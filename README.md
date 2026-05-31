@@ -150,7 +150,7 @@ cd MoodIT
 
 ## 2️⃣ Configurer l'environnement
 
-📖 Pour les instructions détaillées d'installation et de configuration, consulter le **[Guide d'installation](https://github.com/MikeyPopIt/MoodIT/wiki/Installation)** sur le Wiki.
+📖 Pour les instructions détaillées d'installation et de configuration, consulter le **[Guide d'installation](https://github.com/TheHexaLab/MoodIT/wiki/Installation)** sur le Wiki.
 
 ---
 
