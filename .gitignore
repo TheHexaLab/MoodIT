@@ -1,0 +1,90 @@
+# ==============================
+# Secrets & environnement
+# ==============================
+.env
+.env.*
+!.env.example
+*.local
+.idea
+.run
+
+# ==============================
+# Core Service — Java / Spring Boot / Gradle
+# ==============================
+core-service/build/
+core-service/.gradle/
+core-service/out/
+core-service/*.class
+core-service/*.jar
+core-service/*.war
+core-service/.idea/*
+core-service/*.iml
+core-service/*.iws
+core-service/*.ipr
+core-service/.run
+
+# ==============================
+# Auth Service — Java / Spring Boot / Gradle
+# ==============================
+auth-service/build/
+auth-service/.gradle/
+auth-service/out/
+auth-service/*.class
+auth-service/*.jar
+auth-service/*.war
+auth-service/.idea/*
+auth-service/*.iml
+auth-service/*.iws
+auth-service/*.ipr
+auth-service/.run
+
+# ==============================
+# Gateway — Java / Spring Boot / Gradle
+# ==============================
+gateway/build/
+gateway/.gradle/
+gateway/out/
+gateway/*.class
+gateway/*.jar
+gateway/*.war
+gateway/.idea/*
+gateway/*.iml
+gateway/*.iws
+gateway/*.ipr
+gateway/.run
+
+# Eclipse / STS
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/settings.json
+
+# ==============================
+# Frontend — Node / React / Vite
+# ==============================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.idea/
+
+# ==============================
+# OS
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# Docker
+# ==============================
+docker-compose.override.yml
+
+# ==============================
+# Logs
+# ==============================
+*.log
+logs/
