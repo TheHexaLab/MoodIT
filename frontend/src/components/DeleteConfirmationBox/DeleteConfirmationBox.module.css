@@ -8,6 +8,7 @@ div.confirmation-box {
     justify-content: center;
     align-items: center;
     background: rgba(0, 0, 0, 0.35);
+    animation: confirmation-box-fade-in 0.2s ease-out;
 }
 
 div.confirmation-box > div {
@@ -21,6 +22,34 @@ div.confirmation-box > div {
     border-radius: 1rem;
     background: var(--bg-surface);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    animation: confirmation-box-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes confirmation-box-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes confirmation-box-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.confirmation-box,
+    div.confirmation-box > div {
+        animation: none;
+    }
 }
 
 div.confirmation-box > div > * {
