@@ -32,6 +32,9 @@ public class User {
   @Column(nullable = false, unique = true, length = 256)
   private String email;
 
+  @Column(name = "verified_email", nullable = false)
+  private Boolean verifiedEmail = false;
+
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 
