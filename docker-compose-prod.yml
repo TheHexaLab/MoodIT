@@ -38,7 +38,7 @@ services:
     env_file:
       - .env.docker
     ports:
-      - "${GATEWAY_PORT}:8080"
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     networks:
       - internal
     depends_on:

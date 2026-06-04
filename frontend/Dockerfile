@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Build stage
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -9,6 +11,45 @@ RUN npm run build
 # Run stage
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Config nginx (statiques + reverse proxy vers le gateway) écrite inline.
+# "gateway" = nom du service docker-compose, joignable sur le réseau "internal".
+COPY <<'EOF' /etc/nginx/conf.d/default.conf
+server {
+    listen 5173;
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://gateway:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /auth/ {
+        proxy_pass http://gateway:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /gateway/ {
+        proxy_pass http://gateway:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /ws/ {
+        proxy_pass http://gateway:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
 EXPOSE 5173
 CMD ["nginx", "-g", "daemon off;"]
