@@ -86,7 +86,7 @@ CREATE TABLE Forum(
    title VARCHAR(128) NOT NULL,
    f_type_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
-   order INTEGER NOT NULL,
+   --position INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(f_type_id) REFERENCES F_Type(id),
    FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
@@ -303,6 +303,9 @@ INSERT INTO User_ (username, first_name, last_name, password_hash, verified_emai
 
 INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
   ('rosie1234', 'rosie', 'HG', 'hash.pour.tester2', TRUE);
+
+  INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
+  ('mich1234', 'mich', 'normand', 'hash.pour.tester3', TRUE);
 -- ------------------------------------------------------------
 -- User_Role  
 -- ------------------------------------------------------------
@@ -311,6 +314,9 @@ INSERT INTO User_Role (user_id, role_id) VALUES
 
 INSERT INTO User_Role (user_id, role_id) VALUES
   (2, 1);  -- rosie (user_id=2) → etudiant (role_id=1)
+
+INSERT INTO User_Role (user_id, role_id) VALUES
+  (3, 1);  -- mich (user_id=3) → etudiant (role_id=1)
 
 -- ------------------------------------------------------------
 -- User_Programme 

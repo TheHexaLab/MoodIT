@@ -61,4 +61,11 @@ public class UserService {
         return toUserDTO(user);
     }
 
+    public List<UserDTO> findUsersByRole(String roleName) {
+        return userRepository.findByRoles_Name(roleName)
+                .stream()
+                .map(this::toUserDTO)
+                .toList();
+    }
+
 }

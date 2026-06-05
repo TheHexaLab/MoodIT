@@ -32,4 +32,9 @@ public class UserController {
     public ResponseEntity<UserDTO> findByUsername(@PathVariable String username) {
         return ResponseEntity.ok(userService.findByUsername(username));
     }
+
+    @GetMapping("/role/{role}")
+    public ResponseEntity<List<UserDTO>> findByRole(@PathVariable String role) {
+        return ResponseEntity.ok(userService.findUsersByRole(role));
+    }
 }
