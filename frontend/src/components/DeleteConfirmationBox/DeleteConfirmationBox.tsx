@@ -35,7 +35,7 @@ export function DeleteConfirmationBox({
 
   return (
     <div
-      className={`${styles['confirmation-box']}${isClosing ? ` ${styles.closing}` : ''}`}
+      className={`${styles['delete-confirmation-box']}${isClosing ? ` ${styles.closing}` : ''}`}
       onClick={(event) => {
         if (event.target === event.currentTarget) requestClose(onClose);
       }}
