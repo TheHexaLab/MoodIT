@@ -19,6 +19,7 @@ div.section-editor > div {
     border-radius: 1rem;
     border: 1px solid var(--border);
     box-shadow: 0 12px 32px var(--shadow-modal);
+    user-select: none;
     animation: section-editor-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -416,6 +417,7 @@ div.section-editor .edit-row > div:first-of-type > div > span {
 div.section-editor .edit-row > div:first-of-type > div > input {
     flex: 1;
     min-width: 0;
+    user-select: text;
     padding: 0;
     border: none;
     background: transparent;

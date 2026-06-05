@@ -14,7 +14,7 @@ interface SectionEditorProps {
   prefix?: string;
   onClose: (...args: unknown[]) => unknown;
   itemList: Item[];
-  onChange: (change: ItemChange) => void;
+  onChange?: (change: ItemChange) => unknown;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<SectionEditorLabels>;
 }
@@ -129,6 +129,9 @@ export function SectionEditor({
     if (id === null) return;
     setItems((prev) => prev.filter((item) => item.id !== id));
     setDeletingId(null);
+    if (!onChange) {
+      return
+    }
     onChange({ type: 'delete', id });
   }
 
@@ -154,6 +157,9 @@ export function SectionEditor({
     }
     // On ferme le formulaire AVANT de notifier : l'UX ne dépend pas du callback parent.
     cancelEdit();
+    if (!onChange) {
+      return
+    }
     onChange(change);
   }
 
@@ -205,6 +211,9 @@ export function SectionEditor({
     const orderedIds = items.map((item) => item.id);
     // On notifie seulement si l'ordre a réellement changé.
     if (before.join(' ') !== orderedIds.join(' ')) {
+      if (!onChange) {
+        return
+      }
       onChange({ type: 'reorder', orderedIds });
     }
   }
