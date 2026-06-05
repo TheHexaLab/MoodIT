@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import * as React from 'react';
+import { SectionEditor, type ItemChange } from '../components/SectionEditor/SectionEditor.tsx';
 
 interface Service {
   label: string;
@@ -33,6 +34,7 @@ const services: Service[] = [
 export default function ServiceStatus() {
   const [results, setResults] = useState<Record<string, Result | null>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [showEditor, setShowEditor] = useState(false);
 
   const testService = async (service: Service) => {
     setLoading((prev) => ({ ...prev, [service.label]: true }));
@@ -105,12 +107,39 @@ export default function ServiceStatus() {
           );
         })}
       </div>
+      {!showEditor && (
+        <button style={styles.openEditorButton} onClick={() => setShowEditor(true)}>
+          Gérer les canaux
+        </button>
+      )}
+      {showEditor && (
+        <SectionEditor
+          itemList={[]}
+          prefix="#"
+          onClose={() => setShowEditor(false)}
+          onChange={(change: ItemChange) => {
+            console.log(change);
+          }}
+          labels={{
+            title: 'Modifier les canaux',
+            subtitle: 'Glisse pour réorganiser · ajoute, modifie ou supprime un canal',
+            addButton: 'Ajouter un canal',
+            emptyMessage: 'Aucun canal pour le moment.',
+            addTitle: 'Nouveau canal',
+            editTitle: 'Modifier le canal',
+            deleteTitle: 'Supprimer le canal ?',
+            deleteBody: (item, prefix) =>
+              `Le canal « ${prefix} ${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
+          }}
+        />
+      )}
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
+    boxSizing: 'border-box',
     minHeight: '100vh',
     backgroundColor: '#f5f5f5',
     padding: '40px 20px',
@@ -171,5 +200,17 @@ const styles: Record<string, React.CSSProperties> = {
   },
   indicator: {
     flexShrink: 0,
+  },
+  openEditorButton: {
+    display: 'block',
+    margin: '40px auto 0',
+    backgroundColor: '#0d9488',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '10px 16px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
   },
 };
