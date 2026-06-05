@@ -81,7 +81,7 @@ div.section-editor.closing > div {
 div.section-editor > div > header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: 1.25rem;
 }
 
