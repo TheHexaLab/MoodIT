@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: moodit_postgres
+    env_file:
+      - .env.docker
+    environment:
+      TZ: America/Toronto
+      PGTZ: America/Toronto
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  #Frontend -------------------------------------------------
+  frontend:
+    build: ./frontend
+    container_name: moodit_frontend
+    env_file:
+      - .env.docker
+    ports:
+      - "${FRONTEND_PORT}:5173"
+    networks:
+      - internal
+    depends_on:
+      - gateway
+
+  #Gateway -------------------------------------------------
+  gateway:
+    build: ./gateway
+    container_name: moodit_gateway
+    env_file:
+      - .env.docker
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    networks:
+      - internal
+    depends_on:
+      - core-service
+      - auth-service
+
+  #Core service -------------------------------------------------
+  core-service:
+    build: ./core-service
+    container_name: moodit_core
+    env_file:
+      - .env.docker
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+
+  #Auth service -------------------------------------------------
+  auth-service:
+    build: ./auth-service
+    container_name: moodit_auth
+    env_file:
+      - .env.docker
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+
+networks:
+  internal:
+    driver: bridge

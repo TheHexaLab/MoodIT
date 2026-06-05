@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "MoodIT",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "moodit_db",
+      "Username": "postgres",
+      "SSLMode": "prefer"
+    }
+  }
+}
