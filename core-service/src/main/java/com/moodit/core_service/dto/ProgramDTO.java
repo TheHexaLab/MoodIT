@@ -11,6 +11,5 @@ public class ProgramDTO {
     private String code;
     private String cohort;
     private String color;
-    //private EstablishmentDTO establishment;
-    private List<CourseDTO> courses;
 }
+

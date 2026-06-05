@@ -1,5 +1,5 @@
 info:
-  name: Get /programs
+  name: /programs
   type: http
   seq: 1
 

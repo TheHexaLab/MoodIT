@@ -1,11 +1,11 @@
 info:
-  name: Get /programs/id/courses
+  name: /programs/id/courses
   type: http
   seq: 2
 
 http:
   method: GET
-  url: "{{baseUrl}}/programs/GIN/courses"
+  url: "{{baseUrl}}/programs/2/courses"
   auth: inherit
 
 settings:
