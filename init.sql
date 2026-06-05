@@ -86,6 +86,7 @@ CREATE TABLE Forum(
    title VARCHAR(128) NOT NULL,
    f_type_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
+   order INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(f_type_id) REFERENCES F_Type(id),
    FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
