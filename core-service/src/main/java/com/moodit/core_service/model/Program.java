@@ -1,10 +1,12 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.util.List;
 
 @Entity
-@Table(name = "program")
+@Data
+@Table(name = "Program")
 public class Program {
 
     @Id

@@ -1,9 +1,11 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.time.LocalDateTime;
 
 @Entity
+@Data
 @Table(
         name = "enrollment",
         uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "course_id"})

@@ -1,10 +1,12 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
+@Data
 @Table(name = "user_")
 public class User {
 

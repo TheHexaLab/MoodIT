@@ -1,15 +1,17 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.util.List;
 
 @Entity
+@Data
 @Table(name = "course")
 public class Course {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id_course")
+    @Column(name = "id")
     private Integer id;
 
     @Column(length = 128)
@@ -24,5 +26,4 @@ public class Course {
     @ManyToMany(mappedBy = "courses")
     private List<Program> programs;
 
-    
 }

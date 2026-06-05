@@ -1,0 +1,14 @@
+info:
+  name: Get /programs
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/programs"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -1,7 +1,9 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 @Entity
+@Data
 @Table(name = "f_type")
 public class FType {
 

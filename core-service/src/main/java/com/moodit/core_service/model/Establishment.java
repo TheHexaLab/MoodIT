@@ -1,9 +1,11 @@
 package com.moodit.core_service.model;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.util.List;
 
 @Entity
+@Data
 @Table(name = "establishment")
 public class Establishment {
 
