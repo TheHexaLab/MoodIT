@@ -8,6 +8,7 @@ import com.moodit.auth_service.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.LocalDateTime;
 
@@ -18,6 +19,9 @@ public class AuthService {
   private final UserRepository userRepository;
   private final JwtService jwtService;
   private final PasswordEncoder passwordEncoder;
+
+  @Value("${app.security.pepper}")
+  private String pepper;
 
   // Register
 
@@ -41,7 +45,7 @@ public class AuthService {
     user.setFirstName(request.getFirstName());
     user.setLastName(request.getLastName());
     user.setEmail(request.getEmail());
-    user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+    user.setPasswordHash(passwordEncoder.encode(request.getPassword() + pepper));
     user.setCreatedAt(LocalDateTime.now());
 
     // Générer le JWT
@@ -68,7 +72,7 @@ public class AuthService {
             .orElseThrow(() -> new RuntimeException("Email ou mot de passe invalide"));
 
     // Vérifier le mot de passe
-    if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+    if (!passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
       throw new RuntimeException("Email ou mot de passe invalide");
     }
 
