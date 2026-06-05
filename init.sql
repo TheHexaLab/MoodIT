@@ -300,12 +300,21 @@ INSERT INTO Role (name) VALUES
 INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
   ('admin', 'Admin', 'Admin', 'hash.pour.tester', TRUE);
 
+INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
+  ('rosie1234', 'rosie', 'HG', 'hash.pour.tester2', TRUE);
 -- ------------------------------------------------------------
 -- User_Role  
 -- ------------------------------------------------------------
 INSERT INTO User_Role (user_id, role_id) VALUES
   (1, 4);  -- admin (user_id=1) → Administrateur (role_id=4)
 
+INSERT INTO User_Role (user_id, role_id) VALUES
+  (2, 1);  -- rosie (user_id=2) → etudiant (role_id=1)
+
+-- ------------------------------------------------------------
+-- User_Programme 
+-- ------------------------------------------------------------
+INSERT INTO User_Program (program_id, user_id) VALUES (1, 2);
 -- ------------------------------------------------------------
 -- Course  (cours transversaux + spécifiques génie)
 -- ------------------------------------------------------------
