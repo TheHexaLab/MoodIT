@@ -21,7 +21,7 @@ import java.util.List;
 public class UserService {
 
     private final UserRepository userRepository;
-    //private final ProgramService programService;
+    private final ProgramService programService;
 
     private UserDTO toUserDTO(User user) {
         UserDTO dto = new UserDTO();
@@ -39,33 +39,9 @@ public class UserService {
         //dto.setRoles(user.getRoles())
         dto.setPrograms(user.getPrograms()
                 .stream()
-                .map(this::toProgramDTO)
+                .map(programService::toProgramDTO)
                 .toList());
 
-        return dto;
-    }
-
-    private ProgramDTO toProgramDTO(Program program) {
-        ProgramDTO dto = new ProgramDTO();
-
-        dto.setId(program.getId());
-        dto.setName(program.getName());
-        dto.setCode(program.getCode());
-        dto.setCohort(program.getCohort());
-        dto.setColor(program.getColor());
-        dto.setCourses(program.getCourses()
-                .stream()
-                .map(this::toCourseDTO)
-                .toList());
-        return dto;
-    }
-    private CourseDTO toCourseDTO(Course course) {
-        CourseDTO dto = new CourseDTO();
-
-        dto.setId(course.getId());
-        dto.setTitle(course.getTitle());
-        dto.setDescription(course.getDescription());
-        dto.setCode(course.getCode());
         return dto;
     }
 
@@ -78,5 +54,11 @@ public class UserService {
     }
 
 
+    public UserDTO findByUsername(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found with username: " + username));
+
+        return toUserDTO(user);
+    }
 
 }

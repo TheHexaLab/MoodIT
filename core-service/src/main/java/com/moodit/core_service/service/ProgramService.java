@@ -27,7 +27,7 @@ public class ProgramService {
     private final CourseRepository courseRepository;
 
     //region Transformations d'Entités (entité BD -> DTO)
-    private ProgramDTO toProgramDTO(Program program) {
+    public ProgramDTO toProgramDTO(Program program) {
         ProgramDTO dto = new ProgramDTO();
 
         dto.setId(program.getId());
