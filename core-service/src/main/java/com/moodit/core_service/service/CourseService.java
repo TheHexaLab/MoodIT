@@ -1,13 +1,14 @@
 package com.moodit.core_service.service;
 
-//Model
+import com.moodit.core_service.dto.CourseDTO;
+import com.moodit.core_service.dto.ForumDTO;
 import com.moodit.core_service.model.Course;
-
-//Repository
+import com.moodit.core_service.model.Forum;
 import com.moodit.core_service.repository.CourseRepository;
-
+import com.moodit.core_service.repository.ForumRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 
 @Service
@@ -15,5 +16,51 @@ import java.util.List;
 public class CourseService {
 
     private final CourseRepository courseRepository;
+    private final ForumService forumService;
+
+    private CourseDTO toCourseDTO(Course course) {
+        CourseDTO dto = new CourseDTO();
+
+        dto.setId(course.getId());
+        dto.setTitle(course.getTitle());
+        dto.setDescription(course.getDescription());
+        dto.setCode(course.getCode());
+
+        return dto;
+    }
+
+    public CourseDTO findById(Integer id) {
+        Course course = courseRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Course not found"));
+
+        return toCourseDTO(course);
+    }
+
+
+    public List<ForumDTO> getForumsByCourseId(Integer courseId) {
+
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new RuntimeException("Course not found"));
+
+        return course.getForums().stream()
+                .map(forum -> forumService.findById(forum.getId()))
+                .toList();
+    }
+
+    public ForumDTO getForumByIdInCourse(Integer courseId, Integer forumId) {
+
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new RuntimeException("Course not found"));
+
+        Forum forum = course.getForums().stream()
+                .filter(f -> f.getId().equals(forumId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException(
+                        "Forum not found with id " + forumId +
+                                " in course " + courseId
+                ));
+
+        return forumService.findById(forum.getId());
+    }
 
 }
