@@ -4,6 +4,7 @@ import { SectionEditor, type ItemChange } from '../components/SectionEditor/Sect
 import { RoleEditor, type Role, type RoleChange, type User } from '../components/RoleEditor/RoleEditor.tsx';
 import { AddCoursePopup, type NewCourse, type Program } from '../components/AddCoursePopup/AddCoursePopup.tsx';
 import { DeleteConfirmationBox } from '../components/DeleteConfirmationBox/DeleteConfirmationBox.tsx';
+import { EditProfilePopup, type ProfileUpdate } from '../components/EditProfilePopup/EditProfilePopup.tsx';
 import { Sun } from '../assets/Sun.tsx';
 import { Moon } from '../assets/Moon.tsx';
 import { useTheme } from '../helpers/theme.ts';
@@ -69,6 +70,7 @@ export default function PopupTests() {
   const [showRoleEditor, setShowRoleEditor] = useState(false);
   const [showAddCourse, setShowAddCourse] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
   return (
@@ -86,8 +88,8 @@ export default function PopupTests() {
       </button>
       <h1 style={styles.title}>Test des popups</h1>
       <p style={styles.subtitle}>
-        Page de test : chaque bouton ouvre un popup avec des données mock. Les actions
-        (onChange / onSave) sont loguées dans la console.
+        Page de test : chaque bouton ouvre un popup avec des données mock. Les actions (onChange /
+        onSave) sont loguées dans la console.
       </p>
 
       <div style={styles.buttons}>
@@ -102,6 +104,9 @@ export default function PopupTests() {
         </button>
         <button style={styles.button} onClick={() => setShowAddCourse(true)}>
           AddCoursePopup (cours)
+        </button>
+        <button style={styles.button} onClick={() => setShowEditProfile(true)}>
+          EditProfilePopup (profil)
         </button>
       </div>
 
@@ -154,6 +159,24 @@ export default function PopupTests() {
             setShowDeleteConfirmation(false);
           }}
           onClose={() => setShowDeleteConfirmation(false)}
+        />
+      )}
+
+      {showEditProfile && (
+        <EditProfilePopup
+          user={{
+            username: 'tremblaymar',
+            first_name: 'Marie',
+            last_name: 'Tremblay',
+            avatar_color: '#14B8A6',
+            avatar_url:
+              'https://media.licdn.com/dms/image/v2/D4E03AQFMLYc-j7m0rw/profile-displayphoto-crop_800_800/B4EZ5wvbMMJMAI-/0/1780007941382?e=1782345600&v=beta&t=V8YeOmxGBZsOZApvF3DlMmHrdo1IoBYNHOJbtdiHS8U',
+          }}
+          onClose={() => setShowEditProfile(false)}
+          onSave={(profile: ProfileUpdate) => {
+            console.log('EditProfilePopup', profile);
+            setShowEditProfile(false);
+          }}
         />
       )}
     </div>
