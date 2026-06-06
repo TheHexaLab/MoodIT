@@ -83,8 +83,6 @@ const defaultLabels: SectionEditorLabels = {
 };
 
 const namePattern = /^[a-zà-öø-ÿ0-9-]+$/;
-/** Longueur max du nom, alignée sur la colonne VARCHAR(128) en base. */
-const NAME_MAX_LENGTH = 128;
 
 export function SectionEditor({
   prefix = '#',
@@ -238,7 +236,6 @@ export function SectionEditor({
               type="text"
               value={draftName}
               autoFocus
-              maxLength={NAME_MAX_LENGTH}
               onChange={(e) => setDraftName(e.target.value.toLowerCase())}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEdit();
