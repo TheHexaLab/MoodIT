@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/forums/{formu_id}/f_type"
+  url: "{{baseUrl}}/forums/1/f_type"
   auth: inherit
 
 settings:
