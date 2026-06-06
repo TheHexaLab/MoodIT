@@ -1,5 +1,5 @@
-import ServiceStatus from './pages/ServiceStatus';
+import PopupTests from './pages/PopupTests';
 
 export default function App() {
-  return <ServiceStatus />;
+  return <PopupTests />;
 }
