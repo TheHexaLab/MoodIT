@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import jakarta.validation.constraints.Pattern;
 
 @Data
 public class RegisterRequest {
@@ -25,6 +26,10 @@ public class RegisterRequest {
   private String email;
 
   @NotBlank(message = "Le mot de passe est requis")
-  @Size(min = 8, message = "Le mot de passe doit avoir au moins 8 caractères")
+  @Pattern(
+      regexp =
+          "^(?=.*[0-9])(?=.*[!@#$%^&*()_+\\\\-=\\\\[\\\\]{};':\\\"\\\\\\\\|,.<>\\\\/?]).{10,}$",
+      message =
+          "Le mot de passe doit contenir au moins 10 caractères, 1 chiffre et 1 caractère spécial")
   private String password;
 }
