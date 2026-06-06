@@ -22,7 +22,7 @@ public class JwtService {
   @Value("${app.jwt.expiration}")
   private long jwtExpiration;
 
-  // ── Génération du token ───────────────────────────────────────────────
+  // Génération du token
 
   public String generateToken(String email) {
     return Jwts.builder()
@@ -33,13 +33,13 @@ public class JwtService {
         .compact();
   }
 
-  // ── Extraction de l'email depuis le token ─────────────────────────────
+  // Extraction de l'email depuis le token
 
   public String extractEmail(String token) {
     return extractClaims(token).getSubject();
   }
 
-  // ── Validation du token ───────────────────────────────────────────────
+  // Validation du token
 
   public boolean isTokenValid(String token) {
     try {
@@ -50,7 +50,7 @@ public class JwtService {
     }
   }
 
-  // ── Hash du token (2 à 5 fois selon l'email) ──────────────────────────
+  // Hash du token (2 à 5 fois selon l'email)
 
   public String hashToken(String token, String email) {
     int hashCount = getHashCount(email);
@@ -69,7 +69,7 @@ public class JwtService {
     return (sum % 4) + 2; // toujours entre 2 et 5
   }
 
-  // ── Méthodes privées ──────────────────────────────────────────────────
+  // Méthodes privées
 
   private Claims extractClaims(String token) {
     return Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token).getPayload();

@@ -29,6 +29,7 @@ public class SecurityConfig {
                         "/auth/register",
                         "/auth/login",
                         "/auth/validate",
+                        "/auth/test",
                         "/swagger-ui/**",
                         "/swagger-ui/index.html",
                         "/swagger-ui.html",
