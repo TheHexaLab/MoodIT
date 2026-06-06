@@ -32,6 +32,12 @@
     --shadow-hover: rgba(10, 92, 192, 0.22);
     --shadow-danger: rgba(219, 46, 46, 0.22);
     --shadow-modal: rgba(0, 0, 0, 0.25);
+    --login-left-gradient: linear-gradient(0deg, #0D9488 0%, #14B8A6 60%, #34D399 100%);
+    --bubble: rgba(255, 255, 255, 0.06);
+    --bubble-spec: rgba(255, 255, 255, 0.08);
+    --text-app-name: #fff;
+    --slogan-text: rgba(255, 255, 255, 0.82);
+    --bg-right-login-page: #F8F8FB;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,7 +47,7 @@
         --bg-sidebar: #1c1f28;
         --bg-surface: #1c1f28;
         --bg-input: #262b36;
-        --bg-user-panel:#16181f;
+        --bg-user-panel: #16181f;
         --bg-vote-pill: #262b36;
         --bg-active-channel: #243049;
         --border: #2e3340;
@@ -54,6 +60,7 @@
         --brand-teal: #14b8a6;
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
         --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+        --bg-right-login-page: #14161D;
     }
 }
 
@@ -76,7 +83,9 @@
     --brand-teal: #14b8a6;
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+    --bg-right-login-page: #14161D;
 }
+
 body {
     margin: 0;
     background: var(--bg-main);
