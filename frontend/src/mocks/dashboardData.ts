@@ -6,6 +6,49 @@ export interface DemoProgram extends Program {
 }
 
 /**
+ * Mock avec programme et cours mais aucun canal.
+ * Utilise pour tester l'etat "Ce cours est vide" dans le contenu principal.
+ */
+export const dashboardEmptyCourseMock: DemoProgram[] = [
+  {
+    id: '1',
+    label: 'Genie Informatique',
+    courses: [
+      {
+        id_course: 'course-inf-1',
+        code: 'GIF123',
+        title: 'Introduction a la programmation',
+        quizzes: [],
+        textChannels: [],
+        forums: [],
+      },
+      {
+        id_course: 'course-inf-2',
+        code: 'GIF456',
+        title: 'Genie logiciel',
+        quizzes: [],
+        textChannels: [],
+        forums: [],
+      },
+    ],
+  },
+  {
+    id: '2',
+    label: 'SI',
+    courses: [
+      {
+        id_course: 'course-si-1',
+        code: 'SCI101',
+        title: 'Sciences appliquees',
+        quizzes: [],
+        textChannels: [],
+        forums: [],
+      },
+    ],
+  },
+];
+
+/**
  * Donnees de demonstration du dashboard.
  * Elles simulent un melange de donnees UI et backend pour valider
  * le comportement plug-and-play des composants de menu.

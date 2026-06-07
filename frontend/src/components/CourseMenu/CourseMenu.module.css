@@ -10,7 +10,7 @@
     overflow: hidden;
 }
 
-/* ── En-tete ────────────────────────────────────────────────── */
+/* ── En-tête ────────────────────────────────────────────────── */
 .header {
     display: flex;
     align-items: center;
@@ -42,7 +42,6 @@
     appearance: none;
     -webkit-appearance: none;
     width: 100%;
-    padding: 0;
     padding-right: 1.5rem;
     border: none;
     background: transparent;
@@ -109,7 +108,7 @@
     background: var(--text-muted);
 }
 
-/* ── Etat vide ──────────────────────────────────────────────── */
+/* ── État vide ──────────────────────────────────────────────── */
 .emptyState {
     flex: 1;
     display: flex;
@@ -131,6 +130,14 @@
     background: var(--brand-teal-surface);
     margin-bottom: 0.25rem;
     flex-shrink: 0;
+}
+
+.emptyIconImage {
+    width: 1.375rem;
+    height: 1.375rem;
+    object-fit: contain;
+    display: block;
+    filter: invert(45%) sepia(85%) saturate(470%) hue-rotate(128deg) brightness(92%) contrast(92%);
 }
 
 .emptyTitle {
@@ -158,69 +165,4 @@
     padding: clamp(0.5rem, 0.4rem + 0.4vw, 0.75rem) clamp(0.625rem, 0.5rem + 0.45vw, 0.875rem);
 }
 
-/* Placeholder par défaut (remplace par <UserPanel /> ultérieurement) */
-.userPlaceholder {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    border-radius: 0.5rem;
-    padding: 0.25rem 0.375rem;
-    transition: background 0.15s ease;
-    cursor: default;
-}
-
-.userPlaceholder:hover {
-    background: var(--bg-active-channel);
-}
-
-.userAvatar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: clamp(1.75rem, 1.6rem + 0.5vw, 2rem);
-    height: clamp(1.75rem, 1.6rem + 0.5vw, 2rem);
-    border-radius: 50%;
-    background: var(--brand-teal);
-    color: #ffffff;
-    font-family: Inter, sans-serif;
-    font-size: clamp(0.6875rem, 0.63rem + 0.2vw, 0.75rem);
-    font-weight: 700;
-    flex-shrink: 0;
-    user-select: none;
-}
-
-.userInfo {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-}
-
-.userName {
-    color: var(--text);
-    font-family: Inter, sans-serif;
-    font-size: clamp(0.75rem, 0.7rem + 0.2vw, 0.875rem);
-    font-weight: 600;
-    line-height: normal;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.userHandle {
-    color: var(--text-muted);
-    font-family: Inter, sans-serif;
-    font-size: clamp(0.625rem, 0.58rem + 0.15vw, 0.6875rem);
-    font-weight: 400;
-    line-height: normal;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .userPlaceholder {
-        transition: none;
-    }
-}
 

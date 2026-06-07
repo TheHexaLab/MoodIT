@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './CourseChannelList.module.css';
+import { getPrefixForType } from './channelTypePrefix';
 
 export interface CourseChannel {
   id: string;
@@ -119,17 +120,5 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
   );
 };
 
-function getPrefixForType(type: string): string {
-  switch (type) {
-    case 'quiz':
-      return '?';
-    case 'forum':
-      return '↳';
-    case 'text':
-      return '#';
-    default:
-      return '#';
-  }
-}
 
 export default CourseChannelList;

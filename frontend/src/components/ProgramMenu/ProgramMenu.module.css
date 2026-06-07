@@ -135,7 +135,7 @@
 .programBtnActive:hover {
     border-radius: var(--slot-radius);
     background: var(--brand-teal-gradient);
-    color: #ffffff;
+    color: var(--text-on-brand);
 }
 
 .programLogo {

@@ -14,6 +14,7 @@
     --text-body: #4d4d61;
     --text-heading-alt: #333347;
     --text-muted: #7d7d94;
+    --text-on-brand: #ffffff;
     --icon-stroke: #7d7d94;
     --brand-blue-alt: #0099cc;
     --brand-cyan: #00c0d2;
@@ -56,6 +57,7 @@
         --text-body: #b4b4c6;
         --text-heading-alt: #c4c4d2;
         --text-muted: #9a9ab2;
+        --text-on-brand: #ffffff;
         --icon-stroke: #a6a6bc;
         --brand-teal: #14b8a6;
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
@@ -78,6 +80,7 @@
     --text-body: #b4b4c6;
     --text-heading-alt: #c4c4d2;
     --text-muted: #9a9ab2;
+    --text-on-brand: #ffffff;
     --icon-stroke: #a6a6bc;
     --brand-teal: #14b8a6;
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
