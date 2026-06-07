@@ -1,6 +1,7 @@
 import styles from './Register.module.css';
 import { useTheme } from '../../helpers/theme';
 import { useState } from 'react';
+import { register } from '../../helpers/api';
 
 export default function Register() {
   const { theme, toggleTheme } = useTheme();
@@ -9,16 +10,52 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [success, setSuccess] = useState(false);
 
-  function passwordStrength(pw: string): 0 | 1 | 2 | 3 {
+  function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
     if (pw.length === 0) return 0;
-    if (pw.length < 8) return 1; // rouge — moins de 8 chars
+    if (pw.length < 8) return 1;
     const hasNumber = /[0-9]/.test(pw);
-    const hasSpecial = /[^A-Za-z0-9]/.test(pw);
-    if (hasNumber && hasSpecial) return 3; // vert — 8+ chars + chiffre + spécial
-    if (hasNumber || hasSpecial) return 2; // jaune 2 — 8+ chars + chiffre OU spécial
-    return 1; // jaune 1 — 8+ chars seulement
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw);
+    if (hasNumber && hasSpecial) return 4;
+    if (hasNumber || hasSpecial) return 3;
+    return 2;
+  }
+
+  async function handleSubmit() {
+    setServerError('');
+
+    if (!username || !firstName || !name || !email || !password) {
+      setServerError('Veuillez remplir tous les champs');
+      return;
+    }
+    if (!acceptTerms) {
+      setServerError("Vous devez accepter les conditions d'utilisation");
+      return;
+    }
+    if (passwordStrength(password) < 2) {
+      setServerError('Mot de passe trop faible');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await register({
+        username,
+        firstName,
+        lastName: name,
+        email,
+        password,
+      });
+      setSuccess(true);
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : 'Erreur inconnue');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -41,120 +78,134 @@ export default function Register() {
         </button>
 
         <div className={styles.card}>
-          <header className={styles.cardHeader}>
-            <h2>Créer un compte</h2>
-            <p>Rejoignez votre espace MoodIT</p>
-          </header>
-          <div className={styles.field}>
-            <label className={styles.label}>Nom d'utilisateur</label>
-            <div className={styles.inputWrap}>
-              <input
-                type="text"
-                value={username}
-                placeholder="ex : RKarine"
-                onChange={(e) => setUsername(e.target.value)}
-              />
+          {success ? (
+            <div className={styles.successBox}>
+              <h2>Vérifiez votre email ✉️</h2>
+              <p>
+                Un lien de confirmation a été envoyé à <strong>{email}</strong>.
+              </p>
+              <p>Cliquez sur le lien pour activer votre compte puis connectez-vous.</p>
+              <a href="#" className={styles.loginLink}>
+                Se connecter →
+              </a>
             </div>
-          </div>
+          ) : (
+            <>
+              <header className={styles.cardHeader}>
+                <h2>Créer un compte</h2>
+                <p>Rejoignez votre espace MoodIT</p>
+              </header>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Prénom</label>
-            <div className={styles.inputWrap}>
-              <input
-                type="text"
-                value={firstName}
-                placeholder="ex: Karine"
-                onChange={(e) => setFirstName(e.target.value)}
-              />
-            </div>
-          </div>
+              {serverError && <p className={styles.serverError}>⚠ {serverError}</p>}
 
-          <div className={styles.field}>
-            <label className={styles.label}>Nom</label>
-            <div className={styles.inputWrap}>
-              <input
-                type="text"
-                value={name}
-                placeholder="ex: Roussel"
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-          </div>
+              <div className={styles.field}>
+                <label className={styles.label}>Nom d'utilisateur</label>
+                <div className={styles.inputWrap}>
+                  <input
+                    type="text"
+                    value={username}
+                    placeholder="ex : RKarine"
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                </div>
+              </div>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Adresse email</label>
-            <div className={styles.inputWrap}>
-              <input
-                type="email"
-                value={email}
-                placeholder="ex: Karine_Roussel@usherbrooke.ca"
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-          </div>
+              <div className={styles.field}>
+                <label className={styles.label}>Prénom</label>
+                <div className={styles.inputWrap}>
+                  <input
+                    type="text"
+                    value={firstName}
+                    placeholder="ex: Karine"
+                    onChange={(e) => setFirstName(e.target.value)}
+                  />
+                </div>
+              </div>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Mot de passe</label>
-            <div className={styles.inputWrap}>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                placeholder="Choississez un mot de passe"
-                onChange={(e) => setPassword(e.target.value)}
-              />
+              <div className={styles.field}>
+                <label className={styles.label}>Nom</label>
+                <div className={styles.inputWrap}>
+                  <input
+                    type="text"
+                    value={name}
+                    placeholder="ex: Roussel"
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.field}>
+                <label className={styles.label}>Adresse email</label>
+                <div className={styles.inputWrap}>
+                  <input
+                    type="email"
+                    value={email}
+                    placeholder="ex: Karine_Roussel@usherbrooke.ca"
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.field}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Mot de passe</label>
+                  {password && (
+                    <span className={styles.strengthLabel} data-level={passwordStrength(password)}>
+                      {passwordStrength(password) === 1 && 'Mot de passe trop court'}
+                      {passwordStrength(password) === 2 && 'Mot de passe faible'}
+                      {passwordStrength(password) === 3 && 'Mot de passe moyen'}
+                      {passwordStrength(password) === 4 && 'Mot de passe fort'}
+                    </span>
+                  )}
+                </div>
+                <div className={styles.inputWrap}>
+                  <input
+                    type="password"
+                    value={password}
+                    placeholder="Choisissez un mot de passe"
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                {password && (
+                  <div className={styles.strength} data-level={passwordStrength(password)}>
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                )}
+              </div>
+
+              <label className={styles.terms}>
+                <input
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                />
+                <span>
+                  J'accepte les <a href="#">conditions d'utilisation</a> et la{' '}
+                  <a href="#">politique de confidentialité</a>
+                </span>
+              </label>
+
               <button
                 type="button"
-                className={styles.eye}
-                onClick={() => setShowPassword((s) => !s)}
+                className={styles.submit}
+                onClick={handleSubmit}
+                disabled={submitting}
               >
-                {showPassword ? (
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
+                {submitting ? 'Création...' : 'Créer mon compte →'}
               </button>
-            </div>
-            {password && (
-              <div className={styles.strength} data-level={passwordStrength(password)}>
-                <span />
-                <span />
-                <span />
+
+              <div className={styles.divider}>
+                <span>ou</span>
               </div>
-            )}
-          </div>
 
-          <button type="button" className={styles.submit}>
-            Créer mon compte →
-          </button>
-
-          <div className={styles.divider}>
-            <span>ou</span>
-          </div>
-
-          <p className={styles.loginLink}>
-            Déjà un compte ? <a href="#">Se connecter</a>
-          </p>
+              <p className={styles.loginLink}>
+                Déjà un compte ? <a href="#">Se connecter</a>
+              </p>
+            </>
+          )}
         </div>
 
         <footer className={styles.pageFooter}>

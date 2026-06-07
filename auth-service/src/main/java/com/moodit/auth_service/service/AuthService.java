@@ -9,8 +9,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
-
+import com.moodit.auth_service.exception.EmailAlreadyUsedException;
+import com.moodit.auth_service.exception.UsernameAlreadyUsedException;
+import com.moodit.auth_service.exception.InvalidCredentialsException;
 import java.time.LocalDateTime;
+import java.util.Map;
+import com.moodit.auth_service.exception.EmailNotVerifiedException;
 
 @Service
 @RequiredArgsConstructor
@@ -25,21 +29,18 @@ public class AuthService {
 
   // Register
 
-  public AuthResponse register(RegisterRequest request) {
+  public Map<String, String> register(RegisterRequest request) {
 
-    // Vérifier si email ou username déjà pris
     if (userRepository.existsByEmail(request.getEmail())) {
-      throw new RuntimeException("Email déjà utilisé");
+      throw new EmailAlreadyUsedException();
     }
     if (userRepository.existsByUsername(request.getUsername())) {
-      throw new RuntimeException("Nom d'utilisateur déjà pris");
+      throw new UsernameAlreadyUsedException();
     }
 
-    // Vérifier le domaine email
     String domain = extractDomain(request.getEmail());
     // TODO: vérifier domain dans la table Establishment
 
-    // Créer le user
     User user = new User();
     user.setUsername(request.getUsername());
     user.setFirstName(request.getFirstName());
@@ -47,18 +48,13 @@ public class AuthService {
     user.setEmail(request.getEmail());
     user.setPasswordHash(passwordEncoder.encode(request.getPassword() + pepper));
     user.setCreatedAt(LocalDateTime.now());
-
-    // Générer le JWT
-    String token = jwtService.generateToken(request.getEmail());
-
-    // Hasher et stocker le token
-    String hashedToken = jwtService.hashToken(token, request.getEmail());
-    user.setActiveTokenHash(hashedToken);
+    user.setVerifiedEmail(false);
 
     userRepository.save(user);
 
-    return new AuthResponse(
-        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+    // TODO: envoyer email de vérification
+
+    return Map.of("message", "Compte créé! Vérifiez votre email pour activer votre compte.");
   }
 
   // Login
@@ -69,11 +65,14 @@ public class AuthService {
     User user =
         userRepository
             .findByEmail(request.getEmail())
-            .orElseThrow(() -> new RuntimeException("Email ou mot de passe invalide"));
-
+            .orElseThrow(() -> new InvalidCredentialsException());
+    // Vérifier si l'email est confirmé
+    if (!user.isVerifiedEmail()) {
+      throw new EmailNotVerifiedException();
+    }
     // Vérifier le mot de passe
     if (!passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
-      throw new RuntimeException("Email ou mot de passe invalide");
+      throw new InvalidCredentialsException();
     }
 
     // Générer un nouveau JWT
@@ -107,6 +106,17 @@ public class AuthService {
     // Vérifier le hash du token
     String hashedToken = jwtService.hashToken(token, email);
     return hashedToken.equals(user.getActiveTokenHash());
+  }
+
+  // Vérification manuelle pour le dev
+  public Map<String, String> verifyDev(String username) {
+    User user =
+        userRepository
+            .findByUsername(username)
+            .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+    user.setVerifiedEmail(true);
+    userRepository.save(user);
+    return Map.of("message", "Email vérifié pour " + username);
   }
 
   // Méthodes privées

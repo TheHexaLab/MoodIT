@@ -33,7 +33,7 @@ public class User {
   private String email;
 
   @Column(name = "verified_email", nullable = false)
-  private Boolean verifiedEmail = false;
+  private boolean verifiedEmail = false;
 
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
