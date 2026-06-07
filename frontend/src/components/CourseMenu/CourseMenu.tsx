@@ -14,10 +14,8 @@ import {
 } from '../CourseChannelList/courseChannelSources';
 
 export interface Course {
-  /** Identifiant UI optionnel. */
-  id?: string;
-  /** Identifiant backend du cours. */
-  id_course?: string | number;
+  /** Identifiant du cours (Course.id, SERIAL). */
+  id: number;
   /** Nom deja formate pour l'UI. */
   name?: string;
   /** Titre provenant du backend. */
@@ -77,7 +75,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   currentUser,
 }) => {
   const courseOptions = courses.map((course) => ({
-    id: String(course.id ?? course.id_course ?? ''),
+    id: String(course.id),
     label: formatCourseLabel(course),
     channels: normalizeCourseChannelsFromSources({
       channels: course.channels,

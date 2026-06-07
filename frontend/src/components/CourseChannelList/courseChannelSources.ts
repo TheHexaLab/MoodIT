@@ -1,8 +1,8 @@
 import { type CourseChannel } from './CourseChannelList';
 
 export interface QuizChannelSource {
-  id?: string;
-  id_quiz?: string | number;
+  /** Identifiant du quiz (Quiz.id, SERIAL). */
+  id: number;
   title: string;
 }
 
@@ -18,8 +18,8 @@ export type ForumType = 'Discussion' | 'Thread';
  * lignes de la table Forum, distinguees par leur f_type (FK vers F_Type).
  */
 export interface ForumChannelSource {
-  id?: string;
-  id_forum?: string | number;
+  /** Identifiant du forum (Forum.id, SERIAL). */
+  id: number;
   title: string;
   /** F_Type du forum ; defaut 'Thread' (forum) si absent. */
   f_type?: ForumType;
@@ -45,12 +45,12 @@ const FORUM_TYPE_TO_CHANNEL_TYPE: Record<ForumType, string> = {
 export function normalizeCourseChannelsFromSources(sources: CourseChannelSources): CourseChannel[] {
   const normalizedChannels = sources.channels ?? [];
   const normalizedQuizzes = (sources.quizzes ?? []).map((quiz) => ({
-    id: String(quiz.id ?? quiz.id_quiz ?? quiz.title),
+    id: String(quiz.id),
     name: quiz.title,
     type: 'quiz',
   }));
   const normalizedForums = (sources.forums ?? []).map((forum) => ({
-    id: String(forum.id ?? forum.id_forum ?? forum.title),
+    id: String(forum.id),
     name: forum.title,
     type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.f_type ?? 'Thread'],
   }));

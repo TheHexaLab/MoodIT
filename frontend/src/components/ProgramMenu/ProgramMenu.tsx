@@ -4,10 +4,8 @@ import { useTheme } from '../../helpers/theme.ts';
 import { contrastingTextColor } from '../../helpers/color.ts';
 
 export interface Program {
-  /** Identifiant UI optionnel. */
-  id?: string;
-  /** Identifiant provenant directement de la BD/API (Program.id). */
-  id_program?: string | number;
+  /** Identifiant du programme (Program.id, SERIAL). */
+  id: number;
   /** Libelle UI optionnel (override l'affichage par defaut). */
   label?: string;
   /** Nom du programme (Program.name), ex. "Genie informatique". */
@@ -53,9 +51,9 @@ function getInitials(label: string): string {
   return normalized.slice(0, 2).toUpperCase();
 }
 
-/** Retourne un identifiant stable pour un programme, peu importe sa source. */
+/** Retourne l'identifiant du programme sous forme de chaine (etat UI). */
 function getProgramId(program: Program): string {
-  return String(program.id ?? program.id_program ?? '');
+  return String(program.id);
 }
 
 /**

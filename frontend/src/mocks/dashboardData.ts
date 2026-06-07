@@ -11,21 +11,21 @@ export interface DemoProgram extends Program {
  */
 export const dashboardEmptyCourseMock: DemoProgram[] = [
   {
-    id_program: 1,
+    id: 1,
     name: 'Genie informatique',
     code: 'GIN',
     cohort: '71',
     color: '#1a6e3c',
     courses: [
       {
-        id_course: 1,
+        id: 1,
         code: 'GIF123',
         title: 'Introduction a la programmation',
         quizzes: [],
         forums: [],
       },
       {
-        id_course: 2,
+        id: 2,
         code: 'GIF456',
         title: 'Genie logiciel',
         quizzes: [],
@@ -34,14 +34,14 @@ export const dashboardEmptyCourseMock: DemoProgram[] = [
     ],
   },
   {
-    id_program: 2,
+    id: 2,
     name: 'Genie logiciel',
     code: 'GLO',
     cohort: '71',
     color: '#0a5cc0',
     courses: [
       {
-        id_course: 3,
+        id: 3,
         code: 'SCI101',
         title: 'Sciences appliquees',
         quizzes: [],
@@ -61,57 +61,57 @@ export const dashboardEmptyCourseMock: DemoProgram[] = [
  */
 export const dashboardProgramsMock: DemoProgram[] = [
   {
-    id_program: 1,
+    id: 1,
     name: 'Genie informatique',
     code: 'GIN',
     cohort: '71',
     color: '#1a6e3c',
     courses: [
       {
-        id_course: 1,
+        id: 1,
         code: 'GIF123',
         title: 'Introduction a la programmation',
         quizzes: [],
         forums: [],
       },
       {
-        id_course: 2,
+        id: 2,
         code: 'GIF456',
         title: 'Genie logiciel',
-        quizzes: [{ id_quiz: 1, title: 'quiz-semaine-1' }],
+        quizzes: [{ id: 1, title: 'quiz-semaine-1' }],
         forums: [
-          { id_forum: 1, title: 'general', f_type: 'Discussion' },
-          { id_forum: 2, title: 'ressources', f_type: 'Discussion' },
-          { id_forum: 3, title: 'questions-lab', f_type: 'Thread' },
+          { id: 1, title: 'general', f_type: 'Discussion' },
+          { id: 2, title: 'ressources', f_type: 'Discussion' },
+          { id: 3, title: 'questions-lab', f_type: 'Thread' },
         ],
       },
       {
-        id_course: 3,
+        id: 3,
         code: 'IFT287',
         title: 'Structures de donnees',
-        quizzes: [{ id_quiz: 2, title: 'quiz-chapitre-2' }],
-        forums: [{ id_forum: 4, title: 'entraide', f_type: 'Thread' }],
+        quizzes: [{ id: 2, title: 'quiz-chapitre-2' }],
+        forums: [{ id: 4, title: 'entraide', f_type: 'Thread' }],
       },
     ],
   },
   {
-    id_program: 2,
+    id: 2,
     name: 'Genie electrique',
     code: 'GEL',
     cohort: '71',
     color: '#8b1a1a',
     courses: [
       {
-        id_course: 4,
+        id: 4,
         code: 'GEL300',
         title: 'Circuits numeriques',
         forums: [
-          { id_forum: 5, title: 'annonces', f_type: 'Discussion' },
-          { id_forum: 6, title: 'forum-labo', f_type: 'Thread' },
+          { id: 5, title: 'annonces', f_type: 'Discussion' },
+          { id: 6, title: 'forum-labo', f_type: 'Thread' },
         ],
       },
       {
-        id_course: 5,
+        id: 5,
         code: 'GEL201',
         title: 'Electronique',
         quizzes: [],
@@ -120,29 +120,29 @@ export const dashboardProgramsMock: DemoProgram[] = [
     ],
   },
   {
-    id_program: 3,
+    id: 3,
     name: 'Genie civil',
     code: 'GCI',
     cohort: '71',
     color: '#3a3a7a',
     courses: [
       {
-        id_course: 6,
+        id: 6,
         code: 'GCI201',
         title: 'Materiaux de construction',
-        forums: [{ id_forum: 7, title: 'annonces', f_type: 'Discussion' }],
+        forums: [{ id: 7, title: 'annonces', f_type: 'Discussion' }],
       },
       {
-        id_course: 7,
+        id: 7,
         code: 'GCI301',
         title: 'Hydraulique',
-        quizzes: [{ id_quiz: 3, title: 'quiz-diagnostic' }],
-        forums: [{ id_forum: 8, title: 'forum-reflexion', f_type: 'Thread' }],
+        quizzes: [{ id: 3, title: 'quiz-diagnostic' }],
+        forums: [{ id: 8, title: 'forum-reflexion', f_type: 'Thread' }],
       },
     ],
   },
   {
-    id_program: 4,
+    id: 4,
     name: 'Genie chimique',
     code: 'GCH',
     cohort: '71',
@@ -151,7 +151,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
   },
   {
     // Couleur claire : le helper contrastingTextColor doit donner un texte sombre.
-    id_program: 5,
+    id: 5,
     name: 'Genie de l\'environnement',
     code: 'GEN',
     cohort: '2024',

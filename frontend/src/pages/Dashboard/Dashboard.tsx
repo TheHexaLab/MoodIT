@@ -201,12 +201,12 @@ function getCourseDisplayLabel(course: Course): string {
 
 function getProgramStateId(program: Program | undefined): string {
   if (!program) return '';
-  return String(program.id ?? program.id_program ?? '');
+  return String(program.id);
 }
 
 function getCourseStateId(course: Course | undefined): string {
   if (!course) return '';
-  return String(course.id ?? course.id_course ?? '');
+  return String(course.id);
 }
 
 function getEffectiveSelectedCourseId(courses: Course[], selectedCourseId: string): string {
