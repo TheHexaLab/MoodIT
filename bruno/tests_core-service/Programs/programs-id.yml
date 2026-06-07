@@ -1,11 +1,11 @@
 info:
-  name: get/users/role/{role}
+  name: /programs/id
   type: http
-  seq: 3
+  seq: 2
 
 http:
   method: GET
-  url: "{{baseUrl}}/users/role/Étudiant"
+  url: "{{baseUrl}}/programs/1"
   auth: inherit
 
 settings:

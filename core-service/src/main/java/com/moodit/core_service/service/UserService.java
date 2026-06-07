@@ -1,9 +1,7 @@
 package com.moodit.core_service.service;
 
 //Model
-import com.moodit.core_service.dto.CourseDTO;
-import com.moodit.core_service.dto.ProgramDTO;
-import com.moodit.core_service.dto.UserDTO;
+import com.moodit.core_service.dto.*;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.User;
@@ -23,7 +21,8 @@ public class UserService {
     private final UserRepository userRepository;
     private final ProgramService programService;
 
-    private UserDTO toUserDTO(User user) {
+    //region Transformations d'Entités (entité BD -> DTO)
+    public UserDTO toUserDTO(User user) {
         UserDTO dto = new UserDTO();
 
         dto.setId(user.getId());
@@ -36,7 +35,20 @@ public class UserService {
         dto.setCreatedAt(user.getCreatedAt());
         dto.setVerifiedEmail(user.getVerifiedEmail());
 
-        //dto.setRoles(user.getRoles())
+        return dto;
+    }
+    public UserProgramsDTO toUserProgramsDTO(User user) {
+        UserProgramsDTO dto = new UserProgramsDTO();
+
+        dto.setId(user.getId());
+        dto.setUsername(user.getUsername());
+        dto.setFirstName(user.getFirstName());
+        dto.setLastName(user.getLastName());
+        dto.setEmail(user.getEmail());
+        dto.setSettings(user.getSettings());
+        dto.setAvatarColor(user.getAvatarColor());
+        dto.setCreatedAt(user.getCreatedAt());
+        dto.setVerifiedEmail(user.getVerifiedEmail());
         dto.setPrograms(user.getPrograms()
                 .stream()
                 .map(programService::toProgramDTO)
@@ -44,21 +56,20 @@ public class UserService {
 
         return dto;
     }
+    //endregion
 
+    public UserProgramsDTO findById(Integer id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found "));
 
-    public List<UserDTO> findAll() {
-        return userRepository.findAll()
-                .stream()
-                .map(this::toUserDTO)
-                .toList();
+        return toUserProgramsDTO(user);
     }
 
-
-    public UserDTO findByUsername(String username) {
+    public UserProgramsDTO findByUsername(String username) {
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found with username: " + username));
+                .orElseThrow(() -> new RuntimeException("User not found "));
 
-        return toUserDTO(user);
+        return toUserProgramsDTO(user);
     }
 
     public List<UserDTO> findUsersByRole(String roleName) {

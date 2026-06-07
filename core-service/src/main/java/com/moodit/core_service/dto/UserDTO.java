@@ -22,6 +22,5 @@ public class UserDTO {
     private LocalDateTime createdAt;
     private Boolean verifiedEmail;
     //private List<Role> roles;
-    private List<ProgramDTO> programs;
 }
 

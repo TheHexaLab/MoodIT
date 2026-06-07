@@ -3,6 +3,7 @@ package com.moodit.core_service.controller;
 //Model
 import com.moodit.core_service.dto.ProgramDTO;
 import com.moodit.core_service.dto.UserDTO;
+import com.moodit.core_service.dto.UserProgramsDTO;
 import com.moodit.core_service.model.User;
 
 //Service
@@ -25,11 +26,13 @@ public class UserController {
 
     private final UserService userService;
 
-    @GetMapping
-    public ResponseEntity<List<UserDTO>> findAll() { return ResponseEntity.ok(userService.findAll());}
+    @GetMapping("/{userId}")
+    public ResponseEntity<UserProgramsDTO> findById(@PathVariable Integer userId) {
+        return ResponseEntity.ok(userService.findById(userId));
+    }
 
     @GetMapping("/username/{username}")
-    public ResponseEntity<UserDTO> findByUsername(@PathVariable String username) {
+    public ResponseEntity<UserProgramsDTO> findByUsername(@PathVariable String username) {
         return ResponseEntity.ok(userService.findByUsername(username));
     }
 

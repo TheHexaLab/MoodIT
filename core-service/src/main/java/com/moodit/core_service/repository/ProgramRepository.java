@@ -33,6 +33,5 @@ import java.util.Optional;
 @Repository
 public interface ProgramRepository extends JpaRepository<Program, Integer> {
 
-    Optional<Program> findById(Integer id);
 
 }

@@ -1,6 +1,8 @@
 package com.moodit.core_service.service;
 
+import com.moodit.core_service.dto.CourseCreateInProgramsDTO;
 import com.moodit.core_service.dto.CourseDTO;
+import com.moodit.core_service.dto.CourseProgramsDTO;
 import com.moodit.core_service.dto.ForumDTO;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Forum;
@@ -17,7 +19,9 @@ public class CourseService {
 
     private final CourseRepository courseRepository;
     private final ForumService forumService;
+    private final ProgramService programService;
 
+    //region Transformations d'Entités (entité BD -> DTO)
     private CourseDTO toCourseDTO(Course course) {
         CourseDTO dto = new CourseDTO();
 
@@ -28,6 +32,21 @@ public class CourseService {
 
         return dto;
     }
+    public CourseProgramsDTO toCourseProgramsDTO(Course course) {
+        CourseProgramsDTO dto = new CourseProgramsDTO();
+
+        dto.setId(course.getId());
+        dto.setTitle(course.getTitle());
+        dto.setDescription(course.getDescription());
+        dto.setCode(course.getCode());
+        dto.setPrograms(course.getPrograms()
+                .stream()
+                .map(programService::toProgramDTO)
+                .toList());
+
+        return dto;
+    }
+    //endregion
 
     public CourseDTO findById(Integer id) {
         Course course = courseRepository.findById(id)
@@ -36,9 +55,7 @@ public class CourseService {
         return toCourseDTO(course);
     }
 
-
     public List<ForumDTO> getForumsByCourseId(Integer courseId) {
-
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new RuntimeException("Course not found"));
 
@@ -59,8 +76,6 @@ public class CourseService {
                         "Forum not found with id " + forumId +
                                 " in course " + courseId
                 ));
-
         return forumService.findById(forum.getId());
     }
-
 }

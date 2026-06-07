@@ -5,6 +5,6 @@ import lombok.Data;
 import java.util.List;
 
 @Data
-public class CourseCreateDTO extends CourseDTO{
-    private List<Integer> programIds;
+public class UserProgramsDTO extends UserDTO{
+    private List<ProgramDTO> programs;
 }

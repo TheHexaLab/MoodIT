@@ -11,5 +11,5 @@ public class CourseDTO {
     private String title;
     private String description;
     private String code;
-    private List<Forum> forums;
+    //private List<Forum> forums;
 }
