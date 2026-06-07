@@ -18,7 +18,7 @@ public class EstablishmentController {
 
 
     @GetMapping
-    public ResponseEntity<List<EstablishmentSimpleDTO>> findAll() {
+    public ResponseEntity<List<EstablishmentDTO>> findAll() {
         return ResponseEntity.ok(establishmentService.findAll());
     }
 
@@ -32,14 +32,21 @@ public class EstablishmentController {
         );
     }
 
+    @PostMapping
+    public ResponseEntity<EstablishmentDTO> createEstablishment(
+            @RequestBody EstablishmentDTO dto) {
 
-    @PostMapping("/{establishmentId}/programs")
-    public ResponseEntity<EstablishmentDTO> addProgramToEstablishment(
-            @PathVariable Integer establishmentId,
-            @RequestBody Program program) {
+        return ResponseEntity.status(201).body(
+                establishmentService.create(dto)
+        );
+    }
 
-        return ResponseEntity.ok(
-                establishmentService.addProgramToEstablishment(establishmentId, program)
+    @PostMapping("/programs")
+    public ResponseEntity<ProgramDTO> addProgramToEstablishment(
+            @RequestBody ProgramCreateInEstablishmentDTO request) {
+
+        return ResponseEntity.status(201).body(
+                establishmentService.addProgramToEstablishment(request)
         );
     }
 }

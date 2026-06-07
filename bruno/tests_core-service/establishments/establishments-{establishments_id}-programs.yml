@@ -5,14 +5,15 @@ info:
 
 http:
   method: POST
-  url: "{{baseUrl}}/establishments/1/programs"
+  url: "{{baseUrl}}/establishments/programs"
   body:
     type: json
     data: |-
       {
-        "name": "Génie dodo",
-        "code": "GDO",
-        "cohort": "72",
+        "establishmentId": 1,
+        "name": "Génie abc2",
+        "code": "ABC",
+        "cohort": "71",
         "color": "#ff8800"
       }
   auth: inherit

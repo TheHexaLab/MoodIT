@@ -1,14 +1,8 @@
 package com.moodit.core_service.dto;
-
-import com.moodit.core_service.model.Program;
 import lombok.Data;
-
-import java.util.List;
-
 @Data
 public class EstablishmentDTO {
     private Integer id;
     private String name;
     private String domainEmail;
-    private List<ProgramDTO> programs;
 }

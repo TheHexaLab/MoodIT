@@ -4,6 +4,7 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.model.Establishment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.repository.EstablishmentRepository;
+import com.moodit.core_service.repository.ProgramRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,10 +16,11 @@ public class EstablishmentService {
 
     private final EstablishmentRepository establishmentRepository;
     private final ProgramService programService;
+    private final ProgramRepository programRepository;
 
-    private EstablishmentSimpleDTO establishmentSimpleToDTO(Establishment est) {
+    private EstablishmentDTO establishmentToDTO(Establishment est) {
 
-        EstablishmentSimpleDTO dto = new EstablishmentSimpleDTO();
+        EstablishmentDTO dto = new EstablishmentDTO();
         dto.setId(est.getId());
         dto.setName(est.getName());
         dto.setDomainEmail(est.getDomainEmail());
@@ -26,9 +28,9 @@ public class EstablishmentService {
         return dto;
     }
 
-    private EstablishmentDTO establishmentToDTO(Establishment est) {
+    private EstablishmentProgramsDTO establishmentProgramsDTO(Establishment est) {
 
-        EstablishmentDTO dto = new EstablishmentDTO();
+        EstablishmentProgramsDTO dto = new EstablishmentProgramsDTO();
         dto.setId(est.getId());
         dto.setName(est.getName());
         dto.setDomainEmail(est.getDomainEmail());
@@ -43,10 +45,10 @@ public class EstablishmentService {
         return dto;
     }
 
-    public List<EstablishmentSimpleDTO> findAll() {
+    public List<EstablishmentDTO> findAll() {
         return establishmentRepository.findAll()
                 .stream()
-                .map(this::establishmentSimpleToDTO)
+                .map(this::establishmentToDTO)
                 .toList();
     }
 
@@ -63,17 +65,31 @@ public class EstablishmentService {
     }
 
 
-    public EstablishmentDTO addProgramToEstablishment(Integer establishmentId, Program program) {
+    public EstablishmentDTO create(EstablishmentDTO dto) {
 
-        Establishment est = establishmentRepository.findById(establishmentId)
+        Establishment est = new Establishment();
+        est.setName(dto.getName());
+        est.setDomainEmail(dto.getDomainEmail());
+
+        Establishment saved = establishmentRepository.save(est);
+
+        return establishmentToDTO(saved);
+    }
+
+    public ProgramDTO addProgramToEstablishment(ProgramCreateInEstablishmentDTO dto) {
+
+        Establishment est = establishmentRepository.findById(dto.getEstablishmentId())
                 .orElseThrow(() -> new RuntimeException("Establishment not found"));
 
+        Program program = new Program();
+        program.setName(dto.getName());
+        program.setCode(dto.getCode());
+        program.setCohort(dto.getCohort());
+        program.setColor(dto.getColor());
         program.setEstablishment(est);
 
-        est.getPrograms().add(program);
+        Program saved = programRepository.save(program);
 
-        establishmentRepository.save(est);
-
-        return establishmentToDTO(est);
+        return programService.toProgramDTO(saved);
     }
 }

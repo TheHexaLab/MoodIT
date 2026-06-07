@@ -1,0 +1,15 @@
+info:
+  name: POST/courses/forums
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/courses/forums"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -72,10 +72,24 @@ public class UserService {
         return toUserProgramsDTO(user);
     }
 
-    public List<UserDTO> findUsersByRole(String roleName) {
-        return userRepository.findByRoles_Name(roleName)
+    public List<UserDTO> findUsersByProgramAndRole(
+            Integer programId,
+            Integer roleId) {
+
+        return userRepository.findByPrograms_IdAndRoles_Id(programId, roleId)
                 .stream()
                 .map(this::toUserDTO)
+                .toList();
+    }
+
+    public List<ProgramDTO> findProgramsByUserId(Integer userId) {
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        return user.getPrograms()
+                .stream()
+                .map(programService::toProgramDTO)
                 .toList();
     }
 

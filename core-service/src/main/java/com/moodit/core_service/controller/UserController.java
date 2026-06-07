@@ -36,8 +36,17 @@ public class UserController {
         return ResponseEntity.ok(userService.findByUsername(username));
     }
 
-    @GetMapping("/role/{role}")
-    public ResponseEntity<List<UserDTO>> findByRole(@PathVariable String role) {
-        return ResponseEntity.ok(userService.findUsersByRole(role));
+    @GetMapping("/role/{role}/programs/{programId}")
+    public ResponseEntity<List<UserDTO>> findByRole(@PathVariable Integer role, @PathVariable Integer programId) {
+        return ResponseEntity.ok(userService.findUsersByProgramAndRole(programId, role));
+    }
+
+    @GetMapping("/{userId}/programs")
+    public ResponseEntity<List<ProgramDTO>> getProgramsByUser(
+            @PathVariable Integer userId) {
+
+        return ResponseEntity.ok(
+                userService.findProgramsByUserId(userId)
+        );
     }
 }

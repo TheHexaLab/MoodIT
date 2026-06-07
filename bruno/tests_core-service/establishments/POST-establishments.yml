@@ -1,0 +1,22 @@
+info:
+  name: POST/establishments
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/establishments"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Polytechnique Montréal",
+        "domainEmail": "polymtl.ca"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

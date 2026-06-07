@@ -1,10 +1,8 @@
 package com.moodit.core_service.service;
 
-import com.moodit.core_service.dto.CourseCreateInProgramsDTO;
-import com.moodit.core_service.dto.CourseDTO;
-import com.moodit.core_service.dto.CourseProgramsDTO;
-import com.moodit.core_service.dto.ForumDTO;
+import com.moodit.core_service.dto.*;
 import com.moodit.core_service.model.Course;
+import com.moodit.core_service.model.FType;
 import com.moodit.core_service.model.Forum;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.ForumRepository;
@@ -18,10 +16,11 @@ import java.util.List;
 public class CourseService {
 
     private final CourseRepository courseRepository;
+    private final ForumRepository forumRepository;
     private final ForumService forumService;
     private final ProgramService programService;
 
-    //region Transformations d'Entités (entité BD -> DTO)
+
     private CourseDTO toCourseDTO(Course course) {
         CourseDTO dto = new CourseDTO();
 
@@ -44,7 +43,21 @@ public class CourseService {
 
         return dto;
     }
-    //endregion
+
+    public CourseForumsDTO toCourseForumsDTO(Course course) {
+        CourseForumsDTO dto = new CourseForumsDTO();
+
+        dto.setId(course.getId());
+        dto.setTitle(course.getTitle());
+        dto.setCode(course.getCode());
+        dto.setForums(course.getForums()
+                .stream()
+                .map(forumService::toForumDTO)
+                .toList());
+
+        return dto;
+    }
+
 
     public CourseDTO findById(Integer id) {
         Course course = courseRepository.findById(id)
@@ -76,4 +89,25 @@ public class CourseService {
                 ));
         return forumService.findById(forum.getId());
     }
+
+    public ForumDTO addForumToCourse(ForumDTO dto) {
+
+        Course course = courseRepository.findById(dto.getCourseId())
+                .orElseThrow(() -> new RuntimeException("Course not found"));
+
+        Forum forum = new Forum();
+
+        forum.setTitle(dto.getTitle());
+        forum.setCourse(course);
+
+        FType fType = new FType();
+        fType.setId(dto.getFTypeId());
+
+        forum.setFType(fType);
+
+        Forum saved = forumRepository.save(forum);
+
+        return forumService.toForumDTO(saved);
+    }
+
 }
