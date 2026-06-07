@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import * as React from 'react';
-import { useTheme } from '../helpers/theme.ts';
 
 interface Service {
   label: string;
