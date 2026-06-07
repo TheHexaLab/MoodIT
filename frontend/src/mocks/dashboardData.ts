@@ -11,7 +11,7 @@ export interface DemoProgram extends Program {
  */
 export const dashboardEmptyCourseMock: DemoProgram[] = [
   {
-    id: '1',
+    id_program: 1,
     name: 'Genie informatique',
     code: 'GIN',
     cohort: '71',
@@ -34,7 +34,7 @@ export const dashboardEmptyCourseMock: DemoProgram[] = [
     ],
   },
   {
-    id: '2',
+    id_program: 2,
     name: 'Genie logiciel',
     code: 'GLO',
     cohort: '71',
@@ -61,7 +61,7 @@ export const dashboardEmptyCourseMock: DemoProgram[] = [
  */
 export const dashboardProgramsMock: DemoProgram[] = [
   {
-    id: '1',
+    id_program: 1,
     name: 'Genie informatique',
     code: 'GIN',
     cohort: '71',
@@ -95,7 +95,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
     ],
   },
   {
-    id: '2',
+    id_program: 2,
     name: 'Genie electrique',
     code: 'GEL',
     cohort: '71',
@@ -120,7 +120,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
     ],
   },
   {
-    id: '3',
+    id_program: 3,
     name: 'Genie civil',
     code: 'GCI',
     cohort: '71',
@@ -142,7 +142,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
     ],
   },
   {
-    id: '4',
+    id_program: 4,
     name: 'Genie chimique',
     code: 'GCH',
     cohort: '71',
@@ -151,7 +151,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
   },
   {
     // Couleur claire : le helper contrastingTextColor doit donner un texte sombre.
-    id: '5',
+    id_program: 5,
     name: 'Genie de l\'environnement',
     code: 'GEN',
     cohort: '2024',
