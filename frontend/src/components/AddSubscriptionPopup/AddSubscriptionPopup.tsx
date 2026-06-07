@@ -555,6 +555,30 @@ export function AddSubscriptionPopup({
           ? t.joinSearchSubtitle
           : t.joinProgramsSubtitle;
 
+  // ── Animation de transition entre étapes ────────────────────────────
+  // Profondeur de l'étape courante : menu (0) → création / recherche (1) → programmes (2).
+  const stepDepth =
+    view === 'menu' ? 0 : view === 'join' && joinEstablishmentId !== null ? 2 : 1;
+  // Clé d'étape : un changement remonte le conteneur, ce qui rejoue l'animation d'entrée.
+  const stepKey =
+    view === 'menu'
+      ? 'menu'
+      : view === 'create'
+        ? 'create'
+        : joinEstablishmentId !== null
+          ? 'join-programs'
+          : 'join-search';
+  // Sens de l'animation, ajusté pendant le rendu quand la profondeur change
+  // (motif React « adjusting state during render ») : recul si on remonte la pile.
+  const [stepState, setStepState] = useState<{ depth: number; direction: 'forward' | 'back' }>({
+    depth: stepDepth,
+    direction: 'forward',
+  });
+  if (stepState.depth !== stepDepth) {
+    setStepState({ depth: stepDepth, direction: stepDepth < stepState.depth ? 'back' : 'forward' });
+  }
+  const stepDirection = stepState.direction;
+
   return (
     <>
       <div
@@ -587,6 +611,9 @@ export function AddSubscriptionPopup({
           </button>
         </header>
 
+        {/* Conteneur d'étape : la `key` force le remontage à chaque changement d'étape,
+           ce qui rejoue l'animation ; `data-dir` en choisit le sens (avance / recul). */}
+        <div className={styles.body} key={stepKey} data-dir={stepDirection}>
         {view === 'menu' ? (
           <>
             <nav className={styles.options}>
@@ -883,6 +910,7 @@ export function AddSubscriptionPopup({
             )}
           </>
         )}
+        </div>
         </div>
       </div>
 

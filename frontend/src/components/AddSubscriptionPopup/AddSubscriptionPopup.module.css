@@ -14,6 +14,9 @@ div.add-subscription > div {
     width: min(28.75rem, 100% - 2rem);
     /* Sur écran court, le panneau défile au lieu de dépasser le viewport. */
     max-height: calc(100dvh - 2rem);
+    /* overflow-x masqué : l'animation de transition d'étape glisse horizontalement,
+       on évite ainsi toute barre de défilement latérale transitoire. */
+    overflow-x: hidden;
     overflow-y: auto;
     padding: 1rem;
     margin: 1rem;
@@ -32,6 +35,47 @@ div.add-subscription > div {
         max-height: calc(100dvh - 4.26rem);
         padding: 1.25rem;
         margin: 2.13rem;
+    }
+}
+
+/* ── Conteneur d'étape (animation de transition avance / recul) ───────────
+   Toutes les vues (menu, création, rejoindre) sont rendues dans ce conteneur.
+   Une `key` distincte par étape le remonte, ce qui rejoue l'animation d'entrée.
+   Il reprend la disposition en colonne (gap, alignement) que portait la carte. */
+div.add-subscription > div > div.body {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.88rem;
+    /* Sens par défaut : avance (l'étape entre depuis la droite). */
+    animation: add-subscription-step-forward 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Recul : l'étape entre depuis la gauche au lieu de la droite. */
+div.add-subscription > div > div.body[data-dir='back'] {
+    animation-name: add-subscription-step-back;
+}
+
+@keyframes add-subscription-step-forward {
+    from {
+        opacity: 0;
+        transform: translateX(1.25rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes add-subscription-step-back {
+    from {
+        opacity: 0;
+        transform: translateX(-1.25rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
     }
 }
 
@@ -77,12 +121,14 @@ div.add-subscription.closing > div {
 
 @media (prefers-reduced-motion: reduce) {
     div.add-subscription,
-    div.add-subscription > div {
+    div.add-subscription > div,
+    div.add-subscription > div > div.body {
         animation: none;
     }
 }
 
-div.add-subscription > div > * {
+div.add-subscription > div > *,
+div.add-subscription > div > div.body > * {
     margin: 0;
 }
 
@@ -180,14 +226,14 @@ div.add-subscription > div > header > button:active {
 }
 
 /* ── Options de navigation ──────────────────────────────── */
-div.add-subscription > div > nav.options {
+div.add-subscription > div > div.body > nav.options {
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
     align-self: stretch;
 }
 
-div.add-subscription > div > nav.options > button {
+div.add-subscription > div > div.body > nav.options > button {
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -202,24 +248,24 @@ div.add-subscription > div > nav.options > button {
         transform 0.1s ease;
 }
 
-div.add-subscription > div > nav.options > button:hover:not(:disabled) {
+div.add-subscription > div > div.body > nav.options > button:hover:not(:disabled) {
     cursor: pointer;
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.add-subscription > div > nav.options > button:active:not(:disabled) {
+div.add-subscription > div > div.body > nav.options > button:active:not(:disabled) {
     transform: scale(0.99);
 }
 
 /* Option désactivée (chargement en cours sur l'autre option). */
-div.add-subscription > div > nav.options > button:disabled {
+div.add-subscription > div > div.body > nav.options > button:disabled {
     cursor: not-allowed;
     opacity: 0.55;
 }
 
 /* Pastille (1re enfant) ; `:first-child` pour ne pas viser le spinner de chargement. */
-div.add-subscription > div > nav.options > button > span:first-child {
+div.add-subscription > div > div.body > nav.options > button > span:first-child {
     position: relative;
     /* Crée un stacking context : sinon le ::before en z-index:-1 passe derrière la carte
        du popup (fond opaque) et le dégradé devient invisible. */
@@ -246,7 +292,7 @@ div.add-subscription > div > nav.options > button > span:first-child {
 
 /* Calque de dégradé sous le glyphe : un `background` uni → dégradé ne s'interpole pas,
    donc on fait plutôt un fondu d'opacité sur ce calque pour une transition fluide. */
-div.add-subscription > div > nav.options > button > span:first-child::before {
+div.add-subscription > div > div.body > nav.options > button > span:first-child::before {
     content: '';
     position: absolute;
     inset: 0;
@@ -256,16 +302,16 @@ div.add-subscription > div > nav.options > button > span:first-child::before {
     transition: opacity 0.15s ease;
 }
 
-div.add-subscription > div > nav.options > button:hover > span:first-child {
+div.add-subscription > div > div.body > nav.options > button:hover > span:first-child {
     color: #FFFFFF;
 }
 
-div.add-subscription > div > nav.options > button:hover > span:first-child::before {
+div.add-subscription > div > div.body > nav.options > button:hover > span:first-child::before {
     opacity: 1;
 }
 
 
-div.add-subscription > div > nav.options > button > div {
+div.add-subscription > div > div.body > nav.options > button > div {
     display: flex;
     flex-direction: column;
     gap: 0.1875rem;
@@ -273,7 +319,7 @@ div.add-subscription > div > nav.options > button > div {
     min-width: 0;
 }
 
-div.add-subscription > div > nav.options > button > div > span:first-child {
+div.add-subscription > div > div.body > nav.options > button > div > span:first-child {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
@@ -281,7 +327,7 @@ div.add-subscription > div > nav.options > button > div > span:first-child {
     line-height: normal;
 }
 
-div.add-subscription > div > nav.options > button > div > span:last-child {
+div.add-subscription > div > div.body > nav.options > button > div > span:last-child {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 0.8125rem;
@@ -290,7 +336,7 @@ div.add-subscription > div > nav.options > button > div > span:last-child {
 }
 
 /* Chevron : pointe vers la droite (l'asset pointe vers le haut nativement). */
-div.add-subscription > div > nav.options > button > svg.chevron {
+div.add-subscription > div > div.body > nav.options > button > svg.chevron {
     flex-shrink: 0;
     color: var(--brand-teal);
     transform: rotate(90deg);
@@ -299,9 +345,9 @@ div.add-subscription > div > nav.options > button > svg.chevron {
 /* ── Formulaire de création de programme ────────────────── */
 
 /* Libellés de champ (partagés : champs texte, palette, dropdown). */
-div.add-subscription > div > label.field > span,
-div.add-subscription > div > section.color-group > div.palette-group > span.field-label,
-div.add-subscription > div > section.select > span.field-label {
+div.add-subscription > div > div.body > label.field > span,
+div.add-subscription > div > div.body > section.color-group > div.palette-group > span.field-label,
+div.add-subscription > div > div.body > section.select > span.field-label {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 0.8125rem;
@@ -310,14 +356,14 @@ div.add-subscription > div > section.select > span.field-label {
 }
 
 /* Champs texte (code, nom, cohorte). */
-div.add-subscription > div > label.field {
+div.add-subscription > div > div.body > label.field {
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
     align-self: stretch;
 }
 
-div.add-subscription > div > label.field > div {
+div.add-subscription > div > div.body > label.field > div {
     display: flex;
     align-items: center;
     box-sizing: border-box;
@@ -327,18 +373,18 @@ div.add-subscription > div > label.field > div {
     transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-div.add-subscription > div > label.field > div:hover {
+div.add-subscription > div > div.body > label.field > div:hover {
     cursor: text;
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.add-subscription > div > label.field > div:focus-within {
+div.add-subscription > div > div.body > label.field > div:focus-within {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.add-subscription > div > label.field > div > input {
+div.add-subscription > div > div.body > label.field > div > input {
     flex-grow: 1;
     min-width: 0;
     user-select: text;
@@ -353,19 +399,19 @@ div.add-subscription > div > label.field > div > input {
     outline: none;
 }
 
-div.add-subscription > div > label.field > div > input::placeholder {
+div.add-subscription > div > div.body > label.field > div > input::placeholder {
     color: var(--text-muted);
 }
 
 /* Champ en erreur (ex. code déjà pris) : bordure rouge + message. */
-div.add-subscription > div > label.field.invalid > div,
-div.add-subscription > div > label.field.invalid > div:hover,
-div.add-subscription > div > label.field.invalid > div:focus-within {
+div.add-subscription > div > div.body > label.field.invalid > div,
+div.add-subscription > div > div.body > label.field.invalid > div:hover,
+div.add-subscription > div > div.body > label.field.invalid > div:focus-within {
     border-color: var(--danger);
     box-shadow: 0 0 4px 3px var(--shadow-danger);
 }
 
-div.add-subscription > div > label.field > span.field-error {
+div.add-subscription > div > div.body > label.field > span.field-error {
     color: var(--danger);
     font-family: Inter, sans-serif;
     font-size: 0.75rem;
@@ -374,7 +420,7 @@ div.add-subscription > div > label.field > span.field-error {
 }
 
 /* Couleur : icône (aperçu) à gauche, libellé + palette à droite. */
-div.add-subscription > div > section.color-group {
+div.add-subscription > div > div.body > section.color-group {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -383,7 +429,7 @@ div.add-subscription > div > section.color-group {
 }
 
 /* Icône du programme : pastille colorée affichant le code saisi (contraste auto). */
-div.add-subscription > div > section.color-group > span.preview {
+div.add-subscription > div > div.body > section.color-group > span.preview {
     display: flex;
     flex-shrink: 0;
     box-sizing: border-box;
@@ -394,7 +440,7 @@ div.add-subscription > div > section.color-group > span.preview {
     border-radius: 0.875rem;
 }
 
-div.add-subscription > div > section.color-group > span.preview > span {
+div.add-subscription > div > div.body > section.color-group > span.preview > span {
     max-width: 100%;
     padding: 0 0.25rem;
     text-overflow: ellipsis;
@@ -407,7 +453,7 @@ div.add-subscription > div > section.color-group > span.preview > span {
     text-box-edge: cap alphabetic;
 }
 
-div.add-subscription > div > section.color-group > div.palette-group {
+div.add-subscription > div > div.body > section.color-group > div.palette-group {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -415,7 +461,7 @@ div.add-subscription > div > section.color-group > div.palette-group {
     min-width: 0;
 }
 
-div.add-subscription > div > section.color-group > div.palette-group > div.palette {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
@@ -423,7 +469,7 @@ div.add-subscription > div > section.color-group > div.palette-group > div.palet
     gap: 0.5rem;
 }
 
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > button.swatch {
     box-sizing: border-box;
     width: 1.75rem;
     height: 1.75rem;
@@ -434,17 +480,17 @@ div.add-subscription > div > section.color-group > div.palette-group > div.palet
     transition: transform 0.1s ease, box-shadow 0.15s ease;
 }
 
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch:hover {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > button.swatch:hover {
     transform: scale(1.1);
 }
 
 /* Couleur sélectionnée : anneau de la même couleur que la pastille. */
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch.selected {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > button.swatch.selected {
     box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--swatch-color);
 }
 
 /* Bouton « + » : ouvre le sélecteur de couleur natif. */
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > label.add-color {
     position: relative;
     box-sizing: border-box;
     display: flex;
@@ -461,12 +507,12 @@ div.add-subscription > div > section.color-group > div.palette-group > div.palet
     transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color:hover {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > label.add-color:hover {
     border-color: var(--brand-teal);
     color: var(--brand-teal);
 }
 
-div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color > input {
+div.add-subscription > div > div.body > section.color-group > div.palette-group > div.palette > label.add-color > input {
     position: absolute;
     width: 100%;
     height: 100%;
@@ -477,7 +523,7 @@ div.add-subscription > div > section.color-group > div.palette-group > div.palet
 }
 
 /* ── Dropdown établissement ─────────────────────────────── */
-div.add-subscription > div > section.select {
+div.add-subscription > div > div.body > section.select {
     position: relative;
     width: 100%;
     display: flex;
@@ -486,7 +532,7 @@ div.add-subscription > div > section.select {
     align-self: stretch;
 }
 
-div.add-subscription > div > section.select > div.select-control {
+div.add-subscription > div > div.body > section.select > div.select-control {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -499,13 +545,13 @@ div.add-subscription > div > section.select > div.select-control {
     transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-div.add-subscription > div > section.select > div.select-control:hover,
-div.add-subscription > div > section.select > div.select-control.open {
+div.add-subscription > div > div.body > section.select > div.select-control:hover,
+div.add-subscription > div > div.body > section.select > div.select-control.open {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.add-subscription > div > section.select > div.select-control > span {
+div.add-subscription > div > div.body > section.select > div.select-control > span {
     flex-grow: 1;
     min-width: 0;
     overflow: hidden;
@@ -518,25 +564,25 @@ div.add-subscription > div > section.select > div.select-control > span {
     line-height: normal;
 }
 
-div.add-subscription > div > section.select > div.select-control > span.placeholder {
+div.add-subscription > div > div.body > section.select > div.select-control > span.placeholder {
     color: var(--text-muted);
     font-weight: 400;
 }
 
 /* Chevron du dropdown : pointe vers le bas au repos, vers le haut quand ouvert. */
-div.add-subscription > div > section.select > div.select-control > svg.chevron {
+div.add-subscription > div > div.body > section.select > div.select-control > svg.chevron {
     flex-shrink: 0;
     color: var(--brand-teal);
     transform: rotate(180deg);
     transition: transform 0.15s ease;
 }
 
-div.add-subscription > div > section.select > div.select-control > svg.chevron.chevron-open {
+div.add-subscription > div > div.body > section.select > div.select-control > svg.chevron.chevron-open {
     transform: rotate(0deg);
 }
 
 /* Menu déroulant : barre de recherche fixe en haut + liste scrollable en dessous. */
-div.add-subscription > div > section.select > div.picker {
+div.add-subscription > div > div.body > section.select > div.picker {
     position: absolute;
     top: calc(100% + 0.25rem);
     left: 0;
@@ -553,7 +599,7 @@ div.add-subscription > div > section.select > div.picker {
 }
 
 /* Barre de recherche. */
-div.add-subscription > div > section.select > div.picker > div.picker-search {
+div.add-subscription > div > div.body > section.select > div.picker > div.picker-search {
     display: flex;
     align-items: center;
     gap: 0.625rem;
@@ -565,16 +611,16 @@ div.add-subscription > div > section.select > div.picker > div.picker-search {
     transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-div.add-subscription > div > section.select > div.picker > div.picker-search:focus-within {
+div.add-subscription > div > div.body > section.select > div.picker > div.picker-search:focus-within {
     border-color: var(--brand-teal);
     color: var(--brand-teal);
 }
 
-div.add-subscription > div > section.select > div.picker > div.picker-search > svg {
+div.add-subscription > div > div.body > section.select > div.picker > div.picker-search > svg {
     flex-shrink: 0;
 }
 
-div.add-subscription > div > section.select > div.picker > div.picker-search > input {
+div.add-subscription > div > div.body > section.select > div.picker > div.picker-search > input {
     flex-grow: 1;
     min-width: 0;
     user-select: text;
@@ -589,12 +635,12 @@ div.add-subscription > div > section.select > div.picker > div.picker-search > i
     outline: none;
 }
 
-div.add-subscription > div > section.select > div.picker > div.picker-search > input::placeholder {
+div.add-subscription > div > div.body > section.select > div.picker > div.picker-search > input::placeholder {
     color: var(--text-muted);
 }
 
 /* Liste scrollable : 5 lignes pile sans scrollbar, dès le 6e elle apparaît. */
-div.add-subscription > div > section.select > div.picker > ul {
+div.add-subscription > div > div.body > section.select > div.picker > ul {
     --picker-row-height: 2.25rem;
     --picker-visible-rows: 5;
     --picker-row-gap: 0.125rem;
@@ -619,40 +665,40 @@ div.add-subscription > div > section.select > div.picker > ul {
 }
 
 @supports not selector(::-webkit-scrollbar) {
-    div.add-subscription > div > section.select > div.picker > ul {
+    div.add-subscription > div > div.body > section.select > div.picker > ul {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar {
+div.add-subscription > div > div.body > section.select > div.picker > ul::-webkit-scrollbar {
     width: 4px;
 }
 
-div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-track {
+div.add-subscription > div > div.body > section.select > div.picker > ul::-webkit-scrollbar-track {
     background: transparent;
 }
 
-div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-thumb {
+div.add-subscription > div > div.body > section.select > div.picker > ul::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-thumb:hover {
+div.add-subscription > div > div.body > section.select > div.picker > ul::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-button {
+div.add-subscription > div > div.body > section.select > div.picker > ul::-webkit-scrollbar-button {
     display: none;
     width: 0;
     height: 0;
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li {
     display: block;
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li.picker-empty {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li.picker-empty {
     padding: 0.625rem;
     text-align: center;
     color: var(--text-muted);
@@ -661,7 +707,7 @@ div.add-subscription > div > section.select > div.picker > ul > li.picker-empty 
     font-weight: 400;
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li > button {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li > button {
     width: 100%;
     /* Hauteur fixe : garantit que 5 lignes pile tiennent sans scrollbar (cf. ul ci-dessus). */
     height: var(--picker-row-height);
@@ -685,18 +731,18 @@ div.add-subscription > div > section.select > div.picker > ul > li > button {
     transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li > button > span {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li > button > span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li > button:hover {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li > button:hover {
     background: var(--bg-vote-pill);
 }
 
-div.add-subscription > div > section.select > div.picker > ul > li > button.selected {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li > button.selected {
     color: var(--brand-teal);
     font-weight: 600;
     border-color: var(--brand-teal);
@@ -705,13 +751,13 @@ div.add-subscription > div > section.select > div.picker > ul > li > button.sele
 }
 
 /* Checkmark de l'établissement sélectionné. */
-div.add-subscription > div > section.select > div.picker > ul > li > button > svg.check {
+div.add-subscription > div > div.body > section.select > div.picker > ul > li > button > svg.check {
     flex-shrink: 0;
     color: var(--brand-teal);
 }
 
 /* ── Pied (Annuler / Créer) ─────────────────────────────── */
-div.add-subscription > div > footer {
+div.add-subscription > div > div.body > footer {
     display: flex;
     justify-content: flex-end;
     align-items: center;
@@ -719,7 +765,7 @@ div.add-subscription > div > footer {
     align-self: stretch;
 }
 
-div.add-subscription > div > footer > button {
+div.add-subscription > div > div.body > footer > button {
     display: flex;
     padding: 0.75rem 0;
     justify-content: center;
@@ -734,26 +780,26 @@ div.add-subscription > div > footer > button {
         transform 0.1s ease;
 }
 
-div.add-subscription > div > footer > button:hover {
+div.add-subscription > div > div.body > footer > button:hover {
     cursor: pointer;
 }
 
-div.add-subscription > div > footer > button:active {
+div.add-subscription > div > div.body > footer > button:active {
     transform: scale(0.97);
 }
 
-div.add-subscription > div > footer > button:first-child {
+div.add-subscription > div > div.body > footer > button:first-child {
     color: var(--text);
     background: transparent;
     border: 1px solid var(--border);
 }
 
-div.add-subscription > div > footer > button:first-child:hover {
+div.add-subscription > div > div.body > footer > button:first-child:hover {
     background: var(--bg-vote-pill);
     border-color: var(--border-strong);
 }
 
-div.add-subscription > div > footer > button:last-child {
+div.add-subscription > div > div.body > footer > button:last-child {
     color: #ffffff;
     background: var(--brand-teal-gradient);
     /* Bordure transparente : garde la même hauteur que « Annuler » (qui a une vraie bordure).
@@ -763,24 +809,24 @@ div.add-subscription > div > footer > button:last-child {
     background-clip: padding-box;
 }
 
-div.add-subscription > div > footer > button:last-child:hover:not(:disabled) {
+div.add-subscription > div > div.body > footer > button:last-child:hover:not(:disabled) {
     filter: brightness(1.08);
 }
 
-div.add-subscription > div > footer > button:last-child:disabled {
+div.add-subscription > div > div.body > footer > button:last-child:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
 @media (min-width: 768px) {
-    div.add-subscription > div > footer > button {
+    div.add-subscription > div > div.body > footer > button {
         padding: 0.625rem 1.125rem;
         flex-grow: 0;
     }
 }
 
 /* ── Vue « rejoindre » : recherche d'établissement + sélection de programmes ── */
-div.add-subscription > div > section.join {
+div.add-subscription > div > div.body > section.join {
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -789,7 +835,7 @@ div.add-subscription > div > section.join {
 }
 
 /* Barre de recherche (même look que le picker du formulaire). */
-div.add-subscription > div > section.join > div.search {
+div.add-subscription > div > div.body > section.join > div.search {
     display: flex;
     align-items: center;
     gap: 0.625rem;
@@ -801,16 +847,16 @@ div.add-subscription > div > section.join > div.search {
     transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-div.add-subscription > div > section.join > div.search:focus-within {
+div.add-subscription > div > div.body > section.join > div.search:focus-within {
     border-color: var(--brand-teal);
     color: var(--brand-teal);
 }
 
-div.add-subscription > div > section.join > div.search > svg {
+div.add-subscription > div > div.body > section.join > div.search > svg {
     flex-shrink: 0;
 }
 
-div.add-subscription > div > section.join > div.search > input {
+div.add-subscription > div > div.body > section.join > div.search > input {
     flex-grow: 1;
     min-width: 0;
     user-select: text;
@@ -825,12 +871,12 @@ div.add-subscription > div > section.join > div.search > input {
     outline: none;
 }
 
-div.add-subscription > div > section.join > div.search > input::placeholder {
+div.add-subscription > div > div.body > section.join > div.search > input::placeholder {
     color: var(--text-muted);
 }
 
 /* Liste scrollable (établissements ou programmes). */
-div.add-subscription > div > section.join > ul {
+div.add-subscription > div > div.body > section.join > ul {
     /* Hauteur de ligne fixe (établissement comme programme) : 6 lignes pile sans scrollbar,
        dès la 7e elle apparaît. Le calcul ne dépend donc pas des métriques de contenu. */
     --row-height: 2.875rem;
@@ -858,40 +904,40 @@ div.add-subscription > div > section.join > ul {
 }
 
 @supports not selector(::-webkit-scrollbar) {
-    div.add-subscription > div > section.join > ul {
+    div.add-subscription > div > div.body > section.join > ul {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div.add-subscription > div > section.join > ul::-webkit-scrollbar {
+div.add-subscription > div > div.body > section.join > ul::-webkit-scrollbar {
     width: 4px;
 }
 
-div.add-subscription > div > section.join > ul::-webkit-scrollbar-track {
+div.add-subscription > div > div.body > section.join > ul::-webkit-scrollbar-track {
     background: transparent;
 }
 
-div.add-subscription > div > section.join > ul::-webkit-scrollbar-thumb {
+div.add-subscription > div > div.body > section.join > ul::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div.add-subscription > div > section.join > ul::-webkit-scrollbar-thumb:hover {
+div.add-subscription > div > div.body > section.join > ul::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div.add-subscription > div > section.join > ul::-webkit-scrollbar-button {
+div.add-subscription > div > div.body > section.join > ul::-webkit-scrollbar-button {
     display: none;
     width: 0;
     height: 0;
 }
 
-div.add-subscription > div > section.join > ul > li {
+div.add-subscription > div > div.body > section.join > ul > li {
     display: block;
 }
 
-div.add-subscription > div > section.join > ul > li.empty {
+div.add-subscription > div > div.body > section.join > ul > li.empty {
     padding: 0.625rem;
     text-align: center;
     color: var(--text-muted);
@@ -901,7 +947,7 @@ div.add-subscription > div > section.join > ul > li.empty {
 }
 
 /* Ligne : établissement (nom + chevron) ou programme (pastille + nom/cohorte + check). */
-div.add-subscription > div > section.join > ul > li > button {
+div.add-subscription > div > div.body > section.join > ul > li > button {
     width: 100%;
     /* Hauteur fixe : garantit que 6 lignes pile tiennent sans scrollbar (cf. ul ci-dessus). */
     height: var(--row-height);
@@ -922,23 +968,23 @@ div.add-subscription > div > section.join > ul > li > button {
     transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-div.add-subscription > div > section.join > ul > li > button:hover:not(:disabled) {
+div.add-subscription > div > div.body > section.join > ul > li > button:hover:not(:disabled) {
     background: var(--bg-vote-pill);
 }
 
 /* Établissement sans programme : non cliquable. */
-div.add-subscription > div > section.join > ul > li > button:disabled {
+div.add-subscription > div > div.body > section.join > ul > li > button:disabled {
     cursor: not-allowed;
     opacity: 0.45;
 }
 
-div.add-subscription > div > section.join > ul > li > button.selected {
+div.add-subscription > div > div.body > section.join > ul > li > button.selected {
     border-color: var(--brand-teal);
     background: color-mix(in srgb, var(--brand-teal) 8%, transparent);
 }
 
 /* Nom de l'établissement (ligne simple). */
-div.add-subscription > div > section.join > ul > li > button > span.name {
+div.add-subscription > div > div.body > section.join > ul > li > button > span.name {
     flex-grow: 1;
     min-width: 0;
     overflow: hidden;
@@ -949,14 +995,14 @@ div.add-subscription > div > section.join > ul > li > button > span.name {
 }
 
 /* Chevron « aller » sur une ligne établissement (pointe vers la droite). */
-div.add-subscription > div > section.join > ul > li > button > svg.go {
+div.add-subscription > div > div.body > section.join > ul > li > button > svg.go {
     flex-shrink: 0;
     color: var(--brand-teal);
     transform: rotate(90deg);
 }
 
 /* Pastille de couleur du programme (code). */
-div.add-subscription > div > section.join > ul > li > button > span.swatch {
+div.add-subscription > div > div.body > section.join > ul > li > button > span.swatch {
     flex-shrink: 0;
     display: flex;
     box-sizing: border-box;
@@ -974,7 +1020,7 @@ div.add-subscription > div > section.join > ul > li > button > span.swatch {
 }
 
 /* Bloc texte du programme (nom + code · cohorte). */
-div.add-subscription > div > section.join > ul > li > button > div {
+div.add-subscription > div > div.body > section.join > ul > li > button > div {
     display: flex;
     flex-direction: column;
     gap: 0.0625rem;
@@ -982,7 +1028,7 @@ div.add-subscription > div > section.join > ul > li > button > div {
     min-width: 0;
 }
 
-div.add-subscription > div > section.join > ul > li > button > div > span:first-child {
+div.add-subscription > div > div.body > section.join > ul > li > button > div > span:first-child {
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -992,7 +1038,7 @@ div.add-subscription > div > section.join > ul > li > button > div > span:first-
     font-weight: 500;
 }
 
-div.add-subscription > div > section.join > ul > li > button > div > span:last-child {
+div.add-subscription > div > div.body > section.join > ul > li > button > div > span:last-child {
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1003,31 +1049,31 @@ div.add-subscription > div > section.join > ul > li > button > div > span:last-c
 }
 
 /* Checkmark du programme sélectionné. */
-div.add-subscription > div > section.join > ul > li > button > svg.check {
+div.add-subscription > div > div.body > section.join > ul > li > button > svg.check {
     flex-shrink: 0;
     color: var(--brand-teal);
 }
 
 /* ── Écrans étroits (petits téléphones) ─────────────────── */
 @media (max-width: 22.5rem) {
-    /* Resserre les espacements verticaux. */
-    div.add-subscription > div {
+    /* Resserre les espacements verticaux (au sein de l'étape). */
+    div.add-subscription > div > div.body {
         gap: 0.75rem;
     }
 
     /* Section couleur : icône plus compacte et écart réduit pour ne pas serrer la palette. */
-    div.add-subscription > div > section.color-group {
+    div.add-subscription > div > div.body > section.color-group {
         gap: 0.75rem;
     }
 
-    div.add-subscription > div > section.color-group > span.preview {
+    div.add-subscription > div > div.body > section.color-group > span.preview {
         width: 3rem;
         height: 3rem;
         border-radius: 0.75rem;
     }
 
     /* Option du menu : pastille un peu plus petite. */
-    div.add-subscription > div > nav.options > button > span:first-child {
+    div.add-subscription > div > div.body > nav.options > button > span:first-child {
         width: 2.5rem;
         height: 2.5rem;
     }
@@ -1047,8 +1093,8 @@ div.add-subscription span.spinner {
 }
 
 /* Teinte teal là où le spinner remplace un chevron teal (menu + lignes établissement). */
-div.add-subscription > div > nav.options > button > span.spinner,
-div.add-subscription > div > section.join > ul > li > button > span.spinner {
+div.add-subscription > div > div.body > nav.options > button > span.spinner,
+div.add-subscription > div > div.body > section.join > ul > li > button > span.spinner {
     color: var(--brand-teal);
 }
 
@@ -1065,24 +1111,24 @@ div.add-subscription > div > section.join > ul > li > button > span.spinner {
 }
 
 @media (max-width: 22.5rem) {
-    div.add-subscription > div > nav.options > button > span:first-child {
+    div.add-subscription > div > div.body > nav.options > button > span:first-child {
         display: none;
     }
 
-    div.add-subscription > div > section.color-group {
+    div.add-subscription > div > div.body > section.color-group {
         flex-direction: column;
     }
 
-    div.add-subscription > div > section.color-group > span.preview {
+    div.add-subscription > div > div.body > section.color-group > span.preview {
         width: 5rem;
         height: 5rem;
     }
 
-    div.add-subscription > div > section.color-group > span.preview > span {
+    div.add-subscription > div > div.body > section.color-group > span.preview > span {
         font-size: 1.5rem;
     }
 
-    div.add-subscription > div > section.color-group > div.palette-group {
+    div.add-subscription > div > div.body > section.color-group > div.palette-group {
         width: 100%;
     }
 }
