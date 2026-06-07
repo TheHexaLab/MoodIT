@@ -38,4 +38,12 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.NOT_FOUND) //Code 404
                 .body(ex.getMessage());
     }
+
+    //Establishments
+    @ExceptionHandler(EstablishmentsNotFoundException.class)
+    public ResponseEntity<String> handleEstablishmentsNotFound(EstablishmentsNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND) //Code 404
+                .body(ex.getMessage());
+    }
 }

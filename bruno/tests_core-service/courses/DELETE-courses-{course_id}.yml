@@ -1,10 +1,10 @@
 info:
-  name: /courses/{couse_id}
+  name: DELETE/courses/{course_id}
   type: http
-  seq: 1
+  seq: 6
 
 http:
-  method: GET
+  method: DELETE
   url: "{{baseUrl}}/courses/24"
   auth: inherit
 

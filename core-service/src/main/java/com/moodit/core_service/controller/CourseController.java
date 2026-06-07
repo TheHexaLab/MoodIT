@@ -1,6 +1,8 @@
 package com.moodit.core_service.controller;
 
 //Model
+import com.moodit.core_service.dto.CourseDTO;
+import com.moodit.core_service.dto.CourseUpdateDTO;
 import com.moodit.core_service.dto.ForumDTO;
 
 //Service
@@ -53,5 +55,21 @@ public class CourseController {
         return ResponseEntity.ok(
                 courseService.addForumToCourse(request)
         );
+    }
+
+    @PatchMapping("/{courseId}")
+    public ResponseEntity<CourseDTO> updateCourse(
+            @PathVariable Integer courseId,
+            @RequestBody CourseUpdateDTO request) {
+
+        return ResponseEntity.ok(
+                courseService.updateCourse(courseId, request)
+        );
+    }
+
+    @DeleteMapping("/{courseId}")
+    public ResponseEntity<Void> deleteCourse(@PathVariable Integer courseId) {
+        courseService.deleteCourse(courseId);
+        return ResponseEntity.noContent().build();
     }
 }

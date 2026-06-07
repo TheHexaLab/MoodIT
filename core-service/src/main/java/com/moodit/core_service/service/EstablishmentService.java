@@ -1,6 +1,7 @@
 package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
+import com.moodit.core_service.exception.EstablishmentsNotFoundException;
 import com.moodit.core_service.model.Establishment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.repository.EstablishmentRepository;
@@ -56,7 +57,7 @@ public class EstablishmentService {
     public List<ProgramDTO> getProgramsByEstablishment(Integer establishmentId) {
 
         Establishment est = establishmentRepository.findById(establishmentId)
-                .orElseThrow(() -> new RuntimeException("Establishment not found"));
+                .orElseThrow(EstablishmentsNotFoundException::new);
 
         return est.getPrograms()
                 .stream()
@@ -79,7 +80,7 @@ public class EstablishmentService {
     public ProgramDTO addProgramToEstablishment(ProgramCreateInEstablishmentDTO dto) {
 
         Establishment est = establishmentRepository.findById(dto.getEstablishmentId())
-                .orElseThrow(() -> new RuntimeException("Establishment not found"));
+                .orElseThrow(EstablishmentsNotFoundException::new);
 
         Program program = new Program();
         program.setName(dto.getName());
@@ -91,5 +92,25 @@ public class EstablishmentService {
         Program saved = programRepository.save(program);
 
         return programService.toProgramDTO(saved);
+    }
+
+    public EstablishmentDTO updateEstablishment(
+            Integer establishmentId,
+            EstablishmentUpdateDTO dto) {
+
+        Establishment establishment = establishmentRepository.findById(establishmentId)
+                .orElseThrow(EstablishmentsNotFoundException::new);
+
+        if (dto.getName() != null) {
+            establishment.setName(dto.getName());
+        }
+
+        if (dto.getDomainEmail() != null) {
+            establishment.setDomainEmail(dto.getDomainEmail());
+        }
+
+        Establishment saved = establishmentRepository.save(establishment);
+
+        return establishmentToDTO(saved);
     }
 }

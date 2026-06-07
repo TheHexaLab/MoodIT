@@ -1,17 +1,18 @@
 info:
-  name: POST/establishments
+  name: PATCH/users/{user_id}
   type: http
-  seq: 4
+  seq: 5
 
 http:
-  method: POST
-  url: "{{baseUrl}}/establishments"
+  method: PATCH
+  url: "{{baseUrl}}/users/2"
   body:
     type: json
     data: |-
       {
-        "name": "mimimi",
-        "domainEmail": "mimi.ca"
+        "firstName": "Rosie",
+        "lastName": "Homier",
+        "avatarColor": "#ff8800"
       }
   auth: inherit
 

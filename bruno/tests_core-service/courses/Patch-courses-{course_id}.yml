@@ -1,17 +1,17 @@
 info:
-  name: POST/establishments
+  name: Patch/courses/{course_id}
   type: http
-  seq: 4
+  seq: 5
 
 http:
-  method: POST
-  url: "{{baseUrl}}/establishments"
+  method: PATCH
+  url: "{{baseUrl}}/courses/1"
   body:
     type: json
     data: |-
       {
-        "name": "mimimi",
-        "domainEmail": "mimi.ca"
+        "title": "Mathématiques pour ingénieurs I + patch",
+        "code": "MAP115"
       }
   auth: inherit
 

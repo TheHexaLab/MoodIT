@@ -2,6 +2,7 @@ package com.moodit.core_service.service;
 
 //Model
 import com.moodit.core_service.dto.*;
+import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.User;
@@ -60,14 +61,14 @@ public class UserService {
 
     public UserProgramsDTO findById(Integer id) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("User not found "));
+                .orElseThrow(UserNotFoundException::new);
 
         return toUserProgramsDTO(user);
     }
 
     public UserProgramsDTO findByUsername(String username) {
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found "));
+                .orElseThrow(UserNotFoundException::new);
 
         return toUserProgramsDTO(user);
     }
@@ -85,12 +86,34 @@ public class UserService {
     public List<ProgramDTO> findProgramsByUserId(Integer userId) {
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(UserNotFoundException::new);
 
         return user.getPrograms()
                 .stream()
                 .map(programService::toProgramDTO)
                 .toList();
+    }
+
+    public UserDTO updateUser(Integer userId, UserUpdateDTO dto) {
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(UserNotFoundException::new);
+
+        if (dto.getFirstName() != null) {
+            user.setFirstName(dto.getFirstName());
+        }
+
+        if (dto.getLastName() != null) {
+            user.setLastName(dto.getLastName());
+        }
+
+        if (dto.getAvatarColor() != null) {
+            user.setAvatarColor(dto.getAvatarColor());
+        }
+
+        User saved = userRepository.save(user);
+
+        return toUserDTO(saved);
     }
 
 }

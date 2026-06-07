@@ -49,4 +49,14 @@ public class EstablishmentController {
                 establishmentService.addProgramToEstablishment(request)
         );
     }
+
+    @PatchMapping("/{establishmentId}")
+    public ResponseEntity<EstablishmentDTO> updateEstablishment(
+            @PathVariable Integer establishmentId,
+            @RequestBody EstablishmentUpdateDTO request) {
+
+        return ResponseEntity.ok(
+                establishmentService.updateEstablishment(establishmentId, request)
+        );
+    }
 }

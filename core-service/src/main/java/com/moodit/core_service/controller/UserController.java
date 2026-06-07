@@ -4,6 +4,7 @@ package com.moodit.core_service.controller;
 import com.moodit.core_service.dto.ProgramDTO;
 import com.moodit.core_service.dto.UserDTO;
 import com.moodit.core_service.dto.UserProgramsDTO;
+import com.moodit.core_service.dto.UserUpdateDTO;
 import com.moodit.core_service.model.User;
 
 //Service
@@ -11,10 +12,7 @@ import com.moodit.core_service.service.UserService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -47,6 +45,16 @@ public class UserController {
 
         return ResponseEntity.ok(
                 userService.findProgramsByUserId(userId)
+        );
+    }
+
+    @PatchMapping("/{userId}")
+    public ResponseEntity<UserDTO> updateUser(
+            @PathVariable Integer userId,
+            @RequestBody UserUpdateDTO request) {
+
+        return ResponseEntity.ok(
+                userService.updateUser(userId, request)
         );
     }
 }

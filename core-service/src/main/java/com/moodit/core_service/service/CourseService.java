@@ -1,6 +1,7 @@
 package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
+import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.FType;
 import com.moodit.core_service.model.Forum;
@@ -61,14 +62,14 @@ public class CourseService {
 
     public CourseDTO findById(Integer id) {
         Course course = courseRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+                .orElseThrow(CourseNotFoundException::new);
 
         return toCourseDTO(course);
     }
 
     public List<ForumDTO> getForumsByCourseId(Integer courseId) {
         Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+                .orElseThrow(CourseNotFoundException::new);
 
         return course.getForums().stream()
                 .map(forum -> forumService.findById(forum.getId()))
@@ -78,7 +79,7 @@ public class CourseService {
     public ForumDTO getForumByIdInCourse(Integer courseId, Integer forumId) {
 
         Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+                .orElseThrow(CourseNotFoundException::new);
 
         Forum forum = course.getForums().stream()
                 .filter(f -> f.getId().equals(forumId))
@@ -93,7 +94,7 @@ public class CourseService {
     public ForumDTO addForumToCourse(ForumDTO dto) {
 
         Course course = courseRepository.findById(dto.getCourseId())
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+                .orElseThrow(CourseNotFoundException::new);
 
         Forum forum = new Forum();
 
@@ -108,6 +109,32 @@ public class CourseService {
         Forum saved = forumRepository.save(forum);
 
         return forumService.toForumDTO(saved);
+    }
+
+    public CourseDTO updateCourse(Integer courseId, CourseUpdateDTO dto) {
+
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(CourseNotFoundException::new);
+
+        if (dto.getTitle() != null) {
+            course.setTitle(dto.getTitle());
+        }
+
+        if (dto.getCode() != null) {
+            course.setCode(dto.getCode());
+        }
+
+        Course saved = courseRepository.save(course);
+
+        return toCourseDTO(saved);
+    }
+
+    public void deleteCourse(Integer courseId) {
+
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(CourseNotFoundException::new);
+
+        courseRepository.delete(course);
     }
 
 }
