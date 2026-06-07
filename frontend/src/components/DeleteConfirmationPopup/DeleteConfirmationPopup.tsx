@@ -1,41 +1,27 @@
 import React, { useRef, useState } from 'react';
-import styles from './DeleteConfirmationBox.module.css';
+import styles from './DeleteConfirmationPopup.module.css';
+import { defaultLabels } from './labels.ts';
+import type { DeleteConfirmationPopupLabels } from './types.ts';
 
-interface DeleteConfirmationBoxProps {
+// Ré-export de l'API publique : les consommateurs importent toujours ce type depuis ce module.
+export type { DeleteConfirmationPopupLabels } from './types.ts';
+
+interface DeleteConfirmationPopupProps {
   title: string;
   content: string;
   onDeleteConfirmation: (...args: unknown[]) => unknown;
   onClose: (...args: unknown[]) => unknown;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
-  labels?: Partial<DeleteConfirmationBoxLabels>;
+  labels?: Partial<DeleteConfirmationPopupLabels>;
 }
 
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface DeleteConfirmationBoxLabels {
-  /** Bouton « annuler ». */
-  cancel: string;
-  /** Bouton de confirmation de suppression. */
-  confirm: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: DeleteConfirmationBoxLabels = {
-  cancel: 'Annuler',
-  confirm: 'Supprimer',
-};
-
-export function DeleteConfirmationBox({
+export function DeleteConfirmationPopup({
   title,
   content,
   onDeleteConfirmation,
   onClose,
   labels,
-}: DeleteConfirmationBoxProps): React.ReactElement {
+}: DeleteConfirmationPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
   const [isClosing, setIsClosing] = useState(false);
@@ -59,7 +45,7 @@ export function DeleteConfirmationBox({
 
   return (
     <div
-      className={`${styles['delete-confirmation-box']}${isClosing ? ` ${styles.closing}` : ''}`}
+      className={`${styles['delete-confirmation-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
       onClick={(event) => {
         if (event.target === event.currentTarget) requestClose(onClose);
       }}

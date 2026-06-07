@@ -1,19 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import styles from './SectionEditor.module.css';
+import styles from './SectionEditorPopup.module.css';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
-import { DeleteConfirmationBox } from '../DeleteConfirmationBox/DeleteConfirmationBox.tsx';
-import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
+import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
+import { namePattern } from './helpers.ts';
+import { defaultLabels } from './labels.ts';
+import type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
-/** Valeur synchrone ou asynchrone : le callback de modification peut retourner une Promise. */
-export type MaybePromise<T> = T | Promise<T>;
+// Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
+export type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
-export interface Item {
-  id: string;
-  name: string;
-}
-
-interface SectionEditorProps {
+interface SectionEditorPopupProps {
   /** Préfixe affiché devant chaque nom (ex. « # »). */
   prefix?: string;
   onClose: (...args: unknown[]) => unknown;
@@ -25,95 +23,21 @@ interface SectionEditorProps {
    */
   onChange?: (change: ItemChange) => MaybePromise<unknown>;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
-  labels?: Partial<SectionEditorLabels>;
+  labels?: Partial<SectionEditorPopupLabels>;
 }
-
-/**
- * Décrit une modification appliquée à la liste.
- * Émise via `onChange` ; le parent persiste comme il veut (l'endpoint vit chez lui).
- */
-export type ItemChange =
-  | { type: 'create'; item: Item }
-  | { type: 'rename'; id: string; name: string }
-  | { type: 'delete'; id: string }
-  | { type: 'reorder'; orderedIds: string[] };
-
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface SectionEditorLabels {
-  /** Titre du panneau. */
-  title: string;
-  /** Description sous le titre. */
-  subtitle: string;
-  /** Libellé du bouton d'ajout. */
-  addButton: string;
-  /** Message affiché quand la liste est vide. */
-  emptyMessage: string;
-  /** Titre du formulaire en mode ajout. */
-  addTitle: string;
-  /** Titre du formulaire en mode édition. */
-  editTitle: string;
-  /** Titre de la confirmation de suppression. */
-  deleteTitle: string;
-  /** Corps de la confirmation ; reçoit l'item et le préfixe (pas de duplication). */
-  deleteBody: (item: Item, prefix: string) => string;
-  /** Bouton « annuler » du formulaire. */
-  cancel: string;
-  /** Bouton « enregistrer » du formulaire. */
-  save: string;
-  /** Aide sous le champ quand la saisie est valide. */
-  hint: string;
-  /** Aide sous le champ quand la saisie est invalide (format). */
-  hintInvalid: string;
-  /** Aide sous le champ quand le nom existe déjà dans la liste. */
-  hintDuplicate: string;
-  /** Titre du popup d'erreur. */
-  errorTitle: string;
-  /** Message d'erreur quand l'enregistrement d'une modification échoue. */
-  saveError: string;
-  /** Bouton « fermer » du popup d'erreur. */
-  errorClose: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: SectionEditorLabels = {
-  title: 'Modifier les éléments',
-  subtitle: 'Glisse pour réorganiser · ajoute, modifie ou supprime un élément',
-  addButton: 'Ajouter un élément',
-  emptyMessage: 'Aucun élément pour le moment.',
-  addTitle: 'Nouvel élément',
-  editTitle: "Modifier l'élément",
-  deleteTitle: "Supprimer l'élément ?",
-  deleteBody: (item, prefix) =>
-    `L'élément « ${prefix ? `${prefix} ` : ''}${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
-  cancel: 'Annuler',
-  save: 'Enregistrer',
-  hint: 'Lettres minuscules, chiffres et tirets uniquement',
-  hintInvalid: '⚠  Lettres minuscules, chiffres et tirets uniquement',
-  hintDuplicate: '⚠  Ce nom existe déjà',
-  errorTitle: 'Une erreur est survenue',
-  saveError: "Échec de l'enregistrement. Réessaie.",
-  errorClose: 'Fermer',
-};
-
-const namePattern = /^[a-zà-öø-ÿ0-9-]+$/;
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
   return <span className={styles.spinner} aria-hidden="true" />;
 }
 
-export function SectionEditor({
+export function SectionEditorPopup({
   prefix = '#',
   onClose,
   itemList,
   onChange,
   labels,
-}: SectionEditorProps): React.ReactElement {
+}: SectionEditorPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
   const [items, setItems] = useState<Item[]>(itemList);
   const dragIndex = useRef<number | null>(null);
@@ -223,7 +147,9 @@ export function SectionEditor({
       const id = editingId;
       change = { type: 'rename', id, name: trimmed };
       apply = () =>
-        setItems((prev) => prev.map((item) => (item.id === id ? { ...item, name: trimmed } : item)));
+        setItems((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, name: trimmed } : item))
+        );
     } else {
       return;
     }
@@ -344,7 +270,7 @@ export function SectionEditor({
   return (
     <>
       <div
-        className={`${styles['section-editor']}${isClosing ? ` ${styles.closing}` : ''}`}
+        className={`${styles['section-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
         onClick={(event) => {
           if (event.target === event.currentTarget) requestClose(onClose);
         }}
@@ -411,7 +337,7 @@ export function SectionEditor({
         </div>
       </div>
       {deletingItem && (
-        <DeleteConfirmationBox
+        <DeleteConfirmationPopup
           title={t.deleteTitle}
           content={t.deleteBody(deletingItem, prefix)}
           onDeleteConfirmation={confirmDelete}
@@ -419,7 +345,7 @@ export function SectionEditor({
         />
       )}
       {error && (
-        <ErrorBox
+        <ErrorPopup
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}

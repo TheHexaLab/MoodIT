@@ -1,13 +1,34 @@
 import { useState } from 'react';
 import * as React from 'react';
-import { SectionEditor, type ItemChange } from '../components/SectionEditor/SectionEditor.tsx';
-import { RoleEditor, type Role, type RoleChange, type User } from '../components/RoleEditor/RoleEditor.tsx';
-import { AddCoursePopup, type NewCourse, type Program } from '../components/AddCoursePopup/AddCoursePopup.tsx';
-import { UpdateCoursePopup, type CourseUpdate } from '../components/UpdateCoursePopup/UpdateCoursePopup.tsx';
-import { DeleteConfirmationBox } from '../components/DeleteConfirmationBox/DeleteConfirmationBox.tsx';
-import { ErrorBox } from '../components/ErrorBox/ErrorBox.tsx';
-import { EditProfilePopup, type ProfileUpdate } from '../components/EditProfilePopup/EditProfilePopup.tsx';
-import { UpdateProgramPopup, type ProgramUpdate } from '../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
+import {
+  SectionEditorPopup,
+  type ItemChange,
+} from '../components/SectionEditorPopup/SectionEditorPopup.tsx';
+import {
+  RoleEditorPopup,
+  type Role,
+  type RoleChange,
+  type User,
+} from '../components/RoleEditorPopup/RoleEditorPopup.tsx';
+import {
+  AddCoursePopup,
+  type NewCourse,
+  type Program,
+} from '../components/AddCoursePopup/AddCoursePopup.tsx';
+import {
+  UpdateCoursePopup,
+  type CourseUpdate,
+} from '../components/UpdateCoursePopup/UpdateCoursePopup.tsx';
+import { DeleteConfirmationPopup } from '../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
+import { ErrorPopup } from '../components/ErrorPopup/ErrorPopup.tsx';
+import {
+  EditProfilePopup,
+  type ProfileUpdate,
+} from '../components/EditProfilePopup/EditProfilePopup.tsx';
+import {
+  UpdateProgramPopup,
+  type ProgramUpdate,
+} from '../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
 import {
   AddSubscriptionPopup,
   type NewProgram,
@@ -40,7 +61,7 @@ const programs: Program[] = [
 ];
 
 /**
- * Mock — rôles fournis au RoleEditor (ids alignés sur init.sql).
+ * Mock — rôles fournis au RoleEditorPopup (ids alignés sur init.sql).
  * L'ordre du tableau = ordre d'affichage des sections.
  */
 const roles: Role[] = [
@@ -50,23 +71,119 @@ const roles: Role[] = [
 ];
 
 /**
- * Mock — liste d'utilisateurs fournie au RoleEditor.
+ * Mock — liste d'utilisateurs fournie au RoleEditorPopup.
  * role_ids : Enseignant=2, Mainteneur=3, Administrateur=4 ; [] = non assigné (candidat partout).
  */
 const roleUsers: User[] = [
-  { id: 1, username: 'admin', first_name: 'Admin', last_name: 'Admin', email: 'admin@usherbrooke.ca', avatar_color: '#0a5cc0', role_ids: [4] },
-  { id: 2, username: 'tremblaymar', first_name: 'Marie', last_name: 'Tremblay', email: 'tremblaymar@usherbrooke.ca', avatar_color: '#f6c350', role_ids: [4] }, // fond clair → texte sombre
-  { id: 3, username: 'gagnonjp', first_name: 'Jean-Philippe', last_name: 'Gagnon', email: 'gagnonjp@usherbrooke.ca', avatar_color: '#1a6e3c', role_ids: [2] },
-  { id: 4, username: 'roygenev', first_name: 'Geneviève', last_name: 'Roy', email: 'roygenev@usherbrooke.ca', avatar_color: '#7a4e1a', role_ids: [2] },
-  { id: 5, username: 'lavoiesam', first_name: 'Samuel', last_name: 'Lavoie', email: 'lavoiesam@usherbrooke.ca', avatar_color: '#3a3a7a', role_ids: [2] },
-  { id: 6, username: 'bouchardalx', first_name: 'Alexandre', last_name: 'Bouchard', email: 'bouchardalx@usherbrooke.ca', avatar_color: '#0a7a6e', role_ids: [3] },
-  { id: 7, username: 'fortinemi', first_name: 'Émilie', last_name: 'Fortin', email: 'fortinemi@usherbrooke.ca', avatar_color: '#4a7a1a', role_ids: [3] },
-  { id: 8, username: 'cotemax', first_name: 'Maxime', last_name: 'Côté', email: 'cotemax@usherbrooke.ca', avatar_color: '#0a5cc0', role_ids: [2] },
-  { id: 9, username: 'belangerju', first_name: 'Julie', last_name: 'Bélanger', email: 'belangerju@usherbrooke.ca', avatar_color: '#8b1a1a', role_ids: [2] },
-  { id: 10, username: 'pelletierni', first_name: 'Nicolas', last_name: 'Pelletier', email: 'pelletierni@usherbrooke.ca', avatar_color: '#4a7a1a', role_ids: [2] },
+  {
+    id: 1,
+    username: 'admin',
+    first_name: 'Admin',
+    last_name: 'Admin',
+    email: 'admin@usherbrooke.ca',
+    avatar_color: '#0a5cc0',
+    role_ids: [4],
+  },
+  {
+    id: 2,
+    username: 'tremblaymar',
+    first_name: 'Marie',
+    last_name: 'Tremblay',
+    email: 'tremblaymar@usherbrooke.ca',
+    avatar_color: '#f6c350',
+    role_ids: [4],
+  }, // fond clair → texte sombre
+  {
+    id: 3,
+    username: 'gagnonjp',
+    first_name: 'Jean-Philippe',
+    last_name: 'Gagnon',
+    email: 'gagnonjp@usherbrooke.ca',
+    avatar_color: '#1a6e3c',
+    role_ids: [2],
+  },
+  {
+    id: 4,
+    username: 'roygenev',
+    first_name: 'Geneviève',
+    last_name: 'Roy',
+    email: 'roygenev@usherbrooke.ca',
+    avatar_color: '#7a4e1a',
+    role_ids: [2],
+  },
+  {
+    id: 5,
+    username: 'lavoiesam',
+    first_name: 'Samuel',
+    last_name: 'Lavoie',
+    email: 'lavoiesam@usherbrooke.ca',
+    avatar_color: '#3a3a7a',
+    role_ids: [2],
+  },
+  {
+    id: 6,
+    username: 'bouchardalx',
+    first_name: 'Alexandre',
+    last_name: 'Bouchard',
+    email: 'bouchardalx@usherbrooke.ca',
+    avatar_color: '#0a7a6e',
+    role_ids: [3],
+  },
+  {
+    id: 7,
+    username: 'fortinemi',
+    first_name: 'Émilie',
+    last_name: 'Fortin',
+    email: 'fortinemi@usherbrooke.ca',
+    avatar_color: '#4a7a1a',
+    role_ids: [3],
+  },
+  {
+    id: 8,
+    username: 'cotemax',
+    first_name: 'Maxime',
+    last_name: 'Côté',
+    email: 'cotemax@usherbrooke.ca',
+    avatar_color: '#0a5cc0',
+    role_ids: [2],
+  },
+  {
+    id: 9,
+    username: 'belangerju',
+    first_name: 'Julie',
+    last_name: 'Bélanger',
+    email: 'belangerju@usherbrooke.ca',
+    avatar_color: '#8b1a1a',
+    role_ids: [2],
+  },
+  {
+    id: 10,
+    username: 'pelletierni',
+    first_name: 'Nicolas',
+    last_name: 'Pelletier',
+    email: 'pelletierni@usherbrooke.ca',
+    avatar_color: '#4a7a1a',
+    role_ids: [2],
+  },
   // Non assignés : disponibles à l'ajout dans n'importe quelle section.
-  { id: 11, username: 'morinclar', first_name: 'Clara', last_name: 'Morin', email: 'morinclar@usherbrooke.ca', avatar_color: '#5eead4', role_ids: [] }, // fond clair → texte sombre
-  { id: 12, username: 'girardtho', first_name: 'Thomas', last_name: 'Girard', email: 'girardtho@usherbrooke.ca', avatar_color: '#3a3a7a', role_ids: [] },
+  {
+    id: 11,
+    username: 'morinclar',
+    first_name: 'Clara',
+    last_name: 'Morin',
+    email: 'morinclar@usherbrooke.ca',
+    avatar_color: '#5eead4',
+    role_ids: [],
+  }, // fond clair → texte sombre
+  {
+    id: 12,
+    username: 'girardtho',
+    first_name: 'Thomas',
+    last_name: 'Girard',
+    email: 'girardtho@usherbrooke.ca',
+    avatar_color: '#3a3a7a',
+    role_ids: [],
+  },
 ];
 
 /** Mock — établissements fournis au AddSubscriptionPopup (aligné sur init.sql). */
@@ -95,7 +212,7 @@ const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
   establishmentId: i < 10 ? 1 : i < 12 ? 2 : 3,
 }));
 
-/** Mock — canaux fournis au SectionEditor. */
+/** Mock — canaux fournis au SectionEditorPopup. */
 const channels = [
   { id: '1', name: 'general' },
   { id: '2', name: 'annonces' },
@@ -104,15 +221,15 @@ const channels = [
 
 /** Page de test : ouvre et essaie chaque popup avec des données mock. */
 export default function PopupTests() {
-  const [showSectionEditor, setShowSectionEditor] = useState(false);
-  const [showRoleEditor, setShowRoleEditor] = useState(false);
+  const [showSectionEditorPopup, setShowSectionEditorPopup] = useState(false);
+  const [showRoleEditorPopup, setShowRoleEditorPopup] = useState(false);
   const [showAddCourse, setShowAddCourse] = useState(false);
   const [showUpdateCourse, setShowUpdateCourse] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showUpdateProgram, setShowUpdateProgram] = useState(false);
   const [showAddSubscription, setShowAddSubscription] = useState(false);
-  const [showErrorBox, setShowErrorBox] = useState(false);
+  const [showErrorPopup, setShowErrorPopup] = useState(false);
   /** Mode « bug » : les callbacks du AddSubscriptionPopup échouent (test des erreurs). */
   const [failRequests, setFailRequests] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -149,13 +266,13 @@ export default function PopupTests() {
 
       <div style={styles.buttons}>
         <button style={styles.button} onClick={() => setShowDeleteConfirmation(true)}>
-          DeleteConfirmationBox
+          DeleteConfirmationPopup
         </button>
-        <button style={styles.button} onClick={() => setShowSectionEditor(true)}>
-          SectionEditor (canaux)
+        <button style={styles.button} onClick={() => setShowSectionEditorPopup(true)}>
+          SectionEditorPopup (canaux)
         </button>
-        <button style={styles.button} onClick={() => setShowRoleEditor(true)}>
-          RoleEditor (rôles)
+        <button style={styles.button} onClick={() => setShowRoleEditorPopup(true)}>
+          RoleEditorPopup (rôles)
         </button>
         <button style={styles.button} onClick={() => setShowAddCourse(true)}>
           AddCoursePopup (cours)
@@ -172,21 +289,21 @@ export default function PopupTests() {
         <button style={styles.button} onClick={() => setShowAddSubscription(true)}>
           AddSubscriptionPopup (programme)
         </button>
-        <button style={styles.button} onClick={() => setShowErrorBox(true)}>
-          ErrorBox (erreur)
+        <button style={styles.button} onClick={() => setShowErrorPopup(true)}>
+          ErrorPopup (erreur)
         </button>
       </div>
 
-      {showSectionEditor && (
-        <SectionEditor
+      {showSectionEditorPopup && (
+        <SectionEditorPopup
           itemList={channels}
           prefix="#"
-          onClose={() => setShowSectionEditor(false)}
+          onClose={() => setShowSectionEditorPopup(false)}
           // onChange peut être async ; en cas d'échec le composant annule et affiche l'erreur.
           onChange={async (change: ItemChange) => {
             await new Promise((r) => setTimeout(r, 400));
-            if (failRequests) throw new Error('Échec simulé (SectionEditor)');
-            console.log('SectionEditor', change);
+            if (failRequests) throw new Error('Échec simulé (SectionEditorPopup)');
+            console.log('SectionEditorPopup', change);
           }}
           labels={{
             title: 'Modifier les canaux',
@@ -202,16 +319,16 @@ export default function PopupTests() {
         />
       )}
 
-      {showRoleEditor && (
-        <RoleEditor
-          onClose={() => setShowRoleEditor(false)}
+      {showRoleEditorPopup && (
+        <RoleEditorPopup
+          onClose={() => setShowRoleEditorPopup(false)}
           roles={roles}
           users={roleUsers}
           // onChange peut être async ; en cas d'échec le composant annule et affiche l'erreur.
           onChange={async (change: RoleChange) => {
             await new Promise((r) => setTimeout(r, 400));
-            if (failRequests) throw new Error('Échec simulé (RoleEditor)');
-            console.log('RoleEditor', change);
+            if (failRequests) throw new Error('Échec simulé (RoleEditorPopup)');
+            console.log('RoleEditorPopup', change);
           }}
         />
       )}
@@ -244,11 +361,11 @@ export default function PopupTests() {
       )}
 
       {showDeleteConfirmation && (
-        <DeleteConfirmationBox
+        <DeleteConfirmationPopup
           title="Supprimer le cours ?"
           content="Ce cours et tout son contenu seront définitivement supprimés. Cette action est irréversible."
           onDeleteConfirmation={() => {
-            console.log('DeleteConfirmationBox', 'supprimé');
+            console.log('DeleteConfirmationPopup', 'supprimé');
             setShowDeleteConfirmation(false);
           }}
           onClose={() => setShowDeleteConfirmation(false)}
@@ -338,10 +455,10 @@ export default function PopupTests() {
         />
       )}
 
-      {showErrorBox && (
-        <ErrorBox
+      {showErrorPopup && (
+        <ErrorPopup
           content="Impossible de charger les données. Vérifie ta connexion et réessaie."
-          onClose={() => setShowErrorBox(false)}
+          onClose={() => setShowErrorPopup(false)}
         />
       )}
     </div>

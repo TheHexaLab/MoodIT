@@ -2,27 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddCoursePopup.module.css';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
-import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { CODE_MAX_LENGTH, NAME_MAX_LENGTH, defaultLabels } from './labels.ts';
+import type { AddCoursePopupLabels, MaybePromise, NewCourse, Program } from './types.ts';
 
-/** Valeur synchrone ou asynchrone : le callback de sauvegarde peut retourner une Promise. */
-export type MaybePromise<T> = T | Promise<T>;
-
-/** Reflète la table `Program`. */
-export interface Program {
-  id: number;
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
-
-/** Données saisies dans le popup (reflète `Course` + les liens `program_course`). */
-export interface NewCourse {
-  title: string;
-  code: string;
-  programIds: number[];
-}
+// Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
+export type { AddCoursePopupLabels, MaybePromise, NewCourse, Program } from './types.ts';
 
 interface AddCoursePopupProps {
   onClose: (...args: unknown[]) => unknown;
@@ -37,70 +23,6 @@ interface AddCoursePopupProps {
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddCoursePopupLabels>;
 }
-
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface AddCoursePopupLabels {
-  /** Titre du panneau. */
-  title: string;
-  /** Description sous le titre. */
-  subtitle: string;
-  /** Libellé du champ des programmes. */
-  programsLabel: string;
-  /** Invite affichée dans le champ quand aucun programme n'est sélectionné. */
-  programsPlaceholder: string;
-  /** Invite du champ de recherche du menu. */
-  searchPlaceholder: string;
-  /** Message du menu quand aucun programme n'est disponible. */
-  noCandidates: string;
-  /** Message du menu quand la recherche ne renvoie rien. */
-  noResults: string;
-  /** Libellé du champ « code ». */
-  codeLabel: string;
-  /** Invite du champ « code ». */
-  codePlaceholder: string;
-  /** Libellé du champ « titre ». */
-  titleLabel: string;
-  /** Invite du champ « titre ». */
-  titlePlaceholder: string;
-  /** Bouton « annuler ». */
-  cancel: string;
-  /** Bouton « sauvegarder ». */
-  save: string;
-  /** Titre du popup d'erreur. */
-  errorTitle: string;
-  /** Message d'erreur quand l'enregistrement échoue. */
-  saveError: string;
-  /** Bouton « fermer » du popup d'erreur. */
-  errorClose: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: AddCoursePopupLabels = {
-  title: 'Ajouter un cours',
-  subtitle: 'Ajoute ce cours à un ou plusieurs programmes',
-  programsLabel: 'Programmes',
-  programsPlaceholder: 'Sélectionner des programmes',
-  searchPlaceholder: 'Rechercher un programme…',
-  noCandidates: 'Aucun programme disponible',
-  noResults: 'Aucun résultat',
-  codeLabel: 'Code du cours',
-  codePlaceholder: 'Ex. GIF201',
-  titleLabel: 'Titre du cours',
-  titlePlaceholder: 'Ex. Structures de données',
-  cancel: 'Annuler',
-  save: 'Sauvegarder',
-  errorTitle: 'Une erreur est survenue',
-  saveError: "Échec de l'enregistrement. Réessaie.",
-  errorClose: 'Fermer',
-};
-
-const CODE_MAX_LENGTH = 128
-const NAME_MAX_LENGTH = 128
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
@@ -206,8 +128,7 @@ export function AddCoursePopup({
     setProgramIds((prev) => prev.filter((pid) => pid !== id));
   }
 
-  const canSave =
-    code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
+  const canSave = code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
 
   async function save() {
     if (!canSave || pending) return;
@@ -238,140 +159,140 @@ export function AddCoursePopup({
         }}
       >
         <div onAnimationEnd={handleAnimationEnd}>
-        <header>
-          <div>
-            <h1>{t.title}</h1>
-            <p>{t.subtitle}</p>
-          </div>
-          <button onClick={() => requestClose(onClose)}>✕</button>
-        </header>
+          <header>
+            <div>
+              <h1>{t.title}</h1>
+              <p>{t.subtitle}</p>
+            </div>
+            <button onClick={() => requestClose(onClose)}>✕</button>
+          </header>
 
-        <section className={styles.programs} ref={fieldRef}>
-          <span className={styles['field-label']}>{t.programsLabel}</span>
-          <div className={styles['field-control']}>
-            <div
-              className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}`}
-              onClick={toggleOpen}
-            >
-              {programIds.length === 0 ? (
-                <span className={styles.placeholder}>{t.programsPlaceholder}</span>
-              ) : (
-                attachedPrograms().map((program) => (
-                  <span
-                    key={program.id}
-                    className={styles.chip}
-                    style={{ ['--chip-color']: program.color } as React.CSSProperties}
-                    role="button"
-                    aria-label={`Retirer ${program.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeProgram(program.id);
-                    }}
-                  >
-                    <span>
-                      {program.code} - {program.cohort}
-                    </span>
-                    <button
-                      type="button"
+          <section className={styles.programs} ref={fieldRef}>
+            <span className={styles['field-label']}>{t.programsLabel}</span>
+            <div className={styles['field-control']}>
+              <div
+                className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}`}
+                onClick={toggleOpen}
+              >
+                {programIds.length === 0 ? (
+                  <span className={styles.placeholder}>{t.programsPlaceholder}</span>
+                ) : (
+                  attachedPrograms().map((program) => (
+                    <span
+                      key={program.id}
+                      className={styles.chip}
+                      style={{ ['--chip-color']: program.color } as React.CSSProperties}
+                      role="button"
                       aria-label={`Retirer ${program.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         removeProgram(program.id);
                       }}
                     >
-                      ×
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-            <Chevron
-              className={`${styles.chevron}${isOpen ? ` ${styles['chevron-open']}` : ''}`}
-              width="1rem"
-              height="1rem"
-            />
-          </div>
-          {isOpen && (
-            <div className={styles.picker}>
-              <div className={styles['picker-search']}>
-                <MagnifyingGlass width="1rem" height="1rem" />
-                <input
-                  type="text"
-                  placeholder={t.searchPlaceholder}
-                  autoFocus
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setIsOpen(false);
-                  }}
-                />
-              </div>
-              <ul>
-                {candidatePrograms().length === 0 ? (
-                  <li className={styles['picker-empty']}>
-                    {search.trim() === '' ? t.noCandidates : t.noResults}
-                  </li>
-                ) : (
-                  candidatePrograms().map((program) => (
-                    <li key={program.id}>
-                      <button type="button" onClick={() => addProgram(program.id)}>
-                        <span className={styles.swatch} style={{ background: program.color }}>
-                          <span style={{ color: contrastingTextColor(program.color) }}>
-                            {program.code}
-                          </span>
-                        </span>
-                        <div>
-                          <span>{program.name}</span>
-                          <span>Cohorte {program.cohort}</span>
-                        </div>
+                      <span>
+                        {program.code} - {program.cohort}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Retirer ${program.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeProgram(program.id);
+                        }}
+                      >
+                        ×
                       </button>
-                    </li>
+                    </span>
                   ))
                 )}
-              </ul>
+              </div>
+              <Chevron
+                className={`${styles.chevron}${isOpen ? ` ${styles['chevron-open']}` : ''}`}
+                width="1rem"
+                height="1rem"
+              />
             </div>
-          )}
-        </section>
+            {isOpen && (
+              <div className={styles.picker}>
+                <div className={styles['picker-search']}>
+                  <MagnifyingGlass width="1rem" height="1rem" />
+                  <input
+                    type="text"
+                    placeholder={t.searchPlaceholder}
+                    autoFocus
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setIsOpen(false);
+                    }}
+                  />
+                </div>
+                <ul>
+                  {candidatePrograms().length === 0 ? (
+                    <li className={styles['picker-empty']}>
+                      {search.trim() === '' ? t.noCandidates : t.noResults}
+                    </li>
+                  ) : (
+                    candidatePrograms().map((program) => (
+                      <li key={program.id}>
+                        <button type="button" onClick={() => addProgram(program.id)}>
+                          <span className={styles.swatch} style={{ background: program.color }}>
+                            <span style={{ color: contrastingTextColor(program.color) }}>
+                              {program.code}
+                            </span>
+                          </span>
+                          <div>
+                            <span>{program.name}</span>
+                            <span>Cohorte {program.cohort}</span>
+                          </div>
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            )}
+          </section>
 
-        <label className={styles.field}>
-          <span>{t.codeLabel}</span>
-          <div>
-            <input
-              type="text"
-              placeholder={t.codePlaceholder}
-              maxLength={CODE_MAX_LENGTH}
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-            />
-          </div>
-        </label>
+          <label className={styles.field}>
+            <span>{t.codeLabel}</span>
+            <div>
+              <input
+                type="text"
+                placeholder={t.codePlaceholder}
+                maxLength={CODE_MAX_LENGTH}
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+              />
+            </div>
+          </label>
 
-        <label className={styles.field}>
-          <span>{t.titleLabel}</span>
-          <div>
-            <input
-              type="text"
-              placeholder={t.titlePlaceholder}
-              maxLength={NAME_MAX_LENGTH}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-        </label>
+          <label className={styles.field}>
+            <span>{t.titleLabel}</span>
+            <div>
+              <input
+                type="text"
+                placeholder={t.titlePlaceholder}
+                maxLength={NAME_MAX_LENGTH}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+          </label>
 
-        <footer>
-          <button type="button" onClick={() => requestClose(onClose)}>
-            {t.cancel}
-          </button>
-          <button type="button" onClick={save} disabled={!canSave || pending}>
-            {pending ? <Spinner /> : t.save}
-          </button>
-        </footer>
+          <footer>
+            <button type="button" onClick={() => requestClose(onClose)}>
+              {t.cancel}
+            </button>
+            <button type="button" onClick={save} disabled={!canSave || pending}>
+              {pending ? <Spinner /> : t.save}
+            </button>
+          </footer>
         </div>
       </div>
 
       {error && (
-        <ErrorBox
+        <ErrorPopup
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}

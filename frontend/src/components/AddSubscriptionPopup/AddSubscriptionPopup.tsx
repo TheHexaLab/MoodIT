@@ -3,62 +3,31 @@ import styles from './AddSubscriptionPopup.module.css';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
-import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { byName, normalize } from './helpers.ts';
+import { DEFAULT_COLOR, DEFAULT_PALETTE, FIELD_MAX_LENGTH, defaultLabels } from './labels.ts';
+import type {
+  AddSubscriptionPopupLabels,
+  CreateEstablishment,
+  JoinEstablishment,
+  JoinSelection,
+  MaybePromise,
+  NewProgram,
+  Program,
+} from './types.ts';
 
-/** Valeur synchrone ou asynchrone : les callbacks de chargement peuvent retourner une Promise. */
-export type MaybePromise<T> = T | Promise<T>;
-
-/** Établissement sélectionnable (reflète les colonnes utiles de `Establishment`). */
-export interface Establishment {
-  id: number;
-  name: string;
-}
-
-/**
- * Établissement + les codes de ses programmes existants.
- * Chargé au clic « Créer un programme » : alimente le dropdown et la vérification d'unicité du code.
- */
-export interface CreateEstablishment {
-  id: number;
-  name: string;
-  programCodes: string[];
-}
-
-/**
- * Établissement + son nombre de programmes.
- * Chargé au clic « Rejoindre un programme » : alimente la liste et la désactivation des lignes vides.
- */
-export interface JoinEstablishment {
-  id: number;
-  name: string;
-  programCount: number;
-}
-
-/** Programme existant rattaché à un établissement (reflète les colonnes utiles de `Program`). */
-export interface Program {
-  id: number;
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-  establishmentId: number;
-}
-
-/** Nouveau programme saisi dans le formulaire (reflète les colonnes saisissables de `Program`). */
-export interface NewProgram {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-  establishmentId: number | null;
-}
-
-/** Sélection émise par la vue « rejoindre » : un établissement + des programmes. */
-export interface JoinSelection {
-  establishmentId: number;
-  programIds: number[];
-}
+// Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
+export type {
+  AddSubscriptionPopupLabels,
+  CreateEstablishment,
+  Establishment,
+  JoinEstablishment,
+  JoinSelection,
+  MaybePromise,
+  NewProgram,
+  Program,
+} from './types.ts';
 
 /** Opération asynchrone en cours (pilote les spinners et le verrouillage). */
 type Pending =
@@ -92,144 +61,6 @@ interface AddSubscriptionPopupProps {
   palette?: string[];
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
-}
-
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface AddSubscriptionPopupLabels {
-  /** Titre du panneau (vue menu). */
-  title: string;
-  /** Description sous le titre (vue menu). */
-  subtitle: string;
-  /** Titre de l'option « créer » / du formulaire. */
-  createTitle: string;
-  /** Description de l'option « créer » / du formulaire. */
-  createSubtitle: string;
-  /** Titre de l'option « rejoindre » (et de la vue). */
-  joinTitle: string;
-  /** Description de l'option « rejoindre » (menu). */
-  joinSubtitle: string;
-  /** Sous-titre de l'étape recherche d'établissement (vue rejoindre). */
-  joinSearchSubtitle: string;
-  /** Sous-titre de l'étape sélection des programmes (vue rejoindre). */
-  joinProgramsSubtitle: string;
-  /** Invite de la barre de recherche des programmes (vue rejoindre). */
-  programSearchPlaceholder: string;
-  /** Message quand l'établissement n'a aucun programme. */
-  noPrograms: string;
-  /** Décompte de programmes affiché sous le nom de l'établissement (reçoit le nombre). */
-  programCount: (count: number) => string;
-  /** Bouton « ajouter » (vue rejoindre). */
-  add: string;
-  /** Libellé accessible du bouton « retour ». */
-  back: string;
-  /** Libellé de la palette de couleurs. */
-  colorLabel: string;
-  /** Libellé accessible du bouton d'ajout de couleur. */
-  addColorLabel: string;
-  /** Libellé du champ « établissement ». */
-  establishmentLabel: string;
-  /** Invite du champ « établissement » quand rien n'est sélectionné. */
-  establishmentPlaceholder: string;
-  /** Invite de la barre de recherche du menu établissement. */
-  searchPlaceholder: string;
-  /** Message du menu établissement quand aucun n'est disponible. */
-  noEstablishments: string;
-  /** Message du menu établissement quand la recherche ne renvoie rien. */
-  noResults: string;
-  /** Libellé du champ « code ». */
-  codeLabel: string;
-  /** Invite du champ « code ». */
-  codePlaceholder: string;
-  /** Erreur affichée quand le code existe déjà dans l'établissement choisi. */
-  codeTaken: string;
-  /** Libellé du champ « nom ». */
-  nameLabel: string;
-  /** Invite du champ « nom ». */
-  namePlaceholder: string;
-  /** Libellé du champ « cohorte ». */
-  cohortLabel: string;
-  /** Invite du champ « cohorte ». */
-  cohortPlaceholder: string;
-  /** Bouton « annuler ». */
-  cancel: string;
-  /** Bouton « créer ». */
-  submit: string;
-  /** Titre du popup d'erreur. */
-  errorTitle: string;
-  /** Message d'erreur quand un chargement de données échoue. */
-  loadError: string;
-  /** Message d'erreur quand l'enregistrement (création / adhésion) échoue. */
-  saveError: string;
-  /** Bouton « fermer » du popup d'erreur. */
-  errorClose: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: AddSubscriptionPopupLabels = {
-  title: 'Ajouter un programme',
-  subtitle: 'Crée ton propre programme ou rejoins-en un existant.',
-  createTitle: 'Créer un programme',
-  createSubtitle: 'Configure un nouveau programme',
-  joinTitle: 'Rejoindre un programme',
-  joinSubtitle: "Sélectionne les programmes qui t'intéressent",
-  joinSearchSubtitle: 'Recherche et sélectionne ton établissement.',
-  joinProgramsSubtitle: 'Sélectionne un ou plusieurs programmes à rejoindre.',
-  programSearchPlaceholder: 'Rechercher un programme…',
-  noPrograms: 'Aucun programme pour cet établissement',
-  programCount: (count) =>
-    count === 0 ? 'Aucun programme' : `${count} programme${count > 1 ? 's' : ''}`,
-  add: 'Ajouter',
-  back: 'Retour',
-  colorLabel: 'Couleur du programme',
-  addColorLabel: 'Ajouter une couleur',
-  establishmentLabel: 'Établissement',
-  establishmentPlaceholder: 'Sélectionner un établissement',
-  searchPlaceholder: 'Rechercher un établissement…',
-  noEstablishments: 'Aucun établissement disponible',
-  noResults: 'Aucun résultat',
-  codeLabel: 'Code du programme',
-  codePlaceholder: 'Ex. GIN',
-  codeTaken: 'Ce code existe déjà dans cet établissement',
-  nameLabel: 'Nom du programme',
-  namePlaceholder: 'Ex. Génie informatique',
-  cohortLabel: 'Cohorte',
-  cohortPlaceholder: 'Ex. Promo 71',
-  cancel: 'Annuler',
-  submit: 'Créer',
-  errorTitle: 'Une erreur est survenue',
-  loadError: 'Échec du chargement. Vérifie ta connexion et réessaie.',
-  saveError: "Échec de l'enregistrement. Réessaie.",
-  errorClose: 'Fermer',
-};
-
-/** Couleurs prédéfinies par défaut (identiques à EditProfilePopup ; tokens --avatar-* d'index.css). */
-const DEFAULT_PALETTE = [
-  '#0D9488', '#14B8A6', '#2DD4BF', '#0F766E', '#7D7D94',
-];
-
-/** Couleur par défaut = première de la palette (comme le popup de profil). */
-const DEFAULT_COLOR = DEFAULT_PALETTE[0];
-
-/** Longueurs max alignées sur la table Program : name, code et cohort en VARCHAR(128). */
-const FIELD_MAX_LENGTH = 128;
-
-/** Minuscule + suppression des accents : base de comparaison pour la recherche. */
-function normalize(value: string): string {
-  return value
-    .trim()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLocaleLowerCase('fr');
-}
-
-/** Tri par nom (alphabétique, accents-insensible). */
-function byName<T extends { name: string }>(a: T, b: T): number {
-  return a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
 }
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
@@ -308,7 +139,7 @@ export function AddSubscriptionPopup({
   async function runLoad<T>(
     kind: Pending,
     load: () => MaybePromise<T[]>,
-    apply: (data: T[]) => void,
+    apply: (data: T[]) => void
   ) {
     if (pending !== null) return;
     const reqId = ++requestRef.current;
@@ -332,37 +163,29 @@ export function AddSubscriptionPopup({
 
   // ── Transitions de vue : avancent uniquement après un retour valide du callback ──
   function enterCreate() {
-    runLoad<CreateEstablishment>(
-      { kind: 'create' },
-      loadCreateEstablishments,
-      (data) => {
-        setCreateEstablishments(data);
-        // Réinitialise le formulaire à chaque ouverture.
-        setEstablishmentId(null);
-        setCode('');
-        setName('');
-        setCohort('');
-        setColor(DEFAULT_COLOR);
-        setIsEstablishmentOpen(false);
-        setEstablishmentSearch('');
-        setView('create');
-      },
-    );
+    runLoad<CreateEstablishment>({ kind: 'create' }, loadCreateEstablishments, (data) => {
+      setCreateEstablishments(data);
+      // Réinitialise le formulaire à chaque ouverture.
+      setEstablishmentId(null);
+      setCode('');
+      setName('');
+      setCohort('');
+      setColor(DEFAULT_COLOR);
+      setIsEstablishmentOpen(false);
+      setEstablishmentSearch('');
+      setView('create');
+    });
   }
 
   function enterJoin() {
-    runLoad<JoinEstablishment>(
-      { kind: 'join' },
-      loadJoinEstablishments,
-      (data) => {
-        setJoinEstablishments(data);
-        setJoinEstablishmentId(null);
-        setJoinSearch('');
-        setProgramSearch('');
-        setSelectedProgramIds([]);
-        setView('join');
-      },
-    );
+    runLoad<JoinEstablishment>({ kind: 'join' }, loadJoinEstablishments, (data) => {
+      setJoinEstablishments(data);
+      setJoinEstablishmentId(null);
+      setJoinSearch('');
+      setProgramSearch('');
+      setSelectedProgramIds([]);
+      setView('join');
+    });
   }
 
   function chooseJoinEstablishment(id: number) {
@@ -374,7 +197,7 @@ export function AddSubscriptionPopup({
         setProgramSearch('');
         setSelectedProgramIds([]);
         setJoinEstablishmentId(id); // on n'avance qu'après des données valides
-      },
+      }
     );
   }
 
@@ -390,7 +213,7 @@ export function AddSubscriptionPopup({
   /** Coche/décoche un programme (sélection multiple). */
   function toggleProgram(id: number) {
     setSelectedProgramIds((prev) =>
-      prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id],
+      prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
     );
   }
 
@@ -502,7 +325,7 @@ export function AddSubscriptionPopup({
     programQuery === ''
       ? sortedPrograms
       : sortedPrograms.filter((p) =>
-          normalize(`${p.name} ${p.code} ${p.cohort}`).includes(programQuery),
+          normalize(`${p.name} ${p.code} ${p.cohort}`).includes(programQuery)
         );
 
   async function join() {
@@ -557,8 +380,7 @@ export function AddSubscriptionPopup({
 
   // ── Animation de transition entre étapes ────────────────────────────
   // Profondeur de l'étape courante : menu (0) → création / recherche (1) → programmes (2).
-  const stepDepth =
-    view === 'menu' ? 0 : view === 'join' && joinEstablishmentId !== null ? 2 : 1;
+  const stepDepth = view === 'menu' ? 0 : view === 'join' && joinEstablishmentId !== null ? 2 : 1;
   // Clé d'étape : un changement remonte le conteneur, ce qui rejoue l'animation d'entrée.
   const stepKey =
     view === 'menu'
@@ -579,6 +401,309 @@ export function AddSubscriptionPopup({
   }
   const stepDirection = stepState.direction;
 
+  // ── Contenu par étape ───────────────────────────────────────────────
+  // Chaque étape est un bloc JSX du même scope de rendu que le `return` (les handlers y
+  // restent de simples gestionnaires d'événement). Seul le bloc de l'étape courante est
+  // monté dans le conteneur animé `div.body` ci-dessous.
+
+  /** Étape 0 — menu : choix « créer » ou « rejoindre ». */
+  const menuStep: React.ReactElement = (
+    <nav className={styles.options}>
+      <button type="button" disabled={pending !== null} onClick={enterCreate}>
+        <span>+</span>
+        <div>
+          <span>{t.createTitle}</span>
+          <span>{t.createSubtitle}</span>
+        </div>
+        {pending?.kind === 'create' ? (
+          <Spinner />
+        ) : (
+          <Chevron className={styles.chevron} width="1rem" height="1rem" />
+        )}
+      </button>
+      <button type="button" disabled={pending !== null} onClick={enterJoin}>
+        <span>↪</span>
+        <div>
+          <span>{t.joinTitle}</span>
+          <span>{t.joinSubtitle}</span>
+        </div>
+        {pending?.kind === 'join' ? (
+          <Spinner />
+        ) : (
+          <Chevron className={styles.chevron} width="1rem" height="1rem" />
+        )}
+      </button>
+    </nav>
+  );
+
+  /** Étape 1a — création : palette de couleurs, établissement, code/nom/cohorte. */
+  const createStep: React.ReactElement = (
+    <>
+      <section className={styles['color-group']}>
+        <span className={styles.preview} style={{ background: color }} aria-hidden="true">
+          <span style={{ color: contrastingTextColor(color) }}>
+            {code.trim().slice(0, 3) || '?'}
+          </span>
+        </span>
+        <div className={styles['palette-group']}>
+          <span className={styles['field-label']}>{t.colorLabel}</span>
+          <div className={styles.palette}>
+            {palette.map((swatch, index) => {
+              const selected = swatch.toLowerCase() === color.toLowerCase();
+              return (
+                <button
+                  key={`${swatch}-${index}`}
+                  type="button"
+                  className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
+                  style={{ ['--swatch-color']: swatch, background: swatch } as React.CSSProperties}
+                  aria-label={swatch}
+                  aria-pressed={selected}
+                  onClick={() => setColor(swatch)}
+                />
+              );
+            })}
+            <label className={styles['add-color']} aria-label={t.addColorLabel}>
+              +
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.select} ref={establishmentRef}>
+        <span className={styles['field-label']}>{t.establishmentLabel}</span>
+        <div
+          className={`${styles['select-control']}${isEstablishmentOpen ? ` ${styles.open}` : ''}`}
+          onClick={() => toggleEstablishment(!isEstablishmentOpen)}
+        >
+          <span className={selectedEstablishment ? undefined : styles.placeholder}>
+            {selectedEstablishment ? selectedEstablishment.name : t.establishmentPlaceholder}
+          </span>
+          <Chevron
+            className={`${styles.chevron}${isEstablishmentOpen ? ` ${styles['chevron-open']}` : ''}`}
+            width="1rem"
+            height="1rem"
+          />
+        </div>
+        {isEstablishmentOpen && (
+          <div className={styles.picker}>
+            <div className={styles['picker-search']}>
+              <MagnifyingGlass width="1rem" height="1rem" />
+              <input
+                type="text"
+                placeholder={t.searchPlaceholder}
+                autoFocus
+                value={establishmentSearch}
+                onChange={(e) => setEstablishmentSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') toggleEstablishment(false);
+                }}
+              />
+            </div>
+            <ul>
+              {filteredCreateEstablishments.length === 0 ? (
+                <li className={styles['picker-empty']}>
+                  {createEstablishments.length === 0 ? t.noEstablishments : t.noResults}
+                </li>
+              ) : (
+                filteredCreateEstablishments.map((establishment) => {
+                  const selected = establishment.id === establishmentId;
+                  return (
+                    <li key={establishment.id}>
+                      <button
+                        type="button"
+                        className={selected ? styles.selected : undefined}
+                        onClick={() => {
+                          setEstablishmentId(establishment.id);
+                          toggleEstablishment(false);
+                        }}
+                      >
+                        <span>{establishment.name}</span>
+                        {selected && <Check className={styles.check} width="1rem" height="1rem" />}
+                      </button>
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
+        <span>{t.codeLabel}</span>
+        <div>
+          <input
+            type="text"
+            placeholder={t.codePlaceholder}
+            maxLength={FIELD_MAX_LENGTH}
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            aria-invalid={codeTaken}
+          />
+        </div>
+        {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
+      </label>
+
+      <label className={styles.field}>
+        <span>{t.nameLabel}</span>
+        <div>
+          <input
+            type="text"
+            placeholder={t.namePlaceholder}
+            maxLength={FIELD_MAX_LENGTH}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+      </label>
+
+      <label className={styles.field}>
+        <span>{t.cohortLabel}</span>
+        <div>
+          <input
+            type="text"
+            placeholder={t.cohortPlaceholder}
+            maxLength={FIELD_MAX_LENGTH}
+            value={cohort}
+            onChange={(e) => setCohort(e.target.value)}
+          />
+        </div>
+      </label>
+
+      <footer>
+        <button type="button" onClick={() => requestClose(onClose)}>
+          {t.cancel}
+        </button>
+        <button type="button" onClick={submit} disabled={!canSubmit || pending !== null}>
+          {pending?.kind === 'submit' ? <Spinner /> : t.submit}
+        </button>
+      </footer>
+    </>
+  );
+
+  /** Étape 1b — rejoindre / recherche : liste des établissements à choisir. */
+  const joinSearchStep: React.ReactElement = (
+    // key distincte de l'étape « programmes » : force le remontage du <ul> au changement
+    // d'étape, sinon React réutilise le même nœud DOM et garde son scrollTop.
+    <section key="join-establishments" className={styles.join}>
+      <div className={styles.search}>
+        <MagnifyingGlass width="1rem" height="1rem" />
+        <input
+          type="text"
+          placeholder={t.searchPlaceholder}
+          autoFocus
+          value={joinSearch}
+          onChange={(e) => setJoinSearch(e.target.value)}
+        />
+      </div>
+      <ul>
+        {filteredJoinEstablishments.length === 0 ? (
+          <li className={styles.empty}>
+            {joinEstablishments.length === 0 ? t.noEstablishments : t.noResults}
+          </li>
+        ) : (
+          filteredJoinEstablishments.map((establishment) => (
+            <li key={establishment.id}>
+              <button
+                type="button"
+                disabled={establishment.programCount === 0 || pending !== null}
+                onClick={() => chooseJoinEstablishment(establishment.id)}
+              >
+                <div>
+                  <span>{establishment.name}</span>
+                  <span>{t.programCount(establishment.programCount)}</span>
+                </div>
+                {pending?.kind === 'establishment' && pending.id === establishment.id ? (
+                  <Spinner />
+                ) : (
+                  <Chevron className={styles.go} width="1rem" height="1rem" />
+                )}
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+    </section>
+  );
+
+  /** Étape 2 — rejoindre / programmes : sélection multiple des programmes. */
+  const joinProgramsStep: React.ReactElement = (
+    <>
+      <section key="join-programs" className={styles.join}>
+        <div className={styles.search}>
+          <MagnifyingGlass width="1rem" height="1rem" />
+          <input
+            type="text"
+            placeholder={t.programSearchPlaceholder}
+            autoFocus
+            value={programSearch}
+            onChange={(e) => setProgramSearch(e.target.value)}
+          />
+        </div>
+        <ul>
+          {filteredPrograms.length === 0 ? (
+            <li className={styles.empty}>
+              {establishmentPrograms.length === 0 ? t.noPrograms : t.noResults}
+            </li>
+          ) : (
+            filteredPrograms.map((program) => {
+              const selected = selectedProgramIds.includes(program.id);
+              return (
+                <li key={program.id}>
+                  <button
+                    type="button"
+                    className={selected ? styles.selected : undefined}
+                    aria-pressed={selected}
+                    onClick={() => toggleProgram(program.id)}
+                  >
+                    <span
+                      className={styles.swatch}
+                      style={{
+                        background: program.color,
+                        color: contrastingTextColor(program.color),
+                      }}
+                    >
+                      {program.code.slice(0, 3)}
+                    </span>
+                    <div>
+                      <span>{program.name}</span>
+                      <span>{program.cohort}</span>
+                    </div>
+                    {selected && <Check className={styles.check} width="1rem" height="1rem" />}
+                  </button>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      </section>
+
+      <footer>
+        <button type="button" onClick={() => requestClose(onClose)}>
+          {t.cancel}
+        </button>
+        <button
+          type="button"
+          onClick={join}
+          disabled={selectedProgramIds.length === 0 || pending !== null}
+        >
+          {pending?.kind === 'submit' ? <Spinner /> : t.add}
+        </button>
+      </footer>
+    </>
+  );
+
+  // Bloc de l'étape courante, injecté dans le conteneur animé.
+  const stepContent =
+    view === 'menu'
+      ? menuStep
+      : view === 'create'
+        ? createStep
+        : joinEstablishmentId === null
+          ? joinSearchStep
+          : joinProgramsStep;
+
   return (
     <>
       <div
@@ -588,334 +713,36 @@ export function AddSubscriptionPopup({
         }}
       >
         <div onAnimationEnd={handleAnimationEnd}>
-        <header>
-          <div className={styles['header-main']}>
-            {headerBack && (
-              <button
-                type="button"
-                className={styles.back}
-                aria-label={t.back}
-                disabled={pending !== null}
-                onClick={headerBack}
-              >
-                <Chevron className={styles['back-chevron']} width="1.125rem" height="1.125rem" />
-              </button>
-            )}
-            <div>
-              <h1>{headerTitle}</h1>
-              <p>{headerSubtitle}</p>
-            </div>
-          </div>
-          <button type="button" onClick={() => requestClose(onClose)}>
-            ✕
-          </button>
-        </header>
-
-        {/* Conteneur d'étape : la `key` force le remontage à chaque changement d'étape,
-           ce qui rejoue l'animation ; `data-dir` en choisit le sens (avance / recul). */}
-        <div className={styles.body} key={stepKey} data-dir={stepDirection}>
-        {view === 'menu' ? (
-          <>
-            <nav className={styles.options}>
-              <button type="button" disabled={pending !== null} onClick={enterCreate}>
-                <span>+</span>
-                <div>
-                  <span>{t.createTitle}</span>
-                  <span>{t.createSubtitle}</span>
-                </div>
-                {pending?.kind === 'create' ? (
-                  <Spinner />
-                ) : (
-                  <Chevron className={styles.chevron} width="1rem" height="1rem" />
-                )}
-              </button>
-              <button type="button" disabled={pending !== null} onClick={enterJoin}>
-                <span>↪</span>
-                <div>
-                  <span>{t.joinTitle}</span>
-                  <span>{t.joinSubtitle}</span>
-                </div>
-                {pending?.kind === 'join' ? (
-                  <Spinner />
-                ) : (
-                  <Chevron className={styles.chevron} width="1rem" height="1rem" />
-                )}
-              </button>
-            </nav>
-          </>
-        ) : view === 'create' ? (
-          <>
-            <section className={styles['color-group']}>
-              <span
-                className={styles.preview}
-                style={{ background: color }}
-                aria-hidden="true"
-              >
-                <span style={{ color: contrastingTextColor(color) }}>
-                  {code.trim().slice(0, 3) || '?'}
-                </span>
-              </span>
-              <div className={styles['palette-group']}>
-                <span className={styles['field-label']}>{t.colorLabel}</span>
-                <div className={styles.palette}>
-                  {palette.map((swatch, index) => {
-                    const selected = swatch.toLowerCase() === color.toLowerCase();
-                    return (
-                      <button
-                        key={`${swatch}-${index}`}
-                        type="button"
-                        className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
-                        style={
-                          { ['--swatch-color']: swatch, background: swatch } as React.CSSProperties
-                        }
-                        aria-label={swatch}
-                        aria-pressed={selected}
-                        onClick={() => setColor(swatch)}
-                      />
-                    );
-                  })}
-                  <label className={styles['add-color']} aria-label={t.addColorLabel}>
-                    +
-                    <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            <section className={styles.select} ref={establishmentRef}>
-              <span className={styles['field-label']}>{t.establishmentLabel}</span>
-              <div
-                className={`${styles['select-control']}${isEstablishmentOpen ? ` ${styles.open}` : ''}`}
-                onClick={() => toggleEstablishment(!isEstablishmentOpen)}
-              >
-                <span className={selectedEstablishment ? undefined : styles.placeholder}>
-                  {selectedEstablishment ? selectedEstablishment.name : t.establishmentPlaceholder}
-                </span>
-                <Chevron
-                  className={`${styles.chevron}${isEstablishmentOpen ? ` ${styles['chevron-open']}` : ''}`}
-                  width="1rem"
-                  height="1rem"
-                />
-              </div>
-              {isEstablishmentOpen && (
-                <div className={styles.picker}>
-                  <div className={styles['picker-search']}>
-                    <MagnifyingGlass width="1rem" height="1rem" />
-                    <input
-                      type="text"
-                      placeholder={t.searchPlaceholder}
-                      autoFocus
-                      value={establishmentSearch}
-                      onChange={(e) => setEstablishmentSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') toggleEstablishment(false);
-                      }}
-                    />
-                  </div>
-                  <ul>
-                    {filteredCreateEstablishments.length === 0 ? (
-                      <li className={styles['picker-empty']}>
-                        {createEstablishments.length === 0 ? t.noEstablishments : t.noResults}
-                      </li>
-                    ) : (
-                      filteredCreateEstablishments.map((establishment) => {
-                        const selected = establishment.id === establishmentId;
-                        return (
-                          <li key={establishment.id}>
-                            <button
-                              type="button"
-                              className={selected ? styles.selected : undefined}
-                              onClick={() => {
-                                setEstablishmentId(establishment.id);
-                                toggleEstablishment(false);
-                              }}
-                            >
-                              <span>{establishment.name}</span>
-                              {selected && (
-                                <Check className={styles.check} width="1rem" height="1rem" />
-                              )}
-                            </button>
-                          </li>
-                        );
-                      })
-                    )}
-                  </ul>
-                </div>
+          <header>
+            <div className={styles['header-main']}>
+              {headerBack && (
+                <button
+                  type="button"
+                  className={styles.back}
+                  aria-label={t.back}
+                  disabled={pending !== null}
+                  onClick={headerBack}
+                >
+                  <Chevron className={styles['back-chevron']} width="1.125rem" height="1.125rem" />
+                </button>
               )}
-            </section>
-
-            <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
-              <span>{t.codeLabel}</span>
               <div>
-                <input
-                  type="text"
-                  placeholder={t.codePlaceholder}
-                  maxLength={FIELD_MAX_LENGTH}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  aria-invalid={codeTaken}
-                />
+                <h1>{headerTitle}</h1>
+                <p>{headerSubtitle}</p>
               </div>
-              {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
-            </label>
-
-            <label className={styles.field}>
-              <span>{t.nameLabel}</span>
-              <div>
-                <input
-                  type="text"
-                  placeholder={t.namePlaceholder}
-                  maxLength={FIELD_MAX_LENGTH}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-            </label>
-
-            <label className={styles.field}>
-              <span>{t.cohortLabel}</span>
-              <div>
-                <input
-                  type="text"
-                  placeholder={t.cohortPlaceholder}
-                  maxLength={FIELD_MAX_LENGTH}
-                  value={cohort}
-                  onChange={(e) => setCohort(e.target.value)}
-                />
-              </div>
-            </label>
-
-            <footer>
-              <button type="button" onClick={() => requestClose(onClose)}>
-                {t.cancel}
-              </button>
-              <button type="button" onClick={submit} disabled={!canSubmit || pending !== null}>
-                {pending?.kind === 'submit' ? <Spinner /> : t.submit}
-              </button>
-            </footer>
-          </>
-        ) : (
-          <>
-            {joinEstablishmentId === null ? (
-              <>
-                {/* key distincte de l'étape « programmes » : force le remontage du <ul>
-                   au changement d'étape, sinon React réutilise le même nœud DOM et garde
-                   son scrollTop (la liste apparaîtrait déjà scrollée). */}
-                <section key="join-establishments" className={styles.join}>
-                  <div className={styles.search}>
-                    <MagnifyingGlass width="1rem" height="1rem" />
-                    <input
-                      type="text"
-                      placeholder={t.searchPlaceholder}
-                      autoFocus
-                      value={joinSearch}
-                      onChange={(e) => setJoinSearch(e.target.value)}
-                    />
-                  </div>
-                <ul>
-                  {filteredJoinEstablishments.length === 0 ? (
-                    <li className={styles.empty}>
-                      {joinEstablishments.length === 0 ? t.noEstablishments : t.noResults}
-                    </li>
-                  ) : (
-                    filteredJoinEstablishments.map((establishment) => (
-                      <li key={establishment.id}>
-                        <button
-                          type="button"
-                          disabled={establishment.programCount === 0 || pending !== null}
-                          onClick={() => chooseJoinEstablishment(establishment.id)}
-                        >
-                          <div>
-                            <span>{establishment.name}</span>
-                            <span>{t.programCount(establishment.programCount)}</span>
-                          </div>
-                          {pending?.kind === 'establishment' && pending.id === establishment.id ? (
-                            <Spinner />
-                          ) : (
-                            <Chevron className={styles.go} width="1rem" height="1rem" />
-                          )}
-                        </button>
-                      </li>
-                    ))
-                  )}
-                  </ul>
-                </section>
-              </>
-            ) : (
-              <>
-                <section key="join-programs" className={styles.join}>
-                  <div className={styles.search}>
-                    <MagnifyingGlass width="1rem" height="1rem" />
-                    <input
-                      type="text"
-                      placeholder={t.programSearchPlaceholder}
-                      autoFocus
-                      value={programSearch}
-                      onChange={(e) => setProgramSearch(e.target.value)}
-                    />
-                  </div>
-                  <ul>
-                    {filteredPrograms.length === 0 ? (
-                      <li className={styles.empty}>
-                        {establishmentPrograms.length === 0 ? t.noPrograms : t.noResults}
-                      </li>
-                    ) : (
-                      filteredPrograms.map((program) => {
-                        const selected = selectedProgramIds.includes(program.id);
-                        return (
-                          <li key={program.id}>
-                            <button
-                              type="button"
-                              className={selected ? styles.selected : undefined}
-                              aria-pressed={selected}
-                              onClick={() => toggleProgram(program.id)}
-                            >
-                              <span
-                                className={styles.swatch}
-                                style={{
-                                  background: program.color,
-                                  color: contrastingTextColor(program.color),
-                                }}
-                              >
-                                {program.code.slice(0, 3)}
-                              </span>
-                              <div>
-                                <span>{program.name}</span>
-                                <span>{program.cohort}</span>
-                              </div>
-                              {selected && (
-                                <Check className={styles.check} width="1rem" height="1rem" />
-                              )}
-                            </button>
-                          </li>
-                        );
-                      })
-                    )}
-                  </ul>
-                </section>
-
-                <footer>
-                  <button type="button" onClick={() => requestClose(onClose)}>
-                    {t.cancel}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={join}
-                    disabled={selectedProgramIds.length === 0 || pending !== null}
-                  >
-                    {pending?.kind === 'submit' ? <Spinner /> : t.add}
-                  </button>
-                </footer>
-              </>
-            )}
-          </>
-        )}
-        </div>
+            </div>
+            <button type="button" onClick={() => requestClose(onClose)}>
+              ✕
+            </button>
+          </header>
+          <div className={styles.body} key={stepKey} data-dir={stepDirection}>
+            {stepContent}
+          </div>
         </div>
       </div>
 
       {error && (
-        <ErrorBox
+        <ErrorPopup
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}

@@ -1,4 +1,4 @@
-div.error-box {
+div.error-popup {
     position: fixed;
     inset: 0;
     z-index: 20;
@@ -6,10 +6,10 @@ div.error-box {
     justify-content: center;
     align-items: center;
     background: rgba(0, 0, 0, 0.35);
-    animation: error-box-fade-in 0.2s ease-out;
+    animation: error-popup-fade-in 0.2s ease-out;
 }
 
-div.error-box > div {
+div.error-popup > div {
     display: flex;
     box-sizing: border-box;
     width: min(23rem, 100% - 2rem);
@@ -22,15 +22,15 @@ div.error-box > div {
     background: var(--bg-surface);
     box-shadow: 0 12px 32px var(--shadow-modal);
     user-select: none;
-    animation: error-box-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: error-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes error-box-fade-in {
+@keyframes error-popup-fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
 }
 
-@keyframes error-box-pop-in {
+@keyframes error-popup-pop-in {
     from {
         opacity: 0;
         transform: translateY(0.75rem) scale(0.96);
@@ -41,12 +41,12 @@ div.error-box > div {
     }
 }
 
-@keyframes error-box-fade-out {
+@keyframes error-popup-fade-out {
     from { opacity: 1; }
     to { opacity: 0; }
 }
 
-@keyframes error-box-pop-out {
+@keyframes error-popup-pop-out {
     from {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -57,27 +57,27 @@ div.error-box > div {
     }
 }
 
-div.error-box.closing {
-    animation: error-box-fade-out 0.2s ease-in forwards;
+div.error-popup.closing {
+    animation: error-popup-fade-out 0.2s ease-in forwards;
 }
 
-div.error-box.closing > div {
-    animation: error-box-pop-out 0.2s ease-in forwards;
+div.error-popup.closing > div {
+    animation: error-popup-pop-out 0.2s ease-in forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    div.error-box,
-    div.error-box > div {
+    div.error-popup,
+    div.error-popup > div {
         animation: none;
     }
 }
 
-div.error-box > div > * {
+div.error-popup > div > * {
     margin: 0;
 }
 
 /* En-tête : titre + message. */
-div.error-box > div > div:first-child {
+div.error-popup > div > div:first-child {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -85,11 +85,11 @@ div.error-box > div > div:first-child {
     align-self: stretch;
 }
 
-div.error-box > div > div:first-child > * {
+div.error-popup > div > div:first-child > * {
     margin: 0;
 }
 
-div.error-box > div > div:first-child > h1 {
+div.error-popup > div > div:first-child > h1 {
     font-family: Inter, sans-serif;
     font-size: 1.125rem;
     font-weight: 600;
@@ -97,7 +97,7 @@ div.error-box > div > div:first-child > h1 {
     color: var(--text);
 }
 
-div.error-box > div > div:first-child > p {
+div.error-popup > div > div:first-child > p {
     font-family: Inter, sans-serif;
     font-size: 0.84375rem;
     font-weight: 400;
@@ -106,7 +106,7 @@ div.error-box > div > div:first-child > p {
 }
 
 /* Pied : boutons. */
-div.error-box > div > div:last-child {
+div.error-popup > div > div:last-child {
     display: flex;
     justify-content: flex-end;
     align-items: center;
@@ -114,7 +114,7 @@ div.error-box > div > div:last-child {
     align-self: stretch;
 }
 
-div.error-box > div > div:last-child > button {
+div.error-popup > div > div:last-child > button {
     display: flex;
     padding: 0.75rem 0;
     justify-content: center;
@@ -129,39 +129,39 @@ div.error-box > div > div:last-child > button {
         transform 0.1s ease;
 }
 
-div.error-box > div > div:last-child > button:hover {
+div.error-popup > div > div:last-child > button:hover {
     cursor: pointer;
 }
 
-div.error-box > div > div:last-child > button:active {
+div.error-popup > div > div:last-child > button:active {
     transform: scale(0.97);
 }
 
 /* Bouton secondaire (fermer quand un réessai est proposé). */
-div.error-box > div > div:last-child > button.secondary {
+div.error-popup > div > div:last-child > button.secondary {
     color: var(--text);
     background: transparent;
     border: 1px solid var(--border);
 }
 
-div.error-box > div > div:last-child > button.secondary:hover {
+div.error-popup > div > div:last-child > button.secondary:hover {
     background: var(--bg-vote-pill);
     border-color: var(--border-strong);
 }
 
 /* Bouton principal (réessayer, ou fermer s'il est seul) : rouge (action liée à une erreur). */
-div.error-box > div > div:last-child > button.primary {
+div.error-popup > div > div:last-child > button.primary {
     color: #ffffff;
     background: var(--danger);
     border: 1px solid var(--danger);
 }
 
-div.error-box > div > div:last-child > button.primary:hover {
+div.error-popup > div > div:last-child > button.primary:hover {
     filter: brightness(1.08);
 }
 
 @media (min-width: 768px) {
-    div.error-box > div > div:last-child > button {
+    div.error-popup > div > div:last-child > button {
         padding: 0.625rem 1rem;
         flex-grow: 0;
     }

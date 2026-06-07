@@ -1,34 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import styles from './RoleEditor.module.css'
+import styles from './RoleEditorPopup.module.css';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
-import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { initials } from './helpers.ts';
+import { defaultLabels } from './labels.ts';
+import type { MaybePromise, Role, RoleChange, RoleEditorPopupLabels, User } from './types.ts';
 
-/** Valeur synchrone ou asynchrone : le callback d'assignation peut retourner une Promise. */
-export type MaybePromise<T> = T | Promise<T>;
+// Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
+export type { MaybePromise, Role, RoleChange, RoleEditorPopupLabels, User } from './types.ts';
 
-/** Reflète la table `Role` (id = celui inséré dans init.sql). */
-export interface Role {
-  id: number;
-  name: string;
-}
-
-/**
- * Reflète la table `User_` + ses assignations `User_Role`.
- * `role_ids` = rôles assignés à l'utilisateur (many-to-many, comme en base).
- */
-export interface User {
-  id: number;
-  username: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  avatar_color: string;
-  role_ids: number[];
-}
-
-interface RoleEditorProps {
+interface RoleEditorPopupProps {
   onClose: (...args: unknown[]) => unknown;
   /** Rôles à éditer, fournis par le parent. L'ordre du tableau = ordre d'affichage des sections. */
   roles?: Role[];
@@ -41,65 +24,7 @@ interface RoleEditorProps {
    */
   onChange?: (change: RoleChange) => MaybePromise<unknown>;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
-  labels?: Partial<RoleEditorLabels>;
-}
-
-/**
- * Décrit une modification d'assignation rôle ↔ utilisateur (reflète un INSERT/DELETE dans User_Role).
- * Émise via onChange.
- */
-export type RoleChange =
-  | { type: 'assign'; roleId: number; userId: number }
-  | { type: 'unassign'; roleId: number; userId: number };
-
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface RoleEditorLabels {
-  /** Titre du panneau. */
-  title: string;
-  /** Description sous le titre. */
-  subtitle: string;
-  /** Libellé du bouton d'ajout de chaque section. */
-  addButton: string;
-  /** Texte d'invite du champ de recherche. */
-  searchPlaceholder: string;
-  /** Message affiché quand une section n'a aucun utilisateur. */
-  emptyRole: string;
-  /** Message affiché quand aucun rôle n'est fourni. */
-  emptyRoles: string;
-  /** Message du sélecteur quand aucun utilisateur n'est assignable. */
-  noCandidates: string;
-  /** Message du sélecteur quand la recherche ne renvoie rien. */
-  noResults: string;
-  /** Titre du popup d'erreur. */
-  errorTitle: string;
-  /** Message d'erreur quand l'enregistrement d'une assignation échoue. */
-  saveError: string;
-  /** Bouton « fermer » du popup d'erreur. */
-  errorClose: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: RoleEditorLabels = {
-  title: 'Gestion des rôles',
-  subtitle: 'Gère les administrateurs, professeurs et mainteneurs.',
-  addButton: 'Ajouter',
-  searchPlaceholder: 'Rechercher un utilisateur…',
-  emptyRole: 'Aucun utilisateur pour ce rôle.',
-  emptyRoles: 'Aucun rôle à afficher.',
-  noCandidates: 'Aucun utilisateur disponible',
-  noResults: 'Aucun résultat',
-  errorTitle: 'Une erreur est survenue',
-  saveError: "Échec de l'enregistrement. Réessaie.",
-  errorClose: 'Fermer',
-};
-
-function initials(user: User): string {
-  return `${user.first_name[0] ?? ''}${user.last_name[0] ?? ''}`.toUpperCase();
+  labels?: Partial<RoleEditorPopupLabels>;
 }
 
 /** Opération d'assignation async en cours (pilote le spinner et le verrouillage). */
@@ -114,7 +39,13 @@ function Spinner(): React.ReactElement {
   return <span className={styles.spinner} aria-hidden="true" />;
 }
 
-export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange, labels }: RoleEditorProps): React.ReactElement {
+export function RoleEditorPopup({
+  onClose,
+  roles = [],
+  users: initialUsers,
+  onChange,
+  labels,
+}: RoleEditorPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
   const [users, setUsers] = useState<User[]>(initialUsers);
   /** Section dont le sélecteur d'ajout est ouvert (null = aucun). */
@@ -169,10 +100,7 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
   useEffect(() => {
     if (addingRoleId === null) return;
     function onPointerDown(event: MouseEvent) {
-      if (
-        openSectionRef.current &&
-        !openSectionRef.current.contains(event.target as Node)
-      ) {
+      if (openSectionRef.current && !openSectionRef.current.contains(event.target as Node)) {
         setAddingRoleId(null);
         setSearch('');
       }
@@ -248,9 +176,7 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
     if (pending !== null) return;
     setUsers((prev) =>
       prev.map((user) =>
-        user.id === userId
-          ? { ...user, role_ids: [...user.role_ids, roleId] }
-          : user
+        user.id === userId ? { ...user, role_ids: [...user.role_ids, roleId] } : user
       )
     );
     // On ferme le sélecteur AVANT de notifier : l'UX ne dépend pas du callback parent.
@@ -271,115 +197,115 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
   return (
     <>
       <div
-        className={`${styles['role-editor']}${isClosing ? ` ${styles.closing}` : ''}`}
+        className={`${styles['role-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
         onClick={(event) => {
           if (event.target === event.currentTarget) requestClose(onClose);
         }}
       >
         <div onAnimationEnd={handleAnimationEnd}>
-        <header>
-          <div>
-            <h1>{t.title}</h1>
-            <p>{t.subtitle}</p>
-          </div>
-          <button onClick={() => requestClose(onClose)}>✕</button>
-        </header>
-        {roles.length === 0 && <p className={styles.empty}>{t.emptyRoles}</p>}
-        {roles.map((role) => (
-          <section key={role.id} data-role-id={role.id}>
-            <header ref={addingRoleId === role.id ? openSectionRef : undefined}>
-              <h2>
-                {role.name} · {usersFor(role.id).length}
-              </h2>
-              <button className={styles.add} onClick={() => toggleAdding(role.id)}>
-                +<span>{t.addButton}</span>
-              </button>
-              {addingRoleId === role.id && (
-                <div className={styles.picker}>
-                  <div className={styles['picker-search']}>
-                    <MagnifyingGlass width="1rem" height="1rem" />
-                    <input
-                      type="text"
-                      placeholder={t.searchPlaceholder}
-                      autoFocus
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
-                  <ul>
-                    {candidatesFor(role.id).length === 0 ? (
-                      <li className={styles['picker-empty']}>
-                        {search.trim() === '' ? t.noCandidates : t.noResults}
-                      </li>
-                    ) : (
-                      candidatesFor(role.id).map((user) => (
-                        <li key={user.id}>
-                          <button
-                            disabled={pending !== null}
-                            onClick={() => addUser(role.id, user.id)}
-                          >
-                            <span style={{ background: user.avatar_color }}>
-                              <span style={{ color: contrastingTextColor(user.avatar_color) }}>
-                                {initials(user)}
-                              </span>
-                            </span>
-                            <div>
-                              <span>
-                                {user.first_name} {user.last_name}
-                              </span>
-                              <span>{user.email}</span>
-                            </div>
-                          </button>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
-              )}
-            </header>
-            {usersFor(role.id).length === 0 ? (
-              <p className={styles.empty}>{t.emptyRole}</p>
-            ) : (
-            <ul>
-              {usersFor(role.id).map((user) => (
-                <li key={user.id}>
-                  <div>
-                    <span style={{ background: user.avatar_color }}>
-                      <span style={{ color: contrastingTextColor(user.avatar_color) }}>
-                        {initials(user)}
-                      </span>
-                    </span>
-                    <div>
-                      <span>
-                        {user.first_name} {user.last_name}
-                      </span>
-                      <span>{user.email}</span>
+          <header>
+            <div>
+              <h1>{t.title}</h1>
+              <p>{t.subtitle}</p>
+            </div>
+            <button onClick={() => requestClose(onClose)}>✕</button>
+          </header>
+          {roles.length === 0 && <p className={styles.empty}>{t.emptyRoles}</p>}
+          {roles.map((role) => (
+            <section key={role.id} data-role-id={role.id}>
+              <header ref={addingRoleId === role.id ? openSectionRef : undefined}>
+                <h2>
+                  {role.name} · {usersFor(role.id).length}
+                </h2>
+                <button className={styles.add} onClick={() => toggleAdding(role.id)}>
+                  +<span>{t.addButton}</span>
+                </button>
+                {addingRoleId === role.id && (
+                  <div className={styles.picker}>
+                    <div className={styles['picker-search']}>
+                      <MagnifyingGlass width="1rem" height="1rem" />
+                      <input
+                        type="text"
+                        placeholder={t.searchPlaceholder}
+                        autoFocus
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
                     </div>
+                    <ul>
+                      {candidatesFor(role.id).length === 0 ? (
+                        <li className={styles['picker-empty']}>
+                          {search.trim() === '' ? t.noCandidates : t.noResults}
+                        </li>
+                      ) : (
+                        candidatesFor(role.id).map((user) => (
+                          <li key={user.id}>
+                            <button
+                              disabled={pending !== null}
+                              onClick={() => addUser(role.id, user.id)}
+                            >
+                              <span style={{ background: user.avatar_color }}>
+                                <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                                  {initials(user)}
+                                </span>
+                              </span>
+                              <div>
+                                <span>
+                                  {user.first_name} {user.last_name}
+                                </span>
+                                <span>{user.email}</span>
+                              </div>
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
                   </div>
-                  <button
-                    className={styles.delete}
-                    disabled={pending !== null}
-                    onClick={() => removeUser(role.id, user.id)}
-                  >
-                    {pending?.type === 'unassign' &&
-                    pending.roleId === role.id &&
-                    pending.userId === user.id ? (
-                      <Spinner />
-                    ) : (
-                      <TrashCan width="1rem" height="1rem" />
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            )}
-          </section>
-        ))}
+                )}
+              </header>
+              {usersFor(role.id).length === 0 ? (
+                <p className={styles.empty}>{t.emptyRole}</p>
+              ) : (
+                <ul>
+                  {usersFor(role.id).map((user) => (
+                    <li key={user.id}>
+                      <div>
+                        <span style={{ background: user.avatar_color }}>
+                          <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                            {initials(user)}
+                          </span>
+                        </span>
+                        <div>
+                          <span>
+                            {user.first_name} {user.last_name}
+                          </span>
+                          <span>{user.email}</span>
+                        </div>
+                      </div>
+                      <button
+                        className={styles.delete}
+                        disabled={pending !== null}
+                        onClick={() => removeUser(role.id, user.id)}
+                      >
+                        {pending?.type === 'unassign' &&
+                        pending.roleId === role.id &&
+                        pending.userId === user.id ? (
+                          <Spinner />
+                        ) : (
+                          <TrashCan width="1rem" height="1rem" />
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
         </div>
       </div>
 
       {error && (
-        <ErrorBox
+        <ErrorPopup
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}

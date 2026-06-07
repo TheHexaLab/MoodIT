@@ -1,26 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './UpdateProgramPopup.module.css';
-import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { DEFAULT_PALETTE, FIELD_MAX_LENGTH, defaultLabels } from './labels.ts';
+import type {
+  MaybePromise,
+  ProgramData,
+  ProgramUpdate,
+  UpdateProgramPopupLabels,
+} from './types.ts';
 
-/** Valeur synchrone ou asynchrone : le callback d'enregistrement peut retourner une Promise. */
-export type MaybePromise<T> = T | Promise<T>;
-
-/** Programme existant à éditer (reflète les colonnes utiles de `Program`). */
-export interface ProgramData {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
-
-/** Modification de programme (reflète les colonnes éditables de `Program`). */
-export interface ProgramUpdate {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
+// Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
+export type {
+  MaybePromise,
+  ProgramData,
+  ProgramUpdate,
+  UpdateProgramPopupLabels,
+} from './types.ts';
 
 interface UpdateProgramPopupProps {
   onClose: (...args: unknown[]) => unknown;
@@ -42,75 +38,6 @@ interface UpdateProgramPopupProps {
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<UpdateProgramPopupLabels>;
 }
-
-/**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface UpdateProgramPopupLabels {
-  /** Titre du panneau. */
-  title: string;
-  /** Description sous le titre. */
-  subtitle: string;
-  /** Libellé de la palette de couleurs. */
-  colorLabel: string;
-  /** Libellé accessible du bouton d'ajout de couleur. */
-  addColorLabel: string;
-  /** Libellé du champ « code ». */
-  codeLabel: string;
-  /** Invite du champ « code ». */
-  codePlaceholder: string;
-  /** Erreur affichée quand le code existe déjà dans l'établissement. */
-  codeTaken: string;
-  /** Libellé du champ « nom ». */
-  nameLabel: string;
-  /** Invite du champ « nom ». */
-  namePlaceholder: string;
-  /** Libellé du champ « cohorte ». */
-  cohortLabel: string;
-  /** Invite du champ « cohorte ». */
-  cohortPlaceholder: string;
-  /** Bouton « annuler ». */
-  cancel: string;
-  /** Bouton « enregistrer ». */
-  save: string;
-  /** Titre du popup d'erreur. */
-  errorTitle: string;
-  /** Message d'erreur quand l'enregistrement échoue. */
-  saveError: string;
-  /** Bouton « fermer » du popup d'erreur. */
-  errorClose: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: UpdateProgramPopupLabels = {
-  title: 'Modifier le programme',
-  subtitle: 'Mets à jour les informations du programme.',
-  colorLabel: 'Couleur du programme',
-  addColorLabel: 'Ajouter une couleur',
-  codeLabel: 'Code du programme',
-  codePlaceholder: 'Ex. GIN',
-  codeTaken: 'Ce code existe déjà dans cet établissement',
-  nameLabel: 'Nom du programme',
-  namePlaceholder: 'Ex. Génie informatique',
-  cohortLabel: 'Cohorte',
-  cohortPlaceholder: 'Ex. Promo 71',
-  cancel: 'Annuler',
-  save: 'Enregistrer',
-  errorTitle: 'Une erreur est survenue',
-  saveError: "Échec de l'enregistrement. Réessaie.",
-  errorClose: 'Fermer',
-};
-
-/** Couleurs prédéfinies par défaut (identiques à AddSubscriptionPopup ; tokens --avatar-* d'index.css). */
-const DEFAULT_PALETTE = [
-  '#0D9488', '#14B8A6', '#2DD4BF', '#0F766E', '#7D7D94',
-];
-
-/** Longueurs max alignées sur la table Program : name, code et cohort en VARCHAR(128). */
-const FIELD_MAX_LENGTH = 128;
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
@@ -173,11 +100,9 @@ export function UpdateProgramPopup({
   /** Le code saisi existe-t-il déjà dans l'établissement (hors programme édité) ? */
   const trimmedCode = code.trim();
   const codeTaken =
-    trimmedCode !== '' &&
-    existingCodes.some((c) => c.toUpperCase() === trimmedCode.toUpperCase());
+    trimmedCode !== '' && existingCodes.some((c) => c.toUpperCase() === trimmedCode.toUpperCase());
 
-  const canSave =
-    trimmedCode !== '' && name.trim() !== '' && cohort.trim() !== '' && !codeTaken;
+  const canSave = trimmedCode !== '' && name.trim() !== '' && cohort.trim() !== '' && !codeTaken;
 
   async function save() {
     if (!canSave || pending) return;
@@ -213,99 +138,101 @@ export function UpdateProgramPopup({
         }}
       >
         <div onAnimationEnd={handleAnimationEnd}>
-        <header>
-          <div>
-            <h1>{t.title}</h1>
-            <p>{t.subtitle}</p>
-          </div>
-          <button onClick={() => requestClose(onClose)}>✕</button>
-        </header>
-
-        <section className={styles['color-group']}>
-          <span className={styles.preview} style={{ background: color }} aria-hidden="true">
-            <span style={{ color: contrastingTextColor(color) }}>
-              {code.trim().slice(0, 3) || '?'}
-            </span>
-          </span>
-          <div className={styles['palette-group']}>
-            <span className={styles['field-label']}>{t.colorLabel}</span>
-            <div className={styles.palette}>
-              {palette.map((swatch, index) => {
-                const selected = swatch.toLowerCase() === color.toLowerCase();
-                return (
-                  <button
-                    key={`${swatch}-${index}`}
-                    type="button"
-                    className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
-                    style={{ ['--swatch-color']: swatch, background: swatch } as React.CSSProperties}
-                    aria-label={swatch}
-                    aria-pressed={selected}
-                    onClick={() => setColor(swatch)}
-                  />
-                );
-              })}
-              <label className={styles['add-color']} aria-label={t.addColorLabel}>
-                +
-                <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-              </label>
+          <header>
+            <div>
+              <h1>{t.title}</h1>
+              <p>{t.subtitle}</p>
             </div>
-          </div>
-        </section>
+            <button onClick={() => requestClose(onClose)}>✕</button>
+          </header>
 
-        <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
-          <span>{t.codeLabel}</span>
-          <div>
-            <input
-              type="text"
-              placeholder={t.codePlaceholder}
-              maxLength={FIELD_MAX_LENGTH}
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              aria-invalid={codeTaken}
-            />
-          </div>
-          {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
-        </label>
+          <section className={styles['color-group']}>
+            <span className={styles.preview} style={{ background: color }} aria-hidden="true">
+              <span style={{ color: contrastingTextColor(color) }}>
+                {code.trim().slice(0, 3) || '?'}
+              </span>
+            </span>
+            <div className={styles['palette-group']}>
+              <span className={styles['field-label']}>{t.colorLabel}</span>
+              <div className={styles.palette}>
+                {palette.map((swatch, index) => {
+                  const selected = swatch.toLowerCase() === color.toLowerCase();
+                  return (
+                    <button
+                      key={`${swatch}-${index}`}
+                      type="button"
+                      className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
+                      style={
+                        { ['--swatch-color']: swatch, background: swatch } as React.CSSProperties
+                      }
+                      aria-label={swatch}
+                      aria-pressed={selected}
+                      onClick={() => setColor(swatch)}
+                    />
+                  );
+                })}
+                <label className={styles['add-color']} aria-label={t.addColorLabel}>
+                  +
+                  <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+                </label>
+              </div>
+            </div>
+          </section>
 
-        <label className={styles.field}>
-          <span>{t.nameLabel}</span>
-          <div>
-            <input
-              type="text"
-              placeholder={t.namePlaceholder}
-              maxLength={FIELD_MAX_LENGTH}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-        </label>
+          <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
+            <span>{t.codeLabel}</span>
+            <div>
+              <input
+                type="text"
+                placeholder={t.codePlaceholder}
+                maxLength={FIELD_MAX_LENGTH}
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                aria-invalid={codeTaken}
+              />
+            </div>
+            {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
+          </label>
 
-        <label className={styles.field}>
-          <span>{t.cohortLabel}</span>
-          <div>
-            <input
-              type="text"
-              placeholder={t.cohortPlaceholder}
-              maxLength={FIELD_MAX_LENGTH}
-              value={cohort}
-              onChange={(e) => setCohort(e.target.value)}
-            />
-          </div>
-        </label>
+          <label className={styles.field}>
+            <span>{t.nameLabel}</span>
+            <div>
+              <input
+                type="text"
+                placeholder={t.namePlaceholder}
+                maxLength={FIELD_MAX_LENGTH}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+          </label>
 
-        <footer>
-          <button type="button" onClick={() => requestClose(onClose)}>
-            {t.cancel}
-          </button>
-          <button type="button" onClick={save} disabled={!canSave || pending}>
-            {pending ? <Spinner /> : t.save}
-          </button>
-        </footer>
+          <label className={styles.field}>
+            <span>{t.cohortLabel}</span>
+            <div>
+              <input
+                type="text"
+                placeholder={t.cohortPlaceholder}
+                maxLength={FIELD_MAX_LENGTH}
+                value={cohort}
+                onChange={(e) => setCohort(e.target.value)}
+              />
+            </div>
+          </label>
+
+          <footer>
+            <button type="button" onClick={() => requestClose(onClose)}>
+              {t.cancel}
+            </button>
+            <button type="button" onClick={save} disabled={!canSave || pending}>
+              {pending ? <Spinner /> : t.save}
+            </button>
+          </footer>
         </div>
       </div>
 
       {error && (
-        <ErrorBox
+        <ErrorPopup
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}

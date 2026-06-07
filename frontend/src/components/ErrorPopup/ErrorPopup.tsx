@@ -1,7 +1,12 @@
 import React, { useRef, useState } from 'react';
-import styles from './ErrorBox.module.css';
+import styles from './ErrorPopup.module.css';
+import { defaultLabels } from './labels.ts';
+import type { ErrorPopupLabels } from './types.ts';
 
-interface ErrorBoxProps {
+// Ré-export de l'API publique : les consommateurs importent toujours ce type depuis ce module.
+export type { ErrorPopupLabels } from './types.ts';
+
+interface ErrorPopupProps {
   /** Message décrivant l'erreur. */
   content: string;
   /** Fermeture (clic en dehors, bouton « fermer »). */
@@ -9,41 +14,19 @@ interface ErrorBoxProps {
   /** Si fourni, affiche un bouton « réessayer » qui exécute cette action. */
   onRetry?: (...args: unknown[]) => unknown;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
-  labels?: Partial<ErrorBoxLabels>;
+  labels?: Partial<ErrorPopupLabels>;
 }
 
 /**
- * Tous les textes affichés par le composant.
- * Passés via la prop `labels` (en Partial) ; les champs omis prennent les défauts.
- */
-export interface ErrorBoxLabels {
-  /** Titre du panneau. */
-  title: string;
-  /** Libellé du bouton de fermeture. */
-  close: string;
-  /** Libellé du bouton de réessai. */
-  retry: string;
-}
-
-/**
- * Tous les textes par défaut affichés par le composant.
- */
-const defaultLabels: ErrorBoxLabels = {
-  title: 'Une erreur est survenue',
-  close: 'Fermer',
-  retry: 'Réessayer',
-};
-
-/**
- * Petit popup d'erreur réutilisable (même esprit que DeleteConfirmationBox).
+ * Petit popup d'erreur réutilisable (même esprit que DeleteConfirmationPopup).
  * Affiche un titre, un message, un bouton « fermer » et, optionnellement, « réessayer ».
  */
-export function ErrorBox({
+export function ErrorPopup({
   content,
   onClose,
   onRetry,
   labels,
-}: ErrorBoxProps): React.ReactElement {
+}: ErrorPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
   const [isClosing, setIsClosing] = useState(false);
@@ -67,7 +50,7 @@ export function ErrorBox({
 
   return (
     <div
-      className={`${styles['error-box']}${isClosing ? ` ${styles.closing}` : ''}`}
+      className={`${styles['error-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
       onClick={(event) => {
         if (event.target === event.currentTarget) requestClose(onClose);
       }}
@@ -86,11 +69,7 @@ export function ErrorBox({
             {t.close}
           </button>
           {onRetry && (
-            <button
-              type="button"
-              className={styles.primary}
-              onClick={() => requestClose(onRetry)}
-            >
+            <button type="button" className={styles.primary} onClick={() => requestClose(onRetry)}>
               {t.retry}
             </button>
           )}
