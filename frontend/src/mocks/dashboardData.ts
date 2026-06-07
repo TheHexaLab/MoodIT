@@ -12,36 +12,39 @@ export interface DemoProgram extends Program {
 export const dashboardEmptyCourseMock: DemoProgram[] = [
   {
     id: '1',
-    label: 'Genie Informatique',
+    name: 'Genie informatique',
+    code: 'GIN',
+    cohort: '71',
+    color: '#1a6e3c',
     courses: [
       {
-        id_course: 'course-inf-1',
+        id_course: 1,
         code: 'GIF123',
         title: 'Introduction a la programmation',
         quizzes: [],
-        textChannels: [],
         forums: [],
       },
       {
-        id_course: 'course-inf-2',
+        id_course: 2,
         code: 'GIF456',
         title: 'Genie logiciel',
         quizzes: [],
-        textChannels: [],
         forums: [],
       },
     ],
   },
   {
     id: '2',
-    label: 'SI',
+    name: 'Genie logiciel',
+    code: 'GLO',
+    cohort: '71',
+    color: '#0a5cc0',
     courses: [
       {
-        id_course: 'course-si-1',
+        id_course: 3,
         code: 'SCI101',
         title: 'Sciences appliquees',
         quizzes: [],
-        textChannels: [],
         forums: [],
       },
     ],
@@ -52,87 +55,107 @@ export const dashboardEmptyCourseMock: DemoProgram[] = [
  * Donnees de demonstration du dashboard.
  * Elles simulent un melange de donnees UI et backend pour valider
  * le comportement plug-and-play des composants de menu.
+ *
+ * Rappel modele : un canal et un forum sont tous deux des lignes de la table
+ * Forum ; leur f_type ('Discussion' = canal, 'Thread' = forum) les distingue.
  */
 export const dashboardProgramsMock: DemoProgram[] = [
   {
     id: '1',
-    label: 'Genie Informatique',
+    name: 'Genie informatique',
+    code: 'GIN',
+    cohort: '71',
+    color: '#1a6e3c',
     courses: [
       {
-        id_course: 'course-inf-1',
+        id_course: 1,
         code: 'GIF123',
         title: 'Introduction a la programmation',
         quizzes: [],
-        textChannels: [],
         forums: [],
       },
       {
-        id_course: 'course-inf-2',
+        id_course: 2,
         code: 'GIF456',
         title: 'Genie logiciel',
-        quizzes: [{ id_quiz: 'c-1', title: 'quiz-semaine-1' }],
-        textChannels: [
-          { id_text_channel: 'c-2', name: 'general' },
-          { id_text_channel: 'c-3', name: 'ressources' },
+        quizzes: [{ id_quiz: 1, title: 'quiz-semaine-1' }],
+        forums: [
+          { id_forum: 1, title: 'general', f_type: 'Discussion' },
+          { id_forum: 2, title: 'ressources', f_type: 'Discussion' },
+          { id_forum: 3, title: 'questions-lab', f_type: 'Thread' },
         ],
-        forums: [{ id_forum: 'c-4', title: 'questions-lab' }],
       },
       {
-        id: 'course-inf-3',
-        name: 'IFT287 - Structures de donnees',
-        channels: [
-          { id: 'c-9', name: 'quiz-chapitre-2', type: 'quiz' },
-          { id: 'c-10', name: 'entraide', type: 'forum' },
-        ],
+        id_course: 3,
+        code: 'IFT287',
+        title: 'Structures de donnees',
+        quizzes: [{ id_quiz: 2, title: 'quiz-chapitre-2' }],
+        forums: [{ id_forum: 4, title: 'entraide', f_type: 'Thread' }],
       },
     ],
   },
   {
     id: '2',
-    label: 'Genie Electrique',
+    name: 'Genie electrique',
+    code: 'GEL',
+    cohort: '71',
+    color: '#8b1a1a',
     courses: [
       {
-        id_course: 'course-ele-1',
+        id_course: 4,
         code: 'GEL300',
         title: 'Circuits numeriques',
-        textChannels: [{ id_text_channel: 'c-4', name: 'annonces' }],
-        forums: [{ id_forum: 'c-5', title: 'forum-labo' }],
+        forums: [
+          { id_forum: 5, title: 'annonces', f_type: 'Discussion' },
+          { id_forum: 6, title: 'forum-labo', f_type: 'Thread' },
+        ],
       },
       {
-        id_course: 'course-ele-2',
+        id_course: 5,
         code: 'GEL201',
         title: 'Electronique',
         quizzes: [],
-        textChannels: [],
         forums: [],
       },
     ],
   },
   {
     id: '3',
-    label: 'Education',
-    logoUrl: 'https://www.svgrepo.com/show/532061/moon-stars.svg',
+    name: 'Genie civil',
+    code: 'GCI',
+    cohort: '71',
+    color: '#3a3a7a',
     courses: [
       {
-        id_course: 'course-edu-1',
-        code: 'EDU101',
-        title: 'Fondements pedagogiques',
-        textChannels: [{ id_text_channel: 'c-6', name: 'annonces' }],
+        id_course: 6,
+        code: 'GCI201',
+        title: 'Materiaux de construction',
+        forums: [{ id_forum: 7, title: 'annonces', f_type: 'Discussion' }],
       },
       {
-        id_course: 'course-edu-2',
-        code: 'EDU245',
-        title: 'Evaluation des apprentissages',
-        quizzes: [{ id_quiz: 'c-7', title: 'quiz-diagnostic' }],
-        forums: [{ id_forum: 'c-8', title: 'forum-reflexion' }],
+        id_course: 7,
+        code: 'GCI301',
+        title: 'Hydraulique',
+        quizzes: [{ id_quiz: 3, title: 'quiz-diagnostic' }],
+        forums: [{ id_forum: 8, title: 'forum-reflexion', f_type: 'Thread' }],
       },
     ],
   },
   {
     id: '4',
-    label: 'Rick Astley',
-    logoUrl:
-      'https://variety.com/wp-content/uploads/2021/07/Rick-Astley-Never-Gonna-Give-You-Up.png?w=1000&h=667&crop=1',
+    name: 'Genie chimique',
+    code: 'GCH',
+    cohort: '71',
+    color: '#4a7a1a',
+    courses: [],
+  },
+  {
+    // Couleur claire : le helper contrastingTextColor doit donner un texte sombre.
+    id: '5',
+    name: 'Genie de l\'environnement',
+    code: 'GEN',
+    cohort: '2024',
+    color: '#f2c94c',
     courses: [],
   },
 ];

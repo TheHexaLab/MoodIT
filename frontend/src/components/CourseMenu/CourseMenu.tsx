@@ -11,7 +11,6 @@ import {
   type ForumChannelSource,
   normalizeCourseChannelsFromSources,
   type QuizChannelSource,
-  type TextChannelSource,
 } from '../CourseChannelList/courseChannelSources';
 
 export interface Course {
@@ -29,12 +28,10 @@ export interface Course {
   description?: string;
   /** Canaux deja normalises cote UI. */
   channels?: CourseChannel[];
-  /** Quiz issus de la BD. */
+  /** Quiz issus de la BD (table Quiz). */
   quizzes?: QuizChannelSource[];
-  /** Forums issus de la BD. */
+  /** Forums issus de la BD (table Forum) : canaux ('Discussion') et forums ('Thread'). */
   forums?: ForumChannelSource[];
-  /** Canaux texte futurs / normalisés. */
-  textChannels?: TextChannelSource[];
 }
 
 interface CourseMenuProps {
@@ -85,7 +82,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     channels: normalizeCourseChannelsFromSources({
       channels: course.channels,
       quizzes: course.quizzes,
-      textChannels: course.textChannels,
       forums: course.forums,
     }),
   }));

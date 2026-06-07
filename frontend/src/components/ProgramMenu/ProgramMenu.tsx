@@ -1,18 +1,23 @@
 import React from 'react';
 import styles from './ProgramMenu.module.css';
+import { useTheme } from '../../helpers/theme.ts';
+import { contrastingTextColor } from '../../helpers/color.ts';
 
 export interface Program {
   /** Identifiant UI optionnel. */
   id?: string;
-  /** Identifiant provenant directement de la BD/API. */
+  /** Identifiant provenant directement de la BD/API (Program.id). */
   id_program?: string | number;
-  /** Libelle UI deja formate. */
+  /** Libelle UI optionnel (override l'affichage par defaut). */
   label?: string;
-  /** Nom du programme provenant du backend. */
+  /** Nom du programme (Program.name), ex. "Genie informatique". */
   name?: string;
-  /** Cohorte du programme (ex. 201-NYC-05) provenant du backend. */
+  /** Code du programme (Program.code), ex. "GIN". */
+  code?: string;
+  /** Cohorte du programme (Program.cohort), ex. "71". */
   cohort?: string;
-  logoUrl?: string;
+  /** Couleur du programme (Program.color), ex. "#1a6e3c". */
+  color?: string;
 }
 
 interface ProgramMenuProps {
@@ -54,12 +59,22 @@ function getProgramId(program: Program): string {
 }
 
 /**
- * Retourne le texte a afficher pour un programme.
- * Priorite: label UI > cohorte backend > nom backend.
+ * Retourne le texte a afficher pour un programme (tooltip / aria-label).
+ * Priorite: label UI > nom backend > cohorte backend.
  */
 function getProgramLabel(program: Program): string {
-  const displayLabel = program.label ?? program.cohort ?? program.name ?? '';
+  const displayLabel = program.label ?? program.name ?? program.cohort ?? '';
   return displayLabel.trim();
+}
+
+/**
+ * Texte court affiche dans la pastille du programme.
+ * Priorite: code backend (ex. "GIN") > initiales du libelle.
+ */
+function getProgramBadge(program: Program): string {
+  const code = program.code?.trim();
+  if (code) return code.slice(0, 3).toUpperCase();
+  return getInitials(getProgramLabel(program));
 }
 
 const ProgramMenu: React.FC<ProgramMenuProps> = ({
@@ -68,11 +83,12 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   onSelectProgram,
   onAddProgram,
 }) => {
+  const { toggleTheme } = useTheme()
   return (
     <nav className={styles.rail} aria-label="Programme">
       {/* Icône applicative (meme gabarit que le programme actif) */}
-      <div className={styles.appIcon} aria-label="MoodIT">
-        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <div className={styles.appIcon} aria-label="MoodIT" onClick={toggleTheme}>
+        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
           <defs>
             <linearGradient
               id="pg-grad"
@@ -112,13 +128,17 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 title={programLabel}
                 aria-label={programLabel}
                 aria-current={isActive ? 'page' : undefined}
+                style={
+                  prog.color
+                    ? ({
+                        '--program-color': prog.color,
+                        color: contrastingTextColor(prog.color),
+                      } as React.CSSProperties)
+                    : undefined
+                }
                 onClick={() => onSelectProgram?.(programId)}
               >
-                {prog.logoUrl ? (
-                  <img src={prog.logoUrl} alt={programLabel} className={styles.programLogo} />
-                ) : (
-                  <span className={styles.programInitials}>{getInitials(programLabel)}</span>
-                )}
+                <span className={styles.programInitials}>{getProgramBadge(prog)}</span>
               </button>
             </li>
           );
@@ -132,7 +152,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
         aria-label="Ajouter un programme"
         onClick={onAddProgram}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </button>

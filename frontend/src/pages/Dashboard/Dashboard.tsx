@@ -48,7 +48,6 @@ export default function Dashboard() {
     ? normalizeCourseChannelsFromSources({
         channels: selectedCourse.channels,
         quizzes: selectedCourse.quizzes,
-        textChannels: selectedCourse.textChannels,
         forums: selectedCourse.forums,
       })
     : [];
