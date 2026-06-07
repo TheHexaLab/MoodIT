@@ -9,7 +9,6 @@ import java.util.List;
 public class CourseDTO {
     private Integer id;
     private String title;
-    private String description;
     private String code;
     //private List<Forum> forums;
 }

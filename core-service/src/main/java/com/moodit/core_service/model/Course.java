@@ -17,9 +17,6 @@ public class Course {
     @Column(length = 128)
     private String title;
 
-    @Column(length = 256)
-    private String description;
-
     @Column(nullable = false, length = 128)
     private String code;
 

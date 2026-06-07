@@ -27,7 +27,6 @@ public class CourseService {
 
         dto.setId(course.getId());
         dto.setTitle(course.getTitle());
-        dto.setDescription(course.getDescription());
         dto.setCode(course.getCode());
 
         return dto;
@@ -37,7 +36,6 @@ public class CourseService {
 
         dto.setId(course.getId());
         dto.setTitle(course.getTitle());
-        dto.setDescription(course.getDescription());
         dto.setCode(course.getCode());
         dto.setPrograms(course.getPrograms()
                 .stream()

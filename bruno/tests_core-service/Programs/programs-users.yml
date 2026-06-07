@@ -11,7 +11,7 @@ http:
     data: |-
       {
         "id": 1,
-        "programIds":[6, 7]
+        "programIds":[5, 4]
       }
   auth: inherit
 

@@ -59,7 +59,6 @@ public class ProgramService {
 
         dto.setId(course.getId());
         dto.setTitle(course.getTitle());
-        dto.setDescription(course.getDescription());
         dto.setCode(course.getCode());
 
         return dto;
@@ -105,7 +104,6 @@ public class ProgramService {
 
         course.setCode(courseCreateDTO.getCode());
         course.setTitle(courseCreateDTO.getTitle());
-        course.setDescription(courseCreateDTO.getDescription());
         courseRepository.save(course);
         List<Program> programs = courseCreateDTO.getProgramIds()
                 .stream()

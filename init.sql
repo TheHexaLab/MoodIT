@@ -14,7 +14,8 @@ CREATE TABLE Program(
    color VARCHAR(9) NOT NULL DEFAULT '#0a5cc0',
    establishment_id INTEGER NOT NULL,
    PRIMARY KEY(id),
-   FOREIGN KEY(establishment_id) REFERENCES Establishment(id) ON DELETE CASCADE
+   FOREIGN KEY(establishment_id) REFERENCES Establishment(id) ON DELETE CASCADE,
+   CONSTRAINT uq_program_code_cohort_establishment UNIQUE (code, cohort, establishment_id)
 );
 
 CREATE TABLE User_(
@@ -41,7 +42,6 @@ CREATE TABLE Role(
 CREATE TABLE Course(
    id SERIAL,
    title VARCHAR(128) NOT NULL,
-   description VARCHAR(256) ,
    code VARCHAR(128) NOT NULL,
    PRIMARY KEY(id)
 );
@@ -325,37 +325,37 @@ INSERT INTO User_Program (program_id, user_id) VALUES (1, 2);
 -- ------------------------------------------------------------
 -- Course  (cours transversaux + spécifiques génie)
 -- ------------------------------------------------------------
-INSERT INTO Course (title, description, code) VALUES
+INSERT INTO Course (title, code) VALUES
   -- Tronc commun
-  ('Mathématiques pour ingénieurs I',    'Calcul différentiel et intégral appliqué au génie.',                   'MAT115'),
-  ('Mathématiques pour ingénieurs II',   'Algèbre linéaire, équations différentielles ordinaires.',              'MAT215'),
-  ('Physique pour ingénieurs I',         'Mécanique classique, thermodynamique de base.',                        'PHY115'),
-  ('Physique pour ingénieurs II',        'Électromagnétisme, ondes.',                                            'PHY215'),
-  ('Chimie pour ingénieurs',             'Notions fondamentales de chimie générale et de matériaux.',            'CHI105'),
-  ('Communication en génie',             'Rédaction technique, présentation orale, normes IEEE/APA.',           'COM105'),
-  ('Éthique et déontologie',             'Responsabilité professionnelle, développement durable, OIQ.',         'ETH105'),
+  ('Mathématiques pour ingénieurs I',          'MAT115'),
+  ('Mathématiques pour ingénieurs II',         'MAT215'),
+  ('Physique pour ingénieurs I',               'PHY115'),
+  ('Physique pour ingénieurs II',              'PHY215'),
+  ('Chimie pour ingénieurs',                   'CHI105'),
+  ('Communication en génie',                   'COM105'),
+  ('Éthique et déontologie',                   'ETH105'),
   -- Génie informatique / logiciel
-  ('Structures de données et algorithmes','Complexité, arbres, graphes, tables de hachage.',                    'GIF201'),
-  ('Systèmes d''exploitation',           'Gestion de processus, mémoire, fichiers, sécurité.',                 'GIF301'),
-  ('Réseaux informatiques',              'Modèle TCP/IP, protocoles, sécurité réseau.',                         'GIF401'),
-  ('Génie logiciel I',                   'Processus de développement, UML, tests unitaires.',                   'GLO200'),
-  ('Génie logiciel II',                  'Patrons de conception, CI/CD, DevOps.',                               'GLO300'),
-  ('Bases de données',                   'Modèle relationnel, SQL, transactions, normalisation.',                'GIF501'),
+  ('Structures de données et algorithmes',     'GIF201'),
+  ('Systèmes d''exploitation',                 'GIF301'),
+  ('Réseaux informatiques',                    'GIF401'),
+  ('Génie logiciel I',                         'GLO200'),
+  ('Génie logiciel II',                        'GLO300'),
+  ('Bases de données',                         'GIF501'),
   -- Génie électrique
-  ('Circuits électriques I',             'Lois de Kirchhoff, théorèmes de Thévenin/Norton, régime sinusoïdal.','GEL201'),
-  ('Circuits électriques II',            'Filtres, puissance, transformateurs.',                                 'GEL301'),
-  ('Électronique analogique',            'Diodes, transistors, amplificateurs opérationnels.',                   'GEL401'),
-  ('Systèmes de contrôle',               'Modélisation, fonction de transfert, stabilité.',                     'GEL501'),
+  ('Circuits électriques I',                   'GEL201'),
+  ('Circuits électriques II',                  'GEL301'),
+  ('Électronique analogique',                  'GEL401'),
+  ('Systèmes de contrôle',                     'GEL501'),
   -- Génie mécanique
-  ('Mécanique des solides I',            'Statique, résistance des matériaux.',                                  'GMC201'),
-  ('Mécanique des fluides',              'Équation de Bernoulli, écoulements visqueux.',                         'GMC301'),
-  ('Thermodynamique appliquée',          'Cycles thermodynamiques, transfert de chaleur.',                       'GMC401'),
+  ('Mécanique des solides I',                  'GMC201'),
+  ('Mécanique des fluides',                    'GMC301'),
+  ('Thermodynamique appliquée',                'GMC401'),
   -- Génie civil
-  ('Matériaux de construction',          'Béton, acier, bois : propriétés mécaniques et durabilité.',            'GCI201'),
-  ('Hydraulique',                        'Écoulement en conduites et en surface libre.',                         'GCI301'),
+  ('Matériaux de construction',                'GCI201'),
+  ('Hydraulique',                              'GCI301'),
   -- Génie chimique
-  ('Opérations unitaires I',             'Distillation, extraction, absorption.',                                'GCH201'),
-  ('Cinétique chimique',                 'Réacteurs, mécanismes réactionnels, modélisation.',                   'GCH301');
+  ('Opérations unitaires I',                   'GCH201'),
+  ('Cinétique chimique',                       'GCH301');
 
 -- ------------------------------------------------------------
 -- F_Type  (types de forum)
