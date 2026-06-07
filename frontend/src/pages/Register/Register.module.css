@@ -181,3 +181,41 @@
     .formSide { flex: 1; padding: 1.25rem 1rem 2rem; }
     .card { padding: 1.5rem; }
 }
+/*
+zone texte
+*/
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.label {
+    font-size: 0.85rem;
+    color: var(--text-heading-alt);
+}
+
+.inputWrap {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.6rem;
+    background: var(--bg-input);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.inputWrap:focus-within {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 0 3px var(--brand-teal-surface);
+}
+
+.inputWrap input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    padding: 0.65rem 0.75rem;
+    font-size: 0.95rem;
+    outline: none;
+}
