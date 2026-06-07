@@ -4,7 +4,17 @@ import { SectionEditor, type ItemChange } from '../components/SectionEditor/Sect
 import { RoleEditor, type Role, type RoleChange, type User } from '../components/RoleEditor/RoleEditor.tsx';
 import { AddCoursePopup, type NewCourse, type Program } from '../components/AddCoursePopup/AddCoursePopup.tsx';
 import { DeleteConfirmationBox } from '../components/DeleteConfirmationBox/DeleteConfirmationBox.tsx';
+import { ErrorBox } from '../components/ErrorBox/ErrorBox.tsx';
 import { EditProfilePopup, type ProfileUpdate } from '../components/EditProfilePopup/EditProfilePopup.tsx';
+import {
+  AddSubscriptionPopup,
+  type NewProgram,
+  type Establishment,
+  type Program as JoinProgram,
+  type JoinSelection,
+  type CreateEstablishment,
+  type JoinEstablishment,
+} from '../components/AddSubscriptionPopup/AddSubscriptionPopup.tsx';
 import { Sun } from '../assets/Sun.tsx';
 import { Moon } from '../assets/Moon.tsx';
 import { useTheme } from '../helpers/theme.ts';
@@ -57,6 +67,32 @@ const roleUsers: User[] = [
   { id: 12, username: 'girardtho', first_name: 'Thomas', last_name: 'Girard', email: 'girardtho@usherbrooke.ca', avatar_color: '#3a3a7a', role_ids: [] },
 ];
 
+/** Mock — établissements fournis au AddSubscriptionPopup (aligné sur init.sql). */
+const establishments: Establishment[] = [
+  { id: 1, name: 'Université de Sherbrooke' },
+  { id: 2, name: 'Université Laval' },
+  { id: 3, name: 'Polytechnique Montréal' },
+  { id: 4, name: 'Université de Montréal' },
+  { id: 5, name: 'Université McGill' },
+  { id: 6, name: 'Université Concordia' },
+  { id: 7, name: 'Université du Québec à Montréal' },
+  { id: 8, name: 'Université du Québec à Trois-Rivières' },
+  { id: 9, name: 'Université du Québec à Chicoutimi' },
+  { id: 10, name: 'Université du Québec en Outaouais' },
+  { id: 11, name: 'École de technologie supérieure' },
+  { id: 12, name: 'HEC Montréal' },
+];
+
+/**
+ * Mock — programmes rattachés aux établissements, fournis au AddSubscriptionPopup (vue rejoindre).
+ * Université de Sherbrooke (id 1) reçoit la majorité (assez pour scroller), Laval (2) et
+ * Polytechnique (3) en ont quelques-uns ; les autres établissements n'en ont aucun (désactivés).
+ */
+const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
+  ...p,
+  establishmentId: i < 10 ? 1 : i < 12 ? 2 : 3,
+}));
+
 /** Mock — canaux fournis au SectionEditor. */
 const channels = [
   { id: '1', name: 'general' },
@@ -71,10 +107,25 @@ export default function PopupTests() {
   const [showAddCourse, setShowAddCourse] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showAddSubscription, setShowAddSubscription] = useState(false);
+  const [showErrorBox, setShowErrorBox] = useState(false);
+  /** Mode « bug » : les callbacks du AddSubscriptionPopup échouent (test des erreurs). */
+  const [failRequests, setFailRequests] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
   return (
     <div style={styles.container}>
+      <button
+        style={{
+          ...styles.bugButton,
+          ...(failRequests ? styles.bugButtonOn : styles.bugButtonOff),
+        }}
+        onClick={() => setFailRequests((v) => !v)}
+        aria-pressed={failRequests}
+        title="Bascule l'échec des requêtes du AddSubscriptionPopup"
+      >
+        {failRequests ? '🐛 Requêtes : bug' : '✓ Requêtes : OK'}
+      </button>
       <button
         style={styles.themeButton}
         onClick={toggleTheme}
@@ -107,6 +158,12 @@ export default function PopupTests() {
         </button>
         <button style={styles.button} onClick={() => setShowEditProfile(true)}>
           EditProfilePopup (profil)
+        </button>
+        <button style={styles.button} onClick={() => setShowAddSubscription(true)}>
+          AddSubscriptionPopup (programme)
+        </button>
+        <button style={styles.button} onClick={() => setShowErrorBox(true)}>
+          ErrorBox (erreur)
         </button>
       </div>
 
@@ -179,6 +236,56 @@ export default function PopupTests() {
           }}
         />
       )}
+
+      {showAddSubscription && (
+        <AddSubscriptionPopup
+          onClose={() => setShowAddSubscription(false)}
+          // Au clic « Créer » : établissements + codes de leurs programmes (async, ~400 ms).
+          loadCreateEstablishments={async (): Promise<CreateEstablishment[]> => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (loadCreateEstablishments)');
+            return establishments.map((e) => ({
+              ...e,
+              programCodes: joinPrograms
+                .filter((p) => p.establishmentId === e.id)
+                .map((p) => p.code),
+            }));
+          }}
+          // Au clic « Rejoindre » : établissements + leur nombre de programmes (async, ~400 ms).
+          loadJoinEstablishments={async (): Promise<JoinEstablishment[]> => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (loadJoinEstablishments)');
+            return establishments.map((e) => ({
+              ...e,
+              programCount: joinPrograms.filter((p) => p.establishmentId === e.id).length,
+            }));
+          }}
+          // Au choix d'un établissement : ses programmes rattachés (async, ~400 ms).
+          loadEstablishmentPrograms={async (establishmentId: number): Promise<JoinProgram[]> => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (loadEstablishmentPrograms)');
+            return joinPrograms.filter((p) => p.establishmentId === establishmentId);
+          }}
+          // onCreate / onJoin peuvent être async ; le composant ferme via onClose en cas de succès.
+          onCreate={async (program: NewProgram) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (onCreate)');
+            console.log('AddSubscriptionPopup', 'créer', program);
+          }}
+          onJoin={async (selection: JoinSelection) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (onJoin)');
+            console.log('AddSubscriptionPopup', 'rejoindre', selection);
+          }}
+        />
+      )}
+
+      {showErrorBox && (
+        <ErrorBox
+          content="Impossible de charger les données. Vérifie ta connexion et réessaie."
+          onClose={() => setShowErrorBox(false)}
+        />
+      )}
     </div>
   );
 }
@@ -215,6 +322,33 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent',
     color: 'inherit',
     cursor: 'pointer',
+  },
+  bugButton: {
+    position: 'fixed',
+    top: '1rem',
+    left: '1rem',
+    zIndex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '2.25rem',
+    padding: '0 0.875rem',
+    borderRadius: '999px',
+    border: '1px solid',
+    fontFamily: 'Inter, sans-serif',
+    fontSize: '0.8125rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  bugButtonOff: {
+    borderColor: 'rgba(34,197,94,0.45)',
+    background: 'rgba(34,197,94,0.10)',
+    color: '#16a34a',
+  },
+  bugButtonOn: {
+    borderColor: 'rgba(219,46,46,0.45)',
+    background: 'rgba(219,46,46,0.12)',
+    color: '#db2e2e',
   },
   subtitle: {
     margin: 0,
