@@ -4,7 +4,6 @@ import lombok.Data;
 
 @Data
 public class ForumDTO {
-
     private Integer id;
     private String title;
     private Integer courseId;

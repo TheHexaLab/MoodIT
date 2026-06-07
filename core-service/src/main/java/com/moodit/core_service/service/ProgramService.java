@@ -78,13 +78,11 @@ public class ProgramService {
                 .orElseThrow(() -> new ProgramNotFoundException());
 
     }
-    public List<CourseDTO> getCoursesByProgram(Integer programId) {
+    public ProgramCoursesDTO getCoursesByProgram(Integer programId) {
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new ProgramNotFoundException());
-        return program.getCourses()
-                .stream()
-                .map(this::toCourseDTO)
-                .toList();
+
+        return toProgramCoursesDTO(program);
     }
     public CourseDTO getCourseByProgram(Integer programId, Integer courseId) {
         Program program = programRepository.findById(programId)
@@ -125,6 +123,28 @@ public class ProgramService {
                 .toList();
         user.getPrograms().addAll(programs);
         userRepository.save(user);
+    }
+    //endregion
+
+    //region PATCH
+    public ProgramDTO updateProgram(Integer programId, ProgramUpdateDTO programUpdateDTO) {
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new ProgramNotFoundException());
+        if (programUpdateDTO.getName() != null) {
+            program.setCode(programUpdateDTO.getName());
+        }
+        if (programUpdateDTO.getCode() != null) {
+            program.setCode(programUpdateDTO.getCode());
+        }
+        if (programUpdateDTO.getCohort() != null) {
+            program.setCode(programUpdateDTO.getCohort());
+        }
+        if (programUpdateDTO.getColor() != null) {
+            program.setCode(programUpdateDTO.getColor());
+        }
+
+        programRepository.save(program);
+        return toProgramDTO(program);
     }
     //endregion
 }

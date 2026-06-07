@@ -2,19 +2,15 @@ package com.moodit.core_service.controller;
 
 //Model
 import com.moodit.core_service.dto.ForumDTO;
-import com.moodit.core_service.model.Forum;
 
 //Service
+import com.moodit.core_service.dto.PostDTO;
 import com.moodit.core_service.service.ForumService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RestController
 @RequestMapping("/forums")
@@ -23,17 +19,24 @@ public class ForumController {
 
     private final ForumService forumService;
 
+    //region GET
     @GetMapping("/{forumId}/f_type")
     public ResponseEntity<String> getForumType(@PathVariable Integer forumId) {
         return ResponseEntity.ok(forumService.getForumType(forumId));
     }
 
+    //Vérifier s'il sert réellement à quelque chose
     @GetMapping("/{forumId}")
-    public ResponseEntity<ForumDTO> findForumById(
-            @PathVariable Integer forumId) {
+    public ResponseEntity<ForumDTO> findForumById(@PathVariable Integer forumId) {
 
-        return ResponseEntity.ok(
-                forumService.findById(forumId)
-        );
+        return ResponseEntity.ok(forumService.findById(forumId));
     }
+
+    @GetMapping("/{forumId}/posts/{postId}")
+    public ResponseEntity<PostDTO> getPostByForum(@PathVariable Integer forumId,
+                                                  @PathVariable Integer postId,
+                                                  @RequestParam(defaultValue = "false") boolean loadChildren) {
+        return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren));
+    }
+    //endregion
 }
