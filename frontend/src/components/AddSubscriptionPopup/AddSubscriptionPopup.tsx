@@ -57,6 +57,11 @@ interface AddSubscriptionPopupProps {
    * Un retour qui n'est pas un tableau empêche de passer à l'étape de sélection des programmes.
    */
   loadEstablishmentPrograms: (establishmentId: number) => MaybePromise<Program[]>;
+  /**
+   * Obligatoire. Ids des programmes auxquels l'utilisateur est déjà abonné.
+   * À l'ouverture de l'étape de sélection, ces programmes sont préselectionnés (cochés).
+   */
+  subscribedProgramIds: number[];
   /** Couleurs prédéfinies proposées dans la palette. */
   palette?: string[];
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
@@ -75,6 +80,7 @@ export function AddSubscriptionPopup({
   loadCreateEstablishments,
   loadJoinEstablishments,
   loadEstablishmentPrograms,
+  subscribedProgramIds,
   palette = DEFAULT_PALETTE,
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
@@ -195,7 +201,8 @@ export function AddSubscriptionPopup({
       (data) => {
         setEstablishmentPrograms(data);
         setProgramSearch('');
-        setSelectedProgramIds([]);
+        // Préselectionne les programmes (de cet établissement) déjà suivis par l'utilisateur.
+        setSelectedProgramIds(data.filter((p) => subscribedProgramIds.includes(p.id)).map((p) => p.id));
         setJoinEstablishmentId(id); // on n'avance qu'après des données valides
       }
     );

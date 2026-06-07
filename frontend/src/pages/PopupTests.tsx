@@ -212,6 +212,13 @@ const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
   establishmentId: i < 10 ? 1 : i < 12 ? 2 : 3,
 }));
 
+/**
+ * Mock — programmes auxquels l'utilisateur est déjà abonné (ids alignés sur init.sql).
+ * Tous rattachés à l'Université de Sherbrooke (id 1) : en l'ouvrant dans la vue
+ * « rejoindre », GIN (1), GEL (3) et GEN (7) doivent apparaître préselectionnés.
+ */
+const subscribedProgramIds: number[] = [1, 3, 7];
+
 /** Mock — canaux fournis au SectionEditorPopup. */
 const channels = [
   { id: '1', name: 'general' },
@@ -441,6 +448,8 @@ export default function PopupTests() {
             if (failRequests) throw new Error('Échec simulé (loadEstablishmentPrograms)');
             return joinPrograms.filter((p) => p.establishmentId === establishmentId);
           }}
+          // Programmes déjà suivis : préselectionnés dans l'étape de sélection.
+          subscribedProgramIds={subscribedProgramIds}
           // onCreate / onJoin peuvent être async ; le composant ferme via onClose en cas de succès.
           onCreate={async (program: NewProgram) => {
             await new Promise((r) => setTimeout(r, 400));
