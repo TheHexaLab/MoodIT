@@ -3,6 +3,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Data
@@ -19,6 +20,9 @@ public class Post {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "is_pinned")
+    private Boolean isPinned = false;
+
     @ManyToOne
     @JoinColumn(name = "forum_id", nullable = false)
     private Forum forum;
@@ -31,6 +35,9 @@ public class Post {
     @JoinColumn(name = "post_parent_id")
     private Post parent;
 
-    @Column(name = "is_pinned")
-    private Boolean isPinned = false;
+    @OneToMany(mappedBy = "parent")
+    private List<Post> children;
+
+    @OneToMany(mappedBy = "post")
+    private List<Vote> votes;
 }

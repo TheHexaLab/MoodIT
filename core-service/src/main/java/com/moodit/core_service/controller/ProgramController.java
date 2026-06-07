@@ -18,7 +18,6 @@ import java.util.List;
 public class ProgramController {
 
     private final ProgramService programService;
-    private final CourseService courseService;
 
 
     //region GET
@@ -36,7 +35,7 @@ public class ProgramController {
 
     //Retourne courses d'un programme
     @GetMapping("/{programId}/courses")
-    public ResponseEntity<List<CourseDTO>> getCoursesByProgram(@PathVariable Integer programId) {
+    public ResponseEntity<ProgramCoursesDTO> getCoursesByProgram(@PathVariable Integer programId) {
         return ResponseEntity.ok(programService.getCoursesByProgram(programId));
     }
 
@@ -62,4 +61,10 @@ public class ProgramController {
     }
     //endregion
 
+    //region PATCH
+    @PatchMapping("/{programId}")
+    public ResponseEntity<ProgramDTO> updateProgram(@PathVariable Integer programId, @RequestBody ProgramUpdateDTO programUpdateDTO) {
+        return ResponseEntity.ok(programService.updateProgram(programId, programUpdateDTO));
+    }
+    //endregion
 }

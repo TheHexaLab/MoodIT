@@ -422,3 +422,60 @@ INSERT INTO program_course (program_id, course_id) VALUES
 INSERT INTO program_course (program_id, course_id) VALUES
   (7, 19), (7, 21), (7, 22), (7, 23);
 
+-- ------------------------------------------------------------
+-- Post (quelques posts dans les forums existants)
+-- ------------------------------------------------------------
+INSERT INTO Post (content, forum_id, user_id, is_pinned) VALUES
+  ('Bonjour, est-ce que quelqu''un peut m''expliquer la dérivée en chaîne?', 1, 2, FALSE),  -- post 1
+  ('Voici une ressource utile pour MAT115!', 1, 3, TRUE),                                    -- post 2
+  ('Je comprends pas les intégrales doubles...', 1, 2, FALSE),                               -- post 3
+  ('Question sur les systèmes d''exploitation, comment fonctionne un deadlock?', 9, 3, FALSE), -- post 4
+  ('Réponse au deadlock: c''est quand deux processus s''attendent mutuellement.', 9, 2, FALSE); -- post 5
+
+-- Enfants du post 1
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('C''est une réponse au post 1!', 1, 3, 1, FALSE),           -- post 6
+  ('Une deuxième réponse au post 1!', 1, 1, 1, FALSE);         -- post 7
+
+-- Enfants du post 2
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Merci pour la ressource, très utile!', 1, 2, 2, FALSE),    -- post 8
+  ('Je confirme, excellente ressource!', 1, 1, 2, FALSE),      -- post 9
+  ('Est-ce qu''il y a d''autres ressources?', 1, 3, 2, FALSE); -- post 10
+
+-- Enfants du post 3
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Moi non plus, on peut étudier ensemble?', 1, 1, 3, FALSE); -- post 11
+
+-- Enfants du post 4
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Bonne question, j''ai le même problème.', 9, 2, 4, FALSE), -- post 12
+  ('Voici un lien utile sur les deadlocks!', 9, 1, 4, FALSE);  -- post 13
+
+-- Enfant d'un enfant (post 6 → réponse à une réponse)
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Je suis d''accord avec toi!', 1, 2, 6, FALSE);             -- post 14
+
+-- ------------------------------------------------------------
+-- Vote
+-- ------------------------------------------------------------
+INSERT INTO Vote (value_, user_id, post_id) VALUES
+  (1,  2, 2),   -- rosie +1 post 2
+  (1,  3, 2),   -- mich +1 post 2
+  (1,  1, 2),   -- admin +1 post 2
+  (-1, 3, 1),   -- mich -1 post 1
+  (1,  2, 4),   -- rosie +1 post 4
+  (-1, 1, 3),   -- admin -1 post 3
+  (1,  3, 5),   -- mich +1 post 5
+  (1,  1, 6),   -- admin +1 post 6
+  (1,  2, 6),   -- rosie +1 post 6
+  (-1, 3, 7),   -- mich -1 post 7
+  (1,  1, 7),   -- admin +1 post 7
+  (1,  1, 8),   -- admin +1 post 8
+  (-1, 2, 9),   -- rosie -1 post 9
+  (1,  3, 9),   -- mich +1 post 9
+  (1,  2, 10),  -- rosie +1 post 10
+  (1,  1, 11),  -- admin +1 post 11
+  (-1, 3, 12),  -- mich -1 post 12
+  (1,  2, 13),  -- rosie +1 post 13
+  (1,  3, 14);  -- mich +1 post 14
