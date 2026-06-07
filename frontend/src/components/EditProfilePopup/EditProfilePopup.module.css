@@ -81,6 +81,31 @@ div.edit-profile.closing > div {
     }
 }
 
+/* Indicateur de chargement du bouton « enregistrer » (prend la couleur du texte). */
+div.edit-profile span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: edit-profile-spin 0.6s linear infinite;
+}
+
+@keyframes edit-profile-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.edit-profile span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
 div.edit-profile > div > * {
     margin: 0;
 }

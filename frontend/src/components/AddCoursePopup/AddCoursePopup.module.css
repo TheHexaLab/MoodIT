@@ -640,3 +640,28 @@ div.add-course > div > footer > button:last-child:disabled {
         flex-grow: 0;
     }
 }
+
+/* Indicateur de chargement affiché dans le bouton « sauvegarder » pendant l'enregistrement. */
+div.add-course span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: add-course-spin 0.6s linear infinite;
+}
+
+@keyframes add-course-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.add-course span.spinner {
+        animation-duration: 1.4s;
+    }
+}

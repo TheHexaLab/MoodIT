@@ -1064,3 +1064,25 @@ div.add-subscription > div > section.join > ul > li > button > span.spinner {
     }
 }
 
+@media (max-width: 22.5rem) {
+    div.add-subscription > div > nav.options > button > span:first-child {
+        display: none;
+    }
+
+    div.add-subscription > div > section.color-group {
+        flex-direction: column;
+    }
+
+    div.add-subscription > div > section.color-group > span.preview {
+        width: 5rem;
+        height: 5rem;
+    }
+
+    div.add-subscription > div > section.color-group > span.preview > span {
+        font-size: 1.5rem;
+    }
+
+    div.add-subscription > div > section.color-group > div.palette-group {
+        width: 100%;
+    }
+}

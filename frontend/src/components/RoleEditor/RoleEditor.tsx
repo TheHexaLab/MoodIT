@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import styles from './RoleEditor.module.css'
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
+import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+
+/** Valeur synchrone ou asynchrone : le callback d'assignation peut retourner une Promise. */
+export type MaybePromise<T> = T | Promise<T>;
 
 /** Reflète la table `Role` (id = celui inséré dans init.sql). */
 export interface Role {
@@ -30,8 +34,12 @@ interface RoleEditorProps {
   roles?: Role[];
   /** Liste des utilisateurs (avec leurs rôles) à partir de laquelle les sections sont bâties. */
   users: User[];
-  /** Émise à chaque modification d'assignation ; le parent persiste comme il veut (l'endpoint vit chez lui). */
-  onChange?: (change: RoleChange) => unknown;
+  /**
+   * Émise à chaque modification d'assignation ; le parent persiste comme il veut (l'endpoint vit chez lui).
+   * Peut être async (INSERT/DELETE) : le composant affiche un spinner et attend sa résolution.
+   * Si elle rejette, la modification optimiste est annulée et une erreur s'affiche.
+   */
+  onChange?: (change: RoleChange) => MaybePromise<unknown>;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<RoleEditorLabels>;
 }
@@ -65,6 +73,12 @@ export interface RoleEditorLabels {
   noCandidates: string;
   /** Message du sélecteur quand la recherche ne renvoie rien. */
   noResults: string;
+  /** Titre du popup d'erreur. */
+  errorTitle: string;
+  /** Message d'erreur quand l'enregistrement d'une assignation échoue. */
+  saveError: string;
+  /** Bouton « fermer » du popup d'erreur. */
+  errorClose: string;
 }
 
 /**
@@ -78,11 +92,26 @@ const defaultLabels: RoleEditorLabels = {
   emptyRole: 'Aucun utilisateur pour ce rôle.',
   emptyRoles: 'Aucun rôle à afficher.',
   noCandidates: 'Aucun utilisateur disponible',
-  noResults: 'Aucun résultat'
+  noResults: 'Aucun résultat',
+  errorTitle: 'Une erreur est survenue',
+  saveError: "Échec de l'enregistrement. Réessaie.",
+  errorClose: 'Fermer',
 };
 
 function initials(user: User): string {
   return `${user.first_name[0] ?? ''}${user.last_name[0] ?? ''}`.toUpperCase();
+}
+
+/** Opération d'assignation async en cours (pilote le spinner et le verrouillage). */
+interface Pending {
+  type: 'assign' | 'unassign';
+  roleId: number;
+  userId: number;
+}
+
+/** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
+function Spinner(): React.ReactElement {
+  return <span className={styles.spinner} aria-hidden="true" />;
 }
 
 export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange, labels }: RoleEditorProps): React.ReactElement {
@@ -93,10 +122,48 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
   /** Texte de recherche du sélecteur d'ajout. */
   const [search, setSearch] = useState('');
 
+  /** Assignation async en cours : pilote le spinner et empêche les doubles déclenchements. */
+  const [pending, setPending] = useState<Pending | null>(null);
+  /** Message d'erreur de la dernière assignation (null = aucune). */
+  const [error, setError] = useState<string | null>(null);
+  /** Composant monté ? Ignore les réponses async qui reviennent après démontage. */
+  const mountedRef = useRef(true);
+  /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
+  const requestRef = useRef(0);
+
   const [isClosing, setIsClosing] = useState(false);
   const pendingAction = useRef<(() => void) | null>(null);
   /** Header de la section dont le sélecteur est ouvert (pour le click-outside). */
   const openSectionRef = useRef<HTMLElement | null>(null);
+
+  // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /**
+   * Persiste une assignation optimiste : notifie `onChange`, et si l'appel échoue,
+   * annule le changement (`rollback`) et affiche une erreur. Garde anti-périmé/démontage.
+   */
+  async function runChange(kind: Pending, change: RoleChange, rollback: () => void) {
+    if (!onChange) return;
+    const reqId = ++requestRef.current;
+    setError(null);
+    setPending(kind);
+    try {
+      await onChange(change);
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+    } catch {
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      rollback();
+      setError(t.saveError);
+    } finally {
+      if (mountedRef.current && requestRef.current === reqId) setPending(null);
+    }
+  }
 
   // Ferme le sélecteur d'ajout quand on clique en dehors de sa section.
   useEffect(() => {
@@ -154,8 +221,9 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
     setSearch('');
   }
 
-  /** Retire le rôle de l'utilisateur (sans le supprimer de la liste). */
+  /** Retire le rôle de l'utilisateur (sans le supprimer de la liste). Optimiste + rollback. */
   function removeUser(roleId: number, userId: number) {
+    if (pending !== null) return;
     setUsers((prev) =>
       prev.map((user) =>
         user.id === userId
@@ -163,14 +231,21 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
           : user
       )
     );
-    if (!onChange) {
-      return
-    }
-    onChange({ type: 'unassign', roleId, userId });
+    runChange({ type: 'unassign', roleId, userId }, { type: 'unassign', roleId, userId }, () => {
+      // Rollback : on réassigne le rôle retiré.
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.id === userId && !user.role_ids.includes(roleId)
+            ? { ...user, role_ids: [...user.role_ids, roleId] }
+            : user
+        )
+      );
+    });
   }
 
-  /** Ajoute le rôle à l'utilisateur. */
+  /** Ajoute le rôle à l'utilisateur. Optimiste + rollback. */
   function addUser(roleId: number, userId: number) {
+    if (pending !== null) return;
     setUsers((prev) =>
       prev.map((user) =>
         user.id === userId
@@ -181,20 +256,27 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
     // On ferme le sélecteur AVANT de notifier : l'UX ne dépend pas du callback parent.
     setAddingRoleId(null);
     setSearch('');
-    if (!onChange) {
-      return
-    }
-    onChange({ type: 'assign', roleId, userId });
+    runChange({ type: 'assign', roleId, userId }, { type: 'assign', roleId, userId }, () => {
+      // Rollback : on retire le rôle ajouté.
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.id === userId
+            ? { ...user, role_ids: user.role_ids.filter((id) => id !== roleId) }
+            : user
+        )
+      );
+    });
   }
 
   return (
-    <div
-      className={`${styles['role-editor']}${isClosing ? ` ${styles.closing}` : ''}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) requestClose(onClose);
-      }}
-    >
-      <div onAnimationEnd={handleAnimationEnd}>
+    <>
+      <div
+        className={`${styles['role-editor']}${isClosing ? ` ${styles.closing}` : ''}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose(onClose);
+        }}
+      >
+        <div onAnimationEnd={handleAnimationEnd}>
         <header>
           <div>
             <h1>{t.title}</h1>
@@ -232,7 +314,10 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
                     ) : (
                       candidatesFor(role.id).map((user) => (
                         <li key={user.id}>
-                          <button onClick={() => addUser(role.id, user.id)}>
+                          <button
+                            disabled={pending !== null}
+                            onClick={() => addUser(role.id, user.id)}
+                          >
                             <span style={{ background: user.avatar_color }}>
                               <span style={{ color: contrastingTextColor(user.avatar_color) }}>
                                 {initials(user)}
@@ -273,9 +358,16 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
                   </div>
                   <button
                     className={styles.delete}
+                    disabled={pending !== null}
                     onClick={() => removeUser(role.id, user.id)}
                   >
-                    <TrashCan width="1rem" height="1rem" />
+                    {pending?.type === 'unassign' &&
+                    pending.roleId === role.id &&
+                    pending.userId === user.id ? (
+                      <Spinner />
+                    ) : (
+                      <TrashCan width="1rem" height="1rem" />
+                    )}
                   </button>
                 </li>
               ))}
@@ -283,7 +375,16 @@ export function RoleEditor({ onClose, roles = [], users: initialUsers, onChange,
             )}
           </section>
         ))}
+        </div>
       </div>
-    </div>
+
+      {error && (
+        <ErrorBox
+          content={error}
+          labels={{ title: t.errorTitle, close: t.errorClose }}
+          onClose={() => setError(null)}
+        />
+      )}
+    </>
   );
 }

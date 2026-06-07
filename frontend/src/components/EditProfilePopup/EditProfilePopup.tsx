@@ -1,7 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './EditProfilePopup.module.css';
 import { Camera } from '../../assets/Camera.tsx';
+import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+
+/** Valeur synchrone ou asynchrone : le callback d'enregistrement peut retourner une Promise. */
+export type MaybePromise<T> = T | Promise<T>;
 
 /** Utilisateur édité (reflète les colonnes utiles de `User_`). */
 export interface ProfileUser {
@@ -24,8 +28,12 @@ export interface ProfileUpdate {
 
 interface EditProfilePopupProps {
   onClose: (...args: unknown[]) => unknown;
-  /** Émise à l'enregistrement avec le profil saisi ; le parent persiste comme il veut. */
-  onSave: (profile: ProfileUpdate) => unknown;
+  /**
+   * Émise à l'enregistrement avec le profil saisi ; le parent persiste comme il veut.
+   * Peut être async (POST) : le popup affiche un spinner, attend sa résolution puis se ferme.
+   * Si elle rejette, le popup reste ouvert et affiche une erreur.
+   */
+  onSave: (profile: ProfileUpdate) => MaybePromise<unknown>;
   /** Informations de l'utilisateur à éditer. */
   user: ProfileUser;
   /** Couleurs prédéfinies proposées dans la palette. */
@@ -63,6 +71,12 @@ export interface EditProfilePopupLabels {
   cancel: string;
   /** Bouton « enregistrer ». */
   save: string;
+  /** Titre du popup d'erreur. */
+  errorTitle: string;
+  /** Message d'erreur quand l'enregistrement échoue. */
+  saveError: string;
+  /** Bouton « fermer » du popup d'erreur. */
+  errorClose: string;
 }
 
 /**
@@ -81,6 +95,9 @@ const defaultLabels: EditProfilePopupLabels = {
   lastNamePlaceholder: 'Ex. Tremblay',
   cancel: 'Annuler',
   save: 'Enregistrer',
+  errorTitle: 'Une erreur est survenue',
+  saveError: "Échec de l'enregistrement. Réessaie.",
+  errorClose: 'Fermer',
 };
 
 /** Couleurs prédéfinies par défaut (cf. tokens --avatar-* dans index.css). */
@@ -90,6 +107,11 @@ const DEFAULT_PALETTE = [
 
 /** Longueurs max alignées sur la table User_ : first_name et last_name en VARCHAR(128). */
 const NAME_MAX_LENGTH = 128;
+
+/** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
+function Spinner(): React.ReactElement {
+  return <span className={styles.spinner} aria-hidden="true" />;
+}
 
 export function EditProfilePopup({
   onClose,
@@ -111,8 +133,25 @@ export function EditProfilePopup({
   /** La photo a-t-elle été modifiée par rapport à l'état initial ? */
   const [photoChanged, setPhotoChanged] = useState(false);
 
+  /** Enregistrement async en cours ? Pilote le spinner et empêche les doubles déclenchements. */
+  const [pending, setPending] = useState(false);
+  /** Message d'erreur du dernier enregistrement (null = aucune). */
+  const [error, setError] = useState<string | null>(null);
+  /** Composant monté ? Ignore les réponses async qui reviennent après démontage. */
+  const mountedRef = useRef(true);
+  /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
+  const requestRef = useRef(0);
+
   const [isClosing, setIsClosing] = useState(false);
   const pendingAction = useRef<(() => void) | null>(null);
+
+  // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
   function requestClose(action: () => void) {
@@ -163,8 +202,8 @@ export function EditProfilePopup({
 
   const canSave = firstName.trim() !== '' && lastName.trim() !== '';
 
-  function save() {
-    if (!canSave) return;
+  async function save() {
+    if (!canSave || pending) return;
     const profile: ProfileUpdate = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -172,17 +211,32 @@ export function EditProfilePopup({
       // File = nouvelle photo, null = retirée, undefined = inchangée.
       photo: photoChanged ? photoFile : undefined,
     };
-    requestClose(() => onSave(profile));
+    const reqId = ++requestRef.current;
+    setError(null);
+    setPending(true);
+    try {
+      // onSave peut être async (POST) : on attend sa résolution avant de fermer.
+      await onSave(profile);
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      requestClose(onClose); // succès → ferme via onClose
+    } catch {
+      // Échec → le popup reste ouvert et affiche l'erreur.
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      setError(t.saveError);
+    } finally {
+      if (mountedRef.current && requestRef.current === reqId) setPending(false);
+    }
   }
 
   return (
-    <div
-      className={`${styles['edit-profile']}${isClosing ? ` ${styles.closing}` : ''}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) requestClose(onClose);
-      }}
-    >
-      <div onAnimationEnd={handleAnimationEnd}>
+    <>
+      <div
+        className={`${styles['edit-profile']}${isClosing ? ` ${styles.closing}` : ''}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose(onClose);
+        }}
+      >
+        <div onAnimationEnd={handleAnimationEnd}>
         <header>
           <div>
             <h1>{t.title}</h1>
@@ -287,11 +341,20 @@ export function EditProfilePopup({
           <button type="button" onClick={() => requestClose(onClose)}>
             {t.cancel}
           </button>
-          <button type="button" onClick={save} disabled={!canSave}>
-            {t.save}
+          <button type="button" onClick={save} disabled={!canSave || pending}>
+            {pending ? <Spinner /> : t.save}
           </button>
         </footer>
+        </div>
       </div>
-    </div>
+
+      {error && (
+        <ErrorBox
+          content={error}
+          labels={{ title: t.errorTitle, close: t.errorClose }}
+          onClose={() => setError(null)}
+        />
+      )}
+    </>
   );
 }

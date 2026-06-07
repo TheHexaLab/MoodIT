@@ -771,7 +771,10 @@ export function AddSubscriptionPopup({
           <>
             {joinEstablishmentId === null ? (
               <>
-                <section className={styles.join}>
+                {/* key distincte de l'étape « programmes » : force le remontage du <ul>
+                   au changement d'étape, sinon React réutilise le même nœud DOM et garde
+                   son scrollTop (la liste apparaîtrait déjà scrollée). */}
+                <section key="join-establishments" className={styles.join}>
                   <div className={styles.search}>
                     <MagnifyingGlass width="1rem" height="1rem" />
                     <input
@@ -813,7 +816,7 @@ export function AddSubscriptionPopup({
               </>
             ) : (
               <>
-                <section className={styles.join}>
+                <section key="join-programs" className={styles.join}>
                   <div className={styles.search}>
                     <MagnifyingGlass width="1rem" height="1rem" />
                     <input
@@ -851,9 +854,7 @@ export function AddSubscriptionPopup({
                               </span>
                               <div>
                                 <span>{program.name}</span>
-                                <span>
-                                  {program.code} · {program.cohort}
-                                </span>
+                                <span>{program.cohort}</span>
                               </div>
                               {selected && (
                                 <Check className={styles.check} width="1rem" height="1rem" />
@@ -887,9 +888,8 @@ export function AddSubscriptionPopup({
 
       {error && (
         <ErrorBox
-          title={t.errorTitle}
           content={error}
-          closeLabel={t.errorClose}
+          labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}
         />
       )}

@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddCoursePopup.module.css';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
+import { ErrorBox } from '../ErrorBox/ErrorBox.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+
+/** Valeur synchrone ou asynchrone : le callback de sauvegarde peut retourner une Promise. */
+export type MaybePromise<T> = T | Promise<T>;
 
 /** Reflète la table `Program`. */
 export interface Program {
@@ -22,8 +26,12 @@ export interface NewCourse {
 
 interface AddCoursePopupProps {
   onClose: (...args: unknown[]) => unknown;
-  /** Émise à la sauvegarde avec le cours saisi ; le parent persiste comme il veut. */
-  onSave: (course: NewCourse) => unknown;
+  /**
+   * Émise à la sauvegarde avec le cours saisi ; le parent persiste comme il veut.
+   * Peut être async (POST) : le popup attend sa résolution avant de se fermer,
+   * et reste ouvert en affichant une erreur si elle rejette.
+   */
+  onSave: (course: NewCourse) => MaybePromise<unknown>;
   /** Programmes sélectionnables, fournis par le parent. */
   programs?: Program[];
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
@@ -61,6 +69,12 @@ export interface AddCoursePopupLabels {
   cancel: string;
   /** Bouton « sauvegarder ». */
   save: string;
+  /** Titre du popup d'erreur. */
+  errorTitle: string;
+  /** Message d'erreur quand l'enregistrement échoue. */
+  saveError: string;
+  /** Bouton « fermer » du popup d'erreur. */
+  errorClose: string;
 }
 
 /**
@@ -80,10 +94,18 @@ const defaultLabels: AddCoursePopupLabels = {
   titlePlaceholder: 'Ex. Structures de données',
   cancel: 'Annuler',
   save: 'Sauvegarder',
+  errorTitle: 'Une erreur est survenue',
+  saveError: "Échec de l'enregistrement. Réessaie.",
+  errorClose: 'Fermer',
 };
 
 const CODE_MAX_LENGTH = 128
 const NAME_MAX_LENGTH = 128
+
+/** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
+function Spinner(): React.ReactElement {
+  return <span className={styles.spinner} aria-hidden="true" />;
+}
 
 export function AddCoursePopup({
   onClose,
@@ -105,6 +127,23 @@ export function AddCoursePopup({
   const pendingAction = useRef<(() => void) | null>(null);
   /** Conteneur du champ programmes (pour le click-outside du menu). */
   const fieldRef = useRef<HTMLElement | null>(null);
+
+  /** Sauvegarde async en cours : pilote le spinner et empêche les doubles déclenchements. */
+  const [pending, setPending] = useState(false);
+  /** Message d'erreur de la dernière sauvegarde (null = aucune). */
+  const [error, setError] = useState<string | null>(null);
+  /** Composant monté ? Ignore les réponses async qui reviennent après démontage. */
+  const mountedRef = useRef(true);
+  /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
+  const requestRef = useRef(0);
+
+  // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Ferme le menu quand on clique en dehors du champ.
   useEffect(() => {
@@ -170,20 +209,35 @@ export function AddCoursePopup({
   const canSave =
     code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
 
-  function save() {
-    if (!canSave) return;
+  async function save() {
+    if (!canSave || pending) return;
     const course: NewCourse = { title: title.trim(), code: code.trim(), programIds };
-    requestClose(() => onSave(course));
+    const reqId = ++requestRef.current;
+    setError(null);
+    setPending(true);
+    try {
+      // onSave peut être async (POST) : on attend sa résolution avant de fermer.
+      await onSave(course);
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      requestClose(onClose); // succès → ferme via onClose
+    } catch {
+      // Échec → le popup reste ouvert et affiche l'erreur.
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      setError(t.saveError);
+    } finally {
+      if (mountedRef.current && requestRef.current === reqId) setPending(false);
+    }
   }
 
   return (
-    <div
-      className={`${styles['add-course']}${isClosing ? ` ${styles.closing}` : ''}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) requestClose(onClose);
-      }}
-    >
-      <div onAnimationEnd={handleAnimationEnd}>
+    <>
+      <div
+        className={`${styles['add-course']}${isClosing ? ` ${styles.closing}` : ''}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose(onClose);
+        }}
+      >
+        <div onAnimationEnd={handleAnimationEnd}>
         <header>
           <div>
             <h1>{t.title}</h1>
@@ -309,11 +363,20 @@ export function AddCoursePopup({
           <button type="button" onClick={() => requestClose(onClose)}>
             {t.cancel}
           </button>
-          <button type="button" onClick={save} disabled={!canSave}>
-            {t.save}
+          <button type="button" onClick={save} disabled={!canSave || pending}>
+            {pending ? <Spinner /> : t.save}
           </button>
         </footer>
+        </div>
       </div>
-    </div>
+
+      {error && (
+        <ErrorBox
+          content={error}
+          labels={{ title: t.errorTitle, close: t.errorClose }}
+          onClose={() => setError(null)}
+        />
+      )}
+    </>
   );
 }

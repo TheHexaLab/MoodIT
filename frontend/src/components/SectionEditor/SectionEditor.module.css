@@ -79,6 +79,31 @@ div.section-editor.closing > div {
     }
 }
 
+/* Indicateur de chargement du bouton « enregistrer » (prend la couleur du texte). */
+div.section-editor span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: section-editor-spin 0.6s linear infinite;
+}
+
+@keyframes section-editor-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.section-editor span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
 div.section-editor > div > header {
     display: flex;
     justify-content: space-between;
