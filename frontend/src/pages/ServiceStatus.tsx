@@ -111,10 +111,19 @@ export default function ServiceStatus() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
+    boxSizing: 'border-box',
     minHeight: '100vh',
     backgroundColor: '#f5f5f5',
     padding: '40px 20px',
     fontFamily: 'sans-serif',
+  },
+  buttonContainer: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '3rem',
+    marginTop: '4rem',
   },
   title: {
     textAlign: 'center',
@@ -171,5 +180,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
   indicator: {
     flexShrink: 0,
+  },
+  openEditorButton: {
+    display: 'block',
+    backgroundColor: '#0d9488',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '10px 16px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
   },
 };

@@ -26,6 +26,18 @@
     --warning: #f5a623;
     --accent-amber: #f6c350;
     --scrim: rgba(0, 0, 0, 0.45);
+    --brand-teal: #0d9488;
+    --brand-teal-surface: rgba(13, 148, 136, 0.05);
+    --brand-teal-gradient: linear-gradient(101deg, #2dd4bf 0%, #0d9488 83.33%);
+    --shadow-hover: rgba(10, 92, 192, 0.22);
+    --shadow-danger: rgba(219, 46, 46, 0.22);
+    --shadow-modal: rgba(0, 0, 0, 0.25);
+    /* Palette d'avatars : couleurs fixes (identiques en clair et en sombre). */
+    --avatar-teal-strong: #0d9488;
+    --avatar-teal: #14b8a6;
+    --avatar-teal-light: #2dd4bf;
+    --avatar-teal-deep: #0f766e;
+    --avatar-grey: #7d7d94;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +57,9 @@
         --text-heading-alt: #c4c4d2;
         --text-muted: #9a9ab2;
         --icon-stroke: #a6a6bc;
+        --brand-teal: #14b8a6;
+        --brand-teal-surface: rgba(20, 184, 166, 0.05);
+        --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
     }
 }
 
@@ -64,6 +79,9 @@
     --text-heading-alt: #c4c4d2;
     --text-muted: #9a9ab2;
     --icon-stroke: #a6a6bc;
+    --brand-teal: #14b8a6;
+    --brand-teal-surface: rgba(20, 184, 166, 0.05);
+    --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
 }
 body {
     margin: 0;

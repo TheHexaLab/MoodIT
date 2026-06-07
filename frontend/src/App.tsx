@@ -1,4 +1,4 @@
-import ServiceStatus from './pages/ServiceStatus';
+import ServiceStatus from './pages/ServiceStatus.tsx';
 
 export default function App() {
   return <ServiceStatus />;

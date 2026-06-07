@@ -1,0 +1,538 @@
+div.section-editor-popup {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    animation: section-editor-popup-fade-in 0.2s ease-out;
+}
+
+div.section-editor-popup > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    width: 30rem;
+    margin: 1.25rem;
+    background: var(--bg-surface);
+    padding: 1.25rem;
+    border-radius: 1rem;
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    user-select: none;
+    animation: section-editor-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes section-editor-popup-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes section-editor-popup-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Animation de sortie (classe ajoutée par le composant pendant la fermeture) */
+@keyframes section-editor-popup-fade-out {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+@keyframes section-editor-popup-pop-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+}
+
+div.section-editor-popup.closing {
+    animation: section-editor-popup-fade-out 0.2s ease-in forwards;
+}
+
+div.section-editor-popup.closing > div {
+    animation: section-editor-popup-pop-out 0.2s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.section-editor-popup,
+    div.section-editor-popup > div {
+        animation: none;
+    }
+}
+
+/* Indicateur de chargement du bouton « enregistrer » (prend la couleur du texte). */
+div.section-editor-popup span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: section-editor-popup-spin 0.6s linear infinite;
+}
+
+@keyframes section-editor-popup-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.section-editor-popup span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
+div.section-editor-popup > div > header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1.25rem;
+}
+
+div.section-editor-popup > div > header > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+div.section-editor-popup > div > header > div > * {
+    margin: 0;
+}
+
+div.section-editor-popup > div > header > div > h1 {
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 1.0625rem;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+}
+
+div.section-editor-popup > div > header > div > p {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+div.section-editor-popup > div > header > button {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+
+    background: none;
+    border: none;
+    transition: color 0.15s ease, transform 0.1s ease;
+}
+
+div.section-editor-popup > div > header > button:hover {
+    cursor: pointer;
+    color: var(--text);
+}
+
+div.section-editor-popup > div > header > button:active {
+    transform: scale(0.85);
+}
+
+div.section-editor-popup > div > main {
+    --row-height: 2.75rem;
+}
+
+div.section-editor-popup > div > main > ol {
+    --visible-rows: 4;
+    --row-gap: 0.5rem;
+    --shadow-room: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--row-gap);
+    padding: var(--shadow-room);
+    margin: calc(-1 * var(--shadow-room)) 0 calc(-1 * var(--shadow-room)) calc(-1 * var(--shadow-room));
+    list-style-type: none;
+    max-height: calc(
+        var(--visible-rows) * var(--row-height) +
+        (var(--visible-rows) - 1) * var(--row-gap)
+    );
+    overflow-y: auto;
+}
+
+div.section-editor-popup > div > main > ol:not(:has(> li:nth-child(5))) {
+    margin-right: calc(-1 * var(--shadow-room));
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    div.section-editor-popup > div > main > ol {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div.section-editor-popup > div > main > ol::-webkit-scrollbar {
+    width: 4px;
+}
+
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-track {
+    background: transparent;
+    margin: var(--shadow-room) 0;
+}
+
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:start,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:end,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:start,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:end,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:increment,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:decrement {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div.section-editor-popup > div > main > p.empty {
+    box-sizing: border-box;
+    height: var(--row-height);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+    font-weight: 400;
+}
+
+div.section-editor-popup > div > main > ol > li {
+    box-sizing: border-box;
+    height: var(--row-height);
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding:
+        clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem)
+        clamp(0.625rem, 0.5rem + 0.55vw, 0.875rem)
+        clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem)
+        clamp(0.5rem, 0.4rem + 0.55vw, 0.75rem);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    border: 1.5px solid var(--border);
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+div.section-editor-popup > div > main > ol > li:hover {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+/* li en cours de déplacement (drag-and-drop) */
+div.section-editor-popup > div > main > ol > li.dragging {
+    opacity: 0.5;
+    border-color: var(--brand-teal);
+    cursor: grabbing;
+}
+
+/* Poignée de réorganisation : seule zone qui déclenche le drag */
+div.section-editor-popup > div > main > ol > li .handle {
+    cursor: grab;
+    user-select: none;
+}
+
+div.section-editor-popup > div > main > ol > li.dragging .handle {
+    cursor: grabbing;
+}
+
+div.section-editor-popup > div > main > ol > li > div {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+div.section-editor-popup > div > main > ol > li > div:first-child {
+    flex: 1;
+    min-width: 0;
+}
+
+div.section-editor-popup > div > main > ol > li > div:last-child {
+    flex-shrink: 0;
+}
+
+div.section-editor-popup > div > main > ol > li > div > span:first-child {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(1rem, 0.9rem + 0.5vw, 1.125rem);
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+    flex-shrink: 0;
+}
+
+div.section-editor-popup > div > main > ol > li > div > span:last-child {
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: none;
+}
+
+div.section-editor-popup > div > main > ol > li > div > svg {
+    color: var(--icon-stroke);
+    width: clamp(0.875rem, 0.77rem + 0.5vw, 1rem);
+    height: clamp(0.875rem, 0.77rem + 0.5vw, 1rem);
+    transition: color 0.15s ease-out;
+}
+
+div.section-editor-popup > div > main > ol > li > div > svg:hover {
+    cursor: pointer;
+}
+
+div.section-editor-popup > div > main > ol > li > div > svg:first-of-type:hover {
+    color: var(--brand-teal);
+}
+
+div.section-editor-popup > div > main > ol > li > div > svg:last-of-type:hover {
+    color: var(--danger);
+}
+
+div.section-editor-popup > div > footer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+div.section-editor-popup > div > footer > button {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    line-height: normal;
+    font-size: 1.125rem;
+    font-weight: 500;
+    padding: 0.75rem 0;
+    align-self: stretch;
+    border-radius: 0.5rem;
+    border: 1.5px dashed var(--brand-teal);
+    background: var(--brand-teal-surface);
+    flex-grow: 1;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+div.section-editor-popup > div > footer > button:hover {
+    cursor: pointer;
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.section-editor-popup > div > footer > button:active {
+    transform: scale(0.98);
+}
+
+div.section-editor-popup > div > footer > button > span {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+div.section-editor-popup .edit-row {
+    box-sizing: border-box;
+    width: 100%;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.625rem;
+    padding: clamp(0.625rem, 0.5rem + 0.55vw, 0.875rem);
+    border-radius: 0.5rem;
+    border: 1.5px solid var(--brand-teal);
+    background: var(--brand-teal-surface);
+}
+
+div.section-editor-popup .edit-row:hover {
+    box-shadow: none;
+}
+
+div.section-editor-popup .edit-row > h2 {
+    margin: 0;
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > div {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    width: 100%;
+    padding: clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem) clamp(0.625rem, 0.5rem + 0.55vw, 0.875rem);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    border: 1.5px solid var(--border);
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > div:focus-within {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > div > span {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
+    font-weight: 500;
+    user-select: none;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > div > input {
+    flex: 1;
+    min-width: 0;
+    user-select: text;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
+    font-weight: 500;
+    outline: none;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > p {
+    margin: 0;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    line-height: normal;
+    width: 100%;
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > div.invalid,
+div.section-editor-popup .edit-row > div:first-of-type > div.invalid:focus-within {
+    border-color: var(--danger);
+    box-shadow: 0 0 4px 3px var(--shadow-danger);
+}
+
+div.section-editor-popup .edit-row > div:first-of-type > p.invalid {
+    color: var(--danger);
+}
+
+div.section-editor-popup .edit-row > div:last-of-type {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button {
+    border-radius: 0.5rem;
+    border: 1.5px solid var(--border);
+    font-family: Inter, sans-serif;
+    font-weight: 500;
+    font-size: 0.8125rem;
+    transition: background-color 0.15s ease, color 0.15s ease, filter 0.15s ease,
+        transform 0.1s ease;
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:hover {
+    cursor: pointer;
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:first-child {
+    color: var(--text-muted);
+    padding: 0.5rem 0.875rem;
+    background: transparent;
+    border-color: transparent;
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:first-child:hover {
+    color: var(--text);
+    background: var(--bg-vote-pill);
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:last-child {
+    color: #ffffff;
+    padding: 0.5rem 1rem;
+    background: var(--brand-teal-gradient);
+    border-radius: 0.5rem;
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:last-child:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+div.section-editor-popup .edit-row > div:last-of-type > button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@media (min-width: 768px) {
+    div.section-editor-popup > div {
+        margin: 2.13rem;
+        gap: 1rem;
+        padding: 1.5rem;
+    }
+
+    div.section-editor-popup > div > header > div > h1 {
+        font-size: 1.125rem;
+    }
+}
