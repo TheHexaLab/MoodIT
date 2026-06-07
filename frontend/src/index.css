@@ -38,6 +38,8 @@
     --text-app-name: #fff;
     --slogan-text: rgba(255, 255, 255, 0.82);
     --bg-right-login-page: #F8F8FB;
+    --shadow-login-box-modal: rgba(0, 0, 0, 0.04);
+    --shadow-login-box-hover: rgba(10, 92, 192, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {

@@ -104,32 +104,39 @@
 .form-card {
     width: 100%;
     max-width: 27.5rem;
-    height: 100%;
     max-height: 33.75rem;
     box-sizing: border-box;
     background: var(--bg-surface);
-    box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.04), 0 16px 48px 0 rgba(10, 92, 192, 0.08);
+    box-shadow: 0 2px 8px 0 var(--shadow-login-box-modal), 0 16px 48px 0 var(--shadow-login-box-hover);
     border-radius: 1.25rem;
-    padding: 2.5rem 2rem;
+    padding: 3rem 5.5% 2.13rem 5.5%;
+
 }
 
 .form-title {
-    font-size: 1.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
+    font-style: normal;
     color: var(--text);
-    margin: 0 0 0.375rem;
+    margin: 0 0 1.35%;
+    line-height: normal;
+    font-family: Inter, sans-serif;
 }
 
 .form-subtitle {
     font-size: 0.875rem;
     color: var(--text-muted);
-    margin: 0 0 1.75rem;
+    margin: 0 0 7.96%;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+
 }
 
 .form {
     display: flex;
     flex-direction: column;
-    gap: 1.125rem;
 }
 
 .field {
