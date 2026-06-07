@@ -3,9 +3,11 @@ import * as React from 'react';
 import { SectionEditor, type ItemChange } from '../components/SectionEditor/SectionEditor.tsx';
 import { RoleEditor, type Role, type RoleChange, type User } from '../components/RoleEditor/RoleEditor.tsx';
 import { AddCoursePopup, type NewCourse, type Program } from '../components/AddCoursePopup/AddCoursePopup.tsx';
+import { UpdateCoursePopup, type CourseUpdate } from '../components/UpdateCoursePopup/UpdateCoursePopup.tsx';
 import { DeleteConfirmationBox } from '../components/DeleteConfirmationBox/DeleteConfirmationBox.tsx';
 import { ErrorBox } from '../components/ErrorBox/ErrorBox.tsx';
 import { EditProfilePopup, type ProfileUpdate } from '../components/EditProfilePopup/EditProfilePopup.tsx';
+import { UpdateProgramPopup, type ProgramUpdate } from '../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
 import {
   AddSubscriptionPopup,
   type NewProgram,
@@ -105,8 +107,10 @@ export default function PopupTests() {
   const [showSectionEditor, setShowSectionEditor] = useState(false);
   const [showRoleEditor, setShowRoleEditor] = useState(false);
   const [showAddCourse, setShowAddCourse] = useState(false);
+  const [showUpdateCourse, setShowUpdateCourse] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showUpdateProgram, setShowUpdateProgram] = useState(false);
   const [showAddSubscription, setShowAddSubscription] = useState(false);
   const [showErrorBox, setShowErrorBox] = useState(false);
   /** Mode « bug » : les callbacks du AddSubscriptionPopup échouent (test des erreurs). */
@@ -156,8 +160,14 @@ export default function PopupTests() {
         <button style={styles.button} onClick={() => setShowAddCourse(true)}>
           AddCoursePopup (cours)
         </button>
+        <button style={styles.button} onClick={() => setShowUpdateCourse(true)}>
+          UpdateCoursePopup (cours)
+        </button>
         <button style={styles.button} onClick={() => setShowEditProfile(true)}>
           EditProfilePopup (profil)
+        </button>
+        <button style={styles.button} onClick={() => setShowUpdateProgram(true)}>
+          UpdateProgramPopup (programme)
         </button>
         <button style={styles.button} onClick={() => setShowAddSubscription(true)}>
           AddSubscriptionPopup (programme)
@@ -172,7 +182,12 @@ export default function PopupTests() {
           itemList={channels}
           prefix="#"
           onClose={() => setShowSectionEditor(false)}
-          onChange={(change: ItemChange) => console.log('SectionEditor', change)}
+          // onChange peut être async ; en cas d'échec le composant annule et affiche l'erreur.
+          onChange={async (change: ItemChange) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (SectionEditor)');
+            console.log('SectionEditor', change);
+          }}
           labels={{
             title: 'Modifier les canaux',
             subtitle: 'Glisse pour réorganiser · ajoute, modifie ou supprime un canal',
@@ -192,7 +207,12 @@ export default function PopupTests() {
           onClose={() => setShowRoleEditor(false)}
           roles={roles}
           users={roleUsers}
-          onChange={(change: RoleChange) => console.log('RoleEditor', change)}
+          // onChange peut être async ; en cas d'échec le composant annule et affiche l'erreur.
+          onChange={async (change: RoleChange) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (RoleEditor)');
+            console.log('RoleEditor', change);
+          }}
         />
       )}
 
@@ -200,9 +220,25 @@ export default function PopupTests() {
         <AddCoursePopup
           onClose={() => setShowAddCourse(false)}
           programs={programs}
-          onSave={(course: NewCourse) => {
+          onSave={async (course: NewCourse) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (AddCoursePopup)');
             console.log('AddCoursePopup', course);
-            setShowAddCourse(false);
+          }}
+        />
+      )}
+
+      {showUpdateCourse && (
+        <UpdateCoursePopup
+          onClose={() => setShowUpdateCourse(false)}
+          programs={programs}
+          // Cours édité = GIF201, rattaché aux programmes GIN et GLO (ids 1 et 2).
+          course={{ title: 'Structures de données', code: 'GIF201', programIds: [1, 2] }}
+          // onSave peut être async ; le composant ferme via onClose en cas de succès.
+          onSave={async (course: CourseUpdate) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (UpdateCoursePopup)');
+            console.log('UpdateCoursePopup', course);
           }}
         />
       )}
@@ -230,9 +266,31 @@ export default function PopupTests() {
               'https://media.licdn.com/dms/image/v2/D4E03AQFMLYc-j7m0rw/profile-displayphoto-crop_800_800/B4EZ5wvbMMJMAI-/0/1780007941382?e=1782345600&v=beta&t=V8YeOmxGBZsOZApvF3DlMmHrdo1IoBYNHOJbtdiHS8U',
           }}
           onClose={() => setShowEditProfile(false)}
-          onSave={(profile: ProfileUpdate) => {
+          // onSave peut être async ; le composant ferme via onClose en cas de succès.
+          onSave={async (profile: ProfileUpdate) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (EditProfilePopup)');
             console.log('EditProfilePopup', profile);
-            setShowEditProfile(false);
+          }}
+        />
+      )}
+
+      {showUpdateProgram && (
+        <UpdateProgramPopup
+          onClose={() => setShowUpdateProgram(false)}
+          // Programme édité = GIN ; les autres codes servent à tester l'unicité.
+          program={{
+            name: programs[0].name,
+            code: programs[0].code,
+            cohort: programs[0].cohort,
+            color: programs[0].color,
+          }}
+          existingCodes={programs.slice(1).map((p) => p.code)}
+          // onSave peut être async ; le composant ferme via onClose en cas de succès.
+          onSave={async (program: ProgramUpdate) => {
+            await new Promise((r) => setTimeout(r, 400));
+            if (failRequests) throw new Error('Échec simulé (UpdateProgramPopup)');
+            console.log('UpdateProgramPopup', program);
           }}
         />
       )}
