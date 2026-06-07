@@ -1,0 +1,1066 @@
+div.add-subscription {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    animation: add-subscription-fade-in 0.2s ease-out;
+}
+
+div.add-subscription > div {
+    display: flex;
+    box-sizing: border-box;
+    width: min(28.75rem, 100% - 2rem);
+    /* Sur écran court, le panneau défile au lieu de dépasser le viewport. */
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    padding: 1rem;
+    margin: 1rem;
+    user-select: none;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.88rem;
+    border-radius: 1rem;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: add-subscription-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+    div.add-subscription > div {
+        max-height: calc(100dvh - 4.26rem);
+        padding: 1.25rem;
+        margin: 2.13rem;
+    }
+}
+
+@keyframes add-subscription-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes add-subscription-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes add-subscription-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes add-subscription-pop-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+}
+
+div.add-subscription.closing {
+    animation: add-subscription-fade-out 0.2s ease-in forwards;
+}
+
+div.add-subscription.closing > div {
+    animation: add-subscription-pop-out 0.2s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.add-subscription,
+    div.add-subscription > div {
+        animation: none;
+    }
+}
+
+div.add-subscription > div > * {
+    margin: 0;
+}
+
+/* ── En-tête ────────────────────────────────────────────── */
+div.add-subscription > div > header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    align-self: stretch;
+}
+
+/* Conteneur titre (+ bouton retour optionnel en vue formulaire). */
+div.add-subscription > div > header > div.header-main {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+div.add-subscription > div > header > div.header-main > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+div.add-subscription > div > header > div.header-main > div > * {
+    margin: 0;
+}
+
+div.add-subscription > div > header > div.header-main > div > h1 {
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: normal;
+    color: var(--text);
+}
+
+div.add-subscription > div > header > div.header-main > div > p {
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.18125rem;
+    color: var(--text-muted);
+}
+
+/* Bouton retour : ramène du formulaire vers le menu. */
+div.add-subscription > div > header > div.header-main > button.back {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    transition: color 0.15s ease, transform 0.1s ease;
+}
+
+div.add-subscription > div > header > div.header-main > button.back:hover {
+    cursor: pointer;
+    color: var(--text);
+}
+
+div.add-subscription > div > header > div.header-main > button.back:active {
+    transform: scale(0.85);
+}
+
+/* L'asset pointe vers le haut nativement ; -90deg le fait pointer vers la gauche. */
+div.add-subscription > div > header > div.header-main > button.back > svg.back-chevron {
+    transform: rotate(-90deg);
+}
+
+div.add-subscription > div > header > button {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-weight: 400;
+    line-height: normal;
+    background: none;
+    border: none;
+    transition: color 0.15s ease, transform 0.1s ease;
+}
+
+div.add-subscription > div > header > button:hover {
+    cursor: pointer;
+    color: var(--text);
+}
+
+div.add-subscription > div > header > button:active {
+    transform: scale(0.85);
+}
+
+/* ── Options de navigation ──────────────────────────────── */
+div.add-subscription > div > nav.options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    align-self: stretch;
+}
+
+div.add-subscription > div > nav.options > button {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.88rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    background: transparent;
+    text-align: left;
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out,
+        transform 0.1s ease;
+}
+
+div.add-subscription > div > nav.options > button:hover:not(:disabled) {
+    cursor: pointer;
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.add-subscription > div > nav.options > button:active:not(:disabled) {
+    transform: scale(0.99);
+}
+
+/* Option désactivée (chargement en cours sur l'autre option). */
+div.add-subscription > div > nav.options > button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+/* Pastille (1re enfant) ; `:first-child` pour ne pas viser le spinner de chargement. */
+div.add-subscription > div > nav.options > button > span:first-child {
+    position: relative;
+    /* Crée un stacking context : sinon le ::before en z-index:-1 passe derrière la carte
+       du popup (fond opaque) et le dégradé devient invisible. */
+    isolation: isolate;
+    display: flex;
+    width: 2.75rem;
+    height: 2.75rem;
+    justify-content: center;
+    align-items: center;
+    /* Découpe le calque de dégradé (::before) aux coins arrondis. */
+    overflow: hidden;
+    border-radius: 0.75rem;
+
+    font-family: Inter, sans-serif;
+    font-size: 1.375rem;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    transition: color 0.15s ease;
+}
+
+/* Calque de dégradé sous le glyphe : un `background` uni → dégradé ne s'interpole pas,
+   donc on fait plutôt un fondu d'opacité sur ce calque pour une transition fluide. */
+div.add-subscription > div > nav.options > button > span:first-child::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--brand-teal-gradient);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+div.add-subscription > div > nav.options > button:hover > span:first-child {
+    color: #FFFFFF;
+}
+
+div.add-subscription > div > nav.options > button:hover > span:first-child::before {
+    opacity: 1;
+}
+
+
+div.add-subscription > div > nav.options > button > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    flex-grow: 1;
+    min-width: 0;
+}
+
+div.add-subscription > div > nav.options > button > div > span:first-child {
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: normal;
+}
+
+div.add-subscription > div > nav.options > button > div > span:last-child {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.13rem;
+}
+
+/* Chevron : pointe vers la droite (l'asset pointe vers le haut nativement). */
+div.add-subscription > div > nav.options > button > svg.chevron {
+    flex-shrink: 0;
+    color: var(--brand-teal);
+    transform: rotate(90deg);
+}
+
+/* ── Formulaire de création de programme ────────────────── */
+
+/* Libellés de champ (partagés : champs texte, palette, dropdown). */
+div.add-subscription > div > label.field > span,
+div.add-subscription > div > section.color-group > div.palette-group > span.field-label,
+div.add-subscription > div > section.select > span.field-label {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+}
+
+/* Champs texte (code, nom, cohorte). */
+div.add-subscription > div > label.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    align-self: stretch;
+}
+
+div.add-subscription > div > label.field > div {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    padding: 0.75rem 0.88rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.375rem;
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+div.add-subscription > div > label.field > div:hover {
+    cursor: text;
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.add-subscription > div > label.field > div:focus-within {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.add-subscription > div > label.field > div > input {
+    flex-grow: 1;
+    min-width: 0;
+    user-select: text;
+    border: none;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+    outline: none;
+}
+
+div.add-subscription > div > label.field > div > input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Champ en erreur (ex. code déjà pris) : bordure rouge + message. */
+div.add-subscription > div > label.field.invalid > div,
+div.add-subscription > div > label.field.invalid > div:hover,
+div.add-subscription > div > label.field.invalid > div:focus-within {
+    border-color: var(--danger);
+    box-shadow: 0 0 4px 3px var(--shadow-danger);
+}
+
+div.add-subscription > div > label.field > span.field-error {
+    color: var(--danger);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: normal;
+}
+
+/* Couleur : icône (aperçu) à gauche, libellé + palette à droite. */
+div.add-subscription > div > section.color-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    align-self: stretch;
+}
+
+/* Icône du programme : pastille colorée affichant le code saisi (contraste auto). */
+div.add-subscription > div > section.color-group > span.preview {
+    display: flex;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 3.5rem;
+    height: 3.5rem;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.875rem;
+}
+
+div.add-subscription > div > section.color-group > span.preview > span {
+    max-width: 100%;
+    padding: 0 0.25rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: Inter, sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: normal;
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+}
+
+div.add-subscription > div > section.color-group > div.palette-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.625rem;
+    min-width: 0;
+}
+
+div.add-subscription > div > section.color-group > div.palette-group > div.palette {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch {
+    box-sizing: border-box;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch:hover {
+    transform: scale(1.1);
+}
+
+/* Couleur sélectionnée : anneau de la même couleur que la pastille. */
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > button.swatch.selected {
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--swatch-color);
+}
+
+/* Bouton « + » : ouvre le sélecteur de couleur natif. */
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color:hover {
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+div.add-subscription > div > section.color-group > div.palette-group > div.palette > label.add-color > input {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+/* ── Dropdown établissement ─────────────────────────────── */
+div.add-subscription > div > section.select {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    align-self: stretch;
+}
+
+div.add-subscription > div > section.select > div.select-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.75rem 0.88rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+div.add-subscription > div > section.select > div.select-control:hover,
+div.add-subscription > div > section.select > div.select-control.open {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.add-subscription > div > section.select > div.select-control > span {
+    flex-grow: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+}
+
+div.add-subscription > div > section.select > div.select-control > span.placeholder {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* Chevron du dropdown : pointe vers le bas au repos, vers le haut quand ouvert. */
+div.add-subscription > div > section.select > div.select-control > svg.chevron {
+    flex-shrink: 0;
+    color: var(--brand-teal);
+    transform: rotate(180deg);
+    transition: transform 0.15s ease;
+}
+
+div.add-subscription > div > section.select > div.select-control > svg.chevron.chevron-open {
+    transform: rotate(0deg);
+}
+
+/* Menu déroulant : barre de recherche fixe en haut + liste scrollable en dessous. */
+div.add-subscription > div > section.select > div.picker {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    right: 0;
+    z-index: 10;
+    padding: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    box-shadow: 0 8px 20px var(--shadow-modal);
+}
+
+/* Barre de recherche. */
+div.add-subscription > div > section.select > div.picker > div.picker-search {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    box-sizing: border-box;
+    padding: 0.625rem 0.75rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text-muted);
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+div.add-subscription > div > section.select > div.picker > div.picker-search:focus-within {
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+div.add-subscription > div > section.select > div.picker > div.picker-search > svg {
+    flex-shrink: 0;
+}
+
+div.add-subscription > div > section.select > div.picker > div.picker-search > input {
+    flex-grow: 1;
+    min-width: 0;
+    user-select: text;
+    border: none;
+    padding: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: normal;
+    outline: none;
+}
+
+div.add-subscription > div > section.select > div.picker > div.picker-search > input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Liste scrollable : 5 lignes pile sans scrollbar, dès le 6e elle apparaît. */
+div.add-subscription > div > section.select > div.picker > ul {
+    --picker-row-height: 2.25rem;
+    --picker-visible-rows: 5;
+    --picker-row-gap: 0.125rem;
+
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--picker-row-gap);
+    /* 5 lignes pile, mais jamais plus de 40% de la hauteur du viewport (écrans courts). */
+    max-height: min(
+        calc(
+            var(--picker-visible-rows) * var(--picker-row-height) +
+            (var(--picker-visible-rows) - 1) * var(--picker-row-gap)
+        ),
+        40dvh
+    );
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    div.add-subscription > div > section.select > div.picker > ul {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar {
+    width: 4px;
+}
+
+div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div.add-subscription > div > section.select > div.picker > ul::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li {
+    display: block;
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li.picker-empty {
+    padding: 0.625rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+    font-weight: 400;
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li > button {
+    width: 100%;
+    /* Hauteur fixe : garantit que 5 lignes pile tiennent sans scrollbar (cf. ul ci-dessus). */
+    height: var(--picker-row-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    box-sizing: border-box;
+    padding: 0 0.625rem;
+    background: transparent;
+    /* Bordure transparente au repos : évite que la ligne « saute » à la sélection. */
+    border: 1.5px solid transparent;
+    border-radius: 0.375rem;
+    text-align: left;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li > button > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li > button:hover {
+    background: var(--bg-vote-pill);
+}
+
+div.add-subscription > div > section.select > div.picker > ul > li > button.selected {
+    color: var(--brand-teal);
+    font-weight: 600;
+    border-color: var(--brand-teal);
+    /* Teal à 8 % (≈ rgba(20,184,166,0.08) en sombre) ; suit le thème via --brand-teal. */
+    background: color-mix(in srgb, var(--brand-teal) 8%, transparent);
+}
+
+/* Checkmark de l'établissement sélectionné. */
+div.add-subscription > div > section.select > div.picker > ul > li > button > svg.check {
+    flex-shrink: 0;
+    color: var(--brand-teal);
+}
+
+/* ── Pied (Annuler / Créer) ─────────────────────────────── */
+div.add-subscription > div > footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.625rem;
+    align-self: stretch;
+}
+
+div.add-subscription > div > footer > button {
+    display: flex;
+    padding: 0.75rem 0;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.625rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: normal;
+    flex-grow: 1;
+    transition: background-color 0.15s ease, border-color 0.15s ease, filter 0.15s ease,
+        transform 0.1s ease;
+}
+
+div.add-subscription > div > footer > button:hover {
+    cursor: pointer;
+}
+
+div.add-subscription > div > footer > button:active {
+    transform: scale(0.97);
+}
+
+div.add-subscription > div > footer > button:first-child {
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+}
+
+div.add-subscription > div > footer > button:first-child:hover {
+    background: var(--bg-vote-pill);
+    border-color: var(--border-strong);
+}
+
+div.add-subscription > div > footer > button:last-child {
+    color: #ffffff;
+    background: var(--brand-teal-gradient);
+    /* Bordure transparente : garde la même hauteur que « Annuler » (qui a une vraie bordure).
+       padding-box empêche le dégradé d'être peint sous cette bordure → pas de liseré sombre
+       sur les bords arrondis (artefact de sous-pixel de Chromium). */
+    border: 1px solid transparent;
+    background-clip: padding-box;
+}
+
+div.add-subscription > div > footer > button:last-child:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+div.add-subscription > div > footer > button:last-child:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@media (min-width: 768px) {
+    div.add-subscription > div > footer > button {
+        padding: 0.625rem 1.125rem;
+        flex-grow: 0;
+    }
+}
+
+/* ── Vue « rejoindre » : recherche d'établissement + sélection de programmes ── */
+div.add-subscription > div > section.join {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    align-self: stretch;
+}
+
+/* Barre de recherche (même look que le picker du formulaire). */
+div.add-subscription > div > section.join > div.search {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    box-sizing: border-box;
+    padding: 0.625rem 0.75rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text-muted);
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+div.add-subscription > div > section.join > div.search:focus-within {
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+div.add-subscription > div > section.join > div.search > svg {
+    flex-shrink: 0;
+}
+
+div.add-subscription > div > section.join > div.search > input {
+    flex-grow: 1;
+    min-width: 0;
+    user-select: text;
+    border: none;
+    padding: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: normal;
+    outline: none;
+}
+
+div.add-subscription > div > section.join > div.search > input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Liste scrollable (établissements ou programmes). */
+div.add-subscription > div > section.join > ul {
+    /* Hauteur de ligne fixe (établissement comme programme) : 6 lignes pile sans scrollbar,
+       dès la 7e elle apparaît. Le calcul ne dépend donc pas des métriques de contenu. */
+    --row-height: 2.875rem;
+    --visible-rows: 6;
+    --row-gap: 0.125rem;
+
+    box-sizing: border-box;
+    margin: 0;
+    /* Gouttière à droite : espace entre les lignes et la scrollbar (quand elle apparaît). */
+    padding: 0 0.375rem 0 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--row-gap);
+    /* 6 lignes pile, mais jamais plus de 50% de la hauteur du viewport (écrans courts). */
+    max-height: min(
+        calc(
+            var(--visible-rows) * var(--row-height) +
+            (var(--visible-rows) - 1) * var(--row-gap)
+        ),
+        50dvh
+    );
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    div.add-subscription > div > section.join > ul {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div.add-subscription > div > section.join > ul::-webkit-scrollbar {
+    width: 4px;
+}
+
+div.add-subscription > div > section.join > ul::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+div.add-subscription > div > section.join > ul::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div.add-subscription > div > section.join > ul::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div.add-subscription > div > section.join > ul::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div.add-subscription > div > section.join > ul > li {
+    display: block;
+}
+
+div.add-subscription > div > section.join > ul > li.empty {
+    padding: 0.625rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+    font-weight: 400;
+}
+
+/* Ligne : établissement (nom + chevron) ou programme (pastille + nom/cohorte + check). */
+div.add-subscription > div > section.join > ul > li > button {
+    width: 100%;
+    /* Hauteur fixe : garantit que 6 lignes pile tiennent sans scrollbar (cf. ul ci-dessus). */
+    height: var(--row-height);
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    box-sizing: border-box;
+    padding: 0 0.625rem;
+    background: transparent;
+    /* Bordure transparente au repos : évite le « saut » de ligne à la sélection. */
+    border: 1.5px solid transparent;
+    border-radius: 0.375rem;
+    text-align: left;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    line-height: normal;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+div.add-subscription > div > section.join > ul > li > button:hover:not(:disabled) {
+    background: var(--bg-vote-pill);
+}
+
+/* Établissement sans programme : non cliquable. */
+div.add-subscription > div > section.join > ul > li > button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+div.add-subscription > div > section.join > ul > li > button.selected {
+    border-color: var(--brand-teal);
+    background: color-mix(in srgb, var(--brand-teal) 8%, transparent);
+}
+
+/* Nom de l'établissement (ligne simple). */
+div.add-subscription > div > section.join > ul > li > button > span.name {
+    flex-grow: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+/* Chevron « aller » sur une ligne établissement (pointe vers la droite). */
+div.add-subscription > div > section.join > ul > li > button > svg.go {
+    flex-shrink: 0;
+    color: var(--brand-teal);
+    transform: rotate(90deg);
+}
+
+/* Pastille de couleur du programme (code). */
+div.add-subscription > div > section.join > ul > li > button > span.swatch {
+    flex-shrink: 0;
+    display: flex;
+    box-sizing: border-box;
+    width: 2rem;
+    height: 2rem;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.375rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1;
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+}
+
+/* Bloc texte du programme (nom + code · cohorte). */
+div.add-subscription > div > section.join > ul > li > button > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.0625rem;
+    flex-grow: 1;
+    min-width: 0;
+}
+
+div.add-subscription > div > section.join > ul > li > button > div > span:first-child {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: 0.84375rem;
+    font-weight: 500;
+}
+
+div.add-subscription > div > section.join > ul > li > button > div > span:last-child {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+/* Checkmark du programme sélectionné. */
+div.add-subscription > div > section.join > ul > li > button > svg.check {
+    flex-shrink: 0;
+    color: var(--brand-teal);
+}
+
+/* ── Écrans étroits (petits téléphones) ─────────────────── */
+@media (max-width: 22.5rem) {
+    /* Resserre les espacements verticaux. */
+    div.add-subscription > div {
+        gap: 0.75rem;
+    }
+
+    /* Section couleur : icône plus compacte et écart réduit pour ne pas serrer la palette. */
+    div.add-subscription > div > section.color-group {
+        gap: 0.75rem;
+    }
+
+    div.add-subscription > div > section.color-group > span.preview {
+        width: 3rem;
+        height: 3rem;
+        border-radius: 0.75rem;
+    }
+
+    /* Option du menu : pastille un peu plus petite. */
+    div.add-subscription > div > nav.options > button > span:first-child {
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+}
+
+/* ── Spinner de chargement ──────────────────────────────── */
+div.add-subscription span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: add-subscription-spin 0.6s linear infinite;
+}
+
+/* Teinte teal là où le spinner remplace un chevron teal (menu + lignes établissement). */
+div.add-subscription > div > nav.options > button > span.spinner,
+div.add-subscription > div > section.join > ul > li > button > span.spinner {
+    color: var(--brand-teal);
+}
+
+@keyframes add-subscription-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.add-subscription span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
