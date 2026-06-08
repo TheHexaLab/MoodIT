@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import ProgramMenu, { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
+import ProgramMenu from '../../components/ProgramMenu/ProgramMenu.tsx';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
 import {
   type ChannelRef,
@@ -66,10 +66,6 @@ export default function Dashboard() {
     : [];
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
-  const activeProgramLabel = getProgramDisplayLabel(activeProgram);
-  const selectedCourseLabel = selectedCourse
-    ? getCourseDisplayLabel(selectedCourse)
-    : 'Aucun cours';
   const mobileTopbarTitle = selectedChannel
     ? `${getPrefixForType(selectedChannel.type)} ${selectedChannel.name}`
     : 'Accueil';
@@ -114,12 +110,9 @@ export default function Dashboard() {
 
       <MainPanel
         isAdmin={isAdminMock}
-        hasActiveProgram={activeProgram !== null}
-        hasCourses={courses.length > 0}
-        hasChannels={selectedCourseChannels.length > 0}
-        selectedChannel={selectedChannel}
-        programLabel={activeProgramLabel}
-        courseLabel={selectedCourseLabel}
+        program={activeProgram}
+        selectedCourse={effectiveSelectedCourseId}
+        selectedChannel={selectedChannelRef}
         onAddProgram={handleAddProgram}
         onAddCourse={handleAddCourse}
         onCreateChannel={handleCreateChannel}
@@ -134,21 +127,6 @@ function getUserInitial(user: UserMenuUser): string {
   const display =
     user.displayName?.trim() || user.firstName?.trim() || user.username?.trim() || 'U';
   return display[0].toUpperCase();
-}
-
-function getProgramDisplayLabel(program: Program | null): string {
-  if (!program) return 'Accueil';
-  return (program.label ?? program.cohort ?? program.name ?? 'Accueil').trim() || 'Accueil';
-}
-
-function getCourseDisplayLabel(course: Course): string {
-  if (course.name?.trim()) return course.name.trim();
-
-  const title = course.title?.trim() ?? '';
-  const code = course.code?.trim() ?? '';
-
-  if (code && title) return `${code} · ${title}`;
-  return title || code || 'Cours';
 }
 
 function getEffectiveSelectedCourseId(

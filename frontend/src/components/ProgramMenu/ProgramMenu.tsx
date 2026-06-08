@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './ProgramMenu.module.css';
+import { type Course } from '../CourseMenu/CourseMenu.tsx';
 import { useTheme } from '../../helpers/theme.ts';
 import { contrastingTextColor } from '../../helpers/color.ts';
 
@@ -16,6 +17,8 @@ export interface Program {
   cohort: string;
   /** Couleur du programme (Program.color), ex. "#1a6e3c". */
   color: string;
+  /** Cours rattaches au programme. */
+  courses?: Course[];
 }
 
 interface ProgramMenuProps {

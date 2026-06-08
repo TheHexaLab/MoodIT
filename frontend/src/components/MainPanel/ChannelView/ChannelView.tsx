@@ -2,15 +2,15 @@ import React from 'react';
 import styles from './ChannelView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { type Course } from '../../CourseMenu/CourseMenu';
+import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { contrastingTextColor } from '../../../helpers/color';
 
 interface ChannelViewProps {
+  /** Cours auquel appartient le canal (contexte d'en-tete). */
+  course: Course;
   /** Canal selectionne (forum de f_type 'Discussion', rendu comme un canal/chat). */
   channel: CourseChannel;
-  /** Libelle du programme actif (contexte d'en-tete). */
-  programLabel?: string;
-  /** Libelle du cours selectionne (contexte d'en-tete). */
-  courseLabel?: string;
 }
 
 /** Couleur d'avatar par defaut (= Program/User color par defaut en BD). */
@@ -33,15 +33,14 @@ function getInitial(name: string): string {
  * Etat 5 — vue d'un canal de discussion (f_type 'Discussion').
  * Echange libre facon chat : liste des messages + zone de saisie.
  */
-const ChannelView: React.FC<ChannelViewProps> = ({ channel, programLabel, courseLabel }) => {
+const ChannelView: React.FC<ChannelViewProps> = ({ course, channel }: ChannelViewProps) => {
   const messages = channel.messages ?? [];
+  const courseLabel = getCourseDisplayLabel(course);
 
   return (
     <div className={styles.channelView}>
       <header className={styles.header}>
-        {(programLabel || courseLabel) && (
-          <p className={styles.meta}>{[programLabel, courseLabel].filter(Boolean).join(' · ')}</p>
-        )}
+        {courseLabel && <p className={styles.meta}>{courseLabel}</p>}
         <h1 className={styles.title}>
           <span className={styles.prefix}>{getPrefixForType(channel.type)}</span>
           {channel.name}

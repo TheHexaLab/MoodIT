@@ -1,6 +1,8 @@
 import React from 'react';
 import styles from './MainPanel.module.css';
-import { type CourseChannel } from '../CourseChannelList/CourseChannelList.tsx';
+import { type ChannelRef, isSameChannel } from '../CourseChannelList/CourseChannelList.tsx';
+import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources.ts';
+import { type Program } from '../ProgramMenu/ProgramMenu.tsx';
 import ChannelView from './ChannelView/ChannelView.tsx';
 import ForumView from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
@@ -12,18 +14,12 @@ import NoActiveChannelState from './states/NoActiveChannelState/NoActiveChannelS
 interface MainPanelProps {
   /** Utilisateur administrateur : debloque les actions de creation dans les etats vides. */
   isAdmin?: boolean;
-  /** Un programme est-il selectionne ? (false → etat 1). */
-  hasActiveProgram: boolean;
-  /** Le programme actif a-t-il au moins un cours ? (false → etat 2). */
-  hasCourses: boolean;
-  /** Le cours selectionne a-t-il au moins un canal/forum/quiz ? (false → etat 3). */
-  hasChannels: boolean;
-  /** Canal/forum/quiz actuellement selectionne (null → etat 4). */
-  selectedChannel: CourseChannel | null;
-  /** Libelle du programme actif (contexte d'en-tete des vues). */
-  programLabel: string;
-  /** Libelle du cours selectionne (contexte d'en-tete des vues). */
-  courseLabel: string;
+  /** Programme actif (null → etat 1 ; sans cours → etat 2). */
+  program: Program | null;
+  /** Id du cours selectionne dans le programme actif. */
+  selectedCourse?: number;
+  /** Reference (type + id) du canal/forum/quiz selectionne (undefined → etat 4). */
+  selectedChannel?: ChannelRef;
   /** Ouvre le formulaire d'ajout / d'adhesion a un programme (admin). */
   onAddProgram?: () => void;
   /** Ouvre le formulaire d'ajout de cours (admin). */
@@ -44,12 +40,9 @@ interface MainPanelProps {
  */
 const MainPanel: React.FC<MainPanelProps> = ({
   isAdmin = false,
-  hasActiveProgram,
-  hasCourses,
-  hasChannels,
+  program,
+  selectedCourse,
   selectedChannel,
-  programLabel,
-  courseLabel,
   onAddProgram,
   onAddCourse,
   onCreateChannel,
@@ -58,11 +51,21 @@ const MainPanel: React.FC<MainPanelProps> = ({
 }) => {
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
-    if (!hasActiveProgram) return <NoProgramState isAdmin={isAdmin} onAddProgram={onAddProgram} />;
+    if (!program) return <NoProgramState isAdmin={isAdmin} onAddProgram={onAddProgram} />;
     // 2 — le programme n'a aucun cours.
-    if (!hasCourses) return <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} />;
+    const courses = program.courses ?? [];
+    if (courses.length === 0)
+      return <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} />;
     // 3 — le cours selectionne est vide (aucun canal/forum/quiz).
-    if (!hasChannels)
+    const course = courses.find((c) => c.id === selectedCourse) ?? null;
+    const courseChannels = course
+      ? normalizeCourseChannelsFromSources({
+          channels: course.channels,
+          quizzes: course.quizzes,
+          forums: course.forums,
+        })
+      : [];
+    if (courseChannels.length === 0)
       return (
         <EmptyCourseState
           isAdmin={isAdmin}
@@ -72,23 +75,18 @@ const MainPanel: React.FC<MainPanelProps> = ({
         />
       );
     // 4 — le cours a du contenu mais rien n'est selectionne.
-    if (!selectedChannel) return <NoActiveChannelState />;
+    const channel = courseChannels.find((ch) => isSameChannel(ch, selectedChannel)) ?? null;
+    if (!course || !channel) return <NoActiveChannelState />;
 
     // 5/6/7 — un canal est selectionne : on route selon son type.
-    switch (selectedChannel.type) {
+    switch (channel.type) {
       case 'forum': // f_type 'Thread'
-        return (
-          <ForumView channel={selectedChannel} programLabel={programLabel} courseLabel={courseLabel} />
-        );
+        return <ForumView course={course} channel={channel} />;
       case 'quiz':
-        return (
-          <QuizView channel={selectedChannel} programLabel={programLabel} courseLabel={courseLabel} />
-        );
+        return <QuizView course={course} channel={channel} />;
       case 'text': // f_type 'Discussion'
       default:
-        return (
-          <ChannelView channel={selectedChannel} programLabel={programLabel} courseLabel={courseLabel} />
-        );
+        return <ChannelView course={course} channel={channel} />;
     }
   })();
 
