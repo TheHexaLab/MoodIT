@@ -1,5 +1,10 @@
+//création de la page de login
+//date: 7 juin 2026
+//Philip Pigeon
+
 import { useState } from 'react';
 import './LoginPage.css';
+import { EyeIcon } from '../assets/eye.tsx';
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
@@ -33,7 +38,6 @@ export default function LoginPage() {
               <label className="label">Adresse e-mail</label>
               <input className="input" type="email" placeholder="exemple@gmail.com" />
             </div>
-
             <div className="field">
               <label className="label">Mot de passe</label>
               <div className="input-wrapper">
@@ -47,18 +51,17 @@ export default function LoginPage() {
                   className="eye-btn"
                   onClick={() => setShowPassword(!showPassword)}
                 >
-                  {showPassword ? '🙈' : '👁️'}
+                  <EyeIcon visible={showPassword} />
                 </button>
               </div>
               <a href="#" className="forgot-link">
                 Mot de passe oublié ?
               </a>
             </div>
-
             <button type="submit" className="btn-primary">
               Se connecter →
             </button>
-
+            <p className="or-divider">ou</p> {/* ← celui-là */}
             <p className="register-row">
               Pas encore de compte ?{' '}
               <a href="#" className="register-link">
@@ -69,7 +72,7 @@ export default function LoginPage() {
         </div>
 
         <footer className="footer">
-          © 2025 MoodIT · <a href="#">Confidentialité</a> · <a href="#">Conditions d'utilisation</a>
+          © 2026 MoodIT · <a href="#">Confidentialité</a> · <a href="#">Conditions d'utilisation</a>
         </footer>
       </main>
     </div>
