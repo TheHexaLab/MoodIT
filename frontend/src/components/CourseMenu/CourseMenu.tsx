@@ -4,8 +4,10 @@ import messageSquareIcon from '../../assets/message-square-lines.svg';
 import { type Program } from '../ProgramMenu/ProgramMenu';
 import UserMenu, { type UserMenuUser } from '../UserMenu/UserMenu';
 import CourseChannelList, {
+  type ChannelRef,
   type ChannelTypeDefinition,
   type CourseChannel,
+  isSameChannel,
 } from '../CourseChannelList/CourseChannelList';
 import {
   type ForumChannelSource,
@@ -43,10 +45,10 @@ interface CourseMenuProps {
   onSelectCourse?: (courseId: number) => void;
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
-  /** Canal actuellement sélectionné. */
-  selectedChannelId?: number;
+  /** Canal actuellement sélectionné (type + id). */
+  selectedChannel?: ChannelRef;
   /** Callback lors d'un changement de canal. */
-  onSelectChannel?: (channelId: number) => void;
+  onSelectChannel?: (channel: ChannelRef) => void;
   /**
    * Callback d'ouverture d'un canal (vue a implementer).
    * Distinct de "onSelectChannel" pour permettre une navigation indépendante.
@@ -69,7 +71,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   selectedCourseId,
   onSelectCourse,
   channelTypeDefinitions,
-  selectedChannelId,
+  selectedChannel,
   onSelectChannel,
   onOpenChannel,
   currentUser,
@@ -85,9 +87,9 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   }));
   const selectedCourse =
     courseOptions.find((course) => course.id === selectedCourseId) ?? courseOptions[0] ?? null;
-  const effectiveSelectedChannelId = getEffectiveSelectedChannelId(
+  const effectiveSelectedChannel = getEffectiveSelectedChannel(
     selectedCourse?.channels ?? [],
-    selectedChannelId
+    selectedChannel
   );
   const hasCourses = courseOptions.length > 0;
   const emptySubtitle = activeProgram
@@ -153,7 +155,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           <CourseChannelList
             channels={selectedCourse?.channels ?? []}
             typeDefinitions={channelTypeDefinitions}
-            selectedChannelId={effectiveSelectedChannelId}
+            selectedChannel={effectiveSelectedChannel}
             onSelectChannel={onSelectChannel}
             onOpenChannel={onOpenChannel}
           />
@@ -182,13 +184,13 @@ function formatCourseLabel(course: Course): string {
   return title || code || 'Cours';
 }
 
-function getEffectiveSelectedChannelId(
+function getEffectiveSelectedChannel(
   channels: CourseChannel[],
-  selectedChannelId: number | undefined
-): number | undefined {
-  if (selectedChannelId === undefined) return undefined;
-  return channels.some((channel) => channel.id === selectedChannelId)
-    ? selectedChannelId
+  selectedChannel: ChannelRef | undefined
+): ChannelRef | undefined {
+  if (selectedChannel === undefined) return undefined;
+  return channels.some((channel) => isSameChannel(channel, selectedChannel))
+    ? selectedChannel
     : undefined;
 }
 

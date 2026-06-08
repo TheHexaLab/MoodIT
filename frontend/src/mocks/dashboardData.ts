@@ -80,7 +80,43 @@ export const dashboardProgramsMock: DemoProgram[] = [
         title: 'Genie logiciel',
         quizzes: [{ id: 1, title: 'quiz-semaine-1' }],
         forums: [
-          { id: 1, title: 'general', f_type: 'Discussion' },
+          {
+            id: 1,
+            title: 'general',
+            f_type: 'Discussion',
+            messages: [
+              {
+                id: 1,
+                content: 'Salut tout le monde ! Bienvenue dans le canal du cours 👋',
+                created_at: '2026-06-07T09:02:00',
+                author: { id: 1, displayName: 'Admin', avatarColor: '#8b1a1a' },
+              },
+              {
+                id: 2,
+                content: 'Est-ce que le TP de la semaine 1 est deja disponible ?',
+                created_at: '2026-06-07T09:15:00',
+                author: { id: 2, displayName: 'Rosie HG', avatarColor: '#0a5cc0' },
+              },
+              {
+                id: 3,
+                content: 'Oui, il est dans la section ressources. La remise est vendredi prochain.',
+                created_at: '2026-06-07T09:18:00',
+                author: { id: 3, displayName: 'Mich Normand', avatarColor: '#1a6e3c' },
+              },
+              {
+                id: 4,
+                content: 'Merci ! Quelqu\'un veut former une equipe pour reviser avant le quiz ?',
+                created_at: '2026-06-07T09:24:00',
+                author: { id: 2, displayName: 'Rosie HG', avatarColor: '#0a5cc0' },
+              },
+              {
+                id: 5,
+                content: 'Je suis partant 🙌 On peut se voir a la biblio demain midi.',
+                created_at: '2026-06-07T09:31:00',
+                author: { id: 3, displayName: 'Mich Normand', avatarColor: '#1a6e3c' },
+              },
+            ],
+          },
           { id: 2, title: 'ressources', f_type: 'Discussion' },
           { id: 3, title: 'questions-lab', f_type: 'Thread' },
         ],

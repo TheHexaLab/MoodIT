@@ -2,6 +2,28 @@ import React from 'react';
 import styles from './CourseChannelList.module.css';
 import { getPrefixForType } from './channelTypePrefix';
 
+/** Auteur d'un message (≈ colonnes utiles de User_). */
+export interface ChannelMessageAuthor {
+  /** User_.id */
+  id: number;
+  /** Nom affiche (first_name + last_name, ou username). */
+  displayName: string;
+  /** User_.avatar_color (ex. '#0a5cc0'). */
+  avatarColor?: string;
+}
+
+/** Message d'un canal de discussion (≈ Post d'un Forum de f_type 'Discussion'). */
+export interface ChannelMessage {
+  /** Post.id */
+  id: number;
+  /** Post.content */
+  content: string;
+  /** Post.created_at (timestamp ISO). */
+  created_at: string;
+  /** Auteur du message. */
+  author: ChannelMessageAuthor;
+}
+
 export interface CourseChannel {
   /** Identifiant du canal/forum/quiz (SERIAL). */
   id: number;
@@ -9,6 +31,23 @@ export interface CourseChannel {
   name: string;
   /** Type logique du canal (quiz, text, forum, etc.). */
   type: string;
+  /** Messages du canal (uniquement pour un canal de discussion). */
+  messages?: ChannelMessage[];
+}
+
+/**
+ * Reference unique d'un canal dans la liste fusionnee.
+ * Quiz et Forum ont des id_ SERIAL independants (un quiz et un forum peuvent
+ * tous deux avoir id=1) : il faut donc le type ET l'id pour identifier une ligne.
+ */
+export interface ChannelRef {
+  id: number;
+  type: string;
+}
+
+/** Deux references designent-elles le meme canal ? */
+export function isSameChannel(a: ChannelRef | undefined, b: ChannelRef | undefined): boolean {
+  return a !== undefined && b !== undefined && a.id === b.id && a.type === b.type;
 }
 
 export interface ChannelTypeDefinition {
@@ -25,10 +64,10 @@ interface CourseChannelListProps {
   channels?: CourseChannel[];
   /** Types supportés par défaut, extensibles par le parent. */
   typeDefinitions?: ChannelTypeDefinition[];
-  /** Canal actuellement sélectionné. */
-  selectedChannelId?: number;
+  /** Canal actuellement sélectionné (type + id : les id_ se chevauchent entre quiz/forum). */
+  selectedChannel?: ChannelRef;
   /** Callback de sélection d'un canal. */
-  onSelectChannel?: (channelId: number) => void;
+  onSelectChannel?: (channel: ChannelRef) => void;
   /**
    * Callback d'ouverture d'un canal (vue a implementer).
    * Déclenché en même temps que la selection — distinct pour permettre
@@ -51,7 +90,7 @@ const defaultTypeDefinitions: ChannelTypeDefinition[] = [
 const CourseChannelList: React.FC<CourseChannelListProps> = ({
   channels = [],
   typeDefinitions = defaultTypeDefinitions,
-  selectedChannelId,
+  selectedChannel,
   onSelectChannel,
   onOpenChannel,
 }) => {
@@ -94,22 +133,25 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
 
             {typedChannels.length > 0 ? (
               <ul className={styles.channelList} role="list">
-                {typedChannels.map((channel) => (
-                  <li key={channel.id} className={styles.channelItem}>
-                    <button
-                      type="button"
-                      className={`${styles.channelButton} ${selectedChannelId === channel.id ? styles.channelButtonActive : ''}`}
-                      onClick={() => {
-                        onSelectChannel?.(channel.id);
-                        onOpenChannel?.(channel);
-                      }}
-                      aria-current={selectedChannelId === channel.id ? 'page' : undefined}
-                    >
-                      <span className={styles.channelPrefix}>{getPrefixForType(channel.type)}</span>
-                      <span className={styles.channelName}>{channel.name}</span>
-                    </button>
-                  </li>
-                ))}
+                {typedChannels.map((channel) => {
+                  const isSelected = isSameChannel(selectedChannel, channel);
+                  return (
+                    <li key={channel.id} className={styles.channelItem}>
+                      <button
+                        type="button"
+                        className={`${styles.channelButton} ${isSelected ? styles.channelButtonActive : ''}`}
+                        onClick={() => {
+                          onSelectChannel?.({ id: channel.id, type: channel.type });
+                          onOpenChannel?.(channel);
+                        }}
+                        aria-current={isSelected ? 'page' : undefined}
+                      >
+                        <span className={styles.channelPrefix}>{getPrefixForType(channel.type)}</span>
+                        <span className={styles.channelName}>{channel.name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className={styles.emptyLabel}>{definition.emptyLabel}</p>

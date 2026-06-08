@@ -1,4 +1,4 @@
-import { type CourseChannel } from './CourseChannelList';
+import { type ChannelMessage, type CourseChannel } from './CourseChannelList';
 
 export interface QuizChannelSource {
   /** Identifiant du quiz (Quiz.id, SERIAL). */
@@ -23,6 +23,8 @@ export interface ForumChannelSource {
   title: string;
   /** F_Type du forum ; defaut 'Thread' (forum) si absent. */
   f_type?: ForumType;
+  /** Messages du forum (pertinent surtout pour un canal 'Discussion'). */
+  messages?: ChannelMessage[];
 }
 
 export interface CourseChannelSources {
@@ -53,6 +55,7 @@ export function normalizeCourseChannelsFromSources(sources: CourseChannelSources
     id: forum.id,
     name: forum.title,
     type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.f_type ?? 'Thread'],
+    messages: forum.messages,
   }));
 
   return [...normalizedChannels, ...normalizedQuizzes, ...normalizedForums];

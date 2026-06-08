@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import ProgramMenu, { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
-import { type CourseChannel } from '../../components/CourseChannelList/CourseChannelList.tsx';
+import {
+  type ChannelRef,
+  type CourseChannel,
+  isSameChannel,
+} from '../../components/CourseChannelList/CourseChannelList.tsx';
 import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
 import { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
@@ -27,7 +31,7 @@ export default function Dashboard() {
     dashboardPrograms && dashboardPrograms.length > 0 ?  dashboardPrograms[0].id : -1
   );
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
-  const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(undefined);
+  const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
 
   // TODO : remplacer par une navigation ou un rendu de vue lors de l'implémentation des canaux.
   const handleOpenChannel = (channel: CourseChannel) => {
@@ -61,7 +65,7 @@ export default function Dashboard() {
       })
     : [];
   const selectedChannel =
-    selectedCourseChannels.find((channel) => channel.id === selectedChannelId) ?? null;
+    selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
   const activeProgramLabel = getProgramDisplayLabel(activeProgram);
   const selectedCourseLabel = selectedCourse
     ? getCourseDisplayLabel(selectedCourse)
@@ -82,7 +86,7 @@ export default function Dashboard() {
             activeProgramId={activeProgramId}
             onSelectProgram={(nextProgramId) => {
               setActiveProgramId(nextProgramId);
-              setSelectedChannelId(undefined);
+              setSelectedChannelRef(undefined);
 
               const nextProgram = dashboardPrograms.find((program) => program.id === nextProgramId);
 
@@ -99,10 +103,10 @@ export default function Dashboard() {
             selectedCourseId={effectiveSelectedCourseId}
             onSelectCourse={(courseId) => {
               setSelectedCourseId(courseId);
-              setSelectedChannelId(undefined);
+              setSelectedChannelRef(undefined);
             }}
-            selectedChannelId={selectedChannelId}
-            onSelectChannel={setSelectedChannelId}
+            selectedChannel={selectedChannelRef}
+            onSelectChannel={setSelectedChannelRef}
             onOpenChannel={handleOpenChannel}
           />
         }
