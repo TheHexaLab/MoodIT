@@ -38,15 +38,15 @@ interface CourseMenuProps {
   /** Cours disponibles pour le programme actif. */
   courses?: Course[];
   /** Cours actuellement sélectionné dans la liste déroulante. */
-  selectedCourseId?: string;
+  selectedCourseId?: number;
   /** Callback lors d'un changement de cours. */
-  onSelectCourse?: (courseId: string) => void;
+  onSelectCourse?: (courseId: number) => void;
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
   /** Canal actuellement sélectionné. */
-  selectedChannelId?: string;
+  selectedChannelId?: number;
   /** Callback lors d'un changement de canal. */
-  onSelectChannel?: (channelId: string) => void;
+  onSelectChannel?: (channelId: number) => void;
   /**
    * Callback d'ouverture d'un canal (vue a implementer).
    * Distinct de "onSelectChannel" pour permettre une navigation indépendante.
@@ -75,7 +75,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   currentUser,
 }) => {
   const courseOptions = courses.map((course) => ({
-    id: String(course.id),
+    id: course.id,
     label: formatCourseLabel(course),
     channels: normalizeCourseChannelsFromSources({
       channels: course.channels,
@@ -107,7 +107,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
               id="course-menu-select"
               className={styles.courseSelect}
               value={selectedCourse?.id ?? ''}
-              onChange={(event) => onSelectCourse?.(event.target.value)}
+              onChange={(event) => onSelectCourse?.(Number(event.target.value))}
             >
               {courseOptions.map((course) => (
                 <option key={course.id} value={course.id}>
@@ -184,9 +184,9 @@ function formatCourseLabel(course: Course): string {
 
 function getEffectiveSelectedChannelId(
   channels: CourseChannel[],
-  selectedChannelId: string | undefined
-): string | undefined {
-  if (!selectedChannelId) return undefined;
+  selectedChannelId: number | undefined
+): number | undefined {
+  if (selectedChannelId === undefined) return undefined;
   return channels.some((channel) => channel.id === selectedChannelId)
     ? selectedChannelId
     : undefined;

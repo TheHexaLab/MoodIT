@@ -9,22 +9,22 @@ export interface Program {
   /** Libelle UI optionnel (override l'affichage par defaut). */
   label?: string;
   /** Nom du programme (Program.name), ex. "Genie informatique". */
-  name?: string;
+  name: string;
   /** Code du programme (Program.code), ex. "GIN". */
-  code?: string;
+  code: string;
   /** Cohorte du programme (Program.cohort), ex. "71". */
-  cohort?: string;
+  cohort: string;
   /** Couleur du programme (Program.color), ex. "#1a6e3c". */
-  color?: string;
+  color: string;
 }
 
 interface ProgramMenuProps {
   /** Programmes assignes a l'utilisateur. */
   programs?: Program[];
   /** Programme actuellement selectionne. */
-  activeProgramId?: string;
+  activeProgramId?: number;
   /** Callback de selection d'un programme. */
-  onSelectProgram?: (id: string) => void;
+  onSelectProgram?: (id: number) => void;
   /** Callback du bouton d'ajout (implementation a venir). */
   onAddProgram?: () => void;
 }
@@ -49,11 +49,6 @@ function getInitials(label: string): string {
   }
 
   return normalized.slice(0, 2).toUpperCase();
-}
-
-/** Retourne l'identifiant du programme sous forme de chaine (etat UI). */
-function getProgramId(program: Program): string {
-  return String(program.id);
 }
 
 /**
@@ -112,36 +107,42 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
       <span className={styles.divider} />
 
       {/* Liste des programmes */}
-      <ul className={styles.programList} role="list">
-        {programs.map((prog) => {
-          const programId = getProgramId(prog);
-          const programLabel = getProgramLabel(prog);
-          const isActive = programId === activeProgramId;
+      {!programs || programs.length <= 0 ? (
+        <></>
+      ) : (
+        <ul className={styles.programList} role="list">
+          {programs.map((prog) => {
+            const programId = prog.id;
+            const programLabel = getProgramLabel(prog);
+            const isActive = programId === activeProgramId;
 
-          return (
-            <li key={programId} className={styles.programItem}>
-              {isActive && <span className={styles.activePill} aria-hidden="true" />}
-              <button
-                className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
-                title={programLabel}
-                aria-label={programLabel}
-                aria-current={isActive ? 'page' : undefined}
-                style={
-                  prog.color
-                    ? ({
-                        '--program-color': prog.color,
-                        color: contrastingTextColor(prog.color),
-                      } as React.CSSProperties)
-                    : undefined
-                }
+            return (
+              <li
+                key={programId}
+                className={`${styles.programItem} ${isActive ? styles.programItemActive : ''}`}
                 onClick={() => onSelectProgram?.(programId)}
               >
-                <span className={styles.programInitials}>{getProgramBadge(prog)}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                <button
+                  className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
+                  title={programLabel}
+                  aria-label={programLabel}
+                  aria-current={isActive ? 'page' : undefined}
+                  style={
+                    prog.color
+                      ? ({
+                          '--program-color': prog.color,
+                          color: contrastingTextColor(prog.color),
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <span className={styles.programInitials}>{getProgramBadge(prog)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {/* Bouton d'ajout (placeholder d'action) */}
       <button

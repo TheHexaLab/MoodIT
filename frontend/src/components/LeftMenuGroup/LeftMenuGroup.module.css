@@ -22,7 +22,9 @@
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 0.1875rem;
+    /* Pixel entier : un gap fractionnaire (0.2rem = 3.2px) etait arrondi
+       differemment entre les lignes, rendant les deux espaces inegaux. */
+    gap: 3px;
     width: 2rem;
     height: 2rem;
     border: none;
@@ -37,10 +39,13 @@
 }
 
 .hamburgerLine {
-    width: 0.6875rem;
-    height: 1.5px;
-    border-radius: 999px;
+    width: 1rem;
+    /* Pixel entier : evite l'arrondi sous-pixel qui rendait la ligne du milieu
+       d'une epaisseur differente des deux autres. */
+    height: 2px;
+    border-radius: 1rem;
     background: var(--text-muted);
+    box-sizing: border-box;
 }
 
 .backdrop {
@@ -50,7 +55,8 @@
 @media (max-width: 900px) {
     .sidebarShell,
     .backdrop {
-        --program-menu-width: clamp(2.875rem, 2.6rem + 1vw, 3.5rem);
+        /* Doit refleter ProgramMenu .rail (--rail-width: 4.5rem) et CourseMenu .sidebar. */
+        --program-menu-width: 4.5rem;
         --course-menu-width: clamp(11rem, 10rem + 5vw, 14rem);
         --drawer-width: calc(var(--program-menu-width) + var(--course-menu-width));
     }
@@ -109,8 +115,11 @@
         position: fixed;
         top: 0;
         left: 0;
+        /* Largeur definie = largeur reelle du tiroir : evite la dependance circulaire
+           avec .sidebarMenus (width:100%) et le rendu fantome pendant la translation. */
         width: min(var(--drawer-width), 92vw);
         height: 100dvh;
+        overflow: hidden;
         transform: translateX(-100%);
         transition: transform 0.2s ease-out;
         z-index: 90;
@@ -125,11 +134,11 @@
     }
 
     .backdrop {
+        /* Scrim plein ecran : le tiroir (opaque, z-index superieur) glisse par-dessus.
+           Important : ne pas demarrer le scrim a drawer-width, sinon un ecart clair de
+           la largeur du menu apparait pendant la translation (effet "menu fantome vide"). */
         position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: min(var(--drawer-width), 92vw);
+        inset: 0;
         z-index: 80;
         border: none;
         background: var(--scrim);

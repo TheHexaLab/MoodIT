@@ -45,12 +45,12 @@ const FORUM_TYPE_TO_CHANNEL_TYPE: Record<ForumType, string> = {
 export function normalizeCourseChannelsFromSources(sources: CourseChannelSources): CourseChannel[] {
   const normalizedChannels = sources.channels ?? [];
   const normalizedQuizzes = (sources.quizzes ?? []).map((quiz) => ({
-    id: String(quiz.id),
+    id: quiz.id,
     name: quiz.title,
     type: 'quiz',
   }));
   const normalizedForums = (sources.forums ?? []).map((forum) => ({
-    id: String(forum.id),
+    id: forum.id,
     name: forum.title,
     type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.f_type ?? 'Thread'],
   }));

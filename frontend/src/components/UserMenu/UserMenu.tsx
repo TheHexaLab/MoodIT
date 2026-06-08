@@ -2,7 +2,7 @@ import React from 'react';
 import styles from './UserMenu.module.css';
 
 export interface UserMenuUser {
-  id?: string | number;
+  id?: number;
   username?: string;
   firstName?: string;
   lastName?: string;

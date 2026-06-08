@@ -1,0 +1,39 @@
+import React from 'react';
+import styles from './ChannelView.module.css';
+import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
+import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+
+interface ChannelViewProps {
+  /** Canal selectionne (forum de f_type 'Discussion', rendu comme un canal/chat). */
+  channel: CourseChannel;
+  /** Libelle du programme actif (contexte d'en-tete). */
+  programLabel?: string;
+  /** Libelle du cours selectionne (contexte d'en-tete). */
+  courseLabel?: string;
+}
+
+/**
+ * Etat 5 — vue d'un canal de discussion (f_type 'Discussion').
+ * Echange libre facon chat. Contenu a implementer.
+ */
+const ChannelView: React.FC<ChannelViewProps> = ({ channel, programLabel, courseLabel }) => (
+  <>
+    <header className={styles.header}>
+      {courseLabel && <p className={styles.meta}>{courseLabel}</p>}
+      <h1 className={styles.title}>
+        <span className={styles.prefix}>{getPrefixForType(channel.type)}</span>
+        {channel.name}
+      </h1>
+    </header>
+
+    <div className={styles.body}>
+      <p className={styles.placeholder}>
+        Canal de discussion{programLabel ? ` du programme ${programLabel}` : ''}.
+        <br />
+        La messagerie de ce canal sera affichée ici (à implémenter).
+      </p>
+    </div>
+  </>
+);
+
+export default ChannelView;

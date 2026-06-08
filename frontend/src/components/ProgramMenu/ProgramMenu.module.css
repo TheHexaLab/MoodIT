@@ -3,7 +3,7 @@
     --slot-size: 3rem;
     --slot-radius: 1rem;
     --list-gap: 0.75rem;
-    --rail-padding-y: clamp(0.5rem, 0.35rem + 0.55vw, 0.75rem);
+    --rail-padding-y: 0.75rem;
     --divider-width: 2rem;
     --divider-height: 0.125rem;
     display: flex;
@@ -84,17 +84,41 @@
     align-items: center;
     justify-content: center;
     width: 100%;
+    cursor: pointer;
 }
 
-.activePill {
+/* Pastille laterale unique pour les deux etats (survol et selectionne).
+   Un seul element anime en scaleY → la transition survol → selectionne est fluide.
+   Hauteur de reference = etat selectionne (2.5rem) ; le survol n'en montre qu'une partie. */
+.programItem::before {
+    content: '';
     position: absolute;
     left: 0;
     top: 50%;
-    transform: translateY(-50%);
     width: 0.25rem;
     height: 2.5rem;
     border-radius: 0 0.1875rem 0.1875rem 0;
     background: var(--brand-teal);
+    transform: translateY(-50%) scaleY(0);
+    transform-origin: center;
+    opacity: 0;
+    transition: transform 0.18s ease, opacity 0.15s ease;
+    pointer-events: none;
+}
+
+/* Survol : barre un peu moins haute que l'etat selectionne. */
+.programItem:hover::before {
+    transform: translateY(-50%) scaleY(0.5);
+    opacity: 1;
+}
+
+/* Selectionne : pleine hauteur. Classe portee par le <li> lui-meme (et non via
+   :has sur un enfant) pour que la transition se joue de maniere fiable a la
+   selection ET a la deselection. Double classe → meme specificite que :hover ;
+   placee apres → l'emporte quand on survole le programme actif. */
+.programItem.programItemActive::before {
+    transform: translateY(-50%) scaleY(1);
+    opacity: 1;
 }
 
 .programBtn {
@@ -126,7 +150,7 @@
     box-shadow: 0 0 0 2px var(--brand-teal);
 }
 
-.programBtn:hover {
+.programItem:hover .programBtn {
     border-radius: var(--slot-radius);
 }
 
@@ -173,7 +197,7 @@
 
 @media (max-height: 720px) {
     .rail {
-        --rail-padding-y: 0.5rem;
+        --rail-padding-y: 0.75rem;
     }
 }
 
@@ -185,14 +209,15 @@
 
 @media (min-width: 768px) {
     .rail {
-        --rail-padding-y: clamp(0.625rem, 0.45rem + 0.65vw, 0.875rem);
+        --rail-padding-y: 0.75rem;
         --list-gap: 0.75rem;
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .programBtn,
-    .addBtn {
+    .addBtn,
+    .programItem::before {
         transition: none;
     }
 }

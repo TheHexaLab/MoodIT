@@ -3,7 +3,8 @@ import styles from './CourseChannelList.module.css';
 import { getPrefixForType } from './channelTypePrefix';
 
 export interface CourseChannel {
-  id: string;
+  /** Identifiant du canal/forum/quiz (SERIAL). */
+  id: number;
   /** Nom affiche dans la liste. */
   name: string;
   /** Type logique du canal (quiz, text, forum, etc.). */
@@ -25,9 +26,9 @@ interface CourseChannelListProps {
   /** Types supportés par défaut, extensibles par le parent. */
   typeDefinitions?: ChannelTypeDefinition[];
   /** Canal actuellement sélectionné. */
-  selectedChannelId?: string;
+  selectedChannelId?: number;
   /** Callback de sélection d'un canal. */
-  onSelectChannel?: (channelId: string) => void;
+  onSelectChannel?: (channelId: number) => void;
   /**
    * Callback d'ouverture d'un canal (vue a implementer).
    * Déclenché en même temps que la selection — distinct pour permettre
