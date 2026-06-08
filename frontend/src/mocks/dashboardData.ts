@@ -88,32 +88,95 @@ export const dashboardProgramsMock: DemoProgram[] = [
               {
                 id: 1,
                 content: 'Salut tout le monde ! Bienvenue dans le canal du cours 👋',
-                created_at: '2026-06-07T09:02:00',
-                author: { id: 1, displayName: 'Admin', avatarColor: '#8b1a1a' },
+                created_at: '2026-06-05T09:02:00',
+                author: {
+                  id: 1,
+                  username: 'admin',
+                  first_name: 'Admin',
+                  last_name: 'Admin',
+                  avatar_color: '#8b1a1a',
+                },
               },
               {
                 id: 2,
                 content: 'Est-ce que le TP de la semaine 1 est deja disponible ?',
-                created_at: '2026-06-07T09:15:00',
-                author: { id: 2, displayName: 'Rosie HG', avatarColor: '#0a5cc0' },
+                created_at: '2026-06-05T09:15:00',
+                author: {
+                  id: 2,
+                  username: 'rosie1234',
+                  first_name: 'Rosie',
+                  last_name: 'HG',
+                  avatar_color: '#0a5cc0',
+                },
               },
               {
                 id: 3,
                 content: 'Oui, il est dans la section ressources. La remise est vendredi prochain.',
-                created_at: '2026-06-07T09:18:00',
-                author: { id: 3, displayName: 'Mich Normand', avatarColor: '#1a6e3c' },
+                created_at: '2026-06-06T14:18:00',
+                author: {
+                  id: 3,
+                  username: 'mich1234',
+                  first_name: 'Mich',
+                  last_name: 'Normand',
+                  avatar_color: '#1a6e3c',
+                },
               },
               {
                 id: 4,
                 content: 'Merci ! Quelqu\'un veut former une equipe pour reviser avant le quiz ?',
                 created_at: '2026-06-07T09:24:00',
-                author: { id: 2, displayName: 'Rosie HG', avatarColor: '#0a5cc0' },
+                author: {
+                  id: 2,
+                  username: 'rosie1234',
+                  first_name: 'Rosie',
+                  last_name: 'HG',
+                  avatar_color: '#0a5cc0',
+                },
               },
               {
                 id: 5,
                 content: 'Je suis partant 🙌 On peut se voir a la biblio demain midi.',
-                created_at: '2026-06-07T09:31:00',
-                author: { id: 3, displayName: 'Mich Normand', avatarColor: '#1a6e3c' },
+                created_at: '2026-06-07T11:31:00',
+                author: {
+                  id: 3,
+                  username: 'mich1234',
+                  first_name: 'Mich',
+                  last_name: 'Normand',
+                  avatar_color: '#1a6e3c',
+                },
+              },
+              {
+                id: 6,
+                content: 'Petit rappel : la remise du TP1 est ce vendredi a 23 h 59 ⏰',
+                created_at: '2026-06-08T08:05:00',
+                author: {
+                  id: 1,
+                  username: 'admin',
+                  first_name: 'Admin',
+                  last_name: 'Admin',
+                  avatar_color: '#8b1a1a',
+                },
+              },
+              {
+                id: 7,
+                content:
+                  "Merci pour le rappel ! J'en profite pour resumer ce qu'on a convenu hier a la biblio, " +
+                  "histoire que tout le monde soit sur la meme longueur d'onde. On se separe le travail en trois " +
+                  'parties : Rosie prend la modelisation de la base de donnees et le diagramme entite-association, ' +
+                  'moi je m\'occupe de la couche d\'acces aux donnees et des requetes, et il nous reste a trouver ' +
+                  'quelqu\'un pour la partie interface. Pour la remise, on vise mercredi soir comme echeance interne ' +
+                  'afin de garder deux jours de marge pour les tests et la relecture avant la vraie date limite. ' +
+                  "Si quelqu'un voit un probleme avec cette repartition ou veut echanger une section, dites-le " +
+                  'avant ce soir pour qu\'on puisse ajuster. N\'hesitez pas aussi a pousser vos branches au fur et ' +
+                  'a mesure plutot que de tout garder en local jusqu\'a la fin 🙏',
+                created_at: '2026-06-08T08:42:00',
+                author: {
+                  id: 2,
+                  username: 'rosie1234',
+                  first_name: 'Rosie',
+                  last_name: 'HG',
+                  avatar_color: '#0a5cc0',
+                },
               },
             ],
           },

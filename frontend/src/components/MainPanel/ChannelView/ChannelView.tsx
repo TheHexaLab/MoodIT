@@ -1,9 +1,12 @@
 import React from 'react';
 import styles from './ChannelView.module.css';
-import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
+import {
+  type ChannelMessageAuthor,
+  type CourseChannel,
+} from '../../CourseChannelList/CourseChannelList';
 import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
 import { type Course } from '../../CourseMenu/CourseMenu';
-import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
+import { Send } from '../../../assets/Send';
 import { contrastingTextColor } from '../../../helpers/color';
 
 interface ChannelViewProps {
@@ -23,10 +26,33 @@ function formatTime(iso: string): string {
   return new Intl.DateTimeFormat('fr-CA', { hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
-/** Initiale affichee dans l'avatar. */
-function getInitial(name: string): string {
-  const trimmed = name.trim();
-  return trimmed ? trimmed[0].toUpperCase() : '?';
+/** Cle de jour (local) pour detecter un changement de date entre deux messages. */
+function getDayKey(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** Libelle du separateur de date (ex. "5 juin 2026"). */
+function formatDaySeparator(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('fr-CA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+/** Nom affiche d'un auteur (first_name + last_name). */
+function getAuthorName(author: ChannelMessageAuthor): string {
+  return `${author.first_name} ${author.last_name}`.trim() || author.username;
+}
+
+/** Deux initiales affichees dans l'avatar (first_name + last_name). */
+function getInitials(author: ChannelMessageAuthor): string {
+  const initials = `${author.first_name[0] ?? ''}${author.last_name[0] ?? ''}`.trim();
+  return (initials || author.username[0] || '?').toUpperCase();
 }
 
 /**
@@ -35,55 +61,72 @@ function getInitial(name: string): string {
  */
 const ChannelView: React.FC<ChannelViewProps> = ({ course, channel }: ChannelViewProps) => {
   const messages = channel.messages ?? [];
-  const courseLabel = getCourseDisplayLabel(course);
 
   return (
-    <div className={styles.channelView}>
-      <header className={styles.header}>
-        {courseLabel && <p className={styles.meta}>{courseLabel}</p>}
-        <h1 className={styles.title}>
-          <span className={styles.prefix}>{getPrefixForType(channel.type)}</span>
+    <div className={styles['channel-view']}>
+      <header>
+        <p>
+          <span>{getPrefixForType(channel.type)}</span>
           {channel.name}
-        </h1>
+        </p>
+        <span />
+        <p>{course.title}</p>
       </header>
 
-      <div className={styles.body}>
+      <div>
         {messages.length === 0 ? (
-          <p className={styles.placeholder}>Aucun message dans ce canal pour l'instant.</p>
+          <div>
+            <p>Aucun message dans ce canal pour l'instant.</p>
+          </div>
         ) : (
-          <ul className={styles.messageList}>
-            {messages.map((message) => {
-              const avatarColor = message.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
+          <ul>
+            {messages.map((message, index) => {
+              const avatarColor = message.author.avatar_color ?? DEFAULT_AVATAR_COLOR;
+              const authorName = getAuthorName(message.author);
+              const previous = messages[index - 1];
+              const showDateSeparator =
+                !previous || getDayKey(previous.created_at) !== getDayKey(message.created_at);
               return (
-                <li key={message.id} className={styles.message}>
-                  <span
-                    className={styles.avatar}
-                    style={{ background: avatarColor, color: contrastingTextColor(avatarColor) }}
-                    aria-hidden="true"
-                  >
-                    {getInitial(message.author.displayName)}
-                  </span>
-                  <div className={styles.messageBody}>
-                    <p className={styles.messageHeader}>
-                      <span className={styles.messageAuthor}>{message.author.displayName}</span>
-                      <span className={styles.messageTime}>{formatTime(message.created_at)}</span>
-                    </p>
-                    <p className={styles.messageContent}>{message.content}</p>
-                  </div>
-                </li>
+                <React.Fragment key={message.id}>
+                  {showDateSeparator && (
+                    <li role="separator">
+                      <span>{formatDaySeparator(message.created_at)}</span>
+                    </li>
+                  )}
+                  <li role="message">
+                    <span
+                      style={{ background: avatarColor, color: contrastingTextColor(avatarColor) }}
+                    >
+                      {getInitials(message.author)}
+                    </span>
+                    <div>
+                      <p>
+                        <span>{authorName}</span>
+                        <span>{formatTime(message.created_at)}</span>
+                      </p>
+                      <p>{message.content}</p>
+                    </div>
+                  </li>
+                </React.Fragment>
               );
             })}
           </ul>
         )}
 
-        <div className={styles.composer}>
-          <input
-            className={styles.composerInput}
-            type="text"
-            placeholder={`Envoyer un message dans #${channel.name}`}
-            aria-label={`Envoyer un message dans ${channel.name}`}
-            disabled
-          />
+        <div>
+          <div>
+            <button type="button" aria-label="Ajouter une pièce jointe">
+              +
+            </button>
+            <input
+              type="text"
+              placeholder={`Envoyer un message dans #${channel.name}`}
+              aria-label={`Envoyer un message dans ${channel.name}`}
+            />
+            <button type="button" aria-label="Envoyer le message">
+              <Send width={18} height={18} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@
     --bg-sidebar: #f8f8fb;
     --bg-surface: #ffffff;
     --bg-input: #ffffff;
+    --bg-message-input: #F8F8FB;
     --bg-user-panel: #eef0f4;
     --bg-vote-pill: #f2f2f5;
     --bg-active-channel: #e9f1fc;
@@ -48,6 +49,7 @@
         --bg-sidebar: #1c1f28;
         --bg-surface: #1c1f28;
         --bg-input: #262b36;
+        --bg-message-input: #262B36;
         --bg-user-panel:#16181f;
         --bg-vote-pill: #262b36;
         --bg-active-channel: #243049;
@@ -71,6 +73,7 @@
     --bg-sidebar: #1c1f28;
     --bg-surface: #1c1f28;
     --bg-input: #262b36;
+    --bg-message-input: #262B36;
     --bg-user-panel: #16181f;
     --bg-vote-pill: #262b36;
     --bg-active-channel: #243049;

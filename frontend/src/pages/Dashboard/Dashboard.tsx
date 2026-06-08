@@ -111,8 +111,8 @@ export default function Dashboard() {
       <MainPanel
         isAdmin={isAdminMock}
         program={activeProgram}
-        selectedCourse={effectiveSelectedCourseId}
-        selectedChannel={selectedChannelRef}
+        selectedCourse={effectiveSelectedCourseId ?? null}
+        selectedChannel={selectedChannelRef ?? null}
         onAddProgram={handleAddProgram}
         onAddCourse={handleAddCourse}
         onCreateChannel={handleCreateChannel}

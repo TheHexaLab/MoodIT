@@ -6,10 +6,14 @@ import { getPrefixForType } from './channelTypePrefix';
 export interface ChannelMessageAuthor {
   /** User_.id */
   id: number;
-  /** Nom affiche (first_name + last_name, ou username). */
-  displayName: string;
+  /** User_.username */
+  username: string;
+  /** User_.first_name */
+  first_name: string;
+  /** User_.last_name */
+  last_name: string;
   /** User_.avatar_color (ex. '#0a5cc0'). */
-  avatarColor?: string;
+  avatar_color?: string;
 }
 
 /** Message d'un canal de discussion (≈ Post d'un Forum de f_type 'Discussion'). */
@@ -46,8 +50,11 @@ export interface ChannelRef {
 }
 
 /** Deux references designent-elles le meme canal ? */
-export function isSameChannel(a: ChannelRef | undefined, b: ChannelRef | undefined): boolean {
-  return a !== undefined && b !== undefined && a.id === b.id && a.type === b.type;
+export function isSameChannel(
+  a: ChannelRef | null | undefined,
+  b: ChannelRef | null | undefined
+): boolean {
+  return a != null && b != null && a.id === b.id && a.type === b.type;
 }
 
 export interface ChannelTypeDefinition {
