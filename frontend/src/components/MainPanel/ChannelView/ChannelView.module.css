@@ -276,7 +276,7 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-
 }
 
 /* Actions d'un message (repondre / modifier / supprimer) : revelees au survol. */
-div.channel-view > div > ul > li[role="message"] > div:last-of-type {
+div.channel-view > div > ul > li[role="message"] > div[role="message-actions"]:last-of-type {
     flex-shrink: 0;
     align-self: flex-start;
     display: flex;
