@@ -183,8 +183,22 @@ export default function Register() {
                   onChange={(e) => setAcceptTerms(e.target.checked)}
                 />
                 <span>
-                  J'accepte les <a href="#">conditions d'utilisation</a> et la{' '}
-                  <a href="#">politique de confidentialité</a>
+                  J'accepte les{' '}
+                  <a
+                    href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    conditions d'utilisation
+                  </a>{' '}
+                  et la{' '}
+                  <a
+                    href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    politique de confidentialité
+                  </a>
                 </span>
               </label>
 
