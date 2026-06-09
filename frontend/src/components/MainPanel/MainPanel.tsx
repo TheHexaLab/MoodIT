@@ -1,9 +1,20 @@
 import React from 'react';
 import styles from './MainPanel.module.css';
-import { type ChannelRef, isSameChannel } from '../CourseChannelList/CourseChannelList.tsx';
+import {
+  type ChannelMessage,
+  type ChannelMessageAuthor,
+  type ChannelRef,
+  isSameChannel,
+} from '../CourseChannelList/CourseChannelList.tsx';
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources.ts';
 import { type Program } from '../ProgramMenu/ProgramMenu.tsx';
-import ChannelView from './ChannelView/ChannelView.tsx';
+import { type MaybePromise } from './ChannelView/useChannelMessages.ts';
+import ChannelView, {
+  type ChannelSocket,
+  type DeleteMessageHandler,
+  type EditMessageHandler,
+  type SendMessageHandler,
+} from './ChannelView/ChannelView.tsx';
 import ForumView from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
@@ -20,6 +31,18 @@ interface MainPanelProps {
   selectedCourse: number | null;
   /** Reference (type + id) du canal/forum/quiz sélectionné (null → état 4). */
   selectedChannel: ChannelRef | null;
+  /** Utilisateur connecte (auteur des messages envoyes dans un canal). */
+  currentUser: ChannelMessageAuthor;
+  /** Chargement de l'historique d'un canal (API-ready ; voir ChannelView). */
+  onFetchMessages?: (channelId: number) => MaybePromise<ChannelMessage[]>;
+  /** Envoi d'un message dans le canal actif (API-ready ; voir ChannelView). */
+  onSendMessage?: SendMessageHandler;
+  /** Modification d'un de ses messages (API-ready ; voir ChannelView). */
+  onEditMessage?: EditMessageHandler;
+  /** Suppression d'un de ses messages (API-ready ; voir ChannelView). */
+  onDeleteMessage?: DeleteMessageHandler;
+  /** Socket temps reel (optionnel) : reception des messages des autres users. */
+  socket?: ChannelSocket;
   /** Ouvre le formulaire d'ajout / d'adhésion a un programme (admin). */
   onAddProgram?: () => void;
   /** Ouvre le formulaire d'ajout de cours (admin). */
@@ -43,6 +66,12 @@ const MainPanel: React.FC<MainPanelProps> = ({
   program,
   selectedCourse,
   selectedChannel,
+  currentUser,
+  onFetchMessages,
+  onSendMessage,
+  onEditMessage,
+  onDeleteMessage,
+  socket,
   onAddProgram,
   onAddCourse,
   onCreateChannel,
@@ -92,7 +121,19 @@ const MainPanel: React.FC<MainPanelProps> = ({
         return <QuizView course={course} channel={channel} />;
       case 'text': // f_type 'Discussion'
       default:
-        return <ChannelView course={course} channel={channel} />;
+        return (
+          <ChannelView
+            key={`${channel.type}-${channel.id}`}
+            course={course}
+            channel={channel}
+            currentUser={currentUser}
+            onFetchMessages={onFetchMessages}
+            onSendMessage={onSendMessage}
+            onEditMessage={onEditMessage}
+            onDeleteMessage={onDeleteMessage}
+            socket={socket}
+          />
+        );
     }
   })();
 

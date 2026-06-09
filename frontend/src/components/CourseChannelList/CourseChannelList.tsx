@@ -26,6 +26,13 @@ export interface ChannelMessage {
   created_at: string;
   /** Auteur du message. */
   author: ChannelMessageAuthor;
+  /** Post.post_parent_id : id du message auquel celui-ci repond (null/absent sinon). */
+  post_parent_id?: number | null;
+  /**
+   * Identifiant genere cote client a l'envoi (nonce). Renvoye par l'API et par le
+   * broadcast WebSocket, il permet de dedupliquer le message optimiste de son echo.
+   */
+  client_msg_id?: string;
 }
 
 export interface CourseChannel {

@@ -113,6 +113,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
                 id: 3,
                 content: 'Oui, il est dans la section ressources. La remise est vendredi prochain.',
                 created_at: '2026-06-06T14:18:00',
+                post_parent_id: 2,
                 author: {
                   id: 3,
                   username: 'mich1234',

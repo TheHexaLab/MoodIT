@@ -2,12 +2,11 @@ import React from 'react';
 import styles from './UserMenu.module.css';
 
 export interface UserMenuUser {
-  id?: number;
-  username?: string;
-  firstName?: string;
-  lastName?: string;
-  displayName?: string;
-  avatarUrl?: string;
+  id: number;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatar_color: string;
 }
 
 interface UserMenuProps {
@@ -27,14 +26,15 @@ export default function UserMenu({ user, onClick }: UserMenuProps): React.ReactE
   const initials = getInitials(displayName);
 
   return (
-    <button className={styles.userMenu} type="button" onClick={onClick} aria-label="Compte utilisateur">
-      {user?.avatarUrl ? (
-        <img src={user.avatarUrl} alt={displayName} className={styles.userAvatarImage} />
-      ) : (
-        <span className={styles.userAvatarInitials} aria-hidden="true">
-          {initials}
-        </span>
-      )}
+    <button
+      className={styles.userMenu}
+      type="button"
+      onClick={onClick}
+      aria-label="Compte utilisateur"
+    >
+      <span className={styles.userAvatarInitials} aria-hidden="true">
+        {initials}
+      </span>
       <span className={styles.userInfo}>
         <span className={styles.userName}>{displayName}</span>
         <span className={styles.userHandle}>{handle}</span>
@@ -45,7 +45,6 @@ export default function UserMenu({ user, onClick }: UserMenuProps): React.ReactE
 
 function getDisplayName(user?: UserMenuUser | null): string {
   if (!user) return 'Utilisateur';
-  if (user.displayName?.trim()) return user.displayName.trim();
 
   const firstName = user.firstName?.trim() ?? '';
   const lastName = user.lastName?.trim() ?? '';

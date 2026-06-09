@@ -44,9 +44,19 @@ div.channel-view > header > span {
 }
 
 div.channel-view > header > p:last-of-type {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-muted);
     font-weight: 500;
     font-size: 0.8125rem;
+}
+
+/* Le nom du canal ne se compresse pas (le titre de cours se tronque avant). */
+div.channel-view > header > p:first-of-type {
+    flex-shrink: 0;
+    min-width: 0;
 }
 div.channel-view > div {
     flex: 1;
@@ -108,7 +118,78 @@ div.channel-view > div > ul::-webkit-scrollbar-button:vertical:decrement {
 div.channel-view > div > ul > li[role="message"] {
     display: flex;
     align-items: flex-start;
-    gap: 0.625rem;
+    flex-wrap: wrap;
+    column-gap: 0.625rem;
+    row-gap: 0.25rem;
+}
+
+/* Reference au message parent (reponse), facon Discord : ligne au-dessus du message. */
+div.channel-view > div > ul > li[role="message"] > button {
+    flex-basis: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0 0 0 3rem;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+
+/* Connecteur en equerre reliant la reference a l'avatar du message en dessous. */
+div.channel-view > div > ul > li[role="message"] > button::before {
+    content: '';
+    position: absolute;
+    left: 1.1rem;
+    top: 50%;
+    bottom: -0.35rem;
+    width: 1.5rem;
+    border-left: 2px solid var(--border-strong);
+    border-top: 2px solid var(--border-strong);
+    border-top-left-radius: 0.5rem;
+}
+
+div.channel-view > div > ul > li[role="message"] > button:disabled {
+    cursor: default;
+}
+
+div.channel-view > div > ul > li[role="message"] > button > .replyRefAvatar {
+    flex-shrink: 0;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Inter, sans-serif;
+    font-size: 0.5rem;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
+}
+
+div.channel-view > div > ul > li[role="message"] > button > .replyRefName {
+    flex-shrink: 0;
+    color: var(--text);
+    font-weight: 600;
+}
+
+div.channel-view > div > ul > li[role="message"] > button > .replyRefText {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+div.channel-view > div > ul > li[role="message"] > button:not(:disabled):hover > .replyRefText,
+div.channel-view > div > ul > li[role="message"] > button:not(:disabled):hover > .replyRefName {
+    color: var(--text);
 }
 
 /* Separateur de date facon Discord : libelle centre entre deux filets. */
@@ -138,6 +219,9 @@ div.channel-view > div > ul > li[role="separator"] > span {
 }
 
 div.channel-view > div > ul > li[role="message"] > span:first-of-type {
+    /* Positionne pour passer au-dessus du connecteur ::before de la reference. */
+    position: relative;
+    z-index: 1;
     flex-shrink: 0;
     width: 2.25rem;
     height: 2.25rem;
@@ -155,6 +239,7 @@ div.channel-view > div > ul > li[role="message"] > span:first-of-type {
 }
 
 div.channel-view > div > ul > li[role="message"] > div:first-of-type {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
@@ -190,10 +275,119 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-
     overflow-wrap: anywhere;
 }
 
+/* Actions d'un message (repondre / modifier / supprimer) : revelees au survol. */
+div.channel-view > div > ul > li[role="message"] > div:last-of-type {
+    flex-shrink: 0;
+    align-self: flex-start;
+    display: flex;
+    gap: 0.125rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+/* Appareils a pointeur : revele les actions au survol (ou focus clavier). */
+@media (hover: hover) {
+    div.channel-view > div > ul > li[role="message"]:hover > div:last-of-type,
+    div.channel-view > div > ul > li[role="message"]:focus-within > div:last-of-type {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+div.channel-view > div > ul > li[role="message"] > div:last-of-type > button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+div.channel-view > div > ul > li[role="message"] > div:last-of-type > button > svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+div.channel-view > div > ul > li[role="message"] > div:last-of-type > button:hover {
+    color: var(--brand-teal);
+}
+
+div.channel-view > div > ul > li[role="message"] > div:last-of-type > button[role="delete"]:hover {
+    color: var(--danger);
+}
+
+/* Formulaire d'edition en ligne d'un message. */
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-top: 0.125rem;
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > input:focus {
+    border-color: var(--border-strong);
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child {
+    display: flex;
+    gap: 0.5rem;
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button {
+    border: none;
+    border-radius: 0.375rem;
+    padding: 0.3rem 0.7rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    transition: filter 0.12s ease, color 0.12s ease;
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:first-of-type {
+    color: var(--text-muted);
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:first-of-type:hover {
+    color: var(--text);
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:last-of-type {
+    color: var(--brand-teal);
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:last-of-type:hover {
+    filter: brightness(1.1);
+}
+
 div.channel-view > div > div:first-child {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
+    gap: 0.625rem;
     flex-grow: 1;
 }
 
@@ -205,8 +399,85 @@ div.channel-view > div > div:first-child > p {
     text-align: center;
 }
 
+/* Spinner de l'état de chargement des messages. */
+div.channel-view > div > div:first-child > .spinner {
+    box-sizing: border-box;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 2px solid var(--text-muted);
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: channel-view-spin 0.6s linear infinite;
+}
+
+@keyframes channel-view-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.channel-view > div > div:first-child > .spinner {
+        animation-duration: 1.4s;
+    }
+}
+
+/* Bouton « Réessayer » de l'état d'erreur de chargement. */
+div.channel-view > div > div:first-child > button {
+    padding: 0.4rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+div.channel-view > div > div:first-child > button:hover {
+    border-color: var(--border-strong);
+}
+
+/* Contenu de la barre « repondre a … » (texte tronque + bouton d'annulation). */
+div.channel-view > div > div[role="reply"]:last-child > div > div > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+div.channel-view > div > div[role="reply"]:last-child > div > div > span > strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
+div.channel-view > div > div[role="reply"]:last-child > div > div > button {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+div.channel-view > div > div[role="reply"]:last-child > div > div > button:hover {
+    color: var(--text);
+}
+
 /* Zone de saisie (mock non fonctionnel pour l'instant). */
 div.channel-view > div > div:last-child {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     padding: 0.625rem 1rem;
@@ -217,22 +488,53 @@ div.channel-view > div > div:last-child {
 
 /* Champ de saisie : la bordure englobe l'input et les deux boutons. */
 div.channel-view > div > div:last-child > div {
+    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    padding: 0 0.375rem;
+    padding: 0.375rem 0.5rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     background: var(--bg-message-input);
+    transition: border-color 0.15s ease;
 }
 
-div.channel-view > div > div:last-child > div:focus-within {
-    border-color: var(--brand-teal);
+div.channel-view > div > div[role="reply"]:last-child > div {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
 }
 
-div.channel-view > div > div:last-child input {
+div.channel-view > div > div:last-child > div:focus-within,
+div.channel-view > div > div[role="reply"]:last-child > div:focus-within > div{
+    border-color: var(--border-strong);
+}
+
+div.channel-view > div > div[role="reply"]:last-child > div > div {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    width: calc(100% + 2px);
+    bottom: calc(100% - 1px);
+    left: -1px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.5rem 0.45rem 1rem;
+    border: 1px solid var(--border);
+    background: var(--bg-message-input);
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    border-top-left-radius: 0.5rem;
+    border-top-right-radius: 0.5rem;
+    transition: border-color 0.15s ease;
+}
+
+div.channel-view > div > div:last-child > div > input {
     flex: 1;
     min-width: 0;
     border: none;
@@ -245,7 +547,7 @@ div.channel-view > div > div:last-child input {
 }
 
 /* Boutons d'action a l'interieur du champ (+ a gauche, envoi a droite). */
-div.channel-view > div > div:last-child button {
+div.channel-view > div > div:last-child > div > button {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -254,28 +556,118 @@ div.channel-view > div > div:last-child button {
     height: 2rem;
     padding: 0;
     border: none;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--text-muted);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
 }
 
-div.channel-view > div > div:last-child button:hover {
-    background: var(--bg-rail);
-    color: var(--text);
+div.channel-view > div > div:last-child > div > button:first-of-type {
+    background: transparent;
+    color: var(--text-muted);
 }
 
-div.channel-view > div > div:last-child button:first-of-type {
+div.channel-view > div > div:last-child > div > button:first-of-type {
     font-size: 1.5rem;
     line-height: 1;
 }
 
-div.channel-view > div > div:last-child button:last-of-type {
+div.channel-view > div > div:last-child > div > button:first-of-type:hover {
+    color: var(--text);
+}
+
+div.channel-view > div > div:last-child > div > button:last-of-type {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-rail);
+    padding: 0.5625rem 0.5625rem 0.4375rem 0.4375rem;
+    border-radius: 2rem;
+}
+
+div.channel-view > div > div:last-child > div > button:last-of-type::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    background: var(--bg-send-button);
+    clip-path: inset(0);
+    transition: clip-path 0.15s ease;
+}
+
+div.channel-view > div > div:last-child > div > button:last-of-type:not(:disabled):hover::before {
+    clip-path: inset(50%);
+}
+
+div.channel-view > div > div:last-child > div > button:last-of-type > svg {
+    position: relative;
+    color: #ffffff;
+    transition: color 0.15s ease;
+}
+
+div.channel-view > div > div:last-child > div > button:last-of-type:not(:disabled):hover > svg {
     color: var(--brand-teal);
 }
 
-div.channel-view > div > div:last-child button:last-of-type:hover {
-    background: var(--bg-rail);
-    color: var(--brand-teal);
+/* Envoi impossible (brouillon vide ou envoi en cours). */
+div.channel-view > div > div:last-child > div > button:last-of-type:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Responsive
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Tactile (pas de survol) : les actions n'apparaissent qu'au tap sur le message. */
+@media (hover: none) {
+    div.channel-view > div > ul > li[role="message"][data-actions="open"] > div:last-of-type {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+/* Tablette / mobile : on densifie les espacements et on revele les actions. */
+@media (max-width: 48rem) {
+    div.channel-view > header {
+        gap: 0.75rem;
+        padding: 0 0.75rem;
+    }
+
+    div.channel-view > div > ul {
+        gap: 0.875rem;
+        padding: 0.75rem;
+    }
+
+    div.channel-view > div > div:last-child {
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Barre d'actions sortie du flux : flottante en haut a droite du message.
+       Elle ne reserve plus de largeur (le texte garde toute la place) ni de
+       hauteur (plus de grand vide sous les messages courts). */
+    div.channel-view > div > ul > li[role="message"] {
+        position: relative;
+    }
+
+    div.channel-view > div > ul > li[role="message"] > div[role="message-actions"]:last-of-type {
+        position: absolute;
+        top: -0.25rem;
+        right: 0;
+        z-index: 2;
+        gap: 0;
+        padding: 0.125rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--bg-surface);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+}
+
+/* Tres petits ecrans : on masque le contexte de cours dans l'en-tete. */
+@media (max-width: 30rem) {
+    div.channel-view > header > span,
+    div.channel-view > header > p:last-of-type {
+        display: none;
+    }
+
+    div.channel-view > div > ul {
+        padding: 0.625rem;
+    }
 }

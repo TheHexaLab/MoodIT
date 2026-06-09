@@ -6,9 +6,11 @@
     --bg-surface: #ffffff;
     --bg-input: #ffffff;
     --bg-message-input: #F8F8FB;
+    --bg-send-button: linear-gradient(135deg, #0D9488 14.29%, #2DD4BF 85.71%);
     --bg-user-panel: #eef0f4;
     --bg-vote-pill: #f2f2f5;
     --bg-active-channel: #e9f1fc;
+    --send-button-stroke: #272727;
     --border: #dfdfe7;
     --border-strong: #cdcfd5;
     --text: #161623;
@@ -50,9 +52,11 @@
         --bg-surface: #1c1f28;
         --bg-input: #262b36;
         --bg-message-input: #262B36;
+        --bg-send-button: linear-gradient(135deg, #14B8A6 14.29%, #5EEAD4 85.71%);
         --bg-user-panel:#16181f;
         --bg-vote-pill: #262b36;
         --bg-active-channel: #243049;
+        --send-button-stroke: #FFFFFF;
         --border: #2e3340;
         --border-strong: #3a4050;
         --text: #ececf1;
@@ -74,9 +78,11 @@
     --bg-surface: #1c1f28;
     --bg-input: #262b36;
     --bg-message-input: #262B36;
+    --bg-send-button: linear-gradient(135deg, #14B8A6 14.29%, #5EEAD4 85.71%);
     --bg-user-panel: #16181f;
     --bg-vote-pill: #262b36;
     --bg-active-channel: #243049;
+    --send-button-stroke: #FFFFFF;
     --border: #2e3340;
     --border-strong: #3a4050;
     --text: #ececf1;

@@ -3,6 +3,8 @@ import styles from './ProgramMenu.module.css';
 import { type Course } from '../CourseMenu/CourseMenu.tsx';
 import { useTheme } from '../../helpers/theme.ts';
 import { contrastingTextColor } from '../../helpers/color.ts';
+// DEV : clic droit sur l'icone de l'app → menu de test des WebSockets.
+import { WsTestContextMenu } from '../../dev/WsTestContextMenu.tsx';
 
 export interface Program {
   /** Identifiant du programme (Program.id, SERIAL). */
@@ -82,29 +84,32 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   const { toggleTheme } = useTheme()
   return (
     <nav className={styles.rail} aria-label="Programme">
-      {/* Icône applicative (meme gabarit que le programme actif) */}
-      <div className={styles.appIcon} aria-label="MoodIT" onClick={toggleTheme}>
-        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient
-              id="pg-grad"
-              x1="0"
-              y1="0"
-              x2="36"
-              y2="36"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stopColor="#2dd4bf" />
-              <stop offset="100%" stopColor="#0d9488" />
-            </linearGradient>
-          </defs>
-          <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
-          {/* Pictogramme minimal type message */}
-          <circle cx="13" cy="18" r="2" fill="white" />
-          <circle cx="18" cy="18" r="2" fill="white" />
-          <circle cx="23" cy="18" r="2" fill="white" />
-        </svg>
-      </div>
+      {/* Icône applicative (meme gabarit que le programme actif).
+          Clic gauche = bascule le theme ; clic droit = menu de test WS (DEV). */}
+      <WsTestContextMenu>
+        <div className={styles.appIcon} aria-label="MoodIT" onClick={toggleTheme}>
+          <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient
+                id="pg-grad"
+                x1="0"
+                y1="0"
+                x2="36"
+                y2="36"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop offset="0%" stopColor="#2dd4bf" />
+                <stop offset="100%" stopColor="#0d9488" />
+              </linearGradient>
+            </defs>
+            <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
+            {/* Pictogramme minimal type message */}
+            <circle cx="13" cy="18" r="2" fill="white" />
+            <circle cx="18" cy="18" r="2" fill="white" />
+            <circle cx="23" cy="18" r="2" fill="white" />
+          </svg>
+        </div>
+      </WsTestContextMenu>
 
       {/* Séparateur visuel */}
       <span className={styles.divider} />
