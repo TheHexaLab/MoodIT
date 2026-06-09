@@ -3,12 +3,19 @@
 //Philip Pigeon
 
 import { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import './LoginPage.css';
 import { EyeIcon } from '../assets/eye.tsx';
 import { Lightanddark } from '../assets/light-dark-btn.tsx';
+import { login } from '../helpers/api';
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem('theme');
@@ -26,6 +33,26 @@ export default function LoginPage() {
     localStorage.setItem('theme', next);
     setIsDark(!isDark);
   };
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (!email || !password) {
+      setError('Veuillez remplir tous les champs');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await login({ email, password });
+      navigate('/home');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur inconnue');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="page">
@@ -54,10 +81,17 @@ export default function LoginPage() {
           <h2 className="form-title">Bon retour 👋</h2>
           <p className="form-subtitle">Connectez-vous à votre espace MoodIT</p>
 
-          <form className="form">
+          <form className="form" onSubmit={handleSubmit}>
+            {error && <p className="server-error">⚠ {error}</p>}
             <div className="field">
               <label className="label">Adresse e-mail</label>
-              <input className="input" type="email" placeholder="exemple@gmail.com" />
+              <input
+                className="input"
+                type="email"
+                placeholder="exemple@gmail.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
             <div className="field">
               <label className="label">Mot de passe</label>
@@ -66,6 +100,8 @@ export default function LoginPage() {
                   className="input"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
                 <button
                   type="button"
@@ -75,19 +111,19 @@ export default function LoginPage() {
                   <EyeIcon visible={showPassword} />
                 </button>
               </div>
-              <a href="#" className="forgot-link">
+              <a href="#" className="forgot-password">
                 Mot de passe oublié ?
               </a>
             </div>
-            <button type="submit" className="btn-primary">
-              Se connecter →
+            <button type="submit" className="submit-btn" disabled={submitting}>
+              {submitting ? 'Connexion...' : 'Se connecter →'}
             </button>
-            <p className="or-divider">ou</p> {/* ← celui-là */}
+            <p className="or-divider">ou</p>
             <p className="register-row">
               Pas encore de compte ?{' '}
-              <a href="#" className="register-link">
+              <Link to="/register" className="register-link">
                 Créer un compte
-              </a>
+              </Link>
             </p>
           </form>
         </div>

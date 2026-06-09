@@ -2,6 +2,8 @@ import styles from './Register.module.css';
 import { useTheme } from '../../helpers/theme';
 import { useState } from 'react';
 import { register } from '../../helpers/api';
+import { Link } from 'react-router-dom';
+import { Lightanddark } from '../../assets/light-dark-btn';
 
 export default function Register() {
   const { theme, toggleTheme } = useTheme();
@@ -61,7 +63,13 @@ export default function Register() {
   return (
     <div className={styles.page}>
       <aside className={styles.brand}>
+        <div className={styles.bubble1} />
+        <div className={styles.bubble2} />
+        <div className={styles.bubble3} />
         <div className={styles.brandInner}>
+          <div className={styles.logoWrapper}>
+            <img src="/Logo.png" alt="Logo" />
+          </div>
           <h1 className={styles.brandTitle}>MoodIT</h1>
           <p className={styles.brandTagline}>Parce que Moodle, c'était pas assez chaotique.</p>
         </div>
@@ -74,7 +82,7 @@ export default function Register() {
           onClick={toggleTheme}
           aria-label="Changer de thème"
         >
-          {theme === 'dark' ? '☀' : '☾'}
+          <Lightanddark isDark={theme === 'dark'} />
         </button>
 
         <div className={styles.card}>
@@ -85,9 +93,9 @@ export default function Register() {
                 Un lien de confirmation a été envoyé à <strong>{email}</strong>.
               </p>
               <p>Cliquez sur le lien pour activer votre compte puis connectez-vous.</p>
-              <a href="#" className={styles.loginLink}>
+              <Link to="/login" className={styles.loginLink}>
                 Se connecter →
-              </a>
+              </Link>
             </div>
           ) : (
             <>
@@ -216,7 +224,7 @@ export default function Register() {
               </div>
 
               <p className={styles.loginLink}>
-                Déjà un compte ? <a href="#">Se connecter</a>
+                Déjà un compte ? <Link to="/login">Se connecter</Link>
               </p>
             </>
           )}

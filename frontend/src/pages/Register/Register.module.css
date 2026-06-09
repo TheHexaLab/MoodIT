@@ -7,14 +7,49 @@
 
 .brand {
     flex: 1;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(160deg, #34d399 0%, #0d9488 55%, #0f766e 100%);
+    background: var(--login-left-gradient);
     color: #fff;
+    overflow: hidden;
 }
 
-.brandInner { text-align: center; padding: 2rem; }
+.bubble1,
+.bubble2,
+.bubble3 {
+    position: absolute;
+    border-radius: 50%;
+    aspect-ratio: 1;
+}
+.bubble1 {
+    background: var(--bubble);
+    width: clamp(12rem, 45vmin, 25rem);
+    top: max(-6rem, -13%);
+    right: max(-8rem, -16%);
+}
+.bubble2 {
+    background: var(--bubble);
+    width: clamp(10rem, 37vmin, 20rem);
+    bottom: max(-4.38rem, -13%);
+    left: max(-5rem, -16%);
+}
+.bubble3 {
+    background: var(--bubble-spec);
+    width: clamp(3rem, 13vmin, 8.75rem);
+    bottom: 20%;
+    right: 3%;
+}
+
+.logoWrapper img {
+    width: 100%;
+    max-width: 8rem;
+    height: auto;
+    border-radius: 1.375rem;
+}
+
+.brandInner { position: relative; z-index: 1; text-align: center; padding: 2rem; }
 .brandTitle { margin: 0; font-size: 2rem; font-weight: 700; }
 .brandTagline { margin: 0.5rem 0 0; opacity: 0.9; max-width: 16rem; }
 
@@ -25,21 +60,23 @@
     align-items: center;
     justify-content: center;
     padding: 2rem 1.25rem;
-    background: var(--bg-sidebar);
+    background: var(--bg-right-login-page);
     position: relative;
 }
 
 .themeToggle {
     position: absolute;
-    top: 1.25rem;
-    right: 1.25rem;
+    top: 3%;
+    right: 3%;
     width: 2.25rem;
     height: 2.25rem;
     border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--bg-surface);
+    border: none;
+    background: var(--button-light-dark);
     cursor: pointer;
-    font-size: 1rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .card {

@@ -1,3 +1,5 @@
+import { getToken, saveToken, clearToken } from './auth';
+
 export interface RegisterPayload {
   username: string;
   firstName: string;
@@ -16,6 +18,25 @@ export interface AuthResponse {
 
 export interface RegisterResponse {
   message: string;
+}
+
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(init.headers as HeadersInit);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(input, { ...init, headers });
+
+  if (res.status === 401) {
+    clearToken();
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+  }
+
+  return res;
 }
 
 export async function register(payload: RegisterPayload): Promise<RegisterResponse> {
@@ -45,5 +66,7 @@ export async function login(payload: { email: string; password: string }): Promi
     throw new Error(data.message || `Erreur ${res.status}`);
   }
 
-  return res.json();
+  const auth: AuthResponse = await res.json();
+  saveToken(auth.token);
+  return auth;
 }

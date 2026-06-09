@@ -38,7 +38,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     // Laisser passer les routes publiques
     for (String publicRoute : getPublicRoutes()) {
-      if (path.equals(publicRoute.trim())) {
+      if (path.equals(publicRoute.trim()) || path.startsWith(publicRoute.trim() + "/")) {
         filterChain.doFilter(request, response);
         return;
       }
