@@ -32,8 +32,8 @@ const isAdminMock = true;
 
 // Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
 // operations sur les messages : envoi, modification, suppression.
-const SIMULATE_SEND_FAILURE = true;
-const SIMULATE_DELAY = 2000;
+const SIMULATE_SEND_FAILURE = false;
+const SIMULATE_DELAY = 100;
 const SIMULATE_FETCH_FAILURE = false;
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ export default function Dashboard() {
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
 
-  // TODO [1] — API GET /channels/:id/messages (charger l'historique du canal).
+  // TODO [1] — API GET charger l'historique du canal.
   // Simulation pour l'instant : petit délai pour montrer l'état « Chargement… »,
   // puis on renvoie les messages mock du canal demandé.
   const handleFetchMessages = async (channelId: number): Promise<ChannelMessage[]> => {

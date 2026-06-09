@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './ChannelView.module.css';
 import {
   type ChannelMessage,
@@ -127,6 +127,10 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const [activeActionsId, setActiveActionsId] = useState<number | null>(null);
   /** Elements DOM des messages, par id : permet de remonter au message parent. */
   const messageRefs = useRef(new Map<number, HTMLLIElement>());
+  /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
+  const listRef = useRef<HTMLUListElement>(null);
+  /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
+  const atBottomRef = useRef(true);
 
   // ─── Source de vérité des messages : optimiste + API + WebSocket-ready. ───
   // (Les événements WebSocket entrants se branchent sur applyIncoming* du hook.)
@@ -161,6 +165,26 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     messageRefs.current.get(messageId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  /** Colle la liste tout en bas. */
+  function scrollToBottom() {
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+
+  /** A chaque scroll : memorise si on est (proche du) bas (seuil 80px). */
+  function handleListScroll() {
+    const list = listRef.current;
+    if (!list) return;
+    atBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  }
+
+  // Auto-scroll « stick to bottom » : on descend en bas a l'arrivee de messages
+  // SEULEMENT si l'utilisateur y etait deja (sinon on ne l'arrache pas a sa lecture).
+  // Au chargement initial, atBottomRef vaut true → on part bien en bas.
+  useLayoutEffect(() => {
+    if (atBottomRef.current) scrollToBottom();
+  }, [messages, loading]);
+
   /** Envoie le message saisi (optimiste via le hook) ; restaure le composer si échec. */
   async function handleSend() {
     const content = draft.trim();
@@ -168,6 +192,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     const parent = replyingTo;
     setDraft('');
     setReplyingTo(null);
+    atBottomRef.current = true; // envoyer = on veut voir son propre message en bas
     const ok = await sendMessage(content, parent ? parent.id : null);
     if (!ok) {
       // Échec : on restaure le brouillon et la réponse pour réessayer.
@@ -235,7 +260,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
               <p>Aucun message dans ce canal pour l'instant.</p>
             </div>
           ) : (
-            <ul>
+            <ul ref={listRef} onScroll={handleListScroll}>
               {messages.map((message, index) => {
                 const avatarColor = message.author.avatar_color ?? DEFAULT_AVATAR_COLOR;
                 const authorName = getAuthorName(message.author);
