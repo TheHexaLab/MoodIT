@@ -109,6 +109,21 @@ input[type="password"]::-ms-reveal {
     background-color: var(--bg-right-login-page);
 }
 
+.light-dark-btn {
+    position: absolute;
+    right: 3%;
+    top: 3%;
+    border: none;
+    cursor: pointer;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: var(--button-light-dark);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
 .form-card {
     width: 100%;
     max-width: 27.5rem;

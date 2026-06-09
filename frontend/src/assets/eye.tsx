@@ -1,6 +1,7 @@
 //création de l'oeuil de la page de login
 //date: 7 juin 2026
-//Philip Pigeonimport React from 'react';
+//Philip Pigeon
+import React from 'react';
 import type { SVGProps } from 'react';
 
 interface EyeIconProps extends SVGProps<SVGSVGElement> {

@@ -45,6 +45,7 @@
     --login-button: linear-gradient(90deg, #0D9488 0%, #14B8A6 100%);
     --login-button-shadow: rgba(10, 92, 192, 0.30);
     --text-or-divider: #9999AD;
+    --button-light-dark: rgba(0, 0, 0, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -72,6 +73,7 @@
         --text-input-focus: #6F6F86;
         --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
         --text-or-divider: #A6A6BC;
+        --button-light-dark: rgba(255, 255, 255, 0.12);
     }
 }
 
@@ -99,6 +101,7 @@
     --text-input-focus: #6F6F86;
     --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
     --text-or-divider: #A6A6BC;
+    --button-light-dark: rgba(255, 255, 255, 0.12);
 }
 
 body {

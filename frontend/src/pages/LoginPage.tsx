@@ -5,9 +5,27 @@
 import { useState } from 'react';
 import './LoginPage.css';
 import { EyeIcon } from '../assets/eye.tsx';
+import { Lightanddark } from '../assets/light-dark-btn.tsx';
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+
+  const [isDark, setIsDark] = useState(() => {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      return true;
+    }
+    document.documentElement.setAttribute('data-theme', 'light');
+    return false;
+  });
+
+  const toggleTheme = () => {
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    setIsDark(!isDark);
+  };
 
   return (
     <div className="page">
@@ -29,6 +47,9 @@ export default function LoginPage() {
       </aside>
 
       <main className="main">
+        <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+          <Lightanddark isDark={isDark} />
+        </button>
         <div className="form-card">
           <h2 className="form-title">Bon retour 👋</h2>
           <p className="form-subtitle">Connectez-vous à votre espace MoodIT</p>
