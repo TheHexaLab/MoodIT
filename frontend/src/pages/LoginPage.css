@@ -89,11 +89,16 @@ input[type="password"]::-ms-reveal {
 }
 
 .app-tagline {
+    display: flex;
+    flex-direction: column;
+}
+
+.app-tagline-text {
     margin: 0;
     color: var(--slogan-text);
     text-align: center;
     font-family: Inter, sans-serif;
-    font-size: 75%;
+    font-size: 0.75rem;
     font-style: normal;
     font-weight: 300;
     line-height: 162.5%;
@@ -350,4 +355,75 @@ input[type="password"]::-ms-reveal {
 
 .footer a:hover {
     color: var(--text-body);
+}
+
+@media (max-width: 640px) {
+    .page {
+        flex-direction: column;
+    }
+
+    .aside {
+        width: 100%;
+        min-height: 16.25rem;
+    }
+
+    .logo-wrapper img {
+        width: 4.75rem;
+        height: auto;
+        border-radius: 1rem;
+        padding-bottom: 1rem;
+    }
+
+    .app-name {
+        font-size: 1.75rem;
+        margin: 0 0 0.38rem 0;
+    }
+
+    .app-tagline {
+        font-size: 0.75rem;
+        flex-direction: row;
+    }
+
+    .bubble-1 {
+    }
+
+    .bubble-2 {
+        top: -3rem;
+        left: -3rem;
+        bottom: unset;
+    }
+
+    .bubble-3 {
+        display: none;
+    }
+
+    .light-dark-btn {
+        top: 1rem;
+        right: 1rem;
+        background: var(--bubble);
+    }
+
+    .main {
+        padding: 1.5rem 1rem 4rem;
+        justify-content: flex-start;
+        min-height: 0;
+    }
+
+    .form-card {
+        max-width: 100%;
+        max-height: unset;
+        border-radius: 1rem;
+        padding: 1.75rem 1.25rem;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+        width: 30%;
+    }
+
+    .footer {
+        position: static;
+        margin-top: 1.5rem;
+        text-align: center;
+    }
 }
