@@ -2,10 +2,15 @@ import React, { useEffect, useState, type ReactNode } from 'react';
 import styles from './WsTestContextMenu.module.css';
 import {
   hasActiveChannel,
+  hasActiveForum,
   simulateIncomingDelete,
   simulateIncomingEdit,
+  simulateIncomingForumDelete,
+  simulateIncomingForumEdit,
+  simulateIncomingForumPost,
+  simulateIncomingForumVote,
   simulateIncomingMessage,
-} from './mockWsSocket';
+} from './mockSocket';
 
 interface WsTestContextMenuProps {
   /** Element declencheur : un clic droit dessus ouvre le menu de test WS. */
@@ -21,6 +26,7 @@ export function WsTestContextMenu({ children }: WsTestContextMenuProps): React.R
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   // Etat capture a l'ouverture (les fonctions mock ne sont pas reactives).
   const canSimulate = pos !== null && hasActiveChannel();
+  const canSimulateForum = pos !== null && hasActiveForum();
 
   useEffect(() => {
     if (!pos) return;
@@ -61,16 +67,41 @@ export function WsTestContextMenu({ children }: WsTestContextMenuProps): React.R
           onContextMenu={(event) => event.preventDefault()}
         >
           <p className={styles.heading}>Test WebSocket</p>
-          <button type="button" disabled={!canSimulate} onClick={() => run(simulateIncomingMessage)}>
-            Recevoir un message
-          </button>
-          <button type="button" disabled={!canSimulate} onClick={() => run(simulateIncomingEdit)}>
-            Modifier le dernier
-          </button>
-          <button type="button" disabled={!canSimulate} onClick={() => run(simulateIncomingDelete)}>
-            Supprimer le dernier
-          </button>
-          {!canSimulate && <p className={styles.hint}>Ouvre un canal de discussion d'abord.</p>}
+
+          {canSimulate && (
+            <>
+              <button type="button" onClick={() => run(simulateIncomingMessage)}>
+                Recevoir un message
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingEdit)}>
+                Modifier le dernier
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingDelete)}>
+                Supprimer le dernier
+              </button>
+            </>
+          )}
+
+          {canSimulateForum && (
+            <>
+              <button type="button" onClick={() => run(simulateIncomingForumPost)}>
+                Recevoir un sujet
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingForumVote)}>
+                Voter le dernier (+1)
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingForumEdit)}>
+                Modifier le dernier
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingForumDelete)}>
+                Supprimer le dernier
+              </button>
+            </>
+          )}
+
+          {!canSimulate && !canSimulateForum && (
+            <p className={styles.hint}>Ouvre un canal ou un forum d'abord.</p>
+          )}
         </div>
       )}
     </>

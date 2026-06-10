@@ -11,7 +11,12 @@ import {
 import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
 
 // TODO [5] — supprimer cet import (et tout src/dev/) une fois le vrai WebSocket branché.
-import { mockMessageSocket } from '../../dev/mockWsSocket.ts';
+// Une seule connexion simulée sert le chat ET le forum (deux facades).
+import { mockMessageSocket, mockForumSocket } from '../../dev/mockSocket.ts';
+import {
+  getMockForumThreads,
+  type ForumPost,
+} from '../../components/MainPanel/ForumView/forumThreads.ts';
 import { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
 import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
@@ -32,8 +37,8 @@ const isAdminMock = true;
 
 // Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
 // operations sur les messages : envoi, modification, suppression.
-const SIMULATE_SEND_FAILURE = false;
-const SIMULATE_DELAY = 100;
+const SIMULATE_SEND_FAILURE = true;
+const SIMULATE_DELAY = 1000;
 const SIMULATE_FETCH_FAILURE = false;
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -45,8 +50,8 @@ const SIMULATE_FETCH_FAILURE = false;
  *   [2] POST   message     → handleSendMessage     (RENVOYER le message persisté + client_msg_id)
  *   [3] PATCH  message     → handleEditMessage
  *   [4] DELETE message     → handleDeleteMessage
- *   [5] WebSocket          → remplacer `mockMessageSocket` par `createChannelSocket(...)`
- *                            (scaffold prêt : src/services/channelSocket.ts)
+ *   [5] WebSocket          → remplacer les mocks par `createAppSocket(...)` (UNE connexion
+ *                            pour le chat ET le forum ; scaffold prêt : src/services/appSocket.ts)
  *
  * Déjà géré côté front (ne rien recoder) : états loading/erreur, rollback optimiste,
  * déduplication optimiste ↔ écho (client_msg_id), désabonnement au changement de canal.
@@ -121,6 +126,63 @@ export default function Dashboard() {
     await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
     if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de message)');
     console.log('[Dashboard] Suppression du message', messageId);
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────────
+   * FORUM ('Thread') — meme architecture API + temps reel que le chat.
+   * À brancher : GET sujets, POST réponse, PATCH, DELETE, POST vote, WebSocket.
+   * Déjà géré côté front : loading/erreur, rollback optimiste, dédup (client_post_id),
+   * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
+   * ─────────────────────────────────────────────────────────────────────────── */
+
+  // GET sujets d'un forum (renvoie l'arbre des posts).
+  const handleFetchThreads = async (forumId: number): Promise<ForumPost[]> => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des sujets)');
+    return getMockForumThreads(forumId);
+  };
+
+  // POST réponse (post_parent_id si réponse à un post). ⚠ RENVOYER le post persisté
+  // (id réel + meme client_post_id) pour la réconciliation optimiste ↔ écho WS.
+  const handleCreatePost = async (
+    content: string,
+    parentId: number | null,
+    clientPostId: string,
+    title?: string
+  ) => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (publication)');
+    console.log(
+      '[Dashboard] Publication :',
+      title ? `« ${title} » — ` : '',
+      content,
+      '(parent =',
+      parentId,
+      ', client_post_id =',
+      clientPostId,
+      ')'
+    );
+  };
+
+  // PATCH post.
+  const handleEditPost = async (postId: number, content: string) => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de post)');
+    console.log('[Dashboard] Modification du post', postId, ':', content);
+  };
+
+  // DELETE post (cascade du sous-fil côté BD).
+  const handleDeletePost = async (postId: number) => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de post)');
+    console.log('[Dashboard] Suppression du post', postId);
+  };
+
+  // POST/DELETE vote (value ∈ {-1, 0, 1} ; 0 = retrait).
+  const handleVotePost = async (postId: number, value: number) => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (vote)');
+    console.log('[Dashboard] Vote sur le post', postId, ':', value);
   };
 
   const activeProgram =
@@ -199,10 +261,17 @@ export default function Dashboard() {
         onSendMessage={handleSendMessage}
         onEditMessage={handleEditMessage}
         onDeleteMessage={handleDeleteMessage}
-        // TODO [5] — remplacer le mock par le vrai socket :
-        //   const socket = useMemo(() => createChannelSocket(import.meta.env.VITE_WS_URL, getAuthToken), []);
-        //   puis socket={socket}  (scaffold : src/services/channelSocket.ts)
+        // TODO [5] — une seule connexion WebSocket pour le chat ET le forum :
+        //   const ws = useMemo(() => createAppSocket(import.meta.env.VITE_WS_URL, getAuthToken), []);
+        //   puis socket={ws.channels} et forumSocket={ws.forums}  (scaffold : src/services/appSocket.ts)
         socket={mockMessageSocket}
+        // ── Forum ('Thread') : API + temps reel (mirror du chat, meme connexion). ──
+        onFetchThreads={handleFetchThreads}
+        onCreatePost={handleCreatePost}
+        onEditPost={handleEditPost}
+        onDeletePost={handleDeletePost}
+        onVotePost={handleVotePost}
+        forumSocket={mockForumSocket}
         onAddProgram={handleAddProgram}
         onAddCourse={handleAddCourse}
         onCreateChannel={handleCreateChannel}

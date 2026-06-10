@@ -87,7 +87,7 @@ div.channel-view > div > ul {
 }
 
 div.channel-view > div > ul::-webkit-scrollbar {
-    width: 2px;
+    width: 4px;
 }
 
 div.channel-view > div > ul::-webkit-scrollbar-track {
@@ -363,7 +363,7 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     font-weight: 600;
     cursor: pointer;
     background: transparent;
-    transition: filter 0.12s ease, color 0.12s ease;
+    transition: filter 0.3s ease, color 0.12s ease;
 }
 
 div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:first-of-type {
@@ -379,7 +379,7 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
 }
 
 div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:last-of-type:hover {
-    filter: brightness(1.1);
+    filter: var(--brand-teal-hover);
 }
 
 div.channel-view > div > div:first-child {
@@ -484,6 +484,11 @@ div.channel-view > div > div:last-child {
     height: 4rem;
     box-sizing: border-box;
     border-top: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+/* Pendant le chargement / l'erreur de chargement : on masque la barre de saisie. */
+div.channel-view > div[data-loading] > div:last-child {
+    display: none;
 }
 
 /* Champ de saisie : la bordure englobe l'input et les deux boutons. */

@@ -15,7 +15,14 @@ import ChannelView, {
   type EditMessageHandler,
   type SendMessageHandler,
 } from './ChannelView/ChannelView.tsx';
-import ForumView from './ForumView/ForumView.tsx';
+import ForumView, {
+  type CreatePostHandler,
+  type DeletePostHandler,
+  type EditPostHandler,
+  type FetchThreadsHandler,
+  type ForumSocket,
+  type VotePostHandler,
+} from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
@@ -43,6 +50,18 @@ interface MainPanelProps {
   onDeleteMessage?: DeleteMessageHandler;
   /** Socket temps reel (optionnel) : reception des messages des autres users. */
   socket?: ChannelSocket;
+  /** Chargement des sujets d'un forum (API-ready ; voir ForumView). */
+  onFetchThreads?: FetchThreadsHandler;
+  /** Publication d'une reponse dans le forum actif (API-ready ; voir ForumView). */
+  onCreatePost?: CreatePostHandler;
+  /** Modification d'un post de forum (API-ready ; voir ForumView). */
+  onEditPost?: EditPostHandler;
+  /** Suppression d'un post de forum (API-ready ; voir ForumView). */
+  onDeletePost?: DeletePostHandler;
+  /** Vote sur un post de forum (API-ready ; voir ForumView). */
+  onVotePost?: VotePostHandler;
+  /** Socket temps reel du forum (optionnel) : posts/votes des autres users. */
+  forumSocket?: ForumSocket;
   /** Ouvre le formulaire d'ajout / d'adhésion a un programme (admin). */
   onAddProgram?: () => void;
   /** Ouvre le formulaire d'ajout de cours (admin). */
@@ -72,6 +91,12 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onEditMessage,
   onDeleteMessage,
   socket,
+  onFetchThreads,
+  onCreatePost,
+  onEditPost,
+  onDeletePost,
+  onVotePost,
+  forumSocket,
   onAddProgram,
   onAddCourse,
   onCreateChannel,
@@ -116,7 +141,20 @@ const MainPanel: React.FC<MainPanelProps> = ({
     // 5/6/7 — un canal est sélectionné : on route selon son type.
     switch (channel.type) {
       case 'forum': // f_type 'Thread'
-        return <ForumView course={course} channel={channel} />;
+        return (
+          <ForumView
+            key={`${channel.type}-${channel.id}`}
+            course={course}
+            channel={channel}
+            currentUser={currentUser}
+            onFetchThreads={onFetchThreads}
+            onCreatePost={onCreatePost}
+            onEditPost={onEditPost}
+            onDeletePost={onDeletePost}
+            onVotePost={onVotePost}
+            socket={forumSocket}
+          />
+        );
       case 'quiz':
         return <QuizView course={course} channel={channel} />;
       case 'text': // f_type 'Discussion'

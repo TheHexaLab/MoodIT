@@ -31,6 +31,7 @@
     --accent-amber: #f6c350;
     --scrim: rgba(0, 0, 0, 0.45);
     --brand-teal: #0d9488;
+    --brand-teal-hover: brightness(0.5);
     --brand-teal-surface: rgba(13, 148, 136, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #2dd4bf 0%, #0d9488 83.33%);
     --shadow-hover: rgba(10, 92, 192, 0.22);
@@ -42,6 +43,17 @@
     --avatar-teal-light: #2dd4bf;
     --avatar-teal-deep: #0f766e;
     --avatar-grey: #7d7d94;
+    /* Coloration syntaxique des blocs de code (theme clair). */
+    --syntax-fg: #1f2328;
+    --syntax-comment: #6e7781;
+    --syntax-punctuation: #57606a;
+    --syntax-keyword: #cf222e;
+    --syntax-class: #953800;
+    --syntax-string: #0a3069;
+    --syntax-number: #0550ae;
+    --syntax-function: #8250df;
+    --syntax-operator: #0550ae;
+    --syntax-variable: #e36209;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,8 +78,19 @@
         --text-on-brand: #ffffff;
         --icon-stroke: #a6a6bc;
         --brand-teal: #14b8a6;
+        --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
         --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+        --syntax-fg: #d4d4d4;
+        --syntax-comment: #6a9955;
+        --syntax-punctuation: #cccccc;
+        --syntax-keyword: #569cd6;
+        --syntax-class: #4ec9b0;
+        --syntax-string: #ce9178;
+        --syntax-number: #b5cea8;
+        --syntax-function: #dcdcaa;
+        --syntax-operator: #d4d4d4;
+        --syntax-variable: #9cdcfe;
     }
 }
 
@@ -92,8 +115,19 @@
     --text-on-brand: #ffffff;
     --icon-stroke: #a6a6bc;
     --brand-teal: #14b8a6;
+    --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+    --syntax-fg: #d4d4d4;
+    --syntax-comment: #6a9955;
+    --syntax-punctuation: #cccccc;
+    --syntax-keyword: #569cd6;
+    --syntax-class: #4ec9b0;
+    --syntax-string: #ce9178;
+    --syntax-number: #b5cea8;
+    --syntax-function: #dcdcaa;
+    --syntax-operator: #d4d4d4;
+    --syntax-variable: #9cdcfe;
 }
 body {
     margin: 0;

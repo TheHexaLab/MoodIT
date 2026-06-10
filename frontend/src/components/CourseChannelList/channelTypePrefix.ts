@@ -6,7 +6,7 @@ export function getPrefixForType(type: string): string {
     case 'quiz':
       return '?';
     case 'forum':
-      return '↳';
+      return '⮡ ';
     case 'text':
       return '#';
     default:

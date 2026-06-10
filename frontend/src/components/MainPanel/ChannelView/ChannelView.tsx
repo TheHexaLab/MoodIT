@@ -22,6 +22,8 @@ import {
   type MaybePromise,
   type SendMessageHandler,
 } from './useChannelMessages';
+import { defaultChannelViewLabels } from './labels';
+import { type ChannelViewLabels } from './types';
 
 // Re-export : MainPanel et Dashboard importent ces types depuis ChannelView.
 export type {
@@ -29,6 +31,7 @@ export type {
   EditMessageHandler,
   DeleteMessageHandler,
   ChannelSocket,
+  ChannelViewLabels,
 };
 
 interface ChannelViewProps {
@@ -52,6 +55,8 @@ interface ChannelViewProps {
   onDeleteMessage?: DeleteMessageHandler;
   /** Socket temps reel (optionnel) : reception des messages des autres users. */
   socket?: ChannelSocket;
+  /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
+  labels?: Partial<ChannelViewLabels>;
 }
 
 /** Couleur d'avatar par défaut (= Program/User color par défaut en BD). */
@@ -112,7 +117,11 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   onEditMessage,
   onDeleteMessage,
   socket,
+  labels,
 }: ChannelViewProps) => {
+  /** Textes affichés : défauts + surcharges éventuelles via la prop `labels`. */
+  const t = { ...defaultChannelViewLabels, ...labels };
+
   // ─── État de la VUE (composer, édition, réponse, actions). ───
   /** Contenu courant de la zone de saisie. */
   const [draft, setDraft] = useState('');
@@ -242,22 +251,22 @@ const ChannelView: React.FC<ChannelViewProps> = ({
           <p>{course.title}</p>
         </header>
 
-        <div>
+        <div data-loading={loading || loadError ? '' : undefined}>
           {loading ? (
             <div>
               <span className={styles.spinner} aria-hidden="true" />
-              <p>Chargement des messages…</p>
+              <p>{t.loading}</p>
             </div>
           ) : loadError ? (
             <div>
               <p>{loadError}</p>
               <button type="button" onClick={reload}>
-                Réessayer
+                {t.retry}
               </button>
             </div>
           ) : messages.length === 0 ? (
             <div>
-              <p>Aucun message dans ce canal pour l'instant.</p>
+              <p>{t.empty}</p>
             </div>
           ) : (
             <ul ref={listRef} onScroll={handleListScroll}>
@@ -317,7 +326,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               </span>
                             </>
                           ) : (
-                            <span className={styles.replyRefText}>Message original supprimé</span>
+                            <span className={styles.replyRefText}>{t.deletedParent}</span>
                           )}
                         </button>
                       )}
@@ -349,18 +358,18 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                                   cancelEdit();
                                 }
                               }}
-                              aria-label="Modifier le message"
+                              aria-label={t.edit}
                               autoFocus
                             />
                             <div>
                               <button type="button" onClick={cancelEdit}>
-                                Annuler
+                                {t.editCancel}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => submitEdit(message.id, message.content)}
                               >
-                                Enregistrer
+                                {t.editSave}
                               </button>
                             </div>
                           </div>
@@ -373,7 +382,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                           <button
                             type="button"
                             role="reply"
-                            aria-label="Répondre au message"
+                            aria-label={t.reply}
                             onClick={() => startReply(message)}
                           >
                             <Reply />
@@ -382,7 +391,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                             <>
                               <button
                                 type="button"
-                                aria-label="Modifier le message"
+                                aria-label={t.edit}
                                 onClick={() => startEdit(message)}
                               >
                                 <Pencil />
@@ -390,7 +399,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               <button
                                 type="button"
                                 role="delete"
-                                aria-label="Supprimer le message"
+                                aria-label={t.delete}
                                 onClick={() => setConfirmDeleteId(message.id)}
                               >
                                 <TrashCan />
@@ -411,18 +420,18 @@ const ChannelView: React.FC<ChannelViewProps> = ({
               {replyingTo && (
                 <div>
                   <span>
-                    Répondre à <strong>{getAuthorName(replyingTo.author)}</strong>
+                    {t.replyingToPrefix} <strong>{getAuthorName(replyingTo.author)}</strong>
                   </span>
                   <button
                     type="button"
-                    aria-label="Annuler la réponse"
+                    aria-label={t.cancelReply}
                     onClick={() => setReplyingTo(null)}
                   >
                     ✕
                   </button>
                 </div>
               )}
-              <button type="button" aria-label="Ajouter une pièce jointe">
+              <button type="button" aria-label={t.addAttachment}>
                 +
               </button>
               <input
@@ -435,12 +444,12 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                     handleSend();
                   }
                 }}
-                placeholder={`Envoyer un message dans #${channel.name}`}
-                aria-label={`Envoyer un message dans ${channel.name}`}
+                placeholder={`${t.composerPlaceholder} #${channel.name}`}
+                aria-label={`${t.composerPlaceholder} ${channel.name}`}
               />
               <button
                 type="button"
-                aria-label="Envoyer le message"
+                aria-label={t.send}
                 onClick={handleSend}
                 disabled={!canSend}
               >
@@ -453,8 +462,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
 
       {confirmDeleteId !== null && (
         <DeleteConfirmationPopup
-          title="Supprimer le message"
-          content="Ce message sera définitivement supprimé. Continuer ?"
+          title={t.deleteTitle}
+          content={t.deleteContent}
           onDeleteConfirmation={() => {
             deleteMessage(confirmDeleteId);
             setConfirmDeleteId(null);
