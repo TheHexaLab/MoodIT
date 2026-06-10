@@ -21,6 +21,8 @@ export const defaultForumViewLabels: ForumViewLabels = {
   replyOne: 'réponse',
   replyMany: 'réponses',
   noReplies: 'Aucune réponse',
+  repliesLoading: 'Chargement des réponses…',
+  repliesError: 'Impossible de charger les réponses.',
   pinned: 'Épinglé',
   deleteTitle: 'Supprimer le message',
   deleteContent: 'Ce message et ses réponses seront définitivement supprimés. Continuer ?',

@@ -15,12 +15,18 @@ import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteCon
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { Markdown } from './Markdown';
 import { MarkdownEditor } from './MarkdownEditor';
-import { getMockForumThreads, type ForumAuthor, type ForumPost } from './forumThreads';
+import {
+  getMockForumReplies,
+  getMockForumThreads,
+  type ForumAuthor,
+  type ForumPost,
+} from './forumThreads';
 import {
   useForumThreads,
   type CreatePostHandler,
   type DeletePostHandler,
   type EditPostHandler,
+  type FetchRepliesHandler,
   type FetchThreadsHandler,
   type ForumSocket,
   type VoteValue,
@@ -32,6 +38,7 @@ import { type ForumViewLabels } from './types';
 // Re-export : MainPanel et Dashboard importent ces types depuis ForumView.
 export type {
   FetchThreadsHandler,
+  FetchRepliesHandler,
   CreatePostHandler,
   EditPostHandler,
   DeletePostHandler,
@@ -47,8 +54,10 @@ interface ForumViewProps {
   channel: CourseChannel;
   /** Utilisateur connecte : auteur des publications et des votes. */
   currentUser: ChannelMessageAuthor;
-  /** Chargement des sujets (API-ready, GET). Defaut : mock local. */
+  /** Chargement des sujets racines (API-ready, GET). Defaut : mock local. */
   onFetchThreads?: FetchThreadsHandler;
+  /** Chargement paresseux des reponses directes d'un post (API-ready, GET). Defaut : mock local. */
+  onFetchReplies?: FetchRepliesHandler;
   /** Publication d'une reponse (API-ready, POST). */
   onCreatePost?: CreatePostHandler;
   /** Modification d'un post (API-ready, PATCH). */
@@ -98,9 +107,13 @@ function userVoteOf(post: ForumPost, userId: number): VoteValue {
   return post.votes.find((vote) => vote.user_id === userId)?.value ?? 0;
 }
 
-/** Nombre total de reponses d'un sujet (toute la profondeur du fil). */
-function countReplies(post: ForumPost): number {
-  return (post.replies ?? []).reduce((total, child) => total + 1 + countReplies(child), 0);
+/**
+ * Nombre de reponses DIRECTES (enfants immediats) d'un post. On s'appuie sur
+ * `reply_count` (connu des le chargement, meme branche non depliee) et, a defaut,
+ * sur les reponses deja chargees.
+ */
+function replyCountOf(post: ForumPost): number {
+  return post.reply_count ?? post.replies?.length ?? 0;
 }
 
 /** Temps relatif court facon Reddit (« à l'instant », « il y a 3 h », « il y a 2 j »). */
@@ -133,6 +146,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   channel,
   currentUser,
   onFetchThreads = getMockForumThreads,
+  onFetchReplies = getMockForumReplies,
   onCreatePost,
   onEditPost,
   onDeletePost,
@@ -151,6 +165,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     loading,
     loadError,
     reload,
+    loadingReplies,
+    replyErrors,
+    loadReplies,
     error,
     clearError,
     vote,
@@ -163,6 +180,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     initialThreads: [],
     currentUser,
     onFetchThreads,
+    onFetchReplies,
     onCreatePost,
     onEditPost,
     onDeletePost,
@@ -172,10 +190,10 @@ const ForumView: React.FC<ForumViewProps> = ({
 
   // ─── Etat de la VUE uniquement (tri, repli, edition, reponse, actions). ───
   const [sort, setSort] = useState<SortMode>('top');
-  // Fils de reponses ouverts (sujets developpes). Reddit : reponses repliees par defaut.
+  // Fils ouverts : posts (sujets OU reponses) dont on affiche les enfants immediats.
+  // Reddit : tout est replie par defaut ; deplier ne montre QUE le niveau suivant
+  // (pas tout le sous-arbre) et declenche le chargement paresseux de la branche.
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  // Branches repliees : posts dont on a masque les reponses (toggle chevron).
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   /** Post en cours d'edition inline (null = aucun) + brouillon courant. */
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -205,23 +223,31 @@ const ForumView: React.FC<ForumViewProps> = ({
     return scoreOf(post);
   }
 
-  function toggleReplies(postId: number) {
+  /**
+   * Deplie / replie un fil. Au premier depliage d'une branche dont les enfants ne
+   * sont pas encore charges, on declenche le chargement paresseux (un seul niveau).
+   */
+  function toggleReplies(post: ForumPost) {
+    const willOpen = !expanded.has(post.id);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(postId)) next.delete(postId);
-      else next.add(postId);
+      if (next.has(post.id)) next.delete(post.id);
+      else next.add(post.id);
       return next;
     });
+    if (willOpen && post.replies === undefined && !loadingReplies.has(post.id)) {
+      void loadReplies(post.id);
+    }
   }
 
-  /** Replie (ou deplie) les reponses d'une branche (toggle [–]/[+]). */
-  function toggleCollapse(postId: number) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(postId)) next.delete(postId);
-      else next.add(postId);
-      return next;
-    });
+  /**
+   * Recharge les sujets (bouton « Réessayer »). On vide aussi les fils ouverts :
+   * l'arbre repart a zero (racines seules), les anciens ids deplies ne pointent
+   * plus sur des branches chargees.
+   */
+  function handleReload() {
+    setExpanded(new Set());
+    reload();
   }
 
   /** L'utilisateur connecte est-il l'auteur du post ? (debloque modifier/supprimer). */
@@ -247,13 +273,13 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (!content) return;
     setReplyingTo(null);
     setReplyDraft('');
-    // On s'assure que la nouvelle reponse sera visible (sujet deplie, branche ouverte).
+    // On s'assure que la nouvelle reponse sera visible (branche depliee).
     setExpanded((prev) => new Set(prev).add(post.id));
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      next.delete(post.id);
-      return next;
-    });
+    // La branche doit etre chargee avant d'y inserer l'optimiste : sinon on n'aurait
+    // affiche que la nouvelle reponse, en masquant les enfants deja existants.
+    if (post.replies === undefined && !loadingReplies.has(post.id)) {
+      await loadReplies(post.id);
+    }
     const ok = await addReply(post.id, content);
     if (!ok) {
       setReplyingTo(post.id);
@@ -513,22 +539,62 @@ const ForumView: React.FC<ForumViewProps> = ({
   }
 
   /**
-   * Reponse (commentaire) d'un fil, rendue recursivement — profondeur illimitee.
+   * Corps d'un fil deplie : enfants immediats deja charges, ou etat de chargement
+   * paresseux (spinner), ou erreur de chargement (avec « Réessayer »). On n'affiche
+   * jamais que le niveau suivant : chaque enfant reste replie. `flat` retire la
+   * derive d'indentation (au plateau de profondeur).
+   */
+  function renderRepliesBody(post: ForumPost, childDepth: number, flat: boolean): React.ReactNode {
+    if (replyErrors.has(post.id)) {
+      return (
+        <div role="replies-error">
+          <span>{t.repliesError}</span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void loadReplies(post.id);
+            }}
+          >
+            {t.retry}
+          </button>
+        </div>
+      );
+    }
+    // `replies` non charge (undefined) = chargement paresseux en cours.
+    if (post.replies === undefined) {
+      return (
+        <div role="replies-loading">
+          <span role="spinner" aria-hidden="true" />
+          <span>{t.repliesLoading}</span>
+        </div>
+      );
+    }
+    return (
+      <ul role="replies" data-flat={flat || undefined}>
+        {post.replies.map((child) => renderComment(child, childDepth))}
+      </ul>
+    );
+  }
+
+  /**
+   * Reponse (commentaire) d'un fil. Deplier n'affiche QUE les enfants immediats
+   * (pas tout le sous-arbre) et charge la branche paresseusement au besoin.
    * `depth` = profondeur d'imbrication (1 = reponse directe au sujet). L'indentation
    * croit jusqu'a INDENT_PLATEAU_DEPTH puis se stabilise (les niveaux profonds
    * s'alignent au lieu de deriver), de sorte que rien n'est masque et que la colonne
    * de texte ne se reduit jamais a neant. Toute branche se replie via [–]/[+].
    */
   function renderComment(post: ForumPost, depth: number): React.ReactElement {
-    const children = post.replies ?? [];
-    const hasReplies = children.length > 0;
-    const isCollapsed = collapsed.has(post.id);
+    const isOpen = expanded.has(post.id);
+    // Compteur d'enfants immediats (connu meme branche non depliee, via reply_count).
+    const count = replyCountOf(post);
+    const hasReplies = count > 0;
     // Au-dela du plateau, on cesse d'indenter (les enfants ne derivent plus).
     const indentChildren = depth < INDENT_PLATEAU_DEPTH;
-    // Controle « chevron + N réponses » sur la ligne d'actions : replie/deplie.
-    const count = countReplies(post);
+    // Controle « chevron + N réponses » sur la ligne d'actions : deplie/replie.
     const replyToggle = hasReplies
-      ? renderRepliesToggle(!isCollapsed, count, () => toggleCollapse(post.id))
+      ? renderRepliesToggle(isOpen, count, () => toggleReplies(post))
       : null;
 
     return (
@@ -543,8 +609,8 @@ const ForumView: React.FC<ForumViewProps> = ({
       >
         {renderCommentInner(post, replyToggle)}
         {replyingTo === post.id && renderReplyComposer(post)}
-        {hasReplies &&
-          !isCollapsed &&
+        {isOpen &&
+          hasReplies &&
           (indentChildren ? (
             // Sous le plateau : indentation + filet vertical cliquable (replie la branche).
             <div role="replies-wrap">
@@ -553,20 +619,16 @@ const ForumView: React.FC<ForumViewProps> = ({
                 role="collapse-rail"
                 onClick={(event) => {
                   event.stopPropagation();
-                  toggleCollapse(post.id);
+                  toggleReplies(post);
                 }}
                 aria-label={t.collapseThread}
                 tabIndex={-1}
               />
-              <ul role="replies">
-                {children.map((child) => renderComment(child, depth + 1))}
-              </ul>
+              {renderRepliesBody(post, depth + 1, false)}
             </div>
           ) : (
             // Au plateau : les reponses profondes s'alignent (plus de derive a droite).
-            <ul role="replies" data-flat>
-              {children.map((child) => renderComment(child, depth + 1))}
-            </ul>
+            renderRepliesBody(post, depth + 1, true)
           ))}
       </li>
     );
@@ -574,9 +636,8 @@ const ForumView: React.FC<ForumViewProps> = ({
 
   /** Carte d'un sujet racine (post + barre de votes + fil repliable). */
   function renderThreadCard(post: ForumPost): React.ReactElement {
-    const replyCount = countReplies(post);
+    const replyCount = replyCountOf(post);
     const isOpen = expanded.has(post.id);
-    const replies = post.replies ?? [];
     const editing = editingId === post.id;
     return (
       <li
@@ -611,18 +672,14 @@ const ForumView: React.FC<ForumViewProps> = ({
                 {renderOwnerActions(post)}
               </div>
               {replyCount > 0 ? (
-                renderRepliesToggle(isOpen, replyCount, () => toggleReplies(post.id))
+                renderRepliesToggle(isOpen, replyCount, () => toggleReplies(post))
               ) : (
                 <span role="no-replies">{t.noReplies}</span>
               )}
             </div>
           )}
           {replyingTo === post.id && renderReplyComposer(post)}
-          {isOpen && replies.length > 0 && (
-            <ul role="replies">
-              {replies.map((reply) => renderComment(reply, 1))}
-            </ul>
-          )}
+          {isOpen && replyCount > 0 && renderRepliesBody(post, 1, false)}
         </div>
       </li>
     );
@@ -701,7 +758,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         ) : loadError ? (
           <div role="status">
             <p>{loadError}</p>
-            <button type="button" onClick={reload}>
+            <button type="button" onClick={handleReload}>
               {t.retry}
             </button>
           </div>

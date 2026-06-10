@@ -14,6 +14,7 @@ import { getPrefixForType } from '../../components/CourseChannelList/channelType
 // Une seule connexion simulée sert le chat ET le forum (deux facades).
 import { mockMessageSocket, mockForumSocket } from '../../dev/mockSocket.ts';
 import {
+  getMockForumReplies,
   getMockForumThreads,
   type ForumPost,
 } from '../../components/MainPanel/ForumView/forumThreads.ts';
@@ -37,8 +38,8 @@ const isAdminMock = true;
 
 // Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
 // operations sur les messages : envoi, modification, suppression.
-const SIMULATE_SEND_FAILURE = true;
-const SIMULATE_DELAY = 4000;
+const SIMULATE_SEND_FAILURE = false;
+const SIMULATE_DELAY = 1000;
 const SIMULATE_FETCH_FAILURE = false;
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -135,11 +136,18 @@ export default function Dashboard() {
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
-  // GET sujets d'un forum (renvoie l'arbre des posts).
+  // GET sujets RACINES d'un forum (sans leurs réponses : chargement paresseux).
   const handleFetchThreads = async (forumId: number): Promise<ForumPost[]> => {
     await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
     if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des sujets)');
     return getMockForumThreads(forumId);
+  };
+
+  // GET réponses DIRECTES d'un post (enfants immédiats), au dépliage d'un fil.
+  const handleFetchReplies = async (postId: number): Promise<ForumPost[]> => {
+    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
+    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des réponses)');
+    return getMockForumReplies(postId);
   };
 
   // POST réponse (post_parent_id si réponse à un post). ⚠ RENVOYER le post persisté
@@ -265,6 +273,7 @@ export default function Dashboard() {
         socket={mockMessageSocket}
         // ── Forum ('Thread') : API + temps reel (mirror du chat, meme connexion). ──
         onFetchThreads={handleFetchThreads}
+        onFetchReplies={handleFetchReplies}
         onCreatePost={handleCreatePost}
         onEditPost={handleEditPost}
         onDeletePost={handleDeletePost}

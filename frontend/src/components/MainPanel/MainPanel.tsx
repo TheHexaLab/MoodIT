@@ -19,6 +19,7 @@ import ForumView, {
   type CreatePostHandler,
   type DeletePostHandler,
   type EditPostHandler,
+  type FetchRepliesHandler,
   type FetchThreadsHandler,
   type ForumSocket,
   type VotePostHandler,
@@ -52,6 +53,8 @@ interface MainPanelProps {
   socket?: ChannelSocket;
   /** Chargement des sujets d'un forum (API-ready ; voir ForumView). */
   onFetchThreads?: FetchThreadsHandler;
+  /** Chargement paresseux des reponses d'un post de forum (API-ready ; voir ForumView). */
+  onFetchReplies?: FetchRepliesHandler;
   /** Publication d'une reponse dans le forum actif (API-ready ; voir ForumView). */
   onCreatePost?: CreatePostHandler;
   /** Modification d'un post de forum (API-ready ; voir ForumView). */
@@ -92,6 +95,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onDeleteMessage,
   socket,
   onFetchThreads,
+  onFetchReplies,
   onCreatePost,
   onEditPost,
   onDeletePost,
@@ -148,6 +152,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             channel={channel}
             currentUser={currentUser}
             onFetchThreads={onFetchThreads}
+            onFetchReplies={onFetchReplies}
             onCreatePost={onCreatePost}
             onEditPost={onEditPost}
             onDeletePost={onDeletePost}

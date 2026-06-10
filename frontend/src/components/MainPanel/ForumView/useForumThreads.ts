@@ -8,10 +8,18 @@ export type MaybePromise<T> = T | Promise<T>;
 export type VoteValue = 1 | 0 | -1;
 
 /**
- * Chargement des sujets d'un forum (API-ready, GET). Renvoie l'arbre des posts
- * (sujets racines + reponses imbriquees).
+ * Chargement des sujets d'un forum (API-ready, GET). Renvoie UNIQUEMENT les sujets
+ * RACINES (sans leurs reponses) ; chaque racine porte `reply_count`. Les reponses
+ * sont ensuite chargees paresseusement, branche par branche (voir `FetchRepliesHandler`).
  */
 export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>;
+
+/**
+ * Chargement des reponses DIRECTES (enfants immediats) d'un post (API-ready, GET).
+ * Appele quand l'utilisateur deplie un fil : on ne descend qu'un seul niveau a la
+ * fois. Chaque enfant renvoye porte a son tour `reply_count` pour ses propres reponses.
+ */
+export type FetchRepliesHandler = (postId: number) => MaybePromise<ForumPost[]>;
 
 /**
  * Publication d'un post (API-ready, POST). Reçoit le contenu, l'id du parent
@@ -61,6 +69,7 @@ interface UseForumThreadsParams {
   initialThreads: ForumPost[];
   currentUser: ForumAuthor;
   onFetchThreads?: FetchThreadsHandler;
+  onFetchReplies?: FetchRepliesHandler;
   onCreatePost?: CreatePostHandler;
   onEditPost?: EditPostHandler;
   onDeletePost?: DeletePostHandler;
@@ -77,6 +86,15 @@ export interface ForumThreadsApi {
   loadError: string | null;
   /** Relance le chargement (bouton « Réessayer »). */
   reload: () => void;
+  /** Posts dont les reponses directes sont en cours de chargement (lazy). */
+  loadingReplies: Set<number>;
+  /** Posts dont le chargement des reponses a echoue (bouton « Réessayer » de branche). */
+  replyErrors: Set<number>;
+  /**
+   * Charge (paresseusement) les reponses DIRECTES d'un post et les fusionne dans
+   * l'arbre. Resout a `true` en cas de succes, `false` si echec.
+   */
+  loadReplies: (postId: number) => Promise<boolean>;
   /** Une publication async est-elle en cours ? */
   pending: boolean;
   /** Message d'erreur de la derniere operation (null = aucune). */
@@ -119,6 +137,15 @@ function removeFromTree(posts: ForumPost[], id: number): ForumPost[] {
   return posts
     .filter((post) => post.id !== id)
     .map((post) => (post.replies?.length ? { ...post, replies: removeFromTree(post.replies, id) } : post));
+}
+
+/** Ajuste (de `delta`) le compteur de reponses directes du post `parentId`. */
+function adjustReplyCount(posts: ForumPost[], parentId: number | null, delta: number): ForumPost[] {
+  if (parentId === null) return posts;
+  return mapPost(posts, parentId, (post) => ({
+    ...post,
+    reply_count: Math.max(0, (post.reply_count ?? post.replies?.length ?? 0) + delta),
+  }));
 }
 
 /** Insere `reply` sous `parentId` (ou a la racine si null). */
@@ -192,6 +219,7 @@ export function useForumThreads({
   initialThreads,
   currentUser,
   onFetchThreads,
+  onFetchReplies,
   onCreatePost,
   onEditPost,
   onDeletePost,
@@ -203,12 +231,17 @@ export function useForumThreads({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Chargement paresseux des branches : suivi par post (id).
+  const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
+  const [replyErrors, setReplyErrors] = useState<Set<number>>(new Set());
 
   const mountedRef = useRef(true);
   const seqRef = useRef(0);
   const fetchRef = useRef(onFetchThreads);
+  const fetchRepliesRef = useRef(onFetchReplies);
   useEffect(() => {
     fetchRef.current = onFetchThreads;
+    fetchRepliesRef.current = onFetchReplies;
   });
 
   useEffect(() => {
@@ -223,6 +256,10 @@ export function useForumThreads({
     if (!fetchThreads) return;
     setLoading(true);
     setLoadError(null);
+    // On repart d'un arbre neuf : les etats de chargement paresseux des branches
+    // (qui referencent l'ancien arbre) ne sont plus valides.
+    setLoadingReplies(new Set());
+    setReplyErrors(new Set());
     try {
       const fetched = await fetchThreads(forumId);
       if (!mountedRef.current) return;
@@ -240,6 +277,42 @@ export function useForumThreads({
   }, [reload]);
 
   const clearError = useCallback(() => setError(null), []);
+
+  /**
+   * Charge les reponses DIRECTES d'un post (un seul niveau) et les fusionne dans
+   * l'arbre. Ne descend jamais recursivement : chaque enfant reste replie et
+   * chargera ses propres reponses a son tour quand on le depliera.
+   */
+  const loadReplies = useCallback(async (postId: number): Promise<boolean> => {
+    const fetchReplies = fetchRepliesRef.current;
+    setReplyErrors((prev) => {
+      if (!prev.has(postId)) return prev;
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+    setLoadingReplies((prev) => new Set(prev).add(postId));
+    try {
+      const children = fetchReplies ? await fetchReplies(postId) : [];
+      if (!mountedRef.current) return true;
+      setThreads((prev) =>
+        mapPost(prev, postId, (post) => ({ ...post, replies: children, reply_count: children.length }))
+      );
+      return true;
+    } catch {
+      if (!mountedRef.current) return false;
+      setReplyErrors((prev) => new Set(prev).add(postId));
+      return false;
+    } finally {
+      if (mountedRef.current) {
+        setLoadingReplies((prev) => {
+          const next = new Set(prev);
+          next.delete(postId);
+          return next;
+        });
+      }
+    }
+  }, []);
 
   /** Joue une mutation async avec garde anti-demontage ; rollback + erreur si echec. */
   async function runMutation(
@@ -328,8 +401,11 @@ export function useForumThreads({
       author: currentUser,
       votes: [],
       replies: [],
+      reply_count: 0,
     };
-    setThreads((prev) => insertIntoTree(prev, parentId, optimistic));
+    // La branche est supposee deja chargee (le composant la charge avant de poster) :
+    // on insere l'optimiste et on incremente le compteur de reponses du parent.
+    setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, optimistic), parentId, 1));
 
     setError(null);
     setPending(true);
@@ -345,7 +421,8 @@ export function useForumThreads({
       return true;
     } catch {
       if (!mountedRef.current) return false;
-      setThreads((prev) => removeFromTree(prev, tempId)); // rollback
+      // rollback : on retire l'optimiste et on annule l'incrementation du compteur.
+      setThreads((prev) => adjustReplyCount(removeFromTree(prev, tempId), parentId, -1));
       setError("La réponse n'a pas pu être publiée. Réessayez.");
       return false;
     } finally {
@@ -365,8 +442,19 @@ export function useForumThreads({
     try {
       const saved = onEditPost ? await onEditPost(postId, trimmed) : undefined;
       if (!mountedRef.current) return true;
-      // Le serveur fait foi sur le contenu final.
-      if (saved) setThreads((prev) => mapPost(prev, postId, () => saved));
+      // Le serveur fait foi sur le contenu final, mais le PATCH ne renvoie pas le
+      // sous-arbre : on fusionne ses champs en PRESERVANT les reponses deja chargees
+      // et le compteur (sinon on replierait/perdrait la branche du post edite).
+      if (saved) {
+        setThreads((prev) =>
+          mapPost(prev, postId, (p) => ({
+            ...p,
+            ...saved,
+            replies: saved.replies ?? p.replies,
+            reply_count: saved.reply_count ?? p.reply_count,
+          }))
+        );
+      }
       return true;
     } catch {
       if (!mountedRef.current) return false;
@@ -381,11 +469,11 @@ export function useForumThreads({
     if (!target) return;
     const parentId = findParentId(threads, postId) ?? null;
 
-    setThreads((prev) => removeFromTree(prev, postId));
+    setThreads((prev) => adjustReplyCount(removeFromTree(prev, postId), parentId, -1));
 
     runMutation(
       () => (onDeletePost ? onDeletePost(postId) : undefined),
-      () => setThreads((prev) => insertIntoTree(prev, parentId, target)),
+      () => setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, target), parentId, 1)),
       "La suppression n'a pas pu être effectuée. Réessayez."
     );
   }
@@ -396,8 +484,24 @@ export function useForumThreads({
       const existing =
         findInTree(prev, post.id) ??
         (post.client_post_id ? findByClientId(prev, post.client_post_id) : undefined);
-      if (existing) return mapPost(prev, existing.id, () => post); // reconcilie l'optimiste
-      return insertIntoTree(prev, parentId, post);
+      // Reconciliation de l'optimiste : on fusionne l'echo serveur en PRESERVANT les
+      // reponses deja chargees et le compteur (l'echo d'une creation ne porte pas le
+      // sous-arbre), pour ne pas replier ni vider une branche deja depliee.
+      if (existing) {
+        return mapPost(prev, existing.id, (p) => ({
+          ...p,
+          ...post,
+          replies: post.replies ?? p.replies,
+          reply_count: post.reply_count ?? p.reply_count,
+        }));
+      }
+      // Branche parente pas encore chargee (lazy) : on n'insere pas l'enfant (on
+      // ne montrerait qu'une partie du fil) ; on incremente juste le compteur. La
+      // reponse sera recuperee quand l'utilisateur depliera la branche.
+      if (parentId !== null && findInTree(prev, parentId)?.replies === undefined) {
+        return adjustReplyCount(prev, parentId, 1);
+      }
+      return adjustReplyCount(insertIntoTree(prev, parentId, post), parentId, 1);
     });
   }, []);
 
@@ -406,7 +510,10 @@ export function useForumThreads({
   }, []);
 
   const applyIncomingDelete = useCallback((postId: number) => {
-    setThreads((prev) => removeFromTree(prev, postId));
+    setThreads((prev) => {
+      const parentId = findParentId(prev, postId) ?? null;
+      return adjustReplyCount(removeFromTree(prev, postId), parentId, -1);
+    });
   }, []);
 
   const applyIncomingVote = useCallback((postId: number, userId: number, value: VoteValue) => {
@@ -428,6 +535,9 @@ export function useForumThreads({
     loading,
     loadError,
     reload: () => void reload(),
+    loadingReplies,
+    replyErrors,
+    loadReplies,
     pending,
     error,
     clearError,

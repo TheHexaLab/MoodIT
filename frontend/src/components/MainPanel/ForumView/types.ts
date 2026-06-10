@@ -43,6 +43,10 @@ export interface ForumViewLabels {
   replyMany: string;
   /** Libellé « aucune réponse » (sujet sans réponse). */
   noReplies: string;
+  /** Texte affiché pendant le chargement paresseux des réponses d'une branche. */
+  repliesLoading: string;
+  /** Texte affiché quand le chargement des réponses d'une branche échoue. */
+  repliesError: string;
   /** Badge d'un sujet épinglé. */
   pinned: string;
   /** Titre du popup de confirmation de suppression. */

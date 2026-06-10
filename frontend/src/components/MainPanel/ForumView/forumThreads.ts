@@ -38,8 +38,19 @@ export interface ForumPost {
   title?: string;
   /** Votes du post (table Vote). Le score affiche = somme des `value_`. */
   votes: ForumVote[];
-  /** Reponses directes (Post enfants via post_parent_id). */
+  /**
+   * Reponses directes (Post enfants via post_parent_id), chargees PARESSEUSEMENT :
+   * `undefined` = enfants pas encore charges (le fil n'a jamais ete deplie),
+   * `[]` = charges et aucun enfant. On ne descend jamais tout l'arbre d'un coup :
+   * deplier un post va chercher uniquement ses enfants immediats (voir `reply_count`).
+   */
   replies?: ForumPost[];
+  /**
+   * Nombre de reponses DIRECTES (enfants immediats), connu des le chargement du
+   * post meme si `replies` n'est pas encore charge. Sert a afficher le toggle
+   * « N réponses » sans avoir a descendre le fil.
+   */
+  reply_count?: number;
   /**
    * Identifiant genere cote client a la publication (nonce). Renvoye par l'API et
    * par le broadcast WebSocket, il permet de dedupliquer le post optimiste de son echo.
@@ -439,9 +450,43 @@ const DEFAULT_THREADS: ForumPost[] = [
 ];
 
 /**
- * Retourne les sujets mock d'un forum 'Thread' donne (par id de Forum).
+ * Copie « superficielle » d'un post pour le chargement paresseux : on expose le
+ * nombre d'enfants immediats (`reply_count`) mais on RETIRE `replies` (les enfants
+ * ne sont pas charges tant que l'utilisateur n'a pas deplie le fil).
+ */
+function toShallow(post: ForumPost): ForumPost {
+  const { replies, ...rest } = post;
+  return { ...rest, reply_count: replies?.length ?? 0 };
+}
+
+/** Recherche un post (par id) dans un arbre mock (parcours en profondeur). */
+function findMockPost(posts: ForumPost[], id: number): ForumPost | undefined {
+  for (const post of posts) {
+    if (post.id === id) return post;
+    const found = post.replies ? findMockPost(post.replies, id) : undefined;
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Retourne les sujets RACINES mock d'un forum 'Thread' donne (par id de Forum),
+ * sans leurs reponses (chargement paresseux : voir `getMockForumReplies`).
  * Sert de substitut a l'API tant que le backend des forums n'est pas branche.
  */
 export function getMockForumThreads(forumId: number): ForumPost[] {
-  return THREADS_BY_FORUM[forumId] ?? DEFAULT_THREADS;
+  return (THREADS_BY_FORUM[forumId] ?? DEFAULT_THREADS).map(toShallow);
+}
+
+/**
+ * Retourne les reponses DIRECTES (enfants immediats) d'un post mock, sans leurs
+ * propres sous-reponses. Substitut a l'API de chargement paresseux d'une branche.
+ */
+export function getMockForumReplies(postId: number): ForumPost[] {
+  for (const roots of Object.values(THREADS_BY_FORUM)) {
+    const found = findMockPost(roots, postId);
+    if (found) return (found.replies ?? []).map(toShallow);
+  }
+  const found = findMockPost(DEFAULT_THREADS, postId);
+  return found ? (found.replies ?? []).map(toShallow) : [];
 }

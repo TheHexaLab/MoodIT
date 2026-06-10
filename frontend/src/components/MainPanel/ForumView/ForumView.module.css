@@ -636,6 +636,59 @@ div.forum-view [role="collapse-rail"]:hover::before {
     background: var(--brand-teal);
 }
 
+/* ─── Chargement paresseux d'une branche (spinner inline) + etat d'erreur. ─── */
+div.forum-view div[role="replies-loading"],
+div.forum-view div[role="replies-error"] {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Indentation coherente quand l'etat apparait dans une branche imbriquee. */
+div.forum-view div[role="replies-wrap"] > div[role="replies-loading"],
+div.forum-view div[role="replies-wrap"] > div[role="replies-error"] {
+    margin-left: var(--reply-indent);
+    padding-left: var(--reply-pad);
+}
+
+div.forum-view div[role="replies-loading"] > span[role="spinner"] {
+    box-sizing: border-box;
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid var(--text-muted);
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: forum-view-spin 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.forum-view div[role="replies-loading"] > span[role="spinner"] {
+        animation-duration: 1.4s;
+    }
+}
+
+div.forum-view div[role="replies-error"] > button {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+div.forum-view div[role="replies-error"] > button:hover {
+    border-color: var(--border-strong);
+}
+
 /* ─── Responsive : on densifie sur petits ecrans. ─── */
 @media (max-width: 48rem) {
     div.forum-view {
