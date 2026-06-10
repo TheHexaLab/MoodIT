@@ -149,6 +149,9 @@ export function MarkdownEditor({
       role={`markdown-editor${preview ? '-preview' : ''}`}
       onClick={(event) => event.stopPropagation()}
     >
+      {/* Toolbar + zone de saisie : bloc englobant de la toolbar collante, pour
+          qu'elle se decolle a la fin du textarea sans recouvrir les actions. */}
+      <div role="editor-main">
       <div role="toolbar" aria-label={t.toolbar}>
         <div>
           <ToolMenu
@@ -269,6 +272,7 @@ export function MarkdownEditor({
           autoFocus={autoFocus}
         />
       )}
+      </div>
 
       <div role="editor-actions">
         <button type="button" onClick={onCancel}>
