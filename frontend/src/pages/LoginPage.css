@@ -385,16 +385,24 @@ input[type="password"]::-ms-reveal {
     }
 
     .bubble-1 {
+        top: -4.38rem;
+        right: -2.5rem;
+        background: var(--bubble-mobile);
+        width: 11.25rem;
     }
 
     .bubble-2 {
-        top: -3rem;
-        left: -3rem;
-        bottom: unset;
+        left: -3.12rem;
+        bottom: -3.75rem;
+        background: var(--bubble-spec-mobile);
+        width: 8.75rem;
     }
 
     .bubble-3 {
-        display: none;
+        bottom: -0.6rem;
+        right: -0.6rem;
+        background: var(--bubble-spec-mobile);
+        width: 4.375rem;
     }
 
     .light-dark-btn {
@@ -410,20 +418,36 @@ input[type="password"]::-ms-reveal {
     }
 
     .form-card {
-        max-width: 100%;
+        position: absolute;
+        width: 87%;
         max-height: unset;
-        border-radius: 1rem;
-        padding: 1.75rem 1.25rem;
+        border-radius: 1.25rem;
+        top: -2.5rem;
+        padding: 3.8% 7% 1.5rem 7%;
+    }
+
+    .form-subtitle {
+        margin: 0 0 2.5%;
+    }
+
+    .form-title {
+        margin: 0 0 1.9%;
+
+    }
+
+
+    .label {
+        margin: 3.85% 0 1.26% 0;
     }
 
     .or-divider::before,
     .or-divider::after {
-        width: 30%;
+        width: 40%;
     }
 
-    .footer {
-        position: static;
-        margin-top: 1.5rem;
-        text-align: center;
+    .register-row {
+        margin: 3.85% 0 0;
     }
+
+
 }

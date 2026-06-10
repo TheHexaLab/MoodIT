@@ -34,7 +34,9 @@
     --shadow-modal: rgba(0, 0, 0, 0.25);
     --login-left-gradient: linear-gradient(0deg, #0D9488 0%, #14B8A6 60%, #34D399 100%);
     --bubble: rgba(255, 255, 255, 0.06);
+    --bubble-mobile: rgba(255, 255, 255, 0.12);
     --bubble-spec: rgba(255, 255, 255, 0.08);
+    --bubble-spec-mobile: rgba(255, 255, 255, 0.10);
     --text-app-name: #fff;
     --slogan-text: rgba(255, 255, 255, 0.82);
     --bg-right-login-page: #F8F8FB;
