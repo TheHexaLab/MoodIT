@@ -48,6 +48,8 @@
     --login-button-shadow: rgba(10, 92, 192, 0.30);
     --text-or-divider: #9999AD;
     --button-light-dark: rgba(0, 0, 0, 0.06);
+    --button-light-dark-ordinateur: #454559;
+    --button-light-dark-mobile: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -76,6 +78,8 @@
         --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
         --text-or-divider: #A6A6BC;
         --button-light-dark: rgba(255, 255, 255, 0.12);
+        --button-light-dark-ordinateur: #F6C350;
+        --button-light-dark-mobile: #F6C350;
     }
 }
 
@@ -104,6 +108,8 @@
     --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
     --text-or-divider: #A6A6BC;
     --button-light-dark: rgba(255, 255, 255, 0.12);
+    --button-light-dark-ordinateur: #F6C350;
+    --button-light-dark-mobile: #F6C350;
 }
 
 body {

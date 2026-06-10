@@ -127,6 +127,7 @@ input[type="password"]::-ms-reveal {
     display: flex;
     justify-content: center;
     align-items: center;
+    color: var(--button-light-dark-ordinateur);
 }
 
 .form-card {
@@ -409,6 +410,7 @@ input[type="password"]::-ms-reveal {
         top: 1rem;
         right: 1rem;
         background: var(--bubble);
+        color: var(--button-light-dark-mobile);
     }
 
     .main {
