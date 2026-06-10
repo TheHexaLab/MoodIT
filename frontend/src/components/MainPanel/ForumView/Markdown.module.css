@@ -103,22 +103,70 @@ div[role="code-block"] {
     margin: 0.5rem 0;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
-    background: var(--bg-message-input);
+    background: var(--syntax-bg);
     overflow: hidden;
 }
 
-div[role="code-block"] > span[role="code-lang"] {
+/* Barre flottante en haut a droite : bouton de copie + pastille de langage. */
+div[role="code-block"] > div[role="code-toolbar"] {
     position: absolute;
     top: 0;
     right: 0;
-    padding: 0.1rem 0.45rem;
+    display: flex;
+    align-items: stretch;
     border-bottom-left-radius: 0.5rem;
+    overflow: hidden;
     background: var(--bg-vote-pill);
+}
+
+div[role="code-toolbar"] > span[role="code-lang"] {
+    display: flex;
+    align-items: center;
+    padding: 0.1rem 0.45rem;
     color: var(--text-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.65rem;
     text-transform: lowercase;
     user-select: none;
+}
+
+/* Bouton de copie : masque (largeur 0) puis revele au survol du bloc (facon GitHub). */
+div[role="code-toolbar"] > button[role="copy"] {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 0;
+    transition: width 0.12s ease, opacity 0.12s ease, color 0.12s ease;
+}
+
+div[role="code-block"]:hover > div[role="code-toolbar"] > button[role="copy"],
+div[role="code-toolbar"] > button[role="copy"]:focus-visible {
+    width: 1.55rem;
+    opacity: 1;
+}
+
+div[role="code-toolbar"] > button[role="copy"] > svg {
+    flex: none;
+}
+
+div[role="code-toolbar"] > button[role="copy"]:hover {
+    color: var(--text);
+}
+
+/* Etat « Copié » : la coche (verte) reste visible le temps du retour visuel,
+   meme si le curseur a quitte le bloc (sinon width:0 la masquerait). */
+div[role="code-toolbar"] > button[role="copy"][data-copied] {
+    width: 1.55rem;
+    opacity: 1;
+    color: var(--success);
 }
 
 div[role="code-block"] > pre {

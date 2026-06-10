@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import styles from './ForumView.module.css';
 import {
   type ChannelMessageAuthor,
@@ -192,6 +192,8 @@ const ForumView: React.FC<ForumViewProps> = ({
   const [newContent, setNewContent] = useState('');
   /** Publication du nouveau sujet en cours (spinner dans le bouton Publier). */
   const [publishing, setPublishing] = useState(false);
+  /** Conteneur scrollable des sujets : permet de remonter au formulaire inline. */
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   /** Vote courant de l'utilisateur connecte sur un post. */
   function getUserVote(post: ForumPost): VoteValue {
@@ -290,9 +292,14 @@ const ForumView: React.FC<ForumViewProps> = ({
 
   /** Ouvre le formulaire de nouveau sujet (remplace la liste). */
   function startCompose() {
+    if (composing) {
+      return
+    }
     setComposing(true);
     setNewTitle('');
     setNewContent('');
+    // Le formulaire s'affiche en tete de la liste : on remonte pour le rendre visible.
+    bodyRef.current?.scrollTo({ top: 0 });
   }
 
   function cancelCompose() {
@@ -632,8 +639,8 @@ const ForumView: React.FC<ForumViewProps> = ({
         {courseLabel && <p>{courseLabel}</p>}
       </header>
 
-      {/* La barre d'actions (tri + nouveau sujet) : cachee pendant le chargement et la redaction. */}
-      {!loading && !loadError && !composing && (
+      {/* La barre d'actions (tri + nouveau sujet) : cachee pendant le chargement. */}
+      {!loading && !loadError && (
         <div role="toolbar">
           <div role="group" aria-label={t.sortGroup}>
             <button
@@ -653,15 +660,17 @@ const ForumView: React.FC<ForumViewProps> = ({
               {t.sortRecent}
             </button>
           </div>
-          <button type="button" role="new-post" onClick={startCompose}>
+          <button type="button" role={`new-post${composing ? '-composing' : ''}`} onClick={startCompose}>
             +<span>{t.newThread}</span>
           </button>
         </div>
       )}
 
-      <div role="body">
-        {composing ? (
+      <div role="body" ref={bodyRef}>
+        {/* Formulaire « Nouveau sujet » : inline en tete de la liste (pas une autre page). */}
+        {composing && (
           <div role="new-thread">
+            <h2 role="new-thread-heading">{t.newThreadHeading}</h2>
             <input
               type="text"
               value={newTitle}
@@ -683,7 +692,8 @@ const ForumView: React.FC<ForumViewProps> = ({
               placeholder={t.newThreadPlaceholder}
             />
           </div>
-        ) : loading ? (
+        )}
+        {loading ? (
           <div role="status">
             <span role="spinner" aria-hidden="true" />
             <p>{t.loading}</p>
@@ -696,7 +706,10 @@ const ForumView: React.FC<ForumViewProps> = ({
             </button>
           </div>
         ) : visibleThreads.length === 0 ? (
-          <p>{t.empty}</p>
+          // Pendant la redaction, on n'affiche pas le message « vide » sous le formulaire.
+          composing ? null : (
+            <p>{t.empty}</p>
+          )
         ) : (
           <ul>{visibleThreads.map(renderThreadCard)}</ul>
         )}

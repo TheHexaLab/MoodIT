@@ -49,6 +49,8 @@ export interface ForumViewLabels {
   deleteTitle: string;
   /** Contenu du popup de confirmation de suppression. */
   deleteContent: string;
+  /** Titre affiché au-dessus du formulaire de nouveau sujet. */
+  newThreadHeading: string;
   /** Placeholder + aria du champ titre du nouveau sujet. */
   newThreadTitle: string;
   /** Bouton de publication d'un nouveau sujet. */

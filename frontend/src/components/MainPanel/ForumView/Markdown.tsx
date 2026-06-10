@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Highlight, type PrismTheme } from 'prism-react-renderer';
+import { Copy } from '../../../assets/Copy';
+import { Check } from '../../../assets/Check';
 import './prismLanguages'; // effet de bord : enregistre les grammaires Prism
 import './Markdown.module.css'; // styles globaux (selecteurs par role/element)
 
@@ -62,9 +64,36 @@ const LANG_ALIASES: Record<string, string> = {
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const raw = (lang || 'text').toLowerCase();
   const language = LANG_ALIASES[raw] ?? raw;
+  /** Retour visuel « Copié » apres une copie reussie (revient a l'etat normal). */
+  const [copied, setCopied] = useState(false);
+
+  /** Copie le code brut dans le presse-papiers (avec retour visuel ephemere). */
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Presse-papiers indisponible (contexte non securise, permission refusee) :
+      // on ignore silencieusement, le bouton reste utilisable.
+    }
+  }
+
   return (
     <div role="code-block">
-      {lang ? <span role="code-lang">{lang}</span> : null}
+      {/* Coin haut-droit : bouton de copie (apparait au survol) + pastille de langage. */}
+      <div role="code-toolbar">
+        <button
+          type="button"
+          role="copy"
+          onClick={copyCode}
+          aria-label={copied ? 'Copié' : 'Copier'}
+          data-copied={copied || undefined}
+        >
+          {copied ? <Check width={13} height={13} /> : <Copy width={13} height={13} />}
+        </button>
+        {lang ? <span role="code-lang">{lang}</span> : null}
+      </div>
       <Highlight code={code} language={language} theme={codeTheme}>
         {({ style, tokens, getLineProps, getTokenProps }) => (
           <pre style={style}>

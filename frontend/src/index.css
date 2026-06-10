@@ -43,17 +43,18 @@
     --avatar-teal-light: #2dd4bf;
     --avatar-teal-deep: #0f766e;
     --avatar-grey: #7d7d94;
-    /* Coloration syntaxique des blocs de code (theme clair). */
-    --syntax-fg: #1f2328;
-    --syntax-comment: #6e7781;
-    --syntax-punctuation: #57606a;
-    --syntax-keyword: #cf222e;
-    --syntax-class: #953800;
-    --syntax-string: #0a3069;
-    --syntax-number: #0550ae;
-    --syntax-function: #8250df;
-    --syntax-operator: #0550ae;
-    --syntax-variable: #e36209;
+    /* Coloration syntaxique : palette Catppuccin Latte (theme clair). */
+    --syntax-bg: #eff1f5;
+    --syntax-fg: #4c4f69;
+    --syntax-comment: #8c8fa1;
+    --syntax-punctuation: #7c7f93;
+    --syntax-keyword: #8839ef;
+    --syntax-class: #df8e1d;
+    --syntax-string: #40a02b;
+    --syntax-number: #fe640b;
+    --syntax-function: #1e66f5;
+    --syntax-operator: #04a5e5;
+    --syntax-variable: #d20f39;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -81,16 +82,18 @@
         --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
         --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
-        --syntax-fg: #d4d4d4;
-        --syntax-comment: #6a9955;
-        --syntax-punctuation: #cccccc;
-        --syntax-keyword: #569cd6;
-        --syntax-class: #4ec9b0;
-        --syntax-string: #ce9178;
-        --syntax-number: #b5cea8;
-        --syntax-function: #dcdcaa;
-        --syntax-operator: #d4d4d4;
-        --syntax-variable: #9cdcfe;
+        /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
+        --syntax-bg: #1e1e2e;
+        --syntax-fg: #cdd6f4;
+        --syntax-comment: #6c7086;
+        --syntax-punctuation: #9399b2;
+        --syntax-keyword: #cba6f7;
+        --syntax-class: #f9e2af;
+        --syntax-string: #a6e3a1;
+        --syntax-number: #fab387;
+        --syntax-function: #89b4fa;
+        --syntax-operator: #89dceb;
+        --syntax-variable: #f38ba8;
     }
 }
 
@@ -118,16 +121,18 @@
     --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
-    --syntax-fg: #d4d4d4;
-    --syntax-comment: #6a9955;
-    --syntax-punctuation: #cccccc;
-    --syntax-keyword: #569cd6;
-    --syntax-class: #4ec9b0;
-    --syntax-string: #ce9178;
-    --syntax-number: #b5cea8;
-    --syntax-function: #dcdcaa;
-    --syntax-operator: #d4d4d4;
-    --syntax-variable: #9cdcfe;
+    /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
+    --syntax-bg: #1e1e2e;
+    --syntax-fg: #cdd6f4;
+    --syntax-comment: #6c7086;
+    --syntax-punctuation: #9399b2;
+    --syntax-keyword: #cba6f7;
+    --syntax-class: #f9e2af;
+    --syntax-string: #a6e3a1;
+    --syntax-number: #fab387;
+    --syntax-function: #89b4fa;
+    --syntax-operator: #89dceb;
+    --syntax-variable: #f38ba8;
 }
 body {
     margin: 0;

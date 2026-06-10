@@ -24,6 +24,7 @@ export const defaultForumViewLabels: ForumViewLabels = {
   pinned: 'Épinglé',
   deleteTitle: 'Supprimer le message',
   deleteContent: 'Ce message et ses réponses seront définitivement supprimés. Continuer ?',
+  newThreadHeading: 'Nouveau post',
   newThreadTitle: 'Titre du sujet',
   publish: 'Publier',
   editSave: 'Enregistrer',

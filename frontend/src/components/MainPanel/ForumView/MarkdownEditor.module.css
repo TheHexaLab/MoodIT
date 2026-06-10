@@ -171,9 +171,8 @@ div[role^="markdown-editor"] > div[role="preview"] {
 
 div[role^="markdown-editor"] > div[role="preview"] > p {
     margin: 0;
-    color: var(--text-muted);
+    color: var(--border);
     font-family: Inter, sans-serif;
-    font-style: italic;
     font-size: 0.8125rem;
 }
 
