@@ -106,17 +106,23 @@ div.forum-view > div[role="toolbar"] > div[role="group"] > button[role="active-s
 }
 
 div.forum-view > div[role="toolbar"] > button[role="new-post"] {
+    display: flex;
+    gap: 0.4rem;
     flex-shrink: 0;
     border: none;
-    border-radius: 999px;
-    padding: 0.45rem 0.9rem;
+    border-radius: 0.5rem;
+    padding: 0.62rem 0.62rem;
     background: var(--brand-teal);
     color: var(--text-on-brand);
     font-family: Inter, sans-serif;
-    font-size: 0.8125rem;
+    font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
     transition: filter 0.12s ease;
+}
+
+div.forum-view > div[role="toolbar"] > button[role="new-post"] > span {
+    font-size: 0.8125rem;
 }
 
 div.forum-view > div[role="toolbar"] > button[role="new-post"]:hover {
@@ -694,5 +700,12 @@ div.forum-view [role="collapse-rail"]:hover::before {
 
     div.forum-view > div[role="body"] > ul:first-child > li {
         padding: 0.625rem 0.75rem;
+    }
+}
+
+@media (max-width: 21.25rem) {
+
+    div.forum-view > div[role="toolbar"] {
+        flex-direction: column-reverse;
     }
 }

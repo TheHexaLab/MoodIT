@@ -38,7 +38,7 @@ const isAdminMock = true;
 // Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
 // operations sur les messages : envoi, modification, suppression.
 const SIMULATE_SEND_FAILURE = true;
-const SIMULATE_DELAY = 1000;
+const SIMULATE_DELAY = 4000;
 const SIMULATE_FETCH_FAILURE = false;
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -209,15 +209,13 @@ export default function Dashboard() {
     return selectedChannel?.id === channelId ? (selectedChannel.messages ?? []) : [];
   };
 
-  const mobileTopbarTitle = selectedChannel
-    ? `${getPrefixForType(selectedChannel.type)} ${selectedChannel.name}`
-    : 'Accueil';
   const mobileUserInitial = getUserInitial(loggedInUserMock);
 
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitle={mobileTopbarTitle}
+        mobileTitlePrefix={selectedChannel ? getPrefixForType(selectedChannel.type) : undefined}
+        mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         programMenu={
           <ProgramMenu

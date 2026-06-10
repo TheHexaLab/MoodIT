@@ -8,6 +8,8 @@ interface LeftMenuGroupProps {
   courseMenu: React.ReactNode;
   /** Titre affiche dans la barre mobile. */
   mobileTitle?: string;
+  /** Préfixe du titre **/
+  mobileTitlePrefix?: string;
   /** Initiale affichée dans l'avatar mobile. */
   mobileUserInitial?: string;
 }
@@ -20,6 +22,7 @@ export default function LeftMenuGroup({
   programMenu,
   courseMenu,
   mobileTitle = 'Accueil',
+  mobileTitlePrefix = '',
   mobileUserInitial = 'U',
 }: LeftMenuGroupProps): React.ReactElement {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -60,7 +63,14 @@ export default function LeftMenuGroup({
           <span className={styles.hamburgerLine} />
         </button>
 
-        <h2 className={styles.mobileTitle}>{mobileTitle}</h2>
+        <h2 className={styles.mobileTitle}>
+          {mobileTitlePrefix && (
+            <span style={mobileTitlePrefix !== '⮡ ' ? { width: 'fit-content' } : undefined}>
+              {mobileTitlePrefix}
+            </span>
+          )}
+          {mobileTitle}
+        </h2>
 
         <span className={styles.mobileAvatar} aria-label="Utilisateur connecté">
           {mobileUserInitial}

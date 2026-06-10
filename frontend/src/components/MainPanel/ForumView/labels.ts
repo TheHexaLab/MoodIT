@@ -2,7 +2,7 @@ import type { ForumViewLabels, MarkdownEditorLabels } from './types';
 
 /** Textes par défaut affichés par le ForumView. */
 export const defaultForumViewLabels: ForumViewLabels = {
-  loading: 'Chargement des sujets…',
+  loading: 'Chargement en cours…',
   retry: 'Réessayer',
   empty: "Aucun sujet dans ce forum pour l'instant.",
   sortGroup: 'Trier les sujets',

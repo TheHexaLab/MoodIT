@@ -2,7 +2,7 @@ import type { ChannelViewLabels } from './types';
 
 /** Tous les textes par défaut affichés par le ChannelView. */
 export const defaultChannelViewLabels: ChannelViewLabels = {
-  loading: 'Chargement des messages…',
+  loading: 'Chargement en cours…',
   retry: 'Réessayer',
   empty: "Aucun message dans ce canal pour l'instant.",
   deletedParent: 'Message original supprimé',
