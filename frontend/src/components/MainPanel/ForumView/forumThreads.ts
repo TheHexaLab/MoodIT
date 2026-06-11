@@ -356,48 +356,6 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
   ],
 };
 
-/** Quelques sujets generiques pour les forums sans mock dedie. */
-const DEFAULT_THREADS: ForumPost[] = [
-  {
-    id: 901,
-    title: 'Bienvenue sur le forum du cours 👋',
-    content:
-      "C'est l'endroit pour poser vos questions, partager des ressources et discuter des sujets " +
-      "du cours. Soyez respectueux et votez les contributions utiles pour les faire remonter !",
-    created_at: '2026-06-02T10:00:00',
-    author: admin,
-    is_pinned: true,
-    votes: [
-      { user_id: 2, value: 1 },
-      { user_id: 3, value: 1 },
-    ],
-    replies: [],
-  },
-  {
-    id: 902,
-    title: 'Groupe d’étude pour l’examen de mi-session ?',
-    content:
-      "Quelqu'un serait intéressé à former un petit groupe d'étude la semaine prochaine ? " +
-      'On pourrait se partager les chapitres et faire des annales ensemble.',
-    created_at: '2026-06-08T16:20:00',
-    author: me,
-    votes: [
-      { user_id: 3, value: 1 },
-      { user_id: 10, value: 1 },
-    ],
-    replies: [
-      {
-        id: 903,
-        content: 'Partant ! Mardi après-midi me conviendrait. 📚',
-        created_at: '2026-06-08T17:02:00',
-        author: me,
-        votes: [{ user_id: 2, value: 1 }],
-        replies: [],
-      },
-    ],
-  },
-];
-
 /**
  * Copie « superficielle » d'un post pour le chargement paresseux : on expose le
  * nombre d'enfants immediats (`reply_count`) mais on RETIRE `replies` (les enfants
@@ -422,9 +380,10 @@ function findMockPost(posts: ForumPost[], id: number): ForumPost | undefined {
  * Retourne les sujets RACINES mock d'un forum 'Thread' donne (par id de Forum),
  * sans leurs reponses (chargement paresseux : voir `getMockForumReplies`).
  * Sert de substitut a l'API tant que le backend des forums n'est pas branche.
+ * Un forum sans mock dedie (ex. nouvellement cree) est renvoye VIDE.
  */
 export function getMockForumThreads(forumId: number): ForumPost[] {
-  return (THREADS_BY_FORUM[forumId] ?? DEFAULT_THREADS).map(toShallow);
+  return (THREADS_BY_FORUM[forumId] ?? []).map(toShallow);
 }
 
 /**
@@ -436,6 +395,5 @@ export function getMockForumReplies(postId: number): ForumPost[] {
     const found = findMockPost(roots, postId);
     if (found) return (found.replies ?? []).map(toShallow);
   }
-  const found = findMockPost(DEFAULT_THREADS, postId);
-  return found ? (found.replies ?? []).map(toShallow) : [];
+  return [];
 }
