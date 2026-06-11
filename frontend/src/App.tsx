@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import Register from './pages/Register/Register';
 import Home from './pages/Home';
+import VerifyCode from './pages/VerifyCode/VerifyCode';
 import ProtectedRoute from './components/ProtectedRoute';
 import './pages/LoginPage.css';
 
@@ -18,6 +19,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route path="/verify-code" element={<VerifyCode />} />
       <Route path="/" element={<Navigate to="/home" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

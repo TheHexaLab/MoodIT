@@ -2,8 +2,8 @@ import styles from './Register.module.css';
 import { useTheme } from '../../helpers/theme';
 import { useState } from 'react';
 import { register } from '../../helpers/api';
-import { Link } from 'react-router-dom';
 import { Lightanddark } from '../../assets/light-dark-btn';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function Register() {
   const { theme, toggleTheme } = useTheme();
@@ -15,13 +15,13 @@ export default function Register() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
-  const [success, setSuccess] = useState(false);
+  const navigate = useNavigate();
 
   function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
     if (pw.length === 0) return 0;
     if (pw.length < 8) return 1;
     const hasNumber = /[0-9]/.test(pw);
-    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw);
+    const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw);
     if (hasNumber && hasSpecial) return 4;
     if (hasNumber || hasSpecial) return 3;
     return 2;
@@ -52,7 +52,7 @@ export default function Register() {
         email,
         password,
       });
-      setSuccess(true);
+      navigate('/verify-code', { state: { email, mode: 'email' } });
     } catch (err) {
       setServerError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {
@@ -86,19 +86,7 @@ export default function Register() {
         </button>
 
         <div className={styles.card}>
-          {success ? (
-            <div className={styles.successBox}>
-              <h2>Vérifiez votre email ✉️</h2>
-              <p>
-                Un lien de confirmation a été envoyé à <strong>{email}</strong>.
-              </p>
-              <p>Cliquez sur le lien pour activer votre compte puis connectez-vous.</p>
-              <Link to="/login" className={styles.loginLink}>
-                Se connecter →
-              </Link>
-            </div>
-          ) : (
-            <>
+          <>
               <header className={styles.cardHeader}>
                 <h2>Créer un compte</h2>
                 <p>Rejoignez votre espace MoodIT</p>
@@ -226,8 +214,7 @@ export default function Register() {
               <p className={styles.loginLink}>
                 Déjà un compte ? <Link to="/login">Se connecter</Link>
               </p>
-            </>
-          )}
+          </>
         </div>
 
         <footer className={styles.pageFooter}>

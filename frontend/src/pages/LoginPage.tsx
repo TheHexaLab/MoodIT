@@ -46,7 +46,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login({ email, password });
-      navigate('/home');
+      navigate('/verify-code', { state: { email, mode: '2fa' } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {

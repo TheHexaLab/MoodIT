@@ -85,6 +85,7 @@
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: 1rem;
+    box-sizing: border-box;
     box-shadow: 0 12px 32px var(--shadow-modal);
     padding: 2rem;
     display: flex;

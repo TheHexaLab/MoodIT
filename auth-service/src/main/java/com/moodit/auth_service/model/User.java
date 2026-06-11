@@ -35,6 +35,12 @@ public class User {
   @Column(name = "verified_email", nullable = false)
   private boolean verifiedEmail = false;
 
+  @Column(name = "verification_code", length = 6)
+  private String verificationCode;
+
+  @Column(name = "verification_code_expires_at")
+  private LocalDateTime verificationCodeExpiresAt;
+
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 

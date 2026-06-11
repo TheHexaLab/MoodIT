@@ -31,6 +31,8 @@ public class SecurityConfig {
                         "/auth/validate",
                         "/auth/test",
                         "/auth/verify/**",
+                        "/auth/verify-email",
+                        "/auth/verify-2fa",
                         "/swagger-ui/**",
                         "/swagger-ui/index.html",
                         "/swagger-ui.html",

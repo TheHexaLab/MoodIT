@@ -1,4 +1,4 @@
-import { getToken, saveToken, clearToken } from './auth';
+import { getToken, clearToken } from './auth';
 
 export interface RegisterPayload {
   username: string;
@@ -66,7 +66,7 @@ export async function login(payload: { email: string; password: string }): Promi
     throw new Error(data.message || `Erreur ${res.status}`);
   }
 
-  const auth: AuthResponse = await res.json();
-  saveToken(auth.token);
-  return auth;
+  // Le token n'est PAS sauvegardé ici : login ne renvoie pas encore de token
+  // (2FA requise). Le token est sauvegardé après /auth/verify-2fa.
+  return res.json();
 }

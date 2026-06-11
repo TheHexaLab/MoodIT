@@ -33,6 +33,12 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", ex.getMessage()));
   }
 
+  @ExceptionHandler(InvalidVerificationCodeException.class)
+  public ResponseEntity<Map<String, String>> handleInvalidVerificationCode(
+      InvalidVerificationCodeException ex) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", ex.getMessage()));
+  }
+
   @ExceptionHandler(MethodArgumentNotValidException.class)
   public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
     String message =

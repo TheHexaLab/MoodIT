@@ -15,6 +15,9 @@ import com.moodit.auth_service.exception.InvalidCredentialsException;
 import java.time.LocalDateTime;
 import java.util.Map;
 import com.moodit.auth_service.exception.EmailNotVerifiedException;
+import com.moodit.auth_service.exception.InvalidVerificationCodeException;
+import com.moodit.auth_service.service.EmailService;
+import java.security.SecureRandom;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +26,7 @@ public class AuthService {
   private final UserRepository userRepository;
   private final JwtService jwtService;
   private final PasswordEncoder passwordEncoder;
+  private final EmailService emailService;
 
   @Value("${app.security.pepper}")
   private String pepper;
@@ -52,7 +56,14 @@ public class AuthService {
 
     userRepository.save(user);
 
-    // TODO: envoyer email de vérification
+    // Générer et envoyer le code de vérification
+    String code = generateCode();
+    user.setVerificationCode(code);
+    user.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(15));
+
+    userRepository.save(user);
+
+    emailService.sendVerificationCode(request.getEmail(), code);
 
     return Map.of("message", "Compte créé! Vérifiez votre email pour activer votre compte.");
   }
@@ -75,16 +86,19 @@ public class AuthService {
       throw new InvalidCredentialsException();
     }
 
-    // Générer un nouveau JWT
-    String token = jwtService.generateToken(request.getEmail());
+    // Mot de passe valide : on n'émet pas encore de token, la 2FA doit être
+    // validée d'abord. Le token est généré dans verify2FA().
 
-    // Mettre à jour le token hashé en BD
-    String hashedToken = jwtService.hashToken(token, request.getEmail());
-    user.setActiveTokenHash(hashedToken);
+    // Générer et envoyer le code 2FA
+    String code = generateCode();
+    user.setVerificationCode(code);
+    user.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(15));
     userRepository.save(user);
 
+    emailService.send2FACode(request.getEmail(), code);
+
     return new AuthResponse(
-        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+        null, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
   }
 
   // Validate
@@ -119,7 +133,61 @@ public class AuthService {
     return Map.of("message", "Email vérifié pour " + username);
   }
 
+  public Map<String, String> verifyEmail(String email, String code) {
+    User user =
+        userRepository
+            .findByEmail(email)
+            .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
+
+    if (user.getVerificationCode() == null || !user.getVerificationCode().equals(code)) {
+      throw new InvalidVerificationCodeException("Code invalide");
+    }
+
+    if (user.getVerificationCodeExpiresAt().isBefore(LocalDateTime.now())) {
+      throw new InvalidVerificationCodeException("Code expiré");
+    }
+
+    user.setVerifiedEmail(true);
+    user.setVerificationCode(null);
+    user.setVerificationCodeExpiresAt(null);
+    userRepository.save(user);
+
+    return Map.of("message", "Email vérifié avec succès!");
+  }
+
+  public AuthResponse verify2FA(String email, String code) {
+    User user =
+        userRepository
+            .findByEmail(email)
+            .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
+
+    if (user.getVerificationCode() == null || !user.getVerificationCode().equals(code)) {
+      throw new InvalidVerificationCodeException("Code invalide");
+    }
+
+    if (user.getVerificationCodeExpiresAt().isBefore(LocalDateTime.now())) {
+      throw new InvalidVerificationCodeException("Code expiré");
+    }
+
+    user.setVerificationCode(null);
+    user.setVerificationCodeExpiresAt(null);
+
+    String token = jwtService.generateToken(user.getEmail());
+    String hashedToken = jwtService.hashToken(token, user.getEmail());
+    user.setActiveTokenHash(hashedToken);
+    userRepository.save(user);
+
+    return new AuthResponse(
+        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+  }
+
   // Méthodes privées
+
+  private String generateCode() {
+    SecureRandom random = new SecureRandom();
+    int code = 100000 + random.nextInt(900000);
+    return String.valueOf(code);
+  }
 
   private String extractDomain(String email) {
     return email.substring(email.indexOf('@') + 1);
