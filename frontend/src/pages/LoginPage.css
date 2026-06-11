@@ -365,24 +365,26 @@ input[type="password"]::-ms-reveal {
 
     .aside {
         width: 100%;
-        min-height: 16.25rem;
+        min-height: 14rem;
+        max-height: 16.25rem;
     }
 
     .logo-wrapper img {
         width: 4.75rem;
         height: auto;
         border-radius: 1rem;
-        padding-bottom: 1rem;
+        padding-bottom: 0;
     }
 
     .app-name {
         font-size: 1.75rem;
-        margin: 0 0 0.38rem 0;
+        margin: 0 0 0 0;
     }
 
     .app-tagline {
-        font-size: 0.75rem;
+        font-size: 0;
         flex-direction: row;
+        line-height: 0;
     }
 
     .bubble-1 {
