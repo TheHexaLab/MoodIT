@@ -14,7 +14,8 @@ CREATE TABLE Program(
    color VARCHAR(9) NOT NULL DEFAULT '#0a5cc0',
    establishment_id INTEGER NOT NULL,
    PRIMARY KEY(id),
-   FOREIGN KEY(establishment_id) REFERENCES Establishment(id) ON DELETE CASCADE
+   FOREIGN KEY(establishment_id) REFERENCES Establishment(id) ON DELETE CASCADE,
+   CONSTRAINT uq_program_code_cohort_establishment UNIQUE (code, cohort, establishment_id)
 );
 
 CREATE TABLE User_(
@@ -41,7 +42,6 @@ CREATE TABLE Role(
 CREATE TABLE Course(
    id SERIAL,
    title VARCHAR(128) NOT NULL,
-   description VARCHAR(256) ,
    code VARCHAR(128) NOT NULL,
    PRIMARY KEY(id)
 );
@@ -86,6 +86,7 @@ CREATE TABLE Forum(
    title VARCHAR(128) NOT NULL,
    f_type_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
+   --position INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(f_type_id) REFERENCES F_Type(id),
    FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
@@ -300,46 +301,61 @@ INSERT INTO Role (name) VALUES
 INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
   ('admin', 'Admin', 'Admin', 'hash.pour.tester', TRUE);
 
+INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
+  ('rosie1234', 'rosie', 'HG', 'hash.pour.tester2', TRUE);
+
+  INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
+  ('mich1234', 'mich', 'normand', 'hash.pour.tester3', TRUE);
 -- ------------------------------------------------------------
 -- User_Role  
 -- ------------------------------------------------------------
 INSERT INTO User_Role (user_id, role_id) VALUES
   (1, 4);  -- admin (user_id=1) → Administrateur (role_id=4)
 
+INSERT INTO User_Role (user_id, role_id) VALUES
+  (2, 1);  -- rosie (user_id=2) → etudiant (role_id=1)
+
+INSERT INTO User_Role (user_id, role_id) VALUES
+  (3, 1);  -- mich (user_id=3) → etudiant (role_id=1)
+
+-- ------------------------------------------------------------
+-- User_Programme 
+-- ------------------------------------------------------------
+INSERT INTO User_Program (program_id, user_id) VALUES (1, 2);
 -- ------------------------------------------------------------
 -- Course  (cours transversaux + spécifiques génie)
 -- ------------------------------------------------------------
-INSERT INTO Course (title, description, code) VALUES
+INSERT INTO Course (title, code) VALUES
   -- Tronc commun
-  ('Mathématiques pour ingénieurs I',    'Calcul différentiel et intégral appliqué au génie.',                   'MAT115'),
-  ('Mathématiques pour ingénieurs II',   'Algèbre linéaire, équations différentielles ordinaires.',              'MAT215'),
-  ('Physique pour ingénieurs I',         'Mécanique classique, thermodynamique de base.',                        'PHY115'),
-  ('Physique pour ingénieurs II',        'Électromagnétisme, ondes.',                                            'PHY215'),
-  ('Chimie pour ingénieurs',             'Notions fondamentales de chimie générale et de matériaux.',            'CHI105'),
-  ('Communication en génie',             'Rédaction technique, présentation orale, normes IEEE/APA.',           'COM105'),
-  ('Éthique et déontologie',             'Responsabilité professionnelle, développement durable, OIQ.',         'ETH105'),
+  ('Mathématiques pour ingénieurs I',          'MAT115'),
+  ('Mathématiques pour ingénieurs II',         'MAT215'),
+  ('Physique pour ingénieurs I',               'PHY115'),
+  ('Physique pour ingénieurs II',              'PHY215'),
+  ('Chimie pour ingénieurs',                   'CHI105'),
+  ('Communication en génie',                   'COM105'),
+  ('Éthique et déontologie',                   'ETH105'),
   -- Génie informatique / logiciel
-  ('Structures de données et algorithmes','Complexité, arbres, graphes, tables de hachage.',                    'GIF201'),
-  ('Systèmes d''exploitation',           'Gestion de processus, mémoire, fichiers, sécurité.',                 'GIF301'),
-  ('Réseaux informatiques',              'Modèle TCP/IP, protocoles, sécurité réseau.',                         'GIF401'),
-  ('Génie logiciel I',                   'Processus de développement, UML, tests unitaires.',                   'GLO200'),
-  ('Génie logiciel II',                  'Patrons de conception, CI/CD, DevOps.',                               'GLO300'),
-  ('Bases de données',                   'Modèle relationnel, SQL, transactions, normalisation.',                'GIF501'),
+  ('Structures de données et algorithmes',     'GIF201'),
+  ('Systèmes d''exploitation',                 'GIF301'),
+  ('Réseaux informatiques',                    'GIF401'),
+  ('Génie logiciel I',                         'GLO200'),
+  ('Génie logiciel II',                        'GLO300'),
+  ('Bases de données',                         'GIF501'),
   -- Génie électrique
-  ('Circuits électriques I',             'Lois de Kirchhoff, théorèmes de Thévenin/Norton, régime sinusoïdal.','GEL201'),
-  ('Circuits électriques II',            'Filtres, puissance, transformateurs.',                                 'GEL301'),
-  ('Électronique analogique',            'Diodes, transistors, amplificateurs opérationnels.',                   'GEL401'),
-  ('Systèmes de contrôle',               'Modélisation, fonction de transfert, stabilité.',                     'GEL501'),
+  ('Circuits électriques I',                   'GEL201'),
+  ('Circuits électriques II',                  'GEL301'),
+  ('Électronique analogique',                  'GEL401'),
+  ('Systèmes de contrôle',                     'GEL501'),
   -- Génie mécanique
-  ('Mécanique des solides I',            'Statique, résistance des matériaux.',                                  'GMC201'),
-  ('Mécanique des fluides',              'Équation de Bernoulli, écoulements visqueux.',                         'GMC301'),
-  ('Thermodynamique appliquée',          'Cycles thermodynamiques, transfert de chaleur.',                       'GMC401'),
+  ('Mécanique des solides I',                  'GMC201'),
+  ('Mécanique des fluides',                    'GMC301'),
+  ('Thermodynamique appliquée',                'GMC401'),
   -- Génie civil
-  ('Matériaux de construction',          'Béton, acier, bois : propriétés mécaniques et durabilité.',            'GCI201'),
-  ('Hydraulique',                        'Écoulement en conduites et en surface libre.',                         'GCI301'),
+  ('Matériaux de construction',                'GCI201'),
+  ('Hydraulique',                              'GCI301'),
   -- Génie chimique
-  ('Opérations unitaires I',             'Distillation, extraction, absorption.',                                'GCH201'),
-  ('Cinétique chimique',                 'Réacteurs, mécanismes réactionnels, modélisation.',                   'GCH301');
+  ('Opérations unitaires I',                   'GCH201'),
+  ('Cinétique chimique',                       'GCH301');
 
 -- ------------------------------------------------------------
 -- F_Type  (types de forum)
@@ -406,3 +422,60 @@ INSERT INTO program_course (program_id, course_id) VALUES
 INSERT INTO program_course (program_id, course_id) VALUES
   (7, 19), (7, 21), (7, 22), (7, 23);
 
+-- ------------------------------------------------------------
+-- Post (quelques posts dans les forums existants)
+-- ------------------------------------------------------------
+INSERT INTO Post (content, forum_id, user_id, is_pinned) VALUES
+  ('Bonjour, est-ce que quelqu''un peut m''expliquer la dérivée en chaîne?', 1, 2, FALSE),  -- post 1
+  ('Voici une ressource utile pour MAT115!', 1, 3, TRUE),                                    -- post 2
+  ('Je comprends pas les intégrales doubles...', 1, 2, FALSE),                               -- post 3
+  ('Question sur les systèmes d''exploitation, comment fonctionne un deadlock?', 9, 3, FALSE), -- post 4
+  ('Réponse au deadlock: c''est quand deux processus s''attendent mutuellement.', 9, 2, FALSE); -- post 5
+
+-- Enfants du post 1
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('C''est une réponse au post 1!', 1, 3, 1, FALSE),           -- post 6
+  ('Une deuxième réponse au post 1!', 1, 1, 1, FALSE);         -- post 7
+
+-- Enfants du post 2
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Merci pour la ressource, très utile!', 1, 2, 2, FALSE),    -- post 8
+  ('Je confirme, excellente ressource!', 1, 1, 2, FALSE),      -- post 9
+  ('Est-ce qu''il y a d''autres ressources?', 1, 3, 2, FALSE); -- post 10
+
+-- Enfants du post 3
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Moi non plus, on peut étudier ensemble?', 1, 1, 3, FALSE); -- post 11
+
+-- Enfants du post 4
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Bonne question, j''ai le même problème.', 9, 2, 4, FALSE), -- post 12
+  ('Voici un lien utile sur les deadlocks!', 9, 1, 4, FALSE);  -- post 13
+
+-- Enfant d'un enfant (post 6 → réponse à une réponse)
+INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
+  ('Je suis d''accord avec toi!', 1, 2, 6, FALSE);             -- post 14
+
+-- ------------------------------------------------------------
+-- Vote
+-- ------------------------------------------------------------
+INSERT INTO Vote (value_, user_id, post_id) VALUES
+  (1,  2, 2),   -- rosie +1 post 2
+  (1,  3, 2),   -- mich +1 post 2
+  (1,  1, 2),   -- admin +1 post 2
+  (-1, 3, 1),   -- mich -1 post 1
+  (1,  2, 4),   -- rosie +1 post 4
+  (-1, 1, 3),   -- admin -1 post 3
+  (1,  3, 5),   -- mich +1 post 5
+  (1,  1, 6),   -- admin +1 post 6
+  (1,  2, 6),   -- rosie +1 post 6
+  (-1, 3, 7),   -- mich -1 post 7
+  (1,  1, 7),   -- admin +1 post 7
+  (1,  1, 8),   -- admin +1 post 8
+  (-1, 2, 9),   -- rosie -1 post 9
+  (1,  3, 9),   -- mich +1 post 9
+  (1,  2, 10),  -- rosie +1 post 10
+  (1,  1, 11),  -- admin +1 post 11
+  (-1, 3, 12),  -- mich -1 post 12
+  (1,  2, 13),  -- rosie +1 post 13
+  (1,  3, 14);  -- mich +1 post 14

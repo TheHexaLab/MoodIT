@@ -1,19 +1,29 @@
 import React, { useRef, useState } from 'react';
-import styles from './DeleteConfirmationBox.module.css';
+import styles from './DeleteConfirmationPopup.module.css';
+import { defaultLabels } from './labels.ts';
+import type { DeleteConfirmationPopupLabels } from './types.ts';
 
-interface DeleteConfirmationBoxProps {
+// Ré-export de l'API publique : les consommateurs importent toujours ce type depuis ce module.
+export type { DeleteConfirmationPopupLabels } from './types.ts';
+
+interface DeleteConfirmationPopupProps {
   title: string;
   content: string;
   onDeleteConfirmation: (...args: unknown[]) => unknown;
   onClose: (...args: unknown[]) => unknown;
+  /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
+  labels?: Partial<DeleteConfirmationPopupLabels>;
 }
 
-export function DeleteConfirmationBox({
+export function DeleteConfirmationPopup({
   title,
   content,
   onDeleteConfirmation,
   onClose,
-}: DeleteConfirmationBoxProps): React.ReactElement {
+  labels,
+}: DeleteConfirmationPopupProps): React.ReactElement {
+  const t = { ...defaultLabels, ...labels };
+
   const [isClosing, setIsClosing] = useState(false);
   const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
 
@@ -35,7 +45,7 @@ export function DeleteConfirmationBox({
 
   return (
     <div
-      className={`${styles['confirmation-box']}${isClosing ? ` ${styles.closing}` : ''}`}
+      className={`${styles['delete-confirmation-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
       onClick={(event) => {
         if (event.target === event.currentTarget) requestClose(onClose);
       }}
@@ -46,8 +56,8 @@ export function DeleteConfirmationBox({
           <p>{content}</p>
         </div>
         <div>
-          <button onClick={() => requestClose(onClose)}>Annuler</button>
-          <button onClick={() => requestClose(onDeleteConfirmation)}>Supprimer</button>
+          <button onClick={() => requestClose(onClose)}>{t.cancel}</button>
+          <button onClick={() => requestClose(onDeleteConfirmation)}>{t.confirm}</button>
         </div>
       </div>
     </div>

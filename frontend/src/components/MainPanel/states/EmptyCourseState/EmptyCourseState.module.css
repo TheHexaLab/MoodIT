@@ -1,0 +1,128 @@
+.emptyMainState {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.875rem;
+    padding: clamp(1.25rem, 1rem + 2vw, 3rem);
+}
+
+.emptyMainState > div {
+    display: flex;
+    gap: 0.625rem;
+}
+
+.emptyMainIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 0.9rem;
+    background: rgba(13, 148, 136, 0.08);
+    color: var(--brand-teal);
+}
+
+.emptyMainIconImage {
+    width: 2.125rem;
+    height: 2.125rem;
+    object-fit: contain;
+    display: block;
+    filter: invert(45%) sepia(85%) saturate(470%) hue-rotate(128deg) brightness(92%) contrast(92%);
+}
+
+.emptyMainTitle {
+    margin: 0;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: clamp(1rem, 0.9rem + 0.6vw, 1.4rem);
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.emptyMainSubtitle {
+    margin: 0;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8rem, 0.74rem + 0.18vw, 0.9rem);
+    line-height: 1.45;
+    max-width: 26rem;
+}
+
+/* Rangee d'actions : se replie sur plusieurs lignes quand la largeur manque. */
+.emptyCourseActions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.625rem;
+    max-width: 100%;
+}
+
+.emptyMainAction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--brand-teal-gradient);
+    color: var(--text-on-brand);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s ease, background 0.15s ease;
+}
+
+.emptyMainActionOutline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: transparent;
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.emptyMainAction:hover {
+    filter: brightness(1.08);
+}
+
+.emptyMainActionOutline:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-vote-pill);
+}
+
+.emptyMainAction > span,
+.emptyMainActionOutline > span {
+    font-size: 0.9375rem;
+}
+
+.emptyMainActionOutline > span{
+    color: var(--text);
+}
+
+/* Ecrans etroits : les actions s'empilent et occupent toute la largeur disponible. */
+@media (max-width: 30rem) {
+    .emptyCourseActions {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        max-width: 18rem;
+    }
+
+    .emptyCourseActions > .emptyMainAction,
+    .emptyCourseActions > .emptyMainActionOutline {
+        width: 100%;
+    }
+}

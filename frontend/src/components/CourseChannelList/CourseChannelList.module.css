@@ -1,0 +1,178 @@
+.channelSections {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: clamp(0.875rem, 0.75rem + 0.45vw, 1rem);
+}
+
+.channelSection {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.sectionHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.375rem;
+    color: var(--text-muted);
+}
+
+.sectionToggle {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.8125rem);
+    font-weight: 700;
+    line-height: normal;
+    letter-spacing: 0.04em;
+    text-align: left;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.sectionToggle:hover {
+    color: var(--text);
+}
+
+.sectionToggle > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sectionToggle:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+}
+
+.sectionChevron {
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+
+/* Replie : la pointe passe de "vers le bas" a "vers la droite". */
+.sectionChevronCollapsed {
+    transform: rotate(-90deg);
+}
+
+.sectionEdit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sectionEdit:hover {
+    color: var(--brand-teal);
+}
+
+.sectionEdit:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 1px;
+}
+
+.channelList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3125rem;
+}
+
+.channelItem {
+    width: 100%;
+}
+
+.channelButton {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.4375rem 0.625rem;
+    width: 100%;
+    min-height: 2.25rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.8125rem);
+    font-weight: 500;
+    line-height: normal;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.channelButton:hover {
+    background: var(--bg-active-channel);
+    color: var(--text);
+}
+
+.channelButtonActive,
+.channelButtonActive:hover {
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+}
+
+.channelButton:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 1px;
+}
+
+.channelPrefix {
+    color: var(--text-muted);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.channelButtonActive .channelPrefix {
+    color: var(--brand-teal);
+}
+
+.channelName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.channelButtonActive .channelName {
+    font-weight: 600;
+}
+
+.emptyLabel {
+    margin: 0;
+    padding-left: 1rem;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.8125rem);
+    font-weight: 400;
+    line-height: normal;
+}
+
+@media (min-width: 768px) {
+    .channelSections {
+        padding: 1rem;
+    }
+}
+
