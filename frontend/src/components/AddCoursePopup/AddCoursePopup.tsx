@@ -20,6 +20,8 @@ interface AddCoursePopupProps {
   onSave: (course: NewCourse) => MaybePromise<unknown>;
   /** Programmes sélectionnables, fournis par le parent. */
   programs?: Program[];
+  /** Programmes préselectionnés à l'ouverture (ex. le programme courant). */
+  initialProgramIds?: number[];
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddCoursePopupLabels>;
 }
@@ -33,14 +35,15 @@ export function AddCoursePopup({
   onClose,
   onSave,
   programs = [],
+  initialProgramIds = [],
   labels,
 }: AddCoursePopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
   const [code, setCode] = useState('');
   const [title, setTitle] = useState('');
-  /** Ids des programmes rattachés au cours. */
-  const [programIds, setProgramIds] = useState<number[]>([]);
+  /** Ids des programmes rattachés au cours (préremplis avec le programme courant). */
+  const [programIds, setProgramIds] = useState<number[]>(initialProgramIds);
   /** Menu déroulant ouvert ? */
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');

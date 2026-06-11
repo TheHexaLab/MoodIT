@@ -3,6 +3,9 @@ import styles from './WsTestContextMenu.module.css';
 import {
   hasActiveChannel,
   hasActiveForum,
+  hasActiveProgram,
+  hasActiveProgramsList,
+  simulateIncomingCourse,
   simulateIncomingDelete,
   simulateIncomingEdit,
   simulateIncomingForumDelete,
@@ -10,6 +13,12 @@ import {
   simulateIncomingForumPost,
   simulateIncomingForumVote,
   simulateIncomingMessage,
+  simulateIncomingProgram,
+  simulateIncomingSectionChange,
+  simulateRemoveLastCourse,
+  simulateRemoveLastProgram,
+  simulateRenameLastCourse,
+  simulateRenameLastProgram,
 } from './mockSocket';
 
 interface WsTestContextMenuProps {
@@ -27,6 +36,8 @@ export function WsTestContextMenu({ children }: WsTestContextMenuProps): React.R
   // Etat capture a l'ouverture (les fonctions mock ne sont pas reactives).
   const canSimulate = pos !== null && hasActiveChannel();
   const canSimulateForum = pos !== null && hasActiveForum();
+  const canSimulateCourses = pos !== null && hasActiveProgram();
+  const canSimulatePrograms = pos !== null && hasActiveProgramsList();
 
   useEffect(() => {
     if (!pos) return;
@@ -99,8 +110,39 @@ export function WsTestContextMenu({ children }: WsTestContextMenuProps): React.R
             </>
           )}
 
-          {!canSimulate && !canSimulateForum && (
-            <p className={styles.hint}>Ouvre un canal ou un forum d'abord.</p>
+          {canSimulateCourses && (
+            <>
+              <button type="button" onClick={() => run(simulateIncomingCourse)}>
+                Recevoir un cours
+              </button>
+              <button type="button" onClick={() => run(simulateRenameLastCourse)}>
+                Renommer le dernier cours
+              </button>
+              <button type="button" onClick={() => run(simulateIncomingSectionChange)}>
+                Ajouter un canal (dernier cours)
+              </button>
+              <button type="button" onClick={() => run(simulateRemoveLastCourse)}>
+                Supprimer le dernier cours
+              </button>
+            </>
+          )}
+
+          {canSimulatePrograms && (
+            <>
+              <button type="button" onClick={() => run(simulateIncomingProgram)}>
+                Recevoir un programme
+              </button>
+              <button type="button" onClick={() => run(simulateRenameLastProgram)}>
+                Renommer le dernier programme
+              </button>
+              <button type="button" onClick={() => run(simulateRemoveLastProgram)}>
+                Supprimer le dernier programme
+              </button>
+            </>
+          )}
+
+          {!canSimulate && !canSimulateForum && !canSimulateCourses && !canSimulatePrograms && (
+            <p className={styles.hint}>Ouvre un canal, un forum ou un programme d'abord.</p>
           )}
         </div>
       )}

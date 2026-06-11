@@ -64,6 +64,12 @@ interface AddSubscriptionPopupProps {
   subscribedProgramIds: number[];
   /** Couleurs prédéfinies proposées dans la palette. */
   palette?: string[];
+  /**
+   * L'utilisateur peut-il créer un programme ? (réservé aux administrateurs.)
+   * Si false, l'option « Créer un programme » du menu n'est pas proposée — seule
+   * l'adhésion à un programme existant reste possible. Défaut : true.
+   */
+  canCreateProgram?: boolean;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
 }
@@ -82,6 +88,7 @@ export function AddSubscriptionPopup({
   loadEstablishmentPrograms,
   subscribedProgramIds,
   palette = DEFAULT_PALETTE,
+  canCreateProgram = true,
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
@@ -169,6 +176,7 @@ export function AddSubscriptionPopup({
 
   // ── Transitions de vue : avancent uniquement après un retour valide du callback ──
   function enterCreate() {
+    if (!canCreateProgram) return; // garde : création réservée aux administrateurs
     runLoad<CreateEstablishment>({ kind: 'create' }, loadCreateEstablishments, (data) => {
       setCreateEstablishments(data);
       // Réinitialise le formulaire à chaque ouverture.
@@ -416,18 +424,20 @@ export function AddSubscriptionPopup({
   /** Étape 0 — menu : choix « créer » ou « rejoindre ». */
   const menuStep: React.ReactElement = (
     <nav className={styles.options}>
-      <button type="button" disabled={pending !== null} onClick={enterCreate}>
-        <span>+</span>
-        <div>
-          <span>{t.createTitle}</span>
-          <span>{t.createSubtitle}</span>
-        </div>
-        {pending?.kind === 'create' ? (
-          <Spinner />
-        ) : (
-          <Chevron className={styles.chevron} width="1rem" height="1rem" />
-        )}
-      </button>
+      {canCreateProgram && (
+        <button type="button" disabled={pending !== null} onClick={enterCreate}>
+          <span>+</span>
+          <div>
+            <span>{t.createTitle}</span>
+            <span>{t.createSubtitle}</span>
+          </div>
+          {pending?.kind === 'create' ? (
+            <Spinner />
+          ) : (
+            <Chevron className={styles.chevron} width="1rem" height="1rem" />
+          )}
+        </button>
+      )}
       <button type="button" disabled={pending !== null} onClick={enterJoin}>
         <span>↪</span>
         <div>

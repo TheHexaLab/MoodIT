@@ -1,52 +1,31 @@
 /** Types de données et de libellés du AddSubscriptionPopup. */
+import { type Establishment, type Program } from '../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : les callbacks de chargement peuvent retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
 
-/** Établissement sélectionnable (reflète les colonnes utiles de `Establishment`). */
-export interface Establishment {
-  id: number;
-  name: string;
-}
+// Entités ré-exportées depuis le modèle de domaine (source unique).
+export type { Establishment, Program };
 
 /**
- * Établissement + les codes de ses programmes existants.
- * Chargé au clic « Créer un programme » : alimente le dropdown et la vérification d'unicité du code.
+ * Établissement + les codes de ses programmes existants (dérivé de Establishment).
+ * Chargé au clic « Créer un programme » : alimente le dropdown et l'unicité du code.
  */
-export interface CreateEstablishment {
-  id: number;
-  name: string;
-  programCodes: string[];
-}
+export type CreateEstablishment = Establishment & { programCodes: string[] };
 
 /**
- * Établissement + son nombre de programmes.
+ * Établissement + son nombre de programmes (dérivé de Establishment).
  * Chargé au clic « Rejoindre un programme » : alimente la liste et la désactivation des lignes vides.
  */
-export interface JoinEstablishment {
-  id: number;
-  name: string;
-  programCount: number;
-}
+export type JoinEstablishment = Establishment & { programCount: number };
 
-/** Programme existant rattaché à un établissement (reflète les colonnes utiles de `Program`). */
-export interface Program {
-  id: number;
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-  establishmentId: number;
-}
-
-/** Nouveau programme saisi dans le formulaire (reflète les colonnes saisissables de `Program`). */
-export interface NewProgram {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
+/**
+ * DTO de création de programme (write) : colonnes saisissables de `Program` +
+ * l'établissement choisi (null tant que non sélectionné dans le formulaire).
+ */
+export type NewProgram = Pick<Program, 'name' | 'code' | 'cohort' | 'color'> & {
   establishmentId: number | null;
-}
+};
 
 /** Sélection émise par la vue « rejoindre » : un établissement + des programmes. */
 export interface JoinSelection {

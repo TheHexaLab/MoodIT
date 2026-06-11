@@ -1,27 +1,25 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import styles from './ProgramMenu.module.css';
-import { type Course } from '../CourseMenu/CourseMenu.tsx';
-import { useTheme } from '../../helpers/theme.ts';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { Plus } from '../../assets/Plus.tsx';
+import { Pencil } from '../../assets/Pencil.tsx';
+import { Sliders } from '../../assets/Sliders.tsx';
+import { LogOut } from '../../assets/LogOut.tsx';
+import { type Program } from '../../types/domain.ts';
 // DEV : clic droit sur l'icone de l'app → menu de test des WebSockets.
 import { WsTestContextMenu } from '../../dev/WsTestContextMenu.tsx';
 
-export interface Program {
-  /** Identifiant du programme (Program.id, SERIAL). */
-  id: number;
-  /** Libelle UI optionnel (override l'affichage par defaut). */
-  label?: string;
-  /** Nom du programme (Program.name), ex. "Genie informatique". */
-  name: string;
-  /** Code du programme (Program.code), ex. "GIN". */
-  code: string;
-  /** Cohorte du programme (Program.cohort), ex. "71". */
-  cohort: string;
-  /** Couleur du programme (Program.color), ex. "#1a6e3c". */
-  color: string;
-  /** Cours rattaches au programme. */
-  courses?: Course[];
-}
+// Entité Program ré-exportée depuis le modèle de domaine (source unique).
+export type { Program };
+
+// Ré-export du contrat « API + temps réel » : Dashboard et la façade socket
+// importent ces types depuis ProgramMenu.
+export type {
+  FetchProgramsHandler,
+  IncomingProgramHandlers,
+  ProgramsSocket,
+} from './programsApi';
 
 interface ProgramMenuProps {
   /** Programmes assignes a l'utilisateur. */
@@ -30,8 +28,34 @@ interface ProgramMenuProps {
   activeProgramId?: number;
   /** Callback de selection d'un programme. */
   onSelectProgram?: (id: number) => void;
-  /** Callback du bouton d'ajout (implementation a venir). */
+  /** Callback du bouton d'ajout (adhesion / creation de programme). */
   onAddProgram?: () => void;
+  /**
+   * Chargement de la liste des programmes en cours (API-ready). Affiche un spinner
+   * à la place de la liste. Piloté par le parent (GET des programmes de l'utilisateur).
+   */
+  loading?: boolean;
+  /**
+   * Erreur de chargement de la liste (null = aucune). Affiche un bouton « Réessayer »
+   * à la place de la liste (voir `onReload`).
+   */
+  loadError?: string | null;
+  /** Relance le chargement de la liste (bouton de l'état d'erreur). */
+  onReload?: () => void;
+  /**
+   * L'utilisateur est-il administrateur ? Conditionne les actions d'administration
+   * du menu contextuel (ajouter un cours, modifier le programme, gerer les roles).
+   * « Quitter le programme » reste accessible a tous.
+   */
+  isAdmin?: boolean;
+  /** Menu contextuel (clic droit) — ajouter un cours au programme (admin). */
+  onAddCourseToProgram?: (programId: number) => void;
+  /** Menu contextuel — modifier le programme (admin). */
+  onEditProgram?: (programId: number) => void;
+  /** Menu contextuel — gerer les roles du programme (admin). */
+  onManageRoles?: (programId: number) => void;
+  /** Menu contextuel — quitter le programme (tous). */
+  onLeaveProgram?: (programId: number) => void;
 }
 
 /**
@@ -80,14 +104,64 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   activeProgramId,
   onSelectProgram,
   onAddProgram,
+  loading = false,
+  loadError = null,
+  onReload,
+  isAdmin = false,
+  onAddCourseToProgram,
+  onEditProgram,
+  onManageRoles,
+  onLeaveProgram,
 }) => {
-  const { toggleTheme } = useTheme()
+  /** Menu contextuel ouvert : programme cible + position (viewport), ou null. */
+  const [contextMenu, setContextMenu] = useState<{
+    programId: number;
+    left: number;
+    top: number;
+  } | null>(null);
+
+  // Ferme le menu contextuel au clic, à l'Échap, au scroll ou au redimensionnement.
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [contextMenu]);
+
+  // Ouvre le menu à DROITE de la pastille du programme (pas à la position de la souris).
+  function openContextMenu(event: React.MouseEvent<HTMLLIElement>, programId: number) {
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const gap = 8;
+    // Estimation de hauteur (3 actions admin + « quitter ») pour éviter le débordement bas.
+    const estimatedHeight = (isAdmin ? 4 : 1) * 40 + 16;
+    const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
+    setContextMenu({ programId, left: rect.right + gap, top });
+  }
+
+  /** Exécute une action du menu contextuel puis le referme. */
+  function runContextAction(action?: (programId: number) => void) {
+    if (contextMenu && action) action(contextMenu.programId);
+    setContextMenu(null);
+  }
+
   return (
     <nav className={styles.rail} aria-label="Programme">
       {/* Icône applicative (meme gabarit que le programme actif).
           Clic gauche = bascule le theme ; clic droit = menu de test WS (DEV). */}
       <WsTestContextMenu>
-        <div className={styles.appIcon} aria-label="MoodIT" onClick={toggleTheme}>
+        <div className={styles.appIcon} aria-label="MoodIT">
           <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
             <defs>
               <linearGradient
@@ -114,8 +188,34 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
       {/* Séparateur visuel */}
       <span className={styles.divider} />
 
-      {/* Liste des programmes */}
-      {!programs || programs.length <= 0 ? (
+      {/* Liste des programmes (ou état de chargement / d'erreur). */}
+      {loadError ? (
+        <button
+          type="button"
+          className={styles.railRetry}
+          onClick={onReload}
+          title={loadError}
+          aria-label="Réessayer le chargement des programmes"
+        >
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M12.5 6.5A5 5 0 1 0 13 9"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+            <path
+              d="M12.5 3v3.5H9"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      ) : loading ? (
+        <span className={styles.railSpinner} role="status" aria-label="Chargement des programmes" />
+      ) : !programs || programs.length <= 0 ? (
         <></>
       ) : (
         <ul className={styles.programList} role="list">
@@ -129,6 +229,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 key={programId}
                 className={`${styles.programItem} ${isActive ? styles.programItemActive : ''}`}
                 onClick={() => onSelectProgram?.(programId)}
+                onContextMenu={(event) => openContextMenu(event, programId)}
               >
                 <button
                   className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
@@ -163,6 +264,62 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </button>
+
+      {/* Menu contextuel (clic droit sur un programme). Porté vers <body> + position
+          fixe : échappe au overflow du rail et au transform du tiroir mobile. */}
+      {contextMenu &&
+        createPortal(
+          <div
+            className={styles.contextMenu}
+            role="menu"
+            style={{ top: contextMenu.top, left: contextMenu.left }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  className={styles.contextItem}
+                  role="menuitem"
+                  onClick={() => runContextAction(onAddCourseToProgram)}
+                >
+                  <Plus className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                  Ajouter un cours
+                </button>
+                <button
+                  type="button"
+                  className={styles.contextItem}
+                  role="menuitem"
+                  onClick={() => runContextAction(onEditProgram)}
+                >
+                  <Pencil className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                  Modifier le programme
+                </button>
+                <button
+                  type="button"
+                  className={styles.contextItem}
+                  role="menuitem"
+                  onClick={() => runContextAction(onManageRoles)}
+                >
+                  <Sliders className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                  Gérer les rôles
+                </button>
+                <span className={styles.contextDivider} />
+              </>
+            )}
+            <button
+              type="button"
+              className={`${styles.contextItem} ${styles.contextItemDanger}`}
+              role="menuitem"
+              onClick={() => runContextAction(onLeaveProgram)}
+            >
+              <LogOut className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+              Quitter le programme
+            </button>
+          </div>,
+          document.body
+        )}
     </nav>
   );
 };

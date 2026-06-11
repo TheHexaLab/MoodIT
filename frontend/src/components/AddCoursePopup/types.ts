@@ -1,18 +1,16 @@
 /** Types de données et de libellés du AddCoursePopup. */
+import { type Program } from '../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : le callback de sauvegarde peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
 
-/** Reflète la table `Program`. */
-export interface Program {
-  id: number;
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
+// Entité Program ré-exportée depuis le modèle de domaine (source unique).
+export type { Program };
 
-/** Données saisies dans le popup (reflète `Course` + les liens `program_course`). */
+/**
+ * DTO de création de cours (write) : colonnes saisissables de `Course` + les
+ * liens `program_course`. Dérive de l'entité Course.
+ */
 export interface NewCourse {
   title: string;
   code: string;

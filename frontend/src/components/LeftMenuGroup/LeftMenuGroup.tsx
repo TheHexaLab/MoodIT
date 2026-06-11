@@ -10,8 +10,10 @@ interface LeftMenuGroupProps {
   mobileTitle?: string;
   /** Préfixe du titre **/
   mobileTitlePrefix?: string;
-  /** Initiale affichée dans l'avatar mobile. */
+  /** Initiale affichée dans l'avatar mobile (repli si aucun menu fourni). */
   mobileUserInitial?: string;
+  /** Menu du compte rendu dans la barre mobile (avatar cliquable en haut à droite). */
+  mobileUserMenu?: React.ReactNode;
 }
 
 /**
@@ -24,6 +26,7 @@ export default function LeftMenuGroup({
   mobileTitle = 'Accueil',
   mobileTitlePrefix = '',
   mobileUserInitial = 'U',
+  mobileUserMenu,
 }: LeftMenuGroupProps): React.ReactElement {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
@@ -72,9 +75,11 @@ export default function LeftMenuGroup({
           {mobileTitle}
         </h2>
 
-        <span className={styles.mobileAvatar} aria-label="Utilisateur connecté">
-          {mobileUserInitial}
-        </span>
+        {mobileUserMenu ?? (
+          <span className={styles.mobileAvatar} aria-label="Utilisateur connecté">
+            {mobileUserInitial}
+          </span>
+        )}
       </header>
 
       <aside

@@ -1,50 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styles from './CourseChannelList.module.css';
 import { getPrefixForType } from './channelTypePrefix';
+import { defaultTypeDefinitions } from './channelTypeDefinitions.ts';
+import { Edit } from '../../assets/Edit.tsx';
+import { type ChannelMessage, type CourseChannel, type User } from '../../types/domain.ts';
 
-/** Auteur d'un message (≈ colonnes utiles de User_). */
-export interface ChannelMessageAuthor {
-  /** User_.id */
-  id: number;
-  /** User_.username */
-  username: string;
-  /** User_.first_name */
-  first_name: string;
-  /** User_.last_name */
-  last_name: string;
-  /** User_.avatar_color (ex. '#0a5cc0'). */
-  avatar_color?: string;
-}
-
-/** Message d'un canal de discussion (≈ Post d'un Forum de f_type 'Discussion'). */
-export interface ChannelMessage {
-  /** Post.id */
-  id: number;
-  /** Post.content */
-  content: string;
-  /** Post.created_at (timestamp ISO). */
-  created_at: string;
-  /** Auteur du message. */
-  author: ChannelMessageAuthor;
-  /** Post.post_parent_id : id du message auquel celui-ci repond (null/absent sinon). */
-  post_parent_id?: number | null;
-  /**
-   * Identifiant genere cote client a l'envoi (nonce). Renvoye par l'API et par le
-   * broadcast WebSocket, il permet de dedupliquer le message optimiste de son echo.
-   */
-  client_msg_id?: string;
-}
-
-export interface CourseChannel {
-  /** Identifiant du canal/forum/quiz (SERIAL). */
-  id: number;
-  /** Nom affiche dans la liste. */
-  name: string;
-  /** Type logique du canal (quiz, text, forum, etc.). */
-  type: string;
-  /** Messages du canal (uniquement pour un canal de discussion). */
-  messages?: ChannelMessage[];
-}
+// Entités ré-exportées depuis le modèle de domaine (source unique : src/types/domain.ts).
+export type { ChannelMessage, CourseChannel };
+/** Auteur d'un message = User (mêmes colonnes que User_). Alias de compat. */
+export type ChannelMessageAuthor = User;
 
 /**
  * Reference unique d'un canal dans la liste fusionnee.
@@ -88,13 +52,13 @@ interface CourseChannelListProps {
    * une navigation ou un rendu indépendant de l'état visuel.
    */
   onOpenChannel?: (channel: CourseChannel) => void;
+  /**
+   * Callback d'édition d'une section (icône crayon a droite de l'en-tête).
+   * On edite la section entiere (sa liste de canaux), pas un canal isole.
+   * Si absent, l'icône d'édition n'est pas rendue.
+   */
+  onEditSection?: (section: ChannelTypeDefinition) => void;
 }
-
-const defaultTypeDefinitions: ChannelTypeDefinition[] = [
-  { type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' },
-  { type: 'text', label: 'CANAUX', emptyLabel: 'Aucun canal' },
-  { type: 'forum', label: 'FORUMS', emptyLabel: 'Aucun forum' },
-];
 
 /**
  * Liste les canaux regroupés par type pour le cours actif.
@@ -107,7 +71,15 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
   selectedChannel,
   onSelectChannel,
   onOpenChannel,
+  onEditSection,
 }) => {
+  /** Types de sections actuellement repliés (etat local, non persiste). */
+  const [collapsedTypes, setCollapsedTypes] = useState<Record<string, boolean>>({});
+
+  function toggleCollapsed(type: string) {
+    setCollapsedTypes((prev) => ({ ...prev, [type]: !prev[type] }));
+  }
+
   const channelsByType = channels.reduce<Record<string, CourseChannel[]>>((acc, channel) => {
     if (!acc[channel.type]) acc[channel.type] = [];
     acc[channel.type].push(channel);
@@ -118,6 +90,7 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
     <div className={styles.channelSections}>
       {typeDefinitions.map((definition) => {
         const typedChannels = channelsByType[definition.type] ?? [];
+        const isCollapsed = collapsedTypes[definition.type] ?? false;
 
         return (
           <section
@@ -126,26 +99,45 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
             aria-label={definition.label}
           >
             <header className={styles.sectionHeader}>
-              <svg
-                className={styles.sectionChevron}
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                aria-hidden="true"
+              <button
+                type="button"
+                className={styles.sectionToggle}
+                onClick={() => toggleCollapsed(definition.type)}
+                aria-expanded={!isCollapsed}
               >
-                <path
-                  d="M3 4.5 6 7.5 9 4.5"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>{definition.label}</span>
+                <svg
+                  className={`${styles.sectionChevron} ${isCollapsed ? styles.sectionChevronCollapsed : ''}`}
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 4.5 6 7.5 9 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span>{definition.label}</span>
+              </button>
+
+              {onEditSection && (
+                <button
+                  type="button"
+                  className={styles.sectionEdit}
+                  onClick={() => onEditSection(definition)}
+                  aria-label={`Modifier la section ${definition.label}`}
+                  title={`Modifier la section ${definition.label}`}
+                >
+                  <Edit width="14" height="14" aria-hidden="true" />
+                </button>
+              )}
             </header>
 
-            {typedChannels.length > 0 ? (
+            {isCollapsed ? null : typedChannels.length > 0 ? (
               <ul className={styles.channelList} role="list">
                 {typedChannels.map((channel) => {
                   const isSelected = isSameChannel(selectedChannel, channel);

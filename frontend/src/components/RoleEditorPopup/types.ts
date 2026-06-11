@@ -1,27 +1,21 @@
 /** Types de données et de libellés du RoleEditorPopup. */
+import { type Role, type User as DomainUser } from '../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : le callback d'assignation peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
 
-/** Reflète la table `Role` (id = celui inséré dans init.sql). */
-export interface Role {
-  id: number;
-  name: string;
-}
+// Entité Role ré-exportée depuis le modèle de domaine (source unique).
+export type { Role };
 
 /**
- * Reflète la table `User_` + ses assignations `User_Role`.
- * `role_ids` = rôles assignés à l'utilisateur (many-to-many, comme en base).
+ * Utilisateur AVEC ses assignations de rôles (`User_` + `User_Role`). Dérive de
+ * l'entité User ; `email`/`avatar_color` sont requis dans cette vue (membres affichés).
  */
-export interface User {
-  id: number;
-  username: string;
-  first_name: string;
-  last_name: string;
+export type User = DomainUser & {
   email: string;
   avatar_color: string;
   role_ids: number[];
-}
+};
 
 /**
  * Décrit une modification d'assignation rôle ↔ utilisateur (reflète un INSERT/DELETE dans User_Role).

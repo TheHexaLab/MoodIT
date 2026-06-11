@@ -8,6 +8,16 @@ import {
   type ForumSocket,
   type IncomingForumHandlers,
 } from '../components/MainPanel/ForumView/useForumThreads';
+import {
+  type Course,
+  type CourseChannelsSocket,
+  type IncomingCourseHandlers,
+} from '../components/CourseMenu/CourseMenu';
+import {
+  type Program,
+  type IncomingProgramHandlers,
+  type ProgramsSocket,
+} from '../components/ProgramMenu/ProgramMenu';
 
 /**
  * Outil de DEV : UNE SEULE connexion temps reel simulée, partagée par le chat
@@ -25,11 +35,19 @@ import {
 let channelSub: { channelId: number; handlers: IncomingMessageHandlers } | null = null;
 /** Abonnement forum courant. */
 let forumSub: { forumId: number; handlers: IncomingForumHandlers } | null = null;
+/** Abonnement programme courant (liste des cours + sections). */
+let courseSub: { programId: number; handlers: IncomingCourseHandlers } | null = null;
+/** Abonnement utilisateur courant (liste des programmes / abonnements). */
+let programSub: { userId: number; handlers: IncomingProgramHandlers } | null = null;
 /** Compteur d'id « serveur » simulés, partagé par la connexion. */
 let serverSeq = 0;
 /** Derniers elements simulés (cibles des simulate* Edit / Delete / Vote). */
 let lastMessageId: number | null = null;
 let lastPostId: number | null = null;
+/** Dernier cours simulé (cible des simulate* cours / section). */
+let lastCourseId: number | null = null;
+/** Dernier programme simulé (cible des simulate* programme). */
+let lastProgramId: number | null = null;
 
 // ─── Facade « canaux » (chat) ───
 export const mockMessageSocket: ChannelSocket = {
@@ -55,6 +73,18 @@ export const mockForumSocket: ForumSocket = {
   },
 };
 
+// ─── Facade « cours » (liste des cours + sections d'un programme) ───
+export const mockCourseSocket: CourseChannelsSocket = {
+  subscribe(programId, handlers) {
+    courseSub = { programId, handlers };
+    serverSeq = Math.max(serverSeq, 7000 + programId * 100);
+    lastCourseId = null;
+    return () => {
+      if (courseSub?.handlers === handlers) courseSub = null;
+    };
+  },
+};
+
 /** Un canal de discussion est-il abonne ? (active/desactive les actions du menu). */
 export function hasActiveChannel(): boolean {
   return channelSub !== null;
@@ -63,6 +93,28 @@ export function hasActiveChannel(): boolean {
 /** Un forum 'Thread' est-il abonne ? */
 export function hasActiveForum(): boolean {
   return forumSub !== null;
+}
+
+/** Un programme est-il abonne ? (liste des cours en temps reel). */
+export function hasActiveProgram(): boolean {
+  return courseSub !== null;
+}
+
+// ─── Facade « programmes » (liste des abonnements d'un utilisateur) ───
+export const mockProgramsSocket: ProgramsSocket = {
+  subscribe(userId, handlers) {
+    programSub = { userId, handlers };
+    serverSeq = Math.max(serverSeq, 6000 + userId * 100);
+    lastProgramId = null;
+    return () => {
+      if (programSub?.handlers === handlers) programSub = null;
+    };
+  },
+};
+
+/** La liste des programmes (utilisateur) est-elle abonnee ? */
+export function hasActiveProgramsList(): boolean {
+  return programSub !== null;
 }
 
 // ─── Simulations CHAT ───
@@ -141,4 +193,89 @@ export function simulateIncomingForumDelete(): void {
   if (!forumSub || lastPostId === null) return;
   forumSub.handlers.onDelete(lastPostId);
   lastPostId = null;
+}
+
+// ─── Simulations COURS / SECTIONS (scope programme) ───
+
+/** Simule l'ajout distant d'un cours dans le programme abonne. */
+export function simulateIncomingCourse(): void {
+  if (!courseSub) return;
+  serverSeq += 1;
+  lastCourseId = serverSeq;
+  const course: Course = {
+    id: serverSeq,
+    code: `WS-${serverSeq}`,
+    title: `Cours temps réel #${serverSeq}`,
+    channels: [],
+    quizzes: [],
+    forums: [],
+  };
+  courseSub.handlers.onCourseUpsert(course);
+}
+
+/** Simule le renommage distant du dernier cours simule. */
+export function simulateRenameLastCourse(): void {
+  if (!courseSub || lastCourseId === null) return;
+  courseSub.handlers.onCourseUpsert({
+    id: lastCourseId,
+    code: `WS-${lastCourseId}`,
+    title: `(renommé à distance) cours #${lastCourseId}`,
+    channels: [],
+    quizzes: [],
+    forums: [],
+  });
+}
+
+/** Simule l'ajout distant d'un canal texte dans le dernier cours simule. */
+export function simulateIncomingSectionChange(): void {
+  if (!courseSub || lastCourseId === null) return;
+  courseSub.handlers.onSectionChange(lastCourseId, 'text', {
+    type: 'create',
+    item: { id: crypto.randomUUID(), name: `canal-ws-${serverSeq}` },
+  });
+}
+
+/** Simule la suppression distante du dernier cours simule. */
+export function simulateRemoveLastCourse(): void {
+  if (!courseSub || lastCourseId === null) return;
+  courseSub.handlers.onCourseDelete(lastCourseId);
+  lastCourseId = null;
+}
+
+// ─── Simulations PROGRAMMES (scope utilisateur) ───
+
+/** Simule l'adhésion / l'ajout distant d'un programme à la liste de l'utilisateur. */
+export function simulateIncomingProgram(): void {
+  if (!programSub) return;
+  serverSeq += 1;
+  lastProgramId = serverSeq;
+  const program: Program = {
+    id: serverSeq,
+    name: `Programme temps réel #${serverSeq}`,
+    code: `WS${serverSeq}`,
+    cohort: 'WS',
+    color: '#7c3aed',
+    courses: [],
+  };
+  programSub.handlers.onProgramUpsert(program);
+}
+
+/** Simule le renommage distant du dernier programme simulé. */
+export function simulateRenameLastProgram(): void {
+  if (!programSub || lastProgramId === null) return;
+  programSub.handlers.onProgramUpsert({
+    id: lastProgramId,
+    name: `(renommé à distance) programme #${lastProgramId}`,
+    code: `WS${lastProgramId}`,
+    cohort: 'WS',
+    color: '#7c3aed',
+    courses: [],
+  });
+}
+
+/** Simule la suppression / le désabonnement distant du dernier programme simulé. */
+export function simulateRemoveLastProgram(): void {
+  if (!programSub || lastProgramId === null) return;
+  programSub.handlers.onProgramRemove(lastProgramId);
+  lastProgramId = null;
 }

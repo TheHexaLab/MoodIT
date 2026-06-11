@@ -1,23 +1,13 @@
 /** Types de données et de libellés du UpdateProgramPopup. */
+import { type Program } from '../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : le callback d'enregistrement peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
 
-/** Programme existant à éditer (reflète les colonnes utiles de `Program`). */
-export interface ProgramData {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
-
-/** Modification de programme (reflète les colonnes éditables de `Program`). */
-export interface ProgramUpdate {
-  name: string;
-  code: string;
-  cohort: string;
-  color: string;
-}
+/** Colonnes éditables d'un programme (dérivées de l'entité Program). */
+export type ProgramData = Pick<Program, 'name' | 'code' | 'cohort' | 'color'>;
+/** Modification de programme : mêmes colonnes éditables. */
+export type ProgramUpdate = ProgramData;
 
 /**
  * Tous les textes affichés par le composant.

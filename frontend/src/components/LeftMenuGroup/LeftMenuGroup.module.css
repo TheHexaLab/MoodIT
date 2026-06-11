@@ -52,15 +52,7 @@
     display: none;
 }
 
-@media (max-width: 900px) {
-    .sidebarShell,
-    .backdrop {
-        /* Doit refleter ProgramMenu .rail (--rail-width: 4.5rem) et CourseMenu .sidebar. */
-        --program-menu-width: 4.5rem;
-        --course-menu-width: clamp(11rem, 10rem + 5vw, 14rem);
-        --drawer-width: calc(var(--program-menu-width) + var(--course-menu-width));
-    }
-
+@media (max-width: 56.25rem) {
     .mobileTopbar {
         position: fixed;
         top: 0;
@@ -123,9 +115,9 @@
         position: fixed;
         top: 0;
         left: 0;
-        /* Largeur definie = largeur reelle du tiroir : evite la dependance circulaire
-           avec .sidebarMenus (width:100%) et le rendu fantome pendant la translation. */
-        width: min(var(--drawer-width), 92vw);
+        /* Tiroir = 80% de la largeur de l'ecran ; le rail garde sa largeur fixe
+           et CourseMenu (flex:1 en mobile) occupe l'espace restant. */
+        width: 90vw;
         height: 100dvh;
         overflow: hidden;
         transform: translateX(-100%);

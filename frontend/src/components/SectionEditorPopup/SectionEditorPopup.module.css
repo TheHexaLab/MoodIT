@@ -1,5 +1,6 @@
 div.section-editor-popup {
     position: fixed;
+    z-index: 79;
     inset: 0;
     display: flex;
     justify-content: center;

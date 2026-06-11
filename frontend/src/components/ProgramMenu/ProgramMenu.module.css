@@ -36,6 +36,59 @@
     border-radius: var(--slot-radius);
 }
 
+/* État de chargement / d'erreur de la liste (occupe un « slot » du rail). */
+.railSpinner {
+    width: 1.5rem;
+    height: 1.5rem;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--brand-teal);
+    animation: program-rail-spin 0.7s linear infinite;
+}
+
+@keyframes program-rail-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.railRetry {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    flex-shrink: 0;
+    padding: 0;
+    border: 1px solid var(--danger);
+    border-radius: var(--slot-radius);
+    background: transparent;
+    color: var(--danger);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.railRetry svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.railRetry:hover {
+    background: var(--shadow-danger);
+}
+
+.railRetry:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .railSpinner {
+        animation-duration: 1.6s;
+    }
+}
+
 .divider {
     display: block;
     width: var(--divider-width);
@@ -222,3 +275,99 @@
     }
 }
 
+
+/* ── Menu contextuel (clic droit sur un programme) ──────────── */
+.contextMenu {
+    position: fixed;
+    z-index: 200;
+    min-width: 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.375rem;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: program-context-pop-in 0.12s ease-out;
+}
+
+@keyframes program-context-pop-in {
+    from {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.contextItem {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.625rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-body);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.contextIcon {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: color 0.15s ease;
+}
+
+.contextItem:hover {
+    background: var(--bg-active-channel);
+    color: var(--text);
+}
+
+.contextItem:hover .contextIcon {
+    color: var(--brand-teal);
+}
+
+.contextItem:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: -2px;
+}
+
+.contextDivider {
+    height: 1px;
+    margin: 0.25rem 0.25rem;
+    background: var(--border);
+}
+
+.contextItemDanger {
+    color: var(--danger);
+}
+
+.contextItemDanger .contextIcon {
+    color: var(--danger);
+}
+
+.contextItemDanger:hover {
+    background: var(--shadow-danger);
+    color: var(--danger);
+}
+
+.contextItemDanger:hover .contextIcon {
+    color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .contextMenu {
+        animation: none;
+    }
+}

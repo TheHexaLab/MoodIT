@@ -1,62 +1,11 @@
-import { type ChannelMessageAuthor } from '../../CourseChannelList/CourseChannelList';
+import { type ForumPost, type PostVote, type User } from '../../../types/domain.ts';
 
-/**
- * Auteur d'un post de forum (= colonnes utiles de User_).
- * On reutilise le type des messages de canal : meme table User_ en BD.
- */
-export type ForumAuthor = ChannelMessageAuthor;
-
-/**
- * Vote sur un post (≈ une ligne de la table Vote).
- * En BD : Vote.value_ ∈ {-1, 1} (CHECK), et un utilisateur ne vote qu'une seule
- * fois par post (UNIQUE(user_id, post_id)). Le SCORE d'un post = SUM(value_).
- */
-export interface ForumVote {
-  /** Vote.user_id : auteur du vote. */
-  user_id: number;
-  /** Vote.value_ : +1 (upvote) ou -1 (downvote). */
-  value: 1 | -1;
-}
-
-/**
- * Sujet ou reponse d'un forum 'Thread' (≈ Post d'un Forum de f_type 'Thread').
- * Les reponses (Post.post_parent_id) sont imbriquees dans `replies`, facon
- * fil de commentaires Reddit.
- */
-export interface ForumPost {
-  /** Post.id */
-  id: number;
-  /** Post.content */
-  content: string;
-  /** Post.created_at (timestamp ISO). */
-  created_at: string;
-  /** Auteur du post. */
-  author: ForumAuthor;
-  /** Post.is_pinned : sujet epingle en tete de liste. */
-  is_pinned?: boolean;
-  /** Titre du sujet (les posts racines d'un Thread en ont un, facon Reddit). */
-  title?: string;
-  /** Votes du post (table Vote). Le score affiche = somme des `value_`. */
-  votes: ForumVote[];
-  /**
-   * Reponses directes (Post enfants via post_parent_id), chargees PARESSEUSEMENT :
-   * `undefined` = enfants pas encore charges (le fil n'a jamais ete deplie),
-   * `[]` = charges et aucun enfant. On ne descend jamais tout l'arbre d'un coup :
-   * deplier un post va chercher uniquement ses enfants immediats (voir `reply_count`).
-   */
-  replies?: ForumPost[];
-  /**
-   * Nombre de reponses DIRECTES (enfants immediats), connu des le chargement du
-   * post meme si `replies` n'est pas encore charge. Sert a afficher le toggle
-   * « N réponses » sans avoir a descendre le fil.
-   */
-  reply_count?: number;
-  /**
-   * Identifiant genere cote client a la publication (nonce). Renvoye par l'API et
-   * par le broadcast WebSocket, il permet de dedupliquer le post optimiste de son echo.
-   */
-  client_post_id?: string;
-}
+// Entités ré-exportées depuis le modèle de domaine (source unique : src/types/domain.ts).
+export type { ForumPost };
+/** Auteur d'un post = User (mêmes colonnes que User_). Alias de compat. */
+export type ForumAuthor = User;
+/** Vote d'un post. Alias de compat. */
+export type ForumVote = PostVote;
 
 // ─── Auteurs reutilises (inspires des seeds de init.sql). ───
 // `me` = l'utilisateur connecte (mock Dashboard : id 1, « jeandubois »). Ses posts

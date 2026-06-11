@@ -1,5 +1,6 @@
 div.update-program {
     position: fixed;
+    z-index: 90;
     inset: 0;
     display: flex;
     justify-content: center;

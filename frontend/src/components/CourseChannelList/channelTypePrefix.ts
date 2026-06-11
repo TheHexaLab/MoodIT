@@ -4,7 +4,7 @@
 export function getPrefixForType(type: string): string {
   switch (type) {
     case 'quiz':
-      return '?';
+      return '○';
     case 'forum':
       return '⮡ ';
     case 'text':
