@@ -141,7 +141,6 @@
 
 .channelPrefix {
     color: var(--text-muted);
-    width: 1rem;
     text-align: center;
     flex-shrink: 0;
 }

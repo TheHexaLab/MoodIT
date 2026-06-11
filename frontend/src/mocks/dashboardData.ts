@@ -106,7 +106,7 @@ export const dashboardProgramsMock: DemoProgram[] = [
                   id: 2,
                   username: 'rosie1234',
                   first_name: 'Rosie',
-                  last_name: 'HG',
+                  last_name: 'HG a;lskdjf; alksdjf;aklsdjf; klasjdf;kl ajsd;fkljasd;klfj as;kdjhf;askdlj f;aslkdjf ;lkasdjf; asd',
                   avatar_color: '#0a5cc0',
                 },
               },

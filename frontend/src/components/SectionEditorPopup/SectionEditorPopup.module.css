@@ -1,6 +1,6 @@
 div.section-editor-popup {
     position: fixed;
-    z-index: 79;
+    z-index: 90;
     inset: 0;
     display: flex;
     justify-content: center;
@@ -14,6 +14,9 @@ div.section-editor-popup > div {
     flex-direction: column;
     gap: 0.875rem;
     width: 30rem;
+    /* Flex-item : sans min-width:0, un nom long (nowrap) pousse le min-content de la
+       carte au-delà de 30rem et la fait grandir au lieu de laisser l'ellipsis agir. */
+    min-width: 0;
     margin: 1.25rem;
     background: var(--bg-surface);
     padding: 1.25rem;
@@ -304,6 +307,9 @@ div.section-editor-popup > div > main > ol > li > div > span:first-child {
 }
 
 div.section-editor-popup > div > main > ol > li > div > span:last-child {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
@@ -315,6 +321,20 @@ div.section-editor-popup > div > main > ol > li > div > span:last-child {
     text-overflow: ellipsis;
     white-space: nowrap;
     user-select: none;
+}
+
+/* Préfixe (#, ?, ⮡…) : ne rétrécit jamais. */
+div.section-editor-popup > div > main > ol > li > div > span:last-child > span:first-child {
+    flex-shrink: 0;
+}
+
+/* Nom de l'item : tronqué avec « … » quand il dépasse (flex-item → besoin de
+   min-width:0 + ellipsis sur le span lui-même, l'overflow du parent ne suffit pas). */
+div.section-editor-popup > div > main > ol > li > div > span:last-child > span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 div.section-editor-popup > div > main > ol > li > div > svg {

@@ -53,19 +53,32 @@ export function CourseSectionEditor({
   );
 }
 
+function sectionPrefixLabel(type: string): string {
+  switch (type) {
+    case 'quiz':
+      return "Le quiz";
+    case 'forum':
+      return "Le forum";
+    case 'text':
+      return "Le canal";
+    default:
+      return "L'élément";
+  }
+}
+
 /** Libellés du popup d'édition, adaptés au type de section. */
 function sectionPopupLabels(section: ChannelTypeDefinition) {
   const singular = sectionSingular(section.type);
   return {
-    title: `Modifier ${section.label.toLowerCase()}`,
+    title: `Modifier les ${section.label.toLowerCase()}`,
     subtitle: `Glisse pour réorganiser · ajoute, modifie ou supprime ${singular.article}${singular.noun}`,
     addButton: `Ajouter ${singular.article}${singular.noun}`,
     emptyMessage: `Aucun ${singular.noun} pour le moment.`,
     addTitle: `Nouveau ${singular.noun}`,
     editTitle: `Modifier ${singular.article}${singular.noun}`,
     deleteTitle: `Supprimer ${singular.article}${singular.noun} ?`,
-    deleteBody: (item: { name: string }, prefix: string) =>
-      `« ${prefix ? `${prefix} ` : ''}${item.name} » et tout son contenu seront définitivement supprimés. Cette action est irréversible.`,
+    deleteBody: (item: { name: string }) =>
+      `${sectionPrefixLabel(section.type)} « ${item.name} » et tout son contenu seront définitivement supprimés. Cette action est irréversible.`,
   };
 }
 

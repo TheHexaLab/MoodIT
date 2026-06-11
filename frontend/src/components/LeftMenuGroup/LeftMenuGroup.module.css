@@ -87,13 +87,22 @@
         font-style: normal;
         line-height: normal;
         margin: 0;
+        overflow: hidden;
     }
 
-    .mobileTitle > span:first-child {
+    .mobileTitle > span[role="prefix"] {
         color: var(--text-muted);
         font-size: 1.375rem;
         width: 1.375rem;
         font-weight: 600;
+    }
+
+    .mobileTitle > span[role="title"] {
+        text-overflow: ellipsis;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        max-width: 100%;
     }
 
     .mobileAvatar {

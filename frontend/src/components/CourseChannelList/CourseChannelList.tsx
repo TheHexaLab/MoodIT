@@ -152,7 +152,16 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
                         }}
                         aria-current={isSelected ? 'page' : undefined}
                       >
-                        <span className={styles.channelPrefix}>{getPrefixForType(channel.type)}</span>
+                        <span
+                          className={styles.channelPrefix}
+                          style={
+                            getPrefixForType(channel.type) === '⮡ '
+                              ? { display: 'inline-flex', width: '0.6rem' }
+                              : undefined
+                          }
+                        >
+                          {getPrefixForType(channel.type)}
+                        </span>
                         <span className={styles.channelName}>{channel.name}</span>
                       </button>
                     </li>

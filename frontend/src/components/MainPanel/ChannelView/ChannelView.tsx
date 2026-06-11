@@ -245,7 +245,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
         <header>
           <p>
             <span>{getPrefixForType(channel.type)}</span>
-            {channel.name}
+            <span>{channel.name}</span>
           </p>
           <span />
           <p>{course.title}</p>
@@ -317,9 +317,6 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                                 }}
                               >
                                 {getInitials(parent.author)}
-                              </span>
-                              <span className={styles.replyRefName}>
-                                {getAuthorName(parent.author)}
                               </span>
                               <span className={styles.replyRefText}>
                                 {getSnippet(parent.content)}

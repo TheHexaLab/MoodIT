@@ -68,11 +68,11 @@ export default function LeftMenuGroup({
 
         <h2 className={styles.mobileTitle}>
           {mobileTitlePrefix && (
-            <span style={mobileTitlePrefix !== '⮡ ' ? { width: 'fit-content' } : undefined}>
+            <span role="prefix" style={mobileTitlePrefix !== '⮡ ' ? { width: 'fit-content' } : undefined}>
               {mobileTitlePrefix}
             </span>
           )}
-          {mobileTitle}
+          <span role="title">{mobileTitle}</span>
         </h2>
 
         {mobileUserMenu ?? (
