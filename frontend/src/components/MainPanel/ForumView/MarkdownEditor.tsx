@@ -304,6 +304,7 @@ interface ToolMenuProps {
 function ToolMenu({ icon, title, ariaLabel, items, onSelect, disabled }: ToolMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Ferme le menu au clic exterieur ou sur Echap.
   useEffect(() => {
@@ -322,6 +323,19 @@ function ToolMenu({ icon, title, ariaLabel, items, onSelect, disabled }: ToolMen
     };
   }, [open]);
 
+  // À l'ouverture, si le menu (ancré à gauche par défaut) dépasse le bord droit du
+  // viewport, on l'ancre à droite du bouton. Ajustement DOM impératif (mesure →
+  // style) dans un layout effect : bascule avant le paint, sans state ni re-render.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!open || !el) return;
+    const margin = 8;
+    if (el.getBoundingClientRect().right > window.innerWidth - margin) {
+      el.style.left = 'auto';
+      el.style.right = '0';
+    }
+  }, [open]);
+
   return (
     <div role="menu-wrap" ref={wrapRef}>
       <button
@@ -336,7 +350,7 @@ function ToolMenu({ icon, title, ariaLabel, items, onSelect, disabled }: ToolMen
         {icon}
       </button>
       {open && (
-        <div role="menu" aria-label={ariaLabel}>
+        <div role="menu" aria-label={ariaLabel} ref={menuRef}>
           {items.map((item) => (
             <button
               key={item.value || 'plain'}
