@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import styles from './SectionEditorPopup.module.css';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
@@ -243,7 +244,7 @@ export function SectionEditorPopup({
         <h2>{titleText}</h2>
         <div>
           <div className={draftHasError ? styles.invalid : undefined}>
-            <span>{prefix}</span>
+            <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
             <input
               type="text"
               value={draftName}
@@ -267,7 +268,9 @@ export function SectionEditorPopup({
     );
   }
 
-  return (
+  // Porté vers <body> : un modal en position:fixed doit vivre à la racine, sinon
+  // il est rogné par un ancêtre (ex. la sidebar CourseMenu en overflow:hidden).
+  return createPortal(
     <>
       <div
         className={`${styles['section-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
@@ -312,7 +315,8 @@ export function SectionEditorPopup({
                           ⠿
                         </span>
                         <span>
-                          {prefix} {item.name}
+                          <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
+                          <span>{item.name}</span>
                         </span>
                       </div>
                       <div>
@@ -339,7 +343,7 @@ export function SectionEditorPopup({
       {deletingItem && (
         <DeleteConfirmationPopup
           title={t.deleteTitle}
-          content={t.deleteBody(deletingItem, prefix)}
+          content={t.deleteBody(deletingItem)}
           onDeleteConfirmation={confirmDelete}
           onClose={() => setDeletingId(null)}
         />
@@ -351,6 +355,7 @@ export function SectionEditorPopup({
           onClose={() => setError(null)}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 }

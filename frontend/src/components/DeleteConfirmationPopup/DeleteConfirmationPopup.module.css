@@ -1,6 +1,8 @@
 div.delete-confirmation-popup {
     position: fixed;
     inset: 0;
+    /* Au-dessus de toute la chrome de l'app (menu z-index 30, tiroir mobile 90). */
+    z-index: 100;
     display: flex;
     justify-content: center;
     align-items: center;

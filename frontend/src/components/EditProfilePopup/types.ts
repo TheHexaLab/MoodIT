@@ -1,17 +1,14 @@
 /** Types de données et de libellés du EditProfilePopup. */
+import { type User } from '../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : le callback d'enregistrement peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
 
-/** Utilisateur édité (reflète les colonnes utiles de `User_`). */
-export interface ProfileUser {
-  username: string;
-  first_name: string;
-  last_name: string;
-  avatar_color: string;
-  /** URL de la photo de profil existante (si l'utilisateur en a une). */
-  avatar_url?: string;
-}
+/** Utilisateur édité : sous-ensemble de l'entité User (colonnes affichées/éditables). */
+export type ProfileUser = Pick<
+  User,
+  'username' | 'first_name' | 'last_name' | 'avatar_color' | 'avatar_url'
+>;
 
 /** Modification de profil (reflète les colonnes éditables de `User_`). */
 export interface ProfileUpdate {

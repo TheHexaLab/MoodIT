@@ -1,0 +1,793 @@
+/* Vue forum (facon Reddit) : en-tete fixe + barre d'outils + liste scrollable. */
+div.forum-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-main);
+    /* Pas d'indentation d'une reponse imbriquee (decalage + filet vertical).
+       Reduit sur petits ecrans pour ne pas ecraser la colonne de texte. */
+    --reply-indent: 0.5rem;
+    --reply-pad: 0.75rem;
+}
+
+/* ─── En-tete (memes reperes visuels que ChannelView). ─── */
+div.forum-view > header {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    padding: 0 1.13rem;
+    height: 3.25rem;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+    box-sizing: border-box;
+}
+
+div.forum-view > header > * {
+    margin: 0;
+    font-family: Inter, sans-serif;
+    line-height: normal;
+}
+
+div.forum-view > header > p:first-of-type {
+    display: flex;
+    align-items: center;
+    gap: 0.31rem;
+    flex-shrink: 0;
+    color: var(--text);
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+div.forum-view > header > p:first-of-type > span {
+    color: var(--text-muted);
+    font-size: 1.375rem;
+    width: 1.375rem;
+    font-weight: 600;
+}
+
+div.forum-view > header > span {
+    width: 0.0625rem;
+    height: 1.5rem;
+    background: var(--border);
+}
+
+div.forum-view > header > p:nth-of-type(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 0.8125rem;
+}
+
+/* ─── Barre d'outils : tri + nouveau sujet. ─── */
+div.forum-view > div[role="toolbar"] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+div.forum-view > div[role="toolbar"] > div[role="group"] {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.1875rem;
+    border-radius: 999px;
+    background: var(--bg-vote-pill);
+}
+
+div.forum-view > div[role="toolbar"] > div[role="group"] > button {
+    border: none;
+    border-radius: 999px;
+    padding: 0.3rem 0.75rem;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+div.forum-view > div[role="toolbar"] > div[role="group"] > button:hover {
+    color: var(--text);
+}
+
+div.forum-view > div[role="toolbar"] > div[role="group"] > button[role="active-sort"],
+div.forum-view > div[role="toolbar"] > div[role="group"] > button[role="active-sort"]:hover {
+    background: var(--bg-surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+div.forum-view > div[role="toolbar"] > button[role^="new-post"] {
+    display: flex;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.62rem 0.62rem;
+    background: var(--brand-teal);
+    color: var(--text-on-brand);
+    font-family: Inter, sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+div.forum-view > div[role="toolbar"] > button[role^="new-post"] > span {
+    font-size: 0.8125rem;
+}
+
+div.forum-view > div[role="toolbar"] > button[role^="new-post"]:hover {
+    filter: brightness(1.08);
+}
+
+/* ─── Liste scrollable des sujets. ─── */
+div.forum-view > div[role="body"] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-grow: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1rem;
+    gap: 1rem;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    div.forum-view > div[role="body"] {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div.forum-view > div[role="body"]::-webkit-scrollbar {
+    width: 4px;
+}
+
+div.forum-view > div[role="body"]::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div.forum-view > div[role="body"]::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* Masque les boutons de navigation (fleches) du scrollbar, comme ailleurs. */
+div.forum-view > div[role="body"]::-webkit-scrollbar-button,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:start,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:end,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:vertical:start,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:vertical:end,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:vertical:increment,
+div.forum-view > div[role="body"]::-webkit-scrollbar-button:vertical:decrement {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div.forum-view > div[role="body"] > p:first-child {
+    margin: 2rem 0;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+    text-align: center;
+}
+
+/* ─── Etat de chargement / erreur (centre dans la liste). ─── */
+div.forum-view > div[role="body"] > div[role="status"] {
+    margin: auto 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.625rem;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+    text-align: center;
+}
+
+div.forum-view > div[role="body"] > div[role="status"] > p {
+    margin: 0;
+}
+
+div.forum-view > div[role="body"] > div[role="status"] > span[role="spinner"] {
+    box-sizing: border-box;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 2px solid var(--text-muted);
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: forum-view-spin 0.6s linear infinite;
+}
+
+@keyframes forum-view-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.forum-view > div[role="body"] > div[role="status"] > span[role="spinner"] {
+        animation-duration: 1.4s;
+    }
+}
+
+div.forum-view > div[role="body"] > div[role="status"] > button {
+    padding: 0.4rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+div.forum-view > div[role="body"] > div[role="status"] > button:hover {
+    border-color: var(--border-strong);
+}
+
+div.forum-view > div[role="body"] > ul {
+    list-style: none;
+    padding: 0;
+    min-width: 0;
+    width: calc(min(100%, 100rem));
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+}
+
+/* ─── Formulaire « Nouveau sujet » : inline en tete de la liste des sujets. ─── */
+div.forum-view > div[role="body"] > div[role="new-thread"] {
+    width: calc(min(100%, 100rem));
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+div.forum-view > div[role="body"] > div[role="new-thread"] > h2[role="new-thread-heading"] {
+    margin: 0;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: normal;
+}
+
+div.forum-view > div[role="body"] > div[role="new-thread"] > input {
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+div.forum-view > div[role="body"] > div[role="new-thread"] > input::placeholder {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+div.forum-view > div[role="body"] > div[role="new-thread"] > input:focus {
+    border-color: var(--border-strong);
+}
+
+/* ─── Carte d'un sujet : barre de votes a gauche + contenu a droite. ─── */
+div.forum-view > div[role="body"] > ul > li {
+    display: flex;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--bg-surface);
+    padding: 1rem;
+    transition: border-color 0.12s ease;
+}
+
+div.forum-view > div[role="body"] > ul > li:hover {
+    border-color: var(--border-strong);
+}
+
+/* ─── Barre de votes verticale. ─── */
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] {
+    flex-direction: row;
+    gap: 0.19rem;
+    padding: 0.375rem 0.4375rem 0.3125rem 0.5rem;;
+    border-radius: 999rem;
+    background: var(--bg-input);
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.9375rem;
+    height: 0.9375rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role="vertical-vote-actions"] > button > svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] > button {
+    width: 0.9375rem;
+    height: 0.9375rem;
+}
+
+/*div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:hover:not(:disabled) {
+    background: var(--bg-vote-pill);
+}*/
+
+/* Vote desactive (sa propre publication) : non interactif. */
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:first-of-type[aria-pressed="true"],
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:first-of-type:not(:disabled):hover {
+    color: var(--success);
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:nth-of-type(2)[aria-pressed="true"],
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button:nth-of-type(2):not(:disabled):hover {
+    color: var(--danger);
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > span {
+    text-align: center;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] > span {
+    font-size: 0.75rem;
+    padding: 0 0.25rem;
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > span[role="up-voted"] {
+    color: var(--success);
+}
+
+div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > span[role="down-voted"] {
+    color: var(--danger);
+}
+
+/* ─── Contenu d'un sujet. ─── */
+div.forum-view > div[role="body"] > ul > li > div[role="thread-main"] {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+div.forum-view div[role="header"] {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+    /* Filet de sécurité : tout résidu de débordement du byline est rogné (le nom
+       d'auteur, lui, se tronque avec « … » via min-width:0 + ellipsis ci-dessous). */
+    overflow: hidden;
+}
+
+div.forum-view div[role="header"] > span[role="avatar"] {
+    flex-shrink: 0;
+    width: 1.375rem;
+    height: 1.375rem;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Inter, sans-serif;
+    font-size: 0.5625rem;
+    font-weight: 700;
+    user-select: none;
+}
+
+/* Les initiales : item flex (= conteneur de bloc) → text-box-trim s'applique ici
+   et centre optiquement les capitales dans la bulle (le poser sur .avatar, qui
+   est un conteneur flex, serait ignore par le navigateur). */
+div.forum-view div[role="header"] > span[role="avatar"] > span {
+    line-height: 1;
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+}
+
+div.forum-view div[role="header"] > span[role="author"] {
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Flex-item : sans min-width:0, le min-content (nom en nowrap) empêche le
+       rétrécissement → la ligne déborde au lieu de tronquer le nom avec « … ». */
+    min-width: 0;
+}
+
+div.forum-view div[role="header"] > span[role="separator"] {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+div.forum-view div[role="header"] > span[role="time"] {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+}
+
+div.forum-view div[role="header"] > span[role="pin-indicator"] {
+    flex-shrink: 0;
+    margin-left: 0.25rem;
+    padding: 0.0625rem 0.4rem;
+    border-radius: 999px;
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 600;
+}
+
+div.forum-view > div[role="body"] > ul > li > div[role="thread-main"] > h2[role="thread-title"] {
+    margin: 0;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+div.forum-view > div[role="body"] > ul > li > div[role="thread-main"] > div[role="thread-footer"] {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    margin-top: 0.125rem;
+}
+
+div.forum-view div[role="post-actions"] {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem 0.5rem;
+}
+
+div.forum-view div[role="post-actions"] > button {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.12s ease;
+}
+
+div.forum-view div[role="post-actions"] > button:hover:not(:disabled) {
+    color: var(--brand-teal);
+}
+
+div.forum-view div[role="post-actions"] > button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Bouton « Supprimer » : vire au rouge au survol. */
+div.forum-view div[role="post-actions"] > button[role="delete"]:hover:not(:disabled) {
+    color: var(--danger);
+}
+
+/* Toggle « chevron + N réponses » : partage sujets & reponses. */
+div.forum-view [role="replies-toggle"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.3s ease;
+}
+
+div.forum-view [role="replies-toggle"]:hover {
+    filter: var(--brand-teal-hover);
+}
+
+div.forum-view [role="replies-toggle"] > svg {
+    width: 0.9375rem;
+    height: 0.9375rem;
+}
+
+/* Libelle « Aucune réponse » (sujet sans reponse) : non interactif. */
+div.forum-view [role="no-replies"] {
+    padding: 0.3rem 0.5rem;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Vote compact d'un sujet (footer) : visible sur mobile uniquement. */
+div.forum-view [role="mobile-vote"] {
+    display: none;
+}
+
+/* ─── Fil de reponses (commentaires imbriques). ─── */
+div.forum-view ul[role="replies"] {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+div.forum-view li[role="comment"] {
+    display: flex;
+    flex-direction: column;
+    /* min-width:0 : laisse la colonne se rétrécir pour que le byline (nom d'auteur)
+       se tronque au lieu de pousser la largeur (équivalent de thread-main des sujets). */
+    min-width: 0;
+}
+
+div.forum-view div[role="comment-body"] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+div.forum-view div[role="comment-footer"] {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+}
+
+/* Conteneur d'une branche imbriquee : positionne le filet cliquable a gauche. */
+div.forum-view div[role="replies-wrap"] {
+    position: relative;
+}
+
+/* Indentation des reponses imbriquees. Le filet vertical est dessine par le
+   bouton [role="collapse-rail"] (cliquable), pas par une bordure ici. */
+div.forum-view div[role="replies-wrap"] > ul[role="replies"] {
+    margin-left: var(--reply-indent);
+    padding-left: var(--reply-pad);
+}
+
+/* Au-dela du plateau : les reponses profondes restent affichees mais cessent de
+   deriver (aucun decalage ajoute), pour que la colonne de texte ne se reduise
+   jamais a neant — quelle que soit la profondeur du fil. */
+div.forum-view ul[role="replies"][data-flat] {
+    margin-left: 0;
+    padding-left: 0;
+}
+
+/* Filet vertical cliquable : replie la branche au clic, se teinte au survol. */
+div.forum-view [role="collapse-rail"] {
+    position: absolute;
+    left: var(--reply-indent);
+    top: 0;
+    bottom: 0;
+    width: 0.875rem;
+    transform: translateX(-50%);
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    z-index: 1;
+}
+
+div.forum-view [role="collapse-rail"]::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--border);
+    border-radius: 1px;
+    transition: background 0.12s ease;
+}
+
+div.forum-view [role="collapse-rail"]:hover::before {
+    background: var(--brand-teal);
+}
+
+/* ─── Chargement paresseux d'une branche (spinner inline) + etat d'erreur. ─── */
+div.forum-view div[role="replies-loading"],
+div.forum-view div[role="replies-error"] {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Indentation coherente quand l'etat apparait dans une branche imbriquee. */
+div.forum-view div[role="replies-wrap"] > div[role="replies-loading"],
+div.forum-view div[role="replies-wrap"] > div[role="replies-error"] {
+    margin-left: var(--reply-indent);
+    padding-left: var(--reply-pad);
+}
+
+div.forum-view div[role="replies-loading"] > span[role="spinner"] {
+    box-sizing: border-box;
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid var(--text-muted);
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: forum-view-spin 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.forum-view div[role="replies-loading"] > span[role="spinner"] {
+        animation-duration: 1.4s;
+    }
+}
+
+div.forum-view div[role="replies-error"] > button {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+div.forum-view div[role="replies-error"] > button:hover {
+    border-color: var(--border-strong);
+}
+
+/* ─── Responsive : on densifie sur petits ecrans. ─── */
+@media (max-width: 48rem) {
+    div.forum-view {
+        --reply-indent: 0.375rem;
+        --reply-pad: 0.625rem;
+    }
+
+    /* Tactile : les actions n'apparaissent qu'au tap sur le post (facon ChannelView).
+       Elles sortent du flux et flottent en haut a droite du sujet / de la reponse. */
+    div.forum-view > div[role="body"] > ul > li,
+    div.forum-view li[role="comment"] {
+        position: relative;
+    }
+
+    div.forum-view div[role="post-actions"] {
+        position: absolute;
+        top: 0.375rem;
+        right: 0.375rem;
+        z-index: 2;
+        gap: 0;
+        padding: 0.125rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--bg-surface);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.12s ease;
+    }
+
+    div.forum-view li[role="comment"][data-actions="open"] > div[role="comment-body"] > div[role="comment-footer"] > div[role="post-actions"],
+    div.forum-view > div[role="body"] > ul > li[data-actions="open"] > div[role="thread-main"] > div[role="thread-footer"] > div[role="post-actions"] {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* Le vote du sujet passe du rail vertical (gauche) au footer compact (comme une reponse). */
+    div.forum-view > div[role="body"] > ul > li > div[role="vertical-vote-actions"] {
+        display: none;
+    }
+
+    div.forum-view [role="mobile-vote"] {
+        display: flex;
+    }
+
+    div.forum-view > div[role="toolbar"] {
+        padding: 0.625rem 0.75rem;
+    }
+
+    div.forum-view > div[role="body"] {
+        padding: 0.75rem;
+    }
+
+    div.forum-view > div[role="toolbar"] > button[role^="new-post"] {
+        padding: 0.45rem 0.75rem;
+    }
+}
+
+@media (max-width: 30rem) {
+    div.forum-view {
+        --reply-indent: 0.25rem;
+        --reply-pad: 0.5rem;
+    }
+
+    div.forum-view > header > span,
+    div.forum-view > header > p:nth-of-type(2) {
+        display: none;
+    }
+
+    div.forum-view > div[role="body"] {
+        padding: 0.625rem;
+    }
+
+    div.forum-view > div[role="body"] > ul > li {
+        padding: 0.625rem 0.75rem;
+    }
+}
+
+@media (max-width: 21.25rem) {
+
+    div.forum-view > div[role="toolbar"] {
+        flex-direction: column-reverse;
+    }
+}
+
+div.forum-view > div[role="toolbar"] > button[role="new-post-composing"],
+div.forum-view > div[role="toolbar"] > button[role="new-post-composing"]:hover {
+    background: var(--bg-main);
+    color: var(--bg-main);
+    filter: brightness(1);
+    cursor: default;
+}

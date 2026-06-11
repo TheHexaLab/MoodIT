@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './ErrorPopup.module.css';
 import { defaultLabels } from './labels.ts';
 import type { ErrorPopupLabels } from './types.ts';
@@ -47,6 +47,21 @@ export function ErrorPopup({
       pendingAction.current = null;
     }
   }
+
+  // « Entrée » ferme le popup (raccourci, comme un clic sur « fermer »).
+  // Ecoute en phase CAPTURE + stopPropagation : on intercepte la touche avant
+  // qu'elle n'atteigne un champ sous-jacent (ex. la zone de saisie de ChannelView,
+  // qui sinon enverrait un message en meme temps qu'on ferme le popup).
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isClosing) requestClose(onClose);
+    }
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isClosing, onClose]);
 
   return (
     <div

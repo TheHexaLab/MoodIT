@@ -209,8 +209,15 @@ const establishments: Establishment[] = [
  */
 const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
   ...p,
-  establishmentId: i < 10 ? 1 : i < 12 ? 2 : 3,
+  establishment_id: i < 10 ? 1 : i < 12 ? 2 : 3,
 }));
+
+/**
+ * Mock — programmes auxquels l'utilisateur est déjà abonné (ids alignés sur init.sql).
+ * Tous rattachés à l'Université de Sherbrooke (id 1) : en l'ouvrant dans la vue
+ * « rejoindre », GIN (1), GEL (3) et GEN (7) doivent apparaître préselectionnés.
+ */
+const subscribedProgramIds: number[] = [1, 3, 7];
 
 /** Mock — canaux fournis au SectionEditorPopup. */
 const channels = [
@@ -422,7 +429,7 @@ export default function PopupTests() {
             return establishments.map((e) => ({
               ...e,
               programCodes: joinPrograms
-                .filter((p) => p.establishmentId === e.id)
+                .filter((p) => p.establishment_id === e.id)
                 .map((p) => p.code),
             }));
           }}
@@ -432,15 +439,17 @@ export default function PopupTests() {
             if (failRequests) throw new Error('Échec simulé (loadJoinEstablishments)');
             return establishments.map((e) => ({
               ...e,
-              programCount: joinPrograms.filter((p) => p.establishmentId === e.id).length,
+              programCount: joinPrograms.filter((p) => p.establishment_id === e.id).length,
             }));
           }}
           // Au choix d'un établissement : ses programmes rattachés (async, ~400 ms).
-          loadEstablishmentPrograms={async (establishmentId: number): Promise<JoinProgram[]> => {
+          loadEstablishmentPrograms={async (establishment_id: number): Promise<JoinProgram[]> => {
             await new Promise((r) => setTimeout(r, 400));
             if (failRequests) throw new Error('Échec simulé (loadEstablishmentPrograms)');
-            return joinPrograms.filter((p) => p.establishmentId === establishmentId);
+            return joinPrograms.filter((p) => p.establishment_id === establishment_id);
           }}
+          // Programmes déjà suivis : préselectionnés dans l'étape de sélection.
+          subscribedProgramIds={subscribedProgramIds}
           // onCreate / onJoin peuvent être async ; le composant ferme via onClose en cas de succès.
           onCreate={async (program: NewProgram) => {
             await new Promise((r) => setTimeout(r, 400));
