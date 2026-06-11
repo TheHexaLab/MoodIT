@@ -1,0 +1,180 @@
+/* Rendu Markdown d'un post (selecteurs par role/element, sans classes). */
+div[role="markdown-container"] {
+    color: var(--text-body);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+div[role="markdown-container"] > :first-child {
+    margin-top: 0;
+}
+
+div[role="markdown-container"] > :last-child {
+    margin-bottom: 0;
+}
+
+div[role="markdown-container"] p {
+    margin: 0.5rem 0;
+}
+
+div[role="markdown-container"] h2,
+div[role="markdown-container"] h3,
+div[role="markdown-container"] h4,
+div[role="markdown-container"] h5,
+div[role="markdown-container"] h6 {
+    margin: 0.75rem 0 0.35rem;
+    color: var(--text);
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+div[role="markdown-container"] h2 {
+    font-size: 1.1em;
+}
+
+div[role="markdown-container"] h3 {
+    font-size: 1em;
+}
+
+div[role="markdown-container"] h4,
+div[role="markdown-container"] h5,
+div[role="markdown-container"] h6 {
+    font-size: 0.95em;
+}
+
+div[role="markdown-container"] strong {
+    color: var(--text);
+    font-weight: 700;
+}
+
+div[role="markdown-container"] ul,
+div[role="markdown-container"] ol {
+    margin: 0.5rem 0;
+    padding-left: 1.25rem;
+}
+
+div[role="markdown-container"] li {
+    margin: 0.15rem 0;
+}
+
+div[role="markdown-container"] a {
+    color: var(--brand-teal);
+    text-decoration: none;
+}
+
+div[role="markdown-container"] a:hover {
+    text-decoration: underline;
+}
+
+div[role="markdown-container"] code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    background: var(--bg-vote-pill);
+    padding: 0.1em 0.35em;
+    border-radius: 0.3rem;
+}
+
+div[role="markdown-container"] blockquote {
+    margin: 0.5rem 0;
+    padding: 0.2rem 0 0.2rem 0.75rem;
+    border-left: 3px solid var(--border-strong);
+    color: var(--text-muted);
+}
+
+div[role="markdown-container"] blockquote > :first-child {
+    margin-top: 0;
+}
+
+div[role="markdown-container"] blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+div[role="markdown-container"] hr {
+    margin: 0.75rem 0;
+    border: none;
+    border-top: 1px solid var(--border);
+}
+
+/* ─── Bloc de code colore (Prism). ─── */
+div[role="code-block"] {
+    position: relative;
+    margin: 0.5rem 0;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--syntax-bg);
+    overflow: hidden;
+}
+
+/* Barre flottante en haut a droite : bouton de copie + pastille de langage. */
+div[role="code-block"] > div[role="code-toolbar"] {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: stretch;
+    border-bottom-left-radius: 0.5rem;
+    overflow: hidden;
+    background: var(--bg-vote-pill);
+}
+
+div[role="code-toolbar"] > span[role="code-lang"] {
+    display: flex;
+    align-items: center;
+    padding: 0.1rem 0.45rem;
+    color: var(--text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.65rem;
+    text-transform: lowercase;
+    user-select: none;
+}
+
+/* Bouton de copie : masque (largeur 0) puis revele au survol du bloc (facon GitHub). */
+div[role="code-toolbar"] > button[role="copy"] {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 0;
+    transition: width 0.12s ease, opacity 0.12s ease, color 0.12s ease;
+}
+
+div[role="code-block"]:hover > div[role="code-toolbar"] > button[role="copy"],
+div[role="code-toolbar"] > button[role="copy"]:focus-visible {
+    width: 1.55rem;
+    opacity: 1;
+}
+
+div[role="code-toolbar"] > button[role="copy"] > svg {
+    flex: none;
+}
+
+div[role="code-toolbar"] > button[role="copy"]:hover {
+    color: var(--text);
+}
+
+/* Etat « Copié » : la coche (verte) reste visible le temps du retour visuel,
+   meme si le curseur a quitte le bloc (sinon width:0 la masquerait). */
+div[role="code-toolbar"] > button[role="copy"][data-copied] {
+    width: 1.55rem;
+    opacity: 1;
+    color: var(--success);
+}
+
+div[role="code-block"] > pre {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    line-height: 1.5;
+    tab-size: 2;
+}

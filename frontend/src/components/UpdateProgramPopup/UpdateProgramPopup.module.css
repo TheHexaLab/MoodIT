@@ -1,0 +1,456 @@
+div.update-program {
+    position: fixed;
+    z-index: 90;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    animation: update-program-fade-in 0.2s ease-out;
+}
+
+div.update-program > div {
+    display: flex;
+    box-sizing: border-box;
+    width: min(28.75rem, 100% - 2rem);
+    /* Sur écran court, le panneau défile au lieu de dépasser le viewport. */
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    padding: 1rem;
+    margin: 1rem;
+    user-select: none;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.88rem;
+    border-radius: 1rem;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: update-program-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+    div.update-program > div {
+        max-height: calc(100dvh - 4.26rem);
+        padding: 1.25rem;
+        margin: 2.13rem;
+    }
+}
+
+@keyframes update-program-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes update-program-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes update-program-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes update-program-pop-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+}
+
+div.update-program.closing {
+    animation: update-program-fade-out 0.2s ease-in forwards;
+}
+
+div.update-program.closing > div {
+    animation: update-program-pop-out 0.2s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.update-program,
+    div.update-program > div {
+        animation: none;
+    }
+}
+
+div.update-program > div > * {
+    margin: 0;
+}
+
+/* ── En-tête ────────────────────────────────────────────── */
+div.update-program > div > header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    align-self: stretch;
+}
+
+div.update-program > div > header > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+div.update-program > div > header > div > * {
+    margin: 0;
+}
+
+div.update-program > div > header > div > h1 {
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: normal;
+    color: var(--text);
+}
+
+div.update-program > div > header > div > p {
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.18125rem;
+    color: var(--text-muted);
+}
+
+div.update-program > div > header > button {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    font-weight: 400;
+    line-height: normal;
+    background: none;
+    border: none;
+    transition: color 0.15s ease, transform 0.1s ease;
+}
+
+div.update-program > div > header > button:hover {
+    cursor: pointer;
+    color: var(--text);
+}
+
+div.update-program > div > header > button:active {
+    transform: scale(0.85);
+}
+
+/* ── Champs ─────────────────────────────────────────────── */
+
+/* Libellés de champ (partagés : champs texte, palette). */
+div.update-program > div > label.field > span,
+div.update-program > div > section.color-group > div.palette-group > span.field-label {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+}
+
+/* Champs texte (code, nom, cohorte). */
+div.update-program > div > label.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    align-self: stretch;
+}
+
+div.update-program > div > label.field > div {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    padding: 0.75rem 0.88rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.375rem;
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+div.update-program > div > label.field > div:hover {
+    cursor: text;
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.update-program > div > label.field > div:focus-within {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+div.update-program > div > label.field > div > input {
+    flex-grow: 1;
+    min-width: 0;
+    user-select: text;
+    border: none;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+    outline: none;
+}
+
+div.update-program > div > label.field > div > input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Champ en erreur (ex. code déjà pris) : bordure rouge + message. */
+div.update-program > div > label.field.invalid > div,
+div.update-program > div > label.field.invalid > div:hover,
+div.update-program > div > label.field.invalid > div:focus-within {
+    border-color: var(--danger);
+    box-shadow: 0 0 4px 3px var(--shadow-danger);
+}
+
+div.update-program > div > label.field > span.field-error {
+    color: var(--danger);
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: normal;
+}
+
+/* Couleur : icône (aperçu) à gauche, libellé + palette à droite. */
+div.update-program > div > section.color-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    align-self: stretch;
+}
+
+/* Icône du programme : pastille colorée affichant le code saisi (contraste auto). */
+div.update-program > div > section.color-group > span.preview {
+    display: flex;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 3.5rem;
+    height: 3.5rem;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.875rem;
+}
+
+div.update-program > div > section.color-group > span.preview > span {
+    max-width: 100%;
+    padding: 0 0.25rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: Inter, sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: normal;
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+}
+
+div.update-program > div > section.color-group > div.palette-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.625rem;
+    min-width: 0;
+}
+
+div.update-program > div > section.color-group > div.palette-group > div.palette {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+div.update-program > div > section.color-group > div.palette-group > div.palette > button.swatch {
+    box-sizing: border-box;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+div.update-program > div > section.color-group > div.palette-group > div.palette > button.swatch:hover {
+    transform: scale(1.1);
+}
+
+/* Couleur sélectionnée : anneau de la même couleur que la pastille. */
+div.update-program > div > section.color-group > div.palette-group > div.palette > button.swatch.selected {
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--swatch-color);
+}
+
+/* Bouton « + » : ouvre le sélecteur de couleur natif. */
+div.update-program > div > section.color-group > div.palette-group > div.palette > label.add-color {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+div.update-program > div > section.color-group > div.palette-group > div.palette > label.add-color:hover {
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+div.update-program > div > section.color-group > div.palette-group > div.palette > label.add-color > input {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+/* ── Pied (Annuler / Enregistrer) ───────────────────────── */
+div.update-program > div > footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.625rem;
+    align-self: stretch;
+}
+
+div.update-program > div > footer > button {
+    display: flex;
+    padding: 0.75rem 0;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.625rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: normal;
+    flex-grow: 1;
+    transition: background-color 0.15s ease, border-color 0.15s ease, filter 0.15s ease,
+        transform 0.1s ease;
+}
+
+div.update-program > div > footer > button:hover {
+    cursor: pointer;
+}
+
+div.update-program > div > footer > button:active {
+    transform: scale(0.97);
+}
+
+div.update-program > div > footer > button:first-child {
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+}
+
+div.update-program > div > footer > button:first-child:hover {
+    background: var(--bg-vote-pill);
+    border-color: var(--border-strong);
+}
+
+div.update-program > div > footer > button:last-child {
+    color: #ffffff;
+    background: var(--brand-teal-gradient);
+    /* Bordure transparente : garde la même hauteur que « Annuler » (qui a une vraie bordure).
+       padding-box empêche le dégradé d'être peint sous cette bordure → pas de liseré sombre
+       sur les bords arrondis (artefact de sous-pixel de Chromium). */
+    border: 1px solid transparent;
+    background-clip: padding-box;
+}
+
+div.update-program > div > footer > button:last-child:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+div.update-program > div > footer > button:last-child:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@media (min-width: 768px) {
+    div.update-program > div > footer > button {
+        padding: 0.625rem 1.125rem;
+        flex-grow: 0;
+    }
+}
+
+/* ── Écrans étroits (petits téléphones) ─────────────────── */
+@media (max-width: 22.5rem) {
+    /* Resserre les espacements verticaux. */
+    div.update-program > div {
+        gap: 0.75rem;
+    }
+
+    /* Section couleur : icône plus compacte et écart réduit pour ne pas serrer la palette. */
+    div.update-program > div > section.color-group {
+        gap: 0.75rem;
+    }
+
+    div.update-program > div > section.color-group > span.preview {
+        width: 3rem;
+        height: 3rem;
+        border-radius: 0.75rem;
+    }
+}
+
+/* ── Spinner de chargement ──────────────────────────────── */
+div.update-program span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: update-program-spin 0.6s linear infinite;
+}
+
+@keyframes update-program-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.update-program span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
+@media (max-width: 22.5rem) {
+    div.update-program > div > section.color-group {
+        flex-direction: column;
+    }
+
+    div.update-program > div > section.color-group > span.preview {
+        width: 5rem;
+        height: 5rem;
+    }
+
+    div.update-program > div > section.color-group > span.preview > span {
+        font-size: 1.5rem;
+    }
+
+    div.update-program > div > section.color-group > div.palette-group {
+        width: 100%;
+    }
+}

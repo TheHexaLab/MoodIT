@@ -1,0 +1,319 @@
+/* Editeur Markdown (selecteurs par role/element, sans classes).
+   Tout est scope sous [role^="markdown-editor"] : le role "toolbar" est aussi
+   utilise par ForumView, on evite donc toute fuite de style. */
+div[role^="markdown-editor"] {
+    display: flex;
+    flex-direction: column;
+    /* Espacement avec l'element precedent (deplace ici depuis la toolbar : sinon
+       sa marge laisse une bande visible au-dessus de la barre collee). */
+    margin-top: 0.5rem;
+}
+
+/* Bloc englobant de la toolbar collante (toolbar + zone de saisie). Borne le
+   « collage » : la barre se decolle a la fin de cette zone, donc avant les
+   actions (Annuler/Publier), qu'elle ne recouvre plus. */
+div[role^="markdown-editor"] > div[role="editor-main"] {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Barre d'outils. ─── */
+div[role^="markdown-editor"] div[role="toolbar"] {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.125rem;
+    flex-wrap: wrap;
+    border-top-left-radius: 0.5rem;
+    border-top-right-radius: 0.5rem;
+    padding: 0.59375rem 0.625rem 0.59375rem 0.875rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    /* Reste visible quand on scrolle dans un editeur long : la barre se colle en
+       haut du conteneur defilant (z-index pour passer au-dessus du textarea).
+       Pas de margin-top ici : elle laisserait une bande visible au-dessus de la
+       barre collee (l'espacement est porte par le conteneur de l'editeur).
+       top negatif = -(padding-top du conteneur scrollable .forum-view > [role=body],
+       soit 1rem) : sinon la barre se colle au bord du content-box (1rem sous le
+       haut visible) et le contenu defile dans cette bande au-dessus d'elle. */
+    position: sticky;
+    top: -1rem;
+    z-index: 5;
+}
+
+div[role="markdown-editor-preview"] div[role="toolbar"] {
+    border: 1px dashed var(--border);
+    border-bottom-color: transparent;
+    background: var(--bg-surface);
+}
+
+div[role^="markdown-editor"] div[role="toolbar"] > div {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    max-width: calc(100% - 3rem);
+}
+
+/* Boutons d'outils : directs (gras, italique…) + declencheurs de menu (titre, bloc). */
+div[role^="markdown-editor"] div[role="toolbar"] > button,
+div[role^="markdown-editor"] div[role="toolbar"] > div > button,
+div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.75rem;
+    height: 1.75rem;
+    padding: 0 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.3s ease, border-color 0.12s ease;
+}
+
+div[role^="markdown-editor"] div[role="toolbar"] > button:hover:not(:disabled),
+div[role^="markdown-editor"] div[role="toolbar"] > div > button:hover:not(:disabled),
+div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button:hover:not(:disabled) {
+    background: var(--bg-vote-pill);
+    color: var(--brand-teal);
+}
+
+div[role^="markdown-editor"] div[role="toolbar"] > button:disabled,
+div[role^="markdown-editor"] div[role="toolbar"] > div > button:disabled,
+div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* Etat actif : apercu (aria-pressed) ou menu ouvert (aria-expanded). */
+div[role^="markdown-editor"] div[role="toolbar"] > button[aria-pressed="true"],
+div[role^="markdown-editor"] div[role="toolbar"] > div > button[aria-pressed="true"],
+div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button[aria-expanded="true"] {
+    color: var(--brand-teal);
+    border-color: var(--border);
+    background: var(--brand-teal-surface);
+}
+
+div[role^="markdown-editor"] div[role="toolbar"] button > svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+div[role^="markdown-editor"] div[role="toolbar"] [role="mono"] {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+}
+
+/* Espaceur qui repousse l'apercu a droite (seul span direct de la barre). */
+div[role^="markdown-editor"] div[role="toolbar"] > span {
+    flex: 1;
+}
+
+/* ─── Menu deroulant (titres, langages). ─── */
+div[role^="markdown-editor"] div[role="menu-wrap"] {
+    position: relative;
+    display: inline-flex;
+}
+
+div[role^="markdown-editor"] div[role="menu"] {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    z-index: 5;
+    min-width: 9rem;
+    max-height: 14rem;
+    overflow-y: auto;
+    padding: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    box-shadow: 0 4px 12px var(--shadow-modal);
+}
+
+div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"] {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"]:hover {
+    background: var(--bg-vote-pill);
+}
+
+/* ─── Zone de saisie (auto-dimensionnee par JS). ─── */
+div[role^="markdown-editor"] textarea {
+    width: 100%;
+    box-sizing: border-box;
+    /* Hauteur pilotee par le contenu (auto-resize JS), sans plafond ni scroll interne. */
+    resize: none;
+    overflow-y: hidden;
+    min-height: 3.5rem;
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 0.5rem;
+    border-bottom-right-radius: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-message-input);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: clamp(0.8125rem, 0.75rem + 0.15vw, 0.875rem);
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+div[role^="markdown-editor"] textarea:focus {
+    border-color: var(--border-strong);
+}
+
+/* ─── Apercu (rendu Markdown). ─── */
+div[role^="markdown-editor"] div[role="preview"] {
+    min-height: 3.5rem;
+    box-sizing: border-box;
+    border: 1px dashed var(--border);
+    border-bottom-left-radius: 0.5rem;
+    border-bottom-right-radius: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-surface);
+}
+
+div[role^="markdown-editor"] div[role="preview"] > p {
+    margin: 0;
+    color: var(--border);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+}
+
+/* ─── Actions (Annuler / Valider). ─── */
+div[role^="markdown-editor"] > div[role="editor-actions"] {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button {
+    display: flex;
+    border: none;
+    border-radius: 0.375rem;
+    padding: 0.3rem 0.7rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.3s ease, color 0.12s ease;
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button:first-of-type {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button:first-of-type:hover {
+    color: var(--text);
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type {
+    background: transparent;
+    color: var(--brand-teal);
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:hover:not(:disabled) {
+    filter: var(--brand-teal-hover);
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Spinner d'envoi affiche dans le bouton de validation. */
+div[role^="markdown-editor"] [role="spinner"] {
+    box-sizing: border-box;
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: md-editor-spin 0.6s linear infinite;
+}
+
+@keyframes md-editor-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div[role^="markdown-editor"] [role="spinner"] {
+        animation-duration: 1.4s;
+    }
+}
+
+/* ─── Scrollbar (menu + textarea) : fine, sans boutons, alignee sur l'app. ─── */
+@supports not selector(::-webkit-scrollbar) {
+    div[role^="markdown-editor"] div[role="menu"],
+    div[role^="markdown-editor"] textarea {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar {
+    width: 4px;
+}
+
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-track,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-track {
+    background: transparent;
+    /* Inset vertical = rayon du conteneur : le scrollbar ne touche pas les coins arrondis. */
+    margin: 0.5rem 0;
+}
+
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb:hover,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:start,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:end,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:start,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:end,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:increment,
+div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:decrement,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:start,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:end,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:start,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:end,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:increment,
+div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:decrement {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+@media(max-width: 26rem) {
+    div[role^="markdown-editor"] div[role="toolbar"] {
+        align-items: flex-start;
+    }
+}

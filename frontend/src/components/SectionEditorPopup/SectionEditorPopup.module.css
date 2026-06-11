@@ -1,28 +1,33 @@
-div.section-editor {
+div.section-editor-popup {
     position: fixed;
+    z-index: 90;
     inset: 0;
     display: flex;
     justify-content: center;
     align-items: center;
     background: rgba(0, 0, 0, 0.35);
-    animation: section-editor-fade-in 0.2s ease-out;
+    animation: section-editor-popup-fade-in 0.2s ease-out;
 }
 
-div.section-editor > div {
+div.section-editor-popup > div {
     display: flex;
     flex-direction: column;
     gap: 0.875rem;
     width: 30rem;
+    /* Flex-item : sans min-width:0, un nom long (nowrap) pousse le min-content de la
+       carte au-delà de 30rem et la fait grandir au lieu de laisser l'ellipsis agir. */
+    min-width: 0;
     margin: 1.25rem;
     background: var(--bg-surface);
     padding: 1.25rem;
     border-radius: 1rem;
     border: 1px solid var(--border);
     box-shadow: 0 12px 32px var(--shadow-modal);
-    animation: section-editor-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    animation: section-editor-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes section-editor-fade-in {
+@keyframes section-editor-popup-fade-in {
     from {
         opacity: 0;
     }
@@ -31,7 +36,7 @@ div.section-editor > div {
     }
 }
 
-@keyframes section-editor-pop-in {
+@keyframes section-editor-popup-pop-in {
     from {
         opacity: 0;
         transform: translateY(0.75rem) scale(0.96);
@@ -43,7 +48,7 @@ div.section-editor > div {
 }
 
 /* Animation de sortie (classe ajoutée par le composant pendant la fermeture) */
-@keyframes section-editor-fade-out {
+@keyframes section-editor-popup-fade-out {
     from {
         opacity: 1;
     }
@@ -52,7 +57,7 @@ div.section-editor > div {
     }
 }
 
-@keyframes section-editor-pop-out {
+@keyframes section-editor-popup-pop-out {
     from {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -63,39 +68,64 @@ div.section-editor > div {
     }
 }
 
-div.section-editor.closing {
-    animation: section-editor-fade-out 0.2s ease-in forwards;
+div.section-editor-popup.closing {
+    animation: section-editor-popup-fade-out 0.2s ease-in forwards;
 }
 
-div.section-editor.closing > div {
-    animation: section-editor-pop-out 0.2s ease-in forwards;
+div.section-editor-popup.closing > div {
+    animation: section-editor-popup-pop-out 0.2s ease-in forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    div.section-editor,
-    div.section-editor > div {
+    div.section-editor-popup,
+    div.section-editor-popup > div {
         animation: none;
     }
 }
 
-div.section-editor > div > header {
+/* Indicateur de chargement du bouton « enregistrer » (prend la couleur du texte). */
+div.section-editor-popup span.spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: section-editor-popup-spin 0.6s linear infinite;
+}
+
+@keyframes section-editor-popup-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.section-editor-popup span.spinner {
+        animation-duration: 1.4s;
+    }
+}
+
+div.section-editor-popup > div > header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: 1.25rem;
 }
 
-div.section-editor > div > header > div {
+div.section-editor-popup > div > header > div {
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
 }
 
-div.section-editor > div > header > div > * {
+div.section-editor-popup > div > header > div > * {
     margin: 0;
 }
 
-div.section-editor > div > header > div > h1 {
+div.section-editor-popup > div > header > div > h1 {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 1.0625rem;
@@ -104,7 +134,7 @@ div.section-editor > div > header > div > h1 {
     line-height: normal;
 }
 
-div.section-editor > div > header > div > p {
+div.section-editor-popup > div > header > div > p {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 0.75rem;
@@ -113,7 +143,7 @@ div.section-editor > div > header > div > p {
     line-height: normal;
 }
 
-div.section-editor > div > header > button {
+div.section-editor-popup > div > header > button {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 1.125rem;
@@ -126,20 +156,20 @@ div.section-editor > div > header > button {
     transition: color 0.15s ease, transform 0.1s ease;
 }
 
-div.section-editor > div > header > button:hover {
+div.section-editor-popup > div > header > button:hover {
     cursor: pointer;
     color: var(--text);
 }
 
-div.section-editor > div > header > button:active {
+div.section-editor-popup > div > header > button:active {
     transform: scale(0.85);
 }
 
-div.section-editor > div > main {
+div.section-editor-popup > div > main {
     --row-height: 2.75rem;
 }
 
-div.section-editor > div > main > ol {
+div.section-editor-popup > div > main > ol {
     --visible-rows: 4;
     --row-gap: 0.5rem;
     --shadow-room: 0.5rem;
@@ -156,48 +186,48 @@ div.section-editor > div > main > ol {
     overflow-y: auto;
 }
 
-div.section-editor > div > main > ol:not(:has(> li:nth-child(5))) {
+div.section-editor-popup > div > main > ol:not(:has(> li:nth-child(5))) {
     margin-right: calc(-1 * var(--shadow-room));
 }
 
 @supports not selector(::-webkit-scrollbar) {
-    div.section-editor > div > main > ol {
+    div.section-editor-popup > div > main > ol {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div.section-editor > div > main > ol::-webkit-scrollbar {
+div.section-editor-popup > div > main > ol::-webkit-scrollbar {
     width: 4px;
 }
 
-div.section-editor > div > main > ol::-webkit-scrollbar-track {
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-track {
     background: transparent;
     margin: var(--shadow-room) 0;
 }
 
-div.section-editor > div > main > ol::-webkit-scrollbar-thumb {
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div.section-editor > div > main > ol::-webkit-scrollbar-thumb:hover {
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div.section-editor > div > main > ol::-webkit-scrollbar-button,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:start,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:end,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:vertical:start,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:vertical:end,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:vertical:increment,
-div.section-editor > div > main > ol::-webkit-scrollbar-button:vertical:decrement {
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:start,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:end,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:start,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:end,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:increment,
+div.section-editor-popup > div > main > ol::-webkit-scrollbar-button:vertical:decrement {
     display: none;
     width: 0;
     height: 0;
 }
 
-div.section-editor > div > main > p.empty {
+div.section-editor-popup > div > main > p.empty {
     box-sizing: border-box;
     height: var(--row-height);
     margin: 0;
@@ -211,7 +241,7 @@ div.section-editor > div > main > p.empty {
     font-weight: 400;
 }
 
-div.section-editor > div > main > ol > li {
+div.section-editor-popup > div > main > ol > li {
     box-sizing: border-box;
     height: var(--row-height);
     flex-shrink: 0;
@@ -229,44 +259,44 @@ div.section-editor > div > main > ol > li {
     transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-div.section-editor > div > main > ol > li:hover {
+div.section-editor-popup > div > main > ol > li:hover {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
 /* li en cours de déplacement (drag-and-drop) */
-div.section-editor > div > main > ol > li.dragging {
+div.section-editor-popup > div > main > ol > li.dragging {
     opacity: 0.5;
     border-color: var(--brand-teal);
     cursor: grabbing;
 }
 
 /* Poignée de réorganisation : seule zone qui déclenche le drag */
-div.section-editor > div > main > ol > li .handle {
+div.section-editor-popup > div > main > ol > li .handle {
     cursor: grab;
     user-select: none;
 }
 
-div.section-editor > div > main > ol > li.dragging .handle {
+div.section-editor-popup > div > main > ol > li.dragging .handle {
     cursor: grabbing;
 }
 
-div.section-editor > div > main > ol > li > div {
+div.section-editor-popup > div > main > ol > li > div {
     display: flex;
     align-items: center;
     gap: 0.75rem;
 }
 
-div.section-editor > div > main > ol > li > div:first-child {
+div.section-editor-popup > div > main > ol > li > div:first-child {
     flex: 1;
     min-width: 0;
 }
 
-div.section-editor > div > main > ol > li > div:last-child {
+div.section-editor-popup > div > main > ol > li > div:last-child {
     flex-shrink: 0;
 }
 
-div.section-editor > div > main > ol > li > div > span:first-child {
+div.section-editor-popup > div > main > ol > li > div > span:first-child {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: clamp(1rem, 0.9rem + 0.5vw, 1.125rem);
@@ -276,7 +306,10 @@ div.section-editor > div > main > ol > li > div > span:first-child {
     flex-shrink: 0;
 }
 
-div.section-editor > div > main > ol > li > div > span:last-child {
+div.section-editor-popup > div > main > ol > li > div > span:last-child {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
@@ -290,32 +323,46 @@ div.section-editor > div > main > ol > li > div > span:last-child {
     user-select: none;
 }
 
-div.section-editor > div > main > ol > li > div > svg {
+/* Préfixe (#, ?, ⮡…) : ne rétrécit jamais. */
+div.section-editor-popup > div > main > ol > li > div > span:last-child > span:first-child {
+    flex-shrink: 0;
+}
+
+/* Nom de l'item : tronqué avec « … » quand il dépasse (flex-item → besoin de
+   min-width:0 + ellipsis sur le span lui-même, l'overflow du parent ne suffit pas). */
+div.section-editor-popup > div > main > ol > li > div > span:last-child > span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+div.section-editor-popup > div > main > ol > li > div > svg {
     color: var(--icon-stroke);
     width: clamp(0.875rem, 0.77rem + 0.5vw, 1rem);
     height: clamp(0.875rem, 0.77rem + 0.5vw, 1rem);
     transition: color 0.15s ease-out;
 }
 
-div.section-editor > div > main > ol > li > div > svg:hover {
+div.section-editor-popup > div > main > ol > li > div > svg:hover {
     cursor: pointer;
 }
 
-div.section-editor > div > main > ol > li > div > svg:first-of-type:hover {
+div.section-editor-popup > div > main > ol > li > div > svg:first-of-type:hover {
     color: var(--brand-teal);
 }
 
-div.section-editor > div > main > ol > li > div > svg:last-of-type:hover {
+div.section-editor-popup > div > main > ol > li > div > svg:last-of-type:hover {
     color: var(--danger);
 }
 
-div.section-editor > div > footer {
+div.section-editor-popup > div > footer {
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
-div.section-editor > div > footer > button {
+div.section-editor-popup > div > footer > button {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -335,17 +382,17 @@ div.section-editor > div > footer > button {
     transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
-div.section-editor > div > footer > button:hover {
+div.section-editor-popup > div > footer > button:hover {
     cursor: pointer;
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.section-editor > div > footer > button:active {
+div.section-editor-popup > div > footer > button:active {
     transform: scale(0.98);
 }
 
-div.section-editor > div > footer > button > span {
+div.section-editor-popup > div > footer > button > span {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -353,7 +400,7 @@ div.section-editor > div > footer > button > span {
     font-weight: 500;
 }
 
-div.section-editor .edit-row {
+div.section-editor-popup .edit-row {
     box-sizing: border-box;
     width: 100%;
     height: auto;
@@ -367,11 +414,11 @@ div.section-editor .edit-row {
     background: var(--brand-teal-surface);
 }
 
-div.section-editor .edit-row:hover {
+div.section-editor-popup .edit-row:hover {
     box-shadow: none;
 }
 
-div.section-editor .edit-row > h2 {
+div.section-editor-popup .edit-row > h2 {
     margin: 0;
     color: var(--brand-teal);
     font-family: Inter, sans-serif;
@@ -381,13 +428,13 @@ div.section-editor .edit-row > h2 {
     line-height: normal;
 }
 
-div.section-editor .edit-row > div:first-of-type {
+div.section-editor-popup .edit-row > div:first-of-type {
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
 }
 
-div.section-editor .edit-row > div:first-of-type > div {
+div.section-editor-popup .edit-row > div:first-of-type > div {
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -400,12 +447,12 @@ div.section-editor .edit-row > div:first-of-type > div {
     transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-div.section-editor .edit-row > div:first-of-type > div:focus-within {
+div.section-editor-popup .edit-row > div:first-of-type > div:focus-within {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.section-editor .edit-row > div:first-of-type > div > span {
+div.section-editor-popup .edit-row > div:first-of-type > div > span {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: clamp(0.8125rem, 0.7rem + 0.5vw, 0.9375rem);
@@ -413,9 +460,10 @@ div.section-editor .edit-row > div:first-of-type > div > span {
     user-select: none;
 }
 
-div.section-editor .edit-row > div:first-of-type > div > input {
+div.section-editor-popup .edit-row > div:first-of-type > div > input {
     flex: 1;
     min-width: 0;
+    user-select: text;
     padding: 0;
     border: none;
     background: transparent;
@@ -426,7 +474,7 @@ div.section-editor .edit-row > div:first-of-type > div > input {
     outline: none;
 }
 
-div.section-editor .edit-row > div:first-of-type > p {
+div.section-editor-popup .edit-row > div:first-of-type > p {
     margin: 0;
     color: var(--text-muted);
     font-family: Inter, sans-serif;
@@ -436,23 +484,23 @@ div.section-editor .edit-row > div:first-of-type > p {
     width: 100%;
 }
 
-div.section-editor .edit-row > div:first-of-type > div.invalid,
-div.section-editor .edit-row > div:first-of-type > div.invalid:focus-within {
+div.section-editor-popup .edit-row > div:first-of-type > div.invalid,
+div.section-editor-popup .edit-row > div:first-of-type > div.invalid:focus-within {
     border-color: var(--danger);
     box-shadow: 0 0 4px 3px var(--shadow-danger);
 }
 
-div.section-editor .edit-row > div:first-of-type > p.invalid {
+div.section-editor-popup .edit-row > div:first-of-type > p.invalid {
     color: var(--danger);
 }
 
-div.section-editor .edit-row > div:last-of-type {
+div.section-editor-popup .edit-row > div:last-of-type {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
 }
 
-div.section-editor .edit-row > div:last-of-type > button {
+div.section-editor-popup .edit-row > div:last-of-type > button {
     border-radius: 0.5rem;
     border: 1.5px solid var(--border);
     font-family: Inter, sans-serif;
@@ -462,50 +510,50 @@ div.section-editor .edit-row > div:last-of-type > button {
         transform 0.1s ease;
 }
 
-div.section-editor .edit-row > div:last-of-type > button:hover {
+div.section-editor-popup .edit-row > div:last-of-type > button:hover {
     cursor: pointer;
 }
 
-div.section-editor .edit-row > div:last-of-type > button:active:not(:disabled) {
+div.section-editor-popup .edit-row > div:last-of-type > button:active:not(:disabled) {
     transform: scale(0.96);
 }
 
-div.section-editor .edit-row > div:last-of-type > button:first-child {
+div.section-editor-popup .edit-row > div:last-of-type > button:first-child {
     color: var(--text-muted);
     padding: 0.5rem 0.875rem;
     background: transparent;
     border-color: transparent;
 }
 
-div.section-editor .edit-row > div:last-of-type > button:first-child:hover {
+div.section-editor-popup .edit-row > div:last-of-type > button:first-child:hover {
     color: var(--text);
     background: var(--bg-vote-pill);
 }
 
-div.section-editor .edit-row > div:last-of-type > button:last-child {
+div.section-editor-popup .edit-row > div:last-of-type > button:last-child {
     color: #ffffff;
     padding: 0.5rem 1rem;
     background: var(--brand-teal-gradient);
     border-radius: 0.5rem;
 }
 
-div.section-editor .edit-row > div:last-of-type > button:last-child:hover:not(:disabled) {
+div.section-editor-popup .edit-row > div:last-of-type > button:last-child:hover:not(:disabled) {
     filter: brightness(1.08);
 }
 
-div.section-editor .edit-row > div:last-of-type > button:disabled {
+div.section-editor-popup .edit-row > div:last-of-type > button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
 @media (min-width: 768px) {
-    div.section-editor > div {
+    div.section-editor-popup > div {
         margin: 2.13rem;
         gap: 1rem;
         padding: 1.5rem;
     }
 
-    div.section-editor > div > header > div > h1 {
+    div.section-editor-popup > div > header > div > h1 {
         font-size: 1.125rem;
     }
 }

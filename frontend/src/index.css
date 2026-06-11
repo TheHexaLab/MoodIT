@@ -5,15 +5,19 @@
     --bg-sidebar: #f8f8fb;
     --bg-surface: #ffffff;
     --bg-input: #ffffff;
+    --bg-message-input: #F8F8FB;
+    --bg-send-button: linear-gradient(135deg, #0D9488 14.29%, #2DD4BF 85.71%);
     --bg-user-panel: #eef0f4;
     --bg-vote-pill: #f2f2f5;
     --bg-active-channel: #e9f1fc;
+    --send-button-stroke: #272727;
     --border: #dfdfe7;
     --border-strong: #cdcfd5;
     --text: #161623;
     --text-body: #4d4d61;
     --text-heading-alt: #333347;
     --text-muted: #7d7d94;
+    --text-on-brand: #ffffff;
     --icon-stroke: #7d7d94;
     --brand-blue-alt: #0099cc;
     --brand-cyan: #00c0d2;
@@ -27,6 +31,7 @@
     --accent-amber: #f6c350;
     --scrim: rgba(0, 0, 0, 0.45);
     --brand-teal: #0d9488;
+    --brand-teal-hover: brightness(0.5);
     --brand-teal-surface: rgba(13, 148, 136, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #2dd4bf 0%, #0d9488 83.33%);
     --shadow-hover: rgba(10, 92, 192, 0.22);
@@ -46,6 +51,24 @@
     --login-button-shadow: rgba(10, 92, 192, 0.30);
     --text-or-divider: #9999AD;
     --button-light-dark: rgba(0, 0, 0, 0.06);
+    /* Palette d'avatars : couleurs fixes (identiques en clair et en sombre). */
+    --avatar-teal-strong: #0d9488;
+    --avatar-teal: #14b8a6;
+    --avatar-teal-light: #2dd4bf;
+    --avatar-teal-deep: #0f766e;
+    --avatar-grey: #7d7d94;
+    /* Coloration syntaxique : palette Catppuccin Latte (theme clair). */
+    --syntax-bg: #eff1f5;
+    --syntax-fg: #4c4f69;
+    --syntax-comment: #8c8fa1;
+    --syntax-punctuation: #7c7f93;
+    --syntax-keyword: #8839ef;
+    --syntax-class: #df8e1d;
+    --syntax-string: #40a02b;
+    --syntax-number: #fe640b;
+    --syntax-function: #1e66f5;
+    --syntax-operator: #04a5e5;
+    --syntax-variable: #d20f39;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -55,17 +78,22 @@
         --bg-sidebar: #1c1f28;
         --bg-surface: #1c1f28;
         --bg-input: #262b36;
+        --bg-message-input: #262B36;
+        --bg-send-button: linear-gradient(135deg, #14B8A6 14.29%, #5EEAD4 85.71%);
         --bg-user-panel: #16181f;
         --bg-vote-pill: #262b36;
         --bg-active-channel: #243049;
+        --send-button-stroke: #FFFFFF;
         --border: #2e3340;
         --border-strong: #3a4050;
         --text: #ececf1;
         --text-body: #b4b4c6;
         --text-heading-alt: #c4c4d2;
         --text-muted: #9a9ab2;
+        --text-on-brand: #ffffff;
         --icon-stroke: #a6a6bc;
         --brand-teal: #14b8a6;
+        --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
         --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
         --bg-right-login-page: #14161D;
@@ -74,6 +102,18 @@
         --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
         --text-or-divider: #A6A6BC;
         --button-light-dark: rgba(255, 255, 255, 0.12);
+        /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
+        --syntax-bg: #1e1e2e;
+        --syntax-fg: #cdd6f4;
+        --syntax-comment: #6c7086;
+        --syntax-punctuation: #9399b2;
+        --syntax-keyword: #cba6f7;
+        --syntax-class: #f9e2af;
+        --syntax-string: #a6e3a1;
+        --syntax-number: #fab387;
+        --syntax-function: #89b4fa;
+        --syntax-operator: #89dceb;
+        --syntax-variable: #f38ba8;
     }
 }
 
@@ -83,17 +123,22 @@
     --bg-sidebar: #1c1f28;
     --bg-surface: #1c1f28;
     --bg-input: #262b36;
+    --bg-message-input: #262B36;
+    --bg-send-button: linear-gradient(135deg, #14B8A6 14.29%, #5EEAD4 85.71%);
     --bg-user-panel: #16181f;
     --bg-vote-pill: #262b36;
     --bg-active-channel: #243049;
+    --send-button-stroke: #FFFFFF;
     --border: #2e3340;
     --border-strong: #3a4050;
     --text: #ececf1;
     --text-body: #b4b4c6;
     --text-heading-alt: #c4c4d2;
     --text-muted: #9a9ab2;
+    --text-on-brand: #ffffff;
     --icon-stroke: #a6a6bc;
     --brand-teal: #14b8a6;
+    --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
     --bg-right-login-page: #14161D;
@@ -102,6 +147,18 @@
     --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
     --text-or-divider: #A6A6BC;
     --button-light-dark: rgba(255, 255, 255, 0.12);
+    /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
+    --syntax-bg: #1e1e2e;
+    --syntax-fg: #cdd6f4;
+    --syntax-comment: #6c7086;
+    --syntax-punctuation: #9399b2;
+    --syntax-keyword: #cba6f7;
+    --syntax-class: #f9e2af;
+    --syntax-string: #a6e3a1;
+    --syntax-number: #fab387;
+    --syntax-function: #89b4fa;
+    --syntax-operator: #89dceb;
+    --syntax-variable: #f38ba8;
 }
 
 body {

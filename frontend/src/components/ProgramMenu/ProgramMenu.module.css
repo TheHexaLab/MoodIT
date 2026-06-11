@@ -1,0 +1,373 @@
+.rail {
+    --rail-width: 4.5rem;
+    --slot-size: 3rem;
+    --slot-radius: 1rem;
+    --list-gap: 0.75rem;
+    --rail-padding-y: 0.75rem;
+    --divider-width: 2rem;
+    --divider-height: 0.125rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: var(--rail-width);
+    min-width: var(--rail-width);
+    height: 100%;
+    background: var(--bg-rail);
+    padding: var(--rail-padding-y) 0;
+    box-sizing: border-box;
+    gap: var(--list-gap);
+}
+
+.appIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    border-radius: var(--slot-radius);
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.appIcon svg {
+    display: block;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    border-radius: var(--slot-radius);
+}
+
+/* État de chargement / d'erreur de la liste (occupe un « slot » du rail). */
+.railSpinner {
+    width: 1.5rem;
+    height: 1.5rem;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--brand-teal);
+    animation: program-rail-spin 0.7s linear infinite;
+}
+
+@keyframes program-rail-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.railRetry {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    flex-shrink: 0;
+    padding: 0;
+    border: 1px solid var(--danger);
+    border-radius: var(--slot-radius);
+    background: transparent;
+    color: var(--danger);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.railRetry svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.railRetry:hover {
+    background: var(--shadow-danger);
+}
+
+.railRetry:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .railSpinner {
+        animation-duration: 1.6s;
+    }
+}
+
+.divider {
+    display: block;
+    width: var(--divider-width);
+    height: var(--divider-height);
+    background: var(--border-strong);
+    flex-shrink: 0;
+}
+
+.programList {
+    list-style: none;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--list-gap);
+    width: 100%;
+    max-height: calc(100% - (var(--slot-size) * 2.2));
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1px 0;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    .programList {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+.programList::-webkit-scrollbar {
+    width: 4px;
+}
+
+.programList::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.programList::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+.programItem {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    cursor: pointer;
+}
+
+/* Pastille laterale unique pour les deux etats (survol et selectionne).
+   Un seul element anime en scaleY → la transition survol → selectionne est fluide.
+   Hauteur de reference = etat selectionne (2.5rem) ; le survol n'en montre qu'une partie. */
+.programItem::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 0.25rem;
+    height: 2rem;
+    border-radius: 0 0.1875rem 0.1875rem 0;
+    background: var(--brand-teal);
+    transform: translateY(-50%) scaleY(0);
+    transform-origin: center;
+    opacity: 0;
+    transition: transform 0.18s ease, opacity 0.15s ease;
+    pointer-events: none;
+}
+
+/* Survol : barre un peu moins haute que l'etat selectionne. */
+.programItem:hover::before {
+    transform: translateY(-50%) scaleY(0.5);
+    opacity: 1;
+}
+
+/* Selectionne : pleine hauteur. Classe portee par le <li> lui-meme (et non via
+   :has sur un enfant) pour que la transition se joue de maniere fiable a la
+   selection ET a la deselection. Double classe → meme specificite que :hover ;
+   placee apres → l'emporte quand on survole le programme actif. */
+.programItem.programItemActive::before {
+    transform: translateY(-50%) scaleY(1);
+    opacity: 1;
+}
+
+.programBtn {
+    /* Fallback si le programme n'a pas de couleur definie en BD. */
+    --program-color: var(--bg-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    border-radius: 50%;
+    border: 2px solid var(--bg-rail);
+    padding: 0;
+    cursor: pointer;
+    background: var(--program-color);
+    color: var(--text-on-brand);
+    font-size: clamp(0.625rem, 0.56rem + 0.25vw, 0.75rem);
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: 0.04em;
+    transition: border-radius 0.18s ease, box-shadow 0.15s ease;
+    outline: none;
+    flex-shrink: 0;
+    overflow: hidden;
+    line-height: 0;
+}
+
+.programBtn:focus-visible {
+    box-shadow: 0 0 0 2px var(--brand-teal);
+}
+
+.programItem:hover .programBtn {
+    border-radius: var(--slot-radius);
+}
+
+/* Etat actif : la couleur du programme est conservee, l'etat est signale
+   par la forme arrondie et la pastille laterale. */
+.programBtnActive,
+.programBtnActive:hover {
+    border-radius: var(--slot-radius);
+}
+
+.programInitials {
+    line-height: 1;
+    user-select: none;
+}
+
+.addBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    border-radius: 50%;
+    border: 2px solid var(--bg-rail);
+    background: var(--bg-surface);
+    color: var(--brand-teal);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, border-radius 0.18s ease;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.addBtn:hover {
+    border-radius: calc(var(--slot-radius) + 0.125rem);
+}
+
+.addBtn:focus-visible {
+    box-shadow: 0 0 0 2px var(--brand-teal);
+}
+
+.addBtn > svg {
+    width: 0.75rem;
+    height: 0.75rem;
+}
+
+@media (max-height: 720px) {
+    .rail {
+        --rail-padding-y: 0.75rem;
+    }
+}
+
+@media (max-height: 560px) {
+    .programList {
+        max-height: calc(100% - (var(--slot-size) * 2));
+    }
+}
+
+@media (min-width: 768px) {
+    .rail {
+        --rail-padding-y: 0.75rem;
+        --list-gap: 0.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .programBtn,
+    .addBtn,
+    .programItem::before {
+        transition: none;
+    }
+}
+
+
+/* ── Menu contextuel (clic droit sur un programme) ──────────── */
+.contextMenu {
+    position: fixed;
+    z-index: 200;
+    min-width: 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.375rem;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: program-context-pop-in 0.12s ease-out;
+}
+
+@keyframes program-context-pop-in {
+    from {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.contextItem {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.625rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-body);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.contextIcon {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: color 0.15s ease;
+}
+
+.contextItem:hover {
+    background: var(--bg-active-channel);
+    color: var(--text);
+}
+
+.contextItem:hover .contextIcon {
+    color: var(--brand-teal);
+}
+
+.contextItem:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: -2px;
+}
+
+.contextDivider {
+    height: 1px;
+    margin: 0.25rem 0.25rem;
+    background: var(--border);
+}
+
+.contextItemDanger {
+    color: var(--danger);
+}
+
+.contextItemDanger .contextIcon {
+    color: var(--danger);
+}
+
+.contextItemDanger:hover {
+    background: var(--shadow-danger);
+    color: var(--danger);
+}
+
+.contextItemDanger:hover .contextIcon {
+    color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .contextMenu {
+        animation: none;
+    }
+}

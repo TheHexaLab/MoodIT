@@ -1,0 +1,11 @@
+.mainPanel {
+    height: 100vh;
+    flex-grow: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    background: var(--bg-main);
+    overflow-y: auto;
+}
