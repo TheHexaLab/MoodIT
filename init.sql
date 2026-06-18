@@ -282,12 +282,6 @@ CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- quest
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Establishment
--- ------------------------------------------------------------
-INSERT INTO Establishment (name, domain_email) VALUES
-  ('Université de Sherbrooke', 'usherbrooke.ca');
-
-  -- ------------------------------------------------------------
 -- Program  (programmes de génie offerts à l'UdeS)
 -- ------------------------------------------------------------
 INSERT INTO Program (name, code, cohort, color, establishment_id) VALUES
