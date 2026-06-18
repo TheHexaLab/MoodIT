@@ -34,11 +34,6 @@ public class AuthController {
     return ResponseEntity.ok(authService.validate(token));
   }
 
-  @GetMapping("/verify/{username}")
-  public ResponseEntity<Map<String, String>> verifyDev(@PathVariable String username) {
-    return ResponseEntity.ok(authService.verifyDev(username));
-  }
-
   @PostMapping("/verify-email")
   public ResponseEntity<Map<String, String>> verifyEmail(@RequestBody Map<String, String> body) {
     return ResponseEntity.ok(authService.verifyEmail(body.get("email"), body.get("code")));
@@ -47,5 +42,10 @@ public class AuthController {
   @PostMapping("/verify-2fa")
   public ResponseEntity<AuthResponse> verify2FA(@RequestBody Map<String, String> body) {
     return ResponseEntity.ok(authService.verify2FA(body.get("email"), body.get("code")));
+  }
+
+  @PostMapping("/resend-code")
+  public ResponseEntity<Map<String, String>> resendCode(@RequestBody Map<String, String> body) {
+    return ResponseEntity.ok(authService.resendCode(body.get("email"), body.get("mode")));
   }
 }

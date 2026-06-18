@@ -1,4 +1,5 @@
-// Ce fichier permet de définir la table user en BD comme un objet en Java avec Spring Boot
+// Inscription en attente de vérification d'email : tant que le code n'est pas
+// confirmé, les données restent ici et n'entrent jamais dans la table user_.
 
 package com.moodit.auth_service.model;
 
@@ -13,14 +14,14 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "user_")
-public class User {
+@Table(name = "pending_registration")
+public class PendingRegistration {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Integer id;
 
-  @Column(nullable = false, unique = true, length = 64)
+  @Column(nullable = false, length = 64)
   private String username;
 
   @Column(name = "first_name", nullable = false, length = 128)
@@ -32,8 +33,8 @@ public class User {
   @Column(nullable = false, unique = true, length = 256)
   private String email;
 
-  @Column(name = "verified_email", nullable = false)
-  private boolean verifiedEmail = false;
+  @Column(name = "password_hash", nullable = false, length = 256)
+  private String passwordHash;
 
   @Column(name = "verification_code", length = 6)
   private String verificationCode;
@@ -41,20 +42,14 @@ public class User {
   @Column(name = "verification_code_expires_at")
   private LocalDateTime verificationCodeExpiresAt;
 
+  @Column(name = "resend_count", nullable = false)
+  private int resendCount = 0;
+
   @Column(name = "verification_attempts", nullable = false)
   private int verificationAttempts = 0;
 
-  @Column(name = "password_hash", nullable = false, length = 256)
-  private String passwordHash;
-
-  @Column(name = "active_token_hash", length = 256)
-  private String activeTokenHash;
-
-  @Column(name = "avatar_color", nullable = false, length = 9)
-  private String avatarColor = "#0a5cc0";
-
-  @Column(columnDefinition = "TEXT")
-  private String settings;
+  @Column(name = "last_code_sent_at")
+  private LocalDateTime lastCodeSentAt;
 
   @Column(name = "created_at", nullable = false, updatable = false)
   private LocalDateTime createdAt = LocalDateTime.now();

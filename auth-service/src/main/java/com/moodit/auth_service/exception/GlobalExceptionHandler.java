@@ -39,6 +39,17 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", ex.getMessage()));
   }
 
+  @ExceptionHandler(TooManyRequestsException.class)
+  public ResponseEntity<Map<String, String>> handleTooManyRequests(TooManyRequestsException ex) {
+    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        .body(Map.of("message", ex.getMessage()));
+  }
+
+  @ExceptionHandler(DomainNotAllowedException.class)
+  public ResponseEntity<Map<String, String>> handleDomainNotAllowed(DomainNotAllowedException ex) {
+    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", ex.getMessage()));
+  }
+
   @ExceptionHandler(MethodArgumentNotValidException.class)
   public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
     String message =

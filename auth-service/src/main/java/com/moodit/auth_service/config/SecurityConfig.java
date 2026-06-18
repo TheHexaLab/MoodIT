@@ -33,6 +33,7 @@ public class SecurityConfig {
                         "/auth/verify/**",
                         "/auth/verify-email",
                         "/auth/verify-2fa",
+                        "/auth/resend-code",
                         "/swagger-ui/**",
                         "/swagger-ui/index.html",
                         "/swagger-ui.html",
