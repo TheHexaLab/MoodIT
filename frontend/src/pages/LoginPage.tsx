@@ -17,7 +17,6 @@ type FieldErrors = { email?: string; password?: string };
 export default function LoginPage() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const isDark = theme === 'dark';
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -75,17 +74,13 @@ export default function LoginPage() {
           </div>
           <h1 className="app-name">MoodIT</h1>
           <p className="app-tagline">
-            Parce que Moodle,
-            <br />
-            c'est pas assez chaotique.
+            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp; </span>
+            <span className={'app-tagline-text'}>c'est pas assez chaotique.</span>
           </p>
         </div>
       </aside>
 
       <main className="main">
-        <button type="button" className="light-dark-btn" onClick={toggleTheme}>
-          <Lightanddark isDark={isDark} />
-        </button>
         <div className="form-card">
           <h2 className="form-title">Bon retour 👋</h2>
           <p className="form-subtitle">Connectez-vous à votre espace MoodIT</p>
@@ -154,6 +149,9 @@ export default function LoginPage() {
           © 2026 MoodIT · <a href="#">Confidentialité</a> · <a href="#">Conditions d'utilisation</a>
         </footer>
       </main>
+      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+        <Lightanddark isDark={theme === 'dark'} />
+      </button>
     </div>
   );
 }

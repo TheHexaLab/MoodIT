@@ -89,11 +89,16 @@ input[type="password"]::-ms-reveal {
 }
 
 .app-tagline {
+    display: flex;
+    flex-direction: column;
+}
+
+.app-tagline-text {
     margin: 0;
     color: var(--slogan-text);
     text-align: center;
     font-family: Inter, sans-serif;
-    font-size: 75%;
+    font-size: 0.75rem;
     font-style: normal;
     font-weight: 300;
     line-height: 162.5%;
@@ -122,6 +127,7 @@ input[type="password"]::-ms-reveal {
     display: flex;
     justify-content: center;
     align-items: center;
+    color: var(--button-light-dark-ordinateur);
 }
 
 .form-card {
@@ -383,4 +389,102 @@ input[type="password"]::-ms-reveal {
 
 .footer a:hover {
     color: var(--text-body);
+}
+
+@media (max-width: 640px) {
+    .page {
+        flex-direction: column;
+    }
+
+    .aside {
+        width: 100%;
+        min-height: 14rem;
+        max-height: 16.25rem;
+    }
+
+    .logo-wrapper img {
+        width: 4.75rem;
+        height: auto;
+        border-radius: 1rem;
+        padding-bottom: 0;
+    }
+
+    .app-name {
+        font-size: 1.75rem;
+        margin: 0 0 0 0;
+    }
+
+    .app-tagline {
+        font-size: 0;
+        flex-direction: row;
+        line-height: 0;
+    }
+
+    .bubble-1 {
+        top: -4.38rem;
+        right: -2.5rem;
+        background: var(--bubble-mobile);
+        width: 11.25rem;
+    }
+
+    .bubble-2 {
+        left: -3.12rem;
+        bottom: -3.75rem;
+        background: var(--bubble-spec-mobile);
+        width: 8.75rem;
+    }
+
+    .bubble-3 {
+        bottom: -0.6rem;
+        right: -0.6rem;
+        background: var(--bubble-spec-mobile);
+        width: 4.375rem;
+    }
+
+    .light-dark-btn {
+        top: 1rem;
+        right: 1rem;
+        background: var(--bubble);
+        color: var(--button-light-dark-mobile);
+    }
+
+    .main {
+        padding: 1.5rem 1rem 4rem;
+        justify-content: flex-start;
+        min-height: 0;
+    }
+
+    .form-card {
+        position: absolute;
+        width: 87%;
+        max-height: unset;
+        border-radius: 1.25rem;
+        top: -2.5rem;
+        padding: 3.8% 7% 1.5rem 7%;
+    }
+
+    .form-subtitle {
+        margin: 0 0 2.5%;
+    }
+
+    .form-title {
+        margin: 0 0 1.9%;
+
+    }
+
+
+    .label {
+        margin: 3.85% 0 1.26% 0;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+        width: 40%;
+    }
+
+    .register-row {
+        margin: 3.85% 0 0;
+    }
+
+
 }

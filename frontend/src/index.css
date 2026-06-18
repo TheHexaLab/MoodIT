@@ -39,7 +39,9 @@
     --shadow-modal: rgba(0, 0, 0, 0.25);
     --login-left-gradient: linear-gradient(0deg, #0D9488 0%, #14B8A6 60%, #34D399 100%);
     --bubble: rgba(255, 255, 255, 0.06);
+    --bubble-mobile: rgba(255, 255, 255, 0.12);
     --bubble-spec: rgba(255, 255, 255, 0.08);
+    --bubble-spec-mobile: rgba(255, 255, 255, 0.10);
     --text-app-name: #fff;
     --slogan-text: rgba(255, 255, 255, 0.82);
     --bg-right-login-page: #F8F8FB;
@@ -51,6 +53,8 @@
     --login-button-shadow: rgba(10, 92, 192, 0.30);
     --text-or-divider: #9999AD;
     --button-light-dark: rgba(0, 0, 0, 0.06);
+    --button-light-dark-ordinateur: #454559;
+    --button-light-dark-mobile: #ffffff;
     /* Palette d'avatars : couleurs fixes (identiques en clair et en sombre). */
     --avatar-teal-strong: #0d9488;
     --avatar-teal: #14b8a6;
@@ -102,6 +106,8 @@
         --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
         --text-or-divider: #A6A6BC;
         --button-light-dark: rgba(255, 255, 255, 0.12);
+        --button-light-dark-ordinateur: #F6C350;
+        --button-light-dark-mobile: #F6C350;
         /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
         --syntax-bg: #1e1e2e;
         --syntax-fg: #cdd6f4;
@@ -147,6 +153,8 @@
     --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
     --text-or-divider: #A6A6BC;
     --button-light-dark: rgba(255, 255, 255, 0.12);
+    --button-light-dark-ordinateur: #F6C350;
+    --button-light-dark-mobile: #F6C350;
     /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
     --syntax-bg: #1e1e2e;
     --syntax-fg: #cdd6f4;
