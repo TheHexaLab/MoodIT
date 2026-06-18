@@ -14,8 +14,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.time.Duration;
 
-// Rate limiting par IP sur les routes d'authentification sensibles.
-@Component
+// verrou de connexion PAR COMPTE dans auth-service (AuthService.login).
+
 public class RateLimitFilter extends OncePerRequestFilter {
 
   // Routes qui déclenchent l'envoi de courriels : quota strict.

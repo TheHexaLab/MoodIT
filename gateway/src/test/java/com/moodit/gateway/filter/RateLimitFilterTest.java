@@ -1,5 +1,10 @@
 package com.moodit.gateway.filter;
 
+// DÉSACTIVÉ : le RateLimitFilter (rate limiting par IP) est désactivé — la spécification
+// du projet interdit de conserver l'IP en mémoire. Voir GatewayConfig. La protection est
+// désormais un verrou de connexion PAR COMPTE dans auth-service (AuthService.login).
+// Tests conservés en commentaire pour référence.
+/*
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.servlet.ServletException;
@@ -80,3 +85,4 @@ class RateLimitFilterTest {
     assertThat(blocked.getHeader("Retry-After")).isEqualTo("60");
   }
 }
+*/

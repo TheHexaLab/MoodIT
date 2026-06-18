@@ -14,10 +14,10 @@ Documentation technique du système d'authentification de MoodIT : comment il fo
                          ┌─────────────────────────────────────────────┐
    Navigateur            │                  GATEWAY (8080)              │
    (frontend 5173)       │                                             │
-        │                │  RateLimitFilter ──► JwtAuthFilter           │
-        │  HTTP          │   (quotas/IP)         (valide le token)      │
-        └───────────────►│        │                   │                │
-                         │        ▼                   ▼                │
+        │                │            JwtAuthFilter                     │
+        │  HTTP          │            (valide le token)                 │
+        └───────────────►│                  │                          │
+                         │                  ▼                          │
                          │  routes publiques     /auth/validate ───────┼──► AUTH-SERVICE (8083)
                          │  (login, register…)                         │        │
                          └─────────────────────────────────────────────┘        │
@@ -27,8 +27,8 @@ Documentation technique du système d'authentification de MoodIT : comment il fo
 
 - **Le frontend ne parle qu'au Gateway** (port 8080). Le Gateway route ensuite vers les
   microservices internes (`/auth/**` → auth-service, `/api/**` → core-service, etc.).
-- **Tout passe par deux filtres** au Gateway : d'abord le **rate limiting par IP**, puis la
-  **validation du token JWT**.
+- **Le Gateway valide le token JWT** (`JwtAuthFilter`) avant de router vers les services.
+  *(Il n'y a pas de rate limiting par IP — voir §3.)*
 - **L'auth-service** porte toute la logique métier (inscription, vérification, login, 2FA) et
   est le seul à accéder à la table des utilisateurs.
 
@@ -63,12 +63,19 @@ envoyé par courriel ; le token n'est émis qu'après `verify-2fa`.
 
 ```
 POST /auth/login  { email, password }
-   ├─ user introuvable / mauvais mdp ─► 401 InvalidCredentials
+   ├─ compte bloqué (≥ 5 mdp erronés) ─► 429 TooManyRequests (verrou 15 min)
+   ├─ user introuvable / mauvais mdp   ─► 401 InvalidCredentials (incrémente le compteur)
    └─ OK ─► envoie un code 2FA, renvoie AuthResponse avec token = null
 
 POST /auth/verify-2fa  { email, code }
+   ├─ ≥ 5 codes erronés ─► 429 TooManyRequests (verrou 15 min)
    └─ code correct ─► génère le JWT, stocke son hash (active_token_hash), renvoie le token
 ```
+
+> **Verrous par compte (anti brute-force, sans IP).** Après **5 mots de passe** erronés, le compte
+> est bloqué **15 min** (`failed_login_attempts` / `login_locked_until`). De même, après **5 codes
+> 2FA** erronés (`verification_attempts` / `verification_locked_until`). Le comptage est **par
+> compte** : il résiste au changement d'IP et ne nécessite pas de conserver l'IP.
 
 ### 2.3 Renvoi de code
 `POST /auth/resend-code { email, mode }` régénère et renvoie un code, pour l'inscription
@@ -76,13 +83,19 @@ POST /auth/verify-2fa  { email, code }
 
 ---
 
-## 3. Mécanismes anti-flooding (3 couches)
+## 3. Mécanismes anti-flooding / anti brute-force
 
 | Couche | Où | Protège contre |
 |---|---|---|
 | **Table de staging** `pending_registration` | auth-service | Pollution de `user_` par des comptes/usernames bidons |
 | **Throttle par email** (cooldown 60 s + plafond 5 renvois) | auth-service (`AuthService`) | Bombardement de courriels vers **une adresse ciblée** |
-| **Rate limit par IP** (5/min sur register & verify, 10/min sur login) | gateway (`RateLimitFilter`) | Un attaquant qui balaie **plein d'adresses** depuis une origine |
+| **Verrou de connexion par compte** (5 mdp erronés → blocage 15 min) | auth-service (`AuthService`) | Brute-force du **mot de passe** d'un compte |
+| **Verrou 2FA par compte** (5 codes erronés → blocage 15 min) | auth-service (`AuthService`) | Brute-force du **code à 6 chiffres** |
+
+> **Pas de rate limit par IP.** La spécification du projet interdit de conserver l'IP en mémoire :
+> le filtre `RateLimitFilter` (gateway) est donc **désactivé** (commenté). Les verrous ci-dessus
+> comptent **par compte**, ce qui résiste au changement d'IP — au prix de ne pas voir un attaquant
+> qui balaie *plein* de comptes (spraying) ; un CAPTCHA serait le complément pour ce cas.
 
 Couches complémentaires : un `CleanupJob` purge les inscriptions en attente expirées, et un
 contrôle de domaine restreint l'inscription aux établissements autorisés.
@@ -123,7 +136,7 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 #### Services (`service/`) — logique métier
 | Classe | Rôle |
 |---|---|
-| `AuthService` | **Cœur du système.** register, login, verifyEmail, verify2FA, validate, resendCode + helpers (`generateCode`, `extractDomain`, `normalizeEmail`). Applique cooldown, plafonds, normalisation d'email, contrôle de domaine. |
+| `AuthService` | **Cœur du système.** register, login, verifyEmail, verify2FA, validate, resendCode + helpers (`generateCode`, `extractDomain`, `normalizeEmail`). Applique cooldown, plafonds, **verrous par compte** (login + 2FA), normalisation d'email, contrôle de domaine. |
 | `JwtService` | Génère/valide les JWT (signature HS256), extrait l'email, calcule le hash du token actif. |
 | `EmailService` | Envoie les courriels (code de vérification, code 2FA) via SMTP. |
 | `CleanupJob` | Tâche planifiée (`@Scheduled`, toutes les heures) qui supprime les `pending_registration` expirés. |
@@ -150,8 +163,8 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 | Classe | Rôle |
 |---|---|
 | `GatewayApplication` | Point d'entrée Spring Boot + endpoint de test `/gateway/test`. |
-| `GatewayConfig` | Enregistre les filtres servlet dans l'ordre : `RateLimitFilter` (order 0) **avant** `JwtAuthFilter` (order 1). |
-| `RateLimitFilter` | Rate limiting par IP (token-bucket Bucket4j + cache Caffeine). Quotas différenciés par groupe de routes. Renvoie 429 + `Retry-After`. |
+| `GatewayConfig` | Enregistre les filtres servlet. Seul `JwtAuthFilter` est actif (l'enregistrement de `RateLimitFilter` est commenté). |
+| `RateLimitFilter` | **Désactivé (commenté).** Faisait du rate limiting par IP (Bucket4j + Caffeine) ; retiré car la spécification interdit de conserver l'IP en mémoire. Remplacé par les verrous par compte (auth-service). |
 | `JwtAuthFilter` | Laisse passer les routes publiques ; sinon valide le JWT localement puis délègue à `/auth/validate` ; injecte `X-User-Email` pour les services en aval ; fail-closed (503) si l'auth-service est injoignable. |
 | `WrappedRequest` | Wrapper de requête qui ajoute le header `X-User-Email` (l'email extrait du token). |
 | `SecurityConfig` | Spring Security du Gateway (stateless, CSRF off). |
@@ -165,9 +178,10 @@ Le schéma est géré par **`init.sql`** (monté dans Postgres), **pas par Hiber
 
 - **`user_`** : comptes confirmés. Une ligne n'y existe qu'après vérification de l'email
   (pas de flag `verified_email` : la présence dans cette table = email vérifié). Colonnes
-  notables : `email` (unique), `password_hash`, `verification_code` /
-  `verification_code_expires_at` / `verification_attempts` / `last_code_sent_at`
-  (pour la 2FA), `active_token_hash`.
+  notables : `email` (unique), `password_hash`, `active_token_hash` ;
+  **2FA** : `verification_code` / `verification_code_expires_at` / `verification_attempts` /
+  `last_code_sent_at` / `verification_locked_until` ;
+  **verrou de connexion** : `failed_login_attempts` / `login_locked_until`.
 - **`pending_registration`** : inscriptions en attente. Mêmes infos de base + `resend_count`,
   `verification_attempts`, `last_code_sent_at` (anti-bombing).
 - **`establishment`** : `domain_email` (unique) = domaines autorisés à s'inscrire.
@@ -210,7 +224,7 @@ cd frontend;     npm.cmd run lint;   cd ..
 ### `auth-service`
 | Classe | Type | Ce qu'elle vérifie |
 |---|---|---|
-| `AuthServiceTest` | Unitaire (Mockito) | register (normalisation casse, email/username déjà pris, domaine refusé, cooldown, plafond renvoi), login (introuvable, non vérifié, mauvais mdp, succès+2FA), verifyEmail (succès→migration vers `user_`, mauvais code+compteur, plafond→invalidation du code, expiration), verify2FA (succès+token, mauvais code). |
+| `AuthServiceTest` | Unitaire (Mockito) | register (normalisation casse, email/username déjà pris, domaine refusé, cooldown, plafond renvoi), login (introuvable, mauvais mdp, succès+2FA, **verrou après 5 mdp erronés**, **compte bloqué → 429 sans tester le mdp**), verifyEmail (succès→migration vers `user_`, mauvais code+compteur, plafond, expiration), verify2FA (succès+token, mauvais code, **plafond→verrou 15 min**). |
 | `JwtServiceTest` | Unitaire | round-trip génération/validation, rejet d'un token invalide, `getHashCount` ∈ [2,5], hash déterministe. |
 | `AuthControllerTest` | Intégration web-slice (`@WebMvcTest`) | mapping exception → statut HTTP : 200, 400 (validation), 409, 403, 401, 429. |
 | `AuthServiceApplicationTests` | Contexte | `contextLoads` (démarrage du contexte Spring). **Nécessite un Postgres en marche.** |
@@ -218,7 +232,7 @@ cd frontend;     npm.cmd run lint;   cd ..
 ### `gateway`
 | Classe | Type | Ce qu'elle vérifie |
 |---|---|---|
-| `RateLimitFilterTest` | Unitaire (servlet mock) | route non limitée passe toujours ; register/verify/resend bloqués après 5 ; login après 10 ; comptage par IP indépendant ; en-tête `Retry-After` sur le 429. |
+| ~~`RateLimitFilterTest`~~ | — | **Désactivé (commenté)** en même temps que `RateLimitFilter` (plus de rate limit par IP). |
 | `JwtAuthFilterTest` | Unitaire (`RestClient` mocké) | route publique sans token ; token absent → 401 ; signature invalide → 401 ; token valide+actif → passe et injecte `X-User-Email` ; token révoqué → 401 ; auth-service injoignable → 503. |
 | `GatewayApplicationTests` | Contexte | `contextLoads`. |
 

@@ -47,6 +47,12 @@ public class User {
   @Column(name = "verification_locked_until")
   private LocalDateTime verificationLockedUntil;
 
+  @Column(name = "failed_login_attempts", nullable = false)
+  private int failedLoginAttempts = 0;
+
+  @Column(name = "login_locked_until")
+  private LocalDateTime loginLockedUntil;
+
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 

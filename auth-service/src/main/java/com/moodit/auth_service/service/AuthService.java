@@ -46,6 +46,9 @@ public class AuthService {
   private static final int MAX_RESEND = 5;
   // Nombre max de codes erronés avant d'invalider le code (anti brute-force des 6 chiffres).
   private static final int MAX_VERIFY_ATTEMPTS = 5;
+  // Nombre max de mots de passe erronés au login avant de bloquer le compte (anti brute-force
+  // du mot de passe, PAR COMPTE — remplace le rate-limit par IP, l'IP n'étant pas conservée).
+  private static final int MAX_LOGIN_ATTEMPTS = 5;
   // Durée du blocage après le plafond de codes erronés : aucun nouveau code n'est émis pendant
   // ce délai, même en se reconnectant (sinon le plafond serait trivialement contournable).
   private static final int LOCKOUT_MINUTES = 15;
@@ -131,16 +134,32 @@ public class AuthService {
     // suffit donc à prouver que l'email est confirmé (pas de flag dédié).
     User user =
         userRepository.findByEmail(email).orElseThrow(() -> new InvalidCredentialsException());
-    // Vérifier le mot de passe
+
+    LocalDateTime now = LocalDateTime.now();
+
+    // Verrou de connexion : après trop de mots de passe erronés, le compte est bloqué un
+    // moment. Le comptage est PAR COMPTE (l'IP n'est jamais lue ni mise en mémoire).
+    if (user.getLoginLockedUntil() != null && user.getLoginLockedUntil().isAfter(now)) {
+      throw new TooManyRequestsException(
+          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+    }
+
+    // Vérifier le mot de passe ; chaque échec est compté pour déclencher le verrou.
     if (!passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
+      user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
+      if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
+        user.setLoginLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
+      }
+      userRepository.save(user);
       throw new InvalidCredentialsException();
     }
 
-    // Mot de passe valide : on n'émet pas encore de token, la 2FA doit être
-    // validée d'abord. Le token est généré dans verify2FA().
+    // Mot de passe valide : on réinitialise le compteur d'échecs. Le token n'est pas émis
+    // tout de suite, la 2FA doit d'abord être validée (token généré dans verify2FA()).
+    user.setFailedLoginAttempts(0);
+    user.setLoginLockedUntil(null);
 
     // Générer et envoyer le code 2FA
-    LocalDateTime now = LocalDateTime.now();
     // Blocage actif (trop de codes 2FA erronés) : on refuse d'émettre un nouveau code, sinon
     // le plafond de tentatives serait contournable en se reconnectant.
     if (user.getVerificationLockedUntil() != null

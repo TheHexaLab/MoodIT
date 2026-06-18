@@ -212,6 +212,37 @@ class AuthServiceTest {
     verify(userRepository).save(any(User.class));
   }
 
+  @Test
+  void login_fifthWrongPassword_locksAccount() {
+    LoginRequest req = new LoginRequest();
+    req.setEmail("karine.roussel@usherbrooke.ca");
+    req.setPassword("wrong");
+    User u = verifiedUser();
+    u.setFailedLoginAttempts(4); // la prochaine tentative ratée atteint le plafond
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.matches("wrong" + PEPPER, "storedHash")).thenReturn(false);
+
+    assertThatThrownBy(() -> authService.login(req))
+        .isInstanceOf(InvalidCredentialsException.class);
+    assertThat(u.getLoginLockedUntil()).isAfter(LocalDateTime.now());
+    verify(emailService, never()).send2FACode(anyString(), anyString());
+  }
+
+  @Test
+  void login_whenAccountLocked_throwsTooManyRequests_withoutCheckingPassword() {
+    LoginRequest req = new LoginRequest();
+    req.setEmail("karine.roussel@usherbrooke.ca");
+    req.setPassword("Sup3rPass!");
+    User u = verifiedUser();
+    u.setLoginLockedUntil(LocalDateTime.now().plusMinutes(10)); // verrou encore actif
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(() -> authService.login(req))
+        .isInstanceOf(TooManyRequestsException.class);
+    verify(passwordEncoder, never()).matches(anyString(), anyString());
+    verify(emailService, never()).send2FACode(anyString(), anyString());
+  }
+
   // ----- verifyEmail -----
 
   private PendingRegistration validPending() {
