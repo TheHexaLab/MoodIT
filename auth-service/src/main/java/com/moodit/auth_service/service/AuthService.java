@@ -1,3 +1,6 @@
+// Logique métier de l'authentification : inscription, login, 2FA, vérification email et renvoi de
+// code.
+
 package com.moodit.auth_service.service;
 
 import com.moodit.auth_service.dto.AuthResponse;
@@ -43,6 +46,9 @@ public class AuthService {
   private static final int MAX_RESEND = 5;
   // Nombre max de codes erronés avant d'invalider le code (anti brute-force des 6 chiffres).
   private static final int MAX_VERIFY_ATTEMPTS = 5;
+  // Durée du blocage après le plafond de codes erronés : aucun nouveau code n'est émis pendant
+  // ce délai, même en se reconnectant (sinon le plafond serait trivialement contournable).
+  private static final int LOCKOUT_MINUTES = 15;
 
   // Register
 
@@ -57,7 +63,6 @@ public class AuthService {
     }
 
     // Re-register sur un email déjà en attente : on réutilise la ligne et on renvoie un code
-    // (évite qu'un squatteur bloque une vraie personne, et gère le "je n'ai pas reçu le code")
     PendingRegistration existing = pendingRepository.findByEmail(email).orElse(null);
 
     // Username pris par un compte confirmé, ou par un AUTRE pending (autre email) ?
@@ -136,10 +141,18 @@ public class AuthService {
 
     // Générer et envoyer le code 2FA
     LocalDateTime now = LocalDateTime.now();
+    // Blocage actif (trop de codes 2FA erronés) : on refuse d'émettre un nouveau code, sinon
+    // le plafond de tentatives serait contournable en se reconnectant.
+    if (user.getVerificationLockedUntil() != null
+        && user.getVerificationLockedUntil().isAfter(now)) {
+      throw new TooManyRequestsException(
+          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+    }
     String code = generateCode();
     user.setVerificationCode(code);
     user.setVerificationCodeExpiresAt(now.plusMinutes(15));
     user.setVerificationAttempts(0);
+    user.setVerificationLockedUntil(null);
     user.setLastCodeSentAt(now);
     userRepository.save(user);
 
@@ -219,8 +232,7 @@ public class AuthService {
       if (pending.getVerificationAttempts() >= MAX_VERIFY_ATTEMPTS) {
         pending.setVerificationCode(null);
         pendingRepository.save(pending);
-        throw new InvalidVerificationCodeException(
-            "Trop de tentatives. Demandez un nouveau code.");
+        throw new InvalidVerificationCodeException("Trop de tentatives. Demandez un nouveau code.");
       }
       pendingRepository.save(pending);
       throw new InvalidVerificationCodeException("Code invalide");
@@ -255,22 +267,32 @@ public class AuthService {
             .findByEmail(email)
             .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
 
+    LocalDateTime now = LocalDateTime.now();
+    // Blocage actif : on refuse toute tentative tant que le délai n'est pas écoulé.
+    if (user.getVerificationLockedUntil() != null
+        && user.getVerificationLockedUntil().isAfter(now)) {
+      throw new TooManyRequestsException(
+          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+    }
+
     if (user.getVerificationCode() == null) {
       throw new InvalidVerificationCodeException("Code invalide. Reconnectez-vous.");
     }
 
-    if (user.getVerificationCodeExpiresAt().isBefore(LocalDateTime.now())) {
+    if (user.getVerificationCodeExpiresAt().isBefore(now)) {
       throw new InvalidVerificationCodeException("Code expiré");
     }
 
     if (!user.getVerificationCode().equals(code)) {
-      // Mauvais code 2FA : on compte la tentative et on invalide le code au-delà du plafond.
+      // Mauvais code 2FA : on compte la tentative et, au plafond, on invalide le code ET on pose
+      // un blocage temporel — le verrou survit à une reconnexion (vérifié dans login()).
       user.setVerificationAttempts(user.getVerificationAttempts() + 1);
       if (user.getVerificationAttempts() >= MAX_VERIFY_ATTEMPTS) {
         user.setVerificationCode(null);
+        user.setVerificationLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
         userRepository.save(user);
-        throw new InvalidVerificationCodeException(
-            "Trop de tentatives. Reconnectez-vous pour recevoir un nouveau code.");
+        throw new TooManyRequestsException(
+            "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
       }
       userRepository.save(user);
       throw new InvalidVerificationCodeException("Code invalide");
@@ -279,6 +301,7 @@ public class AuthService {
     user.setVerificationCode(null);
     user.setVerificationCodeExpiresAt(null);
     user.setVerificationAttempts(0);
+    user.setVerificationLockedUntil(null);
 
     String token = jwtService.generateToken(user.getEmail());
     String hashedToken = jwtService.hashToken(token, user.getEmail());
@@ -300,6 +323,11 @@ public class AuthService {
               .findByEmail(email)
               .orElseThrow(
                   () -> new InvalidVerificationCodeException("Aucune connexion en cours."));
+      if (user.getVerificationLockedUntil() != null
+          && user.getVerificationLockedUntil().isAfter(now)) {
+        throw new TooManyRequestsException(
+            "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+      }
       if (user.getVerificationCode() == null) {
         throw new InvalidVerificationCodeException("Aucun code à renvoyer. Reconnectez-vous.");
       }

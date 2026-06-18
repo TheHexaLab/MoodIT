@@ -1,3 +1,5 @@
+// Point d'entrée Spring Boot du Gateway + endpoint de test /gateway/test.
+
 package com.moodit.gateway;
 
 import org.springframework.boot.SpringApplication;

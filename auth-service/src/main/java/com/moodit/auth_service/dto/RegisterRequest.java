@@ -1,3 +1,5 @@
+// DTO de la requête d'inscription (identité + email + mot de passe), avec validation des champs.
+
 package com.moodit.auth_service.dto;
 
 import jakarta.validation.constraints.Email;

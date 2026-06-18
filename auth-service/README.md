@@ -179,8 +179,33 @@ Le schéma est géré par **`init.sql`** (monté dans Postgres), **pas par Hiber
 
 ## 6. Tests
 
-Lancer : `./gradlew test` (depuis `auth-service/` ou `gateway/`).
-Rapport HTML : `build/reports/tests/test/index.html`.
+Lancer une suite : `./gradlew test` (depuis `auth-service/` ou `gateway/`).
+Rapport HTML en cas d'échec : `build/reports/tests/test/index.html`.
+
+### Lancer toute la batterie (backend + frontend)
+
+Depuis la **racine du projet**. Les 3 services backend sont des modules Gradle indépendants ;
+le frontend n'a pas de tests unitaires (seulement `lint` + `build`).
+
+**macOS / Linux (bash) :**
+```bash
+(cd auth-service && ./gradlew test)
+(cd gateway      && ./gradlew test)
+(cd core-service && ./gradlew test)
+(cd frontend     && npm run lint)
+```
+
+**Windows (PowerShell) :**
+```powershell
+cd auth-service; .\gradlew.bat test; cd ..
+cd gateway;      .\gradlew.bat test; cd ..
+cd core-service; .\gradlew.bat test; cd ..
+cd frontend;     npm.cmd run lint;   cd ..
+```
+
+> Sous PowerShell, utilise `.\gradlew.bat` et `npm.cmd` (le wrapper `npm.ps1` peut être bloqué
+> par la politique d'exécution ; sinon : `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
+> `npm run build` (`tsc -b`) reste rouge sur des erreurs TS pré-existantes hors auth/gateway.
 
 ### `auth-service`
 | Classe | Type | Ce qu'elle vérifie |
@@ -216,14 +241,8 @@ Rapport HTML : `build/reports/tests/test/index.html`.
 
 ## 8. Pièges à connaître (limites actuelles)
 
-1. **Le schéma vient de `init.sql`, pas d'Hibernate.** Les `application.properties` utilisent une
-   syntaxe `%dev.`/`%prod.` (style Quarkus) **non interprétée par Spring** → `ddl-auto` reste à
-   `none`. Toute nouvelle entité/colonne doit être ajoutée **à la main dans `init.sql`**.
-   `init.sql` ne s'exécute **que sur un volume vierge** (`down -v` pour repartir à neuf).
-2. **Rate limiter en mémoire = par instance.** Si le Gateway est répliqué, chaque instance a ses
-   propres compteurs. Pour une limite globale partagée, il faudrait Redis.
-3. **Le Gateway dépend de l'auth-service** pour valider chaque requête authentifiée (appel
+1. **Le Gateway dépend de l'auth-service** pour valider chaque requête authentifiée (appel
    `/auth/validate`). Si l'auth-service est down, le Gateway refuse tout (fail-closed, 503).
-4. **Secrets par défaut** (`dev-...-change-in-production`) à remplacer impérativement en production.
-5. **`AuthService.hashToken`** utilise un schéma de hachage maison ; fonctionnel mais à
+2. **Secrets par défaut** (`dev-...-change-in-production`) à remplacer impérativement en production.
+3. **`AuthService.hashToken`** utilise un schéma de hachage maison ; fonctionnel mais à
    reconsidérer pour un usage production (token opaque aléatoire, p. ex.).

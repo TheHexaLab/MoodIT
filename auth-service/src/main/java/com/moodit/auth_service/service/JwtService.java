@@ -1,3 +1,5 @@
+// Génération, validation et hachage des jetons JWT.
+
 package com.moodit.auth_service.service;
 
 import io.jsonwebtoken.Claims;

@@ -1,3 +1,5 @@
+// Accès JPA aux inscriptions en attente de vérification + purge des codes expirés.
+
 package com.moodit.auth_service.repository;
 
 import com.moodit.auth_service.model.PendingRegistration;

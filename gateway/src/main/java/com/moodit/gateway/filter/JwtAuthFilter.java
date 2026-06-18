@@ -1,3 +1,6 @@
+// Filtre d'authentification : laisse passer les routes publiques, sinon valide le JWT
+// (signature locale + /auth/validate) et injecte X-User-Email pour les services en aval ; fail-closed.
+
 package com.moodit.gateway.filter;
 
 import io.jsonwebtoken.Claims;

@@ -1,3 +1,5 @@
+// Point d'entrée Spring Boot de l'auth-service (scheduling activé pour le nettoyage des inscriptions expirées).
+
 package com.moodit.auth_service;
 
 import org.springframework.boot.SpringApplication;

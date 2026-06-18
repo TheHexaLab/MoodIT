@@ -38,6 +38,7 @@ CREATE TABLE User_(
    verification_code_expires_at TIMESTAMP,
    verification_attempts INTEGER NOT NULL DEFAULT 0,
    last_code_sent_at TIMESTAMP,
+   verification_locked_until TIMESTAMP,
    PRIMARY KEY(id)
 );
 

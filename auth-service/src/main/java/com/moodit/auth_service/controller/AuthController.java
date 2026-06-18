@@ -1,3 +1,5 @@
+// Contrôleur REST de l'authentification : register, login, validate, vérification email/2FA, renvoi de code.
+
 package com.moodit.auth_service.controller;
 
 import com.moodit.auth_service.dto.AuthResponse;

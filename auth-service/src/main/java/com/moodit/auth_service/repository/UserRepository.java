@@ -1,3 +1,5 @@
+// Accès JPA aux comptes utilisateurs confirmés (recherche par email / username).
+
 package com.moodit.auth_service.repository;
 
 import com.moodit.auth_service.model.User;

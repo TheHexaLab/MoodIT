@@ -1,3 +1,5 @@
+// Envoi des courriels : code de vérification d'inscription et code 2FA.
+
 package com.moodit.auth_service.service;
 
 import lombok.RequiredArgsConstructor;

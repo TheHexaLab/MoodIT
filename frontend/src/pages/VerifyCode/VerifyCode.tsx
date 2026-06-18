@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import styles from './VerifyCode.module.css';
 import { useTheme } from '../../helpers/theme';
+import { Lightanddark } from '../../assets/light-dark-btn';
 
 type Mode = 'email' | '2fa';
 
@@ -108,11 +109,11 @@ export default function VerifyCode() {
       <main className={styles.formSide}>
         <button
           type="button"
-          className={styles.themeToggle}
+          className="light-dark-btn"
           onClick={toggleTheme}
           aria-label="Changer de thème"
         >
-          {theme === 'dark' ? '☀' : '☾'}
+          <Lightanddark isDark={theme === 'dark'} />
         </button>
 
         <div className={styles.card}>

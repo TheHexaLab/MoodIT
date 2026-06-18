@@ -1,3 +1,5 @@
+// Wrapper de requête qui expose le header X-User-Email (email extrait du JWT) aux services en aval.
+
 package com.moodit.gateway.filter;
 
 import jakarta.servlet.http.HttpServletRequest;

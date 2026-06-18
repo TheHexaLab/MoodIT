@@ -3,6 +3,7 @@ import { useTheme } from '../../helpers/theme';
 import { useState } from 'react';
 import { register } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
+import { EyeIcon } from '../../assets/eye';
 import { Link, useNavigate } from 'react-router-dom';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,6 +24,7 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
@@ -113,7 +115,7 @@ export default function Register() {
       <main className={styles.formSide}>
         <button
           type="button"
-          className={styles.themeToggle}
+          className="light-dark-btn"
           onClick={toggleTheme}
           aria-label="Changer de thème"
         >
@@ -225,11 +227,19 @@ export default function Register() {
                   className={`${styles.inputWrap}${fieldErrors.password ? ' ' + styles.invalid : ''}`}
                 >
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={password}
                     placeholder="Choisissez un mot de passe"
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  <button
+                    type="button"
+                    className={styles.eyeBtn}
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  >
+                    <EyeIcon visible={showPassword} />
+                  </button>
                 </div>
                 {password && (
                   <div className={styles.strength} data-level={passwordStrength(password)}>

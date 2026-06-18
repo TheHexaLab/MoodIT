@@ -1,3 +1,5 @@
+// Spring Security du Gateway : stateless, (l'auth se fait via JwtAuthFilter).
+
 package com.moodit.gateway.config;
 
 import org.springframework.context.annotation.Bean;

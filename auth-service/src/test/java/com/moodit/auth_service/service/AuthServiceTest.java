@@ -304,4 +304,33 @@ class AuthServiceTest {
         .isInstanceOf(InvalidVerificationCodeException.class);
     assertThat(u.getVerificationAttempts()).isEqualTo(1);
   }
+
+  @Test
+  void verify2FA_maxAttempts_locksAccount() {
+    User u = verifiedUser();
+    u.setVerificationCode("123456");
+    u.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
+    u.setVerificationAttempts(4); // la prochaine tentative ratée atteint le plafond
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(() -> authService.verify2FA("karine.roussel@usherbrooke.ca", "999999"))
+        .isInstanceOf(TooManyRequestsException.class);
+    assertThat(u.getVerificationLockedUntil()).isAfter(LocalDateTime.now());
+    assertThat(u.getVerificationCode()).isNull();
+  }
+
+  @Test
+  void login_whenLocked_throwsAndSendsNoCode() {
+    LoginRequest req = new LoginRequest();
+    req.setEmail("karine.roussel@usherbrooke.ca");
+    req.setPassword("Sup3rPass!");
+    User u = verifiedUser();
+    u.setVerificationLockedUntil(LocalDateTime.now().plusMinutes(10)); // blocage encore actif
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.matches("Sup3rPass!" + PEPPER, "storedHash")).thenReturn(true);
+
+    assertThatThrownBy(() -> authService.login(req))
+        .isInstanceOf(TooManyRequestsException.class);
+    verify(emailService, never()).send2FACode(anyString(), anyString());
+  }
 }

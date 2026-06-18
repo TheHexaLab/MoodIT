@@ -1,3 +1,5 @@
+// DTO de réponse d'authentification renvoyé au client (token JWT + infos utilisateur).
+
 package com.moodit.auth_service.dto;
 
 import lombok.AllArgsConstructor;

@@ -1,3 +1,5 @@
+// Configuration OpenAPI/Swagger : documentation interactive et schéma d'authentification Bearer.
+
 package com.moodit.auth_service.config;
 
 import io.swagger.v3.oas.models.OpenAPI;

@@ -44,6 +44,9 @@ public class User {
   @Column(name = "last_code_sent_at")
   private LocalDateTime lastCodeSentAt;
 
+  @Column(name = "verification_locked_until")
+  private LocalDateTime verificationLockedUntil;
+
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 

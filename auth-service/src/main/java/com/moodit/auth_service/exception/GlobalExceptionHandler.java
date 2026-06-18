@@ -1,3 +1,5 @@
+// Traduit les exceptions métier de l'auth-service en réponses HTTP (statut + message JSON).
+
 package com.moodit.auth_service.exception;
 
 import org.springframework.http.HttpStatus;

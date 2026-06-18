@@ -1,3 +1,5 @@
+// Tâche planifiée : supprime périodiquement les inscriptions en attente dont le code a expiré.
+
 package com.moodit.auth_service.service;
 
 import com.moodit.auth_service.repository.PendingRegistrationRepository;
@@ -16,7 +18,7 @@ public class CleanupJob {
 
   // Supprime les inscriptions en attente dont le code a expiré, pour que la
   // table de staging ne se fasse pas flooder à son tour.
-  @Scheduled(fixedRate = 3600000) // toutes les heures
+  @Scheduled(fixedRate = 1800000) // toutes les demi-heures
   @Transactional
   public void purgeExpiredPending() {
     pendingRepository.deleteExpired(LocalDateTime.now());

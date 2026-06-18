@@ -1,3 +1,5 @@
+// Accès JPA aux établissements : sert à vérifier qu'un domaine email est autorisé.
+
 package com.moodit.auth_service.repository;
 
 import com.moodit.auth_service.model.Establishment;

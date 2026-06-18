@@ -15,22 +15,17 @@ import java.io.IOException;
 import java.time.Duration;
 
 // Rate limiting par IP sur les routes d'authentification sensibles.
-// Complète le throttle par email de l'auth-service : ici on borne un attaquant
-// qui balaie beaucoup d'adresses différentes depuis une même origine.
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
   // Routes qui déclenchent l'envoi de courriels : quota strict.
   private static final int EMAIL_ROUTE_CAPACITY = 5;
-  // Login : quota un peu plus large (IP partagées d'établissement / NAT).
+  // Login : quota un peu plus large
   private static final int LOGIN_CAPACITY = 10;
 
-  // Un seau par (groupe de routes, IP), avec éviction automatique des IP inactives.
+  // Un seau par (groupe de routes), avec éviction automatique des IP inactives.
   private final Cache<String, Bucket> buckets =
-      Caffeine.newBuilder()
-          .expireAfterAccess(Duration.ofMinutes(10))
-          .maximumSize(100_000)
-          .build();
+      Caffeine.newBuilder().expireAfterAccess(Duration.ofMinutes(10)).maximumSize(100_000).build();
 
   @Override
   protected void doFilterInternal(

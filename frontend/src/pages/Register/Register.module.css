@@ -64,21 +64,6 @@
     position: relative;
 }
 
-.themeToggle {
-    position: absolute;
-    top: 3%;
-    right: 3%;
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 50%;
-    border: none;
-    background: var(--button-light-dark);
-    cursor: pointer;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
 .card {
     width: 100%;
     max-width: 26rem;
@@ -126,6 +111,17 @@
 
 .inputWrap.invalid { border-color: var(--danger); }
 
+.eyeBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 0.75rem;
+    color: inherit;
+}
+
 .error { color: var(--danger); font-size: 0.78rem; }
 
 .serverError {
@@ -165,6 +161,38 @@
     color: var(--text-body);
 }
 .terms a { color: var(--text-active); text-decoration: none; }
+
+.terms input[type='checkbox'] {
+    appearance: none;
+    -webkit-appearance: none;
+    flex-shrink: 0;
+    width: 1.05rem;
+    height: 1.05rem;
+    margin: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.25rem;
+    background: var(--bg-surface);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.terms input[type='checkbox']:checked {
+    background: var(--brand-teal);
+    border-color: var(--brand-teal);
+}
+
+.terms input[type='checkbox']:checked::after {
+    content: '';
+    position: absolute;
+    left: 0.32rem;
+    top: 0.12rem;
+    width: 0.28rem;
+    height: 0.55rem;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
 
 .submit {
     width: 100%;
