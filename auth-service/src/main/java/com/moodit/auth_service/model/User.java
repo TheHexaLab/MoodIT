@@ -32,9 +32,6 @@ public class User {
   @Column(nullable = false, unique = true, length = 256)
   private String email;
 
-  @Column(name = "verified_email", nullable = false)
-  private boolean verifiedEmail = false;
-
   @Column(name = "verification_code", length = 6)
   private String verificationCode;
 
@@ -43,6 +40,9 @@ public class User {
 
   @Column(name = "verification_attempts", nullable = false)
   private int verificationAttempts = 0;
+
+  @Column(name = "last_code_sent_at")
+  private LocalDateTime lastCodeSentAt;
 
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;

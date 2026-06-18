@@ -14,7 +14,6 @@ import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import com.moodit.auth_service.exception.EmailAlreadyUsedException;
-import com.moodit.auth_service.exception.EmailNotVerifiedException;
 import com.moodit.auth_service.exception.InvalidCredentialsException;
 import com.moodit.auth_service.exception.InvalidVerificationCodeException;
 import com.moodit.auth_service.exception.TooManyRequestsException;
@@ -170,7 +169,6 @@ class AuthServiceTest {
     u.setFirstName("Karine");
     u.setLastName("Roussel");
     u.setPasswordHash("storedHash");
-    u.setVerifiedEmail(true);
     return u;
   }
 
@@ -183,19 +181,6 @@ class AuthServiceTest {
 
     assertThatThrownBy(() -> authService.login(req))
         .isInstanceOf(InvalidCredentialsException.class);
-  }
-
-  @Test
-  void login_emailNotVerified_throws() {
-    LoginRequest req = new LoginRequest();
-    req.setEmail("karine.roussel@usherbrooke.ca");
-    req.setPassword("Sup3rPass!");
-    User u = verifiedUser();
-    u.setVerifiedEmail(false);
-    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
-
-    assertThatThrownBy(() -> authService.login(req))
-        .isInstanceOf(EmailNotVerifiedException.class);
   }
 
   @Test
@@ -254,7 +239,6 @@ class AuthServiceTest {
     ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
     verify(userRepository).save(captor.capture());
     User created = captor.getValue();
-    assertThat(created.isVerifiedEmail()).isTrue();
     assertThat(created.getPasswordHash()).isEqualTo("hashed");
     verify(pendingRepository).delete(any(PendingRegistration.class));
   }

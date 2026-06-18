@@ -5,6 +5,17 @@ import { register } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 import { Link, useNavigate } from 'react-router-dom';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type FieldErrors = {
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  password?: string;
+  terms?: string;
+};
+
 export default function Register() {
   const { theme, toggleTheme } = useTheme();
   const [username, setUsername] = useState('');
@@ -15,6 +26,7 @@ export default function Register() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const navigate = useNavigate();
 
   function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
@@ -27,19 +39,42 @@ export default function Register() {
     return 2;
   }
 
+  // Associe un message d'erreur serveur au bon champ (par mots-clés).
+  function mapServerError(message: string) {
+    const m = message.toLowerCase();
+    if (m.includes('utilisateur')) {
+      setFieldErrors({ username: message });
+    } else if (
+      m.includes('e-mail') ||
+      m.includes('email') ||
+      m.includes('adresse') ||
+      m.includes('domaine') ||
+      m.includes('courriel')
+    ) {
+      setFieldErrors({ email: message });
+    } else if (m.includes('mot de passe')) {
+      setFieldErrors({ password: message });
+    } else {
+      setServerError(message);
+    }
+  }
+
   async function handleSubmit() {
     setServerError('');
+    setFieldErrors({});
 
-    if (!username || !firstName || !name || !email || !password) {
-      setServerError('Veuillez remplir tous les champs');
-      return;
-    }
-    if (!acceptTerms) {
-      setServerError("Vous devez accepter les conditions d'utilisation");
-      return;
-    }
-    if (passwordStrength(password) < 2) {
-      setServerError('Mot de passe trop faible');
+    const errors: FieldErrors = {};
+    if (!username) errors.username = 'Requis';
+    if (!firstName) errors.firstName = 'Requis';
+    if (!name) errors.lastName = 'Requis';
+    if (!email) errors.email = 'Requis';
+    else if (!EMAIL_REGEX.test(email)) errors.email = 'Format d’e-mail invalide';
+    if (!password) errors.password = 'Requis';
+    else if (passwordStrength(password) < 2) errors.password = 'Mot de passe trop faible';
+    if (!acceptTerms) errors.terms = "Vous devez accepter les conditions d'utilisation";
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
 
@@ -54,7 +89,7 @@ export default function Register() {
       });
       navigate('/verify-code', { state: { email, mode: 'email' } });
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : 'Erreur inconnue');
+      mapServerError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {
       setSubmitting(false);
     }
@@ -95,8 +130,15 @@ export default function Register() {
               {serverError && <p className={styles.serverError}>⚠ {serverError}</p>}
 
               <div className={styles.field}>
-                <label className={styles.label}>Nom d'utilisateur</label>
-                <div className={styles.inputWrap}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Nom d'utilisateur</label>
+                  {fieldErrors.username && (
+                    <span className={styles.error}>⚠ {fieldErrors.username}</span>
+                  )}
+                </div>
+                <div
+                  className={`${styles.inputWrap}${fieldErrors.username ? ' ' + styles.invalid : ''}`}
+                >
                   <input
                     type="text"
                     value={username}
@@ -107,8 +149,15 @@ export default function Register() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.label}>Prénom</label>
-                <div className={styles.inputWrap}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Prénom</label>
+                  {fieldErrors.firstName && (
+                    <span className={styles.error}>⚠ {fieldErrors.firstName}</span>
+                  )}
+                </div>
+                <div
+                  className={`${styles.inputWrap}${fieldErrors.firstName ? ' ' + styles.invalid : ''}`}
+                >
                   <input
                     type="text"
                     value={firstName}
@@ -119,8 +168,15 @@ export default function Register() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.label}>Nom</label>
-                <div className={styles.inputWrap}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Nom</label>
+                  {fieldErrors.lastName && (
+                    <span className={styles.error}>⚠ {fieldErrors.lastName}</span>
+                  )}
+                </div>
+                <div
+                  className={`${styles.inputWrap}${fieldErrors.lastName ? ' ' + styles.invalid : ''}`}
+                >
                   <input
                     type="text"
                     value={name}
@@ -131,8 +187,15 @@ export default function Register() {
               </div>
 
               <div className={styles.field}>
-                <label className={styles.label}>Adresse email</label>
-                <div className={styles.inputWrap}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Adresse email</label>
+                  {fieldErrors.email && (
+                    <span className={styles.error}>⚠ {fieldErrors.email}</span>
+                  )}
+                </div>
+                <div
+                  className={`${styles.inputWrap}${fieldErrors.email ? ' ' + styles.invalid : ''}`}
+                >
                   <input
                     type="email"
                     value={email}
@@ -145,16 +208,22 @@ export default function Register() {
               <div className={styles.field}>
                 <div className={styles.labelRow}>
                   <label className={styles.label}>Mot de passe</label>
-                  {password && (
-                    <span className={styles.strengthLabel} data-level={passwordStrength(password)}>
-                      {passwordStrength(password) === 1 && 'Mot de passe trop court'}
-                      {passwordStrength(password) === 2 && 'Mot de passe faible'}
-                      {passwordStrength(password) === 3 && 'Mot de passe moyen'}
-                      {passwordStrength(password) === 4 && 'Mot de passe fort'}
-                    </span>
+                  {fieldErrors.password ? (
+                    <span className={styles.error}>⚠ {fieldErrors.password}</span>
+                  ) : (
+                    password && (
+                      <span className={styles.strengthLabel} data-level={passwordStrength(password)}>
+                        {passwordStrength(password) === 1 && 'Mot de passe trop court'}
+                        {passwordStrength(password) === 2 && 'Mot de passe faible'}
+                        {passwordStrength(password) === 3 && 'Mot de passe moyen'}
+                        {passwordStrength(password) === 4 && 'Mot de passe fort'}
+                      </span>
+                    )
                   )}
                 </div>
-                <div className={styles.inputWrap}>
+                <div
+                  className={`${styles.inputWrap}${fieldErrors.password ? ' ' + styles.invalid : ''}`}
+                >
                   <input
                     type="password"
                     value={password}
@@ -197,6 +266,7 @@ export default function Register() {
                   </a>
                 </span>
               </label>
+              {fieldErrors.terms && <p className={styles.error}>⚠ {fieldErrors.terms}</p>}
 
               <button
                 type="button"

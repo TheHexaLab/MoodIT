@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.SecretKey;
@@ -24,6 +25,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
   @Value("${app.public.routes}")
   private String publicRoutesConfig;
+
+  @Value("${app.auth-service.url}")
+  private String authServiceUrl;
+
+  private final RestClient restClient = RestClient.create();
 
   private List<String> getPublicRoutes() {
     return List.of(publicRoutesConfig.split(","));
@@ -52,20 +58,47 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       return;
     }
 
-    // Valider le token JWT
+    // 1) Validation locale rapide : signature + expiration (rejette les tokens grossiers
+    //    sans solliciter l'auth-service).
     String token = authHeader.substring(7);
+    Claims claims;
     try {
-      Claims claims =
+      claims =
           Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token).getPayload();
-
-      // Ajouter l'email dans le header pour les services en aval
-      request = new WrappedRequest(request, claims.getSubject());
-      filterChain.doFilter(request, response);
-
     } catch (Exception e) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       response.getWriter().write("Token invalide");
+      return;
     }
+
+    // 2) Validation forte : l'auth-service confirme que ce token est encore le token ACTIF
+    //    (hash en BD). Couvre la révocation / session unique, impossible à vérifier ici.
+    Boolean active;
+    try {
+      active =
+          restClient
+              .post()
+              .uri(authServiceUrl + "/auth/validate")
+              .header("Authorization", authHeader)
+              .retrieve()
+              .body(Boolean.class);
+    } catch (Exception e) {
+      // Impossible de joindre l'auth-service : on refuse (fail-closed) plutôt que de
+      // laisser passer un token potentiellement révoqué.
+      response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      response.getWriter().write("Service d'authentification indisponible");
+      return;
+    }
+
+    if (!Boolean.TRUE.equals(active)) {
+      response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+      response.getWriter().write("Token invalide");
+      return;
+    }
+
+    // Ajouter l'email dans le header pour les services en aval
+    request = new WrappedRequest(request, claims.getSubject());
+    filterChain.doFilter(request, response);
   }
 
   private SecretKey getSigningKey() {

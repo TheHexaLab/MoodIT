@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import styles from './VerifyCode.module.css';
 import { useTheme } from '../../helpers/theme';
@@ -17,8 +17,18 @@ export default function VerifyCode() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
 
   const isEmailVerification = mode === 'email';
+
+  // Compte à rebours du cooldown de renvoi (aligné sur le délai serveur de 60 s).
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
 
   async function handleSubmit() {
     setError('');
@@ -55,6 +65,34 @@ export default function VerifyCode() {
       setError('Erreur de connexion au serveur');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleResend() {
+    if (cooldown > 0 || resending) return;
+    setError('');
+    setResendMsg('');
+    setResending(true);
+    try {
+      const res = await fetch('/auth/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, mode }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data.message || 'Impossible de renvoyer le code');
+        return;
+      }
+
+      setResendMsg('Un nouveau code a été envoyé.');
+      setCooldown(60);
+    } catch {
+      setError('Erreur de connexion au serveur');
+    } finally {
+      setResending(false);
     }
   }
 
@@ -119,6 +157,22 @@ export default function VerifyCode() {
               >
                 {submitting ? 'Vérification...' : 'Vérifier →'}
               </button>
+
+              <div className={styles.resendRow}>
+                {resendMsg && <p className={styles.resendMsg}>{resendMsg}</p>}
+                <button
+                  type="button"
+                  className={styles.resendBtn}
+                  onClick={handleResend}
+                  disabled={cooldown > 0 || resending}
+                >
+                  {cooldown > 0
+                    ? `Renvoyer le code (${cooldown}s)`
+                    : resending
+                      ? 'Envoi...'
+                      : 'Renvoyer le code'}
+                </button>
+              </div>
 
               <p className={styles.backLink}>
                 <Link to={isEmailVerification ? '/register' : '/login'}>

@@ -6,6 +6,11 @@ CREATE TABLE Establishment(
    CONSTRAINT chk_domain_email CHECK (domain_email ~ '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 );
 
+-- Établissements autorisés à s'inscrire (domaine email).
+INSERT INTO Establishment (name, domain_email)
+VALUES ('Université de Sherbrooke', 'usherbrooke.ca')
+ON CONFLICT (domain_email) DO NOTHING;
+
 CREATE TABLE Program(
    id SERIAL,
    name VARCHAR(128) NOT NULL,
@@ -29,7 +34,28 @@ CREATE TABLE User_(
    active_token_hash VARCHAR(256) ,
    password_hash VARCHAR(256) NOT NULL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-   verified_email BOOLEAN NOT NULL,
+   verification_code VARCHAR(6),
+   verification_code_expires_at TIMESTAMP,
+   verification_attempts INTEGER NOT NULL DEFAULT 0,
+   last_code_sent_at TIMESTAMP,
+   PRIMARY KEY(id)
+);
+
+-- Inscriptions en attente de vérification d'email : rien n'entre dans User_
+-- tant que le code n'est pas confirmé (anti-flooding de la table des comptes).
+CREATE TABLE Pending_Registration(
+   id SERIAL,
+   username VARCHAR(64) NOT NULL,
+   first_name VARCHAR(128) NOT NULL,
+   last_name VARCHAR(128) NOT NULL,
+   email VARCHAR(256) NOT NULL UNIQUE,
+   password_hash VARCHAR(256) NOT NULL,
+   verification_code VARCHAR(6),
+   verification_code_expires_at TIMESTAMP,
+   resend_count INTEGER NOT NULL DEFAULT 0,
+   verification_attempts INTEGER NOT NULL DEFAULT 0,
+   last_code_sent_at TIMESTAMP,
+   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    PRIMARY KEY(id)
 );
 
@@ -244,25 +270,9 @@ CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jou
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 
 -- TRIGGER
---Générer le courriel de l'usager selon son username et son établissement
-CREATE OR REPLACE FUNCTION generate_user_email()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_domain VARCHAR(256);
-BEGIN
-    SELECT domain_email INTO v_domain
-    FROM Establishment
-    LIMIT 1;
-
-    NEW.email := NEW.username || '@' || v_domain;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_user_email
-BEFORE INSERT ON User_
-FOR EACH ROW
-EXECUTE FUNCTION generate_user_email();
+-- (Retiré) L'email est désormais saisi par l'utilisateur à l'inscription et
+-- conservé tel quel : il ne doit plus être dérivé du username, afin que le
+-- username puisse différer de l'email utilisé pour se connecter.
 
 -- ============================================================
 --  Données de départ — Application UdeS / Faculté de génie
@@ -298,14 +308,14 @@ INSERT INTO Role (name) VALUES
 -- ------------------------------------------------------------
 -- User  
 -- ------------------------------------------------------------
-INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
-  ('admin', 'Admin', 'Admin', 'hash.pour.tester', TRUE);
+INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
+  ('admin', 'Admin', 'Admin', 'admin@usherbrooke.ca', 'hash.pour.tester');
 
-INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
-  ('rosie1234', 'rosie', 'HG', 'hash.pour.tester2', TRUE);
+INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
+  ('rosie1234', 'rosie', 'HG', 'rosie1234@usherbrooke.ca', 'hash.pour.tester2');
 
-  INSERT INTO User_ (username, first_name, last_name, password_hash, verified_email) VALUES
-  ('mich1234', 'mich', 'normand', 'hash.pour.tester3', TRUE);
+INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
+  ('mich1234', 'mich', 'normand', 'mich1234@usherbrooke.ca', 'hash.pour.tester3');
 -- ------------------------------------------------------------
 -- User_Role  
 -- ------------------------------------------------------------

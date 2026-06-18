@@ -204,6 +204,39 @@ input[type="password"]::-ms-reveal {
     background: var(--bg-input);
 }
 
+.input.invalid {
+    border-color: var(--danger);
+}
+
+.input.invalid:focus {
+    border: 2px solid var(--danger);
+    box-shadow: 0 0 4px 3px rgba(219, 46, 46, 0.25);
+}
+
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.field-error {
+    color: var(--danger);
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-align: right;
+}
+
+.server-error {
+    color: var(--danger);
+    font-size: 0.8rem;
+    background: rgba(219, 46, 46, 0.08);
+    border: 1px solid var(--danger);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0 0 0.5rem;
+}
+
 .input::placeholder {
     color: var(--text-input-focus);
     font-family: Inter, sans-serif;

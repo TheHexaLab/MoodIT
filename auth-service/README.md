@@ -64,7 +64,6 @@ envoyé par courriel ; le token n'est émis qu'après `verify-2fa`.
 ```
 POST /auth/login  { email, password }
    ├─ user introuvable / mauvais mdp ─► 401 InvalidCredentials
-   ├─ email non vérifié              ─► 403 EmailNotVerified
    └─ OK ─► envoie un code 2FA, renvoie AuthResponse avec token = null
 
 POST /auth/verify-2fa  { email, code }
@@ -135,7 +134,6 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 | `EmailAlreadyUsedException` | 409 | Email déjà pris |
 | `UsernameAlreadyUsedException` | 409 | Username déjà pris |
 | `InvalidCredentialsException` | 401 | Email ou mot de passe invalide |
-| `EmailNotVerifiedException` | 403 | Compte non vérifié |
 | `InvalidVerificationCodeException` | 400 | Code invalide/expiré |
 | `TooManyRequestsException` | 429 | Cooldown/plafond dépassé |
 | `DomainNotAllowedException` | 403 | Domaine hors établissements autorisés |
@@ -165,8 +163,10 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 Le schéma est géré par **`init.sql`** (monté dans Postgres), **pas par Hibernate**
 (voir §7). Tables clés de l'authentification :
 
-- **`user_`** : comptes confirmés. Colonnes notables : `email` (unique), `password_hash`,
-  `verified_email`, `verification_code` / `verification_code_expires_at` / `verification_attempts`
+- **`user_`** : comptes confirmés. Une ligne n'y existe qu'après vérification de l'email
+  (pas de flag `verified_email` : la présence dans cette table = email vérifié). Colonnes
+  notables : `email` (unique), `password_hash`, `verification_code` /
+  `verification_code_expires_at` / `verification_attempts` / `last_code_sent_at`
   (pour la 2FA), `active_token_hash`.
 - **`pending_registration`** : inscriptions en attente. Mêmes infos de base + `resend_count`,
   `verification_attempts`, `last_code_sent_at` (anti-bombing).

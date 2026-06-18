@@ -133,6 +133,31 @@
 .successBox h2 { margin: 0; font-size: 1.4rem; }
 .successBox p { margin: 0; color: var(--text-body); font-size: 0.9rem; }
 
+.resendRow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.resendBtn {
+    background: none;
+    border: none;
+    color: var(--text-active);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.25rem;
+}
+.resendBtn:hover:not(:disabled) { text-decoration: underline; }
+.resendBtn:disabled { color: var(--text-muted); cursor: not-allowed; }
+
+.resendMsg {
+    color: var(--success);
+    font-size: 0.8rem;
+    margin: 0;
+}
+
 .backLink { text-align: center; font-size: 0.88rem; }
 .backLink a { color: var(--text-active); text-decoration: none; }
 

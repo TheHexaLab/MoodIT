@@ -8,38 +8,47 @@ import './LoginPage.css';
 import { EyeIcon } from '../assets/eye.tsx';
 import { Lightanddark } from '../assets/light-dark-btn.tsx';
 import { login } from '../helpers/api';
+import { useTheme } from '../helpers/theme';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type FieldErrors = { email?: string; password?: string };
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
-  const [isDark, setIsDark] = useState(() => {
-    const stored = localStorage.getItem('theme');
-    if (stored === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      return true;
+  // Associe un message d'erreur serveur au bon champ (par mots-clés).
+  function mapServerError(message: string) {
+    const m = message.toLowerCase();
+    if (m.includes('e-mail') || m.includes('email') || m.includes('adresse') || m.includes('vérifié')) {
+      setFieldErrors({ email: message });
+    } else if (m.includes('mot de passe')) {
+      setFieldErrors({ password: message });
+    } else {
+      setError(message);
     }
-    document.documentElement.setAttribute('data-theme', 'light');
-    return false;
-  });
-
-  const toggleTheme = () => {
-    const next = isDark ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-    setIsDark(!isDark);
-  };
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setFieldErrors({});
 
-    if (!email || !password) {
-      setError('Veuillez remplir tous les champs');
+    const errors: FieldErrors = {};
+    if (!email) errors.email = 'L’adresse e-mail est requise';
+    else if (!EMAIL_REGEX.test(email)) errors.email = 'Format d’e-mail invalide';
+    if (!password) errors.password = 'Le mot de passe est requis';
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
 
@@ -48,7 +57,7 @@ export default function LoginPage() {
       await login({ email, password });
       navigate('/verify-code', { state: { email, mode: '2fa' } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur inconnue');
+      mapServerError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {
       setSubmitting(false);
     }
@@ -84,9 +93,12 @@ export default function LoginPage() {
           <form className="form" onSubmit={handleSubmit}>
             {error && <p className="server-error">⚠ {error}</p>}
             <div className="field">
-              <label className="label">Adresse e-mail</label>
+              <div className="label-row">
+                <label className="label">Adresse e-mail</label>
+                {fieldErrors.email && <span className="field-error">⚠ {fieldErrors.email}</span>}
+              </div>
               <input
-                className="input"
+                className={`input${fieldErrors.email ? ' invalid' : ''}`}
                 type="email"
                 placeholder="exemple@gmail.com"
                 value={email}
@@ -94,10 +106,15 @@ export default function LoginPage() {
               />
             </div>
             <div className="field">
-              <label className="label">Mot de passe</label>
+              <div className="label-row">
+                <label className="label">Mot de passe</label>
+                {fieldErrors.password && (
+                  <span className="field-error">⚠ {fieldErrors.password}</span>
+                )}
+              </div>
               <div className="input-wrapper">
                 <input
-                  className="input"
+                  className={`input${fieldErrors.password ? ' invalid' : ''}`}
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••••"
                   value={password}
@@ -111,11 +128,16 @@ export default function LoginPage() {
                   <EyeIcon visible={showPassword} />
                 </button>
               </div>
-              <a href="#" className="forgot-password">
+              <a
+                href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="forgot-link"
+              >
                 Mot de passe oublié ?
               </a>
             </div>
-            <button type="submit" className="submit-btn" disabled={submitting}>
+            <button type="submit" className="btn-primary" disabled={submitting}>
               {submitting ? 'Connexion...' : 'Se connecter →'}
             </button>
             <p className="or-divider">ou</p>

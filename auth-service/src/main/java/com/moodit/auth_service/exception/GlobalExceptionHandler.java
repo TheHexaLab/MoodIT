@@ -28,11 +28,6 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", ex.getMessage()));
   }
 
-  @ExceptionHandler(EmailNotVerifiedException.class)
-  public ResponseEntity<Map<String, String>> handleEmailNotVerified(EmailNotVerifiedException ex) {
-    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", ex.getMessage()));
-  }
-
   @ExceptionHandler(InvalidVerificationCodeException.class)
   public ResponseEntity<Map<String, String>> handleInvalidVerificationCode(
       InvalidVerificationCodeException ex) {

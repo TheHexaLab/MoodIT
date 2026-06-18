@@ -19,7 +19,6 @@ import com.moodit.auth_service.exception.UsernameAlreadyUsedException;
 import com.moodit.auth_service.exception.InvalidCredentialsException;
 import java.time.LocalDateTime;
 import java.util.Map;
-import com.moodit.auth_service.exception.EmailNotVerifiedException;
 import com.moodit.auth_service.exception.InvalidVerificationCodeException;
 import com.moodit.auth_service.exception.TooManyRequestsException;
 import com.moodit.auth_service.service.EmailService;
@@ -123,12 +122,10 @@ public class AuthService {
 
     // Trouver le user (email insensible à la casse)
     String email = normalizeEmail(request.getEmail());
+    // Un compte n'existe dans User_ qu'après vérification de l'email : être ici
+    // suffit donc à prouver que l'email est confirmé (pas de flag dédié).
     User user =
         userRepository.findByEmail(email).orElseThrow(() -> new InvalidCredentialsException());
-    // Vérifier si l'email est confirmé
-    if (!user.isVerifiedEmail()) {
-      throw new EmailNotVerifiedException();
-    }
     // Vérifier le mot de passe
     if (!passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
       throw new InvalidCredentialsException();
@@ -138,10 +135,12 @@ public class AuthService {
     // validée d'abord. Le token est généré dans verify2FA().
 
     // Générer et envoyer le code 2FA
+    LocalDateTime now = LocalDateTime.now();
     String code = generateCode();
     user.setVerificationCode(code);
-    user.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(15));
+    user.setVerificationCodeExpiresAt(now.plusMinutes(15));
     user.setVerificationAttempts(0);
+    user.setLastCodeSentAt(now);
     userRepository.save(user);
 
     emailService.send2FACode(email, code);
@@ -191,7 +190,6 @@ public class AuthService {
     user.setEmail(pending.getEmail());
     user.setPasswordHash(pending.getPasswordHash());
     user.setCreatedAt(LocalDateTime.now());
-    user.setVerifiedEmail(true);
 
     userRepository.save(user);
     pendingRepository.delete(pending);
@@ -243,7 +241,6 @@ public class AuthService {
     user.setEmail(pending.getEmail());
     user.setPasswordHash(pending.getPasswordHash());
     user.setCreatedAt(LocalDateTime.now());
-    user.setVerifiedEmail(true);
 
     userRepository.save(user);
     pendingRepository.delete(pending);
@@ -306,15 +303,15 @@ public class AuthService {
       if (user.getVerificationCode() == null) {
         throw new InvalidVerificationCodeException("Aucun code à renvoyer. Reconnectez-vous.");
       }
-      // user_ n'a pas de last_code_sent_at : on dérive le dernier envoi de l'expiration.
-      LocalDateTime lastSent = user.getVerificationCodeExpiresAt().minusMinutes(15);
-      if (lastSent.plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
+      if (user.getLastCodeSentAt() != null
+          && user.getLastCodeSentAt().plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
         throw new TooManyRequestsException("Patientez avant de redemander un code.");
       }
       String code = generateCode();
       user.setVerificationCode(code);
       user.setVerificationCodeExpiresAt(now.plusMinutes(15));
       user.setVerificationAttempts(0);
+      user.setLastCodeSentAt(now);
       userRepository.save(user);
       emailService.send2FACode(email, code);
       return Map.of("message", "Code renvoyé.");

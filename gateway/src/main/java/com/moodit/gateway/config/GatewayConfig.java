@@ -1,12 +1,24 @@
 package com.moodit.gateway.config;
 
 import com.moodit.gateway.filter.JwtAuthFilter;
+import com.moodit.gateway.filter.RateLimitFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class GatewayConfig {
+
+  // Order 0 : le rate limiting s'exécute AVANT la validation JWT, pour que les
+  // routes publiques sensibles (register/login/verify) soient protégées elles aussi.
+  @Bean
+  public FilterRegistrationBean<RateLimitFilter> rateLimitRegistration(RateLimitFilter filter) {
+    FilterRegistrationBean<RateLimitFilter> registration = new FilterRegistrationBean<>();
+    registration.setFilter(filter);
+    registration.addUrlPatterns("/*");
+    registration.setOrder(0);
+    return registration;
+  }
 
   @Bean
   public FilterRegistrationBean<JwtAuthFilter> jwtFilter(JwtAuthFilter filter) {
