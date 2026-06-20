@@ -1,22 +1,16 @@
+// Point d'entrée Spring Boot de l'auth-service (scheduling activé pour le nettoyage des inscriptions expirées).
+
 package com.moodit.auth_service;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@RestController
-@RequestMapping("/auth")
+@EnableScheduling
 public class AuthServiceApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(AuthServiceApplication.class, args);
-	}
-
-	@GetMapping(value = "/test", produces = "text/plain")
-	public String test() {
-		return "Service d'authentification fonctionnel!";
 	}
 }

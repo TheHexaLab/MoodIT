@@ -1,0 +1,490 @@
+/*création de la page de login
+//date: 7 juin 2026
+Philip Pigeon*/
+
+input[type="password"]::-ms-reveal {
+    display: none;
+}
+
+/*      Layout principal        */
+.page {
+    display: flex;
+    min-height: 100vh;
+    background: var(--bg-main);
+}
+
+/* Panneau de gauche  */
+
+.aside {
+    position: relative;
+    width: 44%;
+    min-height: 100vh;
+    background: var(--login-left-gradient);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.bubble-1 {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--bubble);
+    width: clamp(12rem, 45vmin, 25rem);
+    aspect-ratio: 1;
+    top: max(-6rem, -13%);
+    right: max(-8rem, -16%);
+}
+
+.bubble-2 {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--bubble);
+    width: clamp(10rem, 37vmin, 20rem);
+    aspect-ratio: 1;
+    bottom: max(-4.38rem, -13%);
+    left: max(-5rem, -16%);
+
+}
+
+.bubble-3 {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--bubble-spec);
+    width: clamp(3rem, 13vmin, 8.75rem);
+    aspect-ratio: 1;
+    bottom: 20%;
+    right: 3%;
+}
+
+.aside-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.03%;
+    text-align: center;
+}
+
+.logo-wrapper img {
+    width: 100%;
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1.375rem;
+}
+
+.app-name {
+    font-family: Inter, sans-serif;
+    font-size: 2.375rem;
+    font-weight: 700;
+    font-style: normal;
+    color: var(--text-app-name);
+    line-height: normal;
+    margin: 0.5rem;
+}
+
+.app-tagline {
+    display: flex;
+    flex-direction: column;
+}
+
+.app-tagline-text {
+    margin: 0;
+    color: var(--slogan-text);
+    text-align: center;
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-style: normal;
+    font-weight: 300;
+    line-height: 162.5%;
+}
+
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background-color: var(--bg-right-login-page);
+}
+
+.light-dark-btn {
+    position: absolute;
+    right: 3%;
+    top: 3%;
+    border: none;
+    cursor: pointer;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: var(--button-light-dark);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--button-light-dark-ordinateur);
+}
+
+.form-card {
+    width: 100%;
+    max-width: 27.5rem;
+    max-height: 33.75rem;
+    box-sizing: border-box;
+    background: var(--bg-surface);
+    box-shadow: 0 2px 8px 0 var(--shadow-login-box-modal), 0 16px 48px 0 var(--shadow-login-box-hover);
+    border-radius: 1.25rem;
+    padding: 3rem 5.5% 2.13rem 5.5%;
+
+}
+
+.form-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-style: normal;
+    color: var(--text);
+    margin: 0 0 1.35%;
+    line-height: normal;
+    font-family: Inter, sans-serif;
+}
+
+.form-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin: 0 0 3.85%;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+
+}
+
+.form {
+    display: flex;
+    flex-direction: column;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+}
+
+.label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-label);
+    padding-bottom: 1.38%;
+    padding-top: 4.11%;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    line-height: normal;
+}
+
+.input {
+    width: 100%;
+    padding: 0.9375rem 1rem;
+    font-size: 0.875rem;
+    color: var(--text);
+    background: var(--bg-right-login-page);
+    border: 1.5px solid var(--border);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    display: inline-flex;
+    height: 3.125rem;
+    align-items: center;
+    border-radius: 0.625rem;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.input:focus {
+    border: 2px solid var(--brand-teal);
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+    background: var(--bg-input);
+}
+
+.input.invalid {
+    border-color: var(--danger);
+}
+
+.input.invalid:focus {
+    border: 2px solid var(--danger);
+    box-shadow: 0 0 4px 3px rgba(219, 46, 46, 0.25);
+}
+
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.field-error {
+    color: var(--danger);
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-align: right;
+}
+
+.server-error {
+    color: var(--danger);
+    font-size: 0.8rem;
+    background: rgba(219, 46, 46, 0.08);
+    border: 1px solid var(--danger);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0 0 0.5rem;
+}
+
+.input::placeholder {
+    color: var(--text-input-focus);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.input-wrapper .input {
+    padding-right: 2.5rem;
+}
+
+.eye-btn {
+    position: absolute;
+    right: 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.forgot-link {
+    font-size: 0.75rem;
+    color: var(--brand-teal);
+    text-decoration: none;
+    font-weight: 500;
+    align-self: flex-end;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    line-height: normal;
+    margin-top: 3.2%;
+}
+
+.forgot-link:hover {
+    text-decoration: underline;
+}
+
+.btn-primary {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-app-name);
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    display: flex;
+    width: 100%;
+    height: 3.25rem;
+    justify-content: center;
+    align-items: center;
+    border-radius: 0.75rem;
+    background: var(--login-button);
+    box-shadow: 0 6px 20px 0 var(--login-button-shadow);
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    line-height: normal;
+    margin-top: 3.85%;
+}
+
+.btn-primary:hover {
+    opacity: 0.88;
+}
+
+.or-divider {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-or-divider);
+    margin-top: 3.636%;
+    position: relative;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.or-divider::before,
+.or-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 8.75rem;
+    height: 0.0625rem;
+    background: var(--border);
+}
+
+.or-divider::before {
+    left: 0;
+}
+
+.or-divider::after {
+    right: 0;
+}
+
+.register-row {
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 13.42%;
+    font-family: Inter, sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.register-link {
+    color: var(--brand-teal);
+    font-weight: 600;
+    text-decoration: none;
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-style: normal;
+    line-height: normal;
+}
+
+.register-link:hover {
+    text-decoration: underline;
+}
+
+.footer {
+    position: absolute;
+    bottom: 1.69rem;
+    color: var(--text-input-focus);
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.footer a {
+    text-decoration: none;
+    color: var(--text-input-focus);
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+
+.footer a:hover {
+    color: var(--text-body);
+}
+
+@media (max-width: 640px) {
+    .page {
+        flex-direction: column;
+    }
+
+    .aside {
+        width: 100%;
+        min-height: 14rem;
+        max-height: 16.25rem;
+    }
+
+    .logo-wrapper img {
+        width: 4.75rem;
+        height: auto;
+        border-radius: 1rem;
+        padding-bottom: 0;
+    }
+
+    .app-name {
+        font-size: 1.75rem;
+        margin: 0 0 0 0;
+    }
+
+    .app-tagline {
+        font-size: 0;
+        flex-direction: row;
+        line-height: 0;
+    }
+
+    .bubble-1 {
+        top: -4.38rem;
+        right: -2.5rem;
+        background: var(--bubble-mobile);
+        width: 11.25rem;
+    }
+
+    .bubble-2 {
+        left: -3.12rem;
+        bottom: -3.75rem;
+        background: var(--bubble-spec-mobile);
+        width: 8.75rem;
+    }
+
+    .bubble-3 {
+        bottom: -0.6rem;
+        right: -0.6rem;
+        background: var(--bubble-spec-mobile);
+        width: 4.375rem;
+    }
+
+    .light-dark-btn {
+        top: 1rem;
+        right: 1rem;
+        background: var(--bubble);
+        color: var(--button-light-dark-mobile);
+    }
+
+    .main {
+        padding: 1.5rem 1rem 4rem;
+        justify-content: flex-start;
+        min-height: 0;
+    }
+
+    .form-card {
+        position: absolute;
+        width: 87%;
+        max-height: unset;
+        border-radius: 1.25rem;
+        top: -2.5rem;
+        padding: 3.8% 7% 1.5rem 7%;
+    }
+
+    .form-subtitle {
+        margin: 0 0 2.5%;
+    }
+
+    .form-title {
+        margin: 0 0 1.9%;
+
+    }
+
+
+    .label {
+        margin: 3.85% 0 1.26% 0;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+        width: 40%;
+    }
+
+    .register-row {
+        margin: 3.85% 0 0;
+    }
+
+
+}

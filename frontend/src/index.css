@@ -37,6 +37,24 @@
     --shadow-hover: rgba(10, 92, 192, 0.22);
     --shadow-danger: rgba(219, 46, 46, 0.22);
     --shadow-modal: rgba(0, 0, 0, 0.25);
+    --login-left-gradient: linear-gradient(0deg, #0D9488 0%, #14B8A6 60%, #34D399 100%);
+    --bubble: rgba(255, 255, 255, 0.06);
+    --bubble-mobile: rgba(255, 255, 255, 0.12);
+    --bubble-spec: rgba(255, 255, 255, 0.08);
+    --bubble-spec-mobile: rgba(255, 255, 255, 0.10);
+    --text-app-name: #fff;
+    --slogan-text: rgba(255, 255, 255, 0.82);
+    --bg-right-login-page: #F8F8FB;
+    --shadow-login-box-modal: rgba(0, 0, 0, 0.04);
+    --shadow-login-box-hover: rgba(10, 92, 192, 0.08);
+    --text-label: #454559;
+    --text-input-focus: #AFAFC1;
+    --login-button: linear-gradient(90deg, #0D9488 0%, #14B8A6 100%);
+    --login-button-shadow: rgba(10, 92, 192, 0.30);
+    --text-or-divider: #9999AD;
+    --button-light-dark: rgba(0, 0, 0, 0.06);
+    --button-light-dark-ordinateur: #454559;
+    --button-light-dark-mobile: #ffffff;
     /* Palette d'avatars : couleurs fixes (identiques en clair et en sombre). */
     --avatar-teal-strong: #0d9488;
     --avatar-teal: #14b8a6;
@@ -66,7 +84,7 @@
         --bg-input: #262b36;
         --bg-message-input: #262B36;
         --bg-send-button: linear-gradient(135deg, #14B8A6 14.29%, #5EEAD4 85.71%);
-        --bg-user-panel:#16181f;
+        --bg-user-panel: #16181f;
         --bg-vote-pill: #262b36;
         --bg-active-channel: #243049;
         --send-button-stroke: #FFFFFF;
@@ -82,6 +100,14 @@
         --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
         --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+        --bg-right-login-page: #14161D;
+        --text-label: #C4C4D2;
+        --text-input-focus: #6F6F86;
+        --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
+        --text-or-divider: #A6A6BC;
+        --button-light-dark: rgba(255, 255, 255, 0.12);
+        --button-light-dark-ordinateur: #F6C350;
+        --button-light-dark-mobile: #F6C350;
         /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
         --syntax-bg: #1e1e2e;
         --syntax-fg: #cdd6f4;
@@ -121,6 +147,14 @@
     --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #5eead4 0%, #14b8a6 83.33%);
+    --bg-right-login-page: #14161D;
+    --text-label: #C4C4D2;
+    --text-input-focus: #6F6F86;
+    --login-button: linear-gradient(90deg, #14B8A6 0%, #2DD4BF 100%);
+    --text-or-divider: #A6A6BC;
+    --button-light-dark: rgba(255, 255, 255, 0.12);
+    --button-light-dark-ordinateur: #F6C350;
+    --button-light-dark-mobile: #F6C350;
     /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
     --syntax-bg: #1e1e2e;
     --syntax-fg: #cdd6f4;
@@ -134,6 +168,7 @@
     --syntax-operator: #89dceb;
     --syntax-variable: #f38ba8;
 }
+
 body {
     margin: 0;
     background: var(--bg-main);
