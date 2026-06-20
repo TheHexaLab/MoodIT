@@ -1,6 +1,3 @@
-## Ticket Jira
-Closes #MOODIT-
-
 ## Type de changement
 - [ ] Nouvelle fonctionnalité
 - [ ] Correction de bug
