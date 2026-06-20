@@ -1,4 +1,5 @@
-// Wrapper de requête qui expose le header X-User-Email (email extrait du JWT) aux services en aval.
+// Wrapper de requête qui masque complètement un header entrant (singulier + pluriel + liste des noms).
+// Sert à neutraliser un X-User-Email forgé par le client avant qu'il n'atteigne un service en aval.
 
 package com.moodit.gateway.filter;
 
@@ -10,28 +11,27 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 
-public class WrappedRequest extends HttpServletRequestWrapper {
+public class StrippedHeaderRequest extends HttpServletRequestWrapper {
 
-  private static final String USER_EMAIL = "X-User-Email";
-  private final String userEmail;
+  private final String strippedHeader;
 
-  public WrappedRequest(HttpServletRequest request, String userEmail) {
+  public StrippedHeaderRequest(HttpServletRequest request, String strippedHeader) {
     super(request);
-    this.userEmail = userEmail;
+    this.strippedHeader = strippedHeader;
   }
 
   @Override
   public String getHeader(String name) {
-    if (USER_EMAIL.equalsIgnoreCase(name)) {
-      return userEmail;
+    if (strippedHeader.equalsIgnoreCase(name)) {
+      return null;
     }
     return super.getHeader(name);
   }
 
   @Override
   public Enumeration<String> getHeaders(String name) {
-    if (USER_EMAIL.equalsIgnoreCase(name)) {
-      return Collections.enumeration(List.of(userEmail));
+    if (strippedHeader.equalsIgnoreCase(name)) {
+      return Collections.emptyEnumeration();
     }
     return super.getHeaders(name);
   }
@@ -39,8 +39,7 @@ public class WrappedRequest extends HttpServletRequestWrapper {
   @Override
   public Enumeration<String> getHeaderNames() {
     List<String> names = new ArrayList<>(Collections.list(super.getHeaderNames()));
-    names.removeIf(USER_EMAIL::equalsIgnoreCase);
-    names.add(USER_EMAIL);
+    names.removeIf(strippedHeader::equalsIgnoreCase);
     return Collections.enumeration(names);
   }
 }

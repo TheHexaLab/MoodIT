@@ -7,8 +7,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import './LoginPage.css';
 import { EyeIcon } from '../assets/eye.tsx';
 import { Lightanddark } from '../assets/light-dark-btn.tsx';
+import logo from '../assets/Logo.png';
 import { login } from '../helpers/api';
 import { useTheme } from '../helpers/theme';
+import { classifyServerError } from '../helpers/serverError';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -24,14 +26,15 @@ export default function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Associe un message d'erreur serveur au bon champ (par mots-clés).
+  // Associe un message d'erreur serveur au bon champ (logique de mapping mutualisée).
   function mapServerError(message: string) {
-    const m = message.toLowerCase();
-    if (m.includes('e-mail') || m.includes('email') || m.includes('adresse') || m.includes('vérifié')) {
+    const field = classifyServerError(message);
+    if (field === 'email') {
       setFieldErrors({ email: message });
-    } else if (m.includes('mot de passe')) {
+    } else if (field === 'password') {
       setFieldErrors({ password: message });
     } else {
+      // 'username' (pas de champ ici) ou message général -> erreur globale.
       setError(message);
     }
   }
@@ -70,7 +73,7 @@ export default function LoginPage() {
         <div className="bubble-3" />
         <div className="aside-content">
           <div className="logo-wrapper">
-            <img src="../../images/Logo.png" alt="Logo" />
+            <img src={logo} alt="Logo MoodIT" />
           </div>
           <h1 className="app-name">MoodIT</h1>
           <p className="app-tagline">
@@ -95,6 +98,7 @@ export default function LoginPage() {
               <input
                 className={`input${fieldErrors.email ? ' invalid' : ''}`}
                 type="email"
+                autoComplete="email"
                 placeholder="exemple@gmail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -111,6 +115,7 @@ export default function LoginPage() {
                 <input
                   className={`input${fieldErrors.password ? ' invalid' : ''}`}
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   placeholder="••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

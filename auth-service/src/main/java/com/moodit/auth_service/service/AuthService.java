@@ -13,7 +13,9 @@ import com.moodit.auth_service.repository.PendingRegistrationRepository;
 import com.moodit.auth_service.repository.EstablishmentRepository;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,9 +25,16 @@ import com.moodit.auth_service.exception.InvalidCredentialsException;
 import java.time.LocalDateTime;
 import java.util.Map;
 import com.moodit.auth_service.exception.InvalidVerificationCodeException;
+import com.moodit.auth_service.exception.NotFoundException;
 import com.moodit.auth_service.exception.TooManyRequestsException;
 import com.moodit.auth_service.service.EmailService;
 import java.security.SecureRandom;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 @Service
 @RequiredArgsConstructor
@@ -52,23 +61,38 @@ public class AuthService {
   // Durée du blocage après le plafond de codes erronés : aucun nouveau code n'est émis pendant
   // ce délai, même en se reconnectant (sinon le plafond serait trivialement contournable).
   private static final int LOCKOUT_MINUTES = 15;
+  // Réponse unique du register (vrai succès ET email déjà pris) : empêche l'énumération
+  // de comptes via le statut/message de retour.
+  private static final String REGISTER_OK_MESSAGE =
+      "Compte créé! Vérifiez votre email pour activer votre compte.";
+  // Générateur cryptographique réutilisé (thread-safe) plutôt qu'instancié à chaque code.
+  private static final SecureRandom RANDOM = new SecureRandom();
+  // Hash BCrypt bidon (valide, même cost que les vrais) pour égaliser le temps de réponse du
+  // login quand l'email est introuvable : sans ce matches factice, l'absence de BCrypt rendrait
+  // la réponse plus rapide et trahirait par timing l'existence du compte. Doit être un VRAI
+  // hash BCrypt, sinon matches() le rejette aussitôt sans brûler de temps.
+  private static final String DUMMY_HASH = new BCryptPasswordEncoder().encode("timing-equalizer");
 
   // Register
-
+  //
+  // NON @Transactional volontairement : la récupération de la course concurrente (catch de
+  // DataIntegrityViolationException puis re-requête existsBy...) ne fonctionne QUE si chaque
+  // appel repository tourne dans sa propre transaction. Sous une transaction unique, le save en
+  // échec abandonne la transaction Postgres (la re-requête échouerait) ou diffère l'exception au
+  // commit (le catch deviendrait mort). La course est de toute façon fermée par la contrainte
+  // UNIQUE en BD, pas par @Transactional (inopérant contre un check-then-insert en READ COMMITTED).
   public Map<String, String> register(RegisterRequest request) {
 
     // L'email est insensible à la casse : on normalise pour éviter les doublons
     // et les échecs de login dus à une casse différente.
     String email = normalizeEmail(request.getEmail());
 
-    if (userRepository.existsByEmail(email)) {
-      throw new EmailAlreadyUsedException();
-    }
-
     // Re-register sur un email déjà en attente : on réutilise la ligne et on renvoie un code
     PendingRegistration existing = pendingRepository.findByEmail(email).orElse(null);
 
     // Username pris par un compte confirmé, ou par un AUTRE pending (autre email) ?
+    // 409 conservé volontairement : un username est semi-public et le formulaire
+    // d'inscription doit pouvoir signaler qu'il faut en choisir un autre.
     if (userRepository.existsByUsername(request.getUsername())) {
       throw new UsernameAlreadyUsedException();
     }
@@ -80,25 +104,28 @@ public class AuthService {
               throw new UsernameAlreadyUsedException();
             });
 
-    // Seuls les domaines d'établissements autorisés peuvent s'inscrire.
-    String domain = extractDomain(email);
-    if (!establishmentRepository.existsByDomainEmail(domain)) {
+    // Seuls les domaines d'établissements autorisés (ou leurs sous-domaines) peuvent s'inscrire.
+    // 403 conservé : la liste des domaines d'établissements autorisés est publique.
+    if (!isAllowedDomain(extractDomain(email))) {
       throw new DomainNotAllowedException();
+    }
+
+    // Anti-énumération d'email : si l'email appartient déjà à un compte CONFIRMÉ, on ne
+    // révèle PAS son existence par une 409. On renvoie EXACTEMENT la même réponse qu'une
+    // vraie inscription et on prévient le propriétaire hors-bande (email dédié).
+    // Ce test vient APRÈS username/domaine, sinon un username connu-pris servirait d'oracle
+    // (200 = email pris et court-circuité, 409 = email libre puis username rejeté).
+    if (userRepository.existsByEmail(email)) {
+      emailService.sendAccountAlreadyExists(email);
+      return Map.of("message", REGISTER_OK_MESSAGE);
     }
 
     LocalDateTime now = LocalDateTime.now();
 
     // Anti-bombing : sur un renvoi, on impose un délai entre deux courriels et un plafond total.
     if (existing != null) {
-      if (existing.getLastCodeSentAt() != null
-          && existing.getLastCodeSentAt().plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
-        throw new TooManyRequestsException(
-            "Un code vous a déjà été envoyé. Patientez avant d'en redemander un.");
-      }
-      if (existing.getResendCount() >= MAX_RESEND) {
-        throw new TooManyRequestsException(
-            "Trop de demandes d'envoi pour cet email. Réessayez plus tard.");
-      }
+      enforceResendCooldown(existing.getLastCodeSentAt(), now);
+      enforceResendCap(existing.getResendCount());
     }
 
     PendingRegistration pending = existing != null ? existing : new PendingRegistration();
@@ -108,7 +135,7 @@ public class AuthService {
     pending.setFirstName(request.getFirstName());
     pending.setLastName(request.getLastName());
     pending.setEmail(email);
-    pending.setPasswordHash(passwordEncoder.encode(request.getPassword() + pepper));
+    pending.setPasswordHash(passwordEncoder.encode(peppered(request.getPassword())));
     pending.setVerificationCode(code);
     pending.setVerificationCodeExpiresAt(now.plusMinutes(15));
     pending.setLastCodeSentAt(now);
@@ -117,11 +144,26 @@ public class AuthService {
       pending.setResendCount(pending.getResendCount() + 1);
     }
 
-    pendingRepository.save(pending);
+    // Les contrôles d'unicité ci-dessus ne suffisent pas en concurrence : entre la vérif et
+    // ce save, un autre register peut avoir pris le même username/email. Les contraintes UNIQUE
+    // (username, email) de pending_registration ferment la course ; on traduit la violation
+    // selon la colonne en cause, en restant cohérent avec l'anti-énumération du point 6.
+    try {
+      pendingRepository.save(pending);
+    } catch (DataIntegrityViolationException e) {
+      if (userRepository.existsByUsername(request.getUsername())
+          || pendingRepository.existsByUsername(request.getUsername())) {
+        throw new UsernameAlreadyUsedException();
+      }
+      // Sinon : collision sur l'email pending. On ne révèle pas l'existence (réponse générique)
+      // et on prévient le propriétaire hors-bande, comme pour un email déjà confirmé.
+      emailService.sendAccountAlreadyExists(email);
+      return Map.of("message", REGISTER_OK_MESSAGE);
+    }
 
     emailService.sendVerificationCode(email, code);
 
-    return Map.of("message", "Compte créé! Vérifiez votre email pour activer votre compte.");
+    return Map.of("message", REGISTER_OK_MESSAGE);
   }
 
   // Login
@@ -132,8 +174,13 @@ public class AuthService {
     String email = normalizeEmail(request.getEmail());
     // Un compte n'existe dans User_ qu'après vérification de l'email : être ici
     // suffit donc à prouver que l'email est confirmé (pas de flag dédié).
-    User user =
-        userRepository.findByEmail(email).orElseThrow(() -> new InvalidCredentialsException());
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      // Compte introuvable : on exécute quand même un BCrypt (sur un hash bidon) pour que le
+      // temps de réponse soit indiscernable d'un mauvais mot de passe sur un compte existant.
+      passwordEncoder.matches(peppered(request.getPassword()), DUMMY_HASH);
+      throw new InvalidCredentialsException();
+    }
 
     LocalDateTime now = LocalDateTime.now();
 
@@ -145,7 +192,7 @@ public class AuthService {
     }
 
     // Vérifier le mot de passe ; chaque échec est compté pour déclencher le verrou.
-    if (!passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
+    if (!passwordEncoder.matches(peppered(request.getPassword()), user.getPasswordHash())) {
       user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
       if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
         user.setLoginLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
@@ -154,19 +201,23 @@ public class AuthService {
       throw new InvalidCredentialsException();
     }
 
-    // Mot de passe valide : on réinitialise le compteur d'échecs. Le token n'est pas émis
-    // tout de suite, la 2FA doit d'abord être validée (token généré dans verify2FA()).
-    user.setFailedLoginAttempts(0);
-    user.setLoginLockedUntil(null);
-
-    // Générer et envoyer le code 2FA
-    // Blocage actif (trop de codes 2FA erronés) : on refuse d'émettre un nouveau code, sinon
-    // le plafond de tentatives serait contournable en se reconnectant.
+    // Mot de passe valide. Blocage 2FA actif (trop de codes erronés) : on refuse d'émettre un
+    // nouveau code, sinon le plafond serait contournable en se reconnectant. Ce contrôle vient
+    // AVANT toute mutation, pour ne pas réinitialiser un compteur qui ne serait jamais persisté
+    // (on `throw` avant le `save()`). Il reste APRÈS la vérification du mot de passe pour ne pas
+    // divulguer l'état du verrou sans prouver les identifiants.
     if (user.getVerificationLockedUntil() != null
         && user.getVerificationLockedUntil().isAfter(now)) {
       throw new TooManyRequestsException(
           "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
     }
+
+    // On réinitialise le compteur d'échecs de mot de passe (mot de passe correct). Le token
+    // n'est pas émis tout de suite, la 2FA doit d'abord être validée (token généré dans verify2FA()).
+    user.setFailedLoginAttempts(0);
+    user.setLoginLockedUntil(null);
+
+    // Générer et envoyer le code 2FA
     String code = generateCode();
     user.setVerificationCode(code);
     user.setVerificationCodeExpiresAt(now.plusMinutes(15));
@@ -197,9 +248,12 @@ public class AuthService {
       return false;
     }
 
-    // Vérifier le hash du token
+    // Vérifier le hash du token. Comparaison à temps constant pour ne pas révéler,
+    // par le temps de réponse, à quel préfixe deux hash diffèrent.
     String hashedToken = jwtService.hashToken(token, email);
-    return hashedToken.equals(user.getActiveTokenHash());
+    return MessageDigest.isEqual(
+        hashedToken.getBytes(StandardCharsets.UTF_8),
+        String.valueOf(user.getActiveTokenHash()).getBytes(StandardCharsets.UTF_8));
   }
 
   // Vérification manuelle pour le dev : promeut l'inscription en attente vers un vrai compte
@@ -213,7 +267,7 @@ public class AuthService {
     PendingRegistration pending =
         pendingRepository
             .findByUsername(username)
-            .orElseThrow(() -> new RuntimeException("Inscription en attente non trouvée"));
+            .orElseThrow(() -> new NotFoundException("Inscription en attente non trouvée"));
 
     User user = new User();
     user.setUsername(pending.getUsername());
@@ -273,12 +327,25 @@ public class AuthService {
     user.setPasswordHash(pending.getPasswordHash());
     user.setCreatedAt(LocalDateTime.now());
 
-    userRepository.save(user);
+    // Même course possible ici (deux pendings au même username/email promus en même temps) :
+    // User_.username et User_.email sont UNIQUE, on traduit la violation en 409 plutôt qu'un 500.
+    try {
+      userRepository.save(user);
+    } catch (DataIntegrityViolationException e) {
+      if (userRepository.existsByUsername(pending.getUsername())) {
+        throw new UsernameAlreadyUsedException();
+      }
+      throw new EmailAlreadyUsedException();
+    }
     pendingRepository.delete(pending);
 
     return Map.of("message", "Email vérifié avec succès!");
   }
 
+  // PAS @Transactional : le chemin "mauvais code" incrémente le compteur de tentatives puis
+  // `throw`. Sous une transaction englobante, le rollback par défaut (sur RuntimeException)
+  // annulerait cet incrément ET le verrou -> l'anti-brute-force ne se déclencherait jamais.
+  // Chaque save() doit committer indépendamment.
   public AuthResponse verify2FA(String email, String code) {
     email = normalizeEmail(email);
     User user =
@@ -332,6 +399,7 @@ public class AuthService {
   }
 
   // Renvoi d'un code (inscription ou 2FA), avec le même cooldown / plafond anti-bombing.
+  @Transactional
   public Map<String, String> resendCode(String email, String mode) {
     email = normalizeEmail(email);
     LocalDateTime now = LocalDateTime.now();
@@ -350,10 +418,7 @@ public class AuthService {
       if (user.getVerificationCode() == null) {
         throw new InvalidVerificationCodeException("Aucun code à renvoyer. Reconnectez-vous.");
       }
-      if (user.getLastCodeSentAt() != null
-          && user.getLastCodeSentAt().plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
-        throw new TooManyRequestsException("Patientez avant de redemander un code.");
-      }
+      enforceResendCooldown(user.getLastCodeSentAt(), now);
       String code = generateCode();
       user.setVerificationCode(code);
       user.setVerificationCodeExpiresAt(now.plusMinutes(15));
@@ -371,13 +436,8 @@ public class AuthService {
             .orElseThrow(
                 () -> new InvalidVerificationCodeException("Aucune inscription en attente."));
 
-    if (pending.getLastCodeSentAt() != null
-        && pending.getLastCodeSentAt().plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
-      throw new TooManyRequestsException("Patientez avant de redemander un code.");
-    }
-    if (pending.getResendCount() >= MAX_RESEND) {
-      throw new TooManyRequestsException("Trop de demandes d'envoi. Réessayez plus tard.");
-    }
+    enforceResendCooldown(pending.getLastCodeSentAt(), now);
+    enforceResendCap(pending.getResendCount());
 
     String code = generateCode();
     pending.setVerificationCode(code);
@@ -392,14 +452,59 @@ public class AuthService {
 
   // Méthodes privées
 
+  // BCrypt ignore tout au-delà de 72 octets. On pré-hache donc le mot de passe avec le pepper
+  // via HMAC-SHA256 (sortie de taille fixe, 44 caractères en Base64) : le pepper est entièrement
+  // pris en compte et aucun mot de passe long n'est silencieusement tronqué.
+  private String peppered(String rawPassword) {
+    try {
+      Mac mac = Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(pepper.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+      byte[] h = mac.doFinal(rawPassword.getBytes(StandardCharsets.UTF_8));
+      return Base64.getEncoder().encodeToString(h);
+    } catch (GeneralSecurityException e) {
+      throw new IllegalStateException("HMAC indisponible", e);
+    }
+  }
+
   private String generateCode() {
-    SecureRandom random = new SecureRandom();
-    int code = 100000 + random.nextInt(900000);
+    int code = 100000 + RANDOM.nextInt(900000);
     return String.valueOf(code);
+  }
+
+  // Anti-bombing partagé (register / resendCode) : délai minimal entre deux envois de code.
+  private void enforceResendCooldown(LocalDateTime lastCodeSentAt, LocalDateTime now) {
+    if (lastCodeSentAt != null
+        && lastCodeSentAt.plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
+      throw new TooManyRequestsException(
+          "Un code vous a déjà été envoyé. Patientez avant d'en redemander un.");
+    }
+  }
+
+  // Anti-bombing partagé : plafond total de renvois pour un même email.
+  private void enforceResendCap(int resendCount) {
+    if (resendCount >= MAX_RESEND) {
+      throw new TooManyRequestsException(
+          "Trop de demandes d'envoi pour cet email. Réessayez plus tard.");
+    }
   }
 
   private String extractDomain(String email) {
     return email.substring(email.indexOf('@') + 1);
+  }
+
+  // Autorise le domaine exact OU un sous-domaine d'un domaine d'établissement autorisé.
+  // On remonte label par label en testant l'égalité EXACTE à chaque frontière de label :
+  // "etu.usherbrooke.ca" matche "usherbrooke.ca", mais jamais "evilusherbrooke.ca" ni
+  // "usherbrooke.ca.attaquant.com" (aucune comparaison de suffixe naïve, donc pas de faille).
+  private boolean isAllowedDomain(String domain) {
+    String candidate = domain;
+    while (candidate.contains(".")) {
+      if (establishmentRepository.existsByDomainEmail(candidate)) {
+        return true;
+      }
+      candidate = candidate.substring(candidate.indexOf('.') + 1);
+    }
+    return false;
   }
 
   private String normalizeEmail(String email) {

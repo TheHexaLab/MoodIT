@@ -45,16 +45,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     String path = request.getRequestURI();
 
-    // Laisser passer les routes publiques
+    // Empêche un client d'injecter lui-même l'identité : on neutralise tout
+    // X-User-Email entrant, sur TOUTES les routes (publiques comprises).
+    HttpServletRequest sanitized = new StrippedHeaderRequest(request, "X-User-Email");
+
+    // Laisser passer les routes publiques (avec le header nettoyé)
     for (String publicRoute : getPublicRoutes()) {
       if (path.equals(publicRoute.trim()) || path.startsWith(publicRoute.trim() + "/")) {
-        filterChain.doFilter(request, response);
+        filterChain.doFilter(sanitized, response);
         return;
       }
     }
 
     // Vérifier le header Authorization
-    String authHeader = request.getHeader("Authorization");
+    String authHeader = sanitized.getHeader("Authorization");
     if (authHeader == null || !authHeader.startsWith("Bearer ")) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       response.getWriter().write("Token manquant");
@@ -99,9 +103,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       return;
     }
 
-    // Ajouter l'email dans le header pour les services en aval
-    request = new WrappedRequest(request, claims.getSubject());
-    filterChain.doFilter(request, response);
+    // Ajouter l'email (issu du JWT) dans le header pour les services en aval.
+    // On enveloppe `sanitized` pour que toute valeur cliente soit déjà écrasée.
+    HttpServletRequest authenticated = new WrappedRequest(sanitized, claims.getSubject());
+    filterChain.doFilter(authenticated, response);
   }
 
   private SecretKey getSigningKey() {

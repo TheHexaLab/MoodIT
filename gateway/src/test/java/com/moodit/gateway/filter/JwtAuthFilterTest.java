@@ -124,6 +124,41 @@ class JwtAuthFilterTest {
   }
 
   @Test
+  void forgedEmailHeader_isOverwrittenByJwtSubject() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.addHeader("X-User-Email", "admin@usherbrooke.ca"); // tentative d'usurpation
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    // Singulier et pluriel doivent refléter le JWT, pas la valeur cliente.
+    assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("user@usherbrooke.ca");
+    assertThat(java.util.Collections.list(forwarded.getHeaders("X-User-Email")))
+        .containsExactly("user@usherbrooke.ca");
+  }
+
+  @Test
+  void forgedEmailHeader_isStrippedOnPublicRoute() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/auth/login");
+    req.addHeader("X-User-Email", "admin@usherbrooke.ca"); // injecté par le client
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    // Aucune valeur cliente ne doit fuiter en aval sur une route publique.
+    assertThat(forwarded.getHeader("X-User-Email")).isNull();
+    assertThat(forwarded.getHeaders("X-User-Email").hasMoreElements()).isFalse();
+    assertThat(java.util.Collections.list(forwarded.getHeaderNames()))
+        .doesNotContain("X-User-Email");
+  }
+
+  @Test
   void validButRevokedToken_returns401() throws Exception {
     stubValidate(false, false); // /auth/validate renvoie false
     MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");

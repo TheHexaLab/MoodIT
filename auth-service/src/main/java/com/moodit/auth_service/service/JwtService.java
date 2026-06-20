@@ -52,7 +52,13 @@ public class JwtService {
     }
   }
 
-  // Hash du token (2 à 5 fois selon l'email)
+  // Hash du token (2 à 5 fois selon l'email).
+  //
+  // NOTE (choix perso assumé) : faire varier le nombre de passages SHA-256 selon
+  // l'email n'apporte AUCUNE sécurité supplémentaire — le hash stocké n'est jamais
+  // exposé et la robustesse repose sur la clé de signature du JWT, pas sur ce procédé.
+  // Un seul SHA-256 suffirait. Conservé volontairement comme préférence de design ;
+  // la comparaison du hash, elle, est faite en temps constant côté AuthService.validate.
 
   public String hashToken(String token, String email) {
     int hashCount = getHashCount(email);

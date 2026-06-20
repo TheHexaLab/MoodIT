@@ -93,7 +93,7 @@ POST /auth/verify-2fa  { email, code }
 | **Verrou 2FA par compte** (5 codes erronés → blocage 15 min) | auth-service (`AuthService`) | Brute-force du **code à 6 chiffres** |
 
 > **Pas de rate limit par IP.** La spécification du projet interdit de conserver l'IP en mémoire :
-> le filtre `RateLimitFilter` (gateway) est donc **désactivé** (commenté). Les verrous ci-dessus
+> le filtre de rate limiting (gateway) a donc été **retiré**. Les verrous ci-dessus
 > comptent **par compte**, ce qui résiste au changement d'IP — au prix de ne pas voir un attaquant
 > qui balaie *plein* de comptes (spraying) ; un CAPTCHA serait le complément pour ce cas.
 
@@ -162,11 +162,10 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 
 | Classe | Rôle |
 |---|---|
-| `GatewayApplication` | Point d'entrée Spring Boot + endpoint de test `/gateway/test`. |
-| `GatewayConfig` | Enregistre les filtres servlet. Seul `JwtAuthFilter` est actif (l'enregistrement de `RateLimitFilter` est commenté). |
-| `RateLimitFilter` | **Désactivé (commenté).** Faisait du rate limiting par IP (Bucket4j + Caffeine) ; retiré car la spécification interdit de conserver l'IP en mémoire. Remplacé par les verrous par compte (auth-service). |
+| `GatewayApplication` | Point d'entrée Spring Boot. |
+| `GatewayConfig` | Enregistre les filtres servlet. Seul `JwtAuthFilter` est actif. Le rate limiting par IP a été retiré (la spécification interdit de conserver l'IP en mémoire) et remplacé par un verrou de connexion par compte dans l'auth-service. |
 | `JwtAuthFilter` | Laisse passer les routes publiques ; sinon valide le JWT localement puis délègue à `/auth/validate` ; injecte `X-User-Email` pour les services en aval ; fail-closed (503) si l'auth-service est injoignable. |
-| `WrappedRequest` | Wrapper de requête qui ajoute le header `X-User-Email` (l'email extrait du token). |
+| `WrappedRequest` | Wrapper de requête qui force le header `X-User-Email` (l'email extrait du token) sur les accès singulier et pluriel. |
 | `SecurityConfig` | Spring Security du Gateway (stateless, CSRF off). |
 
 ---
@@ -232,8 +231,7 @@ cd frontend;     npm.cmd run lint;   cd ..
 ### `gateway`
 | Classe | Type | Ce qu'elle vérifie |
 |---|---|---|
-| ~~`RateLimitFilterTest`~~ | — | **Désactivé (commenté)** en même temps que `RateLimitFilter` (plus de rate limit par IP). |
-| `JwtAuthFilterTest` | Unitaire (`RestClient` mocké) | route publique sans token ; token absent → 401 ; signature invalide → 401 ; token valide+actif → passe et injecte `X-User-Email` ; token révoqué → 401 ; auth-service injoignable → 503. |
+| `JwtAuthFilterTest` | Unitaire (`RestClient` mocké) | route publique sans token ; token absent → 401 ; signature invalide → 401 ; token valide+actif → passe et injecte `X-User-Email` ; token révoqué → 401 ; auth-service injoignable → 503 ; header `X-User-Email` forgé écrasé/supprimé. |
 | `GatewayApplicationTests` | Contexte | `contextLoads`. |
 
 > Tous les tests ajoutés sont **autonomes** (aucune BD ni SMTP requis), sauf les `contextLoads`

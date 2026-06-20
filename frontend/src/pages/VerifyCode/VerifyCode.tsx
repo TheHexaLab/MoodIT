@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import styles from './VerifyCode.module.css';
 import { useTheme } from '../../helpers/theme';
+import { saveToken } from '../../helpers/auth';
+import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 
 type Mode = 'email' | '2fa';
@@ -24,6 +26,14 @@ export default function VerifyCode() {
 
   const isEmailVerification = mode === 'email';
 
+  // Accès direct / rafraîchissement : location.state est null, donc email est vide. On ne peut
+  // rien vérifier sans email -> on renvoie vers le login plutôt que d'envoyer une requête vide.
+  useEffect(() => {
+    if (!email) {
+      navigate('/login', { replace: true });
+    }
+  }, [email, navigate]);
+
   // Compte à rebours du cooldown de renvoi (aligné sur le délai serveur de 60 s).
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -41,29 +51,17 @@ export default function VerifyCode() {
 
     setSubmitting(true);
     try {
-      const endpoint = isEmailVerification ? '/auth/verify-email' : '/auth/verify-2fa';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.message || 'Code invalide');
-        return;
-      }
-
       if (isEmailVerification) {
+        await verifyEmail(email, code);
         setSuccess(true);
       } else {
-        // 2FA — stocker le token et rediriger
-        localStorage.setItem('moodit_token', data.token);
+        // 2FA — stocker le token (via le helper, source unique de la clé) et rediriger
+        const data = await verify2FA(email, code);
+        saveToken(data.token);
         navigate('/');
       }
-    } catch {
-      setError('Erreur de connexion au serveur');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {
       setSubmitting(false);
     }
@@ -75,26 +73,20 @@ export default function VerifyCode() {
     setResendMsg('');
     setResending(true);
     try {
-      const res = await fetch('/auth/resend-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, mode }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setError(data.message || 'Impossible de renvoyer le code');
-        return;
-      }
-
+      await resendCode(email, mode);
       setResendMsg('Un nouveau code a été envoyé.');
       setCooldown(60);
-    } catch {
-      setError('Erreur de connexion au serveur');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {
       setResending(false);
     }
+  }
+
+  // Évite d'afficher un instant le formulaire cassé (email vide) avant que la redirection
+  // ci-dessus ne s'applique.
+  if (!email) {
+    return null;
   }
 
   return (
@@ -142,6 +134,8 @@ export default function VerifyCode() {
                 <div className={styles.inputWrap}>
                   <input
                     type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
                     value={code}
                     maxLength={6}
                     placeholder="123456"

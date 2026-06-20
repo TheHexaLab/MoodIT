@@ -5,6 +5,8 @@ package com.moodit.auth_service.controller;
 import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
+import com.moodit.auth_service.dto.ResendCodeRequest;
+import com.moodit.auth_service.dto.VerifyCodeRequest;
 import com.moodit.auth_service.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,23 +33,29 @@ public class AuthController {
   }
 
   @PostMapping("/validate")
-  public ResponseEntity<Boolean> validate(@RequestHeader("Authorization") String authHeader) {
-    String token = authHeader.replace("Bearer ", "");
-    return ResponseEntity.ok(authService.validate(token));
+  public ResponseEntity<Boolean> validate(
+      @RequestHeader(value = "Authorization", required = false) String authHeader) {
+    // Retire uniquement le préfixe "Bearer " (cohérent avec le gateway, JwtAuthFilter).
+    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+      return ResponseEntity.ok(false);
+    }
+    return ResponseEntity.ok(authService.validate(authHeader.substring(7)));
   }
 
   @PostMapping("/verify-email")
-  public ResponseEntity<Map<String, String>> verifyEmail(@RequestBody Map<String, String> body) {
-    return ResponseEntity.ok(authService.verifyEmail(body.get("email"), body.get("code")));
+  public ResponseEntity<Map<String, String>> verifyEmail(
+      @Valid @RequestBody VerifyCodeRequest req) {
+    return ResponseEntity.ok(authService.verifyEmail(req.getEmail(), req.getCode()));
   }
 
   @PostMapping("/verify-2fa")
-  public ResponseEntity<AuthResponse> verify2FA(@RequestBody Map<String, String> body) {
-    return ResponseEntity.ok(authService.verify2FA(body.get("email"), body.get("code")));
+  public ResponseEntity<AuthResponse> verify2FA(@Valid @RequestBody VerifyCodeRequest req) {
+    return ResponseEntity.ok(authService.verify2FA(req.getEmail(), req.getCode()));
   }
 
   @PostMapping("/resend-code")
-  public ResponseEntity<Map<String, String>> resendCode(@RequestBody Map<String, String> body) {
-    return ResponseEntity.ok(authService.resendCode(body.get("email"), body.get("mode")));
+  public ResponseEntity<Map<String, String>> resendCode(
+      @Valid @RequestBody ResendCodeRequest req) {
+    return ResponseEntity.ok(authService.resendCode(req.getEmail(), req.getMode()));
   }
 }

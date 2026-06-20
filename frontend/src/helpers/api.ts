@@ -70,3 +70,48 @@ export async function login(payload: { email: string; password: string }): Promi
   // (2FA requise). Le token est sauvegardé après /auth/verify-2fa.
   return res.json();
 }
+
+export async function verifyEmail(email: string, code: string): Promise<{ message: string }> {
+  const res = await fetch('/auth/verify-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || 'Code invalide');
+  }
+
+  return res.json();
+}
+
+export async function verify2FA(email: string, code: string): Promise<AuthResponse> {
+  const res = await fetch('/auth/verify-2fa', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || 'Code invalide');
+  }
+
+  return res.json();
+}
+
+export async function resendCode(email: string, mode: string): Promise<{ message: string }> {
+  const res = await fetch('/auth/resend-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, mode }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || 'Impossible de renvoyer le code');
+  }
+
+  return res.json();
+}

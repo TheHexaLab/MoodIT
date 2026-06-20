@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { register } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 import { EyeIcon } from '../../assets/eye';
+import logo from '../../assets/Logo.png';
 import { Link, useNavigate } from 'react-router-dom';
+import { classifyServerError } from '../../helpers/serverError';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,7 +23,7 @@ export default function Register() {
   const { theme, toggleTheme } = useTheme();
   const [username, setUsername] = useState('');
   const [firstName, setFirstName] = useState('');
-  const [name, setName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,20 +43,14 @@ export default function Register() {
     return 2;
   }
 
-  // Associe un message d'erreur serveur au bon champ (par mots-clés).
+  // Associe un message d'erreur serveur au bon champ (logique de mapping mutualisée).
   function mapServerError(message: string) {
-    const m = message.toLowerCase();
-    if (m.includes('utilisateur')) {
+    const field = classifyServerError(message);
+    if (field === 'username') {
       setFieldErrors({ username: message });
-    } else if (
-      m.includes('e-mail') ||
-      m.includes('email') ||
-      m.includes('adresse') ||
-      m.includes('domaine') ||
-      m.includes('courriel')
-    ) {
+    } else if (field === 'email') {
       setFieldErrors({ email: message });
-    } else if (m.includes('mot de passe')) {
+    } else if (field === 'password') {
       setFieldErrors({ password: message });
     } else {
       setServerError(message);
@@ -68,7 +64,7 @@ export default function Register() {
     const errors: FieldErrors = {};
     if (!username) errors.username = 'Requis';
     if (!firstName) errors.firstName = 'Requis';
-    if (!name) errors.lastName = 'Requis';
+    if (!lastName) errors.lastName = 'Requis';
     if (!email) errors.email = 'Requis';
     else if (!EMAIL_REGEX.test(email)) errors.email = 'Format d’e-mail invalide';
     if (!password) errors.password = 'Requis';
@@ -85,7 +81,7 @@ export default function Register() {
       await register({
         username,
         firstName,
-        lastName: name,
+        lastName,
         email,
         password,
       });
@@ -105,7 +101,7 @@ export default function Register() {
         <div className={styles.bubble3} />
         <div className={styles.brandInner}>
           <div className={styles.logoWrapper}>
-            <img src="/Logo.png" alt="Logo" />
+            <img src={logo} alt="Logo MoodIT" />
           </div>
           <h1 className={styles.brandTitle}>MoodIT</h1>
           <p className={styles.brandTagline}>Parce que Moodle, c'était pas assez chaotique.</p>
@@ -123,7 +119,6 @@ export default function Register() {
         </button>
 
         <div className={styles.card}>
-          <>
               <header className={styles.cardHeader}>
                 <h2>Créer un compte</h2>
                 <p>Rejoignez votre espace MoodIT</p>
@@ -143,6 +138,7 @@ export default function Register() {
                 >
                   <input
                     type="text"
+                    autoComplete="username"
                     value={username}
                     placeholder="ex : RKarine"
                     onChange={(e) => setUsername(e.target.value)}
@@ -162,6 +158,7 @@ export default function Register() {
                 >
                   <input
                     type="text"
+                    autoComplete="given-name"
                     value={firstName}
                     placeholder="ex: Karine"
                     onChange={(e) => setFirstName(e.target.value)}
@@ -181,9 +178,10 @@ export default function Register() {
                 >
                   <input
                     type="text"
-                    value={name}
+                    autoComplete="family-name"
+                    value={lastName}
                     placeholder="ex: Roussel"
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setLastName(e.target.value)}
                   />
                 </div>
               </div>
@@ -200,6 +198,7 @@ export default function Register() {
                 >
                   <input
                     type="email"
+                    autoComplete="email"
                     value={email}
                     placeholder="ex: Karine_Roussel@usherbrooke.ca"
                     onChange={(e) => setEmail(e.target.value)}
@@ -228,6 +227,7 @@ export default function Register() {
                 >
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
                     value={password}
                     placeholder="Choisissez un mot de passe"
                     onChange={(e) => setPassword(e.target.value)}
@@ -294,7 +294,6 @@ export default function Register() {
               <p className={styles.loginLink}>
                 Déjà un compte ? <Link to="/login">Se connecter</Link>
               </p>
-          </>
         </div>
 
         <footer className={styles.pageFooter}>

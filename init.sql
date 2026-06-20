@@ -48,7 +48,7 @@ CREATE TABLE User_(
 -- tant que le code n'est pas confirmé (anti-flooding de la table des comptes).
 CREATE TABLE Pending_Registration(
    id SERIAL,
-   username VARCHAR(64) NOT NULL,
+   username VARCHAR(64) NOT NULL UNIQUE,
    first_name VARCHAR(128) NOT NULL,
    last_name VARCHAR(128) NOT NULL,
    email VARCHAR(256) NOT NULL UNIQUE,

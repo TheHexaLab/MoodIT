@@ -13,9 +13,9 @@ import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
-import com.moodit.auth_service.exception.EmailAlreadyUsedException;
 import com.moodit.auth_service.exception.InvalidCredentialsException;
 import com.moodit.auth_service.exception.InvalidVerificationCodeException;
+import com.moodit.auth_service.exception.NotFoundException;
 import com.moodit.auth_service.exception.TooManyRequestsException;
 import com.moodit.auth_service.exception.UsernameAlreadyUsedException;
 import com.moodit.auth_service.model.PendingRegistration;
@@ -24,6 +24,7 @@ import com.moodit.auth_service.repository.EstablishmentRepository;
 import com.moodit.auth_service.repository.PendingRegistrationRepository;
 import com.moodit.auth_service.repository.UserRepository;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -54,6 +56,21 @@ class AuthServiceTest {
     ReflectionTestUtils.setField(authService, "pepper", PEPPER);
   }
 
+  // Réplique du pré-hash HMAC-SHA256 fait par AuthService.peppered() : permet de stubber
+  // encode()/matches() avec la valeur réellement transmise à BCrypt.
+  private static String peppered(String rawPassword) {
+    try {
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(
+          new javax.crypto.spec.SecretKeySpec(
+              PEPPER.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+      byte[] h = mac.doFinal(rawPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return java.util.Base64.getEncoder().encodeToString(h);
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
   private RegisterRequest registerRequest() {
     RegisterRequest r = new RegisterRequest();
     r.setUsername("rkarine");
@@ -74,7 +91,7 @@ class AuthServiceTest {
     when(userRepository.existsByUsername("rkarine")).thenReturn(false);
     when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
     when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(true);
-    when(passwordEncoder.encode("Sup3rPass!" + PEPPER)).thenReturn("hashed");
+    when(passwordEncoder.encode(peppered("Sup3rPass!"))).thenReturn("hashed");
 
     authService.register(req);
 
@@ -89,19 +106,29 @@ class AuthServiceTest {
   }
 
   @Test
-  void register_emailAlreadyUsed_throws() {
+  void register_emailAlreadyUsed_returnsGenericSuccess_andNotifiesOwner() {
+    // Anti-énumération : un email déjà pris ne doit PAS renvoyer 409, mais la même réponse
+    // qu'un vrai succès, en prévenant le propriétaire hors-bande.
     RegisterRequest req = registerRequest();
+    when(pendingRepository.findByEmail("karine.roussel@usherbrooke.ca"))
+        .thenReturn(Optional.empty());
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false);
+    when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
+    when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(true);
     when(userRepository.existsByEmail("karine.roussel@usherbrooke.ca")).thenReturn(true);
 
-    assertThatThrownBy(() -> authService.register(req))
-        .isInstanceOf(EmailAlreadyUsedException.class);
+    Map<String, String> res = authService.register(req);
+
+    assertThat(res.get("message")).contains("Vérifiez votre email");
+    verify(emailService).sendAccountAlreadyExists("karine.roussel@usherbrooke.ca");
+    // Aucune inscription en attente créée, aucun code de vérification envoyé.
     verify(pendingRepository, never()).save(any());
+    verify(emailService, never()).sendVerificationCode(anyString(), anyString());
   }
 
   @Test
   void register_usernameAlreadyUsed_throws() {
     RegisterRequest req = registerRequest();
-    when(userRepository.existsByEmail(anyString())).thenReturn(false);
     when(pendingRepository.findByEmail(anyString())).thenReturn(Optional.empty());
     when(userRepository.existsByUsername("rkarine")).thenReturn(true);
 
@@ -112,11 +139,44 @@ class AuthServiceTest {
   @Test
   void register_domainNotAllowed_throws() {
     RegisterRequest req = registerRequest();
-    when(userRepository.existsByEmail(anyString())).thenReturn(false);
     when(pendingRepository.findByEmail(anyString())).thenReturn(Optional.empty());
     when(userRepository.existsByUsername(anyString())).thenReturn(false);
     when(pendingRepository.findByUsername(anyString())).thenReturn(Optional.empty());
     when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(false);
+
+    assertThatThrownBy(() -> authService.register(req))
+        .isInstanceOf(DomainNotAllowedException.class);
+    verify(pendingRepository, never()).save(any());
+  }
+
+  @Test
+  void register_subdomainOfAllowedDomain_isAccepted() {
+    // etu.usherbrooke.ca n'est pas enregistré, mais usherbrooke.ca l'est -> sous-domaine accepté.
+    RegisterRequest req = registerRequest();
+    req.setEmail("Karine.Roussel@etu.usherbrooke.ca");
+    when(pendingRepository.findByEmail("karine.roussel@etu.usherbrooke.ca"))
+        .thenReturn(Optional.empty());
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false);
+    when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
+    when(establishmentRepository.existsByDomainEmail("etu.usherbrooke.ca")).thenReturn(false);
+    when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(true);
+    when(userRepository.existsByEmail("karine.roussel@etu.usherbrooke.ca")).thenReturn(false);
+    when(passwordEncoder.encode(peppered("Sup3rPass!"))).thenReturn("hashed");
+
+    authService.register(req);
+
+    verify(pendingRepository).save(any(PendingRegistration.class));
+  }
+
+  @Test
+  void register_lookAlikeDomain_isRejected() {
+    // evilusherbrooke.ca n'est PAS un sous-domaine de usherbrooke.ca -> refusé (pas de suffixe naïf).
+    RegisterRequest req = registerRequest();
+    req.setEmail("attacker@evilusherbrooke.ca");
+    when(pendingRepository.findByEmail("attacker@evilusherbrooke.ca")).thenReturn(Optional.empty());
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false);
+    when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
+    when(establishmentRepository.existsByDomainEmail("evilusherbrooke.ca")).thenReturn(false);
 
     assertThatThrownBy(() -> authService.register(req))
         .isInstanceOf(DomainNotAllowedException.class);
@@ -160,6 +220,62 @@ class AuthServiceTest {
         .isInstanceOf(TooManyRequestsException.class);
   }
 
+  @Test
+  void register_concurrentUsernameRace_mapsTo409() {
+    // Le save échoue sur la contrainte UNIQUE (course) ; à la re-vérif le username existe.
+    RegisterRequest req = registerRequest();
+    when(pendingRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+    when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
+    when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(true);
+    when(userRepository.existsByEmail(anyString())).thenReturn(false);
+    when(passwordEncoder.encode(peppered("Sup3rPass!"))).thenReturn("hashed");
+    when(pendingRepository.save(any()))
+        .thenThrow(new DataIntegrityViolationException("duplicate username"));
+    // false au contrôle initial, true à la re-vérif dans le catch.
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false, true);
+
+    assertThatThrownBy(() -> authService.register(req))
+        .isInstanceOf(UsernameAlreadyUsedException.class);
+    verify(emailService, never()).sendVerificationCode(anyString(), anyString());
+  }
+
+  @Test
+  void register_concurrentEmailRace_returnsGenericSuccess_andNotifiesOwner() {
+    // Le save échoue sur la contrainte UNIQUE de l'email : on reste sur la réponse générique
+    // (anti-énumération) et on prévient le propriétaire, sans révéler l'existence.
+    RegisterRequest req = registerRequest();
+    when(pendingRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false);
+    when(pendingRepository.findByUsername("rkarine")).thenReturn(Optional.empty());
+    when(establishmentRepository.existsByDomainEmail("usherbrooke.ca")).thenReturn(true);
+    when(userRepository.existsByEmail(anyString())).thenReturn(false);
+    when(passwordEncoder.encode(peppered("Sup3rPass!"))).thenReturn("hashed");
+    when(pendingRepository.save(any()))
+        .thenThrow(new DataIntegrityViolationException("duplicate email"));
+
+    Map<String, String> res = authService.register(req);
+
+    assertThat(res.get("message")).contains("Vérifiez votre email");
+    verify(emailService).sendAccountAlreadyExists("karine.roussel@usherbrooke.ca");
+    verify(emailService, never()).sendVerificationCode(anyString(), anyString());
+  }
+
+  @Test
+  void verifyEmail_concurrentUsernameRace_mapsTo409() {
+    // Insert User_ rejeté par la contrainte UNIQUE (course) ; le username existe à la re-vérif.
+    when(pendingRepository.findByEmail("karine.roussel@usherbrooke.ca"))
+        .thenReturn(Optional.of(validPending()));
+    when(userRepository.existsByEmail(anyString())).thenReturn(false);
+    when(userRepository.existsByUsername("rkarine")).thenReturn(false, true);
+    when(userRepository.save(any()))
+        .thenThrow(new DataIntegrityViolationException("duplicate username"));
+
+    assertThatThrownBy(
+            () -> authService.verifyEmail("karine.roussel@usherbrooke.ca", "123456"))
+        .isInstanceOf(UsernameAlreadyUsedException.class);
+    verify(pendingRepository, never()).delete(any());
+  }
+
   // ----- login -----
 
   private User verifiedUser() {
@@ -181,6 +297,9 @@ class AuthServiceTest {
 
     assertThatThrownBy(() -> authService.login(req))
         .isInstanceOf(InvalidCredentialsException.class);
+    // Anti-timing : un BCrypt factice est exécuté même quand le compte est introuvable,
+    // pour que la réponse ne soit pas plus rapide qu'un mauvais mot de passe.
+    verify(passwordEncoder).matches(eq(peppered("x")), anyString());
   }
 
   @Test
@@ -189,7 +308,7 @@ class AuthServiceTest {
     req.setEmail("karine.roussel@usherbrooke.ca");
     req.setPassword("wrong");
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(verifiedUser()));
-    when(passwordEncoder.matches("wrong" + PEPPER, "storedHash")).thenReturn(false);
+    when(passwordEncoder.matches(peppered("wrong"), "storedHash")).thenReturn(false);
 
     assertThatThrownBy(() -> authService.login(req))
         .isInstanceOf(InvalidCredentialsException.class);
@@ -203,7 +322,7 @@ class AuthServiceTest {
     req.setPassword("Sup3rPass!");
     when(userRepository.findByEmail("karine.roussel@usherbrooke.ca"))
         .thenReturn(Optional.of(verifiedUser()));
-    when(passwordEncoder.matches("Sup3rPass!" + PEPPER, "storedHash")).thenReturn(true);
+    when(passwordEncoder.matches(peppered("Sup3rPass!"), "storedHash")).thenReturn(true);
 
     AuthResponse res = authService.login(req);
 
@@ -220,7 +339,7 @@ class AuthServiceTest {
     User u = verifiedUser();
     u.setFailedLoginAttempts(4); // la prochaine tentative ratée atteint le plafond
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
-    when(passwordEncoder.matches("wrong" + PEPPER, "storedHash")).thenReturn(false);
+    when(passwordEncoder.matches(peppered("wrong"), "storedHash")).thenReturn(false);
 
     assertThatThrownBy(() -> authService.login(req))
         .isInstanceOf(InvalidCredentialsException.class);
@@ -306,6 +425,18 @@ class AuthServiceTest {
         .isInstanceOf(InvalidVerificationCodeException.class);
   }
 
+  // ----- verifyDev -----
+
+  @Test
+  void verifyDev_pendingNotFound_throwsNotFound() {
+    // Renvoie une 404 gérée (NotFoundException) au lieu d'un RuntimeException brut (500).
+    when(userRepository.existsByUsername("ghost")).thenReturn(false);
+    when(pendingRepository.findByUsername("ghost")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> authService.verifyDev("ghost"))
+        .isInstanceOf(NotFoundException.class);
+  }
+
   // ----- verify2FA -----
 
   @Test
@@ -357,11 +488,15 @@ class AuthServiceTest {
     req.setPassword("Sup3rPass!");
     User u = verifiedUser();
     u.setVerificationLockedUntil(LocalDateTime.now().plusMinutes(10)); // blocage encore actif
+    u.setFailedLoginAttempts(3); // compteur non nul avant le login
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
-    when(passwordEncoder.matches("Sup3rPass!" + PEPPER, "storedHash")).thenReturn(true);
+    when(passwordEncoder.matches(peppered("Sup3rPass!"), "storedHash")).thenReturn(true);
 
     assertThatThrownBy(() -> authService.login(req))
         .isInstanceOf(TooManyRequestsException.class);
     verify(emailService, never()).send2FACode(anyString(), anyString());
+    // Le verrou 2FA est testé AVANT toute mutation : aucun reset incohérent / non persisté.
+    assertThat(u.getFailedLoginAttempts()).isEqualTo(3);
+    verify(userRepository, never()).save(any(User.class));
   }
 }

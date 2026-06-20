@@ -2,8 +2,11 @@ package com.moodit.auth_service.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.moodit.auth_service.dto.RegisterRequest;
@@ -56,8 +59,11 @@ class AuthControllerTest {
         .andExpect(status().isBadRequest());
   }
 
+  // EmailAlreadyUsedException n'est plus levée par register (anti-énumération : register
+  // renvoie un succès générique). Elle subsiste comme garde anti-course dans verifyEmail.
+  // Ce test couvre uniquement le mapping de l'exception -> 409 par le GlobalExceptionHandler.
   @Test
-  void register_emailAlreadyUsed_returns409() throws Exception {
+  void emailAlreadyUsedException_mapsTo409() throws Exception {
     when(authService.register(any())).thenThrow(new EmailAlreadyUsedException());
 
     mockMvc
@@ -82,6 +88,64 @@ class AuthControllerTest {
     mockMvc
         .perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void validate_validBearer_stripsOnlyPrefix_andDelegates() throws Exception {
+    // Le token passé au service doit être exactement substring(7), sans toucher au reste.
+    when(authService.validate("abc.def.ghi")).thenReturn(true);
+
+    mockMvc
+        .perform(post("/auth/validate").header("Authorization", "Bearer abc.def.ghi"))
+        .andExpect(status().isOk())
+        .andExpect(content().string("true"));
+  }
+
+  @Test
+  void validate_missingHeader_returnsFalse_withoutCallingService() throws Exception {
+    mockMvc
+        .perform(post("/auth/validate"))
+        .andExpect(status().isOk())
+        .andExpect(content().string("false"));
+
+    verify(authService, never()).validate(anyString());
+  }
+
+  @Test
+  void validate_malformedHeader_returnsFalse_withoutCallingService() throws Exception {
+    mockMvc
+        .perform(post("/auth/validate").header("Authorization", "abc.def.ghi"))
+        .andExpect(status().isOk())
+        .andExpect(content().string("false"));
+
+    verify(authService, never()).validate(anyString());
+  }
+
+  @Test
+  void verify2FA_malformedCode_returns400() throws Exception {
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"12\"}"; // pas 6 chiffres
+
+    mockMvc
+        .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void verifyEmail_missingEmail_returns400() throws Exception {
+    String body = "{\"code\":\"123456\"}"; // email manquant
+
+    mockMvc
+        .perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void resendCode_invalidMode_returns400() throws Exception {
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"mode\":\"sms\"}"; // mode hors {email,2fa}
+
+    mockMvc
+        .perform(post("/auth/resend-code").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

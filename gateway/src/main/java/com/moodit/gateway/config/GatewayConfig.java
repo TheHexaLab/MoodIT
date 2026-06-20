@@ -1,4 +1,8 @@
 // Enregistre les filtres servlet du Gateway. Seul JwtAuthFilter est actif.
+//
+// Note : le rate limiting par IP a été retiré volontairement — la spécification du projet
+// interdit de conserver l'IP en mémoire. Il est remplacé par un verrou de connexion PAR
+// COMPTE dans l'auth-service (AuthService.login).
 
 package com.moodit.gateway.config;
 
@@ -9,17 +13,6 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class GatewayConfig {
-
-  // DÉSACTIVÉ : le rate limiting par IP gardait l'IP en mémoire, ce que la spécification
-  // du projet interdit. Remplacé par un verrou de connexion par compte (auth-service).
-  // @Bean
-  // public FilterRegistrationBean<RateLimitFilter> rateLimitRegistration(RateLimitFilter filter) {
-  //   FilterRegistrationBean<RateLimitFilter> registration = new FilterRegistrationBean<>();
-  //   registration.setFilter(filter);
-  //   registration.addUrlPatterns("/*");
-  //   registration.setOrder(0);
-  //   return registration;
-  // }
 
   @Bean
   public FilterRegistrationBean<JwtAuthFilter> jwtFilter(JwtAuthFilter filter) {
