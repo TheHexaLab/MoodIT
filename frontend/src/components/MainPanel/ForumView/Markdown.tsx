@@ -3,7 +3,9 @@ import { Highlight, type PrismTheme } from 'prism-react-renderer';
 import { Copy } from '../../../assets/Copy';
 import { Check } from '../../../assets/Check';
 import './prismLanguages'; // effet de bord : enregistre les grammaires Prism
-import './Markdown.module.css'; // styles globaux (selecteurs par role/element)
+import './Markdown.css'; // styles globaux (sélecteurs par role/element) — fichier .css
+// SIMPLE (pas .module.css) : un .module.css importé pour effet de bord est tree-shaké
+// au build de prod (map de classes inutilisée), donc ses styles globaux disparaissent.
 
 /**
  * Theme de coloration : les couleurs sont des variables CSS (definies dans
