@@ -7,8 +7,6 @@ import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { type Program } from '../../types/domain.ts';
-// DEV : clic droit sur l'icone de l'app → menu de test des WebSockets.
-import { WsTestContextMenu } from '../../dev/WsTestContextMenu.tsx';
 
 // Entité Program ré-exportée depuis le modèle de domaine (source unique).
 export type { Program };
@@ -158,32 +156,29 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
 
   return (
     <nav className={styles.rail} aria-label="Programme">
-      {/* Icône applicative (meme gabarit que le programme actif).
-          Clic gauche = bascule le theme ; clic droit = menu de test WS (DEV). */}
-      <WsTestContextMenu>
-        <div className={styles.appIcon} aria-label="MoodIT">
-          <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-            <defs>
-              <linearGradient
-                id="pg-grad"
-                x1="0"
-                y1="0"
-                x2="36"
-                y2="36"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop offset="0%" stopColor="#2dd4bf" />
-                <stop offset="100%" stopColor="#0d9488" />
-              </linearGradient>
-            </defs>
-            <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
-            {/* Pictogramme minimal type message */}
-            <circle cx="13" cy="18" r="2" fill="white" />
-            <circle cx="18" cy="18" r="2" fill="white" />
-            <circle cx="23" cy="18" r="2" fill="white" />
-          </svg>
-        </div>
-      </WsTestContextMenu>
+      {/* Icône applicative (meme gabarit que le programme actif). */}
+      <div className={styles.appIcon} aria-label="MoodIT">
+        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient
+              id="pg-grad"
+              x1="0"
+              y1="0"
+              x2="36"
+              y2="36"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="#2dd4bf" />
+              <stop offset="100%" stopColor="#0d9488" />
+            </linearGradient>
+          </defs>
+          <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
+          {/* Pictogramme minimal type message */}
+          <circle cx="13" cy="18" r="2" fill="white" />
+          <circle cx="18" cy="18" r="2" fill="white" />
+          <circle cx="23" cy="18" r="2" fill="white" />
+        </svg>
+      </div>
 
       {/* Séparateur visuel */}
       <span className={styles.divider} />
