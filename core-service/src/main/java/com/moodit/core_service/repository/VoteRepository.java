@@ -1,18 +1,12 @@
 package com.moodit.core_service.repository;
-
-//Model
 import com.moodit.core_service.model.User;
-
+import com.moodit.core_service.model.Vote;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface UserRepository extends JpaRepository<User, Integer> {
-
-    Optional<User> findByUsername(String username);
-    List<User> findByPrograms_IdAndRoles_Id(Integer programId, Integer roleId);
-
+public interface VoteRepository extends JpaRepository<Vote, Integer> {
+    Optional<Vote> findByUserIdAndPostId(Integer userId, Integer postId);
 }

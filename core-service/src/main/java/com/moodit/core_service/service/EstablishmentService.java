@@ -1,7 +1,7 @@
 package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
-import com.moodit.core_service.exception.EstablishmentsNotFoundException;
+import com.moodit.core_service.exception.EstablishmentNotFoundException;
 import com.moodit.core_service.model.Establishment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.repository.EstablishmentRepository;
@@ -57,7 +57,7 @@ public class EstablishmentService {
     public List<ProgramDTO> getProgramsByEstablishment(Integer establishmentId) {
 
         Establishment est = establishmentRepository.findById(establishmentId)
-                .orElseThrow(EstablishmentsNotFoundException::new);
+                .orElseThrow(EstablishmentNotFoundException::new);
 
         return est.getPrograms()
                 .stream()
@@ -80,7 +80,7 @@ public class EstablishmentService {
     public ProgramDTO addProgramToEstablishment(ProgramCreateInEstablishmentDTO dto) {
 
         Establishment est = establishmentRepository.findById(dto.getEstablishmentId())
-                .orElseThrow(EstablishmentsNotFoundException::new);
+                .orElseThrow(EstablishmentNotFoundException::new);
 
         Program program = new Program();
         program.setName(dto.getName());
@@ -99,7 +99,7 @@ public class EstablishmentService {
             EstablishmentUpdateDTO dto) {
 
         Establishment establishment = establishmentRepository.findById(establishmentId)
-                .orElseThrow(EstablishmentsNotFoundException::new);
+                .orElseThrow(EstablishmentNotFoundException::new);
 
         if (dto.getName() != null) {
             establishment.setName(dto.getName());

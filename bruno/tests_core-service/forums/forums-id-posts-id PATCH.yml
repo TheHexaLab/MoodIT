@@ -1,0 +1,21 @@
+info:
+  name: /forums/id/posts/id PATCH
+  type: http
+  seq: 5
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/forums/1/posts/7"
+  body:
+    type: json
+    data: |-
+      {
+        "content": "Une deuxième réponse au post 1, yes!"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -40,8 +40,24 @@ public class GlobalExceptionHandler {
     }
 
     //Establishments
-    @ExceptionHandler(EstablishmentsNotFoundException.class)
-    public ResponseEntity<String> handleEstablishmentsNotFound(EstablishmentsNotFoundException ex) {
+    @ExceptionHandler(EstablishmentNotFoundException.class)
+    public ResponseEntity<String> handleEstablishmentNotFound(EstablishmentNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND) //Code 404
+                .body(ex.getMessage());
+    }
+
+    //Forum
+    @ExceptionHandler(ForumNotFoundException.class)
+    public ResponseEntity<String> handleForumNotFound(ForumNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND) //Code 404
+                .body(ex.getMessage());
+    }
+
+    //Post
+    @ExceptionHandler(PostNotFoundException.class)
+    public ResponseEntity<String> handlePostNotFound(PostNotFoundException ex) {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND) //Code 404
                 .body(ex.getMessage());
