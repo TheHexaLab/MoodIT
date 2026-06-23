@@ -138,7 +138,7 @@ export function RoleEditorPopup({
       if (user.role_ids.includes(roleId)) return false;
       if (query === '') return true;
       const haystack =
-        `${user.first_name} ${user.last_name} ${user.email} ${user.username}`.toLowerCase();
+        `${user.firstName} ${user.lastName} ${user.email} ${user.username}`.toLowerCase();
       return haystack.includes(query);
     });
   }
@@ -244,14 +244,14 @@ export function RoleEditorPopup({
                               disabled={pending !== null}
                               onClick={() => addUser(role.id, user.id)}
                             >
-                              <span style={{ background: user.avatar_color }}>
-                                <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                              <span style={{ background: user.avatarColor }}>
+                                <span style={{ color: contrastingTextColor(user.avatarColor) }}>
                                   {initials(user)}
                                 </span>
                               </span>
                               <div>
                                 <span>
-                                  {user.first_name} {user.last_name}
+                                  {user.firstName} {user.lastName}
                                 </span>
                                 <span>{user.email}</span>
                               </div>
@@ -270,14 +270,14 @@ export function RoleEditorPopup({
                   {usersFor(role.id).map((user) => (
                     <li key={user.id}>
                       <div>
-                        <span style={{ background: user.avatar_color }}>
-                          <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                        <span style={{ background: user.avatarColor }}>
+                          <span style={{ color: contrastingTextColor(user.avatarColor) }}>
                             {initials(user)}
                           </span>
                         </span>
                         <div>
                           <span>
-                            {user.first_name} {user.last_name}
+                            {user.firstName} {user.lastName}
                           </span>
                           <span>{user.email}</span>
                         </div>

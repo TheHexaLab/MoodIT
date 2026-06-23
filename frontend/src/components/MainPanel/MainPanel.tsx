@@ -144,7 +144,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
 
     // 5/6/7 — un canal est sélectionné : on route selon son type.
     switch (channel.type) {
-      case 'forum': // f_type 'Thread'
+      case 'forum': // fType 'Thread'
         return (
           <ForumView
             key={`${channel.type}-${channel.id}`}
@@ -162,7 +162,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
         );
       case 'quiz':
         return <QuizView course={course} channel={channel} />;
-      case 'text': // f_type 'Discussion'
+      case 'text': // fType 'Discussion'
       default:
         return (
           <ChannelView

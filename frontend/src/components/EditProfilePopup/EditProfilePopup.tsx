@@ -40,11 +40,11 @@ export function EditProfilePopup({
   const t = { ...defaultLabels, ...labels };
 
   const username = user.username;
-  const [firstName, setFirstName] = useState(user.first_name);
-  const [lastName, setLastName] = useState(user.last_name);
-  const [avatarColor, setAvatarColor] = useState(user.avatar_color || DEFAULT_PALETTE[0]);
+  const [firstName, setFirstName] = useState(user.firstName);
+  const [lastName, setLastName] = useState(user.lastName);
+  const [avatarColor, setAvatarColor] = useState(user.avatarColor || DEFAULT_PALETTE[0]);
   /** Photo affichée : URL existante (user) ou aperçu local d'une photo choisie. */
-  const [avatarPhoto, setAvatarPhoto] = useState<string | null>(user.avatar_url ?? null);
+  const [avatarPhoto, setAvatarPhoto] = useState<string | null>(user.avatarUrl ?? null);
   /** Fichier de la nouvelle photo choisie (null = aucune nouvelle / retirée). */
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   /** La photo a-t-elle été modifiée par rapport à l'état initial ? */

@@ -9,7 +9,7 @@ export type VoteValue = 1 | 0 | -1;
 
 /**
  * Chargement des sujets d'un forum (API-ready, GET). Renvoie UNIQUEMENT les sujets
- * RACINES (sans leurs reponses) ; chaque racine porte `reply_count`. Les reponses
+ * RACINES (sans leurs reponses) ; chaque racine porte `replyCount`. Les reponses
  * sont ensuite chargees paresseusement, branche par branche (voir `FetchRepliesHandler`).
  */
 export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>;
@@ -17,14 +17,14 @@ export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>
 /**
  * Chargement des reponses DIRECTES (enfants immediats) d'un post (API-ready, GET).
  * Appele quand l'utilisateur deplie un fil : on ne descend qu'un seul niveau a la
- * fois. Chaque enfant renvoye porte a son tour `reply_count` pour ses propres reponses.
+ * fois. Chaque enfant renvoye porte a son tour `replyCount` pour ses propres reponses.
  */
 export type FetchRepliesHandler = (postId: number) => MaybePromise<ForumPost[]>;
 
 /**
  * Publication d'un post (API-ready, POST). Reçoit le contenu, l'id du parent
- * (`post_parent_id`, null pour un sujet racine) et le `clientPostId` (nonce).
- * Peut renvoyer le post persiste (id reel + meme `client_post_id`) qui remplacera
+ * (`postParentId`, null pour un sujet racine) et le `clientPostId` (nonce).
+ * Peut renvoyer le post persiste (id reel + meme `clientPostId`) qui remplacera
  * la version optimiste.
  */
 export type CreatePostHandler = (
@@ -144,7 +144,7 @@ function adjustReplyCount(posts: ForumPost[], parentId: number | null, delta: nu
   if (parentId === null) return posts;
   return mapPost(posts, parentId, (post) => ({
     ...post,
-    reply_count: Math.max(0, (post.reply_count ?? post.replies?.length ?? 0) + delta),
+    replyCount: Math.max(0, (post.replyCount ?? post.replies?.length ?? 0) + delta),
   }));
 }
 
@@ -170,10 +170,10 @@ function findInTree(posts: ForumPost[], id: number): ForumPost | undefined {
   return undefined;
 }
 
-/** Trouve un post par `client_post_id` (reconciliation de l'echo WS). */
+/** Trouve un post par `clientPostId` (reconciliation de l'echo WS). */
 function findByClientId(posts: ForumPost[], clientId: string): ForumPost | undefined {
   for (const post of posts) {
-    if (post.client_post_id === clientId) return post;
+    if (post.clientPostId === clientId) return post;
     if (post.replies?.length) {
       const found = findByClientId(post.replies, clientId);
       if (found) return found;
@@ -196,8 +196,8 @@ function findParentId(posts: ForumPost[], id: number, parent: number | null = nu
 
 /** Pose (ou retire si value=0) le vote de `userId` sur un post. */
 function withVote(post: ForumPost, userId: number, value: VoteValue): ForumPost {
-  const votes = post.votes.filter((v) => v.user_id !== userId);
-  if (value !== 0) votes.push({ user_id: userId, value });
+  const votes = post.votes.filter((v) => v.userId !== userId);
+  if (value !== 0) votes.push({ userId: userId, value });
   return { ...post, votes };
 }
 
@@ -296,7 +296,7 @@ export function useForumThreads({
       const children = fetchReplies ? await fetchReplies(postId) : [];
       if (!mountedRef.current) return true;
       setThreads((prev) =>
-        mapPost(prev, postId, (post) => ({ ...post, replies: children, reply_count: children.length }))
+        mapPost(prev, postId, (post) => ({ ...post, replies: children, replyCount: children.length }))
       );
       return true;
     } catch {
@@ -333,7 +333,7 @@ export function useForumThreads({
   function vote(postId: number, direction: 1 | -1) {
     const post = findInTree(threads, postId);
     if (!post) return;
-    const current = post.votes.find((v) => v.user_id === currentUser.id)?.value ?? 0;
+    const current = post.votes.find((v) => v.userId === currentUser.id)?.value ?? 0;
     const nextValue: VoteValue = current === direction ? 0 : direction;
     const previousVotes = post.votes;
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, currentUser.id, nextValue)));
@@ -354,10 +354,10 @@ export function useForumThreads({
     const tempId = -seqRef.current; // id temporaire negatif, unique pour la cle React
     const optimistic: ForumPost = {
       id: tempId,
-      client_post_id: clientId,
+      clientPostId: clientId,
       title: trimmedTitle || undefined,
       content: trimmedContent,
-      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       author: currentUser,
       votes: [],
       replies: [],
@@ -395,13 +395,13 @@ export function useForumThreads({
     const tempId = -seqRef.current; // id temporaire negatif, unique pour la cle React
     const optimistic: ForumPost = {
       id: tempId,
-      client_post_id: clientId,
+      clientPostId: clientId,
       content: trimmed,
-      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       author: currentUser,
       votes: [],
       replies: [],
-      reply_count: 0,
+      replyCount: 0,
     };
     // La branche est supposee deja chargee (le composant la charge avant de poster) :
     // on insere l'optimiste et on incremente le compteur de reponses du parent.
@@ -451,7 +451,7 @@ export function useForumThreads({
             ...p,
             ...saved,
             replies: saved.replies ?? p.replies,
-            reply_count: saved.reply_count ?? p.reply_count,
+            replyCount: saved.replyCount ?? p.replyCount,
           }))
         );
       }
@@ -483,7 +483,7 @@ export function useForumThreads({
     setThreads((prev) => {
       const existing =
         findInTree(prev, post.id) ??
-        (post.client_post_id ? findByClientId(prev, post.client_post_id) : undefined);
+        (post.clientPostId ? findByClientId(prev, post.clientPostId) : undefined);
       // Reconciliation de l'optimiste : on fusionne l'echo serveur en PRESERVANT les
       // reponses deja chargees et le compteur (l'echo d'une creation ne porte pas le
       // sous-arbre), pour ne pas replier ni vider une branche deja depliee.
@@ -492,7 +492,7 @@ export function useForumThreads({
           ...p,
           ...post,
           replies: post.replies ?? p.replies,
-          reply_count: post.reply_count ?? p.reply_count,
+          replyCount: post.replyCount ?? p.replyCount,
         }));
       }
       // Branche parente pas encore chargee (lazy) : on n'insere pas l'enfant (on

@@ -37,7 +37,7 @@ export type {
 interface ChannelViewProps {
   /** Cours appartenant au canal (contexte d'en-tête). */
   course: Course;
-  /** Canal sélectionné (forum de f_type 'Discussion', rendu comme un canal/chat). */
+  /** Canal sélectionné (forum de fType 'Discussion', rendu comme un canal/chat). */
   channel: CourseChannel;
   /** Utilisateur connecte : auteur des messages envoyés, et seul à pouvoir
    *  modifier/supprimer ses propres messages. */
@@ -87,14 +87,14 @@ function formatDaySeparator(iso: string): string {
   }).format(date);
 }
 
-/** Nom affiche d'un auteur (first_name + last_name). */
+/** Nom affiche d'un auteur (firstName + lastName). */
 function getAuthorName(author: ChannelMessageAuthor): string {
-  return `${author.first_name} ${author.last_name}`.trim() || author.username;
+  return `${author.firstName} ${author.lastName}`.trim() || author.username;
 }
 
-/** Deux initiales affichées dans l'avatar (first_name + last_name). */
+/** Deux initiales affichées dans l'avatar (firstName + lastName). */
 function getInitials(author: ChannelMessageAuthor): string {
-  const initials = `${author.first_name[0] ?? ''}${author.last_name[0] ?? ''}`.trim();
+  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
   return (initials || author.username[0] || '?').toUpperCase();
 }
 
@@ -105,7 +105,7 @@ function getSnippet(content: string, max = 64): string {
 }
 
 /**
- * État 5 — vue d'un canal de discussion (f_type 'Discussion').
+ * État 5 — vue d'un canal de discussion (fType 'Discussion').
  * Échange libre facon chat : liste des messages + zone de saisie.
  */
 const ChannelView: React.FC<ChannelViewProps> = ({
@@ -271,21 +271,21 @@ const ChannelView: React.FC<ChannelViewProps> = ({
           ) : (
             <ul ref={listRef} onScroll={handleListScroll}>
               {messages.map((message, index) => {
-                const avatarColor = message.author.avatar_color ?? DEFAULT_AVATAR_COLOR;
+                const avatarColor = message.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
                 const authorName = getAuthorName(message.author);
                 const previous = messages[index - 1];
                 const showDateSeparator =
-                  !previous || getDayKey(previous.created_at) !== getDayKey(message.created_at);
+                  !previous || getDayKey(previous.createdAt) !== getDayKey(message.createdAt);
                 // Reference au message parent (réponse), facon Discord.
-                const isReply = message.post_parent_id != null;
+                const isReply = message.postParentId != null;
                 const parent = isReply
-                  ? messagesById.get(message.post_parent_id as number)
+                  ? messagesById.get(message.postParentId as number)
                   : undefined;
                 return (
                   <React.Fragment key={message.id}>
                     {showDateSeparator && (
                       <li role="separator">
-                        <span>{formatDaySeparator(message.created_at)}</span>
+                        <span>{formatDaySeparator(message.createdAt)}</span>
                       </li>
                     )}
                     <li
@@ -310,9 +310,9 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               <span
                                 className={styles.replyRefAvatar}
                                 style={{
-                                  background: parent.author.avatar_color ?? DEFAULT_AVATAR_COLOR,
+                                  background: parent.author.avatarColor ?? DEFAULT_AVATAR_COLOR,
                                   color: contrastingTextColor(
-                                    parent.author.avatar_color ?? DEFAULT_AVATAR_COLOR
+                                    parent.author.avatarColor ?? DEFAULT_AVATAR_COLOR
                                   ),
                                 }}
                               >
@@ -338,7 +338,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                       <div role={editingId === message.id ? "editor" : undefined}>
                         <p>
                           <span>{authorName}</span>
-                          <span>{formatTime(message.created_at)}</span>
+                          <span>{formatTime(message.createdAt)}</span>
                         </p>
                         {editingId === message.id ? (
                           <div>

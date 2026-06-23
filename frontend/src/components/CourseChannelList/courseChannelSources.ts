@@ -39,7 +39,7 @@ export function normalizeCourseChannelsFromSources(sources: CourseChannelSources
   const normalizedForums = sortByPosition(sources.forums ?? []).map((forum) => ({
     id: forum.id,
     name: forum.title,
-    type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.f_type ?? 'Thread'],
+    type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.fType ?? 'Thread'],
     messages: forum.messages,
   }));
 

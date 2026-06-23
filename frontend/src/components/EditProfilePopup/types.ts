@@ -7,7 +7,7 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Utilisateur édité : sous-ensemble de l'entité User (colonnes affichées/éditables). */
 export type ProfileUser = Pick<
   User,
-  'username' | 'first_name' | 'last_name' | 'avatar_color' | 'avatar_url'
+  'username' | 'firstName' | 'lastName' | 'avatarColor' | 'avatarUrl'
 >;
 
 /** Modification de profil (reflète les colonnes éditables de `User_`). */

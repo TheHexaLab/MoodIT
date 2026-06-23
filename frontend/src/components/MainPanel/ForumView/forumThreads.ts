@@ -14,49 +14,49 @@ export type ForumVote = PostVote;
 const me: ForumAuthor = {
   id: 1,
   username: 'jeandubois',
-  first_name: 'Jean',
-  last_name: 'D.',
-  avatar_color: '#1f4799',
+  firstName: 'Jean',
+  lastName: 'D.',
+  avatarColor: '#1f4799',
 };
 const admin: ForumAuthor = {
   id: 10,
   username: 'admin',
-  first_name: 'Admin',
-  last_name: 'Admin',
-  avatar_color: '#8b1a1a',
+  firstName: 'Admin',
+  lastName: 'Admin',
+  avatarColor: '#8b1a1a',
 };
 const rosie: ForumAuthor = {
   id: 2,
   username: 'rosie1234',
-  first_name: 'Rosie',
-  last_name: 'HG',
-  avatar_color: '#0a5cc0',
+  firstName: 'Rosie',
+  lastName: 'HG',
+  avatarColor: '#0a5cc0',
 };
 const mich: ForumAuthor = {
   id: 3,
   username: 'mich1234',
-  first_name: 'Mich',
-  last_name: 'Normand',
-  avatar_color: '#1a6e3c',
+  firstName: 'Mich',
+  lastName: 'Normand',
+  avatarColor: '#1a6e3c',
 };
 const lea: ForumAuthor = {
   id: 4,
   username: 'lea_tremblay',
-  first_name: 'Léa',
-  last_name: 'Tremblay',
-  avatar_color: '#0f766e',
+  firstName: 'Léa',
+  lastName: 'Tremblay',
+  avatarColor: '#0f766e',
 };
 const karim: ForumAuthor = {
   id: 5,
   username: 'karim_b',
-  first_name: 'Karim',
-  last_name: 'Benali',
-  avatar_color: '#7a4e1a',
+  firstName: 'Karim',
+  lastName: 'Benali',
+  avatarColor: '#7a4e1a',
 };
 
 /**
  * Sujets de demonstration, indexes par id de forum (Forum.id).
- * Seuls les forums de f_type 'Thread' sont rendus par ForumView ; voir les
+ * Seuls les forums de fType 'Thread' sont rendus par ForumView ; voir les
  * mocks du dashboard (dashboardData.ts) pour le mapping id ↔ forum.
  */
 const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
@@ -64,7 +64,7 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
   3: [
     {
       id: 101,
-      is_pinned: true,
+      isPinned: true,
       title: 'À lire avant de poser une question 📌',
       content:
         '**Avant de créer un sujet**, vérifie qu\'une question similaire n\'existe pas déjà.\n\n' +
@@ -77,14 +77,14 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
         'Pour une commande isolée, cite-la en ligne comme `valgrind ./main`.\n\n' +
         '> Les sujets bien décrits reçoivent des réponses beaucoup plus vite.\n\n' +
         'Voir le [guide de rédaction](https://example.com/guide) pour les détails.',
-      created_at: '2026-06-01T08:00:00',
+      createdAt: '2026-06-01T08:00:00',
       author: admin,
       votes: [
-        { user_id: 1, value: 1 }, // utilisateur connecte : upvote (apparait en vert)
-        { user_id: 2, value: 1 },
-        { user_id: 3, value: 1 },
-        { user_id: 4, value: 1 },
-        { user_id: 5, value: 1 },
+        { userId: 1, value: 1 }, // utilisateur connecte : upvote (apparait en vert)
+        { userId: 2, value: 1 },
+        { userId: 3, value: 1 },
+        { userId: 4, value: 1 },
+        { userId: 5, value: 1 },
       ],
       replies: [],
     },
@@ -97,13 +97,13 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
         'Voici la boucle de libération :\n\n' +
         '```c\nwhile (node) {\n  free(node);\n  node = node->next;\n}\n```\n\n' +
         'J\'ai l\'impression de libérer deux fois le même nœud — quelqu\'un voit l\'erreur ?',
-      created_at: '2026-06-07T14:12:00',
+      createdAt: '2026-06-07T14:12:00',
       author: me,
       votes: [
-        { user_id: 3, value: 1 },
-        { user_id: 4, value: 1 },
-        { user_id: 5, value: 1 },
-        { user_id: 10, value: 1 },
+        { userId: 3, value: 1 },
+        { userId: 4, value: 1 },
+        { userId: 5, value: 1 },
+        { userId: 10, value: 1 },
       ],
       replies: [
         {
@@ -113,23 +113,23 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
             'Sauvegarde `next` AVANT le `free()` :\n\n' +
             '```c\nwhile (node) {\n  Node *next = node->next;\n  free(node);\n  node = next;\n}\n```\n\n' +
             'Et remets le pointeur à `NULL` après `free()` pour éviter le double-free.',
-          created_at: '2026-06-07T14:48:00',
+          createdAt: '2026-06-07T14:48:00',
           author: mich,
           votes: [
-            { user_id: 1, value: -1 }, // utilisateur connecte : downvote (apparait en rouge)
-            { user_id: 2, value: 1 },
-            { user_id: 4, value: 1 },
-            { user_id: 5, value: 1 },
+            { userId: 1, value: -1 }, // utilisateur connecte : downvote (apparait en rouge)
+            { userId: 2, value: 1 },
+            { userId: 4, value: 1 },
+            { userId: 5, value: 1 },
           ],
           replies: [
             {
               id: 104,
               content: "C'était exactement ça, merci ! 🙏 Le `next` sauvegardé avant le free() a réglé le plantage.",
-              created_at: '2026-06-07T15:10:00',
+              createdAt: '2026-06-07T15:10:00',
               author: rosie,
               votes: [
-                { user_id: 3, value: 1 },
-                { user_id: 10, value: 1 },
+                { userId: 3, value: 1 },
+                { userId: 10, value: 1 },
               ],
               replies: [],
             },
@@ -140,11 +140,11 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
           content:
             'Petit conseil bonus : lance ton binaire sous `valgrind --leak-check=full`, il te pointe ' +
             'la ligne exacte du double-free. Indispensable pour ce labo.',
-          created_at: '2026-06-07T16:02:00',
+          createdAt: '2026-06-07T16:02:00',
           author: me,
           votes: [
-            { user_id: 2, value: 1 },
-            { user_id: 3, value: 1 },
+            { userId: 2, value: 1 },
+            { userId: 3, value: 1 },
           ],
           replies: [],
         },
@@ -156,19 +156,19 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
       content:
         'Je ne trouve pas la grille de correction du labo 4 dans la section ressources. ' +
         'Est-ce normal ou est-ce que je cherche au mauvais endroit ?',
-      created_at: '2026-06-08T09:30:00',
+      createdAt: '2026-06-08T09:30:00',
       author: me,
       votes: [
-        { user_id: 10, value: -1 },
-        { user_id: 5, value: -1 },
+        { userId: 10, value: -1 },
+        { userId: 5, value: -1 },
       ],
       replies: [
         {
           id: 107,
           content: 'Elle sera mise en ligne ce soir, on finalise la pondération des tests automatiques.',
-          created_at: '2026-06-08T10:05:00',
+          createdAt: '2026-06-08T10:05:00',
           author: admin,
-          votes: [{ user_id: 4, value: 1 }],
+          votes: [{ userId: 4, value: 1 }],
           replies: [],
         },
       ],
@@ -181,51 +181,51 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
       content:
         'Fil volontairement profond pour observer le comportement de l’indentation et du filet ' +
         'vertical des réponses au fur et à mesure qu’on descend dans le fil.',
-      created_at: '2026-06-08T18:00:00',
+      createdAt: '2026-06-08T18:00:00',
       author: karim,
-      votes: [{ user_id: 2, value: 1 }],
+      votes: [{ userId: 2, value: 1 }],
       replies: [
         {
           id: 121,
           content: 'Niveau 1 — première réponse au sujet.',
-          created_at: '2026-06-08T18:05:00',
+          createdAt: '2026-06-08T18:05:00',
           author: rosie,
-          votes: [{ user_id: 3, value: 1 }],
+          votes: [{ userId: 3, value: 1 }],
           replies: [
             {
               id: 122,
               content: 'Niveau 2 — on s’enfonce d’un cran.',
-              created_at: '2026-06-08T18:10:00',
+              createdAt: '2026-06-08T18:10:00',
               author: mich,
-              votes: [{ user_id: 4, value: 1 }],
+              votes: [{ userId: 4, value: 1 }],
               replies: [
                 {
                   id: 123,
                   content: 'Niveau 3 — toujours lisible ?',
-                  created_at: '2026-06-08T18:15:00',
+                  createdAt: '2026-06-08T18:15:00',
                   author: lea,
-                  votes: [{ user_id: 5, value: 1 }],
+                  votes: [{ userId: 5, value: 1 }],
                   replies: [
                     {
                       id: 124,
                       content: 'Niveau 4 — la largeur de texte commence à se réduire.',
-                      created_at: '2026-06-08T18:20:00',
+                      createdAt: '2026-06-08T18:20:00',
                       author: admin,
-                      votes: [{ user_id: 2, value: 1 }],
+                      votes: [{ userId: 2, value: 1 }],
                       replies: [
                         {
                           id: 125,
                           content:
                             'Niveau 5 — réponse plus longue pour tester le retour à la ligne quand la ' +
                             'colonne devient étroite : lorem ipsum dolor sit amet, consectetur adipiscing elit.',
-                          created_at: '2026-06-08T18:25:00',
+                          createdAt: '2026-06-08T18:25:00',
                           author: karim,
-                          votes: [{ user_id: 3, value: 1 }],
+                          votes: [{ userId: 3, value: 1 }],
                           replies: [
                             {
                               id: 126,
                               content: 'Niveau 6 — encore un cran.',
-                              created_at: '2026-06-08T18:30:00',
+                              createdAt: '2026-06-08T18:30:00',
                               author: rosie,
                               votes: [],
                               replies: [
@@ -234,21 +234,21 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
                                   content:
                                     'Niveau 7 — mot-très-long-sans-espace-pour-tester-le-débordement : ' +
                                     'pneumonoultramicroscopicsilicovolcanoconiosis.',
-                                  created_at: '2026-06-08T18:35:00',
+                                  createdAt: '2026-06-08T18:35:00',
                                   author: mich,
-                                  votes: [{ user_id: 10, value: -1 }],
+                                  votes: [{ userId: 10, value: -1 }],
                                   replies: [
                                     {
                                       id: 128,
                                       content: 'Niveau 8 — presque au bout.',
-                                      created_at: '2026-06-08T18:40:00',
+                                      createdAt: '2026-06-08T18:40:00',
                                       author: lea,
                                       votes: [],
                                       replies: [
                                         {
                                           id: 129,
                                           content: 'Niveau 9 — un avant-dernier.',
-                                          created_at: '2026-06-08T18:45:00',
+                                          createdAt: '2026-06-08T18:45:00',
                                           author: admin,
                                           votes: [],
                                           replies: [
@@ -257,9 +257,9 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
                                               content:
                                                 'Niveau 10 — fin du fil. Si tu lis ceci sans scroll horizontal ' +
                                                 'ni texte écrasé, le layout tient. 🎉',
-                                              created_at: '2026-06-08T18:50:00',
+                                              createdAt: '2026-06-08T18:50:00',
                                               author: karim,
-                                              votes: [{ user_id: 2, value: 1 }],
+                                              votes: [{ userId: 2, value: 1 }],
                                               replies: [],
                                             },
                                           ],
@@ -279,11 +279,11 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
                             'longue branche ci-dessus qui descend jusqu’au niveau 10. C’est le cas ' +
                             '« retour du niveau 10 au niveau 5 » : regarde de combien de crans ' +
                             'l’indentation remonte ici.',
-                          created_at: '2026-06-08T19:05:00',
+                          createdAt: '2026-06-08T19:05:00',
                           author: me,
                           votes: [
-                            { user_id: 2, value: 1 },
-                            { user_id: 3, value: 1 },
+                            { userId: 2, value: 1 },
+                            { userId: 3, value: 1 },
                           ],
                           replies: [
                             {
@@ -291,9 +291,9 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
                               content:
                                 'Niveau 6 (bis) — et une réponse sous ce niveau 5, pour vérifier que ' +
                                 'l’indentation repart bien d’ici.',
-                              created_at: '2026-06-08T19:12:00',
+                              createdAt: '2026-06-08T19:12:00',
                               author: mich,
-                              votes: [{ user_id: 10, value: 1 }],
+                              votes: [{ userId: 10, value: 1 }],
                               replies: [],
                             },
                           ],
@@ -318,12 +318,12 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
       content:
         "On dit que la suppression dans un AVL est en O(log n), mais après le retrait il peut y avoir " +
         'plusieurs rotations en remontant vers la racine. Est-ce que ça reste vraiment logarithmique ?',
-      created_at: '2026-06-06T11:20:00',
+      createdAt: '2026-06-06T11:20:00',
       author: me,
       votes: [
-        { user_id: 2, value: 1 },
-        { user_id: 4, value: 1 },
-        { user_id: 5, value: 1 },
+        { userId: 2, value: 1 },
+        { userId: 4, value: 1 },
+        { userId: 5, value: 1 },
       ],
       replies: [
         {
@@ -331,12 +331,12 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
           content:
             'Oui : la hauteur est en O(log n) et tu fais au plus une rotation (simple ou double) par ' +
             'niveau en remontant. Donc le nombre total de rotations est borné par la hauteur → O(log n).',
-          created_at: '2026-06-06T12:00:00',
+          createdAt: '2026-06-06T12:00:00',
           author: lea,
           votes: [
-            { user_id: 3, value: 1 },
-            { user_id: 2, value: 1 },
-            { user_id: 10, value: 1 },
+            { userId: 3, value: 1 },
+            { userId: 2, value: 1 },
+            { userId: 10, value: 1 },
           ],
           replies: [],
         },
@@ -348,9 +348,9 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
       content:
         "Pour le TP, vaut-il mieux gérer les collisions par chaînage ou par sondage linéaire ? " +
         'Le sujet ne l\'impose pas et je n\'arrive pas à décider.',
-      created_at: '2026-06-08T13:45:00',
+      createdAt: '2026-06-08T13:45:00',
       author: karim,
-      votes: [{ user_id: 3, value: 1 }],
+      votes: [{ userId: 3, value: 1 }],
       replies: [],
     },
   ],
@@ -358,12 +358,12 @@ const THREADS_BY_FORUM: Record<number, ForumPost[]> = {
 
 /**
  * Copie « superficielle » d'un post pour le chargement paresseux : on expose le
- * nombre d'enfants immediats (`reply_count`) mais on RETIRE `replies` (les enfants
+ * nombre d'enfants immediats (`replyCount`) mais on RETIRE `replies` (les enfants
  * ne sont pas charges tant que l'utilisateur n'a pas deplie le fil).
  */
 function toShallow(post: ForumPost): ForumPost {
   const { replies, ...rest } = post;
-  return { ...rest, reply_count: replies?.length ?? 0 };
+  return { ...rest, replyCount: replies?.length ?? 0 };
 }
 
 /** Recherche un post (par id) dans un arbre mock (parcours en profondeur). */

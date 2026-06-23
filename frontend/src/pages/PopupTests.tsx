@@ -78,110 +78,110 @@ const roleUsers: User[] = [
   {
     id: 1,
     username: 'admin',
-    first_name: 'Admin',
-    last_name: 'Admin',
+    firstName: 'Admin',
+    lastName: 'Admin',
     email: 'admin@usherbrooke.ca',
-    avatar_color: '#0a5cc0',
+    avatarColor: '#0a5cc0',
     role_ids: [4],
   },
   {
     id: 2,
     username: 'tremblaymar',
-    first_name: 'Marie',
-    last_name: 'Tremblay',
+    firstName: 'Marie',
+    lastName: 'Tremblay',
     email: 'tremblaymar@usherbrooke.ca',
-    avatar_color: '#f6c350',
+    avatarColor: '#f6c350',
     role_ids: [4],
   }, // fond clair → texte sombre
   {
     id: 3,
     username: 'gagnonjp',
-    first_name: 'Jean-Philippe',
-    last_name: 'Gagnon',
+    firstName: 'Jean-Philippe',
+    lastName: 'Gagnon',
     email: 'gagnonjp@usherbrooke.ca',
-    avatar_color: '#1a6e3c',
+    avatarColor: '#1a6e3c',
     role_ids: [2],
   },
   {
     id: 4,
     username: 'roygenev',
-    first_name: 'Geneviève',
-    last_name: 'Roy',
+    firstName: 'Geneviève',
+    lastName: 'Roy',
     email: 'roygenev@usherbrooke.ca',
-    avatar_color: '#7a4e1a',
+    avatarColor: '#7a4e1a',
     role_ids: [2],
   },
   {
     id: 5,
     username: 'lavoiesam',
-    first_name: 'Samuel',
-    last_name: 'Lavoie',
+    firstName: 'Samuel',
+    lastName: 'Lavoie',
     email: 'lavoiesam@usherbrooke.ca',
-    avatar_color: '#3a3a7a',
+    avatarColor: '#3a3a7a',
     role_ids: [2],
   },
   {
     id: 6,
     username: 'bouchardalx',
-    first_name: 'Alexandre',
-    last_name: 'Bouchard',
+    firstName: 'Alexandre',
+    lastName: 'Bouchard',
     email: 'bouchardalx@usherbrooke.ca',
-    avatar_color: '#0a7a6e',
+    avatarColor: '#0a7a6e',
     role_ids: [3],
   },
   {
     id: 7,
     username: 'fortinemi',
-    first_name: 'Émilie',
-    last_name: 'Fortin',
+    firstName: 'Émilie',
+    lastName: 'Fortin',
     email: 'fortinemi@usherbrooke.ca',
-    avatar_color: '#4a7a1a',
+    avatarColor: '#4a7a1a',
     role_ids: [3],
   },
   {
     id: 8,
     username: 'cotemax',
-    first_name: 'Maxime',
-    last_name: 'Côté',
+    firstName: 'Maxime',
+    lastName: 'Côté',
     email: 'cotemax@usherbrooke.ca',
-    avatar_color: '#0a5cc0',
+    avatarColor: '#0a5cc0',
     role_ids: [2],
   },
   {
     id: 9,
     username: 'belangerju',
-    first_name: 'Julie',
-    last_name: 'Bélanger',
+    firstName: 'Julie',
+    lastName: 'Bélanger',
     email: 'belangerju@usherbrooke.ca',
-    avatar_color: '#8b1a1a',
+    avatarColor: '#8b1a1a',
     role_ids: [2],
   },
   {
     id: 10,
     username: 'pelletierni',
-    first_name: 'Nicolas',
-    last_name: 'Pelletier',
+    firstName: 'Nicolas',
+    lastName: 'Pelletier',
     email: 'pelletierni@usherbrooke.ca',
-    avatar_color: '#4a7a1a',
+    avatarColor: '#4a7a1a',
     role_ids: [2],
   },
   // Non assignés : disponibles à l'ajout dans n'importe quelle section.
   {
     id: 11,
     username: 'morinclar',
-    first_name: 'Clara',
-    last_name: 'Morin',
+    firstName: 'Clara',
+    lastName: 'Morin',
     email: 'morinclar@usherbrooke.ca',
-    avatar_color: '#5eead4',
+    avatarColor: '#5eead4',
     role_ids: [],
   }, // fond clair → texte sombre
   {
     id: 12,
     username: 'girardtho',
-    first_name: 'Thomas',
-    last_name: 'Girard',
+    firstName: 'Thomas',
+    lastName: 'Girard',
     email: 'girardtho@usherbrooke.ca',
-    avatar_color: '#3a3a7a',
+    avatarColor: '#3a3a7a',
     role_ids: [],
   },
 ];
@@ -209,7 +209,7 @@ const establishments: Establishment[] = [
  */
 const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
   ...p,
-  establishment_id: i < 10 ? 1 : i < 12 ? 2 : 3,
+  establishmentId: i < 10 ? 1 : i < 12 ? 2 : 3,
 }));
 
 /**
@@ -383,10 +383,10 @@ export default function PopupTests() {
         <EditProfilePopup
           user={{
             username: 'tremblaymar',
-            first_name: 'Marie',
-            last_name: 'Tremblay',
-            avatar_color: '#14B8A6',
-            avatar_url:
+            firstName: 'Marie',
+            lastName: 'Tremblay',
+            avatarColor: '#14B8A6',
+            avatarUrl:
               'https://media.licdn.com/dms/image/v2/D4E03AQFMLYc-j7m0rw/profile-displayphoto-crop_800_800/B4EZ5wvbMMJMAI-/0/1780007941382?e=1782345600&v=beta&t=V8YeOmxGBZsOZApvF3DlMmHrdo1IoBYNHOJbtdiHS8U',
           }}
           onClose={() => setShowEditProfile(false)}
@@ -429,7 +429,7 @@ export default function PopupTests() {
             return establishments.map((e) => ({
               ...e,
               programCodes: joinPrograms
-                .filter((p) => p.establishment_id === e.id)
+                .filter((p) => p.establishmentId === e.id)
                 .map((p) => p.code),
             }));
           }}
@@ -439,14 +439,14 @@ export default function PopupTests() {
             if (failRequests) throw new Error('Échec simulé (loadJoinEstablishments)');
             return establishments.map((e) => ({
               ...e,
-              programCount: joinPrograms.filter((p) => p.establishment_id === e.id).length,
+              programCount: joinPrograms.filter((p) => p.establishmentId === e.id).length,
             }));
           }}
           // Au choix d'un établissement : ses programmes rattachés (async, ~400 ms).
-          loadEstablishmentPrograms={async (establishment_id: number): Promise<JoinProgram[]> => {
+          loadEstablishmentPrograms={async (establishmentId: number): Promise<JoinProgram[]> => {
             await new Promise((r) => setTimeout(r, 400));
             if (failRequests) throw new Error('Échec simulé (loadEstablishmentPrograms)');
-            return joinPrograms.filter((p) => p.establishment_id === establishment_id);
+            return joinPrograms.filter((p) => p.establishmentId === establishmentId);
           }}
           // Programmes déjà suivis : préselectionnés dans l'étape de sélection.
           subscribedProgramIds={subscribedProgramIds}
