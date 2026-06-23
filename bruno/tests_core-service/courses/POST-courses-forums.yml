@@ -12,7 +12,8 @@ http:
       {
         "courseId": 1,
         "title": "mimi Discussion",
-        "fTypeId": 1
+        "fTypeId": 1,
+        "position": 1
       }
   auth: inherit
 

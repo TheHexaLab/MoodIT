@@ -11,7 +11,7 @@ http:
     data: |-
       {
         "firstName": "Rosie",
-        "lastName": "Homier",
+        "lastName": "Homiers",
         "avatarColor": "#ff8800"
       }
   auth: inherit

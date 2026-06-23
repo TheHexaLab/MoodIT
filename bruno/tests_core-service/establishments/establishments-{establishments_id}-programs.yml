@@ -10,9 +10,9 @@ http:
     type: json
     data: |-
       {
-        "establishmentId": 2,
+        "establishmentId": 1,
         "name": "Génie abc6",
-        "code": "AB6",
+        "code": "penis",
         "cohort": "71",
         "color": "#ff8800"
       }

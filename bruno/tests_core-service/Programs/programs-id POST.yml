@@ -4,13 +4,13 @@ info:
   seq: 7
 
 http:
-  method: POST
+  method: PATCH
   url: "{{baseUrl}}/programs/7"
   body:
     type: json
     data: |-
       {
-        "code": "GENN"
+        "code": "GEN"
       }
   auth: inherit
 

@@ -104,6 +104,8 @@ public class CourseService {
         FType fType = new FType();
         fType.setId(dto.getFTypeId());
 
+        forum.setPosition(dto.getPosition());
+
         forum.setFType(fType);
 
         Forum saved = forumRepository.save(forum);
