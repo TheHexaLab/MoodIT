@@ -175,7 +175,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   );
   const hasCourses = courseOptions.length > 0;
   const emptySubtitle = activeProgram
-    ? 'Ce programme ne contient encore aucun cours a afficher.'
+    ? 'Ce programme ne contient encore aucun cours à afficher.'
     : 'Rejoins un programme pour voir tes cours, canaux et forums.';
 
   // Calcule la position de la liste déroulante (sous le sélecteur, largeur fixe 20rem).

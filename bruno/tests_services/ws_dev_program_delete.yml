@@ -1,0 +1,21 @@
+info:
+  name: Programme · Quitter
+  type: http
+  seq: 12
+
+http:
+  method: DELETE
+  url: http://localhost:8081/dev/ws/program?programId=2
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse le désabonnement du programme <programId> sur user:<userId>.
+  `userId` est OMIS → défaut du contrôleur (MOCK_REALTIME_USER_ID dans
+  DevWsController). Change l'id de test à cet endroit-là, pas ici.
+  programId doit être un programme PRÉSENT dans le Dashboard pour que sa
+  disparition soit visible (onProgramRemove filtre la liste).

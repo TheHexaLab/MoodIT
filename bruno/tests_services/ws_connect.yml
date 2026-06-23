@@ -1,0 +1,29 @@
+info:
+  name: 1. Connexion WebSocket
+  type: ws
+  seq: 1
+
+ws:
+  url: ws://localhost:8081/ws?token=PASTE_JWT_HERE
+
+settings:
+  encodeUrl: false
+  timeout: 0
+
+docs: |
+  Connexion WebSocket directe sur core-service (profil `dev`, port 8081).
+  Le handshake exige un JWT valide en query (?token=). Voir README.
+
+  Après connexion, envoie une commande `join` (protocole de
+  RealtimeWebSocketHandler) pour t'abonner à une room, ex. :
+    {"type":"join","scope":"channel","id":1}
+    {"type":"join","scope":"forum","id":3}
+    {"type":"join","scope":"program","id":1}
+    {"type":"join","scope":"user","id":1}
+  Se désabonner : {"type":"leave","scope":"channel","id":1}
+
+  Le `join` n'est accepté que si l'utilisateur du token est autorisé sur
+  la room (DbRoomAuthorizer : abonnement au programme en BD).
+
+  Puis déclenche un événement via les requêtes ws_dev_* : la diffusion
+  doit apparaître ici en direct.

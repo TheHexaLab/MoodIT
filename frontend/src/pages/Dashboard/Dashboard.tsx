@@ -5,7 +5,6 @@ import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.
 import { useCoursesLoader } from '../../components/CourseMenu/useCoursesLoader.ts';
 import { CourseSectionEditor } from '../../components/CourseMenu/CourseSectionEditor.tsx';
 import {
-  type ChannelMessage,
   type ChannelMessageAuthor,
   type ChannelRef,
   type ChannelTypeDefinition,
@@ -27,10 +26,7 @@ import {
   UpdateProgramPopup,
   type ProgramUpdate,
 } from '../../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
-import {
-  EditProfilePopup,
-  type ProfileUpdate,
-} from '../../components/EditProfilePopup/EditProfilePopup.tsx';
+import { EditProfilePopup } from '../../components/EditProfilePopup/EditProfilePopup.tsx';
 import {
   RoleEditorPopup,
   type Role,
@@ -39,12 +35,6 @@ import {
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
-import {
-  getCreateEstablishments,
-  getEstablishmentPrograms,
-  getJoinEstablishments,
-} from '../../mocks/subscriptionData.ts';
-import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 
@@ -52,12 +42,8 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
-import { getMe, updateMe } from '../../helpers/api.ts';
-import {
-  getMockForumReplies,
-  getMockForumThreads,
-  type ForumPost,
-} from '../../components/MainPanel/ForumView/forumThreads.ts';
+import { useCurrentUser } from './useCurrentUser.ts';
+import * as api from './dashboardApi.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
 import {
@@ -67,51 +53,8 @@ import {
   type QuizChannelSource,
 } from '../../components/CourseChannelList/courseChannelSources.ts';
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
-import { getDashboardPrograms } from './dashboardDataSource.ts';
-import { type DemoProgram } from '../../mocks/dashboardData.ts';
+import { type DemoProgram } from './dashboardApi.ts';
 import styles from './Dashboard.module.css';
-
-// Identité neutre affichée tant que GET /api/me n'a pas répondu : aucun faux nom.
-// L'UI retombe sur 'Utilisateur' / 'U' (cf. getDisplayName / getUserInitial) jusqu'à
-// ce que le vrai profil arrive et remplace cette valeur via setCurrentUser.
-const loadingUser: UserMenuUser = {
-  id: -1,
-  username: '',
-  firstName: '',
-  lastName: '',
-  avatarColor: '#0a5cc0',
-};
-
-// TODO : id mock pour l'abonnement temps réel (scope utilisateur). À remplacer par
-// l'id réel issu de GET /api/me une fois la (re)souscription branchée sur currentUser.
-const MOCK_REALTIME_USER_ID = 1;
-
-// Nom du rôle global (table Role) qui accorde les droits d'édition (cours,
-// programmes, sections, gestion des rôles). Les rôles enseignant PAR programme
-// (User_Program_Role) ne sont pas encore gérés ici.
-const ADMIN_ROLE_NAME = 'Administrateur';
-
-// Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
-// operations sur les messages : envoi, modification, suppression.
-const SIMULATE_SEND_FAILURE = false;
-const SIMULATE_DELAY = 100;
-const SIMULATE_FETCH_FAILURE = false;
-
-/* ─────────────────────────────────────────────────────────────────────────────
- * TODO — BRANCHEMENT BACKEND + TEMPS RÉEL DU CHAT
- * Détails complets : src/components/MainPanel/ChannelView/HANDOFF.md
- *
- * Ordre de développement conseillé (chaque étape est isolée et testable) :
- *   [1] GET    messages    → handleFetchMessages   (afficher l'historique d'abord)
- *   [2] POST   message     → handleSendMessage     (RENVOYER le message persisté + clientMsgId)
- *   [3] PATCH  message     → handleEditMessage
- *   [4] DELETE message     → handleDeleteMessage
- *   [5] WebSocket          → remplacer les mocks par `createAppSocket(...)` (UNE connexion
- *                            pour le chat ET le forum ; scaffold prêt : src/services/appSocket.ts)
- *
- * Déjà géré côté front (ne rien recoder) : états loading/erreur, rollback optimiste,
- * déduplication optimiste ↔ écho (clientMsgId), désabonnement au changement de canal.
- * ───────────────────────────────────────────────────────────────────────────── */
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
@@ -125,17 +68,11 @@ type PopupState =
 
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
-  // modifications de section (réordre, renommage, ajout, suppression) se
-  // reflètent dans l'UI. Le mock ne sert que de valeur initiale.
-  const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>(getDashboardPrograms);
-  // Utilisateur connecté dans un state : les modifications de profil (nom, couleur)
-  // se reflètent dans la barre de profil. Le mock ne sert que de valeur initiale.
-  const [currentUser, setCurrentUser] = useState<UserMenuUser>(loadingUser);
-  // Profil en cours de chargement (GET /api/me) : pilote le skeleton du UserMenu.
-  const [profileLoading, setProfileLoading] = useState(true);
-  // Droits d'édition dérivés des rôles globaux réels (false tant que /api/me n'a pas
-  // répondu → aucun bouton d'édition ne « flashe » pendant le chargement).
-  const isAdmin = currentUser.roles?.some((role) => role.name === ADMIN_ROLE_NAME) ?? false;
+  // modifications de section (réordre, renommage, ajout, suppression) se reflètent
+  // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
+  const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
+  // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
+  const { currentUser, profileLoading, isAdmin, saveProfile } = useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
@@ -167,27 +104,6 @@ export default function Dashboard() {
     return () => ws.close();
   }, [ws]);
 
-  // Profil réel de l'utilisateur connecté (GET /api/me). Remplace l'identité neutre
-  // `loadingUser` dès la réponse. En cas d'échec autre que 401 (déjà géré par apiFetch
-  // → /login), on conserve la valeur de chargement plutôt que de bloquer l'UI.
-  useEffect(() => {
-    let cancelled = false;
-    getMe()
-      .then((user) => {
-        if (!cancelled) setCurrentUser(user);
-      })
-      .catch(() => {
-        // 401 → redirection gérée par apiFetch ; autres erreurs : on garde la valeur
-        // de chargement (skeleton retiré quand même pour ne pas figer l'UI).
-      })
-      .finally(() => {
-        if (!cancelled) setProfileLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Refs vers l'état courant : permettent au handler du socket programmes (abonné
   // une seule fois) de lire la liste / le programme actif sans capture périmée.
   const programsRef = useRef(dashboardPrograms);
@@ -197,12 +113,10 @@ export default function Dashboard() {
     activeProgramIdRef.current = activeProgramId;
   });
 
-  // GET de la liste des programmes de l'utilisateur. Mock-as-cache (délai + échec
-  // simulés) : on n'expose que loading/erreur, la liste vit dans dashboardPrograms.
-  // TODO : remplacer par un vrai GET /me/programs → setDashboardPrograms.
+  // Chargement de la liste des programmes : api.fetchPrograms renvoie les données,
+  // on les pose dans le state ; le loader pilote loading/erreur.
   const handleFetchPrograms = useCallback(async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des programmes)');
+    setDashboardPrograms(await api.fetchPrograms());
   }, []);
 
   const {
@@ -215,7 +129,11 @@ export default function Dashboard() {
   // adhésion / désabonnement. Applique à la liste, et bascule le programme actif s'il
   // disparaît.
   useEffect(() => {
-    const userId = MOCK_REALTIME_USER_ID;
+    // Abonnement sur la room user:<id> RÉELLE (issue de GET /api/me). Tant que le
+    // profil n'est pas chargé (loadingUser.id === -1), on n'ouvre rien : rejoindre
+    // user:1 alors qu'on est l'user 4 serait refusé par DbRoomAuthorizer.
+    const userId = currentUser.id;
+    if (userId < 0) return;
     return ws.programs.subscribe(userId, {
       onProgramUpsert: (program) =>
         setDashboardPrograms((programs) => upsertProgram(programs, program)),
@@ -229,14 +147,14 @@ export default function Dashboard() {
         }
       },
     });
-  }, [ws]);
-  // GET des cours du programme actif. Mock pour l'instant (délai + échec optionnel) :
-  // le state `dashboardPrograms` fait office de cache, on n'expose que loading/erreur.
-  // TODO [1] : remplacer par un vrai GET /programs/:id/courses → setDashboardPrograms.
-  // (reçoit programId du hook ; ignoré ici car le mock utilise le state comme cache.)
-  const handleFetchCourses = useCallback(async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des cours)');
+  }, [ws, currentUser.id]);
+  // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
+  // le programme correspondant ; le loader pilote loading/erreur.
+  const handleFetchCourses = useCallback(async (programId: number) => {
+    const courses = await api.fetchCourses(programId);
+    setDashboardPrograms((programs) =>
+      programs.map((p) => (p.id === programId ? { ...p, courses } : p))
+    );
   }, []);
 
   // Chaînage : on ne charge les cours qu'une fois la liste des programmes chargée
@@ -269,7 +187,7 @@ export default function Dashboard() {
     });
   }, [activeProgramId, ws]);
 
-  // TODO : remplacer par une navigation ou un rendu de vue lors de l'implémentation des canaux.
+  // Ouverture d'un canal (navigation / rendu de vue à implémenter côté canaux).
   const handleOpenChannel = (channel: CourseChannel) => {
     console.log('[Dashboard] Ouverture du canal :', channel);
   };
@@ -287,7 +205,7 @@ export default function Dashboard() {
   };
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
-  // TODO : déconnecter l'utilisateur (clear session + redirection login).
+  // Déconnexion (clear session + redirection login à implémenter).
   const handleLogout = () => console.log('[Dashboard] Déconnexion demandée.');
 
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
@@ -298,16 +216,13 @@ export default function Dashboard() {
   const handleEditProgram = (programId: number) => {
     if (isAdmin) setPopup({ kind: 'editProgram', programId });
   };
-  // GET rôles + membres d'un programme (API-ready : délai + échec simulés).
-  // TODO : GET /programs/:id/roles + /programs/:id/members.
+  // Charge rôles + membres d'un programme (via api.fetchProgramRoles) et alimente le popup.
   const fetchProgramRoles = async (programId: number) => {
     setRoleData(null);
     setRoleError(null);
     setRoleLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-      if (SIMULATE_FETCH_FAILURE) throw new Error('fetch roles failed');
-      setRoleData({ roles: getProgramRoles(), users: getProgramUsers(programId) });
+      setRoleData(await api.fetchProgramRoles(programId));
     } catch {
       setRoleError('Impossible de charger les membres du programme. Réessaie.');
     } finally {
@@ -332,18 +247,15 @@ export default function Dashboard() {
   const handleCreateForum = () => {
     if (isAdmin) setCreatingSectionType('forum');
   };
-  // Persiste une modification de section (réordre/renommage/suppression/ajout).
-  // Branché sur l'API simulée (délai + échec optionnel) comme les handlers de
-  // messages : on exerce ainsi le spinner, le rollback optimiste et l'ErrorPopup
-  // du SectionEditorPopup. Le state n'est appliqué qu'après succès, pour que le
-  // rejet laisse la sidebar inchangée. TODO : POST/PATCH/DELETE backend + refetch.
+  // Persiste une modification de section (réordre/renommage/suppression/ajout) via
+  // api.changeSection. Le state n'est appliqué qu'APRÈS succès (le rejet laisse la
+  // sidebar inchangée) : on exerce ainsi spinner / rollback / ErrorPopup du popup.
   const handleSectionChange = async (
     courseId: number,
     sectionType: string,
     change: ItemChange
   ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de section)');
+    await api.changeSection(courseId, sectionType, change);
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
         ...program,
@@ -354,62 +266,32 @@ export default function Dashboard() {
     );
   };
 
-  // POST d'un nouveau cours (admin) → rattaché aux programmes choisis. Async
-  // (délai + échec simulé) : le AddCoursePopup attend la résolution, reste ouvert
-  // et affiche une erreur si ça rejette, et se ferme via onClose en cas de succès.
-  // TODO : POST /courses (title, code, program_ids) puis refetch / setState.
+  // Création d'un cours (admin) → rattaché aux programmes choisis (via api.createCourse).
+  // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (ajout de cours)');
+    const created = await api.createCourse(course);
     setDashboardPrograms((programs) =>
       programs.map((program) =>
         course.programIds.includes(program.id)
-          ? {
-              ...program,
-              courses: [
-                ...program.courses,
-                {
-                  id: nextNumericId(program.courses),
-                  code: course.code,
-                  title: course.title,
-                  channels: [],
-                  quizzes: [],
-                  forums: [],
-                },
-              ],
-            }
+          ? { ...program, courses: [...program.courses, created] }
           : program
       )
     );
   };
 
-  // POST création d'un programme → ajouté à la liste de l'utilisateur (abonné d'office).
-  // TODO : POST /programs (+ abonnement) puis refetch / setState.
+  // Création d'un programme → ajouté à la liste (abonné d'office) via api.createProgram.
   const handleCreateProgram = async (program: NewProgram) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (création de programme)');
-    setDashboardPrograms((programs) => [
-      ...programs,
-      {
-        id: nextNumericId(programs),
-        name: program.name,
-        code: program.code,
-        cohort: program.cohort,
-        color: program.color,
-        courses: [],
-      },
-    ]);
+    const created = await api.createProgram(program);
+    setDashboardPrograms((programs) => [...programs, created]);
   };
 
-  // POST adhésion → ajoute les programmes choisis du catalogue à la liste de l'utilisateur.
-  // TODO : POST /subscriptions (program_ids) puis refetch / setState.
+  // Adhésion → ajoute les programmes choisis du catalogue à la liste (via api.joinPrograms).
   const handleJoinPrograms = async (selection: JoinSelection) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (adhésion au programme)');
+    const catalog = await api.joinPrograms(selection);
     setDashboardPrograms((programs) => {
       const existing = new Set(programs.map((p) => p.id));
-      const added = getEstablishmentPrograms(selection.establishmentId)
-        .filter((p) => selection.programIds.includes(p.id) && !existing.has(p.id))
+      const added = catalog
+        .filter((p) => !existing.has(p.id))
         .map((p) => ({
           id: p.id,
           name: p.name,
@@ -422,28 +304,14 @@ export default function Dashboard() {
     });
   };
 
-  // Loaders du AddSubscriptionPopup (GET, API-ready ; respectent SIMULATE_FETCH_FAILURE).
-  const loadCreateEstablishments = async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (établissements)');
-    return getCreateEstablishments();
-  };
-  const loadJoinEstablishments = async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (établissements)');
-    return getJoinEstablishments();
-  };
-  const loadEstablishmentPrograms = async (establishmentId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (programmes de l’établissement)');
-    return getEstablishmentPrograms(establishmentId);
-  };
+  // Loaders du AddSubscriptionPopup (GET) — délégués à la couche API.
+  const loadCreateEstablishments = api.fetchEstablishmentsForCreate;
+  const loadJoinEstablishments = api.fetchEstablishmentsForJoin;
+  const loadEstablishmentPrograms = api.fetchEstablishmentPrograms;
 
-  // PATCH d'un cours (admin) → met à jour code/titre dans le programme actif.
-  // TODO : PATCH /courses/:id (+ program_course pour le rattachement many-to-many).
+  // Mise à jour d'un cours (admin) → code/titre dans le programme actif (via api.updateCourse).
   const handleUpdateCourse = async (courseId: number, update: CourseUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de cours)');
+    await api.updateCourse(courseId, update);
     setDashboardPrograms((programs) =>
       mapProgramCourses(programs, activeProgramId, (course) =>
         course.id === courseId ? { ...course, code: update.code, title: update.title } : course
@@ -451,11 +319,9 @@ export default function Dashboard() {
     );
   };
 
-  // PATCH d'un programme (admin) → met à jour nom/code/cohorte/couleur.
-  // TODO : PATCH /programs/:id.
+  // Mise à jour d'un programme (admin) → nom/code/cohorte/couleur (via api.updateProgram).
   const handleUpdateProgram = async (programId: number, update: ProgramUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de programme)');
+    await api.updateProgram(programId, update);
     setDashboardPrograms((programs) =>
       programs.map((program) =>
         program.id === programId
@@ -471,39 +337,19 @@ export default function Dashboard() {
     );
   };
 
-  // PATCH /api/me : prénom, nom, couleur. Si onSave rejette, EditProfilePopup garde
-  // le popup ouvert et affiche l'erreur. Au succès, on applique le profil renvoyé
-  // par le backend (source de vérité) → la barre de profil se met à jour.
-  // TODO : upload de la photo (multipart) — non géré côté backend pour l'instant.
-  const handleSaveProfile = async (profile: ProfileUpdate) => {
-    const updated = await updateMe({
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      avatarColor: profile.avatarColor,
-    });
-    setCurrentUser(updated);
-  };
+  // Assignation/retrait d'un rôle ↔ utilisateur (admin) via api.changeRole. Le
+  // RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister.
+  const handleRoleChange = (change: RoleChange) => api.changeRole(change);
 
-  // INSERT/DELETE d'une assignation rôle ↔ utilisateur (admin). Le RoleEditorPopup
-  // gère l'optimisme + rollback ; on ne fait que persister (mock).
-  // TODO : POST/DELETE /programs/:id/roles (assign / unassign).
-  const handleRoleChange = async (change: RoleChange) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (assignation de rôle)');
-    console.log('[Dashboard] Changement de rôle :', change);
-  };
-
-  // Quitter un programme (async, API-ready). On ferme la confirmation puis on
+  // Quitter un programme (via api.leaveProgram). On ferme la confirmation puis on
   // affiche un overlay de chargement ; en cas d'échec, un ErrorPopup (sans retrait).
   // Au succès : retrait de la liste + bascule du programme actif s'il disparaît.
-  // TODO : DELETE /subscriptions/:programId.
   const handleConfirmLeaveProgram = async (programId: number) => {
     setPopup(null);
     setLeaveError(null);
     setLeaveLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-      if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (quitter le programme)');
+      await api.leaveProgram(programId);
       if (programId === activeProgramId) {
         const fallback = dashboardPrograms.find((program) => program.id !== programId);
         setActiveProgramId(fallback?.id ?? -1);
@@ -526,40 +372,15 @@ export default function Dashboard() {
     lastName: currentUser.lastName ?? '',
   };
 
-  // TODO [2] — API POST du message (postParentId si réponse).
-  // ⚠ RENVOYER le message persisté (id réel) pour la réconciliation, et stocker le
-  //   clientMessageId pour que le broadcast WS le renvoie (dédup). Voir HANDOFF.md.
-  const handleSendMessage = async (
-    content: string,
-    parentId: number | null,
-    clientMessageId: string
-  ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (envoi de message)');
-    console.log(
-      '[Dashboard] Envoi de message :',
-      content,
-      '(postParentId =',
-      parentId,
-      ', clientMsgId =',
-      clientMessageId,
-      ')'
-    );
-  };
+  // Envoi / édition / suppression de message : délégués à la couche API
+  // (api.sendMessage doit RENVOYER le message persisté pour la réconciliation).
+  const handleSendMessage = (content: string, parentId: number | null, clientMessageId: string) =>
+    api.sendMessage(content, parentId, clientMessageId);
 
-  // TODO [3] — API PATCH du message. Simulation pour l'instant.
-  const handleEditMessage = async (messageId: number, content: string) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de message)');
-    console.log('[Dashboard] Modification du message', messageId, ':', content);
-  };
+  const handleEditMessage = (messageId: number, content: string) =>
+    api.editMessage(messageId, content);
 
-  // TODO [4] — API DELETE du message. Simulation pour l'instant.
-  const handleDeleteMessage = async (messageId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de message)');
-    console.log('[Dashboard] Suppression du message', messageId);
-  };
+  const handleDeleteMessage = (messageId: number) => api.deleteMessage(messageId);
 
   /* ───────────────────────────────────────────────────────────────────────────
    * FORUM ('Thread') — meme architecture API + temps reel que le chat.
@@ -568,62 +389,17 @@ export default function Dashboard() {
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
-  // GET sujets RACINES d'un forum (sans leurs réponses : chargement paresseux).
-  const handleFetchThreads = async (forumId: number): Promise<ForumPost[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des sujets)');
-    return getMockForumThreads(forumId);
-  };
-
-  // GET réponses DIRECTES d'un post (enfants immédiats), au dépliage d'un fil.
-  const handleFetchReplies = async (postId: number): Promise<ForumPost[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des réponses)');
-    return getMockForumReplies(postId);
-  };
-
-  // POST réponse (postParentId si réponse à un post). ⚠ RENVOYER le post persisté
-  // (id réel + meme clientPostId) pour la réconciliation optimiste ↔ écho WS.
-  const handleCreatePost = async (
+  const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
+  const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
+  const handleCreatePost = (
     content: string,
     parentId: number | null,
     clientPostId: string,
     title?: string
-  ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (publication)');
-    console.log(
-      '[Dashboard] Publication :',
-      title ? `« ${title} » — ` : '',
-      content,
-      '(parent =',
-      parentId,
-      ', clientPostId =',
-      clientPostId,
-      ')'
-    );
-  };
-
-  // PATCH post.
-  const handleEditPost = async (postId: number, content: string) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de post)');
-    console.log('[Dashboard] Modification du post', postId, ':', content);
-  };
-
-  // DELETE post (cascade du sous-fil côté BD).
-  const handleDeletePost = async (postId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de post)');
-    console.log('[Dashboard] Suppression du post', postId);
-  };
-
-  // POST/DELETE vote (value ∈ {-1, 0, 1} ; 0 = retrait).
-  const handleVotePost = async (postId: number, value: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (vote)');
-    console.log('[Dashboard] Vote sur le post', postId, ':', value);
-  };
+  ) => api.createPost(content, parentId, clientPostId, title);
+  const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
+  const handleDeletePost = (postId: number) => api.deletePost(postId);
+  const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
 
   const activeProgram =
     dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
@@ -650,14 +426,8 @@ export default function Dashboard() {
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
 
-  // TODO [1] — API GET charger l'historique du canal.
-  // Simulation pour l'instant : petit délai pour montrer l'état « Chargement… »,
-  // puis on renvoie les messages mock du canal demandé.
-  const handleFetchMessages = async (channelId: number): Promise<ChannelMessage[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des messages)');
-    return selectedChannel?.id === channelId ? (selectedChannel.messages ?? []) : [];
-  };
+  // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
+  const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
 
   const mobileUserInitial = getUserInitial(currentUser);
 
@@ -843,7 +613,7 @@ export default function Dashboard() {
             lastName: currentUser.lastName ?? '',
             avatarColor: currentUser.avatarColor,
           }}
-          onSave={handleSaveProfile}
+          onSave={saveProfile}
         />
       )}
 

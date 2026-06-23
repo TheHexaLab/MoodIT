@@ -7,6 +7,7 @@ import { Pencil } from '../../assets/Pencil.tsx';
 import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
+import { contrastingTextColor } from '../../helpers/color.ts';
 import { type User as UserMenuUser } from '../../types/domain.ts';
 
 // L'utilisateur affiché est l'entité User du domaine (source unique).
@@ -207,7 +208,7 @@ export default function UserMenu({
               <section className={styles.identity}>
                 <span
                   className={styles.identityAvatar}
-                  style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
+                  style={{ background: user?.avatarColor || 'var(--brand-teal)', color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)') }}
                   aria-hidden="true"
                 >
                   {initials}
@@ -337,7 +338,10 @@ export default function UserMenu({
           aria-haspopup="menu"
           aria-expanded={isOpen}
           aria-label="Compte utilisateur"
-          style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
+          style={{
+            background: user?.avatarColor || 'var(--brand-teal)',
+            color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
+          }}
         >
           {initials}
         </button>
@@ -353,7 +357,10 @@ export default function UserMenu({
         >
           <span
             className={styles.userAvatarInitials}
-            style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
+            style={{
+              background: user?.avatarColor || 'var(--brand-teal)',
+              color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
+            }}
             aria-hidden="true"
           >
             {initials}

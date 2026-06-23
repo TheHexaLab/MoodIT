@@ -42,6 +42,15 @@ public class DevWsController {
   /** Auteur fictif des éléments simulés (rosie, présente dans init.sql). */
   private static final Author ROSIE = new Author(2, "rosie1234", "Rosie", "HG", "#0a5cc0");
 
+  /**
+   * Id de l'utilisateur de TEST : room `user:<id>` ciblée par défaut pour les
+   * diffusions « programme » (subscription / update / delete). UNIQUE endroit à
+   * changer pour tester avec un autre compte — le front s'abonne à
+   * `user:<currentUser.id>`, donc connecte-toi avec CET id.
+   * (String car requis comme `defaultValue` d'annotation, qui doit être constant.)
+   */
+  private static final String MOCK_REALTIME_USER_ID = "4";
+
   private final RealtimeEventPublisher publisher;
 
   public DevWsController(RealtimeEventPublisher publisher) {
@@ -96,7 +105,7 @@ public class DevWsController {
   /** Simule l'adhésion / l'ajout d'un programme pour un utilisateur. */
   @PostMapping("/program")
   public String program(
-      @RequestParam(defaultValue = "1") long userId,
+      @RequestParam(defaultValue = MOCK_REALTIME_USER_ID) long userId,
       @RequestParam(defaultValue = "Programme temps réel") String name) {
     long id = seq.incrementAndGet();
     publisher.subscriptionAdded(
@@ -179,7 +188,7 @@ public class DevWsController {
   /** Simule la modification distante d'un programme (nom / code / cohorte / couleur). */
   @PatchMapping("/program")
   public String editProgram(
-      @RequestParam(defaultValue = "1") long userId,
+      @RequestParam(defaultValue = MOCK_REALTIME_USER_ID) long userId,
       @RequestParam(defaultValue = "2") long programId,
       @RequestParam(defaultValue = "Programme modifié ✏️") String name,
       @RequestParam(defaultValue = "GEL") String code,
@@ -192,7 +201,7 @@ public class DevWsController {
   /** Simule la suppression / le désabonnement distant d'un programme. */
   @DeleteMapping("/program")
   public String deleteProgram(
-      @RequestParam(defaultValue = "1") long userId,
+      @RequestParam(defaultValue = MOCK_REALTIME_USER_ID) long userId,
       @RequestParam(defaultValue = "2") long programId) {
     publisher.programDeleted(userId, programId);
     return "program #" + programId + " supprimé sur user:" + userId;

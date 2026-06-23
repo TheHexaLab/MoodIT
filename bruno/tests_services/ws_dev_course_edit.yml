@@ -1,0 +1,18 @@
+info:
+  name: Cours · Modifier
+  type: http
+  seq: 9
+
+http:
+  method: PATCH
+  url: http://localhost:8081/dev/ws/course?programId=1&courseId=1&code=GIF123&title=Cours modifié ✏️
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse la modification du cours <courseId> sur program:<programId>.
+  course:edited REMPLACE le cours (les sections du DTO font foi).

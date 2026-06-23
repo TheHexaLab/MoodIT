@@ -320,8 +320,8 @@ export default function PopupTests() {
             addTitle: 'Nouveau canal',
             editTitle: 'Modifier le canal',
             deleteTitle: 'Supprimer le canal ?',
-            deleteBody: (item, prefix) =>
-              `Le canal « ${prefix} ${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
+            deleteBody: (item) =>
+              `Le canal « ${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
           }}
         />
       )}

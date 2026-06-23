@@ -1,0 +1,18 @@
+info:
+  name: Forum · Modifier le sujet
+  type: http
+  seq: 6
+
+http:
+  method: PATCH
+  url: http://localhost:8081/dev/ws/post?forumId=3&postId=102&content=(dev) sujet modifié ✏️
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse la modification du sujet <postId> sur forum:<forumId>.
+  postId doit exister dans la room ouverte (mock forum 3 : 101/102/106/120).
