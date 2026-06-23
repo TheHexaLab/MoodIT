@@ -34,7 +34,7 @@ public class UserService {
         dto.setSettings(user.getSettings());
         dto.setAvatarColor(user.getAvatarColor());
         dto.setCreatedAt(user.getCreatedAt());
-        dto.setVerifiedEmail(user.getVerifiedEmail());
+        //dto.setVerifiedEmail(user.getVerifiedEmail());
 
         return dto;
     }
@@ -49,7 +49,7 @@ public class UserService {
         dto.setSettings(user.getSettings());
         dto.setAvatarColor(user.getAvatarColor());
         dto.setCreatedAt(user.getCreatedAt());
-        dto.setVerifiedEmail(user.getVerifiedEmail());
+        //dto.setVerifiedEmail(user.getVerifiedEmail());
         dto.setPrograms(user.getPrograms()
                 .stream()
                 .map(programService::toProgramDTO)

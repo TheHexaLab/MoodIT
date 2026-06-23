@@ -20,7 +20,7 @@ public class UserDTO {
     //private String activeTokenHash;
     //private String passwordHash;
     private LocalDateTime createdAt;
-    private Boolean verifiedEmail;
+    //private Boolean verifiedEmail;
     //private List<Role> roles;
 }
 

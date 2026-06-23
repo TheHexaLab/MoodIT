@@ -41,8 +41,8 @@ public class User {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    @Column(name = "verified_email")
-    private Boolean verifiedEmail;
+    /*@Column(name = "verified_email")
+    private Boolean verifiedEmail;*/
 
     @ManyToMany
     @JoinTable(

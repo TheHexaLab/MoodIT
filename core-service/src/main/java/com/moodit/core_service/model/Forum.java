@@ -16,6 +16,9 @@ public class Forum {
     @Column(nullable = false, length = 128)
     private String title;
 
+    @Column(nullable = false)
+    private Integer position;
+
     @ManyToOne
     @JoinColumn(name = "f_type_id", nullable = false)
     private FType fType;

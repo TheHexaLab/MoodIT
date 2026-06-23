@@ -130,7 +130,6 @@ public class CourseService {
     }
 
     public void deleteCourse(Integer courseId) {
-
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
 
