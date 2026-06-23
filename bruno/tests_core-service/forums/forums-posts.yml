@@ -1,0 +1,25 @@
+info:
+  name: /forums/posts
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/forums/posts"
+  body:
+    type: json
+    data: |-
+      {
+        "forumId": 1,
+        "parentPostId": null,
+        "content": "Mon nouveau post"
+      }
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJqdHJlbWJsYXlAdXNoZXJicm9va2UuY2EiLCJpYXQiOjE3ODEwMzk1NDcsImV4cCI6MTc4MTA0MzE0N30.kQqqcIeZ00u0XtHc8IV7zX2hBvI6rmJ2UcaNsubGFHI
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
