@@ -101,6 +101,8 @@ interface CourseMenuProps {
    * Utilisateur connecte affiche en bas du panneau.
    */
   currentUser?: UserMenuUser | null;
+  /** Profil en cours de chargement : le UserMenu affiche un skeleton. */
+  userLoading?: boolean;
   /** Ouvre le formulaire de modification du profil (menu du compte). */
   onEditProfile?: () => void;
   /** Déconnecte l'utilisateur (menu du compte). */
@@ -129,6 +131,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   onAddCourse,
   onEditCourse,
   currentUser,
+  userLoading = false,
   onEditProfile,
   onLogout,
 }) => {
@@ -439,7 +442,12 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
 
       {/* Panneau utilisateur */}
       <footer className={styles.userPanel}>
-        <UserMenu user={currentUser} onEditProfile={onEditProfile} onLogout={onLogout} />
+        <UserMenu
+          user={currentUser}
+          loading={userLoading}
+          onEditProfile={onEditProfile}
+          onLogout={onLogout}
+        />
       </footer>
 
       {/* Poignée de redimensionnement (bord droit) */}

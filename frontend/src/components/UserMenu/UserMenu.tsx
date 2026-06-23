@@ -16,6 +16,11 @@ export type { UserMenuUser };
 interface UserMenuProps {
   /** Utilisateur actuellement connecte. */
   user?: UserMenuUser | null;
+  /**
+   * Profil en cours de chargement (GET /api/me) : affiche un skeleton à la place de
+   * l'avatar/nom et neutralise l'ouverture du menu tant que les données ne sont pas là.
+   */
+  loading?: boolean;
   /** Ouvre le formulaire de modification du profil. */
   onEditProfile?: () => void;
   /** Déconnecte l'utilisateur. */
@@ -37,6 +42,7 @@ const MOBILE_QUERY = '(max-width: 900px)';
 
 export default function UserMenu({
   user,
+  loading = false,
   onEditProfile,
   onLogout,
   variant = 'footer',
@@ -124,6 +130,7 @@ export default function UserMenu({
   }, [isOpen, computePosition, requestClose]);
 
   function toggleOpen() {
+    if (loading) return; // pas de menu tant que le profil n'est pas chargé
     if (isOpen) {
       if (isClosing) setIsClosing(false); // ré-ouverture pendant l'animation de sortie
       else requestClose();
@@ -200,7 +207,7 @@ export default function UserMenu({
               <section className={styles.identity}>
                 <span
                   className={styles.identityAvatar}
-                  style={{ background: user?.avatar_color || 'var(--brand-teal)' }}
+                  style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
                   aria-hidden="true"
                 >
                   {initials}
@@ -303,7 +310,25 @@ export default function UserMenu({
           document.body
         )}
 
-      {variant === 'compact' ? (
+      {loading ? (
+        variant === 'compact' ? (
+          <span
+            className={`${styles.compactTrigger} ${styles.skeleton} ${styles.skeletonAvatarCompact}`}
+            aria-hidden="true"
+          />
+        ) : (
+          <div className={`${styles.userMenu} ${styles.userMenuLoading}`} aria-busy="true">
+            <span
+              className={`${styles.userAvatarInitials} ${styles.skeleton} ${styles.skeletonAvatar}`}
+              aria-hidden="true"
+            />
+            <span className={styles.userInfo}>
+              <span className={`${styles.skeleton} ${styles.skeletonName}`} aria-hidden="true" />
+              <span className={`${styles.skeleton} ${styles.skeletonHandle}`} aria-hidden="true" />
+            </span>
+          </div>
+        )
+      ) : variant === 'compact' ? (
         <button
           ref={triggerRef}
           className={`${styles.compactTrigger}${isOpen ? ` ${styles.compactTriggerOpen}` : ''}`}
@@ -312,7 +337,7 @@ export default function UserMenu({
           aria-haspopup="menu"
           aria-expanded={isOpen}
           aria-label="Compte utilisateur"
-          style={{ background: user?.avatar_color || 'var(--brand-teal)' }}
+          style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
         >
           {initials}
         </button>
@@ -328,7 +353,7 @@ export default function UserMenu({
         >
           <span
             className={styles.userAvatarInitials}
-            style={{ background: user?.avatar_color || 'var(--brand-teal)' }}
+            style={{ background: user?.avatarColor || 'var(--brand-teal)' }}
             aria-hidden="true"
           >
             {initials}
@@ -346,8 +371,8 @@ export default function UserMenu({
 function getDisplayName(user?: UserMenuUser | null): string {
   if (!user) return 'Utilisateur';
 
-  const firstName = user.first_name?.trim() ?? '';
-  const lastName = user.last_name?.trim() ?? '';
+  const firstName = user.firstName?.trim() ?? '';
+  const lastName = user.lastName?.trim() ?? '';
   const fullName = `${firstName} ${lastName}`.trim();
   if (fullName) return fullName;
 

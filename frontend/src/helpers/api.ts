@@ -1,4 +1,5 @@
 import { getToken, clearToken } from './auth';
+import { type User } from '../types/domain';
 
 export interface RegisterPayload {
   username: string;
@@ -37,6 +38,48 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   }
 
   return res;
+}
+
+/**
+ * Profil de l'utilisateur connecté (GET /api/me). L'identité vient du JWT côté
+ * gateway ; aucune donnée n'est passée en paramètre. Le gateway route /api/** vers
+ * core-service. Un 401 est géré par apiFetch (purge du token + redirection /login).
+ */
+export async function getMe(): Promise<User> {
+  const res = await apiFetch('/api/me');
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/** Champs de profil modifiables par l'utilisateur via PATCH /api/me. */
+export interface UpdateMePayload {
+  firstName: string;
+  lastName: string;
+  avatarColor: string;
+}
+
+/**
+ * Met à jour le profil de l'utilisateur connecté (PATCH /api/me) et renvoie le
+ * profil à jour. La photo (multipart) n'est pas encore gérée côté backend.
+ */
+export async function updateMe(payload: UpdateMePayload): Promise<User> {
+  const res = await apiFetch('/api/me', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
 }
 
 export async function register(payload: RegisterPayload): Promise<RegisterResponse> {

@@ -19,7 +19,7 @@ export type ForumType = 'Discussion' | 'Thread';
 export interface Establishment {
   id: number;
   name: string;
-  domain_email?: string;
+  domainEmail?: string;
 }
 
 /** Rôle (table Role) : Étudiant / Enseignant / Auxiliaire / Administrateur. */
@@ -30,17 +30,22 @@ export interface Role {
 
 /**
  * Utilisateur (table User_, colonnes utiles côté client).
- * `avatar_color` est optionnel pour couvrir les vues d'auteur minimales.
+ * `avatarColor` est optionnel pour couvrir les vues d'auteur minimales.
  */
 export interface User {
   id: number;
   username: string;
-  first_name: string;
-  last_name: string;
-  avatar_color?: string;
+  firstName: string;
+  lastName: string;
+  avatarColor?: string;
   email?: string;
   /** URL d'une photo de profil (si l'utilisateur en a une). */
-  avatar_url?: string;
+  avatarUrl?: string;
+  /**
+   * Rôles GLOBAUX (table User_Role), renvoyés par GET /api/me. Optionnel : les vues
+   * d'auteur minimales ne les portent pas. Le front en dérive `isAdmin`.
+   */
+  roles?: Role[];
 }
 
 /**
@@ -54,7 +59,7 @@ export interface Program {
   code: string;
   cohort: string;
   color: string;
-  establishment_id?: number;
+  establishmentId?: number;
   label?: string;
   courses?: Course[];
 }
@@ -85,12 +90,12 @@ export interface Quiz {
 
 /**
  * Forum (table Forum). Canaux ('Discussion') et forums ('Thread') sont tous deux
- * des lignes de Forum, distingués par `f_type`. `position` = ordre dans sa section.
+ * des lignes de Forum, distingués par `fType`. `position` = ordre dans sa section.
  */
 export interface Forum {
   id: number;
   title: string;
-  f_type?: ForumType;
+  fType?: ForumType;
   position?: number;
   /** Messages (pertinent surtout pour un canal 'Discussion'). */
   messages?: ChannelMessage[];
@@ -108,41 +113,41 @@ export interface CourseChannel {
 }
 
 /**
- * Message d'un canal 'Discussion' (= Post d'un Forum de f_type 'Discussion').
- * `client_msg_id` (nonce) permet de dédupliquer l'optimiste de son écho WS.
+ * Message d'un canal 'Discussion' (= Post d'un Forum de fType 'Discussion').
+ * `clientMsgId` (nonce) permet de dédupliquer l'optimiste de son écho WS.
  */
 export interface ChannelMessage {
   id: number;
   content: string;
-  created_at: string;
+  createdAt: string;
   author: User;
-  post_parent_id?: number | null;
-  client_msg_id?: string;
+  postParentId?: number | null;
+  clientMsgId?: string;
 }
 
 /** Vote sur un post (table Vote) : value_ ∈ {-1, 1} ; score d'un post = SUM(value_). */
 export interface PostVote {
-  user_id: number;
+  userId: number;
   value: 1 | -1;
 }
 
 /**
- * Sujet ou réponse d'un forum 'Thread' (= Post d'un Forum de f_type 'Thread').
- * Les réponses (post_parent_id) sont imbriquées dans `replies` (chargées paresseusement).
+ * Sujet ou réponse d'un forum 'Thread' (= Post d'un Forum de fType 'Thread').
+ * Les réponses (postParentId) sont imbriquées dans `replies` (chargées paresseusement).
  */
 export interface ForumPost {
   id: number;
   content: string;
-  created_at: string;
+  createdAt: string;
   author: User;
-  is_pinned?: boolean;
+  isPinned?: boolean;
   /** Titre du sujet (les posts racines d'un Thread en ont un). */
   title?: string;
   votes: PostVote[];
   /** Réponses directes ; `undefined` = pas encore chargées, `[]` = chargées et vides. */
   replies?: ForumPost[];
   /** Nombre de réponses directes, connu dès le chargement (avant dépliage). */
-  reply_count?: number;
+  replyCount?: number;
   /** Nonce de réconciliation optimiste ↔ écho WS. */
-  client_post_id?: string;
+  clientPostId?: string;
 }

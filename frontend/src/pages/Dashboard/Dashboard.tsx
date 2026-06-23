@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProgramMenu, { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
@@ -48,14 +48,11 @@ import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 
-// TODO [5] — supprimer cet import (et tout src/dev/) une fois le vrai WebSocket branché.
-// Une seule connexion simulée sert le chat ET le forum (deux facades).
-import {
-  mockMessageSocket,
-  mockForumSocket,
-  mockCourseSocket,
-  mockProgramsSocket,
-} from '../../dev/mockSocket.ts';
+// Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
+// les programmes (quatre facades) — étape [5] du HANDOFF.
+import { createAppSocket } from '../../services/appSocket.ts';
+import { getToken } from '../../helpers/auth.ts';
+import { getMe, updateMe } from '../../helpers/api.ts';
 import {
   getMockForumReplies,
   getMockForumThreads,
@@ -74,17 +71,25 @@ import { getDashboardPrograms } from './dashboardDataSource.ts';
 import { type DemoProgram } from '../../mocks/dashboardData.ts';
 import styles from './Dashboard.module.css';
 
-const loggedInUserMock: UserMenuUser = {
-  id: 1,
-  username: 'jeandubois',
-  email: 'jeandubois@email.com',
-  first_name: 'Jean',
-  last_name: 'D.',
-  avatar_color: '#0a5cc0',
+// Identité neutre affichée tant que GET /api/me n'a pas répondu : aucun faux nom.
+// L'UI retombe sur 'Utilisateur' / 'U' (cf. getDisplayName / getUserInitial) jusqu'à
+// ce que le vrai profil arrive et remplace cette valeur via setCurrentUser.
+const loadingUser: UserMenuUser = {
+  id: -1,
+  username: '',
+  firstName: '',
+  lastName: '',
+  avatarColor: '#0a5cc0',
 };
 
-// TODO : dériver du rôle réel de l'utilisateur connecté (mock pour l'instant).
-const isAdminMock = true;
+// TODO : id mock pour l'abonnement temps réel (scope utilisateur). À remplacer par
+// l'id réel issu de GET /api/me une fois la (re)souscription branchée sur currentUser.
+const MOCK_REALTIME_USER_ID = 1;
+
+// Nom du rôle global (table Role) qui accorde les droits d'édition (cours,
+// programmes, sections, gestion des rôles). Les rôles enseignant PAR programme
+// (User_Program_Role) ne sont pas encore gérés ici.
+const ADMIN_ROLE_NAME = 'Administrateur';
 
 // Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
 // operations sur les messages : envoi, modification, suppression.
@@ -98,15 +103,14 @@ const SIMULATE_FETCH_FAILURE = false;
  *
  * Ordre de développement conseillé (chaque étape est isolée et testable) :
  *   [1] GET    messages    → handleFetchMessages   (afficher l'historique d'abord)
- *   [2] POST   message     → handleSendMessage     (RENVOYER le message persisté + client_msg_id)
+ *   [2] POST   message     → handleSendMessage     (RENVOYER le message persisté + clientMsgId)
  *   [3] PATCH  message     → handleEditMessage
  *   [4] DELETE message     → handleDeleteMessage
  *   [5] WebSocket          → remplacer les mocks par `createAppSocket(...)` (UNE connexion
  *                            pour le chat ET le forum ; scaffold prêt : src/services/appSocket.ts)
  *
  * Déjà géré côté front (ne rien recoder) : états loading/erreur, rollback optimiste,
- * déduplication optimiste ↔ écho (client_msg_id), désabonnement au changement de canal.
- * À NETTOYER en fin de parcours : tout le dossier src/dev/ (mock + menu de test).
+ * déduplication optimiste ↔ écho (clientMsgId), désabonnement au changement de canal.
  * ───────────────────────────────────────────────────────────────────────────── */
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
@@ -126,7 +130,12 @@ export default function Dashboard() {
   const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>(getDashboardPrograms);
   // Utilisateur connecté dans un state : les modifications de profil (nom, couleur)
   // se reflètent dans la barre de profil. Le mock ne sert que de valeur initiale.
-  const [currentUser, setCurrentUser] = useState<UserMenuUser>(loggedInUserMock);
+  const [currentUser, setCurrentUser] = useState<UserMenuUser>(loadingUser);
+  // Profil en cours de chargement (GET /api/me) : pilote le skeleton du UserMenu.
+  const [profileLoading, setProfileLoading] = useState(true);
+  // Droits d'édition dérivés des rôles globaux réels (false tant que /api/me n'a pas
+  // répondu → aucun bouton d'édition ne « flashe » pendant le chargement).
+  const isAdmin = currentUser.roles?.some((role) => role.name === ADMIN_ROLE_NAME) ?? false;
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
@@ -144,6 +153,40 @@ export default function Dashboard() {
   // Sortie d'un programme (async : overlay de chargement + ErrorPopup en cas d'échec).
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+
+  // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
+  // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
+  // Les quatre facades (ws.channels / ws.forums / ws.courses / ws.programs) partagent
+  // cette connexion ; ws.close() la ferme volontairement (sans reconnexion).
+  const ws = useMemo(() => createAppSocket(undefined, () => getToken() ?? ''), []);
+  // Ouverture/fermeture pilotées par l'effet : en StrictMode (dev), le démontage
+  // ferme puis le remontage rouvre — la garde `ws !== socket` côté appSocket évite
+  // qu'un ancien socket en cours de connexion ne tue la nouvelle connexion.
+  useEffect(() => {
+    ws.open();
+    return () => ws.close();
+  }, [ws]);
+
+  // Profil réel de l'utilisateur connecté (GET /api/me). Remplace l'identité neutre
+  // `loadingUser` dès la réponse. En cas d'échec autre que 401 (déjà géré par apiFetch
+  // → /login), on conserve la valeur de chargement plutôt que de bloquer l'UI.
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then((user) => {
+        if (!cancelled) setCurrentUser(user);
+      })
+      .catch(() => {
+        // 401 → redirection gérée par apiFetch ; autres erreurs : on garde la valeur
+        // de chargement (skeleton retiré quand même pour ne pas figer l'UI).
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Refs vers l'état courant : permettent au handler du socket programmes (abonné
   // une seule fois) de lire la liste / le programme actif sans capture périmée.
@@ -170,10 +213,10 @@ export default function Dashboard() {
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,
   // adhésion / désabonnement. Applique à la liste, et bascule le programme actif s'il
-  // disparaît. TODO [5] : remplacer mockProgramsSocket par ws.programs (createAppSocket).
+  // disparaît.
   useEffect(() => {
-    const userId = loggedInUserMock.id;
-    return mockProgramsSocket.subscribe(userId, {
+    const userId = MOCK_REALTIME_USER_ID;
+    return ws.programs.subscribe(userId, {
       onProgramUpsert: (program) =>
         setDashboardPrograms((programs) => upsertProgram(programs, program)),
       onProgramRemove: (programId) => {
@@ -186,7 +229,7 @@ export default function Dashboard() {
         }
       },
     });
-  }, []);
+  }, [ws]);
   // GET des cours du programme actif. Mock pour l'instant (délai + échec optionnel) :
   // le state `dashboardPrograms` fait office de cache, on n'expose que loading/erreur.
   // TODO [1] : remplacer par un vrai GET /programs/:id/courses → setDashboardPrograms.
@@ -210,10 +253,9 @@ export default function Dashboard() {
 
   // Abonnement temps réel (scope programme) : applique les évènements cours /
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
-  // TODO [5] : remplacer mockCourseSocket par ws.courses (createAppSocket).
   useEffect(() => {
     if (activeProgramId < 0) return;
-    return mockCourseSocket.subscribe(activeProgramId, {
+    return ws.courses.subscribe(activeProgramId, {
       onSectionChange: (courseId, sectionType, change) =>
         setDashboardPrograms((programs) =>
           mapProgramCourses(programs, activeProgramId, (course) =>
@@ -225,7 +267,7 @@ export default function Dashboard() {
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
     });
-  }, [activeProgramId]);
+  }, [activeProgramId, ws]);
 
   // TODO : remplacer par une navigation ou un rendu de vue lors de l'implémentation des canaux.
   const handleOpenChannel = (channel: CourseChannel) => {
@@ -237,11 +279,11 @@ export default function Dashboard() {
 
   // Ouvre le AddCoursePopup avec le programme courant préselectionné (admin).
   const handleAddCourse = () => {
-    if (isAdminMock) setPopup({ kind: 'addCourse', programId: activeProgramId });
+    if (isAdmin) setPopup({ kind: 'addCourse', programId: activeProgramId });
   };
   // Ouvre le UpdateCoursePopup pour le cours du crayon (admin ; crayon déjà admin-only).
   const handleEditCourse = (courseId: number) => {
-    if (isAdminMock) setPopup({ kind: 'editCourse', courseId });
+    if (isAdmin) setPopup({ kind: 'editCourse', courseId });
   };
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
@@ -251,10 +293,10 @@ export default function Dashboard() {
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
   const handleAddCourseToProgram = (programId: number) => {
-    if (isAdminMock) setPopup({ kind: 'addCourse', programId });
+    if (isAdmin) setPopup({ kind: 'addCourse', programId });
   };
   const handleEditProgram = (programId: number) => {
-    if (isAdminMock) setPopup({ kind: 'editProgram', programId });
+    if (isAdmin) setPopup({ kind: 'editProgram', programId });
   };
   // GET rôles + membres d'un programme (API-ready : délai + échec simulés).
   // TODO : GET /programs/:id/roles + /programs/:id/members.
@@ -274,7 +316,7 @@ export default function Dashboard() {
   };
 
   const handleManageRoles = (programId: number) => {
-    if (!isAdminMock) return;
+    if (!isAdmin) return;
     setPopup({ kind: 'manageRoles', programId });
     void fetchProgramRoles(programId);
   };
@@ -282,13 +324,13 @@ export default function Dashboard() {
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
-    if (isAdminMock) setCreatingSectionType('text');
+    if (isAdmin) setCreatingSectionType('text');
   };
   const handleCreateQuiz = () => {
-    if (isAdminMock) setCreatingSectionType('quiz');
+    if (isAdmin) setCreatingSectionType('quiz');
   };
   const handleCreateForum = () => {
-    if (isAdminMock) setCreatingSectionType('forum');
+    if (isAdmin) setCreatingSectionType('forum');
   };
   // Persiste une modification de section (réordre/renommage/suppression/ajout).
   // Branché sur l'API simulée (délai + échec optionnel) comme les handlers de
@@ -429,18 +471,17 @@ export default function Dashboard() {
     );
   };
 
-  // PATCH du profil de l'utilisateur connecté. Async (délai + échec simulé).
-  // Au succès, on applique nom/couleur au state → la barre de profil se met à jour.
-  // TODO : PATCH /me (prénom, nom, couleur) + upload de la photo (multipart).
+  // PATCH /api/me : prénom, nom, couleur. Si onSave rejette, EditProfilePopup garde
+  // le popup ouvert et affiche l'erreur. Au succès, on applique le profil renvoyé
+  // par le backend (source de vérité) → la barre de profil se met à jour.
+  // TODO : upload de la photo (multipart) — non géré côté backend pour l'instant.
   const handleSaveProfile = async (profile: ProfileUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification du profil)');
-    setCurrentUser((prev) => ({
-      ...prev,
-      first_name: profile.firstName,
-      last_name: profile.lastName,
-      avatar_color: profile.avatarColor,
-    }));
+    const updated = await updateMe({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      avatarColor: profile.avatarColor,
+    });
+    setCurrentUser(updated);
   };
 
   // INSERT/DELETE d'une assignation rôle ↔ utilisateur (admin). Le RoleEditorPopup
@@ -481,11 +522,11 @@ export default function Dashboard() {
   const currentUserAuthor: ChannelMessageAuthor = {
     id: currentUser.id,
     username: currentUser.username,
-    first_name: currentUser.first_name ?? '',
-    last_name: currentUser.last_name ?? '',
+    firstName: currentUser.firstName ?? '',
+    lastName: currentUser.lastName ?? '',
   };
 
-  // TODO [2] — API POST du message (post_parent_id si réponse).
+  // TODO [2] — API POST du message (postParentId si réponse).
   // ⚠ RENVOYER le message persisté (id réel) pour la réconciliation, et stocker le
   //   clientMessageId pour que le broadcast WS le renvoie (dédup). Voir HANDOFF.md.
   const handleSendMessage = async (
@@ -498,9 +539,9 @@ export default function Dashboard() {
     console.log(
       '[Dashboard] Envoi de message :',
       content,
-      '(post_parent_id =',
+      '(postParentId =',
       parentId,
-      ', client_msg_id =',
+      ', clientMsgId =',
       clientMessageId,
       ')'
     );
@@ -523,7 +564,7 @@ export default function Dashboard() {
   /* ───────────────────────────────────────────────────────────────────────────
    * FORUM ('Thread') — meme architecture API + temps reel que le chat.
    * À brancher : GET sujets, POST réponse, PATCH, DELETE, POST vote, WebSocket.
-   * Déjà géré côté front : loading/erreur, rollback optimiste, dédup (client_post_id),
+   * Déjà géré côté front : loading/erreur, rollback optimiste, dédup (clientPostId),
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
@@ -541,8 +582,8 @@ export default function Dashboard() {
     return getMockForumReplies(postId);
   };
 
-  // POST réponse (post_parent_id si réponse à un post). ⚠ RENVOYER le post persisté
-  // (id réel + meme client_post_id) pour la réconciliation optimiste ↔ écho WS.
+  // POST réponse (postParentId si réponse à un post). ⚠ RENVOYER le post persisté
+  // (id réel + meme clientPostId) pour la réconciliation optimiste ↔ écho WS.
   const handleCreatePost = async (
     content: string,
     parentId: number | null,
@@ -557,7 +598,7 @@ export default function Dashboard() {
       content,
       '(parent =',
       parentId,
-      ', client_post_id =',
+      ', clientPostId =',
       clientPostId,
       ')'
     );
@@ -656,6 +697,7 @@ export default function Dashboard() {
           <UserMenu
             variant="compact"
             user={currentUser}
+            loading={profileLoading}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
           />
@@ -676,7 +718,7 @@ export default function Dashboard() {
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
-            isAdmin={isAdminMock}
+            isAdmin={isAdmin}
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
@@ -690,6 +732,7 @@ export default function Dashboard() {
             // pas les cours en cache : CourseMenu reste neutre jusqu'au fetch des cours.
             courses={coursesEnabled ? courses : []}
             currentUser={currentUser}
+            userLoading={profileLoading}
             selectedCourseId={effectiveSelectedCourseId}
             onSelectCourse={(courseId) => {
               setSelectedCourseId(courseId);
@@ -699,7 +742,7 @@ export default function Dashboard() {
             onSelectChannel={setSelectedChannelRef}
             onOpenChannel={handleOpenChannel}
             onSectionChange={handleSectionChange}
-            isAdmin={isAdminMock}
+            isAdmin={isAdmin}
             // CourseMenu ne reflète QUE le fetch des cours (qui n'a lieu qu'après
             // le succès du fetch programmes) → pas d'illusion de fetch parallèle.
             loading={coursesLoading}
@@ -714,7 +757,7 @@ export default function Dashboard() {
       />
 
       <MainPanel
-        isAdmin={isAdminMock}
+        isAdmin={isAdmin}
         program={mainPanelProgram}
         selectedCourse={effectiveSelectedCourseId ?? null}
         selectedChannel={selectedChannelRef ?? null}
@@ -723,10 +766,8 @@ export default function Dashboard() {
         onSendMessage={handleSendMessage}
         onEditMessage={handleEditMessage}
         onDeleteMessage={handleDeleteMessage}
-        // TODO [5] — une seule connexion WebSocket pour le chat ET le forum :
-        //   const ws = useMemo(() => createAppSocket(import.meta.env.VITE_WS_URL, getAuthToken), []);
-        //   puis socket={ws.channels} et forumSocket={ws.forums}  (scaffold : src/services/appSocket.ts)
-        socket={mockMessageSocket}
+        // Une seule connexion WebSocket pour le chat ET le forum (mêmes rooms).
+        socket={ws.channels}
         // ── Forum ('Thread') : API + temps reel (mirror du chat, meme connexion). ──
         onFetchThreads={handleFetchThreads}
         onFetchReplies={handleFetchReplies}
@@ -734,7 +775,7 @@ export default function Dashboard() {
         onEditPost={handleEditPost}
         onDeletePost={handleDeletePost}
         onVotePost={handleVotePost}
-        forumSocket={mockForumSocket}
+        forumSocket={ws.forums}
         onAddProgram={handleAddProgram}
         onAddCourse={handleAddCourse}
         onCreateChannel={handleCreateChannel}
@@ -788,7 +829,7 @@ export default function Dashboard() {
           loadJoinEstablishments={loadJoinEstablishments}
           loadEstablishmentPrograms={loadEstablishmentPrograms}
           subscribedProgramIds={subscribedProgramIds}
-          canCreateProgram={isAdminMock}
+          canCreateProgram={isAdmin}
         />
       )}
 
@@ -798,9 +839,9 @@ export default function Dashboard() {
           onClose={() => setPopup(null)}
           user={{
             username: currentUser.username,
-            first_name: currentUser.first_name ?? '',
-            last_name: currentUser.last_name ?? '',
-            avatar_color: currentUser.avatar_color,
+            firstName: currentUser.firstName ?? '',
+            lastName: currentUser.lastName ?? '',
+            avatarColor: currentUser.avatarColor,
           }}
           onSave={handleSaveProfile}
         />
@@ -869,7 +910,7 @@ export default function Dashboard() {
 }
 
 function getUserInitial(user: UserMenuUser): string {
-  const display = user.first_name?.trim() || user.username?.trim() || 'U';
+  const display = user.firstName?.trim() || user.username?.trim() || 'U';
   return display[0].toUpperCase();
 }
 
@@ -891,7 +932,7 @@ function getSelectedCourse(courses: Course[], selectedCourseId: number | undefin
 /**
  * Renvoie une copie du cours avec la modification de section appliquée.
  * - 'quiz' agit sur les quiz ; 'text'/'forum' agissent sur le sous-ensemble de
- *   forums du f_type correspondant ('Discussion' / 'Thread').
+ *   forums du fType correspondant ('Discussion' / 'Thread').
  * Les positions sont réattribuées séquentiellement après chaque changement.
  */
 /** Applique une transformation aux cours d'un programme donné (immuable). */
@@ -990,7 +1031,7 @@ function applyToForums(
   fType: ForumType,
   change: ItemChange
 ): ForumChannelSource[] {
-  const inSection = (f: ForumChannelSource) => (f.f_type ?? 'Thread') === fType;
+  const inSection = (f: ForumChannelSource) => (f.fType ?? 'Thread') === fType;
   switch (change.type) {
     case 'rename':
       return reposition(
@@ -1003,10 +1044,10 @@ function applyToForums(
     case 'create':
       return reposition([
         ...forums,
-        { id: nextNumericId(forums), title: change.item.name, f_type: fType },
+        { id: nextNumericId(forums), title: change.item.name, fType: fType },
       ]);
     case 'reorder': {
-      // On réordonne uniquement le sous-ensemble du f_type ; les autres forums
+      // On réordonne uniquement le sous-ensemble du fType ; les autres forums
       // gardent leur ordre relatif (les sections sont affichées séparément).
       const reordered = orderByIds(forums.filter(inSection), change.orderedIds);
       const others = forums.filter((f) => !inSection(f));
