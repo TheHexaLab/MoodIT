@@ -73,11 +73,33 @@ export interface AppSocket {
   forums: ForumSocket;
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
+  /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
+  open: () => void;
+  /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
+  close: () => void;
 }
 
-export function createAppSocket(url: string, getToken: () => string): AppSocket {
+/**
+ * URL du WebSocket. Par défaut : même origine que la page, en ws/wss selon http/https,
+ * sur le chemin `/ws` (proxifié par Vite en dev, par le gateway en prod). Surchargeable
+ * via `VITE_WS_URL` (ex. connexion directe au core-service sans passer par le gateway).
+ */
+export function defaultWebSocketUrl(): string {
+  const override = import.meta.env.VITE_WS_URL as string | undefined;
+  if (override) return override;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+export function createAppSocket(
+  url: string = defaultWebSocketUrl(),
+  getToken: () => string = () => ''
+): AppSocket {
   let ws: WebSocket | null = null;
   let reconnectDelay = 1000;
+  /** Fermeture demandée par le client : empêche la reconnexion automatique. */
+  let closedByClient = false;
+  let reconnectTimer: number | null = null;
   /** Rooms actives (on peut être abonné a plusieurs canaux / forums / programmes). */
   const channelSubs = new Map<number, IncomingMessageHandlers>();
   const forumSubs = new Map<number, IncomingForumHandlers>();
@@ -89,9 +111,13 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
   };
 
   function connect() {
-    ws = new WebSocket(`${url}?token=${encodeURIComponent(getToken())}`);
+    closedByClient = false;
+    // Référence locale : permet d'ignorer les évènements d'un socket périmé (ex. un
+    // ancien socket fermé par le double-montage StrictMode pendant qu'un nouveau s'ouvre).
+    const socket = new WebSocket(`${url}?token=${encodeURIComponent(getToken())}`);
+    ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = () => {
       reconnectDelay = 1000;
       // (Re)joindre toutes les rooms actives — utile après une reconnexion.
       for (const channelId of channelSubs.keys()) send({ type: 'join', scope: 'channel', id: channelId });
@@ -101,7 +127,7 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
       // TODO reconnexion : refetcher les éléments manqués « depuis le dernier vu ».
     };
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       let data: ServerEvent;
       try {
         data = JSON.parse(event.data) as ServerEvent;
@@ -119,7 +145,7 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
           channelSubs.get(data.channelId)?.onDelete(data.messageId);
           break;
         case 'post:created':
-          // La dédup optimiste ↔ écho est gérée par le hook (client_msg_id / client_post_id).
+          // La dédup optimiste ↔ écho est gérée par le hook (clientMsgId / clientPostId).
           forumSubs.get(data.forumId)?.onPost(data.post, data.parentId);
           break;
         case 'post:edited':
@@ -153,17 +179,17 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
       }
     };
 
-    ws.onclose = () => {
-      // Reconnexion avec backoff exponentiel plafonné.
-      // TODO : ne pas reconnecter si fermeture VOLONTAIRE (logout / unmount app).
-      window.setTimeout(connect, reconnectDelay);
+    socket.onclose = () => {
+      // Fermeture volontaire (logout / démontage), ou socket déjà remplacé par un
+      // nouveau (StrictMode) : on ne reconnecte pas.
+      if (closedByClient || ws !== socket) return;
+      // Sinon, reconnexion avec backoff exponentiel plafonné.
+      reconnectTimer = window.setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 15_000);
     };
 
-    ws.onerror = () => ws?.close();
+    socket.onerror = () => socket.close();
   }
-
-  connect();
 
   return {
     channels: {
@@ -205,6 +231,30 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
           send({ type: 'leave', scope: 'user', id: userId });
         };
       },
+    },
+    open() {
+      // Idempotent : ne rouvre pas si une connexion est déjà en cours / établie.
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+      connect();
+    },
+    close() {
+      closedByClient = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      const socket = ws;
+      ws = null;
+      if (!socket) return;
+      if (socket.readyState === WebSocket.CONNECTING) {
+        // Fermer un socket encore en cours de connexion fait râler Chrome
+        // ("closed before the connection is established") — fréquent au double-montage
+        // StrictMode. On neutralise ses handlers et on ne le ferme qu'une fois OUVERT,
+        // ce qui est une fermeture propre (sans warning). Il ne rejoint aucune room.
+        socket.onopen = () => socket.close();
+        socket.onmessage = null;
+        socket.onclose = null;
+        socket.onerror = null;
+      } else {
+        socket.close();
+      }
     },
   };
 }
