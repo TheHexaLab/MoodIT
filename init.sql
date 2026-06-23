@@ -151,19 +151,36 @@ CREATE TABLE Vote(
    FOREIGN KEY(post_id) REFERENCES Post(id) ON DELETE CASCADE
 );
 
+CREATE TABLE Language(
+   id SERIAL,
+   name VARCHAR(64) NOT NULL UNIQUE,
+   harness_template TEXT ,
+   PRIMARY KEY(id)
+);
+
 CREATE TABLE Question(
    id SERIAL,
-   prompt VARCHAR(256) NOT NULL,
-   code_language VARCHAR(64) ,
-   expected_output VARCHAR(512) ,
-   start_code VARCHAR(512) ,
+   prompt TEXT NOT NULL,
+   language_id INTEGER ,
+   start_code TEXT ,
    order_index INTEGER,
    total_score INTEGER NOT NULL,
    q_type_id INTEGER NOT NULL,
    quiz_id INTEGER NOT NULL,
    PRIMARY KEY(id),
+   FOREIGN KEY(language_id) REFERENCES Language(id),
    FOREIGN KEY(q_type_id) REFERENCES Q_Type(id),
    FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE
+);
+
+CREATE TABLE Test_Case(
+   id SERIAL,
+   name VARCHAR(128) NOT NULL,
+   harness_code TEXT NOT NULL,
+   weight INTEGER NOT NULL DEFAULT 1,
+   question_id INTEGER NOT NULL,
+   PRIMARY KEY(id),
+   FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE
 );
 
 CREATE TABLE Answer(
@@ -187,7 +204,7 @@ CREATE TABLE Drag_Item(
 
 CREATE TABLE Submission(
    id SERIAL,
-   content VARCHAR(512) ,
+   content TEXT,
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
    score INTEGER,
    question_id INTEGER NOT NULL,
@@ -197,15 +214,18 @@ CREATE TABLE Submission(
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
 
+-- Feedback généré par le service MCP sur un COURS (points forts/faibles).
+-- Rattaché au cours analysé ; user_id = l'enseignant qui a déclenché l'analyse.
+-- Historique conservé : une ligne par analyse (tri par created_at).
 CREATE TABLE MCP_Response(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    content TEXT NOT NULL,
    user_id INTEGER NOT NULL,
-   forum_id INTEGER NOT NULL,
+   course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE,
-   FOREIGN KEY(forum_id) REFERENCES Forum(id) ON DELETE CASCADE
+   FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
 );
 
 CREATE TABLE User_Program(
@@ -251,12 +271,14 @@ CREATE INDEX idx_forum_f_type_id ON Forum(f_type_id);
 CREATE INDEX idx_forum_course_id ON Forum(course_id);
 CREATE INDEX idx_post_user_id ON Post(user_id);
 CREATE INDEX idx_question_q_type_id ON Question(q_type_id);
+CREATE INDEX idx_question_language_id ON Question(language_id);
+CREATE INDEX idx_test_case_question_id ON Test_Case(question_id);
 CREATE INDEX idx_answer_question_id ON Answer(question_id);
 CREATE INDEX idx_drag_item_question_id ON Drag_Item(question_id);
 CREATE INDEX idx_submission_question_id ON Submission(question_id);
 CREATE INDEX idx_submission_user_id ON Submission(user_id);
 CREATE INDEX idx_mcp_response_user_id ON MCP_Response(user_id);
-CREATE INDEX idx_mcp_response_forum_id ON MCP_Response(forum_id);
+CREATE INDEX idx_mcp_response_course_id ON MCP_Response(course_id);
 CREATE INDEX idx_user_program_user_id ON User_Program(user_id);
 CREATE INDEX idx_user_role_role_id ON User_Role(role_id);
 CREATE INDEX idx_program_course_course_id ON program_course(course_id);
