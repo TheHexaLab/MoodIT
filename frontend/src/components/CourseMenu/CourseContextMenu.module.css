@@ -85,3 +85,36 @@
 .itemFeatured:focus-visible .icon {
   color: var(--brand-teal);
 }
+
+/* Séparateur avant l'action destructive (cf. ProgramMenu). */
+.divider {
+  height: 1px;
+  margin: 0.25rem;
+  background: var(--border);
+}
+
+/* Item destructif « Quitter le cours » : rouge (--danger), au repos et au survol. */
+.itemDanger {
+  color: var(--danger);
+}
+
+.itemDanger .icon {
+  color: var(--danger);
+}
+
+.itemDanger:hover,
+.itemDanger:focus-visible {
+  color: var(--danger);
+  background: var(--shadow-danger);
+}
+
+.itemDanger:hover .icon,
+.itemDanger:focus-visible .icon {
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}

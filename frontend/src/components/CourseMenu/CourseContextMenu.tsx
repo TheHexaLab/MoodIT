@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import styles from './CourseContextMenu.module.css';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sparkles } from '../../assets/Sparkles.tsx';
+import { LogOut } from '../../assets/LogOut.tsx';
 import { defaultLabels } from './labels.ts';
 
 interface CourseContextMenuProps {
@@ -15,6 +16,8 @@ interface CourseContextMenuProps {
   onEditCourse?: () => void;
   /** Action « Gestion MCP — Feedback du cours » (absente → item masqué). */
   onOpenMcp?: () => void;
+  /** Action destructive « Quitter le cours » (absente → item + séparateur masqués). */
+  onLeaveCourse?: () => void;
   /** Ferme le menu (clic extérieur, Échap, scroll, resize, après action). */
   onClose: () => void;
 }
@@ -30,6 +33,7 @@ export function CourseContextMenu({
   courseCode,
   onEditCourse,
   onOpenMcp,
+  onLeaveCourse,
   onClose,
 }: CourseContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -91,6 +95,22 @@ export function CourseContextMenu({
           <Sparkles className={styles.icon} width="16" height="16" aria-hidden="true" />
           <span>{defaultLabels.contextMcpManagement}</span>
         </button>
+      )}
+      {onLeaveCourse && (
+        <>
+          {/* Séparateur seulement s'il y a des items au-dessus (pas pour un menu
+              « quitter » seul, cas d'un utilisateur non-administrateur). */}
+          {(onEditCourse || onOpenMcp) && <span className={styles.divider} role="separator" />}
+          <button
+            type="button"
+            role="menuitem"
+            className={`${styles.item} ${styles.itemDanger}`}
+            onClick={onLeaveCourse}
+          >
+            <LogOut className={styles.icon} width="16" height="16" aria-hidden="true" />
+            <span>{defaultLabels.contextLeaveCourse}</span>
+          </button>
+        </>
       )}
     </div>,
     document.body

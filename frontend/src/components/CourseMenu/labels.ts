@@ -20,6 +20,8 @@ export interface CourseDropdownLabels {
   contextEditCourse: string;
   /** Item « Gestion MCP — Feedback du cours » du menu contextuel. */
   contextMcpManagement: string;
+  /** Item « Quitter le cours » du menu contextuel (action destructive). */
+  contextLeaveCourse: string;
 }
 
 /** Tous les textes par défaut du dropdown de cours et de son menu contextuel. */
@@ -32,4 +34,5 @@ export const defaultLabels: CourseDropdownLabels = {
   contextMenuAria: (courseCode) => `Actions du cours ${courseCode}`,
   contextEditCourse: 'Modifier le cours',
   contextMcpManagement: 'Feedback du cours',
+  contextLeaveCourse: 'Quitter le cours',
 };

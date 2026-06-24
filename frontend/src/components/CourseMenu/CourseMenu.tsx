@@ -105,6 +105,11 @@ interface CourseMenuProps {
    */
   onOpenMcpManagement?: (courseId: number) => void;
   /**
+   * « Quitter le cours » (clic droit sur le sélecteur, admin). Action destructive.
+   * Si absent, l'item correspondant du menu contextuel n'est pas affiché.
+   */
+  onLeaveCourse?: (courseId: number) => void;
+  /**
    * Utilisateur connecte affiche en bas du panneau.
    */
   currentUser?: UserMenuUser | null;
@@ -138,6 +143,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   onAddCourse,
   onEditCourse,
   onOpenMcpManagement,
+  onLeaveCourse,
   currentUser,
   userLoading = false,
   onEditProfile,
@@ -318,11 +324,16 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     closeCoursePicker();
   }
 
-  // Clic droit sur le sélecteur de cours → menu contextuel (réservé aux admins).
-  // Ancré sous le sélecteur (comme le Figma), pas à la position de la souris.
-  // Hors admin : on laisse le menu natif du navigateur (pas de preventDefault).
+  // Actions admin du menu contextuel (modifier, gestion MCP) ; « quitter le cours »
+  // reste accessible à TOUS. On n'ouvre le menu que s'il aura au moins un item.
+  const hasAdminContextActions = isAdmin && (Boolean(onEditCourse) || Boolean(onOpenMcpManagement));
+  const hasContextMenu = hasAdminContextActions || Boolean(onLeaveCourse);
+
+  // Clic droit sur le sélecteur de cours → menu contextuel. Ancré sous le sélecteur
+  // (comme le Figma), pas à la position de la souris. Si aucun item n'est applicable,
+  // on laisse le menu natif du navigateur (pas de preventDefault).
   function handleCourseContextMenu(event: React.MouseEvent<HTMLButtonElement>) {
-    if (!isAdmin || !selectedCourse) return;
+    if (!selectedCourse || !hasContextMenu) return;
     event.preventDefault();
     closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
     const rect = event.currentTarget.getBoundingClientRect();
@@ -504,14 +515,15 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         onKeyDown={handleResizeKeyDown}
       />
 
-      {/* Menu contextuel du sélecteur de cours (clic droit, admin) */}
+      {/* Menu contextuel du sélecteur de cours (clic droit). Actions admin (modifier,
+          gestion MCP) réservées aux admins ; « quitter le cours » accessible à tous. */}
       {ctxMenuPos && selectedCourse && (
         <CourseContextMenu
           x={ctxMenuPos.x}
           y={ctxMenuPos.y}
           courseCode={selectedCourse.code}
           onEditCourse={
-            onEditCourse
+            isAdmin && onEditCourse
               ? () => {
                   onEditCourse(selectedCourse.id);
                   setCtxMenuPos(null);
@@ -519,9 +531,17 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
               : undefined
           }
           onOpenMcp={
-            onOpenMcpManagement
+            isAdmin && onOpenMcpManagement
               ? () => {
                   onOpenMcpManagement(selectedCourse.id);
+                  setCtxMenuPos(null);
+                }
+              : undefined
+          }
+          onLeaveCourse={
+            onLeaveCourse
+              ? () => {
+                  onLeaveCourse(selectedCourse.id);
                   setCtxMenuPos(null);
                 }
               : undefined

@@ -13,6 +13,7 @@ import {
 } from '../../components/CourseChannelList/CourseChannelList.tsx';
 import { defaultTypeDefinitions } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { AddCoursePopup, type NewCourse } from '../../components/AddCoursePopup/AddCoursePopup.tsx';
+import { JoinCoursesPopup } from '../../components/JoinCoursesPopup/JoinCoursesPopup.tsx';
 import {
   AddSubscriptionPopup,
   type JoinSelection,
@@ -64,7 +65,9 @@ type PopupState =
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
-  | { kind: 'leaveProgram'; programId: number };
+  | { kind: 'leaveProgram'; programId: number }
+  | { kind: 'leaveCourse'; courseId: number }
+  | { kind: 'joinCourses'; programId: number };
 
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
@@ -208,6 +211,9 @@ export default function Dashboard() {
   const handleOpenMcpManagement = (courseId: number) => {
     if (isAdmin) console.info('[Dashboard] Gestion MCP demandée pour le cours', courseId);
   };
+  // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
+  // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
+  const handleLeaveCourse = (courseId: number) => setPopup({ kind: 'leaveCourse', courseId });
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
@@ -241,6 +247,26 @@ export default function Dashboard() {
     void fetchProgramRoles(programId);
   };
   const handleLeaveProgram = (programId: number) => setPopup({ kind: 'leaveProgram', programId });
+  // Rejoindre des cours d'un programme (menu contextuel, TOUS les utilisateurs) : ouvre
+  // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
+  const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
+  // Inscription aux cours choisis (via api.joinCourses). La sélection du popup REMPLACE
+  // l'ensemble des cours du programme : les cours décochés sont retirés, les nouveaux
+  // ajoutés. On préserve les données riches (canaux/quiz/forums) des cours conservés.
+  // L'erreur remonte au popup (qui l'affiche).
+  const handleConfirmJoinCourses = async (programId: number, courseIds: number[]) => {
+    const joined = await api.joinCourses(programId, courseIds);
+    setDashboardPrograms((programs) =>
+      programs.map((program) => {
+        if (program.id !== programId) return program;
+        const existingById = new Map(program.courses.map((course) => [course.id, course]));
+        const courses = courseIds
+          .map((id) => existingById.get(id) ?? joined.find((course) => course.id === id))
+          .filter((course): course is Course => course !== undefined);
+        return { ...program, courses };
+      })
+    );
+  };
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
@@ -369,6 +395,27 @@ export default function Dashboard() {
     }
   };
 
+  // Quitter un cours (via api.leaveCourse). Même flux que pour un programme : overlay
+  // de chargement, ErrorPopup en cas d'échec. Au succès : retrait du cours du programme
+  // actif + reset de la sélection si c'était le cours ouvert.
+  const handleConfirmLeaveCourse = async (courseId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.leaveCourse(courseId);
+      if (courseId === effectiveSelectedCourseId) {
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
+    } catch {
+      setLeaveError('Impossible de quitter le cours. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   // Auteur des messages envoyés = utilisateur connecte (colonnes utiles de User_).
   const currentUserAuthor: ChannelMessageAuthor = {
     id: currentUser.id,
@@ -456,6 +503,11 @@ export default function Dashboard() {
     popup?.kind === 'editCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la confirmation « Quitter le cours » (dans le programme actif).
+  const leavingCourse =
+    popup?.kind === 'leaveCourse'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Programme ciblé par un popup contextuel (édition / rôles / quitter).
   const popupProgram =
     popup && 'programId' in popup
@@ -497,6 +549,7 @@ export default function Dashboard() {
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
+            onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
         }
@@ -526,6 +579,7 @@ export default function Dashboard() {
             onAddCourse={handleAddCourse}
             onEditCourse={handleEditCourse}
             onOpenMcpManagement={handleOpenMcpManagement}
+            onLeaveCourse={handleLeaveCourse}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
           />
@@ -663,6 +717,18 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Rejoindre des cours d'un programme (menu contextuel, tous les utilisateurs). */}
+      {popup?.kind === 'joinCourses' && popupProgram && (
+        <JoinCoursesPopup
+          programName={popupProgram.name}
+          programColor={popupProgram.color}
+          loadCourses={() => api.fetchProgramCourses(popupProgram.id)}
+          loadJoinedCourseIds={() => api.fetchJoinedCourseIds(popupProgram.id)}
+          onJoin={(courseIds) => handleConfirmJoinCourses(popupProgram.id, courseIds)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Quitter un programme — confirmation (menu contextuel). */}
       {popup?.kind === 'leaveProgram' && popupProgram && (
         <DeleteConfirmationPopup
@@ -670,6 +736,17 @@ export default function Dashboard() {
           content={`Tu ne verras plus les cours, canaux et forums de « ${popupProgram.name} ». Tu pourras le rejoindre à nouveau plus tard.`}
           labels={{ confirm: 'Quitter' }}
           onDeleteConfirmation={() => handleConfirmLeaveProgram(popupProgram.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* Quitter un cours — confirmation (menu contextuel). */}
+      {popup?.kind === 'leaveCourse' && leavingCourse && (
+        <DeleteConfirmationPopup
+          title="Quitter le cours ?"
+          content={`Tu ne verras plus les canaux, quiz et forums de « ${leavingCourse.code ?? leavingCourse.title ?? 'ce cours'} ». Tu pourras le rejoindre à nouveau plus tard.`}
+          labels={{ confirm: 'Quitter' }}
+          onDeleteConfirmation={() => handleConfirmLeaveCourse(leavingCourse.id)}
           onClose={() => setPopup(null)}
         />
       )}

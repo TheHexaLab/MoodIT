@@ -11,6 +11,7 @@ import type {
   JoinSelection,
   NewProgram,
 } from '../../components/AddSubscriptionPopup/types.ts';
+import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange } from '../../components/RoleEditorPopup/types.ts';
@@ -106,12 +107,39 @@ export async function fetchEstablishmentsForJoin() {
 }
 
 /**
- * TODO — Lister le catalogue des programmes existants d'un établissement, pour que
- * l'utilisateur choisisse ceux qu'il veut rejoindre.
+ * TODO — Lister le catalogue des programmes existants d'un établissement
+ * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
   await simulateFetch('Échec simulé (programmes de l’établissement)');
   return getEstablishmentPrograms(establishmentId);
+}
+
+/**
+ * TODO — Lister les cours rejoignables d'un programme.
+ * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
+ */
+export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
+  await simulateFetch('Échec simulé (cours rejoignables du programme)');
+  // Mock : on liste les VRAIS cours du programme (mêmes ids/codes que partout ailleurs)
+  // pour que le popup retrouve, et pré-coche, les cours déjà rejoints.
+  const program = getDashboardPrograms().find((p) => p.id === programId);
+  return (program?.courses ?? []).map((course) => ({
+    id: course.id,
+    code: course.code ?? '',
+    title: course.title ?? '',
+  }));
+}
+
+/**
+ * TODO — Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ rattaché (ses inscriptions).
+ * Sert à pré-cocher le JoinCoursesPopup, indépendamment
+ * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
+ */
+export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
+  await simulateFetch('Échec simulé (cours rattachés du programme)');
+  const program = getDashboardPrograms().find((p) => p.id === programId);
+  return (program?.courses ?? []).map((course) => course.id);
 }
 
 // ── Programmes / cours (écriture) ──────────────────────────────────────────────
@@ -155,6 +183,7 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
  */
 export async function joinPrograms(selection: JoinSelection) {
   await simulateWrite('Échec simulé (adhésion au programme)');
+  console.log(selection)
   return getEstablishmentPrograms(selection.establishmentId).filter((p) =>
     selection.programIds.includes(p.id)
   );
@@ -179,6 +208,33 @@ export async function updateProgram(programId: number, update: ProgramUpdate): P
 export async function leaveProgram(programId: number): Promise<void> {
   await simulateWrite('Échec simulé (quitter le programme)');
   console.log(programId);
+}
+
+/** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
+export async function leaveCourse(courseId: number): Promise<void> {
+  await simulateWrite('Échec simulé (quitter le cours)');
+  console.log(courseId);
+}
+
+/**
+ * TODO — Inscrire l'utilisateur aux cours choisis d'un programme. Renvoie les cours
+ * rejoints (forme `Course`, sans canaux) pour que le Dashboard les fusionne dans le
+ * programme. `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
+ */
+export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
+  await simulateWrite('Échec simulé (adhésion aux cours)');
+  const program = getDashboardPrograms().find((p) => p.id === programId);
+  console.log(programId, courseIds)
+  return (program?.courses ?? [])
+    .filter((course) => courseIds.includes(course.id))
+    .map((course) => ({
+      id: course.id,
+      code: course.code,
+      title: course.title,
+      channels: [],
+      quizzes: [],
+      forums: [],
+    }));
 }
 
 /**
