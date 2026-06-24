@@ -28,6 +28,7 @@ import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { apiFetch } from '../../helpers/api.ts';
+import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
 
