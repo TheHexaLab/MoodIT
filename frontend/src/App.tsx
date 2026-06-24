@@ -4,6 +4,7 @@ import Register from './pages/Register/Register';
 import Dashboard from './pages/Dashboard/Dashboard';
 import VerifyCode from './pages/VerifyCode/VerifyCode';
 import ProtectedRoute from './components/ProtectedRoute';
+import CurrentUserProvider from './context/CurrentUserProvider';
 import './pages/LoginPage.css';
 
 export default function App() {
@@ -14,9 +15,11 @@ export default function App() {
       <Route
         path="/home"
         element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
+          <CurrentUserProvider>
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          </CurrentUserProvider>
         }
       />
       <Route path="/verify-code" element={<VerifyCode />} />

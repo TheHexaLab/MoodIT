@@ -42,7 +42,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
-import { useCurrentUser } from './useCurrentUser.ts';
+import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
