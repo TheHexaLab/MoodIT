@@ -5,6 +5,8 @@
 //
 // ⚠ N'existe PAS hors profil `dev` (jamais exposé en prod). À appeler directement
 // sur core-service (ex. http://localhost:8081/dev/ws/...), pas via le gateway.
+// Reste à la racine (pas sous /api) : WebMvcConfig exclut le package `realtime`
+// du préfixe /api appliqué aux contrôleurs REST.
 //
 // Exemples :
 //   curl -X POST "http://localhost:8081/dev/ws/message?channelId=5&content=Coucou"

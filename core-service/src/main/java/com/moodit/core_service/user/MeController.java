@@ -18,8 +18,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
-// NB : le DispatcherServlet est monté sous /api (spring.mvc.servlet.path=/api),
-// donc /me est servi à /api/me. Pas de @RequestMapping("/api") ici, sinon /api/api/me.
+// NB : pas de @RequestMapping("/api") ici. Le préfixe /api est ajouté globalement
+// par WebMvcConfig (addPathPrefix), donc /me est servi à /api/me. En remettre un ici
+// donnerait /api/api/me.
 @RestController
 public class MeController {
 
