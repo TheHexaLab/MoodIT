@@ -14,6 +14,7 @@ import {
 import { defaultTypeDefinitions } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { AddCoursePopup, type NewCourse } from '../../components/AddCoursePopup/AddCoursePopup.tsx';
 import { JoinCoursesPopup } from '../../components/JoinCoursesPopup/JoinCoursesPopup.tsx';
+import { McpManagementPopup } from '../../components/McpManagementPopup/McpManagementPopup.tsx';
 import {
   AddSubscriptionPopup,
   type JoinSelection,
@@ -67,7 +68,8 @@ type PopupState =
   | { kind: 'manageRoles'; programId: number }
   | { kind: 'leaveProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
-  | { kind: 'joinCourses'; programId: number };
+  | { kind: 'joinCourses'; programId: number }
+  | { kind: 'mcp'; courseId: number };
 
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
@@ -206,10 +208,10 @@ export default function Dashboard() {
   const handleEditCourse = (courseId: number) => {
     if (isAdmin) setPopup({ kind: 'editCourse', courseId });
   };
-  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur).
-  // TODO : ouvrir la modale Gestion MCP (Figma node 4:3) — feature séparée, à implémenter.
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur,
+  // admin) : ouvre la modale de gestion des analyses MCP du cours.
   const handleOpenMcpManagement = (courseId: number) => {
-    if (isAdmin) console.info('[Dashboard] Gestion MCP demandée pour le cours', courseId);
+    if (isAdmin) setPopup({ kind: 'mcp', courseId });
   };
   // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
   // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
@@ -508,6 +510,11 @@ export default function Dashboard() {
     popup?.kind === 'leaveCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la modale « Gestion MCP » (dans le programme actif).
+  const mcpCourse =
+    popup?.kind === 'mcp'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Programme ciblé par un popup contextuel (édition / rôles / quitter).
   const popupProgram =
     popup && 'programId' in popup
@@ -714,6 +721,32 @@ export default function Dashboard() {
           roles={roleData.roles}
           users={roleData.users}
           onChange={handleRoleChange}
+        />
+      )}
+
+      {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
+      {popup?.kind === 'mcp' && mcpCourse && (
+        <McpManagementPopup
+          courseId={mcpCourse.id}
+          courseLabel={
+            mcpCourse.code || mcpCourse.name || 'Cours'
+          }
+          loadAnalyses={() => api.fetchCourseAnalyses(mcpCourse.id)}
+          loadAnalysis={(id) => api.fetchCourseAnalysis(id)}
+          loadPending={() => api.fetchPendingAnalysis(mcpCourse.id)}
+          subscribeCompletion={(handlers) =>
+            ws.mcp.subscribe(mcpCourse.id, {
+              onAnalysisCreated: handlers.onCreated,
+              // Échec : ne réagit que si c'est l'utilisateur courant qui a lancé le job
+              // (le verrou MCP est par (cours, user)).
+              onAnalysisFailed: (launcherId, reason) => {
+                if (launcherId === currentUser.id) handlers.onFailed(reason);
+              },
+              onResync: handlers.onResync,
+            })
+          }
+          onAnalyze={() => api.requestCourseAnalysis(mcpCourse.id)}
+          onClose={() => setPopup(null)}
         />
       )}
 

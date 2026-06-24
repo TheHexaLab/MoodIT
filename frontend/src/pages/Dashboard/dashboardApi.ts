@@ -18,7 +18,15 @@ import {
   getMockForumThreads,
 } from '../../components/MainPanel/ForumView/forumThreads.ts';
 import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
-import type { Course } from '../../types/domain.ts';
+import type { Course, McpResponse, McpResponseSummary } from '../../types/domain.ts';
+import {
+  clearAnalysisPending,
+  generateMcpResponse,
+  getMcpResponse,
+  getMcpResponseSummaries,
+  isAnalysisPending,
+  markAnalysisPending,
+} from '../../mocks/mcpData.ts';
 import {
   getCreateEstablishments,
   getEstablishmentPrograms,
@@ -36,6 +44,8 @@ export type { DemoProgram };
 const SIMULATE_DELAY = 100;
 const SIMULATE_SEND_FAILURE: boolean = false;
 const SIMULATE_FETCH_FAILURE: boolean = false;
+// Durée simulée d'un job MCP (génération) avant le push de complétion.
+const MOCK_MCP_JOB_MS = 2500;
 
 const wait = () => new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
 
@@ -55,6 +65,15 @@ async function simulateWrite(errorMessage: string): Promise<void> {
 // les ids des mocks). À terme, c'est le backend qui attribue l'id, on le retirera.
 let mockIdSeq = 9000;
 const nextMockId = () => ++mockIdSeq;
+
+/**
+ * Id de l'utilisateur courant. MOCK : lu dans localStorage (comme fetchPrograms).
+ * RÉEL : le backend le dérive du JWT — la signature des fonctions n'a donc pas besoin
+ * de le porter (il n'apparaît pas dans le contrat public).
+ */
+function currentUserId(): number {
+  return Number(localStorage.getItem('moodit_user_id')) || 0;
+}
 
 // ── Programmes / cours (chargement) ────────────────────────────────────────────
 
@@ -143,6 +162,37 @@ export async function fetchJoinedCourseIds(programId: number): Promise<number[]>
   return (program?.courses ?? []).map((course) => course.id);
 }
 
+/**
+ * TODO — Historique des analyses MCP d'un cours : RÉSUMÉS (sans contenu), tri récent →
+ * ancien. Tout est renvoyé d'un coup. Le détail est chargé à la demande via
+ * fetchCourseAnalysis(id).
+ */
+export async function fetchCourseAnalyses(courseId: number): Promise<McpResponseSummary[]> {
+  await simulateFetch('Échec simulé (historique des analyses MCP)');
+  return getMcpResponseSummaries(courseId);
+}
+
+/**
+ * TODO — Détail complet d'une analyse MCP (table MCP_Response, avec `content`), chargé
+ * au clic sur une entrée de l'historique.
+ */
+export async function fetchCourseAnalysis(id: number): Promise<McpResponse> {
+  await simulateFetch('Échec simulé (détail de l’analyse MCP)');
+  const response = getMcpResponse(id);
+  if (!response) throw new Error('Analyse introuvable');
+  return response;
+}
+
+/**
+ * TODO — L'utilisateur courant a-t-il une analyse MCP EN COURS pour ce cours ? Permet
+ * de réhydrater l'état « en cours » du popup (survit à un rechargement de page). Le
+ * lien est (cours, utilisateur) : côté réel, l'utilisateur vient du JWT.
+ */
+export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
+  await simulateFetch('Échec simulé (statut de l’analyse MCP)');
+  return isAnalysisPending(courseId, currentUserId());
+}
+
 // ── Programmes / cours (écriture) ──────────────────────────────────────────────
 
 /**
@@ -215,6 +265,24 @@ export async function leaveProgram(programId: number): Promise<void> {
 export async function leaveCourse(courseId: number): Promise<void> {
   await simulateWrite('Échec simulé (quitter le cours)');
   console.log(courseId);
+}
+
+/**
+ * TODO — Déclencher une analyse MCP d'un cours (« Analyser mon cours »). ASYNCHRONE : le
+ * serveur ACCEPTE le job (202) et marque (cours, user) « en cours » ; il ne renvoie PAS
+ * le résultat. Celui-ci arrive plus tard par WebSocket (cf. subscribeCourseAnalyses).
+ */
+export async function requestCourseAnalysis(courseId: number): Promise<void> {
+  await simulateWrite('Échec simulé (analyse MCP)');
+  const userId = currentUserId();
+  markAnalysisPending(courseId, userId);
+  // Simulation du job serveur : après un délai, il persiste la réponse et libère le verrou.
+  // En prod, c'est le backend qui le fait PUIS pousse `mcp:analysis-created` par WebSocket
+  // (ws.mcp, cf. Dashboard) — le push live n'est PAS simulé ici (nécessite core-service).
+  setTimeout(() => {
+    generateMcpResponse(courseId, userId);
+    clearAnalysisPending(courseId, userId);
+  }, MOCK_MCP_JOB_MS);
 }
 
 /**

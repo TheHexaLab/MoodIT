@@ -2,7 +2,7 @@
 // scopes (chat, forum, cours, programmes), via plusieurs « rooms ».
 //
 // Protocole entrant (envoyé par le front, voir appSocket.ts) :
-//   { "type": "join"|"leave", "scope": "channel"|"forum"|"program"|"user", "id": <number> }
+//   { "type": "join"|"leave", "scope": "channel"|"forum"|"program"|"user"|"mcp", "id": <number> }
 //
 // Protocole sortant : les évènements `ServerEvent` (voir RealtimeEventPublisher),
 // poussés par les contrôleurs REST quand une donnée change.
@@ -29,7 +29,8 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
   private static final Logger log = LoggerFactory.getLogger(RealtimeWebSocketHandler.class);
 
   /** Scopes acceptés dans une commande `join` / `leave`. */
-  private static final Set<String> ALLOWED_SCOPES = Set.of("channel", "forum", "program", "user");
+  private static final Set<String> ALLOWED_SCOPES =
+      Set.of("channel", "forum", "program", "user", "mcp");
 
   /** Limites du décorateur concurrent : délai d'envoi (ms) et tampon (octets). */
   private static final int SEND_TIME_LIMIT_MS = 10_000;

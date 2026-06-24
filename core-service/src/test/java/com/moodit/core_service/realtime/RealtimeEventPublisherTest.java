@@ -18,6 +18,7 @@ import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.ItemDto;
+import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import java.io.IOException;
 import java.util.List;
@@ -161,6 +162,39 @@ class RealtimeEventPublisherTest {
     assertThat(event.get("type").asText()).isEqualTo("program:deleted");
     assertThat(event.get("userId").asLong()).isEqualTo(3);
     assertThat(event.get("programId").asLong()).isEqualTo(7);
+  }
+
+  @Test
+  void mcpAnalysisCreated_aLaFormeAttendueEtEstRouteVersLaRoomCours() throws IOException {
+    WebSocketSession inRoom = joinedSession("mcp", 8);
+    WebSocketSession otherCourse = joinedSession("mcp", 9);
+
+    publisher.mcpAnalysisCreated(8, new McpResponseSummaryDto(42, "2026-06-22T10:00:00.000Z", 3, 2));
+
+    JsonNode event = capturePayload(inRoom);
+    assertThat(event.get("type").asText()).isEqualTo("mcp:analysis-created");
+    assertThat(event.get("courseId").asLong()).isEqualTo(8);
+    JsonNode analysis = event.get("analysis");
+    assertThat(analysis.get("id").asLong()).isEqualTo(42);
+    assertThat(analysis.get("createdAt").asText()).isEqualTo("2026-06-22T10:00:00.000Z");
+    assertThat(analysis.get("strengthsCount").asInt()).isEqualTo(3);
+    assertThat(analysis.get("improvementsCount").asInt()).isEqualTo(2);
+    // Le résumé ne porte PAS le contenu (le détail se fetch au clic).
+    assertThat(analysis.has("content")).isFalse();
+    verify(otherCourse, never()).sendMessage(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void mcpAnalysisFailed_porteLeLanceurEtLaRaison() throws IOException {
+    WebSocketSession session = joinedSession("mcp", 8);
+
+    publisher.mcpAnalysisFailed(8, 4, "Service MCP indisponible");
+
+    JsonNode event = capturePayload(session);
+    assertThat(event.get("type").asText()).isEqualTo("mcp:analysis-failed");
+    assertThat(event.get("courseId").asLong()).isEqualTo(8);
+    assertThat(event.get("userId").asLong()).isEqualTo(4);
+    assertThat(event.get("reason").asText()).isEqualTo("Service MCP indisponible");
   }
 
   @Test

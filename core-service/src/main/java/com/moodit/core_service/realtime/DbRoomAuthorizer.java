@@ -4,6 +4,11 @@
 //   program:<id> → il est abonné au programme (User_Program)
 //   channel/forum:<id> → le Forum appartient à un cours d'un programme auquel il
 //                        est abonné (Forum → program_course → User_Program)
+//   mcp:<id>     → le cours (id) appartient à un programme auquel il est abonné
+//                  (program_course → User_Program). ⚠ MCP est côté admin : si on
+//                  veut restreindre aux enseignants/admins, ajouter un contrôle de
+//                  rôle (User_Program_Role) ici — non fait pour rester aligné sur
+//                  la visibilité « cours » des autres scopes.
 //
 // N'utilise pas (encore) le modèle JPA : requêtes SQL directes sur le schéma
 // d'init.sql, pour être opérationnel sans dépendre des entités à venir. Les colleg.
@@ -41,6 +46,7 @@ public class DbRoomAuthorizer implements RoomAuthorizer {
       case "user" -> id == userId;
       case "program" -> isSubscribedToProgram(userId, id);
       case "channel", "forum" -> canSeeForum(userId, id);
+      case "mcp" -> canSeeCourse(userId, id);
       default -> false;
     };
   }
@@ -81,6 +87,27 @@ public class DbRoomAuthorizer implements RoomAuthorizer {
             """,
             Boolean.class,
             forumId,
+            userId));
+  }
+
+  /**
+   * Un cours (Course.id) est visible si l'un de ses programmes (program_course) compte
+   * l'utilisateur parmi ses abonnés (User_Program). Même logique que canSeeForum, mais
+   * sur le cours directement (le scope MCP est par cours).
+   */
+  private boolean canSeeCourse(long userId, long courseId) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS(
+              SELECT 1
+              FROM program_course pc
+              JOIN User_Program up ON up.program_id = pc.program_id
+              WHERE pc.course_id = ? AND up.user_id = ?
+            )
+            """,
+            Boolean.class,
+            courseId,
             userId));
   }
 }

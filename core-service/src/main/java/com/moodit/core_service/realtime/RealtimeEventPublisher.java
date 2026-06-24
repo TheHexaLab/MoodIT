@@ -24,6 +24,7 @@ import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
+import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -150,6 +151,29 @@ public class RealtimeEventPublisher {
 
   public void subscriptionRemoved(long userId, long programId) {
     emit("user", userId, event("subscription:removed", "userId", userId, "programId", programId));
+  }
+
+  // ─── Analyses MCP (scope = course) ────────────────────────────────────────
+  // Poussé quand un job d'analyse MCP se termine. Room "mcp:<courseId>" : tous les
+  // abonnés au feedback de ce cours reçoivent le RÉSUMÉ (le détail se fetch au clic).
+
+  public void mcpAnalysisCreated(long courseId, McpResponseSummaryDto analysis) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-created", "courseId", courseId, "analysis", analysis));
+  }
+
+  /**
+   * Job d'analyse MCP ÉCHOUÉ (LLM indisponible, timeout…). Porte le `userId` du LANCEUR :
+   * seul lui doit voir l'erreur et pouvoir relancer (le verrou est par (cours, user)).
+   * `reason` optionnel : message d'erreur à afficher (null → libellé générique du front).
+   */
+  public void mcpAnalysisFailed(long courseId, long userId, String reason) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-failed", "courseId", courseId, "userId", userId, "reason", reason));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

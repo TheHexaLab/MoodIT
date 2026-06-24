@@ -125,6 +125,52 @@ export interface ChannelMessage {
   clientMsgId?: string;
 }
 
+/**
+ * Réponse du service MCP : feedback automatisé d'un COURS (table MCP_Response).
+ * `content` (TEXT en base) porte l'analyse structurée sérialisée (cf. McpAnalysis).
+ * `userId` = l'enseignant qui a déclenché l'analyse ; historique trié par createdAt.
+ */
+export interface McpResponse {
+  id: number;
+  createdAt: string;
+  content: string;
+  userId: number;
+  courseId: number;
+  /** Auteur résolu (jointure sur user_id) : l'utilisateur qui a lancé l'analyse. */
+  author?: User;
+}
+
+/**
+ * Analyse MCP structurée, telle que sérialisée dans MCP_Response.content : le service
+ * MCP produit ce contenu, le frontend le parse pour l'affichage (score, points forts,
+ * points à améliorer, volumétrie des sources).
+ */
+export interface McpAnalysis {
+  /** Score global du cours (0–100). */
+  score: number;
+  /** Points forts identifiés. */
+  strengths: string[];
+  /** Points à améliorer. */
+  improvements: string[];
+  /** Volumétrie ayant servi à l'analyse. */
+  sources: {
+    quizCount: number;
+    forumMessageCount: number;
+    studentCount: number;
+  };
+}
+
+/**
+ * Résumé d'une analyse MCP pour la LISTE de l'historique : projection légère de
+ * MCP_Response (sans le `content`). Le détail complet est chargé à la demande (au clic).
+ */
+export interface McpResponseSummary {
+  id: number;
+  createdAt: string;
+  strengthsCount: number;
+  improvementsCount: number;
+}
+
 /** Vote sur un post (table Vote) : value_ ∈ {-1, 1} ; score d'un post = SUM(value_). */
 export interface PostVote {
   userId: number;

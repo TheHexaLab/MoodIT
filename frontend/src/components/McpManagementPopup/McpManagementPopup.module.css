@@ -1,0 +1,503 @@
+/* Modale « Gestion MCP » (feedback automatisé d'un cours) — vues liste + détail.
+   Conventions visuelles des autres popups (scrim, dialog animé) ; thème via variables. */
+.scrim {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--scrim);
+  animation: mcp-fade-in 0.2s ease-out;
+}
+
+.dialog {
+  display: flex;
+  box-sizing: border-box;
+  width: min(47.5rem, 100% - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  flex-direction: column;
+  user-select: none;
+  border-radius: 1rem;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 32px var(--shadow-modal);
+  animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scrim.closing {
+  animation: mcp-fade-out 0.2s ease-in forwards;
+}
+.scrim.closing .dialog {
+  animation: mcp-pop-out 0.2s ease-in forwards;
+}
+
+@keyframes mcp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mcp-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mcp-pop-in {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mcp-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(0.75rem) scale(0.97); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .dialog { animation: none; }
+}
+
+/* ── Transition de page (liste ↔ détail) + taille animée ─── */
+/* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change. */
+.viewport {
+  overflow: hidden;
+  transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Contenu de page : glisse + fond à l'entrée (remonté via sa `key`). */
+.view {
+  animation: mcp-step-forward 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.view[data-dir='back'] {
+  animation-name: mcp-step-back;
+}
+@keyframes mcp-step-forward {
+  from { opacity: 0; transform: translateX(1.5rem); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mcp-step-back {
+  from { opacity: 0; transform: translateX(-1.5rem); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viewport { transition: none; }
+  .view { animation: none; }
+}
+
+/* ── En-tête ─────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.headerIcon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--brand-teal);
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+.headerText h1 {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: normal;
+  color: var(--text);
+}
+.headerText p {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.84375rem;
+  font-weight: 400;
+  line-height: normal;
+  color: var(--text-muted);
+}
+
+.close {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.1s ease;
+}
+.close:hover { color: var(--text); }
+.close:active { transform: scale(0.85); }
+
+/* Bouton « retour » (vue détail) : icône-chevron seule, comme dans AddSubscriptionPopup. */
+.back {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  margin-top: 0.125rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.1s ease;
+}
+.back:hover { color: var(--text); }
+.back:active { transform: scale(0.85); }
+.backChevron {
+  transform: rotate(-90deg); /* l'asset pointe vers le haut → flèche vers la gauche */
+}
+
+/* ── Corps ───────────────────────────────────────────────── */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+/* ── Encart « Analyser mon cours » ───────────────────────── */
+.analyzeBanner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.125rem 1.25rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--brand-teal) 12%, var(--bg-surface));
+}
+.analyzeText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+.analyzeText h2 {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: normal;
+  color: var(--text);
+}
+.analyzeText p {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.25rem;
+  color: var(--text-muted);
+}
+.analyzeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  min-width: 7.5rem;
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: 0.625rem;
+  background: var(--brand-teal-gradient);
+  color: #ffffff;
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+.analyzeBtn:hover:not(:disabled) { filter: brightness(1.08); }
+.analyzeBtn:active:not(:disabled) { transform: scale(0.97); }
+.analyzeBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── Historique ──────────────────────────────────────────── */
+.historyLabel {
+  font-family: Inter, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.history {
+  /* Hauteur de ligne fixe → au plus 5 analyses visibles, scroll au-delà. */
+  --history-row-height: 3.5rem;
+  margin: 0;
+  /* Gouttière à droite pour la scrollbar (quand elle apparaît). */
+  padding: 0 0.25rem 0 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-height: calc(5 * var(--history-row-height) + 4 * 0.125rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .history {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+.history::-webkit-scrollbar { width: 4px; }
+.history::-webkit-scrollbar-track { background: transparent; }
+.history::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.history::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.history::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.history > li {
+  display: block;
+}
+/* Ligne cliquable : transparente au repos, surlignée au survol (comme la liste des
+   programmes d'AddSubscriptionPopup). Bordure transparente au repos = pas de « saut ».
+   Hauteur fixe (cf. --history-row-height) pour garantir 6 lignes pile. */
+.historyRow {
+  width: 100%;
+  height: var(--history-row-height);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-sizing: border-box;
+  padding: 0 1rem;
+  border: 1.5px solid transparent;
+  border-radius: 0.625rem;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.historyRow:hover:not(:disabled) {
+  background: var(--bg-vote-pill);
+}
+.historyRow:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.historyInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+  min-width: 0;
+}
+.historyDate {
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.historySummary {
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.historyChevron {
+  flex-shrink: 0;
+  color: var(--brand-teal);
+  /* L'asset pointe vers le haut nativement → on le tourne pour pointer à droite. */
+  transform: rotate(90deg);
+}
+
+/* ── États (chargement / erreur / vide) ──────────────────── */
+.stateMsg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 0.625rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-family: Inter, sans-serif;
+  font-size: 0.84375rem;
+}
+.stateMsg p { margin: 0; }
+.retry {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.retry:hover { background: var(--bg-vote-pill); border-color: var(--border-strong); }
+
+/* ── Vue détail : score ──────────────────────────────────── */
+.scoreHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0 0.75rem;
+}
+.scoreBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4rem;
+  height: 4rem;
+  margin-bottom: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-teal) 16%, var(--bg-surface));
+  color: var(--brand-teal);
+}
+.scoreTitle {
+  font-family: Inter, sans-serif;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.score {
+  font-family: Inter, sans-serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--brand-teal);
+}
+.scoreMeta {
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ── Vue détail : onglets ────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 0.375rem;
+}
+.tab {
+  padding: 0.4375rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.tab:hover {
+  color: var(--brand-teal);
+  background: color-mix(in srgb, var(--brand-teal) 12%, var(--bg-surface));
+}
+.tabActive {
+  color: var(--brand-teal);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--brand-teal) 12%, var(--bg-surface));
+}
+
+/* Onglet « À améliorer » : accent rouge (survol + sélectionné), placé après les règles
+   de base pour primer à spécificité égale. */
+.tabImprove:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-surface));
+}
+.tabImprove.tabActive {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-surface));
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Vue détail : liste des points ───────────────────────── */
+.points {
+  /* Hauteur d'UNE ligne de texte (= line-height de .point). SANS gap entre les points :
+     le rythme vertical est uniforme (chaque ligne, qu'elle soit un nouveau point ou la
+     suite d'un point qui revient à la ligne, fait --point-line-height). Du coup
+     max-height = 6 lignes tombe FLUSH à la 6e ligne. Les points restent distingués par
+     leur icône de tête. */
+  --point-line-height: 1.5rem;
+  /* Nombre de lignes de texte visibles : 6 par défaut, 4 en mobile (cf. media query). */
+  --point-visible-lines: 6;
+  margin: 0;
+  /* Gouttière à droite pour la scrollbar (quand elle apparaît). */
+  padding: 0 0.25rem 0 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: calc(var(--point-visible-lines) * var(--point-line-height));
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .points {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+.points::-webkit-scrollbar { width: 4px; }
+.points::-webkit-scrollbar-track { background: transparent; }
+.points::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.points::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.points::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.point {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 400;
+  /* Même unité que --point-line-height pour garder un rythme de lignes uniforme. */
+  line-height: var(--point-line-height);
+  color: var(--text-body);
+}
+.pointIconStrength {
+  flex-shrink: 0;
+  /* Centre l'icône (1rem) sur la première ligne de texte (--point-line-height). */
+  margin-top: 0.25rem;
+  color: var(--brand-teal);
+}
+.pointIconImprove {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  color: var(--warning);
+}
+
+.footnote {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin: 0.25rem 0 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.1rem;
+  color: var(--text-muted);
+}
+
+/* ── Spinner ─────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: mcp-spin 0.6s linear infinite;
+}
+@keyframes mcp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.4s; }
+}
+
+/* ── Écrans étroits ──────────────────────────────────────── */
+@media (max-width: 34rem) {
+  .analyzeBanner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .analyzeBtn { width: 100%; }
+  .historyRow { flex-wrap: wrap; }
+  /* Liste des points : 4 lignes max en mobile (au lieu de 6). */
+  .points { --point-visible-lines: 4; }
+  /* Onglets centrés horizontalement en mobile. */
+  .tabs { justify-content: center; }
+}

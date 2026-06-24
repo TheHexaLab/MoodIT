@@ -64,6 +64,22 @@ class DbRoomAuthorizerTest {
   }
 
   @Test
+  void mcp_verifieLeCoursViaUnProgrammeAbonne() {
+    stubUserId("a@b.ca", 5L);
+    when(jdbc.queryForObject(contains("FROM program_course"), eq(Boolean.class), eq(8L), eq(5L)))
+        .thenReturn(true);
+    assertThat(auth.canJoin("a@b.ca", "mcp", 8)).isTrue();
+  }
+
+  @Test
+  void mcp_refuseSiCoursNonVisible() {
+    stubUserId("a@b.ca", 5L);
+    when(jdbc.queryForObject(contains("FROM program_course"), eq(Boolean.class), eq(99L), eq(5L)))
+        .thenReturn(false);
+    assertThat(auth.canJoin("a@b.ca", "mcp", 99)).isFalse();
+  }
+
+  @Test
   void scopeInconnu_refuse() {
     stubUserId("a@b.ca", 5L);
     assertThat(auth.canJoin("a@b.ca", "galaxy", 1)).isFalse();

@@ -1,0 +1,28 @@
+info:
+  name: MCP · Analyse réussie
+  type: http
+  seq: 13
+
+http:
+  method: POST
+  url: http://localhost:8081/dev/ws/mcp-analysis?courseId=1&strengthsCount=3&improvementsCount=2
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Simule la RÉUSSITE d'un job d'analyse MCP : pousse `mcp:analysis-created`
+  (le RÉSUMÉ, sans contenu) sur la room mcp:<courseId>.
+
+  Abonne-toi d'abord côté WS : {"type":"join","scope":"mcp","id":1}
+  (courseId 1 = tronc commun, présent dans le programme 1 dans init.sql ;
+  l'utilisateur du token doit être abonné à un programme contenant ce cours,
+  sinon le join est refusé).
+
+  Côté front : ouvre le popup « Gestion MCP » sur ce cours → l'analyse
+  apparaît en direct en tête de l'historique.
+
+  Params : courseId, strengthsCount, improvementsCount.

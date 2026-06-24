@@ -1,9 +1,9 @@
-import { type ChannelMessage } from '../components/CourseChannelList/CourseChannelList';
+import { type ChannelMessage } from '../types/domain.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
 } from '../components/MainPanel/ChannelView/useChannelMessages';
-import { type ForumPost } from '../components/MainPanel/ForumView/forumThreads';
+import { type ForumPost } from '../types/domain.ts';
 import {
   type ForumSocket,
   type IncomingForumHandlers,
@@ -14,12 +14,17 @@ import {
   type CourseChannelsSocket,
   type IncomingCourseHandlers,
 } from '../components/CourseMenu/CourseMenu';
-import { type ItemChange } from '../components/SectionEditorPopup/SectionEditorPopup';
+import { type ItemChange } from '../components/SectionEditorPopup/types.ts';
 import {
   type Program,
   type IncomingProgramHandlers,
   type ProgramsSocket,
 } from '../components/ProgramMenu/ProgramMenu';
+import {
+  type IncomingMcpHandlers,
+  type McpResponseSummary,
+  type McpSocket,
+} from '../components/McpManagementPopup/types.ts';
 
 /**
  * SCAFFOLD du vrai client WebSocket (à finir le jour du branchement temps réel).
@@ -66,13 +71,17 @@ type ServerEvent =
   | { type: 'program:updated'; userId: number; program: Program }
   | { type: 'program:deleted'; userId: number; programId: number }
   | { type: 'subscription:added'; userId: number; program: Program }
-  | { type: 'subscription:removed'; userId: number; programId: number };
+  | { type: 'subscription:removed'; userId: number; programId: number }
+  // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
+  | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
+  | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string };
 
 export interface AppSocket {
   channels: ChannelSocket;
   forums: ForumSocket;
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
+  mcp: McpSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -100,11 +109,18 @@ export function createAppSocket(
   /** Fermeture demandée par le client : empêche la reconnexion automatique. */
   let closedByClient = false;
   let reconnectTimer: number | null = null;
+  /**
+   * Passe à true au 1er `onopen`. Permet de distinguer la connexion INITIALE (les abonnés
+   * viennent de fetcher au montage) d'une RECONNEXION (events potentiellement manqués →
+   * resync). Persiste entre les sockets successifs (closure de createAppSocket).
+   */
+  let everConnected = false;
   /** Rooms actives (on peut être abonné a plusieurs canaux / forums / programmes). */
   const channelSubs = new Map<number, IncomingMessageHandlers>();
   const forumSubs = new Map<number, IncomingForumHandlers>();
   const courseSubs = new Map<number, IncomingCourseHandlers>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
+  const mcpSubs = new Map<number, IncomingMcpHandlers>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -119,12 +135,22 @@ export function createAppSocket(
 
     socket.onopen = () => {
       reconnectDelay = 1000;
+      const reconnected = everConnected;
+      everConnected = true;
       // (Re)joindre toutes les rooms actives — utile après une reconnexion.
       for (const channelId of channelSubs.keys()) send({ type: 'join', scope: 'channel', id: channelId });
       for (const forumId of forumSubs.keys()) send({ type: 'join', scope: 'forum', id: forumId });
       for (const programId of courseSubs.keys()) send({ type: 'join', scope: 'program', id: programId });
       for (const userId of programSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
-      // TODO reconnexion : refetcher les éléments manqués « depuis le dernier vu ».
+      for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
+
+      // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
+      // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
+      // pour MCP ; généralisable aux autres scopes en ajoutant `onResync?` à leurs
+      // handlers + une boucle ici (cf. mcpSubs).
+      if (reconnected) {
+        for (const handlers of mcpSubs.values()) handlers.onResync?.();
+      }
     };
 
     socket.onmessage = (event) => {
@@ -175,6 +201,12 @@ export function createAppSocket(
         case 'program:deleted':
         case 'subscription:removed':
           programSubs.get(data.userId)?.onProgramRemove(data.programId);
+          break;
+        case 'mcp:analysis-created':
+          mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);
+          break;
+        case 'mcp:analysis-failed':
+          mcpSubs.get(data.courseId)?.onAnalysisFailed?.(data.userId, data.reason);
           break;
       }
     };
@@ -229,6 +261,16 @@ export function createAppSocket(
         return () => {
           programSubs.delete(userId);
           send({ type: 'leave', scope: 'user', id: userId });
+        };
+      },
+    },
+    mcp: {
+      subscribe(courseId, handlers) {
+        mcpSubs.set(courseId, handlers);
+        send({ type: 'join', scope: 'mcp', id: courseId });
+        return () => {
+          mcpSubs.delete(courseId);
+          send({ type: 'leave', scope: 'mcp', id: courseId });
         };
       },
     },
