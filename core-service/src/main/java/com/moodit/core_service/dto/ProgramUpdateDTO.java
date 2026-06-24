@@ -1,8 +1,12 @@
 package com.moodit.core_service.dto;
 
-import lombok.Data;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
 
 @Data
+@SuperBuilder
+@NoArgsConstructor
+@AllArgsConstructor
 public class ProgramUpdateDTO {
     private String name;
     private String code;
