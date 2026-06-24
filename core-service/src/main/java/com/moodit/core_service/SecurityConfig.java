@@ -41,8 +41,8 @@ public class SecurityConfig {
                     // trompeur. La laisser passer rend les vrais codes (404/405) visibles.
                     .requestMatchers("/error")
                     .permitAll()
-                    .anyRequest()
-                    .authenticated());
+                    .anyRequest().permitAll()
+                    );
     return http.build();
   }
 }

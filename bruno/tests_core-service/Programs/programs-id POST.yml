@@ -1,0 +1,21 @@
+info:
+  name: /programs/id POST
+  type: http
+  seq: 7
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/programs/7"
+  body:
+    type: json
+    data: |-
+      {
+        "code": "GEN"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

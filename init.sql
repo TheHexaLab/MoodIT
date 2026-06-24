@@ -115,7 +115,7 @@ CREATE TABLE Forum(
    title VARCHAR(128) NOT NULL,
    f_type_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
-   --position INTEGER NOT NULL,
+   position INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(f_type_id) REFERENCES F_Type(id),
    FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
@@ -396,18 +396,18 @@ INSERT INTO F_Type (name) VALUES
 -- ------------------------------------------------------------
 -- Forum  (un forum Q&R et un forum Annonces par cours)
 -- ------------------------------------------------------------
-INSERT INTO Forum (title, f_type_id, course_id)
+INSERT INTO Forum (title, f_type_id, course_id, position)
 SELECT
     'Discussion — ' || c.title,
     1,   -- Échange libre, un chat
-    c.id
+    c.id, 1
 FROM Course c;
  
-INSERT INTO Forum (title, f_type_id, course_id)
+INSERT INTO Forum (title, f_type_id, course_id, position)
 SELECT
     'Thread — ' || c.title,
     2,   -- Post + réponses
-    c.id
+    c.id, 1
 FROM Course c;
 
 -- ------------------------------------------------------------

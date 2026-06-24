@@ -1,0 +1,24 @@
+info:
+  name: POST/courses/forums
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/courses/forums"
+  body:
+    type: json
+    data: |-
+      {
+        "courseId": 1,
+        "title": "mimi Discussion",
+        "fTypeId": 1,
+        "position": 1
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
