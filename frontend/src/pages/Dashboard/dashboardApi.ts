@@ -7,10 +7,7 @@
 // par un vrai apiFetch(...) (cf. src/helpers/api.ts), sans toucher au Dashboard.
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
-import type {
-  JoinSelection,
-  NewProgram,
-} from '../../components/AddSubscriptionPopup/types.ts';
+import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
 import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange } from '../../components/RoleEditorPopup/types.ts';
@@ -30,6 +27,7 @@ import {
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
+import { apiFetch } from '../../helpers/api.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
 
@@ -65,8 +63,11 @@ const nextMockId = () => ++mockIdSeq;
  * renvoie donc ici les programmes SANS leurs cours.
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
-  await simulateFetch('Échec simulé (chargement des programmes)');
-  return getDashboardPrograms().map((program) => ({ ...program, courses: [] }));
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/users/${userId}/programs`);
+  if (!res.ok) throw new Error('Échec chargement des programmes');
+  const data = await res.json();
+  return data.map((p: DemoProgram) => ({ ...p, courses: [] }));
 }
 
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
@@ -241,7 +242,15 @@ export async function sendMessage(
   clientMessageId: string
 ): Promise<void> {
   await simulateWrite('Échec simulé (envoi de message)');
-  console.log('[api] Envoi de message :', content, '(parent =', parentId, ', clientMsgId =', clientMessageId, ')');
+  console.log(
+    '[api] Envoi de message :',
+    content,
+    '(parent =',
+    parentId,
+    ', clientMsgId =',
+    clientMessageId,
+    ')'
+  );
 }
 
 /** TODO — Modifier le contenu d'un message existant. */
@@ -288,7 +297,16 @@ export async function createPost(
   title?: string
 ): Promise<void> {
   await simulateWrite('Échec simulé (publication)');
-  console.log('[api] Publication :', title ? `« ${title} » — ` : '', content, '(parent =', parentId, ', clientPostId =', clientPostId, ')');
+  console.log(
+    '[api] Publication :',
+    title ? `« ${title} » — ` : '',
+    content,
+    '(parent =',
+    parentId,
+    ', clientPostId =',
+    clientPostId,
+    ')'
+  );
 }
 
 /** TODO — Modifier le contenu d'un post. */
