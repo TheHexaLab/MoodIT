@@ -12,11 +12,11 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class UserRepository {
+public class MeRepository {
 
   private final JdbcTemplate jdbc;
 
-  public UserRepository(JdbcTemplate jdbc) {
+  public MeRepository(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
   }
 
@@ -53,9 +53,9 @@ public class UserRepository {
   }
 
   /**
-   * Met à jour les champs de profil modifiables et renvoie le profil à jour (rôles
-   * inclus). Vide si aucun utilisateur ne correspond à cet email. RETURNING évite un
-   * second SELECT pour le profil ; les rôles sont chargés ensuite.
+   * Met à jour les champs de profil modifiables et renvoie le profil à jour (rôles inclus). Vide si
+   * aucun utilisateur ne correspond à cet email. RETURNING évite un second SELECT pour le profil ;
+   * les rôles sont chargés ensuite.
    */
   public Optional<MeDto> updateByEmail(
       String email, String firstName, String lastName, String avatarColor) {

@@ -23,9 +23,9 @@ import org.springframework.http.HttpStatus;
 @RequestMapping("/api")
 public class MeController {
 
-  private final UserRepository users;
+  private final MeRepository users;
 
-  public MeController(UserRepository users) {
+  public MeController(MeRepository users) {
     this.users = users;
   }
 
