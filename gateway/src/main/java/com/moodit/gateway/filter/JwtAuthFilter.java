@@ -19,6 +19,7 @@ import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
@@ -31,6 +32,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
   @Value("${app.auth-service.url}")
   private String authServiceUrl;
+
+  @Value("${app.permission-service.url}")
+  private String permissionServiceUrl;
 
   private final RestClient restClient = RestClient.create();
 
@@ -100,6 +104,35 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     if (!Boolean.TRUE.equals(active)) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       response.getWriter().write("Token invalide");
+      return;
+    }
+
+    // 3) Autorisation : le permission-service décide si ce user a le droit d'accéder à
+    //    cette route (rôles + appartenance). L'identité vient du JWT, pas du client.
+    boolean allowed;
+    try {
+      Map<?, ?> body =
+          restClient
+              .post()
+              .uri(permissionServiceUrl + "/permissions/validate")
+              .body(
+                  Map.of(
+                      "email", claims.getSubject(),
+                      "path", path,
+                      "method", request.getMethod()))
+              .retrieve()
+              .body(Map.class);
+      allowed = body != null && Boolean.TRUE.equals(body.get("allowed"));
+    } catch (Exception e) {
+      // Impossible de joindre le permission-service : on refuse (fail-closed).
+      response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      response.getWriter().write("Service de permissions indisponible");
+      return;
+    }
+
+    if (!allowed) {
+      response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+      response.getWriter().write("Accès refusé");
       return;
     }
 
