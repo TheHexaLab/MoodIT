@@ -5,6 +5,7 @@ import { contrastingTextColor } from '../../helpers/color.ts';
 import { Plus } from '../../assets/Plus.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
+import { LogIn } from '../../assets/LogIn.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { type Program } from '../../types/domain.ts';
 
@@ -52,6 +53,8 @@ interface ProgramMenuProps {
   onEditProgram?: (programId: number) => void;
   /** Menu contextuel — gerer les roles du programme (admin). */
   onManageRoles?: (programId: number) => void;
+  /** Menu contextuel — rejoindre des cours du programme (tous). */
+  onJoinCourses?: (programId: number) => void;
   /** Menu contextuel — quitter le programme (tous). */
   onLeaveProgram?: (programId: number) => void;
 }
@@ -109,6 +112,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   onAddCourseToProgram,
   onEditProgram,
   onManageRoles,
+  onJoinCourses,
   onLeaveProgram,
 }) => {
   /** Menu contextuel ouvert : programme cible + position (viewport), ou null. */
@@ -143,7 +147,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     const rect = event.currentTarget.getBoundingClientRect();
     const gap = 8;
     // Estimation de hauteur (3 actions admin + « quitter ») pour éviter le débordement bas.
-    const estimatedHeight = (isAdmin ? 4 : 1) * 40 + 16;
+    const itemCount = (isAdmin ? 3 : 0) + (onJoinCourses ? 1 : 0) + 1; // +1 = « quitter »
+    const estimatedHeight = itemCount * 40 + 16;
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
     setContextMenu({ programId, left: rect.right + gap, top });
   }
@@ -302,6 +307,17 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 </button>
                 <span className={styles.contextDivider} />
               </>
+            )}
+            {onJoinCourses && (
+              <button
+                type="button"
+                className={styles.contextItem}
+                role="menuitem"
+                onClick={() => runContextAction(onJoinCourses)}
+              >
+                <LogIn className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                Rejoindre des cours
+              </button>
             )}
             <button
               type="button"
