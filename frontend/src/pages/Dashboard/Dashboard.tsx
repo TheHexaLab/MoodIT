@@ -203,6 +203,11 @@ export default function Dashboard() {
   const handleEditCourse = (courseId: number) => {
     if (isAdmin) setPopup({ kind: 'editCourse', courseId });
   };
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur).
+  // TODO : ouvrir la modale Gestion MCP (Figma node 4:3) — feature séparée, à implémenter.
+  const handleOpenMcpManagement = (courseId: number) => {
+    if (isAdmin) console.info('[Dashboard] Gestion MCP demandée pour le cours', courseId);
+  };
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
@@ -520,6 +525,7 @@ export default function Dashboard() {
             onReloadCourses={reloadCourses}
             onAddCourse={handleAddCourse}
             onEditCourse={handleEditCourse}
+            onOpenMcpManagement={handleOpenMcpManagement}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
           />
