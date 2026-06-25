@@ -6,6 +6,9 @@ info:
 http:
   method: POST
   url: "{{baseUrl}}/forums/posts/votes"
+  headers:
+    - name: X-User-Email
+      value: dufl8605@usherbrooke.ca
   body:
     type: json
     data: |-

@@ -14,19 +14,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CoreServiceApplication {
 
-  private final JdbcTemplate jdbcTemplate;
-
   public static void main(String[] args) {
     SpringApplication.run(CoreServiceApplication.class, args);
   }
 
-  @GetMapping(value = "/test", produces = "text/plain")
-  public String test() {
-    try {
-      jdbcTemplate.queryForObject("SELECT 1", Integer.class);
-      return "Core + BD fonctionnels!";
-    } catch (Exception e) {
-      return "Core fonctionnel, BD down.";
-    }
-  }
 }
