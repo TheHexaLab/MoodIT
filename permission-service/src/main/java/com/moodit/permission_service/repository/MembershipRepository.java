@@ -36,18 +36,4 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeForumViaProgram(@Param("userId") long userId, @Param("forumId") long forumId);
-
-  // L'utilisateur est inscrit directement au cours du forum (Enrollment).
-  @Query(
-      value =
-          """
-          SELECT EXISTS(
-            SELECT 1
-            FROM Enrollment e
-            JOIN Forum f ON f.course_id = e.course_id
-            WHERE f.id = :forumId AND e.user_id = :userId
-          )
-          """,
-      nativeQuery = true)
-  boolean isEnrolledInForumCourse(@Param("userId") long userId, @Param("forumId") long forumId);
 }

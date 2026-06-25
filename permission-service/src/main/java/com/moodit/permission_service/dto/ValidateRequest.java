@@ -16,4 +16,8 @@ public class ValidateRequest {
 
   // Methode HTTP, ex: "POST".
   @NotBlank private String method;
+
+  // Corps brut (JSON) de la requete, transmis par le gateway pour les routes dont
+  // l'id de ressource est dans le body (ex: forumId). Null/absent pour GET/DELETE.
+  private String body;
 }

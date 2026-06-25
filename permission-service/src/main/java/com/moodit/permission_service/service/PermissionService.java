@@ -5,11 +5,13 @@
 // (default-allow) : on ne restreint QUE les routes explicitement listees ; l'identite
 // est deja garantie par le gateway (JWT) + l'auth-service.
 //
-// Granularite : grossiere (role) ET fine d'appartenance (via MembershipService), car la
-// logique d'appartenance vit deja ici (objectif : un maximum de logique centralisee).
+// Les ids de ressource peuvent etre dans l'URL (variables de path) OU dans le body
+// JSON (convention REST de l'equipe : ex. forumId dans PostCreateInForumDTO). Le
+// gateway transmet donc le body brut ; on en extrait le champ voulu de facon
+// GENERIQUE (lecture par nom, pas de classe DTO partagee avec core).
 //
-// REGISTRE A COMPLETER une par une, au fur et a mesure que les contrôleurs REST du core
-// figent leurs chemins (source des actions : frontend/src/pages/Dashboard/dashboardApi.ts).
+// REGISTRE A COMPLETER une par une, au fil des contrôleurs REST du core
+// (frontend/src/pages/Dashboard/dashboardApi.ts pour les actions).
 
 package com.moodit.permission_service.service;
 
@@ -19,81 +21,116 @@ import com.moodit.permission_service.repository.UserRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.util.AntPathMatcher;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class PermissionService {
 
   private final UserRepository userRepository;
   private final MembershipService membershipService;
+  private final ObjectMapper objectMapper;
   private final AntPathMatcher matcher = new AntPathMatcher();
   private final List<Rule> rules;
 
-  public PermissionService(UserRepository userRepository, MembershipService membershipService) {
+  public PermissionService(
+      UserRepository userRepository,
+      MembershipService membershipService,
+      ObjectMapper objectMapper) {
     this.userRepository = userRepository;
     this.membershipService = membershipService;
+    this.objectMapper = objectMapper;
     this.rules = buildRules();
   }
 
-  // Une regle : si (methode + motif) matche, `allow` tranche a partir du user et des
-  // variables de chemin extraites (ex: {forumId}).
-  private record Rule(String method, String pattern, BiPredicate<User, Map<String, String>> allow) {}
+  // Decision pour une route : a partir du user, des variables de path et du body JSON
+  // (un noeud "missing" si la requete n'a pas de corps).
+  @FunctionalInterface
+  private interface AccessCheck {
+    boolean allow(User user, Map<String, String> pathVars, JsonNode body);
+  }
+
+  private record Rule(String method, String pattern, AccessCheck check) {}
 
   private List<Rule> buildRules() {
     return List.of(
-        // ── Exemple FIN (appartenance) ───────────────────────────────────────────
-        // Ecrire un post dans un forum/channel : il faut voir le forum (abonne au
-        // programme du cours OU inscrit au cours).
+        // ── FIN (appartenance), id dans le BODY ──────────────────────────────────
+        // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
         new Rule(
             "POST",
-            "/api/forums/{forumId}/posts",
-            (user, vars) ->
-                membershipService.canAccessForum(user.getId(), Long.parseLong(vars.get("forumId")))),
+            "/api/forums/posts",
+            (user, vars, body) -> {
+              long forumId = longField(body, "forumId");
+              return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+            }),
 
-        // ── Exemple GROSSIER (role) ──────────────────────────────────────────────
-        // Gerer les roles d'un programme : reserve aux Administrateurs.
+        // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
         new Rule(
-            "POST", "/api/programs/{programId}/roles", (user, vars) -> hasRole(user, "Administrateur"))
+            "POST",
+            "/api/forums/posts/votes",
+            (user, vars, body) -> {
+              long forumId = longField(body, "forumId");
+              return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+            }),
 
-        // ── TODO : a brancher une par une depuis dashboardApi.ts ────────────────────
-        //  sendMessage   POST   /api/channels/{channelId}/messages  -> canAccessForum (channel == Forum)
-        //  votePost      POST   /api/posts/{postId}/votes           -> canAccessForum du post
-        //  createCourse  POST   /api/courses                        -> Enseignant / Administrateur
-        //  changeRole    POST   /api/programs/{programId}/roles     -> Administrateur (deja ci-dessus)
-        //  editPost      PATCH  /api/posts/{postId}                 -> auteur du post OU role eleve
-        //  deletePost    DELETE /api/posts/{postId}                 -> auteur du post OU role eleve
+        // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
+        // Creer un cours dans des programmes : reserve aux Administrateurs.
+        new Rule(
+            "POST", "/api/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur"))
+
+        // ── TODO : a completer (ids dans le PATH pour edit/delete) ───────────────
+        //  editPost   PATCH  /api/forums/{forumId}/posts/{postId}  -> canAccessForum(vars.forumId)
+        //  deletePost DELETE /api/forums/{forumId}/posts/{postId}  -> canAccessForum(vars.forumId) OU role
         );
   }
 
-  public boolean isAllowed(String email, String path, String method) {
+  public boolean isAllowed(String email, String path, String method, String body) {
     if (email == null || email.isBlank() || path == null || method == null) {
       return false;
     }
 
-    // 1) Chercher une regle applicable AVANT toute requete BD.
+    // 1) Chercher une regle applicable AVANT toute requete BD / tout parsing.
     for (Rule rule : rules) {
       if (method.equalsIgnoreCase(rule.method()) && matcher.match(rule.pattern(), path)) {
-        // 2) Une regle s'applique : on ne charge le user QUE maintenant. L'identite est
-        //    deja garantie par le gateway (/auth/validate) ; ici on a juste besoin de ses
-        //    roles / appartenances pour evaluer la regle.
+        // 2) Une regle s'applique : on charge le user et on parse le body seulement maintenant.
         User user = userRepository.findByEmail(email).orElse(null);
         if (user == null) {
           return false; // identite inconnue : fail-closed.
         }
         Map<String, String> vars = matcher.extractUriTemplateVariables(rule.pattern(), path);
+        JsonNode bodyJson = parseBody(body);
         try {
-          return rule.allow().test(user, vars);
+          return rule.check().allow(user, vars, bodyJson);
         } catch (Exception e) {
-          return false; // variable de chemin invalide (ex: id non numerique) : refus.
+          return false; // donnee de path/body invalide : refus.
         }
       }
     }
 
     // 3) Aucune regle ne restreint cette route : approbation directe, ZERO requete BD.
     return true;
+  }
+
+  // Parse le body JSON ; renvoie un objet vide si absent/illisible (les .path(...)
+  // restent surs et renvoient des valeurs par defaut).
+  private JsonNode parseBody(String body) {
+    if (body != null && !body.isBlank()) {
+      try {
+        return objectMapper.readTree(body);
+      } catch (Exception e) {
+        // body illisible -> noeud vide ci-dessous
+      }
+    }
+    return objectMapper.createObjectNode();
+  }
+
+  // Lit un champ entier (long) du body JSON ; -1 si absent / non numerique.
+  private static long longField(JsonNode body, String field) {
+    JsonNode node = body.path(field);
+    return node.canConvertToLong() ? node.longValue() : -1;
   }
 
   private static boolean hasRole(User user, String roleName) {

@@ -32,7 +32,8 @@ public class PermissionController {
   @PostMapping("/validate")
   public ResponseEntity<ValidateResponse> validate(@Valid @RequestBody ValidateRequest request) {
     boolean allowed =
-        permissionService.isAllowed(request.getEmail(), request.getPath(), request.getMethod());
+        permissionService.isAllowed(
+            request.getEmail(), request.getPath(), request.getMethod(), request.getBody());
     return ResponseEntity.ok(new ValidateResponse(allowed));
   }
 

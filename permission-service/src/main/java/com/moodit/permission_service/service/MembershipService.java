@@ -5,7 +5,7 @@
 // Reprend la semantique de core DbRoomAuthorizer :
 //   user    -> c'est SA propre room (id == son user_id)
 //   program -> abonne au programme (User_Program)
-//   channel/forum -> le forum est visible : abonne au programme du cours OU inscrit au cours.
+//   channel/forum -> le forum est visible : abonne au programme du cours.
 
 package com.moodit.permission_service.service;
 
@@ -42,11 +42,14 @@ public class MembershipService {
     };
   }
 
-  /** Le forum (channel ou thread) est-il accessible a l'utilisateur ? */
+  /**
+   * Le forum (channel ou thread) est-il accessible a l'utilisateur ?
+   * Regle : etre abonne au programme du cours du forum. L'inscription directe au cours
+   * (Enrollment) ne suffit PAS — un user doit faire partie d'un programme.
+   */
   @Transactional(readOnly = true)
   public boolean canAccessForum(long userId, long forumId) {
-    return membershipRepository.canSeeForumViaProgram(userId, forumId)
-        || membershipRepository.isEnrolledInForumCourse(userId, forumId);
+    return membershipRepository.canSeeForumViaProgram(userId, forumId);
   }
 
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
