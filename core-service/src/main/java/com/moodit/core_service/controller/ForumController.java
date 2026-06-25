@@ -42,19 +42,16 @@ public class ForumController {
 
     //region POST
     @PostMapping("/posts")
-    public ResponseEntity<Void> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO) {
-        Integer userId = (Integer) SecurityContextHolder.getContext()
-                .getAuthentication()
-                .getPrincipal();
-        forumService.addPostToForum(postCreateInForumDTO, userId);
+    public ResponseEntity<Void> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
+                                               @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
+        forumService.addPostToForum(postCreateInForumDTO, email);
+
         return ResponseEntity.noContent().build(); //code 204
     }
     @PostMapping("/posts/votes")
-    public ResponseEntity<Void> addVoteToPost(@RequestBody VoteCreateInPostDTO voteCreateInPostDTO) {
-        Integer userId = (Integer) SecurityContextHolder.getContext()
-                .getAuthentication()
-                .getPrincipal();
-        forumService.addVoteToPost(voteCreateInPostDTO, userId);
+    public ResponseEntity<Void> addVoteToPost(@RequestBody VoteCreateInPostDTO voteCreateInPostDTO,
+                                              @RequestHeader("X-User-Email") String email) {
+        forumService.addVoteToPost(voteCreateInPostDTO, email);
         return ResponseEntity.noContent().build(); //code 204
     }
     //endregion

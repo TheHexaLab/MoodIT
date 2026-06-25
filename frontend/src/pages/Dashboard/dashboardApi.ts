@@ -30,7 +30,7 @@ import {
 import {
   getCreateEstablishments,
   getEstablishmentPrograms,
-  getJoinEstablishments,
+  //getJoinEstablishments,
 } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
@@ -92,8 +92,27 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
 export async function fetchCourses(programId: number): Promise<Course[]> {
-  await simulateFetch('Échec simulé (chargement des cours)');
-  return getDashboardPrograms().find((program) => program.id === programId)?.courses ?? [];
+  const res = await apiFetch(`/api/programs/${programId}/courses`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des cours');
+  }
+
+  const data = await res.json();
+
+  const courses = data.courses ?? data;
+
+  return await Promise.all(
+    courses.map(async (course: Course) => {
+      const forumsRes = await apiFetch(`/api/courses/${course.id}/forums`);
+      const forums = forumsRes.ok ? await forumsRes.json() : [];
+
+      return {
+        ...course,
+        forums,
+      };
+    })
+  );
 }
 
 /**
@@ -122,8 +141,13 @@ export async function fetchEstablishmentsForCreate() {
  * existants (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
-  await simulateFetch('Échec simulé (établissements)');
-  return getJoinEstablishments();
+  const res = await apiFetch('/api/establishments');
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des établissements (adhésion)');
+  }
+
+  return await res.json();
 }
 
 /**
@@ -131,8 +155,13 @@ export async function fetchEstablishmentsForJoin() {
  * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
-  await simulateFetch('Échec simulé (programmes de l’établissement)');
-  return getEstablishmentPrograms(establishmentId);
+  const res = await apiFetch(`/api/establishments/${establishmentId}/programs`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des programmes de l’établissement');
+  }
+
+  return await res.json();
 }
 
 /**
@@ -140,11 +169,15 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
-  await simulateFetch('Échec simulé (cours rejoignables du programme)');
-  // Mock : on liste les VRAIS cours du programme (mêmes ids/codes que partout ailleurs)
-  // pour que le popup retrouve, et pré-coche, les cours déjà rejoints.
-  const program = getDashboardPrograms().find((p) => p.id === programId);
-  return (program?.courses ?? []).map((course) => ({
+  const res = await apiFetch(`/api/programs/${programId}/courses`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des cours du programme');
+  }
+
+  const data = await res.json();
+
+  return data.courses.map((course: JoinableCourse) => ({
     id: course.id,
     code: course.code ?? '',
     title: course.title ?? '',
@@ -234,7 +267,7 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
  */
 export async function joinPrograms(selection: JoinSelection) {
   await simulateWrite('Échec simulé (adhésion au programme)');
-  console.log(selection)
+  console.log(selection);
   return getEstablishmentPrograms(selection.establishmentId).filter((p) =>
     selection.programIds.includes(p.id)
   );
@@ -293,7 +326,7 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
   await simulateWrite('Échec simulé (adhésion aux cours)');
   const program = getDashboardPrograms().find((p) => p.id === programId);
-  console.log(programId, courseIds)
+  console.log(programId, courseIds);
   return (program?.courses ?? [])
     .filter((course) => courseIds.includes(course.id))
     .map((course) => ({
@@ -316,8 +349,20 @@ export async function changeSection(
   sectionType: string,
   change: ItemChange
 ): Promise<void> {
-  await simulateWrite('Échec simulé (modification de section)');
-  console.log(courseId, sectionType, change);
+  const res = await apiFetch(`/api/courses/${courseId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sectionType,
+      change,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec modification de section');
+  }
 }
 
 /**
@@ -325,8 +370,17 @@ export async function changeSection(
  * gère l'optimisme + rollback : on ne fait que persister le changement).
  */
 export async function changeRole(change: RoleChange): Promise<void> {
-  await simulateWrite('Échec simulé (assignation de rôle)');
-  console.log('[api] Changement de rôle :', change);
+  const res = await apiFetch(`/api/roles/change`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(change),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec assignation de rôle');
+  }
 }
 
 // ── Chat ('Discussion') ────────────────────────────────────────────────────────
