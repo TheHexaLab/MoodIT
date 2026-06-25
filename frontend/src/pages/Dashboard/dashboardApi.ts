@@ -28,9 +28,7 @@ import {
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
 import {
-  getCreateEstablishments,
   getEstablishmentPrograms,
-  getJoinEstablishments,
 } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
@@ -63,8 +61,6 @@ async function simulateWrite(errorMessage: string): Promise<void> {
 
 // Ids « serveur » simulés pour les entités créées (démarrés haut pour ne pas heurter
 // les ids des mocks). À terme, c'est le backend qui attribue l'id, on le retirera.
-let mockIdSeq = 9000;
-const nextMockId = () => ++mockIdSeq;
 
 /**
  * Id de l'utilisateur courant. MOCK : lu dans localStorage (comme fetchPrograms).
