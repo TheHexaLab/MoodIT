@@ -27,9 +27,7 @@ import {
   isAnalysisPending,
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
-import {
-  getEstablishmentPrograms,
-} from '../../mocks/subscriptionData.ts';
+import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
