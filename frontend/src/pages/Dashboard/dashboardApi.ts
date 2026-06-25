@@ -81,6 +81,7 @@ function currentUserId(): number {
  * TODO — Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les
  * cours sont chargés séparément (fetchCourses) à l'entrée dans un programme : on
  * renvoie donc ici les programmes SANS leurs cours.
+ * DONE
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
   const userId = localStorage.getItem('moodit_user_id');
@@ -91,9 +92,19 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 }
 
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
+
 export async function fetchCourses(programId: number): Promise<Course[]> {
-  await simulateFetch('Échec simulé (chargement des cours)');
-  return getDashboardPrograms().find((program) => program.id === programId)?.courses ?? [];
+  const res = await apiFetch(`/api/programs/${programId}/courses`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des cours');
+  }
+
+  const data = await res.json();
+
+  return (data.courses ?? []).map((course: Course) => ({
+    ...course,
+  }));
 }
 
 /**
@@ -113,8 +124,9 @@ export async function fetchProgramRoles(programId: number) {
  * programme (1re étape du AddSubscriptionPopup en mode création).
  */
 export async function fetchEstablishmentsForCreate() {
-  await simulateFetch('Échec simulé (établissements)');
-  return getCreateEstablishments();
+  const res = await apiFetch('/api/establishments');
+  if (!res.ok) throw new Error('Échec chargement des établissements');
+  return res.json();
 }
 
 /**
@@ -122,8 +134,13 @@ export async function fetchEstablishmentsForCreate() {
  * existants (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
-  await simulateFetch('Échec simulé (établissements)');
-  return getJoinEstablishments();
+  const res = await apiFetch('/api/establishments');
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des établissements (adhésion)');
+  }
+
+  return await res.json();
 }
 
 /**
@@ -157,9 +174,11 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
-  await simulateFetch('Échec simulé (cours rattachés du programme)');
-  const program = getDashboardPrograms().find((p) => p.id === programId);
-  return (program?.courses ?? []).map((course) => course.id);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
+  if (!res.ok) throw new Error('Échec chargement des inscriptions');
+  const data: { courseId: number }[] = await res.json();
+  return data.map((e) => e.courseId);
 }
 
 /**
@@ -201,11 +220,15 @@ export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
  * que le Dashboard l'insère dans sa liste.
  */
 export async function createCourse(course: NewCourse): Promise<Course> {
-  await simulateWrite('Échec simulé (ajout de cours)');
+  const res = await apiFetch('/api/programs/courses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(course),
+  });
+  if (!res.ok) throw new Error('Échec création du cours');
+  const data = await res.json();
   return {
-    id: nextMockId(),
-    code: course.code,
-    title: course.title,
+    ...data,
     channels: [],
     quizzes: [],
     forums: [],
@@ -217,15 +240,22 @@ export async function createCourse(course: NewCourse): Promise<Course> {
  * programme persisté (id attribué par le « serveur ») pour l'ajouter à la liste.
  */
 export async function createProgram(program: NewProgram): Promise<DemoProgram> {
-  await simulateWrite('Échec simulé (création de programme)');
-  return {
-    id: nextMockId(),
-    name: program.name,
-    code: program.code,
-    cohort: program.cohort,
-    color: program.color,
-    courses: [],
-  };
+  const res = await apiFetch('/api/establishments/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(program),
+  });
+  if (!res.ok) throw new Error('Échec création du programme');
+  const data = await res.json();
+
+  const userId = localStorage.getItem('moodit_user_id');
+  await apiFetch('/api/programs/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: Number(userId), programIds: [data.id] }),
+  });
+
+  return { ...data, courses: [] };
 }
 
 /**
@@ -234,7 +264,7 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
  */
 export async function joinPrograms(selection: JoinSelection) {
   await simulateWrite('Échec simulé (adhésion au programme)');
-  console.log(selection)
+  console.log(selection);
   return getEstablishmentPrograms(selection.establishmentId).filter((p) =>
     selection.programIds.includes(p.id)
   );
@@ -293,7 +323,7 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
   await simulateWrite('Échec simulé (adhésion aux cours)');
   const program = getDashboardPrograms().find((p) => p.id === programId);
-  console.log(programId, courseIds)
+  console.log(programId, courseIds);
   return (program?.courses ?? [])
     .filter((course) => courseIds.includes(course.id))
     .map((course) => ({
