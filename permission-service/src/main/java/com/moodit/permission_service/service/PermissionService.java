@@ -22,7 +22,6 @@ import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.AntPathMatcher;
 
 @Service
@@ -69,18 +68,21 @@ public class PermissionService {
         );
   }
 
-  @Transactional(readOnly = true)
   public boolean isAllowed(String email, String path, String method) {
     if (email == null || email.isBlank() || path == null || method == null) {
       return false;
     }
-    User user = userRepository.findByEmail(email).orElse(null);
-    if (user == null) {
-      return false; // identite inconnue : fail-closed.
-    }
 
+    // 1) Chercher une regle applicable AVANT toute requete BD.
     for (Rule rule : rules) {
       if (method.equalsIgnoreCase(rule.method()) && matcher.match(rule.pattern(), path)) {
+        // 2) Une regle s'applique : on ne charge le user QUE maintenant. L'identite est
+        //    deja garantie par le gateway (/auth/validate) ; ici on a juste besoin de ses
+        //    roles / appartenances pour evaluer la regle.
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+          return false; // identite inconnue : fail-closed.
+        }
         Map<String, String> vars = matcher.extractUriTemplateVariables(rule.pattern(), path);
         try {
           return rule.allow().test(user, vars);
@@ -89,7 +91,9 @@ public class PermissionService {
         }
       }
     }
-    return true; // aucune regle ne restreint cette route.
+
+    // 3) Aucune regle ne restreint cette route : approbation directe, ZERO requete BD.
+    return true;
   }
 
   private static boolean hasRole(User user, String roleName) {
