@@ -6,7 +6,7 @@
 }
 
 .brand {
-    flex: 1;
+    flex: 0 0 44%;
     position: relative;
     display: flex;
     align-items: center;
@@ -51,7 +51,7 @@
 
 .brandInner { position: relative; z-index: 1; text-align: center; padding: 2rem; }
 .brandTitle { margin: 0; font-size: 2rem; font-weight: 700; }
-.brandTagline { margin: 0.5rem 0 0; opacity: 0.9; max-width: 16rem; }
+.brandTagline { margin: 0.5rem 0 0; opacity: 0.9; max-width: 16rem; font-weight: 400; }
 
 .formSide {
     flex: 1;
@@ -90,13 +90,14 @@
     align-items: center;
     border: 1px solid var(--border-strong);
     border-radius: 0.6rem;
-    background: var(--bg-input);
+    background: var(--bg-right-login-page);
     transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .inputWrap:focus-within {
     border-color: var(--brand-teal);
     box-shadow: 0 0 0 3px var(--brand-teal-surface);
+    background: var(--bg-input);
 }
 
 .inputWrap input {
@@ -160,7 +161,7 @@
     font-size: 0.82rem;
     color: var(--text-body);
 }
-.terms a { color: var(--text-active); text-decoration: none; }
+.terms a { color: var(--brand-teal); text-decoration: none; }
 
 .terms input[type='checkbox'] {
     appearance: none;
@@ -214,16 +215,31 @@
 .divider span { padding: 0 0.75rem; }
 
 .loginLink { text-align: center; margin: 0; font-size: 0.88rem; color: var(--text-body); }
-.loginLink a { color: var(--text-active); font-weight: 600; text-decoration: none; }
+.loginLink a { color: var(--brand-teal); font-weight: 600; text-decoration: none; }
 
-.pageFooter { margin-top: 1.5rem; font-size: 0.75rem; color: var(--text-muted); }
+.pageFooter {
+    position: absolute;
+    bottom: 1.69rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.pageFooter a {
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.pageFooter a:hover {
+    color: var(--text-body);
+}
 
 @media (max-width: 768px) {
     .page { flex-direction: column; }
-    .brand { flex: none; padding: 2rem 1rem; }
+    .brand { flex: none; padding: 2rem 1rem 3rem; }
     .brandTitle { font-size: 1.5rem; }
-    .formSide { flex: 1; padding: 1.25rem 1rem 2rem; }
-    .card { padding: 1.5rem; }
+    .formSide { flex: 1; padding: 0 1rem 2rem; justify-content: flex-start; }
+    .card { position: relative; z-index: 1; margin-top: -2.5rem; padding: 1.5rem; }
+    .pageFooter { position: static; margin-top: 1.5rem; }
 }
 
 .successBox {
