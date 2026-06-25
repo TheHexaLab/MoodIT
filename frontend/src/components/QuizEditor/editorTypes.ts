@@ -55,22 +55,24 @@ export interface QuestionDraft {
  * persister et peut renvoyer l'entité fraîchement persistée (id réel serveur).
  */
 export interface QuizEditorHandlers {
-  /** Crée un quiz dans le cours ; renvoie le quiz créé (id serveur). */
-  onCreateQuiz?: (courseId: number, meta: QuizMetaDraft) => MaybePromise<Quiz>;
-  /** Met à jour les méta d'un quiz. */
-  onUpdateQuiz?: (quizId: number, meta: QuizMetaDraft) => MaybePromise<Quiz | void>;
+  /**
+   * Persiste un quiz CRÉÉ — méta ET questions — en un seul appel : les questions
+   * sont éditées en mémoire et n'atteignent le backend qu'à l'« Enregistrer » du
+   * formulaire. Renvoie le quiz persisté (ids serveur, questions comprises).
+   */
+  onCreateQuiz?: (courseId: number, quiz: Quiz) => MaybePromise<Quiz>;
+  /**
+   * Persiste les modifications d'un quiz — méta ET questions — en un seul appel
+   * (même logique que `onCreateQuiz`). Renvoie le quiz persisté (ids réconciliés)
+   * ou rien.
+   */
+  onUpdateQuiz?: (quizId: number, quiz: Quiz) => MaybePromise<Quiz | void>;
   /** Supprime un quiz (et son contenu, en cascade). */
   onDeleteQuiz?: (quizId: number) => MaybePromise<unknown>;
   /** Réordonne les quiz d'un cours (ids dans le nouvel ordre). */
   onReorderQuizzes?: (courseId: number, quizIds: number[]) => MaybePromise<unknown>;
   /** Charge le détail d'un quiz (questions embarquées) pour l'édition. */
   onFetchQuiz?: (quizId: number) => MaybePromise<Quiz>;
-  /** Crée ou met à jour une question (selon `draft.id`) ; renvoie la question persistée. */
-  onSaveQuestion?: (quizId: number, draft: QuestionDraft) => MaybePromise<Question>;
-  /** Supprime une question. */
-  onDeleteQuestion?: (questionId: number) => MaybePromise<unknown>;
-  /** Réordonne les questions d'un quiz. */
-  onReorderQuestions?: (quizId: number, questionIds: number[]) => MaybePromise<unknown>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */
@@ -80,7 +82,44 @@ export const DEFAULT_LANGUAGES: Language[] = [
   { id: 3, name: 'SQL' },
   { id: 4, name: 'Java' },
   { id: 5, name: 'C' },
+  { id: 6, name: 'C++' },
+  { id: 7, name: 'C#' },
+  { id: 8, name: 'HTML' },
+  { id: 9, name: 'JSON' },
+  { id: 10, name: 'Ruby' },
+  { id: 11, name: 'Rust' },
+  { id: 12, name: 'TypeScript' },
+  { id: 13, name: 'Bash' },
+  { id: 14, name: 'YAML' },
 ];
+
+/** Squelette de code de départ proposé par langage (par nom, insensible à la casse). */
+const START_CODE_BY_LANGUAGE: Record<string, string> = {
+  python: 'def solution():\n    # à compléter\n    pass\n',
+  javascript: 'function solution() {\n  // à compléter\n}\n',
+  sql: '-- Écris ta requête ici\n',
+  java: 'public class Solution {\n    public static void main(String[] args) {\n        // à compléter\n    }\n}\n',
+  c: '#include <stdio.h>\n\nint main(void) {\n    // à compléter\n    return 0;\n}\n',
+  'c++': '#include <iostream>\n\nint main() {\n    // à compléter\n    return 0;\n}\n',
+  'c#': 'using System;\n\nclass Solution\n{\n    static void Main()\n    {\n        // à compléter\n    }\n}\n',
+  html: '<!DOCTYPE html>\n<html lang="fr">\n  <head>\n    <meta charset="utf-8" />\n    <title></title>\n  </head>\n  <body>\n    <!-- à compléter -->\n  </body>\n</html>\n',
+  json: '{\n  \n}\n',
+  ruby: 'def solution\n  # à compléter\nend\n',
+  rust: 'fn solution() {\n    // à compléter\n}\n',
+  typescript: 'function solution(): void {\n  // à compléter\n}\n',
+  bash: '#!/usr/bin/env bash\n# à compléter\n',
+  yaml: '# à compléter\n',
+};
+
+/**
+ * Code de départ par défaut d'un langage. Privilégie le gabarit fourni par le backend
+ * (`Language.start_code_template`) ; à défaut, replie sur un squelette local par nom
+ * (mode mock / langages sans gabarit). Chaîne vide si langage inconnu/absent.
+ */
+export function defaultStartCode(language?: Language): string {
+  if (!language) return '';
+  return language.startCodeTemplate ?? START_CODE_BY_LANGUAGE[language.name.toLowerCase()] ?? '';
+}
 
 /** Construit le brouillon initial d'une question d'un type donné (valeurs par défaut). */
 export function emptyQuestionDraft(qType: QuestionType): QuestionDraft {
@@ -124,7 +163,13 @@ export function emptyQuestionDraft(qType: QuestionType): QuestionDraft {
         ],
       };
     case 'coding':
-      return { ...base, qType, languageId: 1, startCode: '', testCases: [] };
+      return {
+        ...base,
+        qType,
+        languageId: DEFAULT_LANGUAGES[0].id,
+        startCode: defaultStartCode(DEFAULT_LANGUAGES[0]),
+        testCases: [],
+      };
   }
 }
 
@@ -140,5 +185,51 @@ export function questionToDraft(q: Question): QuestionDraft {
     languageId: q.language?.id,
     startCode: q.startCode,
     testCases: q.testCases?.map((t) => ({ ...t })),
+  };
+}
+
+/**
+ * Convertit un brouillon en Question persistée (forme renvoyée par le backend).
+ * `id` est l'id (serveur ou temporaire) attribué à la question. Les ids des
+ * enfants sans id (nouvelles options/éléments/harnais) reçoivent un id négatif
+ * provisoire — en réel, c'est le backend qui les attribue. Partagé par l'éditeur
+ * (mode mémoire) et la couche API mock (`dashboardApi.saveQuestion`).
+ */
+export function draftToQuestion(
+  draft: QuestionDraft,
+  id: number,
+  languages?: Language[]
+): Question {
+  const language =
+    draft.qType === 'coding'
+      ? (languages ?? []).find((l) => l.id === draft.languageId) ?? {
+          id: draft.languageId ?? 1,
+          name: 'Python',
+        }
+      : undefined;
+  return {
+    id,
+    qType: draft.qType,
+    prompt: draft.prompt,
+    totalScore: draft.totalScore,
+    answers: draft.answers?.map((a, i) => ({
+      id: a.id ?? -(i + 1),
+      content: a.content,
+      isCorrect: a.isCorrect,
+    })),
+    dragItems: draft.dragItems?.map((d, i) => ({
+      id: d.id ?? -(i + 1),
+      content: d.content,
+      correctOrder: d.correctOrder ?? 0,
+      groupName: d.groupName ?? null,
+    })),
+    language,
+    startCode: draft.startCode,
+    testCases: draft.testCases?.map((t, i) => ({
+      id: t.id ?? -(i + 1),
+      name: t.name,
+      harnessCode: t.harnessCode,
+      weight: t.weight,
+    })),
   };
 }

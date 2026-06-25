@@ -64,8 +64,35 @@ for (const lang of ['c', 'cpp']) {
   ]);
 }
 
-// Python : instanciation = appel d'un nom PascalCase, ex. `MyClass(...)`.
-addClassNamePatterns('python', [/\b[A-Z]\w*(?=\s*\()/]);
+// Python : definition `class Foo` + instanciation `MyClass(...)`. Pas de PascalCase
+// "large" ici : dans la grammaire python, class-name precede booleen/keyword, donc
+// un motif trop large colorerait True/False/None.
+addClassNamePatterns('python', [
+  { pattern: /(\bclass\s+)[A-Za-z_]\w*/, lookbehind: true },
+  /\b[A-Z]\w*(?=\s*\()/,
+]);
+
+// JavaScript : renforce class-name apres class/extends/new/instanceof ET colore
+// l'usage PascalCase (types/constructeurs : Foo, Promise, …). Sans risque sur les
+// mots-cles/booleens JS, tous en minuscules. Le motif exige une minuscule pour
+// epargner les CONSTANTES tout en capitales.
+addClassNamePatterns('javascript', [
+  { pattern: /(\b(?:class|extends|new|instanceof)\s+)[A-Za-z_$][\w$]*/, lookbehind: true },
+  /\b[A-Z][\w$]*[a-z][\w$]*\b/,
+]);
+
+// Python : Prism ne colore que la DEFINITION de fonction (apres `def`). On ajoute
+// les APPELS (nom suivi de `(`), methodes `obj.methode()` comprises. Initiale
+// minuscule/underscore exigee pour ne pas empieter sur les classes (PascalCase,
+// deja colorees via class-name a l'instanciation).
+const pythonGrammar = Prism.languages.python as Record<string, unknown> | undefined;
+if (pythonGrammar) {
+  const callPattern = { pattern: /\b[a-z_]\w*(?=\s*\()/ };
+  const existing = pythonGrammar['function'];
+  if (Array.isArray(existing)) existing.push(callPattern);
+  else if (existing) pythonGrammar['function'] = [existing, callPattern];
+  else pythonGrammar['function'] = callPattern;
+}
 
 // Go : litteral compose d'un type PascalCase, ex. `Point{}`, `&Config{…}`.
 addClassNamePatterns('go', [/\b[A-Z]\w*(?=\s*\{)/], 'function');

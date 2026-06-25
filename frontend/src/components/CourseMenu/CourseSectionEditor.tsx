@@ -34,6 +34,8 @@ interface CourseSectionEditorProps {
   quizzes?: Quiz[];
   quizSubtitle?: string;
   quizHandlers?: QuizEditorHandlers;
+  /** Remonte la liste des quiz au parent après un changement définitif (sync sidebar). */
+  onQuizzesChange?: (quizzes: Quiz[]) => void;
 }
 
 /**
@@ -53,6 +55,7 @@ export function CourseSectionEditor({
   quizzes,
   quizSubtitle,
   quizHandlers,
+  onQuizzesChange,
 }: CourseSectionEditorProps): React.ReactElement {
   // Section QUIZ avec données : éditeur de quiz riche (liste → formulaire → question).
   if (section.type === 'quiz' && quizzes && courseId != null) {
@@ -62,6 +65,7 @@ export function CourseSectionEditor({
         courseSubtitle={quizSubtitle}
         quizzes={quizzes}
         handlers={quizHandlers}
+        onQuizzesChange={onQuizzesChange}
         onClose={onClose}
       />
     );

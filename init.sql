@@ -154,7 +154,13 @@ CREATE TABLE Language(
    id SERIAL,
    name VARCHAR(64) NOT NULL UNIQUE,
    harness_template TEXT ,
-   PRIMARY KEY(id)
+   start_code_template TEXT ,
+   -- Langage dans lequel sont ecrits les harnais des questions utilisant CE langage
+   -- (peut differer du langage du code etudiant ; ex. enonce en pseudocode, harnais
+   -- en Python). NULL = harnais dans le meme langage que la question.
+   harness_language_id INTEGER ,
+   PRIMARY KEY(id),
+   FOREIGN KEY(harness_language_id) REFERENCES Language(id)
 );
 
 CREATE TABLE Question(
@@ -287,6 +293,7 @@ CREATE INDEX idx_post_user_id ON Post(user_id);
 CREATE INDEX idx_question_q_type_id ON Question(q_type_id);
 CREATE INDEX idx_question_language_id ON Question(language_id);
 CREATE INDEX idx_test_case_question_id ON Test_Case(question_id);
+CREATE INDEX idx_language_harness_language_id ON Language(harness_language_id);
 CREATE INDEX idx_answer_question_id ON Answer(question_id);
 CREATE INDEX idx_drag_item_question_id ON Drag_Item(question_id);
 CREATE INDEX idx_submission_question_id ON Submission(question_id);

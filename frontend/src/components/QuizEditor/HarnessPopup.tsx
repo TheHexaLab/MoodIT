@@ -1,30 +1,43 @@
 import React, { useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
+import { CodeEditor } from './CodeEditor';
 import { TrashCan } from '../../assets/TrashCan';
 import { type TestCaseDraft } from './editorTypes';
 
 interface HarnessBodyProps {
   /** Harnais courants (édités en place ; renvoyés par `onSave`). */
   testCases: TestCaseDraft[];
+  /**
+   * Langage des harnais (nom) pour la coloration syntaxique. Déterminé par le
+   * langage de la question (via Language.harness_language_id), pas par harnais.
+   */
+  language?: string;
   /** Annule (« Annuler » / chevron retour) : retour à la question, sans appliquer. */
   onCancel: () => void;
   /** Valide les harnais édités (le parent les réinjecte dans le brouillon de question). */
   onSave: (testCases: TestCaseDraft[]) => void;
 }
 
+const DEFAULT_HARNESS = 'def test():\n    return False\n';
+
 /**
  * Corps « Harnais de test » : édition des harnais cachés d'une question Code.
  * Chaque harnais = nom (retour à l'étudiant) + poids (crédit partiel) + code qui
- * renvoie vrai/faux. Rappel du contrat affiché en bandeau (cf. [[quiz-subsystem]]).
- * Rendu dans la coquille commune (`EditorShell`) par `QuizEditor` : c'est une page
- * empilée du popup, pas un nouveau popup.
+ * renvoie vrai/faux. Le langage des harnais est celui configuré pour le langage de
+ * la question (Language.harness_language_id) — voir [[quiz-subsystem]]. Rendu dans la
+ * coquille commune (`EditorShell`) par `QuizEditor` : page empilée, pas un nouveau popup.
  */
-export function HarnessBody({ testCases, onCancel, onSave }: HarnessBodyProps): React.ReactElement {
+export function HarnessBody({
+  testCases,
+  language,
+  onCancel,
+  onSave,
+}: HarnessBodyProps): React.ReactElement {
   const [cases, setCases] = useState<TestCaseDraft[]>(() =>
     testCases.length > 0
       ? testCases.map((t) => ({ ...t }))
-      : [{ name: '', harnessCode: 'def test():\n    return False\n', weight: 1 }]
+      : [{ name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]
   );
 
   function update(index: number, patch: Partial<TestCaseDraft>) {
@@ -34,7 +47,7 @@ export function HarnessBody({ testCases, onCancel, onSave }: HarnessBodyProps): 
     setCases((prev) => prev.filter((_, i) => i !== index));
   }
   function add() {
-    setCases((prev) => [...prev, { name: '', harnessCode: 'def test():\n    return False\n', weight: 1 }]);
+    setCases((prev) => [...prev, { name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]);
   }
 
   return (
@@ -71,13 +84,11 @@ export function HarnessBody({ testCases, onCancel, onSave }: HarnessBodyProps): 
                 <TrashCan width={15} height={15} />
               </button>
             </div>
-            <textarea
-              className={styles.codeArea}
+            <CodeEditor
               value={c.harnessCode}
-              spellCheck={false}
-              wrap="off"
-              aria-label={`Code du harnais ${i + 1}`}
-              onChange={(e) => update(i, { harnessCode: e.target.value })}
+              onChange={(harnessCode) => update(i, { harnessCode })}
+              language={language}
+              ariaLabel={`Code du harnais ${i + 1}`}
             />
           </div>
         ))}

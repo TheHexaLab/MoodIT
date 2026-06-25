@@ -46,6 +46,7 @@ import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
+import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
 import {
@@ -57,6 +58,19 @@ import {
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
 import { type DemoProgram } from './dashboardApi.ts';
 import styles from './Dashboard.module.css';
+
+/**
+ * Câblage des callbacks de l'éditeur de quiz sur la couche API (`dashboardApi`).
+ * Assemblage côté consommateur : l'éditeur reste « API-ready » (remplacer les corps
+ * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
+ */
+const quizEditorHandlers: QuizEditorHandlers = {
+  onFetchQuiz: api.fetchQuiz,
+  onCreateQuiz: api.createQuiz,
+  onUpdateQuiz: api.updateQuiz,
+  onDeleteQuiz: api.deleteQuiz,
+  onReorderQuizzes: api.reorderQuizzes,
+};
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
@@ -299,6 +313,20 @@ export default function Dashboard() {
     );
   };
 
+  // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
+  // (création/maj/suppression/réordre). L'éditeur a déjà persisté via quizEditorHandlers ;
+  // ici on aligne l'état local (positions réattribuées) pour un reflet immédiat.
+  const handleQuizzesChange = (courseId: number, quizzes: Course['quizzes']) => {
+    setDashboardPrograms((programs) =>
+      programs.map((program) => ({
+        ...program,
+        courses: program.courses.map((course) =>
+          course.id === courseId ? { ...course, quizzes: reposition(quizzes ?? []) } : course
+        ),
+      }))
+    );
+  };
+
   // Création d'un cours (admin) → rattaché aux programmes choisis (via api.createCourse).
   // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
@@ -428,8 +456,12 @@ export default function Dashboard() {
 
   // Envoi / édition / suppression de message : délégués à la couche API
   // (api.sendMessage doit RENVOYER le message persisté pour la réconciliation).
-  const handleSendMessage = (content: string, parentId: number | null, clientMessageId: string) =>
-    api.sendMessage(content, parentId, clientMessageId);
+  const handleSendMessage = (
+    channelId: number,
+    content: string,
+    parentId: number | null,
+    clientMessageId: string
+  ) => api.sendMessage(channelId, content, parentId, clientMessageId);
 
   const handleEditMessage = (messageId: number, content: string) =>
     api.editMessage(messageId, content);
@@ -446,11 +478,12 @@ export default function Dashboard() {
   const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
   const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
   const handleCreatePost = (
+    forumId: number,
     content: string,
     parentId: number | null,
     clientPostId: string,
     title?: string
-  ) => api.createPost(content, parentId, clientPostId, title);
+  ) => api.createPost(forumId, content, parentId, clientPostId, title);
   const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
   const handleDeletePost = (postId: number) => api.deletePost(postId);
   const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
@@ -589,6 +622,9 @@ export default function Dashboard() {
             onLeaveCourse={handleLeaveCourse}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
+            // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
+            quizHandlers={quizEditorHandlers}
+            onQuizzesChange={handleQuizzesChange}
           />
         }
       />
@@ -618,6 +654,9 @@ export default function Dashboard() {
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
+        // ── Quiz : détail + soumission servis depuis le mock (cf. dashboardApi). ──
+        onFetchQuiz={api.fetchQuiz}
+        onSubmitQuiz={api.submitQuiz}
       />
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que
@@ -632,6 +671,8 @@ export default function Dashboard() {
           courseId={selectedCourse.id}
           quizzes={selectedCourse.quizzes ?? []}
           quizSubtitle={selectedCourse.code}
+          quizHandlers={quizEditorHandlers}
+          onQuizzesChange={(quizzes) => handleQuizzesChange(selectedCourse.id, quizzes)}
         />
       )}
 

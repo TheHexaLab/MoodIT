@@ -11,6 +11,8 @@ import {
   type Quiz,
 } from '../../types/domain';
 import {
+  DEFAULT_LANGUAGES,
+  draftToQuestion,
   emptyQuestionDraft,
   questionToDraft,
   type QuestionDraft,
@@ -31,6 +33,13 @@ interface QuizEditorProps {
   onClose: () => void;
   /** Handlers CRUD (API-ready). Sans eux, l'éditeur opère en mémoire (mock). */
   handlers?: QuizEditorHandlers;
+  /**
+   * Notifie le parent quand la LISTE des quiz change de façon définitive
+   * (création enregistrée, méta mises à jour, suppression, réordre) — pour
+   * synchroniser la sidebar. Émis UNIQUEMENT aux commits : ni pendant l'édition
+   * d'un quiz (quiz temporaire de création, édits de questions), ni à l'annulation.
+   */
+  onQuizzesChange?: (quizzes: Quiz[]) => void;
 }
 
 type View =
@@ -60,6 +69,7 @@ export function QuizEditor({
   languages,
   onClose,
   handlers = {},
+  onQuizzesChange,
 }: QuizEditorProps): React.ReactElement {
   const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
   const [view, setView] = useState<View>({ kind: 'list' });
@@ -80,14 +90,15 @@ export function QuizEditor({
   const snapshotRef = useRef<Quiz[] | null>(null);
 
   const quizById = (id: number) => quizzes.find((q) => q.id === id);
-  const upsertQuiz = (quiz: Quiz) =>
-    setQuizzes((prev) => {
-      const i = prev.findIndex((q) => q.id === quiz.id);
-      if (i < 0) return [...prev, quiz];
-      const next = [...prev];
-      next[i] = quiz;
-      return next;
-    });
+  /** Insère/remplace un quiz dans une liste (pur) — réutilisé par l'état ET la notif parent. */
+  const upsertInList = (list: Quiz[], quiz: Quiz): Quiz[] => {
+    const i = list.findIndex((q) => q.id === quiz.id);
+    if (i < 0) return [...list, quiz];
+    const next = [...list];
+    next[i] = quiz;
+    return next;
+  };
+  const upsertQuiz = (quiz: Quiz) => setQuizzes((prev) => upsertInList(prev, quiz));
 
   // ───────────────────────────── Quiz (liste) ─────────────────────────────
 
@@ -121,7 +132,9 @@ export function QuizEditor({
   }
 
   function reorderQuizzes(quizIds: number[]) {
-    setQuizzes((prev) => quizIds.map((id) => prev.find((q) => q.id === id)!).filter(Boolean));
+    const next = quizIds.map((id) => quizzes.find((q) => q.id === id)!).filter(Boolean);
+    setQuizzes(next);
+    onQuizzesChange?.(next); // commit : la sidebar reflète le nouvel ordre
     void handlers.onReorderQuizzes?.(courseId, quizIds);
   }
 
@@ -129,19 +142,32 @@ export function QuizEditor({
     setSaving(true);
     setError(null);
     try {
+      const current = quizById(quizId);
+      // UN SEUL appel : méta du formulaire + questions éditées en mémoire pendant
+      // la session. C'est le point de centralisation de la persistance.
+      const payload: Quiz = {
+        ...current,
+        id: quizId,
+        ...meta,
+        questions: current?.questions ?? [],
+      };
+      let next: Quiz[];
       if (isNew && handlers.onCreateQuiz) {
-        const created = await handlers.onCreateQuiz(courseId, meta);
-        // Réconcilie l'id temporaire avec l'id serveur.
-        setQuizzes((prev) => prev.map((q) => (q.id === quizId ? { ...created, questions: q.questions ?? [] } : q)));
+        const created = await handlers.onCreateQuiz(courseId, payload);
+        // Réconcilie le quiz temporaire avec la version persistée (ids serveur).
+        next = quizzes.map((q) => (q.id === quizId ? created : q));
+        setQuizzes(next);
         setView({ kind: 'form', quizId: created.id, isNew: false });
       } else {
-        if (!isNew) await handlers.onUpdateQuiz?.(quizId, meta);
-        const current = quizById(quizId);
-        if (current) upsertQuiz({ ...current, ...meta });
+        const saved = !isNew ? await handlers.onUpdateQuiz?.(quizId, payload) : undefined;
+        next = upsertInList(quizzes, saved ?? payload);
+        setQuizzes(next);
         if (isNew) setView({ kind: 'form', quizId, isNew: false });
       }
       // Enregistré : les changements de la session deviennent définitifs.
       snapshotRef.current = null;
+      // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
+      onQuizzesChange?.(next);
     } catch {
       setError("L'enregistrement a échoué. Réessayez.");
     } finally {
@@ -156,9 +182,11 @@ export function QuizEditor({
     try {
       if (target.kind === 'quiz') {
         await handlers.onDeleteQuiz?.(target.id);
-        setQuizzes((prev) => prev.filter((q) => q.id !== target.id));
+        const next = quizzes.filter((q) => q.id !== target.id);
+        setQuizzes(next);
+        onQuizzesChange?.(next); // commit : retire le quiz de la sidebar
       } else {
-        await handlers.onDeleteQuestion?.(target.id);
+        // Suppression EN MÉMOIRE : persistée à l'« Enregistrer » du quiz.
         const quiz = quizById(target.quizId);
         if (quiz) {
           upsertQuiz({ ...quiz, questions: (quiz.questions ?? []).filter((x) => x.id !== target.id) });
@@ -185,37 +213,28 @@ export function QuizEditor({
     setView({ kind: 'question', quizId, quizIsNew, draft: questionToDraft(question), isNew: false });
   }
 
-  async function saveQuestion(quizId: number, quizIsNew: boolean, draft: QuestionDraft) {
-    setSaving(true);
+  // Enregistre une question EN MÉMOIRE : aucun appel API ici. La persistance se
+  // fait en un seul coup à l'« Enregistrer » du quiz (cf. saveQuizMeta), qui envoie
+  // méta + questions. « Annuler » du formulaire défait donc proprement ces édits.
+  function saveQuestion(quizId: number, quizIsNew: boolean, draft: QuestionDraft) {
+    const quiz = quizById(quizId);
+    if (!quiz) return;
+    const saved = draftToQuestion(draft, draft.id ?? nextTmpId(), languages);
+    const existing = quiz.questions ?? [];
+    const i = existing.findIndex((q) => q.id === saved.id);
+    const questions = i < 0 ? [...existing, saved] : existing.map((q) => (q.id === saved.id ? saved : q));
+    upsertQuiz({ ...quiz, questions });
     setError(null);
-    try {
-      const quiz = quizById(quizId);
-      if (!quiz) return;
-      let saved: Question;
-      if (handlers.onSaveQuestion) {
-        saved = await handlers.onSaveQuestion(quizId, draft);
-      } else {
-        saved = draftToQuestion(draft, draft.id ?? nextTmpId(), languages);
-      }
-      const existing = quiz.questions ?? [];
-      const i = existing.findIndex((q) => q.id === saved.id);
-      const questions = i < 0 ? [...existing, saved] : existing.map((q) => (q.id === saved.id ? saved : q));
-      upsertQuiz({ ...quiz, questions });
-      // Retour au formulaire en préservant le statut « nouveau quiz ».
-      setView({ kind: 'form', quizId, isNew: quizIsNew });
-    } catch {
-      setError("L'enregistrement de la question a échoué.");
-    } finally {
-      setSaving(false);
-    }
+    // Retour au formulaire en préservant le statut « nouveau quiz ».
+    setView({ kind: 'form', quizId, isNew: quizIsNew });
   }
 
+  // Réordonne EN MÉMOIRE : le nouvel ordre est persisté à l'« Enregistrer » du quiz.
   function reorderQuestions(quizId: number, questionIds: number[]) {
     const quiz = quizById(quizId);
     if (!quiz) return;
     const map = new Map((quiz.questions ?? []).map((q) => [q.id, q]));
     upsertQuiz({ ...quiz, questions: questionIds.map((id) => map.get(id)!).filter(Boolean) });
-    void handlers.onReorderQuestions?.(quizId, questionIds);
   }
 
   /**
@@ -235,6 +254,16 @@ export function QuizEditor({
   // ─────────────────────────────────── Rendu ───────────────────────────────────
 
   const activeQuiz = view.kind !== 'list' ? quizById(view.quizId) : null;
+
+  // Identité de la vue affichée : sert à réinitialiser le défilement de la coquille
+  // à chaque navigation (liste → quiz → question → harnais), pour ne pas hériter du
+  // scroll de la vue précédente (ex. harnais ouvert depuis le bas du formulaire).
+  const scrollResetKey =
+    view.kind === 'list'
+      ? 'list'
+      : view.kind === 'form'
+        ? `form-${view.quizId}`
+        : `${view.kind}-${view.quizId}-${view.draft.id ?? 'new'}`;
 
   // En-tête de la coquille selon la vue (la coquille est UNIQUE et persistante :
   // son contenu + sa taille changent, ce qui anime le resize au changement de vue).
@@ -298,6 +327,7 @@ export function QuizEditor({
         width={shell.width}
         scrollBody={shell.scrollBody}
         desktopMaxVh={shell.desktopMaxVh}
+        scrollResetKey={scrollResetKey}
       >
         {view.kind === 'list' && (
           <QuizListBody
@@ -348,6 +378,7 @@ export function QuizEditor({
         {view.kind === 'harness' && activeQuiz && (
           <HarnessBody
             testCases={view.draft.testCases ?? []}
+            language={harnessLanguageName(view.draft.languageId, languages ?? DEFAULT_LANGUAGES)}
             onCancel={() =>
               setView({
                 kind: 'question',
@@ -388,39 +419,28 @@ export function QuizEditor({
   );
 }
 
+/**
+ * Langage (nom) dans lequel s'écrivent les harnais d'une question, pour la coloration :
+ * le langage de la question peut désigner un AUTRE langage de harnais via
+ * `Language.harnessLanguageId` (sinon = le langage de la question lui-même).
+ */
+function harnessLanguageName(
+  languageId: number | undefined,
+  languages: Language[]
+): string | undefined {
+  const questionLang = languages.find((l) => l.id === languageId);
+  if (!questionLang) return undefined;
+  const harnessLang =
+    questionLang.harnessLanguageId != null
+      ? languages.find((l) => l.id === questionLang.harnessLanguageId)
+      : undefined;
+  return (harnessLang ?? questionLang).name;
+}
+
 /** Sous-titre de l'éditeur de question : « Question # ». */
 function questionSubtitle(quiz: Quiz, draft: QuestionDraft, isNew: boolean): string {
   const questions = quiz.questions ?? [];
   if (isNew) return `Question ${questions.length + 1}`;
   const index = questions.findIndex((q) => q.id === draft.id);
   return `Question ${index >= 0 ? index + 1 : ''}`.trim();
-}
-
-/** Convertit un brouillon en Question (mode mock : pas de backend pour corriger). */
-function draftToQuestion(draft: QuestionDraft, id: number, languages?: Language[]): Question {
-  const language =
-    draft.qType === 'coding'
-      ? (languages ?? []).find((l) => l.id === draft.languageId) ?? { id: draft.languageId ?? 1, name: 'Python' }
-      : undefined;
-  return {
-    id,
-    qType: draft.qType,
-    prompt: draft.prompt,
-    totalScore: draft.totalScore,
-    answers: draft.answers?.map((a, i) => ({ id: a.id ?? -(i + 1), content: a.content, isCorrect: a.isCorrect })),
-    dragItems: draft.dragItems?.map((d, i) => ({
-      id: d.id ?? -(i + 1),
-      content: d.content,
-      correctOrder: d.correctOrder ?? 0,
-      groupName: d.groupName ?? null,
-    })),
-    language,
-    startCode: draft.startCode,
-    testCases: draft.testCases?.map((t, i) => ({
-      id: t.id ?? -(i + 1),
-      name: t.name,
-      harnessCode: t.harnessCode,
-      weight: t.weight,
-    })),
-  };
 }

@@ -31,6 +31,12 @@ interface EditorShellProps {
    * pour l'éditeur de question (corps défilant) : on borne à 60vh sur grand écran.
    */
   desktopMaxVh?: number;
+  /**
+   * Réinitialise le défilement du corps en haut quand cette clé change. La coquille
+   * étant persistante d'une vue à l'autre, le corps conserverait sinon le `scrollTop`
+   * de la vue précédente (ex. harnais ouvert déjà défilé en bas).
+   */
+  scrollResetKey?: string | number;
   children: React.ReactNode;
 }
 
@@ -71,6 +77,7 @@ export function EditorShell({
   width,
   scrollBody = false,
   desktopMaxVh,
+  scrollResetKey,
   children,
 }: EditorShellProps): React.ReactElement {
   const [isClosing, setIsClosing] = useState(false);
@@ -81,6 +88,7 @@ export function EditorShell({
   // la mesure ne dépend pas de la hauteur posée (pas de boucle).
   const headerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const [footerSlot, setFooterSlot] = useState<HTMLDivElement | null>(null);
   const [height, setHeight] = useState<number>();
   // Le contenu dépasse-t-il le viewport ? On n'autorise le défilement (scrollbar)
@@ -93,6 +101,12 @@ export function EditorShell({
     const id = requestAnimationFrame(() => setAnimateSize(true));
     return () => cancelAnimationFrame(id);
   }, []);
+
+  // Changement de vue : on repart en haut du corps (sinon le scroll de la vue
+  // précédente persiste, cf. `scrollResetKey`). Avant le paint pour éviter un saut.
+  useLayoutEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [scrollResetKey]);
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -185,6 +199,7 @@ export function EditorShell({
 
         <div
           className={styles.panelBody}
+          ref={bodyRef}
           style={{ overflowY: scrollBody && clamped ? 'auto' : 'hidden' }}
         >
           <div className={styles.panelBodyInner} ref={contentRef}>

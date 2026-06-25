@@ -362,6 +362,39 @@
     overflow-x: auto;
 }
 
+/* Scrollbar fine, alignée sur le reste de l'app (cf. QuizEditor / SectionEditorPopup). */
+@supports not selector(::-webkit-scrollbar) {
+    .codeEditor,
+    .codeReadonly {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+.codeEditor::-webkit-scrollbar,
+.codeReadonly::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+.codeEditor::-webkit-scrollbar-track,
+.codeReadonly::-webkit-scrollbar-track {
+    background: transparent;
+}
+.codeEditor::-webkit-scrollbar-thumb,
+.codeReadonly::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+.codeEditor::-webkit-scrollbar-thumb:hover,
+.codeReadonly::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.codeEditor::-webkit-scrollbar-button,
+.codeReadonly::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
 /* Bloc « Résultat des tests » (label + liste) sous le code, en révision. */
 .testsBlock {
     margin-top: 1rem;

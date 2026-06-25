@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
+import { CodeEditor } from './CodeEditor';
 import { Dropdown } from './Dropdown';
 import { usePointerReorder } from './usePointerReorder';
 import { MarkdownEditor } from '../MainPanel/ForumView/MarkdownEditor';
@@ -15,6 +16,7 @@ import {
 } from '../../types/domain';
 import {
   DEFAULT_LANGUAGES,
+  defaultStartCode,
   emptyQuestionDraft,
   type AnswerDraft,
   type DragItemDraft,
@@ -102,6 +104,16 @@ export function QuestionFormBody({
   /** Changement de type : on repart d'un brouillon vierge du type, en gardant énoncé + points. */
   function changeType(qType: QuestionType) {
     setDraft((d) => ({ ...emptyQuestionDraft(qType), id: d.id, prompt: d.prompt, totalScore: d.totalScore }));
+  }
+
+  /**
+   * Changement de langage (question Code) : le code de départ et les harnais sont
+   * liés au langage. On repose donc le squelette du nouveau langage et on vide les
+   * harnais (ils ne sont plus valides dans l'autre langage).
+   */
+  function changeLanguage(languageId: number) {
+    const language = languages.find((l) => l.id === languageId);
+    patch({ languageId, startCode: defaultStartCode(language), testCases: [] });
   }
 
   const canSave = draft.prompt.trim() !== '' && draft.totalScore > 0;
@@ -395,6 +407,7 @@ export function QuestionFormBody({
 
   function renderCoding(): React.ReactElement {
     const tests = draft.testCases ?? [];
+    const languageName = languages.find((l) => l.id === draft.languageId)?.name;
 
     return (
       <>
@@ -404,19 +417,18 @@ export function QuestionFormBody({
             ariaLabel="Langage"
             value={String(draft.languageId ?? languages[0]?.id ?? '')}
             options={languages.map((l) => ({ value: String(l.id), label: l.name }))}
-            onChange={(v) => patch({ languageId: Number(v) })}
+            onChange={(v) => changeLanguage(Number(v))}
           />
         </div>
 
         <div className={styles.field}>
           <span className={styles.fieldLabel}>Code de départ</span>
-          <textarea
-            className={styles.codeArea}
+          <CodeEditor
             value={draft.startCode ?? ''}
-            spellCheck={false}
-            wrap="off"
+            onChange={(startCode) => patch({ startCode })}
+            language={languageName}
             placeholder={'def fonction():\n    # à compléter\n    pass'}
-            onChange={(e) => patch({ startCode: e.target.value })}
+            ariaLabel="Code de départ"
           />
         </div>
 

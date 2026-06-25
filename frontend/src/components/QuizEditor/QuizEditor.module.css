@@ -703,25 +703,6 @@
     font-weight: 600;
 }
 
-/* ── Code / harnais ── */
-.codeArea {
-    box-sizing: border-box;
-    width: 100%;
-    border: 1.5px solid var(--border);
-    border-radius: 0.5rem;
-    padding: 0.6875rem 0.75rem;
-    background: var(--syntax-bg);
-    color: var(--syntax-fg);
-    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    resize: vertical;
-    min-height: 5.5rem;
-    outline: none;
-    white-space: pre;
-    tab-size: 4;
-}
-.codeArea:focus { border-color: var(--brand-teal); }
 
 .infoBanner {
     display: flex;

@@ -1,0 +1,131 @@
+/* Éditeur de code « façon IDE » : conteneur encadré, rangée gouttière (numéros de
+   ligne) + zone éditable. La coloration syntaxique est un <pre> Prism rendu SOUS un
+   <textarea> au texte transparent (caret visible) : les deux se superposent au pixel
+   près. La hauteur suit le contenu (auto-grandissement piloté en JS, cf. CodeEditor.tsx). */
+.editor {
+    border: 1.5px solid var(--border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: var(--syntax-bg);
+}
+.editor:focus-within {
+    border-color: var(--brand-teal);
+}
+
+/* Métriques monospace PARTAGÉES par la gouttière, la couche colorée et le textarea
+   (via `font: inherit`) : indispensable pour que numéros, coloration et texte saisi
+   restent alignés au pixel. */
+.body {
+    display: flex;
+    align-items: stretch;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.gutter {
+    flex: 0 0 auto;
+    padding: 0.6875rem 0.5rem 0.6875rem 0.75rem;
+    color: var(--syntax-comment);
+    text-align: right;
+    user-select: none;
+    white-space: pre;
+}
+
+/* Pile coloration + saisie : le textarea (en flux) donne la hauteur ; la couche
+   colorée est posée par-dessus en absolu, à la même place. */
+.codeWrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.highlight {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0.6875rem 0.75rem;
+    overflow: hidden;          /* défilement horizontal piloté (scrollLeft) en JS */
+    pointer-events: none;      /* tous les events vont au textarea au-dessus */
+    font: inherit;
+    color: var(--syntax-fg);
+    white-space: pre;
+    tab-size: 4;
+}
+
+.textarea {
+    position: relative;        /* au-dessus de la couche colorée */
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    border: none;
+    outline: none;
+    /* Hauteur gérée par JS (auto-grow) → pas de poignée ni de scroll vertical ; seul
+       le débordement horizontal (lignes longues) défile (la gouttière reste fixe). */
+    resize: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.6875rem 0.75rem;
+    background: transparent;
+    /* Texte saisi rendu invisible (la couche colorée le montre) ; le caret reste
+       visible. `-webkit-text-fill-color` est nécessaire pour masquer sur WebKit. */
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    caret-color: var(--syntax-fg);
+    font: inherit;
+    white-space: pre;
+    tab-size: 4;
+}
+
+/* Placeholder visible malgré le texte transparent (sinon hérite de la couleur/fill). */
+.textarea::placeholder {
+    color: var(--syntax-comment);
+    -webkit-text-fill-color: var(--syntax-comment);
+    opacity: 1;
+}
+
+/* La scrollbar native du textarea est MASQUÉE : le défilement horizontal reste actif
+   (suivi du curseur), mais on l'affiche via une barre proxy pleine largeur (.hscroll). */
+.textarea {
+    scrollbar-width: none; /* Firefox */
+}
+.textarea::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+/* Barre de défilement horizontale pleine largeur (sous la gouttière comprise),
+   synchronisée avec le textarea. Affichée par JS uniquement quand le code déborde.
+   Scrollbar fine, alignée sur le reste de l'app (cf. QuizEditor / SectionEditorPopup). */
+.hscroll {
+    display: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+.hscrollInner {
+    height: 1px; /* largeur posée en JS ; hauteur minimale pour matérialiser la barre */
+}
+@supports not selector(::-webkit-scrollbar) {
+    .hscroll {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+.hscroll::-webkit-scrollbar {
+    height: 4px;
+}
+.hscroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.hscroll::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+.hscroll::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.hscroll::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}

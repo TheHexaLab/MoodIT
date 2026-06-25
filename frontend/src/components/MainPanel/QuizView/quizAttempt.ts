@@ -176,6 +176,35 @@ export function toSubmission(quiz: Quiz, answers: AttemptAnswers): QuizSubmissio
   return { quizId: quiz.id, answers: submitted };
 }
 
+/**
+ * Reconstruit l'état de réponses à partir d'une charge utile de soumission
+ * (opération inverse de `toSubmission`). Sert au grader de prévisualisation
+ * MOCK côté « serveur » (cf. `dashboardApi.submitQuiz`), qui reçoit une
+ * `QuizSubmission` et veut la corriger via `gradeQuiz` (qui attend des `AttemptAnswers`).
+ */
+export function fromSubmission(quiz: Quiz, submission: QuizSubmission): AttemptAnswers {
+  const byId = new Map(submission.answers.map((a) => [a.questionId, a]));
+  const answers: AttemptAnswers = {};
+  for (const q of quiz.questions ?? []) {
+    const s = byId.get(q.id);
+    switch (answerKindFor(q.qType)) {
+      case 'choice':
+        answers[q.id] = { kind: 'choice', answerIds: s?.answerIds ?? [] };
+        break;
+      case 'ordering':
+        answers[q.id] = { kind: 'ordering', itemIds: s?.orderedItemIds ?? [] };
+        break;
+      case 'matching':
+        answers[q.id] = { kind: 'matching', placement: s?.placement ?? {} };
+        break;
+      case 'coding':
+        answers[q.id] = { kind: 'coding', code: s?.code ?? '' };
+        break;
+    }
+  }
+  return answers;
+}
+
 // ───────────────────────────── Handlers API-ready ─────────────────────────────
 
 /**

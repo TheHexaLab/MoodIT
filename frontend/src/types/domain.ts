@@ -192,6 +192,14 @@ export interface Language {
   name: string;
   /** Gabarit de harnais de départ proposé au prof (table Language.harness_template). */
   harnessTemplate?: string;
+  /** Code de départ par défaut proposé pour ce langage (table Language.start_code_template). */
+  startCodeTemplate?: string;
+  /**
+   * Langage dans lequel s'écrivent les harnais des questions utilisant CE langage
+   * (table Language.harness_language_id, auto-référence). Absent → harnais dans le
+   * même langage que la question.
+   */
+  harnessLanguageId?: number;
 }
 
 /**
