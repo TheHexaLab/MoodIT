@@ -221,4 +221,25 @@ class JwtAuthFilterTest {
     assertThat(res.getStatus()).isEqualTo(503);
     assertThat(chain.getRequest()).isNull();
   }
+
+  @Test
+  void postAvecBodyJson_transmisEtRelisableEnAval() throws Exception {
+    stubValidate(true, false);
+    String json = "{\"forumId\":42,\"content\":\"hi\"}";
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(json.getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(forwarded).isNotNull();
+    // Le filtre a consommé le body pour permission ; core doit pouvoir le relire intact.
+    String forwardedBody =
+        new String(forwarded.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertThat(forwardedBody).isEqualTo(json);
+  }
 }
