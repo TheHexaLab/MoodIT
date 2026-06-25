@@ -186,6 +186,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
       quizzes: course.quizzes,
       forums: course.forums,
     }),
+    // Quiz d'origine (avec questions) : alimentent l'éditeur de quiz riche.
+    quizzes: course.quizzes ?? [],
   }));
   const selectedCourse =
     courseOptions.find((course) => course.id === selectedCourseId) ?? courseOptions[0] ?? null;
@@ -557,6 +559,9 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           channels={selectedCourse.channels}
           onClose={() => setEditingSection(null)}
           onChange={(change) => onSectionChange?.(selectedCourse.id, editingSection.type, change)}
+          courseId={selectedCourse.id}
+          quizzes={selectedCourse.quizzes}
+          quizSubtitle={selectedCourse.code}
         />
       )}
     </nav>

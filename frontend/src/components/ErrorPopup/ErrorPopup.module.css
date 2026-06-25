@@ -1,8 +1,8 @@
 div.error-popup {
     position: fixed;
     inset: 0;
-    /* Au-dessus de la chrome de l'app et des autres modales (menu 30, tiroir 90). */
-    z-index: 110;
+    /* Erreur top-most : au-dessus de la chrome, de l'éditeur de quiz (1000) et des confirmations (1100). */
+    z-index: 1200;
     display: flex;
     justify-content: center;
     align-items: center;

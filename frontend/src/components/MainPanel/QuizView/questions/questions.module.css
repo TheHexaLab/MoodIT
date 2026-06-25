@@ -1,0 +1,442 @@
+/* Styles partagés des six rendus de question (passation + révision).
+   Couleurs via variables de thème (clair/sombre automatiques). */
+
+.helper {
+    margin: 0 0 0.75rem;
+    color: var(--text-muted);
+    font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.8125rem);
+}
+
+/* ───────────────────────── Choix (V/F, unique, multiple) ───────────────────────── */
+
+.options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+/* Vrai/Faux : deux options côte à côte. */
+.optionsGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.option {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    background: var(--bg-surface);
+    padding: 0.75rem 0.875rem;
+    color: var(--text-body);
+    font: inherit;
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.option:hover:not(:disabled) {
+    border-color: var(--border-strong);
+}
+
+.option:disabled {
+    cursor: default;
+}
+
+/* Option sélectionnée (passation). */
+.optionSelected {
+    border-color: var(--brand-teal);
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    font-weight: 600;
+}
+
+/* Centrage du libellé pour Vrai/Faux (contrôle + texte centrés). */
+.optionCentered {
+    justify-content: center;
+}
+
+/* Pastille de contrôle (radio / case à cocher). */
+.control {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.125rem;
+    height: 1.125rem;
+    border: 1.5px solid var(--border-strong);
+    color: var(--text-on-brand);
+}
+
+.controlRadio {
+    border-radius: 50%;
+}
+
+.controlCheckbox {
+    border-radius: 0.3125rem;
+}
+
+.controlOn {
+    border-color: var(--brand-teal);
+    background: var(--brand-teal);
+}
+
+/* Point central du radio coché. */
+.radioDot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--text-on-brand);
+}
+
+.optionLabel {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Les états de révision (.optionCorrect / .optionWrong / .optionCorrectMissed)
+   sont définis EN FIN DE FICHIER pour primer sur les fonds/bordures des lignes
+   (.orderRow, .matchRow) — question d'ordre source en CSS. */
+
+/* Icône de statut en révision (✓ / ✗). */
+.statusIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 50%;
+}
+
+.statusOk {
+    color: var(--brand-teal);
+}
+
+/* Crochet entouré d'un cercle vert pâle — état « contour » du choix multiple
+   (bonne réponse manquée OU distracteur correctement évité). */
+.statusIconCircle {
+    background: rgba(20, 184, 166, 0.18);
+}
+
+.statusBad {
+    color: var(--danger);
+}
+
+.statusMuted {
+    color: var(--text-muted);
+}
+
+/* ───────────────────────────── Remise en ordre ───────────────────────────── */
+
+.orderList {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+.orderRow {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    background: var(--bg-vote-pill);
+    padding: 0.75rem 0.875rem;
+    color: var(--text-body);
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+}
+
+.orderRowDraggable {
+    cursor: grab;
+}
+
+.orderRowDragging {
+    opacity: 0.5;
+}
+
+.orderRowOver {
+    border-color: var(--brand-teal);
+    background: var(--brand-teal-surface);
+}
+
+.grip {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    color: var(--text-muted);
+}
+
+.orderNum {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    font-size: 0.8125rem;
+    font-weight: 700;
+}
+
+.orderText {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* ───────────────────────────────── Association ───────────────────────────────── */
+
+.pool {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 3rem;
+    border-radius: 0.625rem;
+    background: var(--bg-vote-pill);
+    padding: 0.625rem;
+    margin-bottom: 0.875rem;
+}
+
+.poolOver {
+    outline: 2px dashed var(--brand-teal);
+    outline-offset: -2px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    padding: 0.4375rem 0.625rem;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.8125rem;
+    cursor: grab;
+}
+
+.chip:hover {
+    border-color: var(--border-strong);
+}
+
+.groupGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 4.5rem;
+    border: 1.5px dashed var(--brand-teal);
+    border-radius: 0.625rem;
+    padding: 0.625rem;
+}
+
+.groupOver {
+    background: var(--brand-teal-surface);
+}
+
+.groupLabel {
+    color: var(--brand-teal);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.groupItems {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Révision Association : une ligne par élément (élément → groupe choisi). */
+.matchRow {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
+}
+
+.matchRowItem {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-body);
+}
+
+.matchRowGroup {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--brand-teal);
+    font-weight: 600;
+}
+
+.matchRowArrow {
+    color: var(--text-muted);
+}
+
+/* ──────────────────────────────────── Code ──────────────────────────────────── */
+
+.codePanel {
+    border: 1px solid var(--border);
+    border-radius: 0.625rem;
+    overflow: hidden;
+    background: var(--syntax-bg);
+}
+
+.codeHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.875rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.codeHeaderMuted {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* Libellés de section de la révision Code (« Ta réponse », « Résultat des tests »). */
+.codeLabel {
+    display: block;
+    margin-bottom: 0.4375rem;
+    color: var(--text-body);
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.codeBody {
+    display: flex;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.codeGutter {
+    flex: 0 0 auto;
+    padding: 0.75rem 0.5rem 0.75rem 0.875rem;
+    color: var(--syntax-comment);
+    text-align: right;
+    user-select: none;
+    white-space: pre;
+}
+
+.codeEditor {
+    flex: 1 1 auto;
+    border: none;
+    outline: none;
+    resize: vertical;
+    min-height: 9rem;
+    padding: 0.75rem 0.875rem;
+    background: transparent;
+    color: var(--syntax-fg);
+    font: inherit;
+    tab-size: 4;
+}
+
+.codeReadonly {
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 0.75rem 0.875rem;
+    color: var(--syntax-fg);
+    white-space: pre;
+    overflow-x: auto;
+}
+
+/* Bloc « Résultat des tests » (label + liste) sous le code, en révision. */
+.testsBlock {
+    margin-top: 1rem;
+}
+
+/* Liste des harnais en révision (✓ / ✗ + contribution pondérée par cas). */
+.tests {
+    display: flex;
+    flex-direction: column;
+}
+
+.testRow {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.5rem 0;
+    font-size: 0.8125rem;
+    color: var(--text-body);
+    border-bottom: 1px solid var(--border);
+}
+
+.testRow:last-child {
+    border-bottom: none;
+}
+
+.testName {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.testScore {
+    flex: 0 0 auto;
+    font-size: 0.78125rem;
+    font-weight: 600;
+}
+
+.testScorePass {
+    color: var(--brand-teal);
+}
+
+.testScoreFail {
+    color: var(--danger);
+}
+
+/* Cercle rouge pâle autour du ✗ (révision Code). */
+.statusIconCircleBad {
+    background: rgba(229, 72, 77, 0.14);
+}
+
+.testNote {
+    margin: 0.75rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+/* ───────────────── États de révision (lecture seule) ─────────────────
+   Définis en fin de fichier pour primer sur .orderRow / .matchRow (ordre source).
+   - .optionCorrect       : bonne réponse retenue par l'étudiant → fond vert + bordure.
+   - .optionCorrectMissed : bonne réponse NON sélectionnée → contour vert SEUL (sans fond).
+   - .optionWrong         : mauvaise réponse cochée → fond rouge + bordure. */
+.optionCorrect {
+    border-color: var(--brand-teal);
+    background: rgba(20, 184, 166, 0.16);
+    color: var(--text-body);
+}
+
+.optionCorrectMissed {
+    border-color: var(--brand-teal);
+    background: transparent;
+    color: var(--text-body);
+}
+
+.optionWrong {
+    border-color: var(--danger);
+    background: rgba(229, 72, 77, 0.12);
+    color: var(--text-body);
+}

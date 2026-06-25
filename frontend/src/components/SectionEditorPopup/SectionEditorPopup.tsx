@@ -13,8 +13,8 @@ import type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from '.
 export type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
 interface SectionEditorPopupProps {
-  /** Préfixe affiché devant chaque nom (ex. « # »). */
-  prefix?: string;
+  /** Icône/préfixe affiché devant chaque nom (ex. `<ChannelTypeIcon />`). */
+  prefix?: React.ReactNode;
   onClose: (...args: unknown[]) => unknown;
   itemList: Item[];
   /**
@@ -244,7 +244,7 @@ export function SectionEditorPopup({
         <h2>{titleText}</h2>
         <div>
           <div className={draftHasError ? styles.invalid : undefined}>
-            <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
+            <span>{prefix}</span>
             <input
               type="text"
               value={draftName}
@@ -315,7 +315,7 @@ export function SectionEditorPopup({
                           ⠿
                         </span>
                         <span>
-                          <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
+                          <span>{prefix}</span>
                           <span>{item.name}</span>
                         </span>
                       </div>

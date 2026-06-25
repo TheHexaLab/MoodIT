@@ -37,7 +37,7 @@ import {
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
-import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
+import { ChannelTypeIcon } from '../../components/CourseChannelList/ChannelTypeIcon.tsx';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
@@ -524,7 +524,7 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitlePrefix={selectedChannel ? getPrefixForType(selectedChannel.type) : undefined}
+        mobileTitlePrefix={selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined}
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
@@ -629,6 +629,9 @@ export default function Dashboard() {
           channels={selectedCourseChannels}
           onChange={(change) => handleSectionChange(selectedCourse.id, creatingSection.type, change)}
           onClose={() => setCreatingSectionType(null)}
+          courseId={selectedCourse.id}
+          quizzes={selectedCourse.quizzes ?? []}
+          quizSubtitle={selectedCourse.code}
         />
       )}
 

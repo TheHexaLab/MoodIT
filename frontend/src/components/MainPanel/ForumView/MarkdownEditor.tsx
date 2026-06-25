@@ -42,12 +42,12 @@ interface MarkdownEditorProps {
   value: string;
   /** Notifie chaque changement du texte. */
   onChange: (value: string) => void;
-  /** Validation (bouton + Ctrl/Cmd+Entrée). */
-  onSubmit: () => void;
-  /** Annulation (bouton + Échap). */
-  onCancel: () => void;
+  /** Validation (bouton + Ctrl/Cmd+Entrée). Optionnel en mode `embedded`. */
+  onSubmit?: () => void;
+  /** Annulation (bouton + Échap). Optionnel en mode `embedded`. */
+  onCancel?: () => void;
   /** Libelle du bouton de validation (« Enregistrer », « Répondre »…). */
-  submitLabel: string;
+  submitLabel?: string;
   /** Placeholder du textarea. */
   placeholder?: string;
   /** Desactive la validation en plus du contenu vide (ex. titre manquant). */
@@ -58,6 +58,12 @@ interface MarkdownEditorProps {
   submitting?: boolean;
   /** Surcharge des textes internes ; les champs omis prennent les défauts. */
   labels?: Partial<MarkdownEditorLabels>;
+  /**
+   * Mode « champ » : intégré dans un formulaire existant (ex. énoncé de question).
+   * Pas de barre d'actions (le formulaire hôte a la sienne) et barre d'outils non
+   * collante (le conteneur défilant n'est pas le sien).
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -76,6 +82,7 @@ export function MarkdownEditor({
   autoFocus = true,
   submitting = false,
   labels,
+  embedded = false,
 }: MarkdownEditorProps): React.ReactElement {
   /** Textes affichés : défauts + surcharges éventuelles via la prop `labels`. */
   const t = { ...defaultMarkdownEditorLabels, ...labels };
@@ -93,16 +100,45 @@ export function MarkdownEditor({
   const [preview, setPreview] = useState(false);
 
   // Auto-dimensionne la zone d'edition selon son contenu (pas de resize manuel).
-  // Se relance a chaque changement de texte (frappe ET insertions via la barre).
+  // Se relance a chaque changement de texte (frappe ET insertions via la barre),
+  // MAIS aussi quand la LARGEUR change (popup qui s'anime, clavier mobile, rotation)
+  // et quand les POLICES finissent de charger : sinon le texte se reflowe apres la
+  // mesure et la derniere ligne se retrouve coupee.
   useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
-    // scrollHeight n'inclut pas la bordure (box-sizing: border-box) : on l'ajoute,
-    // sinon le contenu deborde de quelques pixels et un scrollbar apparait.
-    const cs = getComputedStyle(ta);
-    const borderY = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
-    ta.style.height = `${ta.scrollHeight + borderY}px`;
+    const resize = () => {
+      ta.style.height = 'auto';
+      // scrollHeight n'inclut pas la bordure (box-sizing: border-box) : on l'ajoute,
+      // sinon le contenu deborde de quelques pixels et la derniere ligne est rognee.
+      const cs = getComputedStyle(ta);
+      const borderY = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      ta.style.height = `${ta.scrollHeight + borderY}px`;
+    };
+    resize();
+
+    // Re-mesure sur changement de largeur uniquement (on ignore les variations de
+    // hauteur que `resize` provoque lui-meme, pour ne pas boucler).
+    let lastWidth = ta.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (ta.clientWidth !== lastWidth) {
+        lastWidth = ta.clientWidth;
+        resize();
+      }
+    });
+    ro.observe(ta);
+
+    // Re-mesure une fois les polices chargees (la 1re mesure peut utiliser une
+    // police de repli aux metriques differentes).
+    let cancelled = false;
+    document.fonts?.ready?.then(() => {
+      if (!cancelled) resize();
+    });
+
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+    };
   }, [value, preview]);
 
   /** Entoure la selection de `before`…`after` (gras, italique, code, lien). */
@@ -147,6 +183,7 @@ export function MarkdownEditor({
   return (
     <div
       role={`markdown-editor${preview ? '-preview' : ''}`}
+      data-embedded={embedded ? '' : undefined}
       onClick={(event) => event.stopPropagation()}
     >
       {/* Toolbar + zone de saisie : bloc englobant de la toolbar collante, pour
@@ -259,11 +296,27 @@ export function MarkdownEditor({
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              if (!onSubmit) return;
               event.preventDefault();
               onSubmit();
             } else if (event.key === 'Escape') {
+              if (!onCancel) return;
               event.preventDefault();
               onCancel();
+            } else if (event.key === 'Tab' && !event.shiftKey) {
+              // Tab dans le textarea = indentation (4 espaces), pas de changement de
+              // champ. La sélection est remplacée par les espaces, curseur après.
+              event.preventDefault();
+              const ta = event.currentTarget;
+              const start = ta.selectionStart;
+              const end = ta.selectionEnd;
+              const indent = '    ';
+              onChange(value.slice(0, start) + indent + value.slice(end));
+              requestAnimationFrame(() => {
+                ta.focus();
+                const pos = start + indent.length;
+                ta.setSelectionRange(pos, pos);
+              });
             }
           }}
           rows={2}
@@ -274,14 +327,16 @@ export function MarkdownEditor({
       )}
       </div>
 
-      <div role="editor-actions">
-        <button type="button" onClick={onCancel}>
-          {t.cancel}
-        </button>
-        <button type="button" onClick={onSubmit} disabled={submitDisabled || submitting}>
-          {submitting ? <span role="spinner" aria-hidden="true" /> : submitLabel}
-        </button>
-      </div>
+      {!embedded && (
+        <div role="editor-actions">
+          <button type="button" onClick={onCancel}>
+            {t.cancel}
+          </button>
+          <button type="button" onClick={onSubmit} disabled={submitDisabled || submitting}>
+            {submitting ? <span role="spinner" aria-hidden="true" /> : submitLabel}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

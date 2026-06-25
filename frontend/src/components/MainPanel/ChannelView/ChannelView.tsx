@@ -5,7 +5,7 @@ import {
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
@@ -244,7 +244,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
       <div className={styles['channel-view']}>
         <header>
           <p>
-            <span>{getPrefixForType(channel.type)}</span>
+            <span><ChannelTypeIcon type={channel.type} /></span>
             <span>{channel.name}</span>
           </p>
           <span />

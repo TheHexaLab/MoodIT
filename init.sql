@@ -95,7 +95,6 @@ CREATE TABLE F_Type(
 CREATE TABLE Quiz(
    id SERIAL,
    title VARCHAR(128) NOT NULL,
-   description VARCHAR(512) ,
    is_daily BOOLEAN NOT NULL DEFAULT FALSE,
    is_published BOOLEAN NOT NULL DEFAULT FALSE,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -210,8 +209,23 @@ CREATE TABLE Submission(
    question_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    PRIMARY KEY(id),
+   -- Une seule soumission par (utilisateur, question) : empeche de refaire une
+   -- question deja repondue (donc de re-tenter un quiz, question par question).
+   UNIQUE(user_id, question_id),
    FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
+);
+
+-- Detail de correction d'une soumission de CODE : verdict (passe/echoue) par
+-- harnais. Permet d'afficher en revision quels Test_Case ont reussi/echoue, sans
+-- re-executer le code. Une ligne par (soumission, harnais).
+CREATE TABLE Submission_Test_Case(
+   submission_id INTEGER NOT NULL,
+   test_case_id INTEGER NOT NULL,
+   passed BOOLEAN NOT NULL,
+   PRIMARY KEY(submission_id, test_case_id),
+   FOREIGN KEY(submission_id) REFERENCES Submission(id) ON DELETE CASCADE,
+   FOREIGN KEY(test_case_id) REFERENCES Test_Case(id) ON DELETE CASCADE
 );
 
 -- Feedback généré par le service MCP sur un COURS (points forts/faibles).
@@ -276,7 +290,9 @@ CREATE INDEX idx_test_case_question_id ON Test_Case(question_id);
 CREATE INDEX idx_answer_question_id ON Answer(question_id);
 CREATE INDEX idx_drag_item_question_id ON Drag_Item(question_id);
 CREATE INDEX idx_submission_question_id ON Submission(question_id);
-CREATE INDEX idx_submission_user_id ON Submission(user_id);
+-- (user_id est deja couvert par la 1re colonne de l'index UNIQUE(user_id, question_id).)
+-- (submission_id est deja couvert par la 1re colonne de la cle primaire composite.)
+CREATE INDEX idx_submission_test_case_test_case_id ON Submission_Test_Case(test_case_id);
 CREATE INDEX idx_mcp_response_user_id ON MCP_Response(user_id);
 CREATE INDEX idx_mcp_response_course_id ON MCP_Response(course_id);
 CREATE INDEX idx_user_program_user_id ON User_Program(user_id);

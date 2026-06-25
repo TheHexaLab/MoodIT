@@ -25,6 +25,7 @@ import ForumView, {
   type VotePostHandler,
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
+import { type FetchQuizHandler, type SubmitQuizHandler } from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
 import EmptyCourseState from './states/EmptyCourseState/EmptyCourseState.tsx';
@@ -73,6 +74,10 @@ interface MainPanelProps {
   onCreateChannel?: () => void;
   /** Ouvre le formulaire de creation de quiz (admin). */
   onCreateQuiz?: () => void;
+  /** Chargement du detail d'un quiz (API-ready ; voir QuizView). */
+  onFetchQuiz?: FetchQuizHandler;
+  /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
+  onSubmitQuiz?: SubmitQuizHandler;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
 }
@@ -106,6 +111,8 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onCreateChannel,
   onCreateQuiz,
   onCreateForum,
+  onFetchQuiz,
+  onSubmitQuiz,
 }) => {
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
@@ -161,7 +168,15 @@ const MainPanel: React.FC<MainPanelProps> = ({
           />
         );
       case 'quiz':
-        return <QuizView course={course} channel={channel} />;
+        return (
+          <QuizView
+            key={`${channel.type}-${channel.id}`}
+            course={course}
+            channel={channel}
+            onFetchQuiz={onFetchQuiz}
+            onSubmitQuiz={onSubmitQuiz}
+          />
+        );
       case 'text': // fType 'Discussion'
       default:
         return (
