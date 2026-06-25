@@ -36,27 +36,36 @@ import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import { quizAllQuestionTypesMock } from '../../mocks/dashboardData.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
-import type { Question, Quiz } from '../../types/domain.ts';
+import {
+  QUESTION_TYPE_LABELS,
+  type Language,
+  type Question,
+  type QuestionType,
+  type QuestionTypeOption,
+  type Quiz,
+} from '../../types/domain.ts';
 import {
   fromSubmission,
+  type CodeEvaluationInput,
+  type CodingTestResult,
   type QuizResult,
   type QuizSubmission,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { gradeQuiz } from '../../components/MainPanel/QuizView/grading.ts';
+import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
 
 // ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 100;
-const SIMULATE_SEND_FAILURE: boolean = false;
+const SIMULATE_DELAY = 5000;
+const SIMULATE_SEND_FAILURE: boolean = true;
 const SIMULATE_FETCH_FAILURE: boolean = false;
-// DEV (mock quiz) : si un cours réel revient SANS aucun quiz, on injecte un quiz
-// cliquable (métadonnées seules ; ses questions sont chargées par fetchQuiz/onFetchQuiz).
-// Garantit qu'une section quiz est toujours accessible pour développer QuizView /
-// QuizEditor tant que le backend ne sert pas de quiz. Mets à false pour t'en débarrasser.
-const MOCK_QUIZ_FALLBACK: boolean = true;
+// DEV : à `true`, les fonctions de chargement de quiz renvoient les QUIZ MOCK
+// (quizAllQuestionTypesMock). À `false`, elles renvoient du vide (comme un backend
+// sans données) — pratique pour tester l'état « aucun quiz ».
+const USE_MOCK_QUIZZES: boolean = true;
 // Durée simulée d'un job MCP (génération) avant le push de complétion.
 const MOCK_MCP_JOB_MS = 2500;
 
@@ -120,14 +129,12 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
       const forumsRes = await apiFetch(`/api/courses/${course.id}/forums`);
       const forums = forumsRes.ok ? await forumsRes.json() : [];
 
-      // DEV : assure au moins un quiz cliquable (cf. MOCK_QUIZ_FALLBACK). On porte
-      // le quiz COMPLET (méta + questions) : la LISTE lit ces méta (badge
-      // Publié/Brouillon, ★) ET le compte de questions, et l'éditeur ouvre le quiz
-      // déjà peuplé (onFetchQuiz n'est sollicité que si questions absentes).
-      const quizzes =
-        MOCK_QUIZ_FALLBACK && (course.quizzes ?? []).length === 0
-          ? [{ ...quizAllQuestionTypesMock, position: 0 }]
-          : course.quizzes;
+      // Sidebar = quiz PUBLIÉS uniquement (les brouillons ne sont visibles que dans
+      // l'éditeur, qui charge la liste complète via fetchQuizzes).
+      // TODO — au branchement réel : faire embarquer les quiz publiés dans le payload
+      // du cours (ou un endpoint dédié) pour éviter ce fetch par cours (N+1 requêtes).
+      // MOCK off → on garde les quiz du payload du cours (vrai backend) ; MOCK on → mock.
+      const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
 
       return {
         ...course,
@@ -146,7 +153,84 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
 /** TODO — Charger le détail d'un quiz (questions embarquées) pour la passation/édition. */
 export async function fetchQuiz(quizId: number): Promise<Quiz> {
   await simulateFetch('Échec simulé (chargement du quiz)');
+  if (!USE_MOCK_QUIZZES) return { id: quizId, title: '', questions: [] };
   return { ...quizAllQuestionTypesMock, id: quizId };
+}
+
+/** Liste mock des quiz d'un cours (méta seules ; les questions arrivent via fetchQuiz). */
+function mockCourseQuizzes(): Quiz[] {
+  // fetchQuiz renvoie quizAllQuestionTypesMock pour tout id → même compte partout (mock).
+  const questionCount = quizAllQuestionTypesMock.questions?.length ?? 0;
+  return [
+    {
+      id: quizAllQuestionTypesMock.id,
+      title: quizAllQuestionTypesMock.title,
+      position: 0,
+      isPublished: true,
+      isDaily: false,
+      questionCount,
+    },
+    {
+      id: 8001,
+      title: 'quiz-brouillon',
+      position: 1,
+      isPublished: false,
+      isDaily: false,
+      questionCount,
+    },
+  ];
+}
+
+/**
+ * TODO — Quiz d'un cours VISIBLES par l'étudiant : uniquement les PUBLIÉS (méta seules).
+ * Sert à la sidebar / vue étudiant. Tri par `position`.
+ */
+export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
+  await simulateFetch('Échec simulé (chargement des quiz publiés)');
+  console.log('[api] Quiz publiés du cours', courseId);
+  if (!USE_MOCK_QUIZZES) return [];
+  return mockCourseQuizzes().filter((q) => q.isPublished);
+}
+
+/**
+ * TODO — TOUS les quiz d'un cours, BROUILLONS COMPRIS (méta seules). Réservé à
+ * l'enseignant/admin (éditeur « Modifier les quiz »). Tri par `position`.
+ */
+export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
+  await simulateFetch('Échec simulé (chargement des quiz)');
+  console.log('[api] Quiz (tous) du cours', courseId);
+  if (!USE_MOCK_QUIZZES) return [];
+  return mockCourseQuizzes();
+}
+
+/**
+ * TODO — Langages d'exécution disponibles (table Language : nom + gabarits
+ * start_code_template / harness_template + harness_language_id). Alimente le sélecteur
+ * de langage de l'éditeur de quiz. MOCK : liste par défaut (sans gabarits → le front
+ * retombe sur ses squelettes locaux).
+ */
+/**
+ * TODO — Types de question disponibles (table Q_Type : id + name FR). Alimente le
+ * sélecteur de type de l'éditeur de question. MOCK : dérivé des slugs front + labels.
+ */
+export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
+  await simulateFetch('Échec simulé (chargement des types de question)');
+  const order: QuestionType[] = [
+    'true_false',
+    'single_choice',
+    'multiple_choice',
+    'ordering',
+    'matching',
+    'coding',
+  ];
+  console.log(order)
+  return order.map((slug, i) => ({ id: i + 1, slug, label: QUESTION_TYPE_LABELS[slug] }));
+}
+
+export async function fetchLanguages(): Promise<Language[]> {
+  await simulateFetch('Échec simulé (chargement des langages)');
+  console.log(DEFAULT_LANGUAGES)
+  return DEFAULT_LANGUAGES;
 }
 
 /**
@@ -159,6 +243,23 @@ export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult
   const quiz = { ...quizAllQuestionTypesMock, id: submission.quizId };
   console.log(submission)
   return gradeQuiz(quiz, fromSubmission(quiz, submission));
+}
+
+/**
+ * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
+ * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
+ * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
+ * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ */
+export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
+  await simulateWrite('Échec simulé (évaluation du code)');
+  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
+  const attempted = input.code.trim().length > 0;
+  return input.testCases.map((t, i) => ({
+    name: t.name,
+    passed: attempted && i % 2 === 0,
+    weight: t.weight,
+  }));
 }
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────

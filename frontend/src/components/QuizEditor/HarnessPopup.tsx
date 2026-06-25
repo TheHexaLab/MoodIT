@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
@@ -13,6 +13,8 @@ interface HarnessBodyProps {
    * langage de la question (via Language.harness_language_id), pas par harnais.
    */
   language?: string;
+  /** Demande le chargement (paresseux) des langages — le harnais est du Code. */
+  onRequestLanguages?: () => void;
   /** Annule (« Annuler » / chevron retour) : retour à la question, sans appliquer. */
   onCancel: () => void;
   /** Valide les harnais édités (le parent les réinjecte dans le brouillon de question). */
@@ -31,6 +33,7 @@ const DEFAULT_HARNESS = 'def test():\n    return False\n';
 export function HarnessBody({
   testCases,
   language,
+  onRequestLanguages,
   onCancel,
   onSave,
 }: HarnessBodyProps): React.ReactElement {
@@ -39,6 +42,11 @@ export function HarnessBody({
       ? testCases.map((t) => ({ ...t }))
       : [{ name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]
   );
+
+  // Page harnais = contexte Code → on s'assure que les langages sont chargés.
+  useEffect(() => {
+    onRequestLanguages?.();
+  }, [onRequestLanguages]);
 
   function update(index: number, patch: Partial<TestCaseDraft>) {
     setCases((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
@@ -53,7 +61,7 @@ export function HarnessBody({
   return (
     <>
       <div className={styles.infoBanner}>
-        🔒 Cachés à l'étudiant · chaque harnais renvoie vrai/faux · note = part des poids réussis
+        Cachés à l'étudiant · chaque harnais renvoie vrai/faux · note = part des poids réussis
       </div>
 
       <div className={[styles.list, styles.harnessList].join(' ')}>

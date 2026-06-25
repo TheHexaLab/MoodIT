@@ -34,6 +34,8 @@ interface CodeEditorProps {
   ariaLabel?: string;
   /** Hauteur minimale, en lignes (défaut 4). */
   minRows?: number;
+  /** Lecture seule : pas d'édition (utilisé pour la révision d'une réponse). */
+  readOnly?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export function CodeEditor({
   placeholder,
   ariaLabel,
   minRows = 4,
+  readOnly = false,
 }: CodeEditorProps): React.ReactElement {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
@@ -127,8 +130,10 @@ export function CodeEditor({
     };
   }, [value, minRows]);
 
-  // Numéros de ligne : une entrée par ligne, avec un plancher à `minRows`.
-  const lineCount = Math.max(value.split('\n').length, minRows);
+  // Numéros de ligne : UNIQUEMENT les lignes réelles (≥ 1). La hauteur minimale du
+  // champ vient du `min-height` (cf. resize/minRows), pas de numéros fantômes — donc
+  // pas de n° de ligne en face des lignes vides sous le contenu.
+  const lineCount = Math.max(value.split('\n').length, 1);
   const gutter = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
 
   // Défilement piloté par le textarea (molette, clavier, suivi du curseur) : on
@@ -296,6 +301,7 @@ export function CodeEditor({
             ref={taRef}
             className={styles.textarea}
             value={value}
+            readOnly={readOnly}
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
@@ -305,7 +311,10 @@ export function CodeEditor({
             aria-label={ariaLabel}
             onChange={(e) => onChange(e.target.value)}
             onScroll={onTextareaScroll}
-            onKeyDown={onKeyDown}
+            // En lecture seule : pas de logique d'édition (Tab/Entrée/auto-fermeture…),
+            // sinon nos handlers modifieraient quand même la valeur (readOnly ne bloque
+            // que la saisie clavier native, pas les changements programmatiques).
+            onKeyDown={readOnly ? undefined : onKeyDown}
           />
         </div>
       </div>

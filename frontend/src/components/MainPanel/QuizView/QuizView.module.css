@@ -441,3 +441,28 @@
     font-weight: 600;
     cursor: pointer;
 }
+
+/* ─────────────────────────────────── Mobile ─────────────────────────────────── */
+@media (max-width: 30rem) {
+    /* En-tête de carte sur 2 lignes : « Question N » + points (l.1), type (l.2). */
+    .cardHeader {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "label points"
+            "badge badge";
+        align-items: center;
+        column-gap: 0.5rem;
+        row-gap: 0.375rem;
+    }
+    .questionLabel {
+        grid-area: label;
+    }
+    .points {
+        grid-area: points;
+    }
+    .badge {
+        grid-area: badge;
+        justify-self: start;
+    }
+}

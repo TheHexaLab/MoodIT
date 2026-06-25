@@ -1,17 +1,19 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup';
 import { EditorShell, Portal } from './EditorShell';
 import { QuizListBody } from './QuizListPopup';
 import { QuizFormBody } from './QuizFormPopup';
 import { QuestionFormBody } from './QuestionFormPopup';
 import { HarnessBody } from './HarnessPopup';
+import { QuestionTestBody } from './QuestionTestPopup';
 import {
   type Language,
   type Question,
+  type QuestionTypeOption,
   type Quiz,
 } from '../../types/domain';
 import {
-  DEFAULT_LANGUAGES,
+  FALLBACK_LANGUAGES,
   draftToQuestion,
   emptyQuestionDraft,
   questionToDraft,
@@ -50,7 +52,9 @@ type View =
   | { kind: 'question'; quizId: number; quizIsNew: boolean; draft: QuestionDraft; isNew: boolean }
   // Harnais de test (question Code) : page empilée sur la question, porte le brouillon
   // courant (édits en cours) pour ne rien perdre à l'aller-retour.
-  | { kind: 'harness'; quizId: number; quizIsNew: boolean; draft: QuestionDraft; isNew: boolean };
+  | { kind: 'harness'; quizId: number; quizIsNew: boolean; draft: QuestionDraft; isNew: boolean }
+  // Prévisualisation « Tester » : page empilée qui rend la question comme un étudiant.
+  | { kind: 'test'; quizId: number; quizIsNew: boolean; draft: QuestionDraft; isNew: boolean };
 
 type Pending =
   | { kind: 'quiz'; id: number; title: string }
@@ -76,6 +80,56 @@ export function QuizEditor({
   const [pendingDelete, setPendingDelete] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // À l'ouverture, l'éditeur charge la liste COMPLÈTE (brouillons compris) ; la prop
+  // `initialQuizzes` (quiz publiés, venue de la sidebar) sert d'affichage immédiat.
+  const fetchQuizzes = handlers.onFetchQuizzes;
+  useEffect(() => {
+    if (!fetchQuizzes) return;
+    let cancelled = false;
+    Promise.resolve(fetchQuizzes(courseId))
+      .then((all) => {
+        if (!cancelled) setQuizzes(all);
+      })
+      .catch(() => {
+        /* échec : on garde la liste initiale (publiés) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, fetchQuizzes]);
+
+  // Langages chargés PARESSEUSEMENT (au 1er accès à une question Code), puis mis en
+  // cache. `effectiveLanguages` = langages chargés > prop ; sinon repli FALLBACK_LANGUAGES
+  // (Python + C) appliqué côté enfants (param par défaut / harnessLanguageName).
+  const [loadedLanguages, setLoadedLanguages] = useState<Language[] | null>(null);
+  const languagesRequested = useRef(false);
+  const fetchLanguages = handlers.onFetchLanguages;
+  const requestLanguages = useCallback(() => {
+    if (languagesRequested.current || !fetchLanguages) return;
+    languagesRequested.current = true;
+    Promise.resolve(fetchLanguages())
+      .then((langs) => setLoadedLanguages(langs))
+      .catch(() => {
+        languagesRequested.current = false; // échec : on pourra réessayer
+      });
+  }, [fetchLanguages]);
+  const effectiveLanguages = loadedLanguages ?? languages;
+
+  // Types de question chargés PARESSEUSEMENT (à l'ouverture d'un éditeur de question),
+  // puis mis en cache. Repli (param par défaut côté QuestionFormBody) sinon.
+  const [questionTypes, setQuestionTypes] = useState<QuestionTypeOption[] | null>(null);
+  const questionTypesRequested = useRef(false);
+  const fetchQuestionTypes = handlers.onFetchQuestionTypes;
+  const requestQuestionTypes = useCallback(() => {
+    if (questionTypesRequested.current || !fetchQuestionTypes) return;
+    questionTypesRequested.current = true;
+    Promise.resolve(fetchQuestionTypes())
+      .then((types) => setQuestionTypes(types))
+      .catch(() => {
+        questionTypesRequested.current = false;
+      });
+  }, [fetchQuestionTypes]);
 
   /** Générateur d'ids temporaires (mode mock) : négatifs, jamais en collision. */
   const tmpId = useRef(-1);
@@ -299,23 +353,40 @@ export function QuizEditor({
               // Desktop : limite la hauteur à 60vh (le corps défile au-delà).
               desktopMaxVh: 60,
             }
-          : {
-              // Page « Harnais de test » : empilée sur la question (chevron retour).
-              title: 'Harnais de test',
-              subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
-              onBack: () =>
-                setView({
-                  kind: 'question',
-                  quizId: view.quizId,
-                  quizIsNew: view.quizIsNew,
-                  draft: view.draft,
-                  isNew: view.isNew,
-                }),
-              width: '34rem',
-              // Corps défilant (les harnais + leurs zones de code peuvent dépasser).
-              scrollBody: true,
-              desktopMaxVh: 60,
-            };
+          : view.kind === 'harness'
+            ? {
+                // Page « Harnais de test » : empilée sur la question (chevron retour).
+                title: 'Harnais de test',
+                subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
+                onBack: () =>
+                  setView({
+                    kind: 'question',
+                    quizId: view.quizId,
+                    quizIsNew: view.quizIsNew,
+                    draft: view.draft,
+                    isNew: view.isNew,
+                  }),
+                width: '34rem',
+                // Corps défilant (les harnais + leurs zones de code peuvent dépasser).
+                scrollBody: true,
+                desktopMaxVh: 60,
+              }
+            : {
+                // Page « Tester » : prévisualisation de la question (chevron retour).
+                title: 'Tester la question',
+                subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
+                onBack: () =>
+                  setView({
+                    kind: 'question',
+                    quizId: view.quizId,
+                    quizIsNew: view.quizIsNew,
+                    draft: view.draft,
+                    isNew: view.isNew,
+                  }),
+                width: '34rem',
+                scrollBody: true,
+                desktopMaxVh: 60,
+              };
 
   return (
     <>
@@ -360,12 +431,24 @@ export function QuizEditor({
             isNew={view.isNew}
             saving={saving}
             error={error}
-            languages={languages}
+            languages={effectiveLanguages}
+            onRequestLanguages={requestLanguages}
+            questionTypes={questionTypes ?? undefined}
+            onRequestQuestionTypes={requestQuestionTypes}
             onCancel={() => setView({ kind: 'form', quizId: view.quizId, isNew: view.quizIsNew })}
             onSave={(draft) => saveQuestion(view.quizId, view.quizIsNew, draft)}
             onManageHarness={(draft) =>
               setView({
                 kind: 'harness',
+                quizId: view.quizId,
+                quizIsNew: view.quizIsNew,
+                draft,
+                isNew: view.isNew,
+              })
+            }
+            onTest={(draft) =>
+              setView({
+                kind: 'test',
                 quizId: view.quizId,
                 quizIsNew: view.quizIsNew,
                 draft,
@@ -378,7 +461,8 @@ export function QuizEditor({
         {view.kind === 'harness' && activeQuiz && (
           <HarnessBody
             testCases={view.draft.testCases ?? []}
-            language={harnessLanguageName(view.draft.languageId, languages ?? DEFAULT_LANGUAGES)}
+            language={harnessLanguageName(view.draft.languageId, effectiveLanguages ?? FALLBACK_LANGUAGES)}
+            onRequestLanguages={requestLanguages}
             onCancel={() =>
               setView({
                 kind: 'question',
@@ -397,6 +481,15 @@ export function QuizEditor({
                 isNew: view.isNew,
               })
             }
+          />
+        )}
+
+        {view.kind === 'test' && activeQuiz && (
+          <QuestionTestBody
+            draft={view.draft}
+            languages={effectiveLanguages}
+            onRequestLanguages={requestLanguages}
+            onEvaluateCode={handlers.onEvaluateCode}
           />
         )}
       </EditorShell>

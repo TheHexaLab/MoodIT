@@ -29,6 +29,9 @@ export function MatchingQuestion({
   // Catégories distinctes, dans l'ordre d'apparition.
   const groups = [...new Set(items.map((d) => d.groupName).filter((g): g is string => !!g))];
 
+  // Glissement par Pointer Events (souris + tactile) : `drag` porte l'étiquette
+  // saisie et la position du pointeur (pour le fantôme) ; `overZone` la zone survolée.
+  const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null);
   const [overZone, setOverZone] = useState<string | null>(null);
 
   if (mode === 'review') {
@@ -71,33 +74,47 @@ export function MatchingQuestion({
   const inZone = (zone: string) =>
     items.filter((d) => (placement[d.id] ?? null) === (zone === POOL ? null : zone));
 
+  /** Zone (`data-zone`) sous le point (x, y), ou null. */
+  function zoneAt(x: number, y: number): string | null {
+    return document.elementFromPoint(x, y)?.closest('[data-zone]')?.getAttribute('data-zone') ?? null;
+  }
+
+  function startDrag(e: React.PointerEvent, id: number) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    setDrag({ id, x: e.clientX, y: e.clientY });
+    const onMove = (ev: PointerEvent) => {
+      setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY } : d));
+      setOverZone(zoneAt(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const zone = zoneAt(ev.clientX, ev.clientY);
+      // Ne réécrit que si la zone cible diffère de la zone actuelle (pas de no-op au tap).
+      if (zone) {
+        const target = zone === POOL ? null : zone;
+        if (target !== (placement[id] ?? null)) placeInto(id, zone);
+      }
+      setDrag(null);
+      setOverZone(null);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
   function Chip({ id, content }: { id: number; content: string }): React.ReactElement {
     return (
       <span
-        className={styles.chip}
-        draggable
-        onDragStart={(e) => e.dataTransfer.setData('text/plain', String(id))}
+        className={[styles.chip, drag?.id === id ? styles.chipDragging : ''].filter(Boolean).join(' ')}
+        onPointerDown={(e) => startDrag(e, id)}
       >
         <GripVertical width={12} height={12} aria-hidden />
-        {content}
+        <span className={styles.chipText}>{content}</span>
       </span>
     );
-  }
-
-  function dropHandlers(zone: string) {
-    return {
-      onDragOver: (e: React.DragEvent) => {
-        e.preventDefault();
-        setOverZone(zone);
-      },
-      onDragLeave: () => setOverZone((z) => (z === zone ? null : z)),
-      onDrop: (e: React.DragEvent) => {
-        e.preventDefault();
-        const id = Number(e.dataTransfer.getData('text/plain'));
-        if (!Number.isNaN(id)) placeInto(id, zone);
-        setOverZone(null);
-      },
-    };
   }
 
   return (
@@ -107,7 +124,7 @@ export function MatchingQuestion({
       {/* Réserve des étiquettes non classées. */}
       <div
         className={[styles.pool, overZone === POOL ? styles.poolOver : ''].filter(Boolean).join(' ')}
-        {...dropHandlers(POOL)}
+        data-zone={POOL}
       >
         {inZone(POOL).map((d) => (
           <Chip key={d.id} id={d.id} content={d.content} />
@@ -122,7 +139,7 @@ export function MatchingQuestion({
             className={[styles.group, overZone === group ? styles.groupOver : '']
               .filter(Boolean)
               .join(' ')}
-            {...dropHandlers(group)}
+            data-zone={group}
           >
             <span className={styles.groupLabel}>{group}</span>
             <div className={styles.groupItems}>
@@ -133,6 +150,14 @@ export function MatchingQuestion({
           </div>
         ))}
       </div>
+
+      {/* Étiquette « fantôme » qui suit le pointeur pendant le glissement. */}
+      {drag && (
+        <span className={styles.dragGhost} style={{ left: drag.x, top: drag.y }}>
+          <GripVertical width={12} height={12} aria-hidden />
+          <span className={styles.chipText}>{byId.get(drag.id)?.content}</span>
+        </span>
+      )}
     </div>
   );
 }

@@ -66,10 +66,14 @@ import styles from './Dashboard.module.css';
  */
 const quizEditorHandlers: QuizEditorHandlers = {
   onFetchQuiz: api.fetchQuiz,
+  onFetchQuizzes: api.fetchQuizzes,
+  onFetchLanguages: api.fetchLanguages,
+  onFetchQuestionTypes: api.fetchQuestionTypes,
   onCreateQuiz: api.createQuiz,
   onUpdateQuiz: api.updateQuiz,
   onDeleteQuiz: api.deleteQuiz,
   onReorderQuizzes: api.reorderQuizzes,
+  onEvaluateCode: api.evaluateCode,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
@@ -109,6 +113,7 @@ export default function Dashboard() {
   // Sortie d'un programme (async : overlay de chargement + ErrorPopup en cas d'échec).
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+
 
   // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
   // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
@@ -314,14 +319,15 @@ export default function Dashboard() {
   };
 
   // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
-  // (création/maj/suppression/réordre). L'éditeur a déjà persisté via quizEditorHandlers ;
-  // ici on aligne l'état local (positions réattribuées) pour un reflet immédiat.
+  // (création/maj/suppression/réordre). L'éditeur travaille sur la liste COMPLÈTE
+  // (brouillons compris) ; la sidebar ne montre que les PUBLIÉS → on filtre ici.
   const handleQuizzesChange = (courseId: number, quizzes: Course['quizzes']) => {
+    const published = reposition((quizzes ?? []).filter((q) => q.isPublished));
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
         ...program,
         courses: program.courses.map((course) =>
-          course.id === courseId ? { ...course, quizzes: reposition(quizzes ?? []) } : course
+          course.id === courseId ? { ...course, quizzes: published } : course
         ),
       }))
     );

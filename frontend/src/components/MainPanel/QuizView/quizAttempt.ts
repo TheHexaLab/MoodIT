@@ -10,7 +10,7 @@
  * `grading.ts`) — sauf le code, qui ne s'exécute pas dans le navigateur.
  */
 
-import { type Quiz, type Question, type QuestionType } from '../../../types/domain';
+import { type Quiz, type Question, type QuestionType, type TestCase } from '../../../types/domain';
 
 /** Valeur synchrone ou asynchrone : un callback d'API peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -125,6 +125,17 @@ export interface CodingTestResult {
   passed: boolean;
   /** Poids du harnais (Test_Case.weight) — pour afficher sa contribution au score. */
   weight: number;
+}
+
+/**
+ * Charge utile d'évaluation d'une question Code : le code soumis + les harnais à
+ * exécuter (côté serveur). Le langage permet de choisir l'exécuteur. Utilisé pour
+ * corriger une question Code à l'unité (ex. bouton « Tester » de l'éditeur).
+ */
+export interface CodeEvaluationInput {
+  languageId?: number;
+  code: string;
+  testCases: TestCase[];
 }
 
 /**

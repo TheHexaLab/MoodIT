@@ -11,9 +11,14 @@ import {
   type Language,
   type Question,
   type QuestionType,
+  type QuestionTypeOption,
   type Quiz,
   type TestCase,
 } from '../../types/domain';
+import {
+  type CodeEvaluationInput,
+  type CodingTestResult,
+} from '../MainPanel/QuizView/quizAttempt';
 
 /** Valeur synchrone ou asynchrone. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -73,6 +78,26 @@ export interface QuizEditorHandlers {
   onReorderQuizzes?: (courseId: number, quizIds: number[]) => MaybePromise<unknown>;
   /** Charge le détail d'un quiz (questions embarquées) pour l'édition. */
   onFetchQuiz?: (quizId: number) => MaybePromise<Quiz>;
+  /**
+   * Charge TOUS les quiz d'un cours (brouillons compris), au montage de l'éditeur.
+   * Sans lui, l'éditeur se contente de la liste reçue en prop (quiz publiés).
+   */
+  onFetchQuizzes?: (courseId: number) => MaybePromise<Quiz[]>;
+  /**
+   * Charge les langages d'exécution. Appelé PARESSEUSEMENT : seulement à l'ouverture
+   * d'une question Code (édition ou passage au type Code). Mis en cache par l'éditeur.
+   */
+  onFetchLanguages?: () => MaybePromise<Language[]>;
+  /**
+   * Charge les types de question (table Q_Type). Appelé PARESSEUSEMENT à l'ouverture
+   * d'un éditeur de question (ajout/modification). Mis en cache par l'éditeur.
+   */
+  onFetchQuestionTypes?: () => MaybePromise<QuestionTypeOption[]>;
+  /**
+   * Évalue une question Code (exécution serveur des harnais) : reçoit le code + les
+   * harnais, renvoie le verdict par test. Sert au bouton « Tester » d'une question Code.
+   */
+  onEvaluateCode?: (input: CodeEvaluationInput) => MaybePromise<CodingTestResult[]>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */
@@ -92,6 +117,14 @@ export const DEFAULT_LANGUAGES: Language[] = [
   { id: 13, name: 'Bash' },
   { id: 14, name: 'YAML' },
 ];
+
+/**
+ * Repli MINIMAL (Python + C) affiché tant que les langages ne sont pas chargés via
+ * l'API (ou si elle échoue). La liste COMPLÈTE vient de `onFetchLanguages`/`DEFAULT_LANGUAGES`.
+ */
+export const FALLBACK_LANGUAGES: Language[] = DEFAULT_LANGUAGES.filter(
+  (l) => l.name === 'Python' || l.name === 'C'
+);
 
 /** Squelette de code de départ proposé par langage (par nom, insensible à la casse). */
 const START_CODE_BY_LANGUAGE: Record<string, string> = {

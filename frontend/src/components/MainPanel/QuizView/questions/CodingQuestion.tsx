@@ -2,14 +2,16 @@ import React from 'react';
 import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
+import { CodeEditor } from '../../../QuizEditor/CodeEditor';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
 
 /**
- * Question Code : éditeur simple (gouttière de numéros + zone d'édition monospace)
- * pré-rempli avec `start_code`. La vraie exécution des harnais est SERVEUR ; en
- * révision, `result.tests` liste le verdict par cas (✓/✗) ou `null` si non évalué
- * (cas du mode mock, le code ne tourne pas dans le navigateur).
+ * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
+ * gouttière, coloration syntaxique, auto-indentation…), pré-rempli avec `start_code`.
+ * La vraie exécution des harnais est SERVEUR ; en révision, l'éditeur passe en lecture
+ * seule et `result.tests` liste le verdict par cas (✓/✗) ou `null` si non évalué
+ * (mode mock, le code ne tourne pas dans le navigateur).
  */
 export function CodingQuestion({
   question,
@@ -19,40 +21,20 @@ export function CodingQuestion({
   onChange,
 }: QuestionViewProps): React.ReactElement {
   const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
-  const language = question.language?.name ?? 'Code';
-  const lineCount = Math.max(code.split('\n').length, 1);
-  const gutter = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
-
+  const language = question.language?.name;
   const review = mode === 'review';
 
   return (
     <div>
       {review && <span className={styles.codeLabel}>Ta réponse</span>}
-      <div className={styles.codePanel}>
-        <div className={styles.codeHeader}>
-          <span>{language}</span>
-          {review && <span className={styles.codeHeaderMuted}>Lecture seule</span>}
-        </div>
-        <div className={styles.codeBody}>
-          <div className={styles.codeGutter} aria-hidden>
-            {gutter}
-          </div>
-          {review ? (
-            <pre className={styles.codeReadonly}>{code}</pre>
-          ) : (
-            <textarea
-              className={styles.codeEditor}
-              value={code}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-              wrap="off"
-              aria-label={`Éditeur de code (${language})`}
-              onChange={(e) => onChange({ kind: 'coding', code: e.target.value })}
-            />
-          )}
-        </div>
-      </div>
+      <CodeEditor
+        value={code}
+        onChange={(next) => onChange({ kind: 'coding', code: next })}
+        language={language}
+        readOnly={review}
+        minRows={8}
+        ariaLabel={`Éditeur de code (${language ?? 'Code'})`}
+      />
 
       {review && <TestResults tests={result?.tests} />}
     </div>

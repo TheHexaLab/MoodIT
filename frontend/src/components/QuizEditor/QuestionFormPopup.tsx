@@ -13,9 +13,10 @@ import {
   QUESTION_TYPE_LABELS,
   type Language,
   type QuestionType,
+  type QuestionTypeOption,
 } from '../../types/domain';
 import {
-  DEFAULT_LANGUAGES,
+  FALLBACK_LANGUAGES,
   defaultStartCode,
   emptyQuestionDraft,
   type AnswerDraft,
@@ -32,11 +33,19 @@ interface QuestionFormBodyProps {
   error?: string | null;
   /** Langages disponibles pour les questions Code. */
   languages?: Language[];
+  /** Demande le chargement (paresseux) des langages — appelé quand le type est Code. */
+  onRequestLanguages?: () => void;
+  /** Types de question proposés (sélecteur). Repli local si non fourni. */
+  questionTypes?: QuestionTypeOption[];
+  /** Demande le chargement (paresseux) des types — appelé à l'ouverture de l'éditeur. */
+  onRequestQuestionTypes?: () => void;
   /** Annule (bouton « Annuler ») : retour au formulaire de quiz — pas de fermeture. */
   onCancel: () => void;
   onSave: (draft: QuestionDraft) => void;
   /** Ouvre la page « Harnais de test » avec le brouillon courant (édits en cours). */
   onManageHarness: (draft: QuestionDraft) => void;
+  /** Ouvre la page « Tester » (prévisualisation étudiant) avec le brouillon courant. */
+  onTest: (draft: QuestionDraft) => void;
 }
 
 /** Types proposés dans le sélecteur, dans l'ordre du modèle. */
@@ -49,6 +58,13 @@ const TYPE_ORDER: QuestionType[] = [
   'coding',
 ];
 
+/** Repli des types de question, tant qu'ils ne sont pas chargés via l'API. */
+const FALLBACK_QUESTION_TYPES: QuestionTypeOption[] = TYPE_ORDER.map((slug, i) => ({
+  id: i + 1,
+  slug,
+  label: QUESTION_TYPE_LABELS[slug],
+}));
+
 /**
  * Éditeur d'une question (tous types). L'énoncé est en Markdown (champ avec
  * barre d'outils + aperçu). Le corps change selon le type sélectionné : options
@@ -60,15 +76,30 @@ export function QuestionFormBody({
   isNew,
   saving,
   error,
-  languages = DEFAULT_LANGUAGES,
+  languages = FALLBACK_LANGUAGES,
+  onRequestLanguages,
+  questionTypes = FALLBACK_QUESTION_TYPES,
+  onRequestQuestionTypes,
   onCancel,
   onSave,
   onManageHarness,
+  onTest,
 }: QuestionFormBodyProps): React.ReactElement {
   const [draft, setDraft] = useState<QuestionDraft>(initialDraft);
   /** Mobile (associations) : index de la ligne active dont la flèche devient poubelle. */
   const [activeMatch, setActiveMatch] = useState<number | null>(null);
   const matchingListRef = useRef<HTMLDivElement>(null);
+
+  // Ouverture de l'éditeur de question (ajout/modif) : charge les types de question.
+  useEffect(() => {
+    onRequestQuestionTypes?.();
+  }, [onRequestQuestionTypes]);
+
+  // Question Code (à l'ouverture OU au passage au type Code) : charge les langages
+  // (paresseux ; l'éditeur met en cache, donc appels répétés sans coût).
+  useEffect(() => {
+    if (draft.qType === 'coding') onRequestLanguages?.();
+  }, [draft.qType, onRequestLanguages]);
 
   // Désactive la ligne active (→ la poubelle redevient flèche) dès qu'on clique en
   // dehors de la liste des associations.
@@ -137,7 +168,7 @@ export function QuestionFormBody({
           <Dropdown
             ariaLabel="Type de question"
             value={draft.qType}
-            options={TYPE_ORDER.map((t) => ({ value: t, label: QUESTION_TYPE_LABELS[t] }))}
+            options={questionTypes.map((t) => ({ value: t.slug, label: t.label }))}
             onChange={(v) => changeType(v as QuestionType)}
           />
         </div>
@@ -159,7 +190,13 @@ export function QuestionFormBody({
 
       <EditorFooter>
         <div className={styles.footer}>
-          <button type="button" className={styles.outlineButton} title="Prévisualiser / tester" disabled>
+          <button
+            type="button"
+            className={styles.outlineButton}
+            title="Prévisualiser / tester"
+            disabled={!canSave}
+            onClick={() => onTest(draft)}
+          >
             Tester
           </button>
           <span className={styles.footerSpacer} />
@@ -344,7 +381,14 @@ export function QuestionFormBody({
         </div>
         <div className={[styles.list, styles.matchingList].join(' ')} ref={matchingListRef}>
           {items.map((d, i) => (
-            <div key={i} className={[styles.answerRow, styles.matchingRow, styles.association].join(' ')}>
+            <div
+              key={i}
+              className={[styles.answerRow, styles.matchingRow, styles.association].join(' ')}
+              // Active la ligne (→ poubelle) au clic n'importe où sur la ligne, en plus
+              // du focus d'un input. Les boutons de suppression stoppent la propagation
+              // pour ne pas ré-activer la ligne après l'avoir supprimée.
+              onClick={() => setActiveMatch(i)}
+            >
               <input
                 className={[styles.input, styles.answerInput].join(' ')}
                 value={d.content}
@@ -360,7 +404,8 @@ export function QuestionFormBody({
                 className={styles.matchSlot}
                 data-active={activeMatch === i}
                 aria-label={activeMatch === i ? "Supprimer l'association" : "Options de l'association"}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation(); // ne pas re-déclencher le onClick de la ligne
                   if (activeMatch === i) {
                     setItems(items.filter((_, j) => j !== i));
                     setActiveMatch(null);
@@ -369,8 +414,8 @@ export function QuestionFormBody({
                   }
                 }}
               >
-                <ArrowRight className={styles.matchSlotArrow} width={14} height={14} />
-                <TrashCan className={styles.matchSlotTrash} width={15} height={15} />
+                <ArrowRight className={styles.matchSlotArrow} width={16} height={16} />
+                <TrashCan className={styles.matchSlotTrash} width={16} height={16} />
               </button>
               <input
                 className={[styles.input, styles.groupSelect, d.groupName ? styles.groupSelectTeal : '']
@@ -387,7 +432,10 @@ export function QuestionFormBody({
                 type="button"
                 className={[styles.iconButton, styles.iconButtonDanger].join(' ')}
                 aria-label="Supprimer l'association"
-                onClick={() => setItems(items.filter((_, j) => j !== i))}
+                onClick={(e) => {
+                  e.stopPropagation(); // évite de ré-activer la ligne après suppression
+                  setItems(items.filter((_, j) => j !== i));
+                }}
               >
                 <TrashCan width={15} height={15} />
               </button>

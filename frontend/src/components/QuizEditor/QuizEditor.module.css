@@ -40,6 +40,9 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: hidden;
+    /* Réserve la place de la scrollbar : son apparition/disparition ne décale plus la
+       largeur du contenu (contrôles, listes déroulantes) pendant le défilement. */
+    scrollbar-gutter: stable;
 }
 
 /* Contenu mesuré (hauteur naturelle du corps) : champs de la vue. */
@@ -561,6 +564,11 @@
         pointer-events: auto;
         cursor: pointer;
         padding: 0.25rem;
+        /* Taille FIXE : l'échange flèche↔poubelle ne redimensionne plus la ligne
+           (et laisse respirer les icônes 16px + le padding). */
+        box-sizing: border-box;
+        width: 1.625rem;
+        height: 1.625rem;
     }
     .matchingRow .matchSlotArrow { transform: rotate(90deg); }
     .matchingRow .matchSlot[data-active='true'] .matchSlotArrow { display: none; }
@@ -587,6 +595,11 @@
     .questionList { max-height: 12.5rem; }
     /* La scrollbar apparaît dès la 4e question → on réserve l'espacement avant. */
     .questionList:has(> :nth-child(4)) { padding-right: 0.5rem; }
+
+    .answerRow.association > .answerInput,
+    .answerRow.association > .groupSelect {
+        text-align: center;
+    }
 }
 
 .iconButton {
@@ -703,6 +716,19 @@
     font-weight: 600;
 }
 
+/* Page « Tester » : on force box-sizing border-box sur tout le sous-arbre, car les
+   composants étudiant réutilisés (carte, options…) sont en width:100% + padding sans
+   border-box → sinon leur boîte dépasse et fait déborder horizontalement le popup. */
+.testArea {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+.testArea,
+.testArea * {
+    box-sizing: border-box;
+}
+
 
 .infoBanner {
     display: flex;
@@ -742,6 +768,17 @@
 .harnessCardHead { display: flex; align-items: center; gap: 0.5rem; }
 .weightLabel { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; flex: 0 0 auto; }
 .weightInput { flex: 0 0 3.25rem; text-align: center; }
+
+/* Pas de flèches d'incrémentation/décrémentation sur les champs nombre. */
+.input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+.input[type='number']::-webkit-outer-spin-button,
+.input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
 
 /* Bouton de bascule (ghost teal) « ↔ Tester ». */
 .outlineButton {

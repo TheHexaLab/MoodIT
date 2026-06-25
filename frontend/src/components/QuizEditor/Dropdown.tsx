@@ -19,6 +19,18 @@ interface DropdownProps {
 const MENU_MAX_PX = 160;
 
 /**
+ * Style du menu AVANT que sa position ne soit calculée : `fixed` + invisible. Évite
+ * que le rendu initial (CSS par défaut `position: absolute; top: 100%`, porté dans
+ * `document.body`) ne pousse une scrollbar de page et ne décale tout d'un cran.
+ */
+const HIDDEN_MENU_STYLE: React.CSSProperties = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  visibility: 'hidden',
+};
+
+/**
  * Liste déroulante personnalisée (même look que le sélecteur d'établissement de
  * `AddSubscriptionPopup`) : contrôle bordé + chevron animé, et menu flottant avec
  * surlignage de l'option active. Le menu est **porté dans `document.body`** en
@@ -34,9 +46,11 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
 
   const current = options.find((o) => o.value === value);
 
-  // Position du menu (fixe) : sous le contrôle, ou au-dessus si la place manque.
-  // Recalculée à l'ouverture, au défilement (capture, pour le corps du popup) et
-  // au redimensionnement.
+  // Position du menu (porté en `position: fixe`), calculée UNE fois à l'ouverture (et
+  // au redimensionnement de la fenêtre). On ne recalcule PAS au défilement : ça évitait
+  // que la largeur/position « saute » quand la scrollbar du corps apparaît/disparaît.
+  // À la place, scroller le CORPS du popup ferme le menu (comme un <select> natif) ;
+  // scroller À L'INTÉRIEUR de la liste (>3 éléments) ne le ferme pas.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -58,10 +72,16 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
       });
     };
     place();
-    window.addEventListener('scroll', place, true);
+    const onScroll = (e: Event) => {
+      // Scroll interne de la liste → on garde le menu ouvert ; sinon (corps/popup) → on ferme.
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', place);
     return () => {
-      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', place);
     };
   }, [open]);
@@ -105,7 +125,12 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
       </button>
       {open &&
         createPortal(
-          <ul className={styles.dropdownPicker} role="listbox" ref={menuRef} style={menuStyle}>
+          <ul
+            className={styles.dropdownPicker}
+            role="listbox"
+            ref={menuRef}
+            style={menuStyle ?? HIDDEN_MENU_STYLE}
+          >
             {options.map((option) => {
               const selected = option.value === value;
               return (

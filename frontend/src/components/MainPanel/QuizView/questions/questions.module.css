@@ -18,7 +18,9 @@
 /* Vrai/Faux : deux options côte à côte. */
 .optionsGrid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* minmax(0,1fr) : les colonnes peuvent passer sous leur min-content → pas de
+       débordement horizontal dans un conteneur étroit (ex. popup « Tester »). */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0.75rem;
 }
 
@@ -27,6 +29,8 @@
     align-items: center;
     gap: 0.625rem;
     width: 100%;
+    /* Permet au label enfant de tronquer (sinon le bouton garde sa largeur min-content). */
+    min-width: 0;
     border: 1.5px solid var(--border);
     border-radius: 0.625rem;
     background: var(--bg-surface);
@@ -96,6 +100,8 @@
 .optionLabel {
     flex: 1 1 auto;
     min-width: 0;
+    /* Les phrases s'enroulent ; seuls les mots trop longs (sans espace) sont coupés. */
+    overflow-wrap: anywhere;
 }
 
 /* Les états de révision (.optionCorrect / .optionWrong / .optionCorrectMissed)
@@ -143,6 +149,8 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    /* Permet au texte enfant de tronquer (sinon la ligne garde sa largeur min-content). */
+    min-width: 0;
     border: 1.5px solid var(--border);
     border-radius: 0.625rem;
     background: var(--bg-vote-pill);
@@ -169,6 +177,9 @@
     align-items: center;
     flex: 0 0 auto;
     color: var(--text-muted);
+    cursor: grab;
+    /* Le geste de glisser au doigt ne doit pas faire défiler la page. */
+    touch-action: none;
 }
 
 .orderNum {
@@ -188,6 +199,8 @@
 .orderText {
     flex: 1 1 auto;
     min-width: 0;
+    /* Les phrases s'enroulent ; seuls les mots trop longs (sans espace) sont coupés. */
+    overflow-wrap: anywhere;
 }
 
 /* ───────────────────────────────── Association ───────────────────────────────── */
@@ -220,15 +233,54 @@
     font: inherit;
     font-size: 0.8125rem;
     cursor: grab;
+    /* Le geste de glisser au doigt ne doit pas faire défiler la page. */
+    touch-action: none;
+    user-select: none;
+    /* Tronque (ellipsis) si l'étiquette dépasse la largeur de son conteneur. */
+    max-width: 100%;
+    min-width: 0;
+}
+/* Texte de l'étiquette : s'enroule ; seuls les mots trop longs (sans espace) cassent. */
+.chipText {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.chip > svg,
+.dragGhost > svg {
+    flex: 0 0 auto;
 }
 
 .chip:hover {
     border-color: var(--border-strong);
 }
 
+/* Étiquette en cours de glissement : l'originale s'estompe (le fantôme suit le doigt). */
+.chipDragging {
+    opacity: 0.4;
+}
+
+/* Étiquette « fantôme » qui suit le pointeur pendant le glissement (association). */
+.dragGhost {
+    position: fixed;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1000;
+    max-width: 16rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    padding: 0.4375rem 0.625rem;
+    color: var(--text-body);
+    font-size: 0.8125rem;
+    box-shadow: 0 4px 12px var(--shadow-modal);
+}
+
 .groupGrid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0.75rem;
 }
 
@@ -237,6 +289,9 @@
     flex-direction: column;
     gap: 0.5rem;
     min-height: 4.5rem;
+    /* Indispensable pour que le label tronque : sans ça, l'item de grille garde sa
+       largeur min-content (= label `nowrap` entier) et ne rétrécit jamais. */
+    min-width: 0;
     border: 1.5px dashed var(--brand-teal);
     border-radius: 0.625rem;
     padding: 0.625rem;
@@ -252,6 +307,9 @@
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+    /* Les phrases s'enroulent ; seuls les mots trop longs (sans espace) sont coupés. */
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .groupItems {
@@ -290,30 +348,8 @@
 }
 
 /* ──────────────────────────────────── Code ──────────────────────────────────── */
-
-.codePanel {
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    overflow: hidden;
-    background: var(--syntax-bg);
-}
-
-.codeHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    border-bottom: 1px solid var(--border);
-    padding: 0.5rem 0.875rem;
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
-.codeHeaderMuted {
-    color: var(--text-muted);
-    font-weight: 500;
-}
+/* L'éditeur de code lui-même est le composant partagé `CodeEditor` (QuizEditor) ;
+   ici on ne garde que les libellés et le bloc de résultats de la révision. */
 
 /* Libellés de section de la révision Code (« Ta réponse », « Résultat des tests »). */
 .codeLabel {
@@ -322,77 +358,6 @@
     color: var(--text-body);
     font-size: 0.8125rem;
     font-weight: 600;
-}
-
-.codeBody {
-    display: flex;
-    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-}
-
-.codeGutter {
-    flex: 0 0 auto;
-    padding: 0.75rem 0.5rem 0.75rem 0.875rem;
-    color: var(--syntax-comment);
-    text-align: right;
-    user-select: none;
-    white-space: pre;
-}
-
-.codeEditor {
-    flex: 1 1 auto;
-    border: none;
-    outline: none;
-    resize: vertical;
-    min-height: 9rem;
-    padding: 0.75rem 0.875rem;
-    background: transparent;
-    color: var(--syntax-fg);
-    font: inherit;
-    tab-size: 4;
-}
-
-.codeReadonly {
-    flex: 1 1 auto;
-    margin: 0;
-    padding: 0.75rem 0.875rem;
-    color: var(--syntax-fg);
-    white-space: pre;
-    overflow-x: auto;
-}
-
-/* Scrollbar fine, alignée sur le reste de l'app (cf. QuizEditor / SectionEditorPopup). */
-@supports not selector(::-webkit-scrollbar) {
-    .codeEditor,
-    .codeReadonly {
-        scrollbar-width: thin;
-        scrollbar-color: var(--border-strong) transparent;
-    }
-}
-.codeEditor::-webkit-scrollbar,
-.codeReadonly::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-}
-.codeEditor::-webkit-scrollbar-track,
-.codeReadonly::-webkit-scrollbar-track {
-    background: transparent;
-}
-.codeEditor::-webkit-scrollbar-thumb,
-.codeReadonly::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 999px;
-}
-.codeEditor::-webkit-scrollbar-thumb:hover,
-.codeReadonly::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
-}
-.codeEditor::-webkit-scrollbar-button,
-.codeReadonly::-webkit-scrollbar-button {
-    display: none;
-    width: 0;
-    height: 0;
 }
 
 /* Bloc « Résultat des tests » (label + liste) sous le code, en révision. */
@@ -472,4 +437,16 @@
     border-color: var(--danger);
     background: rgba(229, 72, 77, 0.12);
     color: var(--text-body);
+}
+
+/* ─────────────────────────────────── Mobile ─────────────────────────────────── */
+@media (max-width: 30rem) {
+    /* Vrai/Faux : options empilées (une colonne) au lieu de côte à côte. */
+    .optionsGrid {
+        grid-template-columns: 1fr;
+    }
+    /* Association : catégories empilées (une colonne). */
+    .groupGrid {
+        grid-template-columns: 1fr;
+    }
 }

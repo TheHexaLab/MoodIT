@@ -95,6 +95,11 @@ export interface Quiz {
    * Absent dans les vues de liste (section Quiz d'un cours).
    */
   questions?: Question[];
+  /**
+   * Nombre de questions, fourni par les endpoints de LISTE (sans charger les questions).
+   * La liste affiche `questions?.length ?? questionCount`. Absent dans le détail.
+   */
+  questionCount?: number;
 }
 
 /**
@@ -109,6 +114,17 @@ export type QuestionType =
   | 'ordering'
   | 'matching'
   | 'coding';
+
+/**
+ * Type de question tel que listé par l'API (table Q_Type) : `id` (q_type_id, pour la
+ * persistance), `slug` (discriminant frontend) et `label` (Q_Type.name, FR affiché).
+ * Alimente le sélecteur de type de l'éditeur de question.
+ */
+export interface QuestionTypeOption {
+  id: number;
+  slug: QuestionType;
+  label: string;
+}
 
 /** Libellé FR par slug (jonction vers Q_Type.name). Seul point qui porte le texte affiché. */
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {

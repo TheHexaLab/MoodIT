@@ -95,7 +95,9 @@ export function QuizListBody({
                   {quiz.isPublished ? 'Publié' : 'Brouillon'}
                 </span>
               </div>
-              <span className={styles.rowSub}>{quiz.questions?.length ?? 0} questions</span>
+              <span className={styles.rowSub}>
+                {quiz.questions?.length ?? quiz.questionCount ?? 0} questions
+              </span>
             </div>
             <div
               className={[
