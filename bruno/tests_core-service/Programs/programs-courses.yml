@@ -1,0 +1,24 @@
+info:
+  name: /programs/courses
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: "{{baseUrl}}/programs/courses"
+  body:
+    type: json
+    data: |-
+      {
+        "code": "Test",
+        "title": "Test ajouts cours",
+        "description": "Espérons que ça fonctionne.",
+        "programIds":[1, 2]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

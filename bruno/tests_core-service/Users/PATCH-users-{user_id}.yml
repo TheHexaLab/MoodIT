@@ -1,0 +1,23 @@
+info:
+  name: PATCH/users/{user_id}
+  type: http
+  seq: 5
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/users/2"
+  body:
+    type: json
+    data: |-
+      {
+        "firstName": "Rosie",
+        "lastName": "Homiers",
+        "avatarColor": "#ff8800"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
