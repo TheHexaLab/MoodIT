@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
 import { TrashCan } from '../../assets/TrashCan';
 import { type TestCaseDraft } from './editorTypes';
+import { defaultHarnessLabels, type HarnessLabels } from './harnessLabels';
 
 interface HarnessBodyProps {
   /** Harnais courants (édités en place ; renvoyés par `onSave`). */
@@ -15,6 +16,8 @@ interface HarnessBodyProps {
   language?: string;
   /** Demande le chargement (paresseux) des langages — le harnais est du Code. */
   onRequestLanguages?: () => void;
+  /** Textes (surcharge partielle des défauts). */
+  labels?: Partial<HarnessLabels>;
   /** Annule (« Annuler » / chevron retour) : retour à la question, sans appliquer. */
   onCancel: () => void;
   /** Valide les harnais édités (le parent les réinjecte dans le brouillon de question). */
@@ -22,6 +25,54 @@ interface HarnessBodyProps {
 }
 
 const DEFAULT_HARNESS = 'def test():\n    return False\n';
+
+/**
+ * Champ de poids : saisie en TEXTE local (champ vide / intermédiaire permis pendant
+ * la frappe, sinon le forçage à ≥ 1 à chaque touche empêche de remplacer la valeur).
+ * Borné à un entier ≥ 1 au `blur`. Se resynchronise sur la valeur externe HORS-focus
+ * (ex. suppression d'une ligne → réindexation des cartes). Tant que vide, remonte 0
+ * (→ bloque l'enregistrement via la validation parente).
+ */
+function WeightInput({
+  value,
+  onChange,
+  className,
+}: {
+  value: number;
+  onChange: (weight: number) => void;
+  className?: string;
+}): React.ReactElement {
+  const [text, setText] = useState(String(value));
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!focusedRef.current) setText(String(value));
+  }, [value]);
+  return (
+    <input
+      className={className}
+      type="number"
+      min={1}
+      step={1}
+      value={text}
+      aria-invalid={!(Number(text) > 0)}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setText(raw);
+        onChange(raw === '' ? 0 : Number(raw));
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        const n = Math.trunc(Number(text));
+        const clamped = n >= 1 ? n : 1;
+        setText(String(clamped));
+        onChange(clamped);
+      }}
+    />
+  );
+}
 
 /**
  * Corps « Harnais de test » : édition des harnais cachés d'une question Code.
@@ -34,14 +85,14 @@ export function HarnessBody({
   testCases,
   language,
   onRequestLanguages,
+  labels,
   onCancel,
   onSave,
 }: HarnessBodyProps): React.ReactElement {
-  const [cases, setCases] = useState<TestCaseDraft[]>(() =>
-    testCases.length > 0
-      ? testCases.map((t) => ({ ...t }))
-      : [{ name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]
-  );
+  const t = { ...defaultHarnessLabels, ...labels };
+  // On reflète les harnais existants tels quels (liste vide si aucun) : pas d'ajout
+  // automatique — l'utilisateur ajoute via « + Ajouter un harnais ».
+  const [cases, setCases] = useState<TestCaseDraft[]>(() => testCases.map((tc) => ({ ...tc })));
 
   // Page harnais = contexte Code → on s'assure que les langages sont chargés.
   useEffect(() => {
@@ -58,35 +109,40 @@ export function HarnessBody({
     setCases((prev) => [...prev, { name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]);
   }
 
+  // Enregistrement bloqué s'il n'y a aucun harnais, ou si l'un n'a pas de nom OU a un
+  // poids ≤ 0.
+  const isValid = cases.length > 0 && cases.every((c) => c.name.trim() !== '' && c.weight > 0);
+
   return (
     <>
-      <div className={styles.infoBanner}>
-        Cachés à l'étudiant · chaque harnais renvoie vrai/faux · note = part des poids réussis
-      </div>
+      <div className={styles.infoBanner}>{t.infoBanner}</div>
 
       <div className={[styles.list, styles.harnessList].join(' ')}>
         {cases.map((c, i) => (
           <div key={i} className={styles.harnessCard}>
             <div className={styles.harnessCardHead}>
-              <input
-                className={styles.input}
-                value={c.name}
-                placeholder="Nom du cas (ex. Cas nominal)"
-                maxLength={128}
-                onChange={(e) => update(i, { name: e.target.value })}
-              />
-              <span className={styles.weightLabel}>Poids</span>
-              <input
-                className={[styles.input, styles.weightInput].join(' ')}
-                type="number"
-                min={1}
-                value={c.weight}
-                onChange={(e) => update(i, { weight: Math.max(1, Number(e.target.value) || 1) })}
-              />
+              <div className={styles.harnessFields}>
+                <input
+                  className={styles.input}
+                  aria-invalid={c.name.trim() === ''}
+                  value={c.name}
+                  placeholder={t.namePlaceholder}
+                  maxLength={128}
+                  onChange={(e) => update(i, { name: e.target.value })}
+                />
+                <div className={styles.weightField}>
+                  <span className={styles.weightLabel}>{t.weightLabel}</span>
+                  <WeightInput
+                    className={[styles.input, styles.weightInput].join(' ')}
+                    value={c.weight}
+                    onChange={(weight) => update(i, { weight })}
+                  />
+                </div>
+              </div>
               <button
                 type="button"
                 className={[styles.iconButton, styles.iconButtonDanger].join(' ')}
-                aria-label="Supprimer le harnais"
+                aria-label={t.deleteAria}
                 onClick={() => remove(i)}
               >
                 <TrashCan width={15} height={15} />
@@ -96,24 +152,29 @@ export function HarnessBody({
               value={c.harnessCode}
               onChange={(harnessCode) => update(i, { harnessCode })}
               language={language}
-              ariaLabel={`Code du harnais ${i + 1}`}
+              ariaLabel={t.codeAria(i + 1)}
             />
           </div>
         ))}
       </div>
 
       <button type="button" className={styles.addButton} onClick={add}>
-        + Ajouter un harnais
+        + {t.add}
       </button>
 
       <EditorFooter>
         <div className={styles.footer}>
           <span className={styles.footerSpacer} />
           <button type="button" className={styles.ghostButton} onClick={onCancel}>
-            Annuler
+            {t.cancel}
           </button>
-          <button type="button" className={styles.primaryButton} onClick={() => onSave(cases)}>
-            Enregistrer
+          <button
+            type="button"
+            className={styles.primaryButton}
+            disabled={!isValid}
+            onClick={() => onSave(cases)}
+          >
+            {t.save}
           </button>
         </div>
       </EditorFooter>

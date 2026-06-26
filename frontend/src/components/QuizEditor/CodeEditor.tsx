@@ -80,6 +80,51 @@ export function CodeEditor({
     }
   }
 
+  // Ancêtre défilant le plus proche (le textarea grandit avec le contenu : il ne
+  // défile PAS verticalement, c'est un conteneur au-dessus qui le fait). null → fenêtre.
+  function getScrollParent(el: HTMLElement): HTMLElement | null {
+    let node = el.parentElement;
+    while (node) {
+      const oy = getComputedStyle(node).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  // Suivi VERTICAL du curseur : le défilement natif d'un textarea ne s'applique pas ici
+  // (hauteur = contenu, jamais de scroll interne), donc on fait défiler l'ancêtre pour
+  // garder la ligne du curseur visible. (L'horizontal, lui, défile dans le textarea.)
+  function scrollCaretIntoView() {
+    const ta = taRef.current;
+    if (!ta) return;
+    const cs = getComputedStyle(ta);
+    const lineHeight = parseFloat(cs.lineHeight) || 0;
+    if (!lineHeight) return;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    // Position du curseur ACTIF : extrémité mobile de la sélection (vers le haut →
+    // début, sinon fin). La valeur du DOM est la source de vérité au moment de l'appel.
+    const pos = ta.selectionDirection === 'backward' ? ta.selectionStart : ta.selectionEnd;
+    const lineIndex = ta.value.slice(0, pos).split('\n').length - 1;
+    const taRect = ta.getBoundingClientRect();
+    const caretTop = taRect.top + padTop + lineIndex * lineHeight;
+    const caretBottom = caretTop + lineHeight;
+    // Marge : on garde une ligne et demie de contexte au-dessus/dessous du curseur.
+    const margin = lineHeight * 1.5;
+    const container = getScrollParent(ta);
+    if (container) {
+      const r = container.getBoundingClientRect();
+      if (caretBottom > r.bottom - margin) container.scrollTop += caretBottom - (r.bottom - margin);
+      else if (caretTop < r.top + margin) container.scrollTop -= r.top + margin - caretTop;
+    } else {
+      if (caretBottom > window.innerHeight - margin) {
+        window.scrollBy(0, caretBottom - (window.innerHeight - margin));
+      } else if (caretTop < margin) {
+        window.scrollBy(0, caretTop - margin);
+      }
+    }
+  }
+
   // Nom de langage → grammaire Prism (certains noms diffèrent : C++ = `cpp`).
   const raw = (language ?? 'text').toLowerCase();
   const prismLang = PRISM_ALIASES[raw] ?? raw;
@@ -168,6 +213,7 @@ export function CodeEditor({
     requestAnimationFrame(() => {
       ta.focus();
       ta.setSelectionRange(caret, caret);
+      scrollCaretIntoView();
     });
   }
 
@@ -242,6 +288,7 @@ export function CodeEditor({
       requestAnimationFrame(() => {
         ta.focus();
         ta.setSelectionRange(start + 1, start + 1);
+        scrollCaretIntoView();
       });
       return;
     }
@@ -259,6 +306,7 @@ export function CodeEditor({
         requestAnimationFrame(() => {
           ta.focus();
           ta.setSelectionRange(start + 1, end + 1); // sélection conservée à l'intérieur
+          scrollCaretIntoView();
         });
         return;
       }
@@ -311,6 +359,10 @@ export function CodeEditor({
             aria-label={ariaLabel}
             onChange={(e) => onChange(e.target.value)}
             onScroll={onTextareaScroll}
+            // Suivi vertical du curseur : la frappe normale et la navigation (flèches)
+            // remontent ici après mise à jour du caret ; le clic repositionne aussi.
+            onKeyUp={scrollCaretIntoView}
+            onClick={scrollCaretIntoView}
             // En lecture seule : pas de logique d'édition (Tab/Entrée/auto-fermeture…),
             // sinon nos handlers modifieraient quand même la valeur (readOnly ne bloque
             // que la saisie clavier native, pas les changements programmatiques).

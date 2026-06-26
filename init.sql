@@ -97,6 +97,9 @@ CREATE TABLE Quiz(
    title VARCHAR(128) NOT NULL,
    is_daily BOOLEAN NOT NULL DEFAULT FALSE,
    is_published BOOLEAN NOT NULL DEFAULT FALSE,
+   -- Ordre d'affichage dans la section Quiz d'un cours (réordonnable par l'enseignant).
+   -- Même rôle que Forum.position / Question.order_index.
+   position INTEGER NOT NULL DEFAULT 0,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
@@ -315,6 +318,7 @@ CREATE INDEX idx_post_parent_created ON Post(post_parent_id, created_at); -- rep
 CREATE INDEX idx_vote_post_value ON Vote(post_id, value_); -- score d'un post (SUM value_) + cascade post_id
 CREATE INDEX idx_vote_quiz_value ON Vote(quiz_id, value_); -- score d'un quiz + cascade quiz_id
 CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jour" d'un cours + cascade course_id
+CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 
 -- TRIGGER

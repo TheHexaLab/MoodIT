@@ -17,6 +17,8 @@ import { useQuizAttempt } from './useQuizAttempt';
 import { QuestionCard } from './QuestionCard';
 import { QuestionRenderer } from './questions/QuestionRenderer';
 import { QuizSummary } from './QuizSummary';
+import { Spinner } from '../../Spinner/Spinner';
+import { defaultQuizViewLabels, type QuizViewLabelsBundle } from './quizViewLabels';
 
 interface QuizViewProps {
   /** Cours auquel appartient le quiz (contexte d'en-tête). */
@@ -35,6 +37,8 @@ interface QuizViewProps {
   onSubmitQuiz?: SubmitQuizHandler;
   /** Retour au tableau de bord depuis le résumé (optionnel). */
   onExit?: () => void;
+  /** Libellés (coquille + résumé / carte / rendus). Défauts FR sinon. */
+  labels?: QuizViewLabelsBundle;
 }
 
 /**
@@ -49,16 +53,24 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchQuiz,
   onSubmitQuiz,
   onExit,
+  labels,
 }) => {
+  const t = { ...defaultQuizViewLabels, ...labels?.view };
   // Repli : le mock des 6 types, rattaché à l'id du quiz sélectionné.
   const fallbackQuiz: Quiz = initialQuiz ?? { ...quizAllQuestionTypesMock, id: channel.id };
 
-  const attempt = useQuizAttempt({ initialQuiz: fallbackQuiz, onFetchQuiz, onSubmitQuiz });
+  const attempt = useQuizAttempt({
+    initialQuiz: fallbackQuiz,
+    onFetchQuiz,
+    onSubmitQuiz,
+    loadErrorMessage: t.loadError,
+    submitErrorMessage: t.submitError,
+  });
   const { quiz, phase, currentIndex, answers, result } = attempt;
 
   const questions = quiz.questions ?? [];
   const total = questions.length;
-  const headerTitle = quiz.isDaily ? 'Quiz du jour' : channel.name;
+  const headerTitle = quiz.isDaily ? t.dailyTitle : channel.name;
 
   // Barre de progression : fraction courante (100 % au résumé).
   const progress =
@@ -79,11 +91,11 @@ const QuizView: React.FC<QuizViewProps> = ({
         {phase === 'review' ? (
           <button type="button" className={styles.backButton} onClick={attempt.backToSummary}>
             <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-            Retour au résumé
+            {t.backToSummary}
           </button>
         ) : (
           <span className={styles.status}>
-            {phase === 'summary' ? 'Quiz terminé' : `Question ${currentIndex + 1} sur ${total}`}
+            {phase === 'summary' ? t.finished : t.questionStatus(currentIndex + 1, total)}
           </span>
         )}
       </header>
@@ -102,28 +114,36 @@ const QuizView: React.FC<QuizViewProps> = ({
 
   function renderBody(): React.ReactElement {
     if (attempt.loading) {
-      return <div className={styles.centeredState}>Chargement du quiz…</div>;
+      return (
+        <div className={styles.centeredState} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={40} />
+          <p>{t.loading}</p>
+        </div>
+      );
     }
     if (attempt.loadError) {
       return (
         <div className={styles.centeredState}>
           <p>{attempt.loadError}</p>
           <button type="button" className={styles.retryButton} onClick={attempt.reload}>
-            Réessayer
+            {t.retry}
           </button>
         </div>
       );
     }
     if (total === 0) {
-      return (
-        <div className={styles.centeredState}>Ce quiz ne contient pas encore de question.</div>
-      );
+      return <div className={styles.centeredState}>{t.empty}</div>;
     }
 
     if (phase === 'summary' && result) {
       return (
         <div className={styles.body}>
-          <QuizSummary quiz={quiz} result={result} onReview={attempt.reviewQuestion} />
+          <QuizSummary
+            quiz={quiz}
+            result={result}
+            onReview={attempt.reviewQuestion}
+            labels={labels?.summary}
+          />
         </div>
       );
     }
@@ -135,13 +155,14 @@ const QuizView: React.FC<QuizViewProps> = ({
 
     return (
       <div className={styles.body}>
-        <QuestionCard question={question} index={currentIndex} result={qResult}>
+        <QuestionCard question={question} index={currentIndex} result={qResult} labels={labels?.card}>
           <QuestionRenderer
             question={question}
             mode={phase === 'review' ? 'review' : 'answer'}
             answer={answers[question.id]}
             result={qResult}
             onChange={(a) => attempt.setAnswer(question.id, a)}
+            labels={labels?.question}
           />
         </QuestionCard>
       </div>
@@ -163,14 +184,14 @@ const QuizView: React.FC<QuizViewProps> = ({
             disabled={!onExit}
           >
             <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-            Tableau de bord
+            {t.toDashboard}
           </button>
           <button
             type="button"
             className={styles.primaryButton}
             onClick={() => attempt.reviewQuestion(0)}
           >
-            Revoir mes réponses
+            {t.reviewAnswers}
           </button>
         </footer>
       );
@@ -187,7 +208,7 @@ const QuizView: React.FC<QuizViewProps> = ({
           disabled={currentIndex === 0}
         >
           <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-          Précédent
+          {t.prev}
         </button>
 
         <div className={styles.dots}>
@@ -204,7 +225,7 @@ const QuizView: React.FC<QuizViewProps> = ({
               ]
                 .filter(Boolean)
                 .join(' ')}
-              aria-label={`Question ${i + 1}`}
+              aria-label={t.dotAria(i + 1)}
               onClick={() => attempt.goTo(i)}
             />
           ))}
@@ -226,11 +247,11 @@ const QuizView: React.FC<QuizViewProps> = ({
         >
           {isLast ? (
             <>
-              Terminé <Check width={15} height={15} />
+              {t.done} <Check width={15} height={15} />
             </>
           ) : (
             <>
-              Suivant <ArrowRight width={15} height={15} />
+              {t.next} <ArrowRight width={15} height={15} />
             </>
           )}
         </button>
@@ -245,14 +266,14 @@ const QuizView: React.FC<QuizViewProps> = ({
           onClick={attempt.submit}
           disabled={attempt.submitting}
         >
-          {attempt.submitting ? 'Envoi…' : 'Soumettre le quiz'} <Check width={15} height={15} />
+          {attempt.submitting ? t.submitting : t.submit} <Check width={15} height={15} />
         </button>
       );
     }
 
     return (
       <button type="button" className={styles.primaryButton} onClick={attempt.goNext}>
-        Suivant <ArrowRight width={15} height={15} />
+        {t.next} <ArrowRight width={15} height={15} />
       </button>
     );
   }

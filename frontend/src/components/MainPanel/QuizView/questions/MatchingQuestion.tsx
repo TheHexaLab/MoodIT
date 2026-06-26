@@ -5,6 +5,7 @@ import { X } from '../../../../assets/X';
 import { ArrowRight } from '../../../../assets/ArrowRight';
 import { GripVertical } from '../../../../assets/GripVertical';
 import { type QuestionViewProps } from './types';
+import { defaultQuestionLabels } from './questionLabels';
 
 /** Réserve (éléments non classés). */
 const POOL = '__pool__';
@@ -21,7 +22,9 @@ export function MatchingQuestion({
   answer,
   result,
   onChange,
+  labels,
 }: QuestionViewProps): React.ReactElement {
+  const t = { ...defaultQuestionLabels, ...labels };
   const items = question.dragItems ?? [];
   const byId = new Map(items.map((d) => [d.id, d]));
   const placement = answer?.kind === 'matching' ? answer.placement : {};
@@ -58,7 +61,7 @@ export function MatchingQuestion({
               <span className={styles.matchRowArrow} aria-hidden>
                 <ArrowRight width={14} height={14} />
               </span>
-              <span className={styles.matchRowGroup}>{m.chosenGroup ?? '—'}</span>
+              <span className={styles.matchRowGroup}>{m.chosenGroup ?? t.unplacedGroup}</span>
             </div>
           );
         })}
@@ -119,7 +122,7 @@ export function MatchingQuestion({
 
   return (
     <div>
-      <p className={styles.helper}>Glisse chaque étiquette dans la catégorie qui convient.</p>
+      <p className={styles.helper}>{t.matchingHelper}</p>
 
       {/* Réserve des étiquettes non classées. */}
       <div

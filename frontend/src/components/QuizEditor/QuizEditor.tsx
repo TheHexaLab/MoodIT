@@ -21,6 +21,10 @@ import {
   type QuizEditorHandlers,
   type QuizMetaDraft,
 } from './editorTypes';
+import {
+  defaultQuizEditorLabels,
+  type QuizEditorLabelsBundle,
+} from './quizEditorLabels';
 
 interface QuizEditorProps {
   /** Cours édité (pour le titre/sous-titre des popups). */
@@ -42,6 +46,8 @@ interface QuizEditorProps {
    * d'un quiz (quiz temporaire de création, édits de questions), ni à l'annulation.
    */
   onQuizzesChange?: (quizzes: Quiz[]) => void;
+  /** Libellés (coquille + surcharges par sous-popup). Défauts FR sinon. */
+  labels?: QuizEditorLabelsBundle;
 }
 
 type View =
@@ -74,60 +80,76 @@ export function QuizEditor({
   onClose,
   handlers = {},
   onQuizzesChange,
+  labels,
 }: QuizEditorProps): React.ReactElement {
-  const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
+  const t = { ...defaultQuizEditorLabels, ...labels?.shell };
+  // Pas de cache d'affichage : si un fetch est câblé, on démarre VIDE puis on remplit
+  // au retour du fetch — on N'affiche PAS les quiz « publiés » de la sidebar
+  // (`initialQuizzes`), qui sont périmés. Sans fetch (mode mémoire pur), on s'appuie
+  // sur initialQuizzes comme avant.
+  const [quizzes, setQuizzes] = useState<Quiz[]>(handlers.onFetchQuizzes ? [] : initialQuizzes);
+  // Chargement de la liste en cours (vrai tant que le 1er fetch n'a pas répondu) :
+  // évite d'afficher une liste vide « définitive » à la place du chargement.
+  const [loadingQuizzes, setLoadingQuizzes] = useState(handlers.onFetchQuizzes != null);
   const [view, setView] = useState<View>({ kind: 'list' });
+  // Quiz dont le détail est en cours de chargement (clic sur le crayon) : pilote le
+  // spinner du crayon dans la liste, le temps de `onFetchQuiz`.
+  const [openingQuizId, setOpeningQuizId] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // À l'ouverture, l'éditeur charge la liste COMPLÈTE (brouillons compris) ; la prop
-  // `initialQuizzes` (quiz publiés, venue de la sidebar) sert d'affichage immédiat.
+  // AUCUN cache : l'éditeur refetch la liste COMPLÈTE (brouillons compris) à CHAQUE
+  // fois que la vue liste s'affiche — à l'ouverture ET au retour depuis l'édition/
+  // création d'un quiz. `initialQuizzes` (quiz publiés, venue de la sidebar) sert
+  // d'affichage immédiat le temps du fetch.
   const fetchQuizzes = handlers.onFetchQuizzes;
+  const showingList = view.kind === 'list';
   useEffect(() => {
-    if (!fetchQuizzes) return;
+    if (!fetchQuizzes || !showingList) return;
     let cancelled = false;
+    setLoadingQuizzes(true);
     Promise.resolve(fetchQuizzes(courseId))
       .then((all) => {
         if (!cancelled) setQuizzes(all);
       })
       .catch(() => {
-        /* échec : on garde la liste initiale (publiés) */
+        /* échec : on garde la liste affichée */
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingQuizzes(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [courseId, fetchQuizzes]);
+  }, [courseId, fetchQuizzes, showingList]);
 
-  // Langages chargés PARESSEUSEMENT (au 1er accès à une question Code), puis mis en
-  // cache. `effectiveLanguages` = langages chargés > prop ; sinon repli FALLBACK_LANGUAGES
-  // (Python + C) appliqué côté enfants (param par défaut / harnessLanguageName).
+  // Langages : AUCUN cache. Chaque accès à une question Code refetch les langages
+  // (« fetch tout le temps »). `effectiveLanguages` = langages chargés > prop ; sinon
+  // repli FALLBACK_LANGUAGES (Python + C) appliqué côté enfants (param par défaut /
+  // harnessLanguageName).
   const [loadedLanguages, setLoadedLanguages] = useState<Language[] | null>(null);
-  const languagesRequested = useRef(false);
   const fetchLanguages = handlers.onFetchLanguages;
   const requestLanguages = useCallback(() => {
-    if (languagesRequested.current || !fetchLanguages) return;
-    languagesRequested.current = true;
+    if (!fetchLanguages) return;
     Promise.resolve(fetchLanguages())
       .then((langs) => setLoadedLanguages(langs))
       .catch(() => {
-        languagesRequested.current = false; // échec : on pourra réessayer
+        /* échec : on pourra réessayer au prochain accès */
       });
   }, [fetchLanguages]);
   const effectiveLanguages = loadedLanguages ?? languages;
 
-  // Types de question chargés PARESSEUSEMENT (à l'ouverture d'un éditeur de question),
-  // puis mis en cache. Repli (param par défaut côté QuestionFormBody) sinon.
+  // Types de question : AUCUN cache. Chaque ouverture d'un éditeur de question refetch
+  // les types. Repli (param par défaut côté QuestionFormBody) sinon.
   const [questionTypes, setQuestionTypes] = useState<QuestionTypeOption[] | null>(null);
-  const questionTypesRequested = useRef(false);
   const fetchQuestionTypes = handlers.onFetchQuestionTypes;
   const requestQuestionTypes = useCallback(() => {
-    if (questionTypesRequested.current || !fetchQuestionTypes) return;
-    questionTypesRequested.current = true;
+    if (!fetchQuestionTypes) return;
     Promise.resolve(fetchQuestionTypes())
       .then((types) => setQuestionTypes(types))
       .catch(() => {
-        questionTypesRequested.current = false;
+        /* échec : on pourra réessayer à la prochaine ouverture */
       });
   }, [fetchQuestionTypes]);
 
@@ -159,14 +181,17 @@ export function QuizEditor({
   async function openEdit(quiz: Quiz) {
     setError(null);
     snapshotRef.current = quizzes; // état à restaurer si « Annuler »
-    // Charge le détail (questions) si un fetch est fourni et qu'elles manquent.
+    // AUCUN cache : on refetch le détail (questions) du quiz à CHAQUE ouverture.
     let full = quiz;
-    if (handlers.onFetchQuiz && !quiz.questions) {
+    if (handlers.onFetchQuiz) {
+      setOpeningQuizId(quiz.id); // spinner sur le crayon de CE quiz pendant le fetch
       try {
         full = await handlers.onFetchQuiz(quiz.id);
         upsertQuiz(full);
       } catch {
-        setError('Chargement du quiz impossible.');
+        setError(t.loadError);
+      } finally {
+        setOpeningQuizId(null);
       }
     }
     setView({ kind: 'form', quizId: full.id, isNew: false });
@@ -198,12 +223,15 @@ export function QuizEditor({
     try {
       const current = quizById(quizId);
       // UN SEUL appel : méta du formulaire + questions éditées en mémoire pendant
-      // la session. C'est le point de centralisation de la persistance.
+      // la session. C'est le point de centralisation de la persistance. On estampille
+      // `orderIndex` (= Question.order_index) selon la position FINALE dans le tableau :
+      // l'ordre d'affichage (réordres en mémoire compris) est ainsi explicitement
+      // persisté, sans dépendre de l'ordre d'insertion côté backend.
       const payload: Quiz = {
         ...current,
         id: quizId,
         ...meta,
-        questions: current?.questions ?? [],
+        questions: (current?.questions ?? []).map((q, i) => ({ ...q, orderIndex: i })),
       };
       let next: Quiz[];
       if (isNew && handlers.onCreateQuiz) {
@@ -223,7 +251,7 @@ export function QuizEditor({
       // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
       onQuizzesChange?.(next);
     } catch {
-      setError("L'enregistrement a échoué. Réessayez.");
+      setError(t.saveError);
     } finally {
       setSaving(false);
     }
@@ -247,7 +275,7 @@ export function QuizEditor({
         }
       }
     } catch {
-      setError('La suppression a échoué.');
+      setError(t.deleteError);
     }
   }
 
@@ -273,7 +301,14 @@ export function QuizEditor({
   function saveQuestion(quizId: number, quizIsNew: boolean, draft: QuestionDraft) {
     const quiz = quizById(quizId);
     if (!quiz) return;
-    const saved = draftToQuestion(draft, draft.id ?? nextTmpId(), languages);
+    // `effectiveLanguages` (langages chargés > prop) et `questionTypes` (chargés via
+    // l'API) permettent de résoudre le langage ET le `qTypeId` (Q_Type.id) du payload.
+    const saved = draftToQuestion(
+      draft,
+      draft.id ?? nextTmpId(),
+      effectiveLanguages,
+      questionTypes ?? undefined
+    );
     const existing = quiz.questions ?? [];
     const i = existing.findIndex((q) => q.id === saved.id);
     const questions = i < 0 ? [...existing, saved] : existing.map((q) => (q.id === saved.id ? saved : q));
@@ -324,8 +359,8 @@ export function QuizEditor({
   const shell =
     view.kind === 'list'
       ? {
-          title: 'Modifier les quiz',
-          subtitle: 'Glisse pour réorganiser · une seule édition quotidienne (★)',
+          title: t.listTitle,
+          subtitle: t.listSubtitle,
           onBack: undefined as (() => void) | undefined,
           width: '29rem',
           // Liste + formulaire de quiz : pas de défilement global (la liste des
@@ -335,7 +370,7 @@ export function QuizEditor({
         }
       : view.kind === 'form'
         ? {
-            title: view.isNew ? 'Nouveau quiz' : 'Modifier le quiz',
+            title: view.isNew ? t.newQuizTitle : t.editQuizTitle,
             subtitle: courseSubtitle,
             onBack: cancelForm,
             width: '34rem',
@@ -344,8 +379,10 @@ export function QuizEditor({
           }
         : view.kind === 'question'
           ? {
-              title: view.isNew ? 'Nouvelle question' : 'Modifier la question',
-              subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
+              title: view.isNew ? t.newQuestionTitle : t.editQuestionTitle,
+              subtitle: activeQuiz
+                ? questionSubtitle(activeQuiz, view.draft, view.isNew, t.questionSubtitle)
+                : undefined,
               onBack: () => setView({ kind: 'form', quizId: view.quizId, isNew: view.quizIsNew }),
               width: '34rem',
               // Éditeur de question : header + actions figés, corps défilant.
@@ -356,8 +393,10 @@ export function QuizEditor({
           : view.kind === 'harness'
             ? {
                 // Page « Harnais de test » : empilée sur la question (chevron retour).
-                title: 'Harnais de test',
-                subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
+                title: t.harnessTitle,
+                subtitle: activeQuiz
+                  ? questionSubtitle(activeQuiz, view.draft, view.isNew, t.questionSubtitle)
+                  : undefined,
                 onBack: () =>
                   setView({
                     kind: 'question',
@@ -373,8 +412,10 @@ export function QuizEditor({
               }
             : {
                 // Page « Tester » : prévisualisation de la question (chevron retour).
-                title: 'Tester la question',
-                subtitle: activeQuiz ? questionSubtitle(activeQuiz, view.draft, view.isNew) : undefined,
+                title: t.testTitle,
+                subtitle: activeQuiz
+                  ? questionSubtitle(activeQuiz, view.draft, view.isNew, t.questionSubtitle)
+                  : undefined,
                 onBack: () =>
                   setView({
                     kind: 'question',
@@ -403,6 +444,9 @@ export function QuizEditor({
         {view.kind === 'list' && (
           <QuizListBody
             quizzes={quizzes}
+            loading={loadingQuizzes}
+            openingQuizId={openingQuizId}
+            labels={labels?.list}
             onCreate={openCreate}
             onEdit={openEdit}
             onDelete={(quiz) => setPendingDelete({ kind: 'quiz', id: quiz.id, title: quiz.title })}
@@ -416,6 +460,7 @@ export function QuizEditor({
             isNew={view.isNew}
             saving={saving}
             error={error}
+            labels={labels?.form}
             onCancel={cancelForm}
             onSaveMeta={(meta) => saveQuizMeta(view.quizId, view.isNew, meta)}
             onAddQuestion={() => openAddQuestion(view.quizId, view.isNew)}
@@ -435,6 +480,7 @@ export function QuizEditor({
             onRequestLanguages={requestLanguages}
             questionTypes={questionTypes ?? undefined}
             onRequestQuestionTypes={requestQuestionTypes}
+            labels={labels?.question}
             onCancel={() => setView({ kind: 'form', quizId: view.quizId, isNew: view.quizIsNew })}
             onSave={(draft) => saveQuestion(view.quizId, view.quizIsNew, draft)}
             onManageHarness={(draft) =>
@@ -463,6 +509,7 @@ export function QuizEditor({
             testCases={view.draft.testCases ?? []}
             language={harnessLanguageName(view.draft.languageId, effectiveLanguages ?? FALLBACK_LANGUAGES)}
             onRequestLanguages={requestLanguages}
+            labels={labels?.harness}
             onCancel={() =>
               setView({
                 kind: 'question',
@@ -490,6 +537,7 @@ export function QuizEditor({
             languages={effectiveLanguages}
             onRequestLanguages={requestLanguages}
             onEvaluateCode={handlers.onEvaluateCode}
+            labels={labels?.test}
           />
         )}
       </EditorShell>
@@ -497,12 +545,8 @@ export function QuizEditor({
       {pendingDelete && (
         <Portal>
           <DeleteConfirmationPopup
-            title={pendingDelete.kind === 'quiz' ? 'Supprimer le quiz ?' : 'Supprimer la question ?'}
-            content={
-              pendingDelete.kind === 'quiz'
-                ? 'Le quiz et toutes ses questions, réponses et soumissions seront définitivement supprimés. Cette action est irréversible.'
-                : 'La question et ses réponses seront définitivement supprimées. Cette action est irréversible.'
-            }
+            title={pendingDelete.kind === 'quiz' ? t.deleteQuizTitle : t.deleteQuestionTitle}
+            content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
             onDeleteConfirmation={confirmDelete}
             onClose={() => setPendingDelete(null)}
           />
@@ -530,10 +574,15 @@ function harnessLanguageName(
   return (harnessLang ?? questionLang).name;
 }
 
-/** Sous-titre de l'éditeur de question : « Question # ». */
-function questionSubtitle(quiz: Quiz, draft: QuestionDraft, isNew: boolean): string {
+/** Sous-titre de l'éditeur de question : « Question # » (via le formatter de labels). */
+function questionSubtitle(
+  quiz: Quiz,
+  draft: QuestionDraft,
+  isNew: boolean,
+  format: (index: number) => string
+): string {
   const questions = quiz.questions ?? [];
-  if (isNew) return `Question ${questions.length + 1}`;
+  if (isNew) return format(questions.length + 1);
   const index = questions.findIndex((q) => q.id === draft.id);
-  return `Question ${index >= 0 ? index + 1 : ''}`.trim();
+  return format(index >= 0 ? index + 1 : questions.length + 1);
 }

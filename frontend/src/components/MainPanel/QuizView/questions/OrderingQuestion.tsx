@@ -5,6 +5,7 @@ import { X } from '../../../../assets/X';
 import { GripVertical } from '../../../../assets/GripVertical';
 import { usePointerReorder } from '../../../QuizEditor/usePointerReorder';
 import { type QuestionViewProps } from './types';
+import { defaultQuestionLabels } from './questionLabels';
 
 /**
  * Remise en ordre : l'étudiant glisse les éléments par la poignée pour les
@@ -18,7 +19,9 @@ export function OrderingQuestion({
   answer,
   result,
   onChange,
+  labels,
 }: QuestionViewProps): React.ReactElement {
+  const t = { ...defaultQuestionLabels, ...labels };
   const items = question.dragItems ?? [];
   const byId = new Map(items.map((d) => [d.id, d]));
   const baseOrder = answer?.kind === 'ordering' ? answer.itemIds : items.map((d) => d.id);
@@ -31,7 +34,7 @@ export function OrderingQuestion({
 
   return (
     <div>
-      {!review && <p className={styles.helper}>Glisse les éléments pour les réordonner.</p>}
+      {!review && <p className={styles.helper}>{t.orderingHelper}</p>}
       <ol className={styles.orderList} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {displayed.map((itemId, index) => {
           const item = byId.get(itemId);

@@ -43,8 +43,14 @@
 .highlight {
     position: absolute;
     inset: 0;
+    box-sizing: border-box;
     margin: 0;
-    padding: 0.6875rem 0.75rem;
+    /* Le « padding » droit est une BORDURE transparente (et non un padding-right) :
+       le padding-right d'un conteneur à défilement horizontal est ignoré au bout du
+       scroll (Chrome), la bordure, elle, reste toujours réservée → marge à droite
+       conservée même code scrollé à fond. Identique au textarea (alignement). */
+    padding: 0.6875rem 0 0.6875rem 0.75rem;
+    border-right: 0.75rem solid transparent;
     overflow: hidden;          /* défilement horizontal piloté (scrollLeft) en JS */
     pointer-events: none;      /* tous les events vont au textarea au-dessus */
     font: inherit;
@@ -65,7 +71,10 @@
     resize: none;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 0.6875rem 0.75rem;
+    /* Marge droite via une bordure transparente (cf. .highlight) : préserve l'espace
+       à droite même quand une longue ligne est scrollée jusqu'au bout. */
+    padding: 0.6875rem 0 0.6875rem 0.75rem;
+    border-right: 0.75rem solid transparent;
     background: transparent;
     /* Texte saisi rendu invisible (la couche colorée le montre) ; le caret reste
        visible. `-webkit-text-fill-color` est nécessaire pour masquer sur WebKit. */

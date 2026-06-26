@@ -6,6 +6,7 @@ import { draftToQuestion, type QuestionDraft } from './editorTypes';
 import { QuestionCard } from '../MainPanel/QuizView/QuestionCard';
 import { QuestionRenderer } from '../MainPanel/QuizView/questions/QuestionRenderer';
 import { gradeQuestion } from '../MainPanel/QuizView/grading';
+import { Spinner } from '../Spinner/Spinner';
 import {
   emptyAnswer,
   type CodeEvaluationInput,
@@ -14,6 +15,7 @@ import {
   type QuestionResult,
 } from '../MainPanel/QuizView/quizAttempt';
 import { type Language } from '../../types/domain';
+import { defaultQuestionTestLabels, type QuestionTestLabels } from './questionTestLabels';
 
 interface QuestionTestBodyProps {
   /** Brouillon courant de la question (édits en cours), à prévisualiser. */
@@ -24,6 +26,8 @@ interface QuestionTestBodyProps {
   onRequestLanguages?: () => void;
   /** Évalue une question Code via l'API (exécution serveur des harnais). */
   onEvaluateCode?: (input: CodeEvaluationInput) => Promise<CodingTestResult[]> | CodingTestResult[];
+  /** Textes (surcharge partielle des défauts). */
+  labels?: Partial<QuestionTestLabels>;
 }
 
 /** Construit le résultat d'une question Code à partir des verdicts par harnais. */
@@ -51,7 +55,9 @@ export function QuestionTestBody({
   languages,
   onRequestLanguages,
   onEvaluateCode,
+  labels,
 }: QuestionTestBodyProps): React.ReactElement {
+  const t = { ...defaultQuestionTestLabels, ...labels };
   // Question dérivée du brouillon (ids temporaires : on ne persiste rien ici).
   const question = useMemo(
     () => draftToQuestion(draft, draft.id ?? -1, languages),
@@ -84,7 +90,7 @@ export function QuestionTestBody({
         });
         setResult(codingResult(question, tests));
       } catch {
-        setError("L'évaluation du code a échoué. Réessayez.");
+        setError(t.evalError);
       } finally {
         setEvaluating(false);
       }
@@ -105,9 +111,7 @@ export function QuestionTestBody({
       {/* `testArea` force box-sizing: border-box sur tout le sous-arbre : les composants
           étudiant (width:100% + padding) ne débordent donc pas dans le popup étroit. */}
       <div className={styles.testArea}>
-        <div className={styles.infoBanner}>
-          Prévisualisation : réponds comme un étudiant, puis « Corriger ».
-        </div>
+        <div className={styles.infoBanner}>{t.infoBanner}</div>
 
         <QuestionCard question={question} index={0} result={result ?? undefined}>
           <QuestionRenderer
@@ -125,7 +129,7 @@ export function QuestionTestBody({
           <span className={styles.footerSpacer} />
           {reviewing ? (
             <button type="button" className={styles.primaryButton} onClick={reset}>
-              Réessayer
+              {t.retry}
             </button>
           ) : (
             <button
@@ -134,7 +138,7 @@ export function QuestionTestBody({
               disabled={evaluating}
               onClick={correct}
             >
-              {evaluating ? <span className={styles.spinner} /> : 'Corriger'}
+              {evaluating ? <Spinner tone="current" size={16} /> : t.correct}
             </button>
           )}
         </div>

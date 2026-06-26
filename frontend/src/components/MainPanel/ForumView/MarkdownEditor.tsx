@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './MarkdownEditor.module.css'; // styles globaux (selecteurs par role/element)
+import { Spinner } from '../../Spinner/Spinner';
 import { Markdown } from './Markdown';
 import { defaultMarkdownEditorLabels } from './labels';
 import { type MarkdownEditorLabels } from './types';
@@ -333,7 +334,7 @@ export function MarkdownEditor({
             {t.cancel}
           </button>
           <button type="button" onClick={onSubmit} disabled={submitDisabled || submitting}>
-            {submitting ? <span role="spinner" aria-hidden="true" /> : submitLabel}
+            {submitting ? <Spinner tone="current" size={16} /> : submitLabel}
           </button>
         </div>
       )}

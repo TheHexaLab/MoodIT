@@ -13,6 +13,7 @@ import CourseChannelList, {
   isSameChannel,
 } from '../CourseChannelList/CourseChannelList';
 import { CourseSectionEditor } from './CourseSectionEditor.tsx';
+import { Spinner } from '../Spinner/Spinner.tsx';
 import { CourseContextMenu } from './CourseContextMenu.tsx';
 import { defaultLabels as dropdownLabels } from './labels.ts';
 import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/types.ts';
@@ -481,8 +482,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             )}
           </div>
         ) : loading ? (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            <span className={styles.loadingSpinner} aria-hidden="true" />
+          <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
+            <Spinner size={24} />
             <p className={styles.emptySubtitle}>Chargement des cours…</p>
           </div>
         ) : !hasCourses ? (

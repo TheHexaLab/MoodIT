@@ -439,8 +439,18 @@
     color: var(--text-body);
 }
 
-/* ─────────────────────────────────── Mobile ─────────────────────────────────── */
-@media (max-width: 30rem) {
+/* Bonne réponse NON cochée (choix multiple) : signalée comme manquée — bordure rouge
+   SANS fond (contrairement à .optionWrong), avec ✗ rouge cerclé. */
+.optionWrongMissed {
+    border-color: var(--danger);
+    background: transparent;
+    color: var(--text-body);
+}
+
+/* ─── Carte étroite (selon la largeur de la CARTE : QuestionCard est un conteneur
+   `quizcard`, défini dans QuizView.module.css ; vaut aussi pour l'aperçu « Tester »
+   de l'éditeur, qui réutilise QuestionCard). ─── */
+@container quizcard (max-width: 26rem) {
     /* Vrai/Faux : options empilées (une colonne) au lieu de côte à côte. */
     .optionsGrid {
         grid-template-columns: 1fr;

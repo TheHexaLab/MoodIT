@@ -148,6 +148,13 @@ export interface Question {
   /** Énoncé en Markdown (table Question.prompt). */
   prompt: string;
   qType: QuestionType;
+  /**
+   * Id du type en base (table Q_Type.id ; colonne Question.q_type_id, NOT NULL), pour
+   * la PERSISTANCE. Dérivé du `qType` (slug, discriminant front) via la liste des
+   * types chargée — le slug n'existant pas en base. Absent tant que les types ne sont
+   * pas chargés ; le backend doit alors le résoudre lui-même.
+   */
+  qTypeId?: number;
   /** Barème de la question (table Question.total_score). */
   totalScore: number;
   /** Ordre d'affichage dans le quiz (table Question.order_index). */

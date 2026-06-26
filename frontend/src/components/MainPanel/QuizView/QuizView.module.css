@@ -6,6 +6,11 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    /* La vue vit dans un panneau REDIMENSIONNABLE (la sidebar peut le rétrécir) : on
+       adapte donc la mise en page à la largeur du PANNEAU via des container queries,
+       et non au viewport (sinon panneau étroit + fenêtre large = pas d'adaptation). */
+    container-type: inline-size;
+    container-name: quiz;
 }
 
 /* ─────────────────────────────── En-tête ─────────────────────────────── */
@@ -56,6 +61,10 @@
     font-size: 1rem;
     font-weight: 700;
     line-height: 1.2;
+    /* Tronque si le titre du quiz dépasse (panneau étroit) au lieu de pousser le statut. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .status {
@@ -97,6 +106,8 @@
     border-radius: 3px;
     background: var(--border);
     overflow: hidden;
+    /* Ne jamais s'écraser dans la colonne flex (reste visible même panneau étroit). */
+    flex-shrink: 0;
 }
 
 .progressFill {
@@ -127,6 +138,11 @@
     background: var(--bg-surface);
     box-shadow: 0 1px 2px var(--shadow-login-box-modal);
     padding: clamp(1rem, 0.85rem + 0.6vw, 1.375rem);
+    /* Conteneur de requête : l'en-tête de carte ET les rendus de question
+       (questions.module.css) s'adaptent à la largeur de la CARTE — y compris dans
+       l'aperçu « Tester » de l'éditeur, qui réutilise QuestionCard. */
+    container-type: inline-size;
+    container-name: quizcard;
 }
 
 /* En-tête de carte : badge + « Question N » + pastille de points. */
@@ -220,6 +236,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4375rem;
+    /* Les boutons ne se compriment pas (sinon leur texte passe sur 2 lignes) :
+       c'est la rangée de points, au milieu, qui cède l'espace. */
+    flex: 0 0 auto;
+    white-space: nowrap;
     border: 1px solid var(--border-strong);
     border-radius: 0.625rem;
     background: var(--bg-surface);
@@ -252,6 +272,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4375rem;
+    flex: 0 0 auto;
+    white-space: nowrap;
     border: none;
     border-radius: 0.625rem;
     background: var(--brand-teal-gradient);
@@ -277,11 +299,16 @@
     cursor: not-allowed;
 }
 
-/* Points de progression (un par question). */
+/* Points de progression (un par question). Au milieu du pied de page : cède
+   l'espace et masque le débordement plutôt que de pousser les boutons hors-cadre. */
 .dots {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.4375rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .dot {
@@ -442,8 +469,26 @@
     cursor: pointer;
 }
 
-/* ─────────────────────────────────── Mobile ─────────────────────────────────── */
-@media (max-width: 30rem) {
+/* ─── Compensation de la barre supérieure MOBILE (viewport, pas conteneur) ───
+   Sous 56.25rem, LeftMenuGroup affiche une barre fixe de 3.25rem (z-index 70) qui
+   recouvre le haut du panneau. L'en-tête du quiz (normalement `calc(3.25rem - 3px)`)
+   passe alors derrière elle ; sa hauteur étant pile celle de la barre moins le ruban
+   de progression, ce dernier se retrouve masqué sous le bord de la barre.
+   → On donne à l'en-tête la hauteur PLEINE (3.25rem) : il remplit exactement la zone
+   cachée, et la barre de progression descend juste sous la barre mobile → visible. */
+@media (max-width: 56.25rem) {
+    .header {
+        height: 3.25rem;
+    }
+    /* Mobile : on masque les points de progression du pied de page (la barre du haut
+       suffit à indiquer l'avancement) → plus de place pour les boutons de navigation. */
+    .dots {
+        display: none;
+    }
+}
+
+/* ─── Carte étroite (selon la largeur de la CARTE, pas du viewport) ─── */
+@container quizcard (max-width: 26rem) {
     /* En-tête de carte sur 2 lignes : « Question N » + points (l.1), type (l.2). */
     .cardHeader {
         display: grid;
@@ -464,5 +509,26 @@
     .badge {
         grid-area: badge;
         justify-self: start;
+    }
+}
+
+/* ─── Panneau étroit (selon la largeur de la VUE) : resserre en-tête / pied de page.
+   Les points de progression RESTENT visibles : ils se réduisent (overflow caché) au
+   lieu d'être masqués, et la fine barre du haut indique aussi l'avancement. ─── */
+@container quiz (max-width: 24rem) {
+    .header {
+        padding: 0 0.75rem;
+    }
+    .body {
+        padding: 1.25rem 0.75rem;
+    }
+    .footer {
+        padding: 0 0.75rem;
+        gap: 0.5rem;
+    }
+    .navButton,
+    .primaryButton {
+        padding-left: 0.875rem;
+        padding-right: 0.875rem;
     }
 }

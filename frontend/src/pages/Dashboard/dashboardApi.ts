@@ -59,8 +59,8 @@ import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts'
 export type { DemoProgram };
 
 // ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 5000;
-const SIMULATE_SEND_FAILURE: boolean = true;
+const SIMULATE_DELAY = 1000;
+const SIMULATE_SEND_FAILURE: boolean = false;
 const SIMULATE_FETCH_FAILURE: boolean = false;
 // DEV : à `true`, les fonctions de chargement de quiz renvoient les QUIZ MOCK
 // (quizAllQuestionTypesMock). À `false`, elles renvoient du vide (comme un backend

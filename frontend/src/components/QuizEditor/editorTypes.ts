@@ -156,7 +156,7 @@ export function defaultStartCode(language?: Language): string {
 
 /** Construit le brouillon initial d'une question d'un type donné (valeurs par défaut). */
 export function emptyQuestionDraft(qType: QuestionType): QuestionDraft {
-  const base = { prompt: '', totalScore: 10 } as const;
+  const base = { prompt: '', totalScore: 1 } as const;
   switch (qType) {
     case 'true_false':
       return {
@@ -227,11 +227,17 @@ export function questionToDraft(q: Question): QuestionDraft {
  * enfants sans id (nouvelles options/éléments/harnais) reçoivent un id négatif
  * provisoire — en réel, c'est le backend qui les attribue. Partagé par l'éditeur
  * (mode mémoire) et la couche API mock (`dashboardApi.saveQuestion`).
+ *
+ * `questionTypes` (liste chargée via `onFetchQuestionTypes`) sert à résoudre
+ * `qTypeId` (Q_Type.id, requis NOT NULL en base) à partir du `qType` (slug front,
+ * absent de la base). Si la liste est absente, `qTypeId` reste indéfini et le
+ * backend doit le résoudre lui-même.
  */
 export function draftToQuestion(
   draft: QuestionDraft,
   id: number,
-  languages?: Language[]
+  languages?: Language[],
+  questionTypes?: QuestionTypeOption[]
 ): Question {
   const language =
     draft.qType === 'coding'
@@ -243,6 +249,7 @@ export function draftToQuestion(
   return {
     id,
     qType: draft.qType,
+    qTypeId: questionTypes?.find((t) => t.slug === draft.qType)?.id,
     prompt: draft.prompt,
     totalScore: draft.totalScore,
     answers: draft.answers?.map((a, i) => ({

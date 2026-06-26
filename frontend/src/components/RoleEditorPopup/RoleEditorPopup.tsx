@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './RoleEditorPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
@@ -36,7 +37,7 @@ interface Pending {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function RoleEditorPopup({

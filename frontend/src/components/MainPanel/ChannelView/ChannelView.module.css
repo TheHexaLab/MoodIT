@@ -415,29 +415,6 @@ div.channel-view > div > div:first-child > p {
     text-align: center;
 }
 
-/* Spinner de l'état de chargement des messages. */
-div.channel-view > div > div:first-child > .spinner {
-    box-sizing: border-box;
-    width: 1.5rem;
-    height: 1.5rem;
-    border: 2px solid var(--text-muted);
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: channel-view-spin 0.6s linear infinite;
-}
-
-@keyframes channel-view-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.channel-view > div > div:first-child > .spinner {
-        animation-duration: 1.4s;
-    }
-}
-
 /* Bouton « Réessayer » de l'état d'erreur de chargement. */
 div.channel-view > div > div:first-child > button {
     padding: 0.4rem 0.9rem;
