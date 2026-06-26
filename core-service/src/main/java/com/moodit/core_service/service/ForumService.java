@@ -4,6 +4,7 @@ import com.moodit.core_service.dto.*;
 
 import com.moodit.core_service.exception.ForumNotFoundException;
 import com.moodit.core_service.exception.PostNotFoundException;
+import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Forum;
 import com.moodit.core_service.model.Post;
 import com.moodit.core_service.model.User;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Service
@@ -108,16 +110,18 @@ public class ForumService {
 
     //region POST
     @Transactional
-    public void addPostToForum(PostCreateInForumDTO postCreateInForumDTO, Integer userId) {
+    public void addPostToForum(PostCreateInForumDTO postCreateInForumDTO, String email) {
         Forum forum = forumRepository.findById(postCreateInForumDTO.getForumId())
                 .orElseThrow(ForumNotFoundException::new);
-        User user = userRepository.getReferenceById(userId);
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(UserNotFoundException::new);
 
         Post post = new Post();
         post.setForum(forum);
         post.setUser(user);
         post.setContent(postCreateInForumDTO.getContent());
         post.setIsPinned(false);
+        post.setCreatedAt(LocalDateTime.now());
 
         if (postCreateInForumDTO.getParentPostId() != null) {
             Post parent = forum.getPosts()
@@ -130,8 +134,11 @@ public class ForumService {
         postRepository.save(post);
     }
     @Transactional
-    public void addVoteToPost(VoteCreateInPostDTO voteCreateInPostDTO, Integer userId) {
-        Optional<Vote> existingVote = voteRepository.findByUserIdAndPostId(userId, voteCreateInPostDTO.getPostId());
+    public void addVoteToPost(VoteCreateInPostDTO voteCreateInPostDTO, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(UserNotFoundException::new);
+
+        Optional<Vote> existingVote = voteRepository.findByUserIdAndPostId(user.getId(), voteCreateInPostDTO.getPostId());
 
         if (existingVote.isEmpty()) {
             Post post = forumRepository.findById(voteCreateInPostDTO.getForumId())
@@ -140,7 +147,6 @@ public class ForumService {
                     .filter(p -> p.getId().equals(voteCreateInPostDTO.getPostId()))
                     .findFirst()
                     .orElseThrow(PostNotFoundException::new);
-            User user = userRepository.getReferenceById(userId);
 
             Vote vote = new Vote();
             vote.setPost(post);

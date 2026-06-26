@@ -27,19 +27,45 @@ import {
   isAnalysisPending,
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
-import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
+import {
+  getCreateEstablishments,
+  getEstablishmentPrograms,
+  getJoinEstablishments,
+} from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
+import { quizAllQuestionTypesMock } from '../../mocks/dashboardData.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
+import {
+  QUESTION_TYPE_LABELS,
+  type Language,
+  type Question,
+  type QuestionType,
+  type QuestionTypeOption,
+  type Quiz,
+} from '../../types/domain.ts';
+import {
+  fromSubmission,
+  type CodeEvaluationInput,
+  type CodingTestResult,
+  type QuizResult,
+  type QuizSubmission,
+} from '../../components/MainPanel/QuizView/quizAttempt.ts';
+import { gradeQuiz } from '../../components/MainPanel/QuizView/grading.ts';
+import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
 
 // ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 100;
-const SIMULATE_SEND_FAILURE: boolean = false;
+const SIMULATE_DELAY = 5000;
+const SIMULATE_SEND_FAILURE: boolean = true;
 const SIMULATE_FETCH_FAILURE: boolean = false;
+// DEV : à `true`, les fonctions de chargement de quiz renvoient les QUIZ MOCK
+// (quizAllQuestionTypesMock). À `false`, elles renvoient du vide (comme un backend
+// sans données) — pratique pour tester l'état « aucun quiz ».
+const USE_MOCK_QUIZZES: boolean = true;
 // Durée simulée d'un job MCP (génération) avant le push de complétion.
 const MOCK_MCP_JOB_MS = 2500;
 
@@ -59,6 +85,9 @@ async function simulateWrite(errorMessage: string): Promise<void> {
 
 // Ids « serveur » simulés pour les entités créées (démarrés haut pour ne pas heurter
 // les ids des mocks). À terme, c'est le backend qui attribue l'id, on le retirera.
+
+let mockIdSeq = 9000;
+const nextMockId = () => ++mockIdSeq;
 
 /**
  * Id de l'utilisateur courant. MOCK : lu dans localStorage (comme fetchPrograms).
@@ -96,9 +125,195 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
 
   const data = await res.json();
 
-  return (data.courses ?? []).map((course: Course) => ({
-    ...course,
+  const courses = data.courses ?? data;
+
+  return await Promise.all(
+    courses.map(async (course: Course) => {
+      const forumsRes = await apiFetch(`/api/courses/${course.id}/forums`);
+      const forums = forumsRes.ok ? await forumsRes.json() : [];
+
+      // Sidebar = quiz PUBLIÉS uniquement (les brouillons ne sont visibles que dans
+      // l'éditeur, qui charge la liste complète via fetchQuizzes).
+      // TODO — au branchement réel : faire embarquer les quiz publiés dans le payload
+      // du cours (ou un endpoint dédié) pour éviter ce fetch par cours (N+1 requêtes).
+      // MOCK off → on garde les quiz du payload du cours (vrai backend) ; MOCK on → mock.
+      const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
+
+      return {
+        ...course,
+        quizzes,
+        forums,
+      };
+    })
+  );
+}
+
+// ── Quiz (passation étudiant + éditeur enseignant) ─────────────────────────────
+// MOCK : le backend ne sert pas encore le détail des quiz. On renvoie le quiz de
+// référence couvrant les 6 types (quizAllQuestionTypesMock), rattaché à l'id ouvert,
+// pour développer QuizView (passation) ET QuizEditor (édition) sans backend.
+
+/** TODO — Charger le détail d'un quiz (questions embarquées) pour la passation/édition. */
+export async function fetchQuiz(quizId: number): Promise<Quiz> {
+  await simulateFetch('Échec simulé (chargement du quiz)');
+  if (!USE_MOCK_QUIZZES) return { id: quizId, title: '', questions: [] };
+  return { ...quizAllQuestionTypesMock, id: quizId };
+}
+
+/** Liste mock des quiz d'un cours (méta seules ; les questions arrivent via fetchQuiz). */
+function mockCourseQuizzes(): Quiz[] {
+  // fetchQuiz renvoie quizAllQuestionTypesMock pour tout id → même compte partout (mock).
+  const questionCount = quizAllQuestionTypesMock.questions?.length ?? 0;
+  return [
+    {
+      id: quizAllQuestionTypesMock.id,
+      title: quizAllQuestionTypesMock.title,
+      position: 0,
+      isPublished: true,
+      isDaily: false,
+      questionCount,
+    },
+    {
+      id: 8001,
+      title: 'quiz-brouillon',
+      position: 1,
+      isPublished: false,
+      isDaily: false,
+      questionCount,
+    },
+  ];
+}
+
+/**
+ * TODO — Quiz d'un cours VISIBLES par l'étudiant : uniquement les PUBLIÉS (méta seules).
+ * Sert à la sidebar / vue étudiant. Tri par `position`.
+ */
+export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
+  await simulateFetch('Échec simulé (chargement des quiz publiés)');
+  console.log('[api] Quiz publiés du cours', courseId);
+  if (!USE_MOCK_QUIZZES) return [];
+  return mockCourseQuizzes().filter((q) => q.isPublished);
+}
+
+/**
+ * TODO — TOUS les quiz d'un cours, BROUILLONS COMPRIS (méta seules). Réservé à
+ * l'enseignant/admin (éditeur « Modifier les quiz »). Tri par `position`.
+ */
+export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
+  await simulateFetch('Échec simulé (chargement des quiz)');
+  console.log('[api] Quiz (tous) du cours', courseId);
+  if (!USE_MOCK_QUIZZES) return [];
+  return mockCourseQuizzes();
+}
+
+/**
+ * TODO — Langages d'exécution disponibles (table Language : nom + gabarits
+ * start_code_template / harness_template + harness_language_id). Alimente le sélecteur
+ * de langage de l'éditeur de quiz. MOCK : liste par défaut (sans gabarits → le front
+ * retombe sur ses squelettes locaux).
+ */
+/**
+ * TODO — Types de question disponibles (table Q_Type : id + name FR). Alimente le
+ * sélecteur de type de l'éditeur de question. MOCK : dérivé des slugs front + labels.
+ */
+export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
+  await simulateFetch('Échec simulé (chargement des types de question)');
+  const order: QuestionType[] = [
+    'true_false',
+    'single_choice',
+    'multiple_choice',
+    'ordering',
+    'matching',
+    'coding',
+  ];
+  console.log(order);
+  return order.map((slug, i) => ({ id: i + 1, slug, label: QUESTION_TYPE_LABELS[slug] }));
+}
+
+export async function fetchLanguages(): Promise<Language[]> {
+  await simulateFetch('Échec simulé (chargement des langages)');
+  console.log(DEFAULT_LANGUAGES);
+  return DEFAULT_LANGUAGES;
+}
+
+/**
+ * TODO — Soumettre une tentative ; le backend corrige et renvoie le QuizResult.
+ * MOCK : correction locale via gradeQuiz (le code n'est PAS exécuté au navigateur →
+ * harnais illustratifs, cf. grading.ts).
+ */
+export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult> {
+  await simulateWrite('Échec simulé (soumission du quiz)');
+  const quiz = { ...quizAllQuestionTypesMock, id: submission.quizId };
+  console.log(submission);
+  return gradeQuiz(quiz, fromSubmission(quiz, submission));
+}
+
+/**
+ * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
+ * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
+ * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
+ * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ */
+export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
+  await simulateWrite('Échec simulé (évaluation du code)');
+  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
+  const attempted = input.code.trim().length > 0;
+  return input.testCases.map((t, i) => ({
+    name: t.name,
+    passed: attempted && i % 2 === 0,
+    weight: t.weight,
   }));
+}
+
+// ── Quiz (édition enseignant — écriture) ───────────────────────────────────────
+// MOCK : signatures finales ; corps à remplacer par un apiFetch au branchement réel.
+// Les questions sont éditées EN MÉMOIRE dans l'éditeur et persistées en un seul appel
+// (create/update du quiz), pas une requête par question.
+
+/**
+ * Attribue un id serveur simulé aux entités sans id positif (créations). Les ids
+ * temporaires de l'éditeur sont négatifs ; le backend en assigne de vrais. MOCK.
+ */
+function persistQuestions(questions: Question[] = []): Question[] {
+  const withId = <T extends { id: number }>(e: T): T => (e.id > 0 ? e : { ...e, id: nextMockId() });
+  return questions.map((q) => ({
+    ...withId(q),
+    answers: q.answers?.map(withId),
+    dragItems: q.dragItems?.map(withId),
+    testCases: q.testCases?.map(withId),
+  }));
+}
+
+/**
+ * TODO — Créer un quiz COMPLET (méta + questions) dans un cours ; renvoie le quiz
+ * persisté (ids serveur, questions comprises).
+ */
+export async function createQuiz(courseId: number, quiz: Quiz): Promise<Quiz> {
+  await simulateWrite('Échec simulé (création de quiz)');
+  console.log('[api] Création de quiz dans le cours', courseId, quiz);
+  return { ...quiz, id: nextMockId(), questions: persistQuestions(quiz.questions) };
+}
+
+/**
+ * TODO — Mettre à jour un quiz COMPLET (méta + questions) en un appel ; renvoie le
+ * quiz persisté (ids des nouvelles questions réconciliés).
+ */
+export async function updateQuiz(quizId: number, quiz: Quiz): Promise<Quiz> {
+  await simulateWrite('Échec simulé (modification de quiz)');
+  console.log('[api] Modification du quiz', quizId, quiz);
+  return { ...quiz, id: quizId, questions: persistQuestions(quiz.questions) };
+}
+
+/** TODO — Supprimer un quiz et tout son contenu (questions/réponses) en cascade. */
+export async function deleteQuiz(quizId: number): Promise<void> {
+  await simulateWrite('Échec simulé (suppression de quiz)');
+  console.log('[api] Suppression du quiz', quizId);
+}
+
+/** TODO — Réordonner les quiz d'un cours (ids dans le nouvel ordre). */
+export async function reorderQuizzes(courseId: number, quizIds: number[]): Promise<void> {
+  await simulateWrite('Échec simulé (réordre des quiz)');
+  console.log('[api] Réordre des quiz du cours', courseId, quizIds);
 }
 
 /**
@@ -142,8 +357,13 @@ export async function fetchEstablishmentsForJoin() {
  * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
-  await simulateFetch('Échec simulé (programmes de l’établissement)');
-  return getEstablishmentPrograms(establishmentId);
+  const res = await apiFetch(`/api/establishments/${establishmentId}/programs`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des programmes de l’établissement');
+  }
+
+  return await res.json();
 }
 
 /**
@@ -151,11 +371,15 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
-  await simulateFetch('Échec simulé (cours rejoignables du programme)');
-  // Mock : on liste les VRAIS cours du programme (mêmes ids/codes que partout ailleurs)
-  // pour que le popup retrouve, et pré-coche, les cours déjà rejoints.
-  const program = getDashboardPrograms().find((p) => p.id === programId);
-  return (program?.courses ?? []).map((course) => ({
+  const res = await apiFetch(`/api/programs/${programId}/courses`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des cours du programme');
+  }
+
+  const data = await res.json();
+
+  return data.courses.map((course: JoinableCourse) => ({
     id: course.id,
     code: course.code ?? '',
     title: course.title ?? '',
@@ -340,8 +564,20 @@ export async function changeSection(
   sectionType: string,
   change: ItemChange
 ): Promise<void> {
-  await simulateWrite('Échec simulé (modification de section)');
-  console.log(courseId, sectionType, change);
+  const res = await apiFetch(`/api/courses/${courseId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sectionType,
+      change,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec modification de section');
+  }
 }
 
 /**
@@ -349,8 +585,17 @@ export async function changeSection(
  * gère l'optimisme + rollback : on ne fait que persister le changement).
  */
 export async function changeRole(change: RoleChange): Promise<void> {
-  await simulateWrite('Échec simulé (assignation de rôle)');
-  console.log('[api] Changement de rôle :', change);
+  const res = await apiFetch(`/api/roles/change`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(change),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec assignation de rôle');
+  }
 }
 
 // ── Chat ('Discussion') ────────────────────────────────────────────────────────
@@ -380,18 +625,21 @@ export async function fetchMessages(channelId: number): Promise<ChannelMessage[]
 }
 
 /**
- * TODO — Publier un message dans un canal (réponse à un autre si `parentId`). Devra
- * RENVOYER le message persisté (id réel) en conservant le `clientMessageId`, afin de
- * réconcilier l'affichage optimiste et de dédupliquer l'écho reçu par WebSocket.
+ * TODO — Publier un message dans le canal `channelId` (réponse à un autre si `parentId`).
+ * Devra RENVOYER le message persisté (id réel) en conservant le `clientMessageId`, afin
+ * de réconcilier l'affichage optimiste et de dédupliquer l'écho reçu par WebSocket.
  */
 export async function sendMessage(
+  channelId: number,
   content: string,
   parentId: number | null,
   clientMessageId: string
 ): Promise<void> {
   await simulateWrite('Échec simulé (envoi de message)');
   console.log(
-    '[api] Envoi de message :',
+    '[api] Envoi de message (canal',
+    channelId,
+    ') :',
     content,
     '(parent =',
     parentId,
@@ -434,11 +682,12 @@ export async function fetchReplies(postId: number) {
 }
 
 /**
- * TODO — Publier un sujet ou une réponse dans un forum (réponse si `parentId`, avec
- * un `title` pour un sujet racine). Devra RENVOYER le post persisté (id réel) en
+ * TODO — Publier un sujet ou une réponse dans le forum `forumId` (réponse si `parentId`,
+ * avec un `title` pour un sujet racine). Devra RENVOYER le post persisté (id réel) en
  * conservant le `clientPostId` pour la réconciliation optimiste ↔ écho WebSocket.
  */
 export async function createPost(
+  forumId: number,
   content: string,
   parentId: number | null,
   clientPostId: string,
@@ -446,7 +695,9 @@ export async function createPost(
 ): Promise<void> {
   await simulateWrite('Échec simulé (publication)');
   console.log(
-    '[api] Publication :',
+    '[api] Publication (forum',
+    forumId,
+    ') :',
     title ? `« ${title} » — ` : '',
     content,
     '(parent =',

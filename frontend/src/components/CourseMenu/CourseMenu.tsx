@@ -17,7 +17,8 @@ import { CourseContextMenu } from './CourseContextMenu.tsx';
 import { defaultLabels as dropdownLabels } from './labels.ts';
 import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/types.ts';
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources';
-import { type Course } from '../../types/domain.ts';
+import { type Course, type Quiz } from '../../types/domain.ts';
+import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
 
 // Entité ré-exportée depuis le modèle de domaine (source unique : src/types/domain.ts).
 export type { Course };
@@ -119,6 +120,14 @@ interface CourseMenuProps {
   onEditProfile?: () => void;
   /** Déconnecte l'utilisateur (menu du compte). */
   onLogout?: () => void;
+  /**
+   * Handlers CRUD de l'éditeur de quiz (crayon de la section « quiz »). Fournit
+   * notamment `onFetchQuiz` pour charger les questions à l'édition. Sans eux,
+   * l'éditeur opère en mémoire (questions absentes si le cours n'en porte pas).
+   */
+  quizHandlers?: QuizEditorHandlers;
+  /** Remonte la liste des quiz d'un cours après un changement de l'éditeur (sync sidebar). */
+  onQuizzesChange?: (courseId: number, quizzes: Quiz[]) => void;
 }
 
 /**
@@ -148,6 +157,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   userLoading = false,
   onEditProfile,
   onLogout,
+  quizHandlers,
+  onQuizzesChange,
 }) => {
   /** Menu déroulant des cours ouvert ? */
   const [isCourseOpen, setIsCourseOpen] = useState(false);
@@ -186,6 +197,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
       quizzes: course.quizzes,
       forums: course.forums,
     }),
+    // Quiz d'origine (avec questions) : alimentent l'éditeur de quiz riche.
+    quizzes: course.quizzes ?? [],
   }));
   const selectedCourse =
     courseOptions.find((course) => course.id === selectedCourseId) ?? courseOptions[0] ?? null;
@@ -557,6 +570,15 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           channels={selectedCourse.channels}
           onClose={() => setEditingSection(null)}
           onChange={(change) => onSectionChange?.(selectedCourse.id, editingSection.type, change)}
+          courseId={selectedCourse.id}
+          quizzes={selectedCourse.quizzes}
+          quizSubtitle={selectedCourse.code}
+          quizHandlers={quizHandlers}
+          onQuizzesChange={
+            onQuizzesChange
+              ? (quizzes) => onQuizzesChange(selectedCourse.id, quizzes)
+              : undefined
+          }
         />
       )}
     </nav>

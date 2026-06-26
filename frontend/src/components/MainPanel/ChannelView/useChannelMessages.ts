@@ -8,12 +8,13 @@ import {
 export type MaybePromise<T> = T | Promise<T>;
 
 /**
- * Callback d'envoi d'un message (API-ready). Reçoit le contenu, l'id du message
- * parent (`postParentId`, null si racine) et le `clientMessageId` (nonce). Le
- * parent persiste (POST) ; il peut renvoyer le message persiste (id reel cote
- * serveur, et le meme `clientMsgId`) qui remplacera la version optimiste.
+ * Callback d'envoi d'un message (API-ready). Reçoit l'id du canal (Forum 'Discussion')
+ * cible, le contenu, l'id du message parent (`postParentId`, null si racine) et le
+ * `clientMessageId` (nonce). Le parent persiste (POST) ; il peut renvoyer le message
+ * persiste (id reel cote serveur, et le meme `clientMsgId`) qui remplacera l'optimiste.
  */
 export type SendMessageHandler = (
+  channelId: number,
   content: string,
   parentId: number | null,
   clientMessageId: string
@@ -228,7 +229,9 @@ export function useChannelMessages({
     setError(null);
     setPending(true);
     try {
-      const saved = onSendMessage ? await onSendMessage(trimmed, parentId, clientId) : undefined;
+      const saved = onSendMessage
+        ? await onSendMessage(channelId, trimmed, parentId, clientId)
+        : undefined;
       if (!mountedRef.current) return true;
       // Réconciliation : on remplace l'optimiste par la version persistante.
       if (saved) {

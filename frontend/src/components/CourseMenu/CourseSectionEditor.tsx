@@ -4,11 +4,14 @@ import {
   type ItemChange,
   type MaybePromise,
 } from '../SectionEditorPopup/SectionEditorPopup.tsx';
-import { getPrefixForType } from '../CourseChannelList/channelTypePrefix.ts';
+import { ChannelTypeIcon } from '../CourseChannelList/ChannelTypeIcon.tsx';
 import {
   type ChannelTypeDefinition,
   type CourseChannel,
 } from '../CourseChannelList/CourseChannelList.tsx';
+import { QuizEditor } from '../QuizEditor/QuizEditor.tsx';
+import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
+import { type Quiz } from '../../types/domain.ts';
 
 interface CourseSectionEditorProps {
   /** Section éditée (type + libellé). */
@@ -22,6 +25,17 @@ interface CourseSectionEditorProps {
   onChange?: (change: ItemChange) => MaybePromise<unknown>;
   /** Ferme le popup. */
   onClose: () => void;
+  /**
+   * Section QUIZ uniquement : id du cours + ses quiz (avec questions) + sous-titre
+   * et handlers CRUD. Si fournis, l'édition de la section « quiz » ouvre l'éditeur
+   * de quiz riche au lieu du popup générique de réordonnancement.
+   */
+  courseId?: number;
+  quizzes?: Quiz[];
+  quizSubtitle?: string;
+  quizHandlers?: QuizEditorHandlers;
+  /** Remonte la liste des quiz au parent après un changement définitif (sync sidebar). */
+  onQuizzesChange?: (quizzes: Quiz[]) => void;
 }
 
 /**
@@ -37,7 +51,26 @@ export function CourseSectionEditor({
   channels,
   onChange,
   onClose,
+  courseId,
+  quizzes,
+  quizSubtitle,
+  quizHandlers,
+  onQuizzesChange,
 }: CourseSectionEditorProps): React.ReactElement {
+  // Section QUIZ avec données : éditeur de quiz riche (liste → formulaire → question).
+  if (section.type === 'quiz' && quizzes && courseId != null) {
+    return (
+      <QuizEditor
+        courseId={courseId}
+        courseSubtitle={quizSubtitle}
+        quizzes={quizzes}
+        handlers={quizHandlers}
+        onQuizzesChange={onQuizzesChange}
+        onClose={onClose}
+      />
+    );
+  }
+
   const items = channels
     .filter((channel) => channel.type === section.type)
     .map((channel) => ({ id: String(channel.id), name: channel.name }));
@@ -45,7 +78,7 @@ export function CourseSectionEditor({
   return (
     <SectionEditorPopup
       itemList={items}
-      prefix={getPrefixForType(section.type).trim()}
+      prefix={<ChannelTypeIcon type={section.type} />}
       onClose={onClose}
       onChange={onChange}
       labels={sectionPopupLabels(section)}

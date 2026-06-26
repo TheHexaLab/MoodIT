@@ -34,8 +34,11 @@ div.channel-view > header > p:first-of-type {
 }
 
 div.channel-view > header > p:first-of-type > span:first-of-type {
+    display: inline-flex;
+    align-items: center;
     color: var(--text-muted);
-    font-size: 1.375rem;
+    /* Taille de l'icône SVG (1em), calée pour s'équilibrer avec le nom (1rem). */
+    font-size: 1.0625rem;
 }
 
 div.channel-view > header > p:first-of-type > span:last-of-type {

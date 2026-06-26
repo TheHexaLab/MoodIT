@@ -4,7 +4,7 @@ import {
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { contrastingTextColor } from '../../../helpers/color';
@@ -689,7 +689,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     <div className={styles['forum-view']}>
       <header>
         <p>
-          <span>{getPrefixForType(channel.type)}</span>
+          <span><ChannelTypeIcon type={channel.type} /></span>
           {channel.name}
         </p>
         <span />

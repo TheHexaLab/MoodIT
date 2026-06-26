@@ -1,48 +1,468 @@
+/* Coquille de la vue Quiz (passation / résumé / révision).
+   Couleurs via variables de thème : clair & sombre automatiques. */
+
+.view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+/* ─────────────────────────────── En-tête ─────────────────────────────── */
+
 .header {
+    display: flex;
+    /* Centre le statut « Question N sur T » (et le bouton retour) verticalement
+       face au bloc titre, plus haut (titre + sous-titre sur deux lignes). */
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    box-sizing: border-box;
+    /* Header + barre de progression (3px) = 3.25rem, soit la hauteur du
+       selectWrapper de la sidebar : les deux barres du haut s'alignent. */
+    height: calc(3.25rem - 3px);
+    flex-shrink: 0;
+    padding: 0 1.13rem;
+}
+
+.headerTitle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.bolt {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    /* Même gris que le préfixe « # » des canaux et l'icône de thread. */
+    color: var(--text-muted);
+    /* Même taille d'icône que les en-têtes ChannelView / ForumView. */
+    font-size: 1.0625rem;
+}
+
+.titleText {
+    display: flex;
+    flex-direction: column;
+    gap: 0.0625rem;
+    min-width: 0;
+}
+
+.title {
+    margin: 0;
+    color: var(--text);
+    /* Même taille que le titre des canaux / threads (en-têtes ChannelView/ForumView). */
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.status {
+    color: var(--text-muted);
+    font-size: clamp(0.75rem, 0.7rem + 0.2vw, 0.875rem);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+/* Bouton « ← Retour au résumé » (révision). */
+.backButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--brand-teal);
+    border-radius: 0.5rem;
+    background: transparent;
+    padding: 0.4375rem 0.75rem;
+    color: var(--brand-teal);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.backButton:hover {
+    background: var(--brand-teal-surface);
+}
+
+.backButton:active {
+    transform: scale(0.97);
+}
+
+/* ───────────────────────── Barre de progression ───────────────────────── */
+
+.progressTrack {
+    height: 3px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+}
+
+.progressFill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--brand-teal-gradient);
+    transition: width 0.25s ease;
+}
+
+/* ───────────────────────────── Zone centrale ───────────────────────────── */
+
+.body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.5rem 1.13rem;
+    display: flex;
+    justify-content: center;
+}
+
+/* Carte centrée (question / résumé). */
+.card {
+    width: 100%;
+    max-width: 620px;
+    align-self: flex-start;
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+    background: var(--bg-surface);
+    box-shadow: 0 1px 2px var(--shadow-login-box-modal);
+    padding: clamp(1rem, 0.85rem + 0.6vw, 1.375rem);
+}
+
+/* En-tête de carte : badge + « Question N » + pastille de points. */
+.cardHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: var(--brand-teal-surface);
+    padding: 0.1875rem 0.625rem;
+    color: var(--brand-teal);
+    font-size: 0.6875rem;
+    font-weight: 700;
+}
+
+.questionLabel {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.points {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    /* Rectangle arrondi (6px), padding 8/4 — comme les maquettes (pas une capsule). */
+    border-radius: 0.375rem;
+    background: var(--bg-vote-pill);
+    padding: 0.25rem 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Pastille de points colorée en révision / résumé (couleurs des maquettes). */
+.pointsFull {
+    background: var(--badge-success-bg);
+    color: var(--badge-success-fg);
+}
+
+.pointsZero {
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
+}
+
+.pointsPartial {
+    background: var(--badge-warn-bg);
+    color: var(--badge-warn-fg);
+}
+
+.prompt {
+    margin-bottom: 1rem;
+    color: var(--text);
+    font-size: clamp(0.9375rem, 0.88rem + 0.25vw, 1.0625rem);
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+/* Le rendu Markdown du prompt : on resserre les marges par défaut. */
+.prompt :global([role='markdown-container']) > :first-child {
+    margin-top: 0;
+}
+
+.prompt :global([role='markdown-container']) > :last-child {
+    margin-bottom: 0;
+}
+
+/* ─────────────────────────────── Pied de page ─────────────────────────────── */
+
+.footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    box-sizing: border-box;
+    /* Même hauteur que le panneau utilisateur de la sidebar (.userPanel = 4rem),
+       pour que les deux barres du bas s'alignent. */
+    height: 4rem;
+    flex-shrink: 0;
+    padding: 0 1.13rem;
+    border-top: 1px solid var(--border);
+}
+
+.navButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.625rem;
+    background: var(--bg-surface);
+    padding: 0.5625rem 1rem;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease,
+        transform 0.1s ease;
+}
+
+.navButton:hover:not(:disabled) {
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+.navButton:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+.navButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Bouton principal (Suivant / Soumettre / Revoir). */
+.primaryButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    border: none;
+    border-radius: 0.625rem;
+    background: var(--brand-teal-gradient);
+    padding: 0.5625rem 1.125rem;
+    color: var(--text-on-brand);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+    filter: brightness(1.05);
+}
+
+.primaryButton:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+.primaryButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Points de progression (un par question). */
+.dots {
+    display: flex;
+    align-items: center;
+    gap: 0.4375rem;
+}
+
+.dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--border-strong);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: width 0.2s, background 0.2s;
+}
+
+.dotAnswered {
+    background: var(--brand-teal);
+    opacity: 0.55;
+}
+
+.dotActive {
+    width: 22px;
+    background: var(--brand-teal);
+    opacity: 1;
+}
+
+/* ─────────────────────────────── Résumé ─────────────────────────────── */
+
+.summaryHead {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: center;
+    padding-bottom: 1rem;
+}
+
+.summaryCheck {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    margin-bottom: 0.25rem;
+}
+
+.summaryTitle {
+    margin: 0;
+    color: var(--text);
+    font-size: clamp(1.0625rem, 0.95rem + 0.45vw, 1.25rem);
+    font-weight: 700;
+}
+
+.summaryScore {
+    color: var(--brand-teal);
+    font-size: clamp(2rem, 1.6rem + 1.6vw, 2.75rem);
+    font-weight: 800;
+    line-height: 1;
+}
+
+.summarySub {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+
+.summaryDivider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1rem 0;
+}
+
+.summaryListTitle {
+    margin: 0 0 0.75rem;
+    color: var(--text);
+    font-size: 0.9375rem;
+    font-weight: 700;
+}
+
+.summaryList {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
 }
 
-.meta {
-    margin: 0;
-    color: var(--text-muted);
-    font-family: Inter, sans-serif;
-    font-size: clamp(0.75rem, 0.7rem + 0.18vw, 0.8125rem);
-    font-weight: 500;
-}
-
-.title {
+.summaryRow {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin: 0;
-    color: var(--text);
-    font-family: Inter, sans-serif;
-    font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.375rem);
-    font-weight: 700;
-    line-height: 1.2;
+    gap: 0.625rem;
+    width: 100%;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    padding: 0.5rem 0.375rem;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
 }
 
-.prefix {
-    color: var(--text-muted);
+.summaryRow:hover {
+    background: var(--bg-vote-pill);
+}
+
+.summaryRowIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+}
+
+.summaryRowText {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-body);
+    font-size: 0.875rem;
+}
+
+.summaryRowScore {
+    color: var(--text-body);
+    font-size: 0.8125rem;
     font-weight: 600;
+    white-space: nowrap;
 }
 
-.body {
+.summaryRowChevron {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+}
+
+/* ───────────────────────── États (chargement / vide) ───────────────────────── */
+
+.centeredState {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    background: var(--bg-surface);
-    padding: clamp(0.875rem, 0.76rem + 0.45vw, 1.125rem);
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
 }
 
-.placeholder {
-    margin: 0;
-    color: var(--text-muted);
-    font-family: Inter, sans-serif;
-    font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
-    line-height: 1.45;
+.retryButton {
+    border: 1px solid var(--border-strong);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    padding: 0.4375rem 0.875rem;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* ─────────────────────────────────── Mobile ─────────────────────────────────── */
+@media (max-width: 30rem) {
+    /* En-tête de carte sur 2 lignes : « Question N » + points (l.1), type (l.2). */
+    .cardHeader {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "label points"
+            "badge badge";
+        align-items: center;
+        column-gap: 0.5rem;
+        row-gap: 0.375rem;
+    }
+    .questionLabel {
+        grid-area: label;
+    }
+    .points {
+        grid-area: points;
+    }
+    .badge {
+        grid-area: badge;
+        justify-self: start;
+    }
 }

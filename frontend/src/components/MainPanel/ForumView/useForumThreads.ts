@@ -22,12 +22,13 @@ export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>
 export type FetchRepliesHandler = (postId: number) => MaybePromise<ForumPost[]>;
 
 /**
- * Publication d'un post (API-ready, POST). Reçoit le contenu, l'id du parent
- * (`postParentId`, null pour un sujet racine) et le `clientPostId` (nonce).
- * Peut renvoyer le post persiste (id reel + meme `clientPostId`) qui remplacera
- * la version optimiste.
+ * Publication d'un post (API-ready, POST). Reçoit l'id du forum ('Thread') cible, le
+ * contenu, l'id du parent (`postParentId`, null pour un sujet racine) et le
+ * `clientPostId` (nonce). Peut renvoyer le post persiste (id reel + meme
+ * `clientPostId`) qui remplacera la version optimiste.
  */
 export type CreatePostHandler = (
+  forumId: number,
   content: string,
   parentId: number | null,
   clientPostId: string,
@@ -368,7 +369,7 @@ export function useForumThreads({
     setPending(true);
     try {
       const saved = onCreatePost
-        ? await onCreatePost(trimmedContent, null, clientId, trimmedTitle || undefined)
+        ? await onCreatePost(forumId, trimmedContent, null, clientId, trimmedTitle || undefined)
         : undefined;
       if (!mountedRef.current) return true;
       if (saved) {
@@ -410,7 +411,7 @@ export function useForumThreads({
     setError(null);
     setPending(true);
     try {
-      const saved = onCreatePost ? await onCreatePost(trimmed, parentId, clientId) : undefined;
+      const saved = onCreatePost ? await onCreatePost(forumId, trimmed, parentId, clientId) : undefined;
       if (!mountedRef.current) return true;
       // Reconciliation : on remplace l'optimiste par la version persistante.
       if (saved) {

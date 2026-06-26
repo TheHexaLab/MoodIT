@@ -84,8 +84,138 @@ export interface Course {
 export interface Quiz {
   id: number;
   title: string;
-  description?: string;
   position?: number;
+  /** Quiz « du jour » (table Quiz.is_daily). */
+  isDaily?: boolean;
+  /** Publié aux étudiants (table Quiz.is_published) ; un brouillon ne l'est pas. */
+  isPublished?: boolean;
+  createdAt?: string;
+  /**
+   * Questions du quiz, embarquées au chargement du détail (table Question).
+   * Absent dans les vues de liste (section Quiz d'un cours).
+   */
+  questions?: Question[];
+  /**
+   * Nombre de questions, fourni par les endpoints de LISTE (sans charger les questions).
+   * La liste affiche `questions?.length ?? questionCount`. Absent dans le détail.
+   */
+  questionCount?: number;
+}
+
+/**
+ * Type de question — DISCRIMINANT technique stable (slug), volontairement découplé
+ * du libellé FR affiché (table Q_Type.name). Sert de clé de `switch` / map de
+ * composants et ouvre l'i18n. Pour l'affichage, passer par `QUESTION_TYPE_LABELS`.
+ */
+export type QuestionType =
+  | 'true_false'
+  | 'single_choice'
+  | 'multiple_choice'
+  | 'ordering'
+  | 'matching'
+  | 'coding';
+
+/**
+ * Type de question tel que listé par l'API (table Q_Type) : `id` (q_type_id, pour la
+ * persistance), `slug` (discriminant frontend) et `label` (Q_Type.name, FR affiché).
+ * Alimente le sélecteur de type de l'éditeur de question.
+ */
+export interface QuestionTypeOption {
+  id: number;
+  slug: QuestionType;
+  label: string;
+}
+
+/** Libellé FR par slug (jonction vers Q_Type.name). Seul point qui porte le texte affiché. */
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  true_false: 'Vrai/Faux',
+  single_choice: 'Choix unique',
+  multiple_choice: 'Choix multiple',
+  ordering: 'Remise en ordre',
+  matching: 'Association',
+  coding: 'Code',
+};
+
+/**
+ * Question d'un quiz (table Question). `prompt` est en **Markdown**, `totalScore` est
+ * le barème. Les champs de support dépendent du `qType` (tables génériques partagées) :
+ * - `true_false` / `single_choice` / `multiple_choice` → `answers`
+ * - `ordering` / `matching` → `dragItems`
+ * - `coding` → `language` + `startCode` + `testCases`
+ */
+export interface Question {
+  id: number;
+  /** Énoncé en Markdown (table Question.prompt). */
+  prompt: string;
+  qType: QuestionType;
+  /** Barème de la question (table Question.total_score). */
+  totalScore: number;
+  /** Ordre d'affichage dans le quiz (table Question.order_index). */
+  orderIndex?: number;
+  /** Options (Vrai/Faux, choix unique, choix multiple). */
+  answers?: Answer[];
+  /** Éléments à ordonner (`ordering`) ou à classer (`matching`). */
+  dragItems?: DragItem[];
+  /** Langage d'exécution (questions `coding`). */
+  language?: Language;
+  /** Squelette de code montré à l'étudiant (table Question.start_code). */
+  startCode?: string;
+  /**
+   * Harnais de tests CACHÉS (table Test_Case). Présent seulement dans les vues
+   * enseignant/éditeur ; jamais renvoyé au répondant.
+   */
+  testCases?: TestCase[];
+}
+
+/**
+ * Option de réponse (table Answer) — Vrai/Faux, choix unique, choix multiple.
+ * `isCorrect` est la vérité de correction : omis dans la vue du répondant.
+ */
+export interface Answer {
+  id: number;
+  content: string;
+  isCorrect?: boolean;
+}
+
+/**
+ * Élément déplaçable (table Drag_Item), partagé entre deux types :
+ * - `ordering` → `correctOrder` = position attendue, `groupName` absent.
+ * - `matching` → `groupName` = catégorie attendue ; `correctOrder` inutilisé (= 0).
+ * Les champs de correction sont omis dans la vue du répondant.
+ */
+export interface DragItem {
+  id: number;
+  content: string;
+  correctOrder?: number;
+  groupName?: string | null;
+}
+
+/**
+ * Cas de test d'une question `coding` (table Test_Case). Contrat minimal : le harnais
+ * renvoie un BOOLÉEN (passe/échoue). `weight` donne le crédit partiel. Données cachées.
+ */
+export interface TestCase {
+  id: number;
+  name: string;
+  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). */
+  harnessCode: string;
+  weight: number;
+}
+
+/** Langage d'exécution d'une question `coding` (table Language). */
+export interface Language {
+  id: number;
+  name: string;
+  /** Gabarit de harnais de départ proposé au prof (table Language.harness_template). */
+  harnessTemplate?: string;
+  /** Code de départ par défaut proposé pour ce langage (table Language.start_code_template). */
+  startCodeTemplate?: string;
+  /**
+   * Langage dans lequel s'écrivent les harnais des questions utilisant CE langage
+   * (table Language.harness_language_id, auto-référence). Absent → harnais dans le
+   * même langage que la question.
+   */
+  harnessLanguageId?: number;
 }
 
 /**
