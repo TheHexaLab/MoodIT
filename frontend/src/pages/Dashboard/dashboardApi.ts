@@ -27,11 +27,7 @@ import {
   isAnalysisPending,
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
-import {
-  getCreateEstablishments,
-  getEstablishmentPrograms,
-  //getJoinEstablishments,
-} from '../../mocks/subscriptionData.ts';
+import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import { quizAllQuestionTypesMock } from '../../mocks/dashboardData.ts';
@@ -85,6 +81,7 @@ async function simulateWrite(errorMessage: string): Promise<void> {
 
 // Ids « serveur » simulés pour les entités créées (démarrés haut pour ne pas heurter
 // les ids des mocks). À terme, c'est le backend qui attribue l'id, on le retirera.
+
 let mockIdSeq = 9000;
 const nextMockId = () => ++mockIdSeq;
 
@@ -103,6 +100,7 @@ function currentUserId(): number {
  * TODO — Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les
  * cours sont chargés séparément (fetchCourses) à l'entrée dans un programme : on
  * renvoie donc ici les programmes SANS leurs cours.
+ * DONE
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
   const userId = localStorage.getItem('moodit_user_id');
@@ -113,6 +111,7 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 }
 
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
+
 export async function fetchCourses(programId: number): Promise<Course[]> {
   const res = await apiFetch(`/api/programs/${programId}/courses`);
 
@@ -223,13 +222,13 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
     'matching',
     'coding',
   ];
-  console.log(order)
+  console.log(order);
   return order.map((slug, i) => ({ id: i + 1, slug, label: QUESTION_TYPE_LABELS[slug] }));
 }
 
 export async function fetchLanguages(): Promise<Language[]> {
   await simulateFetch('Échec simulé (chargement des langages)');
-  console.log(DEFAULT_LANGUAGES)
+  console.log(DEFAULT_LANGUAGES);
   return DEFAULT_LANGUAGES;
 }
 
@@ -241,7 +240,7 @@ export async function fetchLanguages(): Promise<Language[]> {
 export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult> {
   await simulateWrite('Échec simulé (soumission du quiz)');
   const quiz = { ...quizAllQuestionTypesMock, id: submission.quizId };
-  console.log(submission)
+  console.log(submission);
   return gradeQuiz(quiz, fromSubmission(quiz, submission));
 }
 
@@ -330,8 +329,9 @@ export async function fetchProgramRoles(programId: number) {
  * programme (1re étape du AddSubscriptionPopup en mode création).
  */
 export async function fetchEstablishmentsForCreate() {
-  await simulateFetch('Échec simulé (établissements)');
-  return getCreateEstablishments();
+  const res = await apiFetch('/api/establishments');
+  if (!res.ok) throw new Error('Échec chargement des établissements');
+  return res.json();
 }
 
 /**
@@ -388,9 +388,11 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
-  await simulateFetch('Échec simulé (cours rattachés du programme)');
-  const program = getDashboardPrograms().find((p) => p.id === programId);
-  return (program?.courses ?? []).map((course) => course.id);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
+  if (!res.ok) throw new Error('Échec chargement des inscriptions');
+  const data: { courseId: number }[] = await res.json();
+  return data.map((e) => e.courseId);
 }
 
 /**
@@ -432,11 +434,15 @@ export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
  * que le Dashboard l'insère dans sa liste.
  */
 export async function createCourse(course: NewCourse): Promise<Course> {
-  await simulateWrite('Échec simulé (ajout de cours)');
+  const res = await apiFetch('/api/programs/courses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(course),
+  });
+  if (!res.ok) throw new Error('Échec création du cours');
+  const data = await res.json();
   return {
-    id: nextMockId(),
-    code: course.code,
-    title: course.title,
+    ...data,
     channels: [],
     quizzes: [],
     forums: [],
@@ -448,15 +454,22 @@ export async function createCourse(course: NewCourse): Promise<Course> {
  * programme persisté (id attribué par le « serveur ») pour l'ajouter à la liste.
  */
 export async function createProgram(program: NewProgram): Promise<DemoProgram> {
-  await simulateWrite('Échec simulé (création de programme)');
-  return {
-    id: nextMockId(),
-    name: program.name,
-    code: program.code,
-    cohort: program.cohort,
-    color: program.color,
-    courses: [],
-  };
+  const res = await apiFetch('/api/establishments/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(program),
+  });
+  if (!res.ok) throw new Error('Échec création du programme');
+  const data = await res.json();
+
+  const userId = localStorage.getItem('moodit_user_id');
+  await apiFetch('/api/programs/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: Number(userId), programIds: [data.id] }),
+  });
+
+  return { ...data, courses: [] };
 }
 
 /**
