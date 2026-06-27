@@ -120,7 +120,7 @@ public class UserService {
         .toList();
   }
 
-  public List<CourseDTO> getEnrollmentsByUserAndProgram(Integer userId, Integer programId) {
+  public List<CourseForumsDTO> getEnrollmentsByUserAndProgram(Integer userId, Integer programId) {
 
     User user = userRepository.findById(userId)
             .orElseThrow(UserNotFoundException::new);
@@ -132,7 +132,7 @@ public class UserService {
                             .anyMatch(p -> p.getId().equals(programId))
             )
             .distinct()
-            .map(courseService::toCourseDTO)
+            .map(courseService::toCourseForumsDTO)
             .toList();
   }
 }

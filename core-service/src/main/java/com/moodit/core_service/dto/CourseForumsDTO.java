@@ -14,4 +14,5 @@ import java.util.List;
 @AllArgsConstructor
 public class CourseForumsDTO extends CourseDTO {
     private List<ForumDTO> forums;
+    private List<QuizDTO> quizzes;
 }

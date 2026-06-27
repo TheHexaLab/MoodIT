@@ -193,7 +193,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     label: formatCourseLabel(course),
     title: course.title?.trim() ?? '',
     channels: normalizeCourseChannelsFromSources({
-      channels: course.channels,
       quizzes: course.quizzes,
       forums: course.forums,
     }),

@@ -66,7 +66,8 @@ export interface Program {
 
 /**
  * Cours (table Course). `title`/`code` peuvent manquer dans certaines vues UI.
- * `channels`/`quizzes`/`forums` sont les sections embarquées au chargement.
+ * `quizzes`/`forums` sont les sections embarquées au chargement (les canaux de
+ * discussion sont des Forum de `fType: 'Discussion'`).
  */
 export interface Course {
   id: number;
@@ -75,7 +76,6 @@ export interface Course {
   /** Libellé UI déjà formaté (compat affichage). */
   name?: string;
   description?: string;
-  channels?: CourseChannel[];
   quizzes?: Quiz[];
   forums?: Forum[];
 }

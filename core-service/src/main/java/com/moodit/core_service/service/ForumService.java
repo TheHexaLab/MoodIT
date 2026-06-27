@@ -35,6 +35,18 @@ public class ForumService {
     private final UserRepository userRepository;
 
     //region Transformations d'Entités (entité BD -> DTO)
+    /** Auteur d'un post embarqué dans le DTO (le front lit message.author : prénom/nom, avatarColor…). */
+    private UserDTO toAuthorDTO(User user) {
+        UserDTO dto = new UserDTO();
+        dto.setId(user.getId());
+        dto.setUsername(user.getUsername());
+        dto.setFirstName(user.getFirstName());
+        dto.setLastName(user.getLastName());
+        dto.setEmail(user.getEmail());
+        dto.setAvatarColor(user.getAvatarColor());
+        return dto;
+    }
+
     public ForumDTO toForumDTO(Forum forum) {
 
         ForumDTO dto = new ForumDTO();
@@ -70,6 +82,7 @@ public class ForumService {
                 .mapToInt(Vote::getValue)
                 .sum());
         dto.setUserId(post.getUser().getId());
+        dto.setAuthor(toAuthorDTO(post.getUser()));
         dto.setChildrenCount(post.getChildren().size());
         if (loadChildren) {
             dto.setChildren(post.getChildren()

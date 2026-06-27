@@ -18,7 +18,7 @@ import {
   getMockForumThreads,
 } from '../../components/MainPanel/ForumView/forumThreads.ts';
 //import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
-import type { Course, McpResponse, McpResponseSummary } from '../../types/domain.ts';
+import type { Course, ForumType, McpResponse, McpResponseSummary } from '../../types/domain.ts';
 import {
   clearAnalysisPending,
   generateMcpResponse,
@@ -111,11 +111,36 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
   return data.map((p: DemoProgram) => ({ ...p, courses: [] }));
 }
 
+/** Forme d'un forum renvoyé par le backend (ForumDTO) : le type est porté par `fTypeName`. */
+interface ForumResponse {
+  id: number;
+  title: string;
+  position?: number;
+  courseId: number;
+  fTypeId: number;
+  fTypeName: ForumType; // 'Discussion' (canal) | 'Thread' (forum)
+}
+
+/** Forme d'un quiz renvoyé par le backend (QuizDTO, méta seule sans les questions). */
+interface QuizResponse {
+  id: number;
+  title: string;
+  isPublished?: boolean;
+  isDaily?: boolean;
+  createdAt?: string;
+}
+
+/** Cours renvoyé par l'endpoint enrollments (CourseForumsDTO) : forums + quiz embarqués. */
+interface CourseForumsResponse {
+  id: number;
+  title?: string;
+  code?: string;
+  forums?: ForumResponse[];
+  quizzes?: QuizResponse[];
+}
+
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
-
 export async function fetchCourses(programId: number): Promise<Course[]> {
-  console.log('fetchCourses');
-
   const userId = localStorage.getItem('moodit_user_id');
 
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
@@ -124,26 +149,30 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
     throw new Error('Échec chargement des cours');
   }
 
-  const courses: Course[] = await res.json();
+  // L'endpoint renvoie chaque cours avec ses forums embarqués (un seul appel). Canaux
+  // de discussion ('Discussion') et forums ('Thread') sont tous des Forum, distingués
+  // par `fTypeName` → `fType` ; normalizeCourseChannelsFromSources les répartit ensuite
+  // pour l'affichage ('Discussion' → canal texte, 'Thread' → forum).
+  const courses: CourseForumsResponse[] = await res.json();
 
-  return await Promise.all(
-    courses.map(async (course) => {
-      // forums (type 1)
-      const forumsRes = await apiFetch(`/api/courses/${course.id}/forums?typeId=1`);
-      const forums = forumsRes.ok ? await forumsRes.json() : [];
-
-      // channels (type 2)
-      const channelsRes = await apiFetch(`/api/courses/${course.id}/forums?typeId=2`);
-      const channels = channelsRes.ok ? await channelsRes.json() : [];
-
-      return {
-        ...course,
-        forums: forums,
-        channels: channels,
-        quizzes: [],
-      };
-    })
-  );
+  return courses.map((course) => ({
+    id: course.id,
+    title: course.title,
+    code: course.code,
+    forums: (course.forums ?? []).map((f) => ({
+      id: f.id,
+      title: f.title,
+      position: f.position,
+      fType: f.fTypeName,
+    })),
+    quizzes: (course.quizzes ?? []).map((q) => ({
+      id: q.id,
+      title: q.title,
+      isPublished: q.isPublished,
+      isDaily: q.isDaily,
+      createdAt: q.createdAt,
+    })),
+  }));
 }
 
 // ── Quiz (passation étudiant + éditeur enseignant) ─────────────────────────────
@@ -454,7 +483,6 @@ export async function createCourse(course: NewCourse): Promise<Course> {
   const data = await res.json();
   return {
     ...data,
-    channels: [],
     quizzes: [],
     forums: [],
   };
@@ -586,7 +614,6 @@ export async function joinCourses(programId: number, courseIds: number[]): Promi
     id: course.id,
     code: course.code,
     title: course.title,
-    channels: [],
     quizzes: [],
     forums: [],
   }));

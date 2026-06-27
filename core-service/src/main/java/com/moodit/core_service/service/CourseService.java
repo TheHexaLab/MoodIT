@@ -63,7 +63,25 @@ public class CourseService {
                 .stream()
                 .map(forumService::toForumDTO)
                 .toList());
+        // Tous les quiz du cours (méta seule, sans les questions). Le DTO porte
+        // isPublished/isDaily : le front filtre s'il ne veut afficher que les publiés.
+        dto.setQuizzes(course.getQuizzes() == null ? List.of()
+                : course.getQuizzes()
+                .stream()
+                .map(this::toQuizDTO)
+                .toList());
 
+        return dto;
+    }
+
+    /** Méta d'un quiz pour les vues de liste (section Quiz d'un cours), sans les questions. */
+    public QuizDTO toQuizDTO(Quiz quiz) {
+        QuizDTO dto = new QuizDTO();
+        dto.setId(quiz.getId());
+        dto.setTitle(quiz.getTitle());
+        dto.setIsPublished(quiz.getIsPublished());
+        dto.setIsDaily(quiz.getIsDaily());
+        dto.setCreatedAt(quiz.getCreatedAt());
         return dto;
     }
 

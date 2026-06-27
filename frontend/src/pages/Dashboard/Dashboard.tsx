@@ -511,7 +511,6 @@ export default function Dashboard() {
   const selectedCourse = getSelectedCourse(courses, effectiveSelectedCourseId);
   const selectedCourseChannels = selectedCourse
     ? normalizeCourseChannelsFromSources({
-        channels: selectedCourse.channels,
         quizzes: selectedCourse.quizzes,
         forums: selectedCourse.forums,
       })

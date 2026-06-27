@@ -128,7 +128,6 @@ const MainPanel: React.FC<MainPanelProps> = ({
     const course = courses.find((c) => c.id === selectedCourse) ?? null;
     const courseChannels = course
       ? normalizeCourseChannelsFromSources({
-          channels: course.channels,
           quizzes: course.quizzes,
           forums: course.forums,
         })
