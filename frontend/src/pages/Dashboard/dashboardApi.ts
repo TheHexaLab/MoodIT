@@ -17,7 +17,7 @@ import {
   getMockForumReplies,
   getMockForumThreads,
 } from '../../components/MainPanel/ForumView/forumThreads.ts';
-import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
+//import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
 import type { Course, McpResponse, McpResponseSummary } from '../../types/domain.ts';
 import {
   clearAnalysisPending,
@@ -29,7 +29,7 @@ import {
 } from '../../mocks/mcpData.ts';
 //import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
-import { getDashboardPrograms } from './dashboardDataSource.ts';
+//import { getDashboardPrograms } from './dashboardDataSource.ts';
 import { quizAllQuestionTypesMock } from '../../mocks/dashboardData.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import {
@@ -115,35 +115,32 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 
 export async function fetchCourses(programId: number): Promise<Course[]> {
   console.log('fetchCourses');
-  //const res = await apiFetch(`/api/programs/${programId}/courses`);
+
   const userId = localStorage.getItem('moodit_user_id');
+
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
 
   if (!res.ok) {
     throw new Error('Échec chargement des cours');
   }
 
-  const data = await res.json();
-
-  const courses = data.courses ?? data;
+  const courses: Course[] = await res.json();
 
   return await Promise.all(
-    courses.map(async (course: Course) => {
-      const forumsRes = await apiFetch(`/api/courses/${course.id}/forums`);
+    courses.map(async (course) => {
+      // forums (type 1)
+      const forumsRes = await apiFetch(`/api/courses/${course.id}/forums?typeId=1`);
       const forums = forumsRes.ok ? await forumsRes.json() : [];
 
-      // Sidebar = quiz PUBLIÉS uniquement (les brouillons ne sont visibles que dans
-      // l'éditeur, qui charge la liste complète via fetchQuizzes).
-      // TODO — au branchement réel : faire embarquer les quiz publiés dans le payload
-      // du cours (ou un endpoint dédié) pour éviter ce fetch par cours (N+1 requêtes).
-      // MOCK off → on garde les quiz du payload du cours (vrai backend) ; MOCK on → mock.
-
-      //const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
+      // channels (type 2)
+      const channelsRes = await apiFetch(`/api/courses/${course.id}/forums?typeId=2`);
+      const channels = channelsRes.ok ? await channelsRes.json() : [];
 
       return {
         ...course,
+        forums: forums,
+        channels: channels,
         quizzes: [],
-        forums,
       };
     })
   );
@@ -646,23 +643,14 @@ export async function changeRole(change: RoleChange): Promise<void> {
  * canal dans les programmes mock (par id) et renvoie ses messages.
  */
 export async function fetchMessages(channelId: number): Promise<ChannelMessage[]> {
-  await simulateFetch('Échec simulé (chargement des messages)');
-  for (const program of getDashboardPrograms()) {
-    for (const course of program.courses) {
-      const channels = normalizeCourseChannelsFromSources({
-        channels: course.channels,
-        quizzes: course.quizzes,
-        forums: course.forums,
-      });
-      // Les messages vivent sur les canaux TEXTE (Discussion). Un quiz ou un forum
-      // peut partager l'id d'un canal texte (id_ uniques seulement PAR type) : on
-      // filtre donc par type avant de chercher par id, sinon on tomberait sur le
-      // quiz (sans messages) et le canal texte renverrait vide.
-      const channel = channels.find((c) => c.type === 'text' && c.id === channelId);
-      if (channel) return channel.messages ?? [];
-    }
+  console.log('fetchMessages');
+  const res = await apiFetch(`/api/forums/${channelId}/posts`);
+
+  if (!res.ok) {
+    throw new Error('Échec chargement des messages');
   }
-  return [];
+
+  return await res.json();
 }
 
 /**
@@ -676,18 +664,23 @@ export async function sendMessage(
   parentId: number | null,
   clientMessageId: string
 ): Promise<void> {
-  await simulateWrite('Échec simulé (envoi de message)');
-  console.log(
-    '[api] Envoi de message (canal',
-    channelId,
-    ') :',
-    content,
-    '(parent =',
-    parentId,
-    ', clientMsgId =',
-    clientMessageId,
-    ')'
-  );
+  console.log('sendMessage');
+  const res = await apiFetch('/api/forums/post', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      forumId: channelId,
+      parentPostId: parentId,
+      content,
+      clientMessageId,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Échec de l'envoi du message");
+  }
 }
 
 /** TODO — Modifier le contenu d'un message existant. */
@@ -718,6 +711,7 @@ export async function fetchThreads(forumId: number) {
  * l'utilisateur déplie le fil.
  */
 export async function fetchReplies(postId: number) {
+  console.log('fetchReplies');
   await simulateFetch('Échec simulé (chargement des réponses)');
   return getMockForumReplies(postId);
 }
@@ -734,19 +728,27 @@ export async function createPost(
   clientPostId: string,
   title?: string
 ): Promise<void> {
-  await simulateWrite('Échec simulé (publication)');
-  console.log(
-    '[api] Publication (forum',
-    forumId,
-    ') :',
-    title ? `« ${title} » — ` : '',
-    content,
-    '(parent =',
-    parentId,
-    ', clientPostId =',
-    clientPostId,
-    ')'
-  );
+  console.log('createPost');
+  const email = localStorage.getItem('moodit_user_email');
+
+  const res = await apiFetch('/api/forums/posts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Email': email ?? '',
+    },
+    body: JSON.stringify({
+      forumId,
+      parentPostId: parentId,
+      content,
+      title: title ?? null,
+      clientPostId,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la publication du post');
+  }
 }
 
 /** TODO — Modifier le contenu d'un post. */
