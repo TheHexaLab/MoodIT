@@ -8,10 +8,12 @@ import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.EnrollmentRepository;
 import com.moodit.core_service.repository.ForumRepository;
 import com.moodit.core_service.repository.UserRepository;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +30,7 @@ public class CourseService {
     private final EnrollmentRepository enrollmentRepository;
 
 
-    private CourseDTO toCourseDTO(Course course) {
+    public CourseDTO toCourseDTO(Course course) {
         CourseDTO dto = new CourseDTO();
 
         dto.setId(course.getId());
@@ -155,18 +157,30 @@ public class CourseService {
         courseRepository.delete(course);
     }
 
-    public void addUserToCourses(UserCreateInCoursesDTO dto) {
+    @Transactional
+    public List<CourseDTO> syncUserCourses(UserCreateInCoursesDTO dto) {
 
         User user = userRepository.findById(dto.getId())
                 .orElseThrow(UserNotFoundException::new);
 
-        Set<Integer> existingCourseIds = user.getEnrollments().stream()
+        List<Enrollment> currentEnrollments = user.getEnrollments();
+
+        Set<Integer> requestedCourseIds = new HashSet<>(dto.getCourseIds());
+
+        // 1. REMOVE enrollments not in new list
+        currentEnrollments.removeIf(enrollment ->
+                !requestedCourseIds.contains(enrollment.getCourse().getId())
+        );
+
+        // 2. Existing after cleanup
+        Set<Integer> remainingCourseIds = currentEnrollments.stream()
                 .map(e -> e.getCourse().getId())
                 .collect(Collectors.toSet());
 
+        // 3. ADD missing enrollments
         List<Course> coursesToAdd = dto.getCourseIds().stream()
                 .distinct()
-                .filter(id -> !existingCourseIds.contains(id))
+                .filter(id -> !remainingCourseIds.contains(id))
                 .map(id -> courseRepository.findById(id)
                         .orElseThrow(CourseNotFoundException::new))
                 .toList();
@@ -177,10 +191,16 @@ public class CourseService {
             enrollment.setCourse(course);
             enrollment.setEnrolledAt(LocalDateTime.now());
 
-            enrollmentRepository.save(enrollment);
+            user.getEnrollments().add(enrollment);
         }
 
         userRepository.save(user);
+
+        return user.getEnrollments().stream()
+                .map(Enrollment::getCourse)
+                .distinct()
+                .map(this::toCourseDTO)
+                .toList();
     }
 
 }

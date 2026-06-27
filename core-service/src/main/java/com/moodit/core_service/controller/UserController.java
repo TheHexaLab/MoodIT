@@ -55,7 +55,7 @@ public class UserController {
   }
 
   @GetMapping("/{userId}/programs/{programId}/enrollments")
-  public ResponseEntity<List<EnrollmentDTO>> getEnrollmentsByUserAndProgram(
+  public ResponseEntity<List<CourseDTO>> getEnrollmentsByUserAndProgram(
       @PathVariable Integer userId, @PathVariable Integer programId) {
     return ResponseEntity.ok(userService.getEnrollmentsByUserAndProgram(userId, programId));
   }

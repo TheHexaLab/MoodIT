@@ -59,11 +59,11 @@ public class CourseController {
     }
 
     @PostMapping("/users")
-    public ResponseEntity<Void> addUserToCourses(
+    public ResponseEntity<List<CourseDTO>> addUserToCourses(
             @RequestBody UserCreateInCoursesDTO request) {
 
-        courseService.addUserToCourses(request);
-        return ResponseEntity.status(201).build();
+        courseService.syncUserCourses(request);
+        return ResponseEntity.ok(courseService.syncUserCourses(request));
     }
 
     @PatchMapping("/{courseId}")

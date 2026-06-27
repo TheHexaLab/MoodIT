@@ -115,7 +115,9 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 
 export async function fetchCourses(programId: number): Promise<Course[]> {
   console.log('fetchCourses');
-  const res = await apiFetch(`/api/programs/${programId}/courses`);
+  //const res = await apiFetch(`/api/programs/${programId}/courses`);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
 
   if (!res.ok) {
     throw new Error('Échec chargement des cours');
@@ -135,6 +137,7 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
       // TODO — au branchement réel : faire embarquer les quiz publiés dans le payload
       // du cours (ou un endpoint dédié) pour éviter ce fetch par cours (N+1 requêtes).
       // MOCK off → on garde les quiz du payload du cours (vrai backend) ; MOCK on → mock.
+
       //const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
 
       return {
@@ -394,11 +397,16 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
   console.log('fetchJoinedCourseIds');
+
   const userId = localStorage.getItem('moodit_user_id');
+
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
+
   if (!res.ok) throw new Error('Échec chargement des inscriptions');
-  const data: { courseId: number }[] = await res.json();
-  return data.map((e) => e.courseId);
+
+  const data: Course[] = await res.json();
+
+  return data.map((course) => course.id);
 }
 
 /**
@@ -510,6 +518,7 @@ export async function joinPrograms(selection: JoinSelection) {
  * aux programmes (relation many-to-many program_course).
  */
 export async function updateCourse(courseId: number, update: CourseUpdate): Promise<void> {
+  console.log('updateCourse');
   await simulateWrite('Échec simulé (modification de cours)');
   console.log(courseId, update);
 }
@@ -528,6 +537,7 @@ export async function leaveProgram(programId: number): Promise<void> {
 
 /** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
 export async function leaveCourse(courseId: number): Promise<void> {
+  console.log('leaveCourse');
   await simulateWrite('Échec simulé (quitter le cours)');
   console.log(courseId);
 }
@@ -556,19 +566,33 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
  * programme. `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
  */
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
-  await simulateWrite('Échec simulé (adhésion aux cours)');
-  const program = getDashboardPrograms().find((p) => p.id === programId);
-  console.log(programId, courseIds);
-  return (program?.courses ?? [])
-    .filter((course) => courseIds.includes(course.id))
-    .map((course) => ({
-      id: course.id,
-      code: course.code,
-      title: course.title,
-      channels: [],
-      quizzes: [],
-      forums: [],
-    }));
+  console.log('joinCourses', programId);
+  const userId = localStorage.getItem('moodit_user_id');
+  const response = await apiFetch('/api/courses/users', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: userId,
+      courseIds,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to join courses');
+  }
+
+  const joinedCourses: Course[] = await response.json();
+
+  return joinedCourses.map((course) => ({
+    id: course.id,
+    code: course.code,
+    title: course.title,
+    channels: [],
+    quizzes: [],
+    forums: [],
+  }));
 }
 
 /**

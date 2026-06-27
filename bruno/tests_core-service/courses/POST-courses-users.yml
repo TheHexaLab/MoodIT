@@ -10,8 +10,8 @@ http:
     type: json
     data: |-
       {
-        "id": 3,
-        "courseIds": [1, 2, 3]
+        "id": 2,
+        "courseIds": [1, 2]
       }
   auth: inherit
 

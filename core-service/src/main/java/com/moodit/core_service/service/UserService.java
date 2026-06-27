@@ -4,6 +4,7 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Course;
+import com.moodit.core_service.model.Enrollment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.service.ProgramService;
@@ -21,6 +22,7 @@ public class UserService {
 
   private final UserRepository userRepository;
   private final ProgramService programService;
+  private final CourseService courseService;
 
   // region Transformations d'Entités (entité BD -> DTO)
   public UserDTO toUserDTO(User user) {
@@ -118,18 +120,19 @@ public class UserService {
         .toList();
   }
 
-  public List<EnrollmentDTO> getEnrollmentsByUserAndProgram(Integer userId, Integer programId) {
-    User user =
-        userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+  public List<CourseDTO> getEnrollmentsByUserAndProgram(Integer userId, Integer programId) {
+
+    User user = userRepository.findById(userId)
+            .orElseThrow(UserNotFoundException::new);
+
     return user.getEnrollments().stream()
-        .filter(
-            e -> e.getCourse().getPrograms().stream().anyMatch(p -> p.getId().equals(programId)))
-        .map(
-            e -> {
-              EnrollmentDTO dto = new EnrollmentDTO();
-              dto.setCourseId(e.getCourse().getId());
-              return dto;
-            })
-        .toList();
+            .map(Enrollment::getCourse)
+            .filter(course ->
+                    course.getPrograms().stream()
+                            .anyMatch(p -> p.getId().equals(programId))
+            )
+            .distinct()
+            .map(courseService::toCourseDTO)
+            .toList();
   }
 }

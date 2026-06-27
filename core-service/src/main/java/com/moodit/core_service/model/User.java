@@ -65,6 +65,6 @@ public class User {
       inverseJoinColumns = @JoinColumn(name = "program_id"))
   private List<Program> programs;
 
-  @OneToMany(mappedBy = "user")
+  @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
   private List<Enrollment> enrollments;
 }
