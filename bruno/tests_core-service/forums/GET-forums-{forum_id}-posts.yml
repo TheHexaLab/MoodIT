@@ -1,0 +1,19 @@
+info:
+  name: GET/forums/{forum_id}/posts
+  type: http
+  seq: 10
+
+http:
+  method: GET
+  url: "{{baseUrl}}/forums/2/posts?loadChildren=true"
+  params:
+    - name: loadChildren
+      value: "true"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

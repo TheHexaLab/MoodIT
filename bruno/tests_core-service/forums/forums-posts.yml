@@ -8,14 +8,14 @@ http:
   url: "{{baseUrl}}/forums/posts"
   headers:
     - name: X-User-Email
-      value: dufl8605@usherbrooke.ca
+      value: homr7756@usherbrooke.ca
   body:
     type: json
     data: |-
       {
-        "forumId": 1,
+        "forumId": 2,
         "parentPostId": null,
-        "content": "Mon nouveau post"
+        "content": "mimimi"
       }
   auth:
     type: bearer

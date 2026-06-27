@@ -6,6 +6,7 @@ import com.moodit.core_service.dto.CourseUpdateDTO;
 import com.moodit.core_service.dto.ForumDTO;
 
 //Service
+import com.moodit.core_service.dto.UserCreateInCoursesDTO;
 import com.moodit.core_service.service.CourseService;
 
 import com.moodit.core_service.service.ForumService;
@@ -32,10 +33,10 @@ public class CourseController {
 
     @GetMapping("/{courseId}/forums")
     public ResponseEntity<List<ForumDTO>> getForumsByCourse(
-            @PathVariable Integer courseId) {
+            @PathVariable Integer courseId, @RequestParam(required = false) Integer typeId) {
 
         return ResponseEntity.ok(
-                courseService.getForumsByCourseId(courseId)
+                courseService.getForumsByCourseAndType(courseId, typeId)
         );
     }
 
@@ -55,6 +56,14 @@ public class CourseController {
         return ResponseEntity.ok(
                 courseService.addForumToCourse(request)
         );
+    }
+
+    @PostMapping("/users")
+    public ResponseEntity<Void> addUserToCourses(
+            @RequestBody UserCreateInCoursesDTO request) {
+
+        courseService.addUserToCourses(request);
+        return ResponseEntity.status(201).build();
     }
 
     @PatchMapping("/{courseId}")

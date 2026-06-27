@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -105,6 +106,17 @@ public class ForumService {
                 .orElseThrow(PostNotFoundException::new);
 
         return toPostVoteUserDTO(post, loadChildren);
+    }
+
+    public List<PostVoteUserDTO> getAllPostsByForum(Integer forumId, boolean loadChildren) {
+
+        Forum forum = forumRepository.findById(forumId)
+                .orElseThrow(ForumNotFoundException::new);
+
+        return forum.getPosts().stream()
+                .filter(p -> p.getParent() == null) // only root posts OR remove this if you want all
+                .map(p -> toPostVoteUserDTO(p, loadChildren))
+                .toList();
     }
     //endregion
 

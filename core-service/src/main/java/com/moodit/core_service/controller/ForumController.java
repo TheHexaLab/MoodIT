@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 
 @RestController
 @RequestMapping("/forums")
@@ -38,6 +40,16 @@ public class ForumController {
                                                   @RequestParam(defaultValue = "false") boolean loadChildren) {
         return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren));
     }
+
+    @GetMapping("/{forumId}/posts")
+    public ResponseEntity<List<PostVoteUserDTO>> getAllPostsByForum(
+            @PathVariable Integer forumId,
+            @RequestParam(defaultValue = "false") boolean loadChildren) {
+
+        return ResponseEntity.ok(
+                forumService.getAllPostsByForum(forumId, loadChildren)
+        );
+    }
     //endregion
 
     //region POST
@@ -48,6 +60,7 @@ public class ForumController {
 
         return ResponseEntity.noContent().build(); //code 204
     }
+
     @PostMapping("/posts/votes")
     public ResponseEntity<Void> addVoteToPost(@RequestBody VoteCreateInPostDTO voteCreateInPostDTO,
                                               @RequestHeader("X-User-Email") String email) {
