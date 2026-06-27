@@ -27,7 +27,7 @@ import {
   isAnalysisPending,
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
-import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
+//import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 import { getDashboardPrograms } from './dashboardDataSource.ts';
 import { quizAllQuestionTypesMock } from '../../mocks/dashboardData.ts';
@@ -103,6 +103,7 @@ function currentUserId(): number {
  * DONE
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
+  console.log('fetchPrograms');
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/users/${userId}/programs`);
   if (!res.ok) throw new Error('Échec chargement des programmes');
@@ -113,6 +114,7 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
 /** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
 
 export async function fetchCourses(programId: number): Promise<Course[]> {
+  console.log('fetchCourses');
   const res = await apiFetch(`/api/programs/${programId}/courses`);
 
   if (!res.ok) {
@@ -133,11 +135,11 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
       // TODO — au branchement réel : faire embarquer les quiz publiés dans le payload
       // du cours (ou un endpoint dédié) pour éviter ce fetch par cours (N+1 requêtes).
       // MOCK off → on garde les quiz du payload du cours (vrai backend) ; MOCK on → mock.
-      const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
+      //const quizzes = USE_MOCK_QUIZZES ? await fetchPublishedQuizzes(course.id) : course.quizzes;
 
       return {
         ...course,
-        quizzes,
+        quizzes: [],
         forums,
       };
     })
@@ -339,6 +341,7 @@ export async function fetchEstablishmentsForCreate() {
  * existants (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
+  console.log('fetchEstablishmentsForJoin');
   const res = await apiFetch('/api/establishments');
 
   if (!res.ok) {
@@ -353,6 +356,7 @@ export async function fetchEstablishmentsForJoin() {
  * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
+  console.log('fetchEstablishmentPrograms');
   const res = await apiFetch(`/api/establishments/${establishmentId}/programs`);
 
   if (!res.ok) {
@@ -367,6 +371,7 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
+  console.log('fetchProgramCourses');
   const res = await apiFetch(`/api/programs/${programId}/courses`);
 
   if (!res.ok) {
@@ -388,6 +393,7 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
+  console.log('fetchJoinedCourseIds');
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
   if (!res.ok) throw new Error('Échec chargement des inscriptions');
@@ -477,11 +483,26 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
  * programmes ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
  */
 export async function joinPrograms(selection: JoinSelection) {
-  await simulateWrite('Échec simulé (adhésion au programme)');
-  console.log(selection);
-  return getEstablishmentPrograms(selection.establishmentId).filter((p) =>
-    selection.programIds.includes(p.id)
-  );
+  console.log('joinPrograms');
+
+  const userId = localStorage.getItem('moodit_user_id');
+
+  const res = await apiFetch(`/api/programs/users`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: userId,
+      programIds: selection.programIds,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec adhésion aux programmes');
+  }
+
+  return [];
 }
 
 /**
