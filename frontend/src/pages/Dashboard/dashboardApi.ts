@@ -590,6 +590,7 @@ export async function joinCourses(programId: number, courseIds: number[]): Promi
     body: JSON.stringify({
       id: userId,
       courseIds,
+      programId,
     }),
   });
 

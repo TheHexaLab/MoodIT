@@ -188,12 +188,20 @@ public class CourseService {
 
         List<Enrollment> currentEnrollments = user.getEnrollments();
 
-        Set<Integer> requestedCourseIds = new HashSet<>(dto.getCourseIds());
+        List<Integer> courseIds = dto.getCourseIds() == null ? List.of() : dto.getCourseIds();
+        Set<Integer> requestedCourseIds = new HashSet<>(courseIds);
+        Integer programId = dto.getProgramId();
 
-        // 1. REMOVE enrollments not in new list
-        currentEnrollments.removeIf(enrollment ->
-                !requestedCourseIds.contains(enrollment.getCourse().getId())
-        );
+        // 1. REMOVE : seulement les inscriptions aux cours DU PROGRAMME concerné qui ne sont
+        //    plus sélectionnés (déselection = désinscription, liste vide comprise).
+        //    programId null → portée globale (rétrocompat).
+        currentEnrollments.removeIf(enrollment -> {
+            Course course = enrollment.getCourse();
+            boolean inProgram = programId == null
+                    || (course.getPrograms() != null
+                        && course.getPrograms().stream().anyMatch(p -> p.getId().equals(programId)));
+            return inProgram && !requestedCourseIds.contains(course.getId());
+        });
 
         // 2. Existing after cleanup
         Set<Integer> remainingCourseIds = currentEnrollments.stream()
@@ -201,7 +209,7 @@ public class CourseService {
                 .collect(Collectors.toSet());
 
         // 3. ADD missing enrollments
-        List<Course> coursesToAdd = dto.getCourseIds().stream()
+        List<Course> coursesToAdd = courseIds.stream()
                 .distinct()
                 .filter(id -> !remainingCourseIds.contains(id))
                 .map(id -> courseRepository.findById(id)

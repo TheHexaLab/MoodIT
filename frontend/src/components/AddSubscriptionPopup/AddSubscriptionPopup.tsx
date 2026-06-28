@@ -345,7 +345,8 @@ export function AddSubscriptionPopup({
         );
 
   async function join() {
-    if (joinEstablishmentId === null || selectedProgramIds.length === 0 || pending !== null) return;
+    // 0 programme sélectionné est valide : se désabonner de tous ceux de l'établissement.
+    if (joinEstablishmentId === null || pending !== null) return;
     const selection: JoinSelection = {
       establishmentId: joinEstablishmentId,
       programIds: selectedProgramIds,
@@ -704,7 +705,7 @@ export function AddSubscriptionPopup({
         <button
           type="button"
           onClick={join}
-          disabled={selectedProgramIds.length === 0 || pending !== null}
+          disabled={pending !== null}
         >
           {pending?.kind === 'submit' ? <Spinner /> : t.add}
         </button>

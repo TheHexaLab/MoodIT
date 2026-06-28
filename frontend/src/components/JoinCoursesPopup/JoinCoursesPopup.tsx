@@ -139,7 +139,8 @@ export function JoinCoursesPopup({
   }
 
   async function join() {
-    if (selectedIds.length === 0 || pending) return;
+    // Aucune sélection est autorisé : se désinscrire de tous les cours du programme.
+    if (pending) return;
     const reqId = ++requestRef.current;
     setError(null);
     setPending(true);
@@ -162,7 +163,8 @@ export function JoinCoursesPopup({
       : courses.filter((course) => `${course.code} ${course.title}`.toLowerCase().includes(query));
 
   const hasCourses = !loading && !loadError && courses.length > 0;
-  const canJoin = hasCourses && selectedIds.length > 0 && !pending;
+  // 0 cours sélectionné est valide (désinscription complète du programme).
+  const canJoin = hasCourses && !pending;
 
   return (
     <>

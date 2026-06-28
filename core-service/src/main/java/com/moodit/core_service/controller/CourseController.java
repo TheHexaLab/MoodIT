@@ -66,7 +66,6 @@ public class CourseController {
     public ResponseEntity<List<CourseDTO>> addUserToCourses(
             @RequestBody UserCreateInCoursesDTO request) {
 
-        courseService.syncUserCourses(request);
         return ResponseEntity.ok(courseService.syncUserCourses(request));
     }
 

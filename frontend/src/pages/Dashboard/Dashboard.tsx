@@ -273,20 +273,15 @@ export default function Dashboard() {
   // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
   const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
   // Inscription aux cours choisis (via api.joinCourses). La sélection du popup REMPLACE
-  // l'ensemble des cours du programme : les cours décochés sont retirés, les nouveaux
-  // ajoutés. On préserve les données riches (canaux/quiz/forums) des cours conservés.
-  // L'erreur remonte au popup (qui l'affiche).
+  // l'ensemble des cours du programme (décochés retirés, nouveaux ajoutés). On RECHARGE
+  // ensuite les cours du programme (api.fetchCourses) pour que les cours fraîchement
+  // rejoints arrivent avec leur contenu (canaux/quiz/forums) — joinCourses ne renvoie
+  // que la méta. L'erreur remonte au popup (qui l'affiche).
   const handleConfirmJoinCourses = async (programId: number, courseIds: number[]) => {
-    const joined = await api.joinCourses(programId, courseIds);
+    await api.joinCourses(programId, courseIds);
+    const courses = await api.fetchCourses(programId);
     setDashboardPrograms((programs) =>
-      programs.map((program) => {
-        if (program.id !== programId) return program;
-        const existingById = new Map(program.courses.map((course) => [course.id, course]));
-        const courses = courseIds
-          .map((id) => existingById.get(id) ?? joined.find((course) => course.id === id))
-          .filter((course): course is Course => course !== undefined);
-        return { ...program, courses };
-      })
+      programs.map((program) => (program.id === programId ? { ...program, courses } : program))
     );
   };
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
