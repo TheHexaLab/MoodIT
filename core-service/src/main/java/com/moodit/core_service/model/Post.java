@@ -20,6 +20,10 @@ public class Post {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    /** Titre d'un sujet RACINE de forum 'Thread' ; null pour une réponse / un message de canal. */
+    @Column(length = 256)
+    private String title;
+
     @Column(name = "is_pinned")
     private Boolean isPinned = false;
 

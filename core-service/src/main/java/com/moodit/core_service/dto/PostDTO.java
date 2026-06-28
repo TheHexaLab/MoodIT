@@ -15,5 +15,7 @@ public class PostDTO {
     private Integer id;
     private LocalDateTime createdAt;
     private String content;
+    /** Titre d'un sujet racine de forum 'Thread' (null sinon). */
+    private String title;
     private Boolean isPinned;
 }

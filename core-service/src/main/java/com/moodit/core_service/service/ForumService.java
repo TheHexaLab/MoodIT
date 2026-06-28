@@ -66,6 +66,7 @@ public class ForumService {
         dto.setId(post.getId());
         dto.setCreatedAt(post.getCreatedAt());
         dto.setContent(post.getContent());
+        dto.setTitle(post.getTitle());
         dto.setIsPinned(post.getIsPinned());
 
         return dto;
@@ -76,6 +77,7 @@ public class ForumService {
         dto.setId(post.getId());
         dto.setCreatedAt(post.getCreatedAt());
         dto.setContent(post.getContent());
+        dto.setTitle(post.getTitle());
         dto.setIsPinned(post.getIsPinned());
         dto.setVoteTotalValue(post.getVotes()
                 .stream()
@@ -145,6 +147,7 @@ public class ForumService {
         post.setForum(forum);
         post.setUser(user);
         post.setContent(postCreateInForumDTO.getContent());
+        post.setTitle(postCreateInForumDTO.getTitle());
         post.setIsPinned(false);
         post.setCreatedAt(LocalDateTime.now());
 

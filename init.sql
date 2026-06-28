@@ -127,6 +127,8 @@ CREATE TABLE Post(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    content TEXT NOT NULL,
+   -- Titre d'un sujet racine de forum 'Thread' (NULL pour une réponse / message de canal).
+   title VARCHAR(256),
    forum_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    post_parent_id INTEGER,
