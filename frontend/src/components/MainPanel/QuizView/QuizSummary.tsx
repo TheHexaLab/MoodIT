@@ -57,9 +57,7 @@ export function QuizSummary({ quiz, result, onReview, labels }: QuizSummaryProps
             >
               <StatusDot tone={tone} />
               <span className={styles.badge}>{QUESTION_TYPE_LABELS[question.qType]}</span>
-              <span className={styles.summaryRowText}>
-                {t.rowText(index + 1, title)}
-              </span>
+              <span className={styles.summaryRowText}>{t.rowText(title)}</span>
               <span className={styles.summaryRowScore}>
                 {t.rowScore(qResult?.earned ?? 0, qResult?.max ?? question.totalScore)}
               </span>

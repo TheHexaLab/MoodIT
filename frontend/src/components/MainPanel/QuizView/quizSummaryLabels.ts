@@ -11,8 +11,8 @@ export interface QuizSummaryLabels {
   summarySub: (earned: number, max: number, perfect: number, total: number) => string;
   /** Titre de la liste de détail. */
   detailTitle: string;
-  /** Libellé d'une ligne : « Q<n> · <titre> ». */
-  rowText: (index: number, title: string) => string;
+  /** Énoncé court de la question (2e ligne). */
+  rowText: (title: string) => string;
   /** Score d'une ligne (« earned / max pts »). */
   rowScore: (earned: number, max: number) => string;
 }
@@ -26,6 +26,6 @@ export const defaultQuizSummaryLabels: QuizSummaryLabels = {
     return `${earned} / ${max} points · ${perfect} question${s} parfaite${s} sur ${total}`;
   },
   detailTitle: 'Détail par question',
-  rowText: (index, title) => `Q${index} · ${title}`,
-  rowScore: (earned, max) => `${earned} / ${max} pts`,
+  rowText: (title) => title,
+  rowScore: (earned, max) => `${earned} / ${max}`,
 };
