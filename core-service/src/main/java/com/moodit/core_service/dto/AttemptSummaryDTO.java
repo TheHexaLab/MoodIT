@@ -5,19 +5,17 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
-import java.util.List;
+import java.time.Instant;
 
-/** Résultat corrigé d'une tentative complète. */
+/** Résumé d'une tentative de quiz (pour l'historique côté étudiant). */
 @Data
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QuizResultDTO {
-    private Integer quizId;
-    /** Tentative correspondant à ce résultat (null avant persistance, sinon renseigné). */
-    private Integer attemptId;
+public class AttemptSummaryDTO {
+    private Integer id;
     private Integer attemptNo;
     private Integer earned;
     private Integer max;
-    private List<QuestionResultDTO> questions;
+    private Instant submittedAt;
 }

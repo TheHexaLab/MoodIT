@@ -77,6 +77,7 @@ export function QuizFormBody({
   const [title, setTitle] = useState(quiz.title);
   const [isPublished, setIsPublished] = useState(!!quiz.isPublished);
   const [isDaily, setIsDaily] = useState(!!quiz.isDaily);
+  const [allowRetry, setAllowRetry] = useState(!!quiz.allowRetry);
 
   const questions = quiz.questions ?? [];
   // Réordonnancement souris + tactile (poignée), cf. usePointerReorder.
@@ -109,6 +110,7 @@ export function QuizFormBody({
       <div className={styles.toggles}>
         <Toggle label={t.published} on={isPublished} onToggle={() => setIsPublished((v) => !v)} />
         <Toggle label={t.daily} on={isDaily} onToggle={() => setIsDaily((v) => !v)} />
+        <Toggle label={t.allowRetry} on={allowRetry} onToggle={() => setAllowRetry((v) => !v)} />
       </div>
 
       <hr className={styles.divider} />
@@ -202,7 +204,7 @@ export function QuizFormBody({
             type="button"
             className={styles.primaryButton}
             disabled={!canSave || saving}
-            onClick={() => onSaveMeta({ title: title.trim(), isPublished, isDaily })}
+            onClick={() => onSaveMeta({ title: title.trim(), isPublished, isDaily, allowRetry })}
           >
             {saving ? <Spinner tone="current" size={16} /> : isNew ? t.create : t.save}
           </button>

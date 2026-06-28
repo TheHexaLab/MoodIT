@@ -29,6 +29,8 @@ export interface QuizViewLabels {
   toDashboard: string;
   /** Bouton « revoir mes réponses » (résumé). */
   reviewAnswers: string;
+  /** Bouton « refaire le quiz » (résumé, si tentatives autorisées). */
+  retryQuiz: string;
   /** Bouton « précédent ». */
   prev: string;
   /** Bouton « suivant ». */
@@ -56,6 +58,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   empty: 'Ce quiz ne contient pas encore de question.',
   toDashboard: 'Tableau de bord',
   reviewAnswers: 'Revoir mes réponses',
+  retryQuiz: 'Refaire le quiz',
   prev: 'Précédent',
   next: 'Suivant',
   submit: 'Soumettre',

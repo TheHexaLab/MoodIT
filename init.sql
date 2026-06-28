@@ -97,6 +97,8 @@ CREATE TABLE Quiz(
    title VARCHAR(128) NOT NULL,
    is_daily BOOLEAN NOT NULL DEFAULT FALSE,
    is_published BOOLEAN NOT NULL DEFAULT FALSE,
+   -- L'étudiant peut-il refaire le quiz (tentatives multiples) ?
+   allow_retry BOOLEAN NOT NULL DEFAULT FALSE,
    -- Ordre d'affichage dans la section Quiz d'un cours (réordonnable par l'enseignant).
    -- Même rôle que Forum.position / Question.order_index.
    position INTEGER NOT NULL DEFAULT 0,
@@ -212,17 +214,35 @@ CREATE TABLE Drag_Item(
    FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE
 );
 
+-- Une TENTATIVE de quiz par un utilisateur (regroupe les soumissions de la tentative).
+-- `attempt_no` = 1, 2, … par (quiz, user). Les tentatives multiples ne sont possibles
+-- que si Quiz.allow_retry = TRUE (contrôlé côté service).
+CREATE TABLE Attempt(
+   id SERIAL,
+   quiz_id INTEGER NOT NULL,
+   user_id INTEGER NOT NULL,
+   attempt_no INTEGER NOT NULL,
+   submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+   score INTEGER NOT NULL,
+   max_score INTEGER NOT NULL,
+   PRIMARY KEY(id),
+   UNIQUE(quiz_id, user_id, attempt_no),
+   FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE,
+   FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
+);
+
 CREATE TABLE Submission(
    id SERIAL,
    content TEXT,
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
    score INTEGER,
+   attempt_id INTEGER NOT NULL,
    question_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    PRIMARY KEY(id),
-   -- Une seule soumission par (utilisateur, question) : empeche de refaire une
-   -- question deja repondue (donc de re-tenter un quiz, question par question).
-   UNIQUE(user_id, question_id),
+   -- Une seule soumission par (tentative, question).
+   UNIQUE(attempt_id, question_id),
+   FOREIGN KEY(attempt_id) REFERENCES Attempt(id) ON DELETE CASCADE,
    FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
@@ -302,6 +322,7 @@ CREATE INDEX idx_language_harness_language_id ON Language(harness_language_id);
 CREATE INDEX idx_answer_question_id ON Answer(question_id);
 CREATE INDEX idx_drag_item_question_id ON Drag_Item(question_id);
 CREATE INDEX idx_submission_question_id ON Submission(question_id);
+CREATE INDEX idx_submission_attempt_id ON Submission(attempt_id);
 -- (user_id est deja couvert par la 1re colonne de l'index UNIQUE(user_id, question_id).)
 -- (submission_id est deja couvert par la 1re colonne de la cle primaire composite.)
 CREATE INDEX idx_submission_test_case_test_case_id ON Submission_Test_Case(test_case_id);
@@ -557,8 +578,8 @@ INSERT INTO Enrollment (course_id, user_id) VALUES (1, 2);  -- rosie (user 2) �
 -- ------------------------------------------------------------
 -- Quiz  (un quiz publié dans le cours 1, tous les types sauf le code)
 -- ------------------------------------------------------------
-INSERT INTO Quiz (title, is_daily, is_published, position, course_id) VALUES
-  ('Quiz découverte — tous les types (sauf code)', FALSE, TRUE, 0, 1);  -- quiz 1
+INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id) VALUES
+  ('Quiz découverte — tous les types (sauf code)', FALSE, TRUE, TRUE, 0, 1);  -- quiz 1 (réessayable)
 
 -- ------------------------------------------------------------
 -- Question  (5 questions du quiz 1 : un type chacune, sauf code)

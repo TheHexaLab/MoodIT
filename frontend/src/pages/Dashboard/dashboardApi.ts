@@ -50,6 +50,7 @@ import {
   type Quiz,
 } from '../../types/domain.ts';
 import {
+  type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
   type QuizResult,
@@ -155,6 +156,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
     position: data.position,
     isPublished: data.isPublished,
     isDaily: data.isDaily,
+    allowRetry: data.allowRetry,
     questions: (data.questions ?? []).map((q: QuestionResponse) => ({
       id: q.id,
       prompt: q.prompt,
@@ -186,6 +188,7 @@ function toQuizMeta(q: QuizResponse): Quiz {
     position: q.position,
     isPublished: q.isPublished,
     isDaily: q.isDaily,
+    allowRetry: q.allowRetry,
     questionCount: q.questionCount,
   };
 }
@@ -254,13 +257,19 @@ export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult
 }
 
 /**
- * Résultat de la tentative DÉJÀ soumise par l'utilisateur (réhydratation : tentative
- * unique → on affiche le récap au lieu de laisser refaire le quiz). `null` si pas soumis.
+ * Historique des tentatives de l'utilisateur sur un quiz (réhydratation + reprise).
+ * Liste vide = pas encore tenté.
  */
-export async function fetchQuizResult(quizId: number): Promise<QuizResult | null> {
-  const res = await apiFetch(`/api/quizzes/${quizId}/submissions/me`);
-  if (res.status === 204) return null; // pas encore soumis
-  if (!res.ok) throw new Error('Échec chargement du résultat du quiz');
+export async function fetchQuizAttempts(quizId: number): Promise<AttemptSummary[]> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts`);
+  if (!res.ok) throw new Error('Échec chargement des tentatives');
+  return await res.json();
+}
+
+/** Détail corrigé d'une tentative donnée (révision d'une tentative passée). */
+export async function fetchAttemptResult(quizId: number, attemptId: number): Promise<QuizResult> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}`);
+  if (!res.ok) throw new Error('Échec chargement de la tentative');
   return await res.json();
 }
 

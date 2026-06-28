@@ -89,6 +89,8 @@ export interface Quiz {
   isDaily?: boolean;
   /** Publié aux étudiants (table Quiz.is_published) ; un brouillon ne l'est pas. */
   isPublished?: boolean;
+  /** L'étudiant peut-il refaire le quiz (tentatives multiples, table Quiz.allow_retry) ? */
+  allowRetry?: boolean;
   createdAt?: string;
   /**
    * Questions du quiz, embarquées au chargement du détail (table Question).
@@ -356,6 +358,7 @@ export interface QuizResponse {
   position?: number;
   isPublished?: boolean;
   isDaily?: boolean;
+  allowRetry?: boolean;
   questionCount?: number;
   createdAt?: string;
 }
@@ -404,5 +407,6 @@ export interface QuizDetailResponse {
   position?: number;
   isPublished?: boolean;
   isDaily?: boolean;
+  allowRetry?: boolean;
   questions?: QuestionResponse[];
 }

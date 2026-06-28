@@ -9,8 +9,9 @@ import { Chevron } from '../../../assets/Chevron';
 import { Check } from '../../../assets/Check';
 import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
+  type FetchAttemptResultHandler,
+  type FetchAttemptsHandler,
   type FetchQuizHandler,
-  type FetchQuizResultHandler,
   type SubmitQuizHandler,
   isAnswered,
 } from './quizAttempt';
@@ -34,8 +35,10 @@ interface QuizViewProps {
   initialQuiz?: Quiz;
   /** Chargement du détail du quiz (API-ready, GET). */
   onFetchQuiz?: FetchQuizHandler;
-  /** Résultat d'une tentative déjà soumise (API-ready, GET) → ouvre sur le récap. */
-  onFetchResult?: FetchQuizResultHandler;
+  /** Historique des tentatives (API-ready, GET) → ouvre sur la dernière + reprise. */
+  onFetchAttempts?: FetchAttemptsHandler;
+  /** Détail corrigé d'une tentative (API-ready, GET) → révision d'une tentative passée. */
+  onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Retour au tableau de bord depuis le résumé (optionnel). */
@@ -54,7 +57,8 @@ const QuizView: React.FC<QuizViewProps> = ({
   channel,
   initialQuiz,
   onFetchQuiz,
-  onFetchResult,
+  onFetchAttempts,
+  onFetchAttemptResult,
   onSubmitQuiz,
   onExit,
   labels,
@@ -66,7 +70,8 @@ const QuizView: React.FC<QuizViewProps> = ({
   const attempt = useQuizAttempt({
     initialQuiz: fallbackQuiz,
     onFetchQuiz,
-    onFetchResult,
+    onFetchAttempts,
+    onFetchAttemptResult,
     onSubmitQuiz,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
@@ -146,6 +151,9 @@ const QuizView: React.FC<QuizViewProps> = ({
           <QuizSummary
             quiz={quiz}
             result={result}
+            attempts={attempt.attempts}
+            currentAttemptId={attempt.currentAttemptId}
+            onSelectAttempt={attempt.selectAttempt}
             onReview={attempt.reviewQuestion}
             labels={labels?.summary}
           />
@@ -193,11 +201,16 @@ const QuizView: React.FC<QuizViewProps> = ({
           </button>
           <button
             type="button"
-            className={styles.primaryButton}
+            className={styles.navButton}
             onClick={() => attempt.reviewQuestion(0)}
           >
             {t.reviewAnswers}
           </button>
+          {attempt.allowRetry && (
+            <button type="button" className={styles.primaryButton} onClick={attempt.retry}>
+              {t.retryQuiz}
+            </button>
+          )}
         </footer>
       );
     }

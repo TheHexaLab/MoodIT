@@ -13,13 +13,15 @@ import java.time.LocalDateTime;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "questionCount", "createdAt"})
+@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "allowRetry", "questionCount", "createdAt"})
 public class QuizDTO {
     private Integer id;
     private String title;
     private Integer position;
     private Boolean isPublished;
     private Boolean isDaily;
+    /** L'étudiant peut-il refaire le quiz ? */
+    private Boolean allowRetry;
     /** Nombre de questions (vues de liste : sans charger les questions). */
     private Integer questionCount;
     private LocalDateTime createdAt;

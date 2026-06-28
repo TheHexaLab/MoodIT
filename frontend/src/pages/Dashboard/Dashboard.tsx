@@ -648,7 +648,8 @@ export default function Dashboard() {
         onCreateForum={handleCreateForum}
         // ── Quiz : détail + résultat (réhydratation) + soumission (cf. dashboardApi). ──
         onFetchQuiz={api.fetchQuiz}
-        onFetchResult={api.fetchQuizResult}
+        onFetchAttempts={api.fetchQuizAttempts}
+        onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
       />
 

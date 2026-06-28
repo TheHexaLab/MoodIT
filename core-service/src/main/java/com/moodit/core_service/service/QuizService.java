@@ -4,10 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
+import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
+import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -35,6 +38,7 @@ public class QuizService {
     private final CourseRepository courseRepository;
     private final QTypeRepository qTypeRepository;
     private final SubmissionRepository submissionRepository;
+    private final AttemptRepository attemptRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
@@ -159,54 +163,81 @@ public class QuizService {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
 
-        // Tentative unique : une soumission existante (sur une question du quiz) bloque.
-        if (submissionRepository.countByUser_IdAndQuestion_Quiz_Id(user.getId(), quizId) > 0) {
+        long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
+        // Tentative unique si le quiz n'autorise pas la reprise.
+        if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
         }
 
-        Map<Integer, SubmittedAnswerDTO> byQuestion = (submission.getAnswers() == null ? List.<SubmittedAnswerDTO>of()
-                : submission.getAnswers()).stream()
-                .collect(Collectors.toMap(SubmittedAnswerDTO::getQuestionId, a -> a, (a, b) -> a));
-
+        Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
         QuizResultDTO result = buildResult(quiz, byQuestion);
 
-        // Persistance : une Submission par question (réponse brute + score corrigé).
+        // Nouvelle tentative (numéro = nb existant + 1).
+        Attempt attempt = new Attempt();
+        attempt.setQuiz(quiz);
+        attempt.setUser(user);
+        attempt.setAttemptNo((int) existing + 1);
+        attempt.setScore(result.getEarned());
+        attempt.setMaxScore(result.getMax());
+        Attempt savedAttempt = attemptRepository.save(attempt);
+
+        // Une Submission par question, rattachée à la tentative (réponse brute + score).
         Map<Integer, Integer> earnedByQuestion = result.getQuestions().stream()
                 .collect(Collectors.toMap(QuestionResultDTO::getQuestionId, QuestionResultDTO::getEarned));
-        LocalDateTime now = LocalDateTime.now();
         for (Question q : sortedQuestions(quiz)) {
             Submission s = new Submission();
+            s.setAttempt(savedAttempt);
             s.setUser(user);
             s.setQuestion(q);
             s.setScore(earnedByQuestion.get(q.getId()));
-            s.setSubmittedAt(now);
             s.setContent(serializeAnswer(byQuestion.get(q.getId())));
             submissionRepository.save(s);
         }
 
+        result.setAttemptId(savedAttempt.getId());
+        result.setAttemptNo(savedAttempt.getAttemptNo());
         return result;
     }
 
-    /**
-     * Résultat de la tentative DÉJÀ soumise par l'utilisateur (réhydratation : empêche
-     * de refaire le quiz). `null` s'il n'a pas encore soumis.
-     */
+    /** Historique des tentatives de l'utilisateur sur un quiz (résumés, ordre croissant). */
     @Transactional(readOnly = true)
-    public QuizResultDTO getMyResult(Integer quizId, String userEmail) {
-        Quiz quiz = quizRepository.findById(quizId)
-                .orElseThrow(QuizNotFoundException::new);
+    public List<AttemptSummaryDTO> getMyAttempts(Integer quizId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
+        return attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(quizId, user.getId()).stream()
+                .map(a -> new AttemptSummaryDTO(
+                        a.getId(),
+                        a.getAttemptNo(),
+                        a.getScore(),
+                        a.getMaxScore(),
+                        a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC)))
+                .toList();
+    }
 
-        List<Submission> subs = submissionRepository.findByUser_IdAndQuestion_Quiz_Id(user.getId(), quizId);
-        if (subs.isEmpty()) return null;
+    /** Résultat corrigé d'UNE tentative donnée (révision), restreint à son propriétaire. */
+    @Transactional(readOnly = true)
+    public QuizResultDTO getAttemptResult(Integer attemptId, String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(UserNotFoundException::new);
+        Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
+                .orElseThrow(AttemptNotFoundException::new);
 
-        Map<Integer, SubmittedAnswerDTO> byQuestion = subs.stream()
-                .collect(Collectors.toMap(
-                        s -> s.getQuestion().getId(),
-                        s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
-                        (a, b) -> a));
-        return buildResult(quiz, byQuestion);
+        Map<Integer, SubmittedAnswerDTO> byQuestion =
+                (attempt.getSubmissions() == null ? List.<Submission>of() : attempt.getSubmissions()).stream()
+                        .collect(Collectors.toMap(
+                                s -> s.getQuestion().getId(),
+                                s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
+                                (a, b) -> a));
+
+        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion);
+        result.setAttemptId(attempt.getId());
+        result.setAttemptNo(attempt.getAttemptNo());
+        return result;
+    }
+
+    private Map<Integer, SubmittedAnswerDTO> toAnswerMap(List<SubmittedAnswerDTO> answers) {
+        return (answers == null ? List.<SubmittedAnswerDTO>of() : answers).stream()
+                .collect(Collectors.toMap(SubmittedAnswerDTO::getQuestionId, a -> a, (a, b) -> a));
     }
 
     /** Corrige toutes les questions du quiz à partir des réponses fournies (sans persister). */
@@ -363,6 +394,7 @@ public class QuizService {
         quiz.setTitle(dto.getTitle());
         quiz.setIsDaily(Boolean.TRUE.equals(dto.getIsDaily()));
         quiz.setIsPublished(Boolean.TRUE.equals(dto.getIsPublished()));
+        quiz.setAllowRetry(Boolean.TRUE.equals(dto.getAllowRetry()));
         int fallback = course != null && course.getQuizzes() != null ? course.getQuizzes().size() : 0;
         quiz.setPosition(dto.getPosition() != null ? dto.getPosition() : fallback);
     }
@@ -433,6 +465,7 @@ public class QuizService {
                 .position(quiz.getPosition())
                 .isPublished(quiz.getIsPublished())
                 .isDaily(quiz.getIsDaily())
+                .allowRetry(quiz.getAllowRetry())
                 .questionCount(quiz.getQuestions() == null ? 0 : quiz.getQuestions().size())
                 .createdAt(quiz.getCreatedAt())
                 .build();
@@ -445,6 +478,7 @@ public class QuizService {
                 .position(quiz.getPosition())
                 .isPublished(quiz.getIsPublished())
                 .isDaily(quiz.getIsDaily())
+                .allowRetry(quiz.getAllowRetry())
                 .questions(quiz.getQuestions() == null ? List.of()
                         : quiz.getQuestions().stream()
                         .sorted(Comparator.comparing(Question::getOrderIndex,

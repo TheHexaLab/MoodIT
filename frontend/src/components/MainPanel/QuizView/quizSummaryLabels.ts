@@ -15,6 +15,12 @@ export interface QuizSummaryLabels {
   rowText: (title: string) => string;
   /** Score d'une ligne (« earned / max pts »). */
   rowScore: (earned: number, max: number) => string;
+  /** Meilleur score (parmi les tentatives). */
+  bestScore: (percent: number) => string;
+  /** Libellé de la barre des tentatives. */
+  attemptsLabel: string;
+  /** Puce d'une tentative (« #n · earned/max »). */
+  attemptChip: (attemptNo: number, earned: number, max: number) => string;
 }
 
 /** Textes par défaut (FR) du récapitulatif. */
@@ -28,4 +34,7 @@ export const defaultQuizSummaryLabels: QuizSummaryLabels = {
   detailTitle: 'Détail par question',
   rowText: (title) => title,
   rowScore: (earned, max) => `${earned} / ${max}`,
+  bestScore: (percent) => `Meilleur score : ${percent} %`,
+  attemptsLabel: 'Tentatives',
+  attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${earned}/${max}`,
 };

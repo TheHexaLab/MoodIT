@@ -30,6 +30,10 @@ public class Quiz {
     @Column(name = "is_published", nullable = false)
     private Boolean isPublished;
 
+    /** L'étudiant peut-il refaire le quiz (tentatives multiples) ? */
+    @Column(name = "allow_retry", nullable = false)
+    private Boolean allowRetry;
+
     /** Ordre d'affichage dans la section Quiz du cours (cf. init.sql Quiz.position). */
     @Column(nullable = false)
     private Integer position;

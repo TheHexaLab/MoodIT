@@ -28,6 +28,8 @@ export interface QuizMetaDraft {
   title: string;
   isPublished: boolean;
   isDaily: boolean;
+  /** L'étudiant peut-il refaire le quiz (tentatives multiples) ? */
+  allowRetry: boolean;
 }
 
 /** Brouillon d'une option de réponse (Answer sans id pour les nouvelles). */

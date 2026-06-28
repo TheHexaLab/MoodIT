@@ -26,8 +26,9 @@ import ForumView, {
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
 import {
+  type FetchAttemptResultHandler,
+  type FetchAttemptsHandler,
   type FetchQuizHandler,
-  type FetchQuizResultHandler,
   type SubmitQuizHandler,
 } from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
@@ -80,8 +81,10 @@ interface MainPanelProps {
   onCreateQuiz?: () => void;
   /** Chargement du detail d'un quiz (API-ready ; voir QuizView). */
   onFetchQuiz?: FetchQuizHandler;
-  /** Résultat d'une tentative déjà soumise (API-ready ; voir QuizView). */
-  onFetchResult?: FetchQuizResultHandler;
+  /** Historique des tentatives (API-ready ; voir QuizView). */
+  onFetchAttempts?: FetchAttemptsHandler;
+  /** Détail corrigé d'une tentative (API-ready ; voir QuizView). */
+  onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Ouvre le formulaire de creation de forum (admin). */
@@ -118,7 +121,8 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onCreateQuiz,
   onCreateForum,
   onFetchQuiz,
-  onFetchResult,
+  onFetchAttempts,
+  onFetchAttemptResult,
   onSubmitQuiz,
 }) => {
   const content = ((): React.ReactElement => {
@@ -180,7 +184,8 @@ const MainPanel: React.FC<MainPanelProps> = ({
             course={course}
             channel={channel}
             onFetchQuiz={onFetchQuiz}
-            onFetchResult={onFetchResult}
+            onFetchAttempts={onFetchAttempts}
+            onFetchAttemptResult={onFetchAttemptResult}
             onSubmitQuiz={onSubmitQuiz}
           />
         );

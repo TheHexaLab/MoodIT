@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Quiz } from '../../../types/domain';
 import {
   type AttemptAnswers,
+  type AttemptSummary,
+  type FetchAttemptResultHandler,
+  type FetchAttemptsHandler,
   type FetchQuizHandler,
-  type FetchQuizResultHandler,
   type QuestionAnswer,
   type QuizResult,
   type SubmitQuizHandler,
@@ -26,10 +28,12 @@ interface UseQuizAttemptParams {
   /** Chargement du détail (API-ready, GET). Absent → on reste sur `initialQuiz`. */
   onFetchQuiz?: FetchQuizHandler;
   /**
-   * Résultat d'une tentative déjà soumise (API-ready, GET). Si non `null` au chargement,
-   * la vue s'ouvre directement sur le récap (tentative unique : pas de re-passation).
+   * Historique des tentatives (API-ready, GET). Non vide au chargement → on ouvre sur
+   * le récap de la DERNIÈRE tentative ; vide → passation.
    */
-  onFetchResult?: FetchQuizResultHandler;
+  onFetchAttempts?: FetchAttemptsHandler;
+  /** Détail corrigé d'une tentative (API-ready, GET) : révision d'une tentative passée. */
+  onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
@@ -63,6 +67,18 @@ export interface QuizAttemptApi {
   submitting: boolean;
   submitError: string | null;
 
+  // ── Tentatives ──
+  /** Historique des tentatives (résumés), ordre croissant. */
+  attempts: AttemptSummary[];
+  /** Tentative actuellement affichée au récap (null si passation en cours). */
+  currentAttemptId: number | null;
+  /** Le quiz autorise-t-il une nouvelle tentative ? */
+  allowRetry: boolean;
+  /** Relance une nouvelle tentative (repasse en `taking`). */
+  retry: () => void;
+  /** Affiche le récap d'une tentative passée. */
+  selectAttempt: (attemptId: number) => void;
+
   // ── Saisie ──
   setAnswer: (questionId: number, answer: QuestionAnswer) => void;
 
@@ -82,15 +98,16 @@ export interface QuizAttemptApi {
 }
 
 /**
- * Source de vérité d'une tentative de quiz : charge le détail (API-ready),
- * accumule les réponses, pilote la machine de phases et délègue la correction au
- * backend (ou au grader local en mode mock). Le composant est remonté via `key`
- * au changement de quiz, donc l'état repart de zéro à chaque quiz.
+ * Source de vérité d'une tentative de quiz : charge le détail + l'historique des
+ * tentatives (API-ready), accumule les réponses, pilote la machine de phases et délègue
+ * la correction au backend (ou au grader local en mode mock). Remonté via `key` au
+ * changement de quiz → l'état repart de zéro à chaque quiz.
  */
 export function useQuizAttempt({
   initialQuiz,
   onFetchQuiz,
-  onFetchResult,
+  onFetchAttempts,
+  onFetchAttemptResult,
   onSubmitQuiz,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
@@ -107,12 +124,17 @@ export function useQuizAttempt({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const [attempts, setAttempts] = useState<AttemptSummary[]>([]);
+  const [currentAttemptId, setCurrentAttemptId] = useState<number | null>(null);
+
   const mountedRef = useRef(true);
   const fetchRef = useRef(onFetchQuiz);
-  const fetchResultRef = useRef(onFetchResult);
+  const fetchAttemptsRef = useRef(onFetchAttempts);
+  const fetchAttemptResultRef = useRef(onFetchAttemptResult);
   useEffect(() => {
     fetchRef.current = onFetchQuiz;
-    fetchResultRef.current = onFetchResult;
+    fetchAttemptsRef.current = onFetchAttempts;
+    fetchAttemptResultRef.current = onFetchAttemptResult;
   });
   useEffect(() => {
     mountedRef.current = true;
@@ -123,7 +145,7 @@ export function useQuizAttempt({
 
   const questionCount = quiz.questions?.length ?? 0;
 
-  /** Charge (ou recharge) le détail du quiz via `onFetchQuiz`. */
+  /** Charge le détail du quiz + l'historique ; ouvre sur la dernière tentative s'il y en a. */
   const reload = useCallback(async () => {
     const fetchQuiz = fetchRef.current;
     if (!fetchQuiz) return;
@@ -131,18 +153,26 @@ export function useQuizAttempt({
     setLoadError(null);
     try {
       const fetched = await fetchQuiz(initialQuiz.id);
-      // Tentative unique : si l'utilisateur a déjà soumis, on ouvre sur le récap.
-      const existing = fetchResultRef.current ? await fetchResultRef.current(initialQuiz.id) : null;
+      const history = fetchAttemptsRef.current ? await fetchAttemptsRef.current(initialQuiz.id) : [];
+      const last = history.length > 0 ? history[history.length - 1] : null;
+      // Récap de la dernière tentative si elle existe (et qu'on sait la charger).
+      const lastResult =
+        last && fetchAttemptResultRef.current
+          ? await fetchAttemptResultRef.current(initialQuiz.id, last.id)
+          : null;
       if (!mountedRef.current) return;
       setQuiz(fetched);
       setAnswers(initAnswers(fetched));
       setTouched(new Set());
       setCurrentIndex(0);
-      if (existing) {
-        setResult(existing);
+      setAttempts(history);
+      if (lastResult) {
+        setResult(lastResult);
+        setCurrentAttemptId(last ? last.id : null);
         setPhase('summary');
       } else {
         setResult(null);
+        setCurrentAttemptId(null);
         setPhase('taking');
       }
     } catch {
@@ -186,7 +216,14 @@ export function useQuizAttempt({
         : gradeQuiz(quiz, answers); // repli : correction locale (mode mock)
       if (!mountedRef.current) return;
       setResult(graded);
+      setCurrentAttemptId(graded.attemptId ?? null);
       setPhase('summary');
+      // Met à jour l'historique avec la nouvelle tentative.
+      const refresh = fetchAttemptsRef.current;
+      if (refresh) {
+        const history = await refresh(quiz.id);
+        if (mountedRef.current) setAttempts(history);
+      }
     } catch {
       if (!mountedRef.current) return;
       setSubmitError(submitErrorMessage);
@@ -195,12 +232,45 @@ export function useQuizAttempt({
     }
   }, [quiz, answers, onSubmitQuiz, submitErrorMessage]);
 
+  /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */
+  const retry = useCallback(() => {
+    setAnswers(initAnswers(quiz));
+    setTouched(new Set());
+    setCurrentIndex(0);
+    setResult(null);
+    setCurrentAttemptId(null);
+    setSubmitError(null);
+    setPhase('taking');
+  }, [quiz]);
+
+  /** Affiche le récap d'une tentative passée (charge son détail corrigé). */
+  const selectAttempt = useCallback(async (attemptId: number) => {
+    const fetchAttemptResult = fetchAttemptResultRef.current;
+    if (!fetchAttemptResult) return;
+    setLoading(true);
+    try {
+      const attemptResult = await fetchAttemptResult(quiz.id, attemptId);
+      if (!mountedRef.current) return;
+      setResult(attemptResult);
+      setCurrentAttemptId(attemptId);
+      setCurrentIndex(0);
+      setPhase('summary');
+    } catch {
+      if (!mountedRef.current) return;
+      setLoadError(loadErrorMessage);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [quiz.id, loadErrorMessage]);
+
   const reviewQuestion = useCallback((index: number) => {
     setCurrentIndex(index);
     setPhase('review');
   }, []);
 
   const backToSummary = useCallback(() => setPhase('summary'), []);
+
+  const allowRetry = Boolean(quiz.allowRetry);
 
   return useMemo<QuizAttemptApi>(
     () => ({
@@ -215,6 +285,11 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
+      attempts,
+      currentAttemptId,
+      allowRetry,
+      retry,
+      selectAttempt: (attemptId: number) => void selectAttempt(attemptId),
       setAnswer,
       goNext,
       goPrev,
@@ -235,6 +310,11 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
+      attempts,
+      currentAttemptId,
+      allowRetry,
+      retry,
+      selectAttempt,
       setAnswer,
       goNext,
       goPrev,

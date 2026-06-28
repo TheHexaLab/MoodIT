@@ -11,6 +11,8 @@ export interface QuizFormLabels {
   published: string;
   /** Interrupteur « quiz du jour ». */
   daily: string;
+  /** Interrupteur « autoriser les nouvelles tentatives ». */
+  allowRetry: string;
   /** Titre de la section des questions. */
   questionsSection: string;
   /** Formatte un total de points (badge + méta de section). */
@@ -37,6 +39,7 @@ export const defaultQuizFormLabels: QuizFormLabels = {
   titlePlaceholder: 'Titre du quiz',
   published: 'Publié',
   daily: 'Quiz du jour',
+  allowRetry: 'Autoriser les reprises',
   questionsSection: 'Questions',
   points: (value) => `${value} pts`,
   addQuestion: 'Ajouter',

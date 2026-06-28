@@ -4,13 +4,19 @@ import { Check } from '../../../assets/Check';
 import { X } from '../../../assets/X';
 import { Chevron } from '../../../assets/Chevron';
 import { QUESTION_TYPE_LABELS, type Quiz } from '../../../types/domain';
-import { type QuizResult } from './quizAttempt';
+import { type AttemptSummary, type QuizResult } from './quizAttempt';
 import { scoreTone, type ScoreTone } from './scoreTone';
 import { defaultQuizSummaryLabels, type QuizSummaryLabels } from './quizSummaryLabels';
 
 interface QuizSummaryProps {
   quiz: Quiz;
   result: QuizResult;
+  /** Historique des tentatives (≥ 2 → barre de sélection). */
+  attempts: AttemptSummary[];
+  /** Tentative actuellement affichée (surlignée dans la barre). */
+  currentAttemptId: number | null;
+  /** Affiche le récap d'une tentative passée. */
+  onSelectAttempt: (attemptId: number) => void;
   /** Ouvre la révision de la question d'index donné. */
   onReview: (index: number) => void;
   /** Textes (surcharge partielle des défauts). */
@@ -21,11 +27,24 @@ interface QuizSummaryProps {
  * Écran récapitulatif post-soumission : score global (pourcentage), volumétrie, et
  * détail cliquable par question (chaque ligne ouvre la révision correspondante).
  */
-export function QuizSummary({ quiz, result, onReview, labels }: QuizSummaryProps): React.ReactElement {
+export function QuizSummary({
+  quiz,
+  result,
+  attempts,
+  currentAttemptId,
+  onSelectAttempt,
+  onReview,
+  labels,
+}: QuizSummaryProps): React.ReactElement {
   const t = { ...defaultQuizSummaryLabels, ...labels };
   const questions = quiz.questions ?? [];
   const percent = result.max > 0 ? Math.round((result.earned / result.max) * 100) : 0;
   const perfectCount = result.questions.filter((q) => q.max > 0 && q.earned >= q.max).length;
+  // Meilleur score parmi les tentatives (affiché quand il y en a plusieurs).
+  const bestPercent = attempts.reduce(
+    (best, a) => Math.max(best, a.max > 0 ? Math.round((a.earned / a.max) * 100) : 0),
+    0
+  );
 
   return (
     <article className={styles.card}>
@@ -38,7 +57,33 @@ export function QuizSummary({ quiz, result, onReview, labels }: QuizSummaryProps
         <div className={styles.summarySub}>
           {t.summarySub(result.earned, result.max, perfectCount, questions.length)}
         </div>
+        {attempts.length > 1 && (
+          <div className={styles.summarySub}>{t.bestScore(bestPercent)}</div>
+        )}
       </div>
+
+      {attempts.length > 1 && (
+        <div className={styles.attemptBar}>
+          <span className={styles.attemptBarLabel}>{t.attemptsLabel}</span>
+          <div className={styles.attemptChips}>
+            {attempts.map((a) => (
+              <button
+                type="button"
+                key={a.id}
+                className={[
+                  styles.attemptChip,
+                  a.id === currentAttemptId ? styles.attemptChipActive : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => onSelectAttempt(a.id)}
+              >
+                {t.attemptChip(a.attemptNo, a.earned, a.max)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <hr className={styles.summaryDivider} />
 

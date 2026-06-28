@@ -13,12 +13,14 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "questions"})
+@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "allowRetry", "questions"})
 public class QuizDetailDTO {
     private Integer id;
     private String title;
     private Integer position;
     private Boolean isPublished;
     private Boolean isDaily;
+    /** L'étudiant peut-il refaire le quiz ? */
+    private Boolean allowRetry;
     private List<QuestionDTO> questions;
 }

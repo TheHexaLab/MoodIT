@@ -1,5 +1,6 @@
 package com.moodit.core_service.controller;
 
+import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
@@ -8,6 +9,8 @@ import com.moodit.core_service.service.QuizService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/quizzes") // /api/quizzes (préfixe /api ajouté par WebMvcConfig)
@@ -22,16 +25,21 @@ public class QuizController {
         return ResponseEntity.ok(quizService.getQuizDetail(quizId));
     }
 
-    /**
-     * Résultat de la tentative déjà soumise par l'utilisateur courant (réhydratation :
-     * le front affiche le récap au lieu de laisser refaire le quiz). 204 si pas soumis.
-     */
-    @GetMapping("/{quizId}/submissions/me")
-    public ResponseEntity<QuizResultDTO> getMyResult(
+    /** Historique des tentatives de l'utilisateur courant sur ce quiz (résumés). */
+    @GetMapping("/{quizId}/attempts")
+    public ResponseEntity<List<AttemptSummaryDTO>> getMyAttempts(
             @PathVariable Integer quizId,
             @RequestHeader("X-User-Email") String email) {
-        QuizResultDTO result = quizService.getMyResult(quizId, email);
-        return result == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(result);
+        return ResponseEntity.ok(quizService.getMyAttempts(quizId, email));
+    }
+
+    /** Détail corrigé d'une tentative donnée (révision), restreint à son propriétaire. */
+    @GetMapping("/{quizId}/attempts/{attemptId}")
+    public ResponseEntity<QuizResultDTO> getAttemptResult(
+            @PathVariable Integer quizId,
+            @PathVariable Integer attemptId,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.getAttemptResult(attemptId, email));
     }
 
     /** Met à jour un quiz complet (méta + questions) en un appel. */

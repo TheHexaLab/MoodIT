@@ -78,4 +78,12 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.CONFLICT) //Code 409
                 .body(ex.getMessage());
     }
+
+    //Tentative introuvable
+    @ExceptionHandler(AttemptNotFoundException.class)
+    public ResponseEntity<String> handleAttemptNotFound(AttemptNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND) //Code 404
+                .body(ex.getMessage());
+    }
 }

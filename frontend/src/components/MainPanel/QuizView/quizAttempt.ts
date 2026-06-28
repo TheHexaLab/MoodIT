@@ -189,9 +189,21 @@ export interface QuestionResult {
 /** Résultat corrigé d'une tentative complète. */
 export interface QuizResult {
   quizId: number;
+  /** Tentative correspondante (présent une fois soumise/chargée). */
+  attemptId?: number;
+  attemptNo?: number;
   earned: number;
   max: number;
   questions: QuestionResult[];
+}
+
+/** Résumé d'une tentative (historique). */
+export interface AttemptSummary {
+  id: number;
+  attemptNo: number;
+  earned: number;
+  max: number;
+  submittedAt?: string;
 }
 
 /** Transforme l'état de réponses en charge utile de soumission. */
@@ -258,7 +270,13 @@ export type FetchQuizHandler = (quizId: number) => MaybePromise<Quiz>;
 export type SubmitQuizHandler = (submission: QuizSubmission) => MaybePromise<QuizResult>;
 
 /**
- * Chargement du résultat d'une tentative DÉJÀ soumise (réhydratation, tentative unique).
- * Renvoie `null` si l'utilisateur n'a pas encore soumis. Absent → on ouvre en passation.
+ * Historique des tentatives de l'utilisateur sur un quiz (réhydratation). Liste vide →
+ * pas encore tenté → on ouvre en passation. Absent → idem.
  */
-export type FetchQuizResultHandler = (quizId: number) => MaybePromise<QuizResult | null>;
+export type FetchAttemptsHandler = (quizId: number) => MaybePromise<AttemptSummary[]>;
+
+/** Chargement du détail corrigé d'UNE tentative (révision d'une tentative passée). */
+export type FetchAttemptResultHandler = (
+  quizId: number,
+  attemptId: number
+) => MaybePromise<QuizResult>;

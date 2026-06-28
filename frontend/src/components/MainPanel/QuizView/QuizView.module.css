@@ -385,6 +385,50 @@
     margin: 1rem 0;
 }
 
+/* Barre d'historique des tentatives (récap). */
+.attemptBar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.attemptBarLabel {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.attemptChips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.attemptChip {
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    padding: 0.25rem 0.625rem;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.attemptChip:hover {
+    border-color: var(--brand-teal);
+}
+
+.attemptChipActive {
+    border-color: var(--brand-teal);
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+}
+
 .summaryListTitle {
     margin: 0 0 0.75rem;
     color: var(--text);
