@@ -181,7 +181,7 @@ const QuizView: React.FC<QuizViewProps> = ({
 
     if (phase === 'summary') {
       return (
-        <footer className={styles.footer}>
+        <footer className={`${styles.footer} ${styles.summaryFooter}`}>
           <button
             type="button"
             className={styles.navButton}

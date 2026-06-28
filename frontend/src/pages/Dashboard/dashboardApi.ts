@@ -661,13 +661,17 @@ export async function changeRole(change: RoleChange): Promise<void> {
  */
 export async function fetchMessages(channelId: number): Promise<ChannelMessage[]> {
   console.log('fetchMessages');
-  const res = await apiFetch(`/api/forums/${channelId}/posts`);
+  const res = await apiFetch(`/api/forums/${channelId}/messages`);
 
   if (!res.ok) {
     throw new Error('Échec chargement des messages');
   }
 
-  return await res.json();
+  const messages = await res.json();
+
+  console.log('Messages: ', messages);
+
+  return messages;
 }
 
 /**
@@ -682,7 +686,7 @@ export async function sendMessage(
   clientMessageId: string
 ): Promise<void> {
   console.log('sendMessage');
-  const res = await apiFetch('/api/forums/post', {
+  const res = await apiFetch('/api/forums/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

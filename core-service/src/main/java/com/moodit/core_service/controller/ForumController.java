@@ -41,6 +41,13 @@ public class ForumController {
         return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren));
     }
 
+    @GetMapping("/{forumId}/messages")
+    public ResponseEntity<List<PostVoteUserDTO>> getAllMessagesByForum(@PathVariable Integer forumId) {
+        return ResponseEntity.ok(
+                forumService.getAllMessagesByForum(forumId)
+        );
+    }
+
     @GetMapping("/{forumId}/posts")
     public ResponseEntity<List<PostVoteUserDTO>> getAllPostsByForum(
             @PathVariable Integer forumId,
@@ -53,6 +60,14 @@ public class ForumController {
     //endregion
 
     //region POST
+    @PostMapping("/messages")
+    public ResponseEntity<Void> addMessageToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
+                                               @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
+        forumService.addPostToForum(postCreateInForumDTO, email);
+
+        return ResponseEntity.noContent().build(); //code 204
+    }
+
     @PostMapping("/posts")
     public ResponseEntity<Void> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
                                                @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement

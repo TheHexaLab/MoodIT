@@ -139,6 +139,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const messageRefs = useRef(new Map<number, HTMLLIElement>());
   /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
   const listRef = useRef<HTMLUListElement>(null);
+  /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
+  const composerRef = useRef<HTMLInputElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
 
@@ -211,9 +213,10 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     }
   }
 
-  /** Démarre une réponse à un message (affiche la barre au-dessus du composer). */
+  /** Démarre une réponse à un message (affiche la barre au-dessus du composer + focus). */
   function startReply(message: ChannelMessage) {
     setReplyingTo(message);
+    composerRef.current?.focus();
   }
 
   /** L'utilisateur connecte est-il l'auteur de ce message ? */
@@ -433,6 +436,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                 +
               </button>
               <input
+                ref={composerRef}
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}

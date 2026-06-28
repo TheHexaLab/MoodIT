@@ -21,7 +21,10 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -64,18 +67,23 @@ public class ForumService {
         PostDTO dto = new PostDTO();
 
         dto.setId(post.getId());
-        dto.setCreatedAt(post.getCreatedAt());
+        dto.setCreatedAt(toUtcInstant(post.getCreatedAt()));
         dto.setContent(post.getContent());
         dto.setTitle(post.getTitle());
         dto.setIsPinned(post.getIsPinned());
 
         return dto;
     }
+
+    /** Le timestamp BD (TIMESTAMP sans zone, stocké en UTC) → Instant UTC pour le client. */
+    private Instant toUtcInstant(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
+    }
     public PostVoteUserDTO toPostVoteUserDTO(Post post, boolean loadChildren) {
         PostVoteUserDTO dto = new PostVoteUserDTO();
 
         dto.setId(post.getId());
-        dto.setCreatedAt(post.getCreatedAt());
+        dto.setCreatedAt(toUtcInstant(post.getCreatedAt()));
         dto.setContent(post.getContent());
         dto.setTitle(post.getTitle());
         dto.setIsPinned(post.getIsPinned());
@@ -84,6 +92,7 @@ public class ForumService {
                 .mapToInt(Vote::getValue)
                 .sum());
         dto.setUserId(post.getUser().getId());
+        dto.setPostParentId(post.getParent() != null ? post.getParent().getId() : null);
         dto.setAuthor(toAuthorDTO(post.getUser()));
         dto.setChildrenCount(post.getChildren().size());
         if (loadChildren) {
@@ -133,6 +142,21 @@ public class ForumService {
                 .map(p -> toPostVoteUserDTO(p, loadChildren))
                 .toList();
     }
+
+    /**
+     * TOUS les messages d'un canal 'Discussion' (racines ET réponses), à PLAT et triés
+     * chronologiquement. Le front les relie via `postParentId` (style chat/Discord).
+     */
+    public List<PostVoteUserDTO> getAllMessagesByForum(Integer forumId) {
+        Forum forum = forumRepository.findById(forumId)
+                .orElseThrow(ForumNotFoundException::new);
+
+        return forum.getPosts().stream()
+                .sorted(Comparator.comparing(Post::getCreatedAt,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(p -> toPostVoteUserDTO(p, false))
+                .toList();
+    }
     //endregion
 
     //region POST
@@ -149,7 +173,7 @@ public class ForumService {
         post.setContent(postCreateInForumDTO.getContent());
         post.setTitle(postCreateInForumDTO.getTitle());
         post.setIsPinned(false);
-        post.setCreatedAt(LocalDateTime.now());
+        // createdAt est généré par la BD (@CreationTimestamp source=DB) → ordre cohérent.
 
         if (postCreateInForumDTO.getParentPostId() != null) {
             Post parent = forum.getPosts()
