@@ -494,6 +494,8 @@ export default function Dashboard() {
     username: currentUser.username,
     firstName: currentUser.firstName ?? '',
     lastName: currentUser.lastName ?? '',
+    avatarColor: currentUser.avatarColor,
+    avatarUrl: currentUser.avatarUrl,
   };
 
   // Envoi / édition / suppression de message : délégués à la couche API
