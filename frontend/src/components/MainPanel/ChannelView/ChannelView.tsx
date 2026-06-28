@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './ChannelView.module.css';
+import { Spinner } from '../../Spinner/Spinner';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
@@ -254,7 +255,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
         <div data-loading={loading || loadError ? '' : undefined}>
           {loading ? (
             <div>
-              <span className={styles.spinner} aria-hidden="true" />
+              <Spinner size={24} />
               <p>{t.loading}</p>
             </div>
           ) : loadError ? (

@@ -13,10 +13,11 @@ import java.time.LocalDateTime;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "isPublished", "isDaily", "createdAt"})
+@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "createdAt"})
 public class QuizDTO {
     private Integer id;
     private String title;
+    private Integer position;
     private Boolean isPublished;
     private Boolean isDaily;
     private LocalDateTime createdAt;

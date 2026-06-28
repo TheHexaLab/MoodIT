@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './McpManagementPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Sparkles } from '../../assets/Sparkles.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
@@ -62,7 +63,7 @@ interface McpManagementPopupProps {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 /** Parse l'analyse structurée sérialisée dans MCP_Response.content (null si invalide). */

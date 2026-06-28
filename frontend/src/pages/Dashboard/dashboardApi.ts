@@ -55,8 +55,8 @@ import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts'
 export type { DemoProgram };
 
 // ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 5000;
-const SIMULATE_SEND_FAILURE: boolean = true;
+const SIMULATE_DELAY = 1000;
+const SIMULATE_SEND_FAILURE: boolean = false;
 const SIMULATE_FETCH_FAILURE: boolean = false;
 // DEV : à `true`, les fonctions de chargement de quiz renvoient les QUIZ MOCK
 // (quizAllQuestionTypesMock). À `false`, elles renvoient du vide (comme un backend
@@ -125,6 +125,7 @@ interface ForumResponse {
 interface QuizResponse {
   id: number;
   title: string;
+  position?: number;
   isPublished?: boolean;
   isDaily?: boolean;
   createdAt?: string;
@@ -168,6 +169,7 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
     quizzes: (course.quizzes ?? []).map((q) => ({
       id: q.id,
       title: q.title,
+      position: q.position,
       isPublished: q.isPublished,
       isDaily: q.isDaily,
       createdAt: q.createdAt,

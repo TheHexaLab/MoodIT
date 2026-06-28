@@ -6,11 +6,19 @@ import { GripVertical } from '../../assets/GripVertical';
 import { Pencil } from '../../assets/Pencil';
 import { TrashCan } from '../../assets/TrashCan';
 import { Plus } from '../../assets/Plus';
+import { Spinner } from '../Spinner/Spinner';
 import { type Quiz } from '../../types/domain';
+import { defaultQuizListLabels, type QuizListLabels } from './quizListLabels';
 
 interface QuizListBodyProps {
   /** Quiz du cours (ordre d'affichage = `position`). */
   quizzes: Quiz[];
+  /** Chargement initial de la liste en cours (1er fetch non encore résolu). */
+  loading?: boolean;
+  /** Quiz dont le détail charge (clic sur le crayon) : spinner sur ce crayon. */
+  openingQuizId?: number | null;
+  /** Textes (surcharge partielle des défauts). */
+  labels?: Partial<QuizListLabels>;
   onCreate: () => void;
   onEdit: (quiz: Quiz) => void;
   onDelete: (quiz: Quiz) => void;
@@ -18,15 +26,15 @@ interface QuizListBodyProps {
   onReorder: (quizIds: number[]) => void;
 }
 
-/** Icône étoile (quiz du jour). Pleine si actif. */
-function Star({ on }: { on: boolean }): React.ReactElement {
+/** Icône éclair (quiz du jour) — même tracé que l'icône de type quiz. Pleine si actif. */
+function Bolt({ on }: { on: boolean }): React.ReactElement {
   return (
-    <span className={[styles.star, on ? styles.starOn : ''].filter(Boolean).join(' ')}>
-      <svg width={16} height={16} viewBox="0 0 16 16" fill={on ? 'currentColor' : 'none'}>
+    <span className={[styles.bolt, on ? styles.boltOn : ''].filter(Boolean).join(' ')}>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'}>
         <path
-          d="M8 1.5l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4 4.3 13l.8-4.2L2 5.9l4.2-.5L8 1.5z"
+          d="M13 2 3 14h9l-1 8 10-12h-9z"
           stroke="currentColor"
-          strokeWidth="1.2"
+          strokeWidth="1.8"
           strokeLinejoin="round"
         />
       </svg>
@@ -42,11 +50,15 @@ function Star({ on }: { on: boolean }): React.ReactElement {
  */
 export function QuizListBody({
   quizzes,
+  loading = false,
+  openingQuizId = null,
+  labels,
   onCreate,
   onEdit,
   onDelete,
   onReorder,
 }: QuizListBodyProps): React.ReactElement {
+  const t = { ...defaultQuizListLabels, ...labels };
   // Réordonnancement souris + tactile (poignée), cf. usePointerReorder.
   const { order, draggingId, onGripPointerDown } = usePointerReorder(
     quizzes.map((q) => q.id),
@@ -61,6 +73,15 @@ export function QuizListBody({
   return (
     <>
       <div className={styles.list}>
+        {loading && ordered.length === 0 && (
+          <div className={styles.listLoading} role="status" aria-live="polite" aria-busy="true">
+            <Spinner size={26} />
+            <span>{t.loading}</span>
+          </div>
+        )}
+        {!loading && ordered.length === 0 && (
+          <p className={styles.listEmpty}>{t.empty}</p>
+        )}
         {ordered.map((quiz) => (
           <div
             key={quiz.id}
@@ -82,7 +103,7 @@ export function QuizListBody({
             >
               <GripVertical width={16} height={16} />
             </span>
-            <Star on={!!quiz.isDaily} />
+            <Bolt on={!!quiz.isDaily} />
             <div className={styles.rowBody}>
               <div className={styles.rowTitleLine}>
                 <span className={styles.rowTitle}>{quiz.title}</span>
@@ -92,11 +113,11 @@ export function QuizListBody({
                     quiz.isPublished ? styles.badgePublished : styles.badgeDraft,
                   ].join(' ')}
                 >
-                  {quiz.isPublished ? 'Publié' : 'Brouillon'}
+                  {quiz.isPublished ? t.published : t.draft}
                 </span>
               </div>
               <span className={styles.rowSub}>
-                {quiz.questions?.length ?? quiz.questionCount ?? 0} questions
+                {t.questionsCount(quiz.questions?.length ?? quiz.questionCount ?? 0)}
               </span>
             </div>
             <div
@@ -110,18 +131,24 @@ export function QuizListBody({
               <button
                 type="button"
                 className={styles.iconButton}
-                aria-label={`Modifier ${quiz.title}`}
+                aria-label={t.editAria(quiz.title)}
+                aria-busy={openingQuizId === quiz.id}
+                disabled={openingQuizId === quiz.id}
                 onClick={(e) => {
                   e.stopPropagation();
                   onEdit(quiz);
                 }}
               >
-                <Pencil width={15} height={15} />
+                {openingQuizId === quiz.id ? (
+                  <Spinner size={15} />
+                ) : (
+                  <Pencil width={15} height={15} />
+                )}
               </button>
               <button
                 type="button"
                 className={[styles.iconButton, styles.iconButtonDanger].join(' ')}
-                aria-label={`Supprimer ${quiz.title}`}
+                aria-label={t.deleteAria(quiz.title)}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(quiz);
@@ -136,7 +163,7 @@ export function QuizListBody({
 
       <EditorFooter>
         <button type="button" className={styles.addButton} onClick={onCreate}>
-          <Plus width={14} height={14} /> Créer un quiz
+          <Plus width={14} height={14} /> {t.create}
         </button>
       </EditorFooter>
     </>

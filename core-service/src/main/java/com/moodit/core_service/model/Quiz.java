@@ -29,6 +29,10 @@ public class Quiz {
     @Column(name = "is_published", nullable = false)
     private Boolean isPublished;
 
+    /** Ordre d'affichage dans la section Quiz du cours (cf. init.sql Quiz.position). */
+    @Column(nullable = false)
+    private Integer position;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

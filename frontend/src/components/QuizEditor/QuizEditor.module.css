@@ -125,13 +125,15 @@
     background: none;
     color: var(--text-muted);
     cursor: pointer;
-    transition: color 0.15s ease, transform 0.1s ease;
+    transition: color 0.15s ease, opacity 0.1s ease;
 }
 .backChevron:hover { color: var(--text); }
-.backChevron:active { transform: scale(0.85); }
+/* Retour visuel au clic via l'OPACITÉ (pas un scale) : un scale rétrécit le bouton
+   sous le curseur au mousedown → les clics près du bord ne déclenchent pas le clic. */
+.backChevron:active { opacity: 0.55; }
 .closeButton { font-size: 1.125rem; }
 .closeButton:hover { color: var(--text); }
-.closeButton:active { transform: scale(0.85); }
+.closeButton:active { opacity: 0.55; }
 
 /* ── Champs (label + contrôle) ── */
 .field { display: flex; flex-direction: column; gap: 0.625rem; }
@@ -396,6 +398,26 @@
     gap: 0.5rem;
 }
 
+/* Placeholder de la liste (chargement / vide) : message discret centré. */
+.listEmpty {
+    margin: 0;
+    padding: 1.25rem 0.5rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Chargement de la liste : spinner + texte, centrés verticalement. */
+.listLoading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1.5rem 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
 /* Petit espacement avant la scrollbar quand la liste déborde (≥ 5 éléments). */
 .list.questionList:has(> :nth-child(6)) {
     padding-right: 0.5rem;
@@ -619,8 +641,8 @@
 .iconButtonDanger:hover { background: var(--shadow-danger); color: var(--danger); }
 
 /* Étoile « quiz du jour ». */
-.star { color: var(--text-muted); display: inline-flex; flex: 0 0 auto; }
-.starOn { color: var(--accent-amber); }
+.bolt { color: var(--text-muted); display: inline-flex; flex: 0 0 auto; }
+.boltOn { color: var(--accent-amber); }
 
 /* Badges (type / statut / points). */
 .badge {
@@ -765,9 +787,43 @@
     border-radius: 0.625rem;
     padding: 0.625rem;
 }
+/* En-tête d'un harnais : bloc de champs (nom + poids) à gauche, poubelle à droite —
+   `align-items: center` garde la poubelle centrée verticalement, même quand les
+   champs passent sur deux lignes en mobile. */
 .harnessCardHead { display: flex; align-items: center; gap: 0.5rem; }
+.harnessFields { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 auto; min-width: 0; }
+.weightField { display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto; }
 .weightLabel { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; flex: 0 0 auto; }
 .weightInput { flex: 0 0 3.25rem; text-align: center; }
+
+/* Mobile : nom et poids empilés sur une colonne. La poubelle est placée sur la
+   LIGNE DU NOM (centrée verticalement par rapport à l'input de nom), le poids
+   passant en dessous sur toute la largeur. On déplie `.harnessFields` (display:
+   contents) pour que ses enfants participent à la grille du conteneur. */
+@media (max-width: 30rem) {
+    .harnessCardHead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "name   trash"
+            "weight weight";
+        column-gap: 0.5rem;
+        row-gap: 0.5rem;
+        align-items: center;
+    }
+    .harnessFields {
+        display: contents;
+    }
+    .harnessFields > .input {
+        grid-area: name;
+    }
+    .weightField {
+        grid-area: weight;
+    }
+    .harnessCardHead > .iconButton {
+        grid-area: trash;
+    }
+}
 
 /* Pas de flèches d'incrémentation/décrémentation sur les champs nombre. */
 .input[type='number'] {
@@ -834,17 +890,3 @@
 .ghostButton:active, .primaryButton:active { transform: scale(0.97); }
 
 .errorText { color: var(--danger); font-size: 0.8125rem; }
-
-/* Spinner (réutilisé du patron). */
-.spinner {
-    display: inline-block;
-    box-sizing: border-box;
-    width: 1rem;
-    height: 1rem;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: editor-spin 0.6s linear infinite;
-}
-@keyframes editor-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.4s; } }

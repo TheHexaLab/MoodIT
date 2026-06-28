@@ -4,6 +4,7 @@ import { Markdown } from '../ForumView/Markdown';
 import { QUESTION_TYPE_LABELS, type Question } from '../../../types/domain';
 import { type QuestionResult } from './quizAttempt';
 import { scoreTone } from './scoreTone';
+import { defaultQuestionCardLabels, type QuestionCardLabels } from './questionCardLabels';
 
 interface QuestionCardProps {
   question: Question;
@@ -11,6 +12,8 @@ interface QuestionCardProps {
   index: number;
   /** Résultat corrigé : présent en révision → pastille de points colorée. */
   result?: QuestionResult;
+  /** Textes (surcharge partielle des défauts). */
+  labels?: Partial<QuestionCardLabels>;
   /** Le rendu de saisie / révision propre au type. */
   children: React.ReactNode;
 }
@@ -24,14 +27,16 @@ export function QuestionCard({
   question,
   index,
   result,
+  labels,
   children,
 }: QuestionCardProps): React.ReactElement {
+  const t = { ...defaultQuestionCardLabels, ...labels };
   return (
     <article className={styles.card}>
       <div className={styles.cardHeader}>
         <span className={styles.badge}>{QUESTION_TYPE_LABELS[question.qType]}</span>
-        <span className={styles.questionLabel}>Question {index + 1}</span>
-        <PointsPill question={question} result={result} />
+        <span className={styles.questionLabel}>{t.questionLabel(index + 1)}</span>
+        <PointsPill question={question} result={result} labels={t} />
       </div>
 
       <div className={styles.prompt}>
@@ -46,12 +51,14 @@ export function QuestionCard({
 function PointsPill({
   question,
   result,
+  labels,
 }: {
   question: Question;
   result?: QuestionResult;
+  labels: QuestionCardLabels;
 }): React.ReactElement {
   if (!result) {
-    return <span className={styles.points}>{question.totalScore} pts</span>;
+    return <span className={styles.points}>{labels.points(question.totalScore)}</span>;
   }
   const toneClass = {
     full: styles.pointsFull,
@@ -60,7 +67,7 @@ function PointsPill({
   }[scoreTone(result.earned, result.max)];
   return (
     <span className={[styles.points, toneClass].join(' ')}>
-      {result.earned} / {result.max} pts
+      {labels.score(result.earned, result.max)}
     </span>
   );
 }

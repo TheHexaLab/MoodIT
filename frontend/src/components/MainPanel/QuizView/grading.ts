@@ -98,11 +98,12 @@ function gradeCoding(question: Question, answer: QuestionAnswer | undefined): Qu
   // Le code ne s'exécute PAS dans le navigateur : la vraie évaluation des harnais
   // est faite côté serveur (onSubmitQuiz). Ici (mode mock) on simule un verdict
   // DÉTERMINISTE par harnais, uniquement pour faire vivre la révision (voir quels
-  // Test_Case passent/échouent). Heuristique : si le squelette n'a pas été modifié
-  // → tout échoue ; sinon un harnais sur deux passe (résultat partiel illustratif).
+  // Test_Case passent/échouent). Heuristique ALIGNÉE sur `dashboardApi.evaluateCode`
+  // (chemin « Tester ») pour que la correction Code soit identique des deux côtés :
+  // tenté = code non vide ; alors un harnais sur deux passe (résultat partiel illustratif).
   const tests = question.testCases ?? [];
   const code = answer?.kind === 'coding' ? answer.code : '';
-  const attempted = code.trim().length > 0 && code !== (question.startCode ?? '');
+  const attempted = code.trim().length > 0;
 
   const results = tests.map((t, i) => ({
     name: t.name,

@@ -511,26 +511,6 @@
     text-align: center;
 }
 
-.loadingSpinner {
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 50%;
-    border: 2px solid var(--border-strong);
-    border-top-color: var(--brand-teal);
-    animation: course-menu-spin 0.7s linear infinite;
-}
-
-@keyframes course-menu-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .loadingSpinner {
-        animation-duration: 1.6s;
-    }
-}
 
 /* ── Panneau utilisateur ────────────────────────────────────── */
 .userPanel {

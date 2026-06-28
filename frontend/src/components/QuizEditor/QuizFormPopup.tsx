@@ -6,8 +6,10 @@ import { GripVertical } from '../../assets/GripVertical';
 import { Pencil } from '../../assets/Pencil';
 import { Plus } from '../../assets/Plus';
 import { TrashCan } from '../../assets/TrashCan';
+import { Spinner } from '../Spinner/Spinner';
 import { QUESTION_TYPE_LABELS, type Question, type Quiz } from '../../types/domain';
 import { type QuizMetaDraft } from './editorTypes';
+import { defaultQuizFormLabels, type QuizFormLabels } from './quizFormLabels';
 
 interface QuizFormBodyProps {
   quiz: Quiz;
@@ -15,6 +17,8 @@ interface QuizFormBodyProps {
   isNew?: boolean;
   saving?: boolean;
   error?: string | null;
+  /** Textes (surcharge partielle des défauts). */
+  labels?: Partial<QuizFormLabels>;
   /** Annule (bouton « Annuler ») : retour à la liste — pas de fermeture. */
   onCancel: () => void;
   onSaveMeta: (meta: QuizMetaDraft) => void;
@@ -61,6 +65,7 @@ export function QuizFormBody({
   isNew,
   saving,
   error,
+  labels,
   onCancel,
   onSaveMeta,
   onAddQuestion,
@@ -68,6 +73,7 @@ export function QuizFormBody({
   onDeleteQuestion,
   onReorderQuestions,
 }: QuizFormBodyProps): React.ReactElement {
+  const t = { ...defaultQuizFormLabels, ...labels };
   const [title, setTitle] = useState(quiz.title);
   const [isPublished, setIsPublished] = useState(!!quiz.isPublished);
   const [isDaily, setIsDaily] = useState(!!quiz.isDaily);
@@ -90,29 +96,29 @@ export function QuizFormBody({
   return (
     <>
       <label className={styles.field}>
-        <span className={styles.fieldLabel}>Titre</span>
+        <span className={styles.fieldLabel}>{t.titleLabel}</span>
         <input
           className={styles.input}
           value={title}
           maxLength={128}
-          placeholder="Titre du quiz"
+          placeholder={t.titlePlaceholder}
           onChange={(e) => setTitle(e.target.value)}
         />
       </label>
 
       <div className={styles.toggles}>
-        <Toggle label="Publié" on={isPublished} onToggle={() => setIsPublished((v) => !v)} />
-        <Toggle label="Quiz du jour" on={isDaily} onToggle={() => setIsDaily((v) => !v)} />
+        <Toggle label={t.published} on={isPublished} onToggle={() => setIsPublished((v) => !v)} />
+        <Toggle label={t.daily} on={isDaily} onToggle={() => setIsDaily((v) => !v)} />
       </div>
 
       <hr className={styles.divider} />
 
       <div className={styles.sectionBar}>
         <span className={styles.sectionTitle}>
-          Questions <span className={styles.sectionMeta}>{totalPoints} pts</span>
+          {t.questionsSection} <span className={styles.sectionMeta}>{t.points(totalPoints)}</span>
         </span>
         <button type="button" className={styles.addLinkButton} onClick={onAddQuestion}>
-          <Plus width={14} height={14} /> Ajouter
+          <Plus width={14} height={14} /> {t.addQuestion}
         </button>
       </div>
 
@@ -144,10 +150,10 @@ export function QuizFormBody({
                   {QUESTION_TYPE_LABELS[question.qType]}
                 </span>
                 <span className={[styles.badge, styles.badgePoints].join(' ')}>
-                  {question.totalScore} pts
+                  {t.points(question.totalScore)}
                 </span>
               </div>
-              <span className={styles.rowSub}>{firstLine(question.prompt)}</span>
+              <span className={styles.rowSub}>{firstLine(question.prompt, t.noPrompt)}</span>
             </div>
             <div
               className={[
@@ -160,7 +166,7 @@ export function QuizFormBody({
               <button
                 type="button"
                 className={styles.iconButton}
-                aria-label="Modifier la question"
+                aria-label={t.editQuestionAria}
                 onClick={(e) => {
                   e.stopPropagation();
                   onEditQuestion(question);
@@ -171,7 +177,7 @@ export function QuizFormBody({
               <button
                 type="button"
                 className={[styles.iconButton, styles.iconButtonDanger].join(' ')}
-                aria-label="Supprimer la question"
+                aria-label={t.deleteQuestionAria}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteQuestion(question);
@@ -190,7 +196,7 @@ export function QuizFormBody({
         <div className={styles.footer}>
           <span className={styles.footerSpacer} />
           <button type="button" className={styles.ghostButton} onClick={onCancel}>
-            Annuler
+            {t.cancel}
           </button>
           <button
             type="button"
@@ -198,7 +204,7 @@ export function QuizFormBody({
             disabled={!canSave || saving}
             onClick={() => onSaveMeta({ title: title.trim(), isPublished, isDaily })}
           >
-            {saving ? <span className={styles.spinner} /> : isNew ? 'Créer' : 'Enregistrer'}
+            {saving ? <Spinner tone="current" size={16} /> : isNew ? t.create : t.save}
           </button>
         </div>
       </EditorFooter>
@@ -206,11 +212,11 @@ export function QuizFormBody({
   );
 }
 
-/** Première ligne « parlante » du prompt Markdown. */
-function firstLine(prompt: string): string {
+/** Première ligne « parlante » du prompt Markdown (`fallback` si vide). */
+function firstLine(prompt: string, fallback: string): string {
   const line = prompt
     .split('\n')
     .map((l) => l.trim())
     .find((l) => l.length > 0);
-  return line ? line.replace(/^#+\s*/, '').replace(/[*`_]/g, '') : 'Sans énoncé';
+  return line ? line.replace(/^#+\s*/, '').replace(/[*`_]/g, '') : fallback;
 }

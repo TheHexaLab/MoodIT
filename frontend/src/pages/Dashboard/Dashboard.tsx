@@ -4,6 +4,7 @@ import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoade
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
 import { useCoursesLoader } from '../../components/CourseMenu/useCoursesLoader.ts';
 import { CourseSectionEditor } from '../../components/CourseMenu/CourseSectionEditor.tsx';
+import { Spinner } from '../../components/Spinner/Spinner.tsx';
 import {
   type ChannelMessageAuthor,
   type ChannelRef,
@@ -754,8 +755,8 @@ export default function Dashboard() {
           Données chargées à la demande (GET par programme) : spinner pendant le
           chargement, ErrorPopup en cas d'échec, sinon le RoleEditorPopup. */}
       {popup?.kind === 'manageRoles' && popupProgram && roleLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && roleError && (
@@ -835,8 +836,8 @@ export default function Dashboard() {
 
       {/* Sortie de programme en cours (DELETE) : overlay puis ErrorPopup si échec. */}
       {leaveLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {leaveError && <ErrorPopup content={leaveError} onClose={() => setLeaveError(null)} />}

@@ -26,6 +26,10 @@ interface UseQuizAttemptParams {
   onFetchQuiz?: FetchQuizHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
+  /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
+  loadErrorMessage?: string;
+  /** Message d'erreur affiché si la soumission échoue (label, surchargeable). */
+  submitErrorMessage?: string;
 }
 
 export interface QuizAttemptApi {
@@ -81,6 +85,8 @@ export function useQuizAttempt({
   initialQuiz,
   onFetchQuiz,
   onSubmitQuiz,
+  loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
+  submitErrorMessage = 'La soumission a échoué. Réessayez.',
 }: UseQuizAttemptParams): QuizAttemptApi {
   const [quiz, setQuiz] = useState<Quiz>(initialQuiz);
   const [loading, setLoading] = useState<boolean>(Boolean(onFetchQuiz));
@@ -125,11 +131,11 @@ export function useQuizAttempt({
       setResult(null);
     } catch {
       if (!mountedRef.current) return;
-      setLoadError('Impossible de charger le quiz. Réessayez.');
+      setLoadError(loadErrorMessage);
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [initialQuiz.id]);
+  }, [initialQuiz.id, loadErrorMessage]);
 
   useEffect(() => {
     void reload();
@@ -167,11 +173,11 @@ export function useQuizAttempt({
       setPhase('summary');
     } catch {
       if (!mountedRef.current) return;
-      setSubmitError("La soumission a échoué. Réessayez.");
+      setSubmitError(submitErrorMessage);
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-  }, [quiz, answers, onSubmitQuiz]);
+  }, [quiz, answers, onSubmitQuiz, submitErrorMessage]);
 
   const reviewQuestion = useCallback((index: number) => {
     setCurrentIndex(index);

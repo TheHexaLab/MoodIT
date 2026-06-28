@@ -3,6 +3,7 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { type QuestionViewProps } from './types';
+import { defaultQuestionLabels } from './questionLabels';
 
 /**
  * Rendu des trois types « à options » : Vrai/Faux, Choix unique (radio, sélection
@@ -19,7 +20,9 @@ export function ChoiceQuestion({
   answer,
   result,
   onChange,
+  labels,
 }: QuestionViewProps): React.ReactElement {
+  const t = { ...defaultQuestionLabels, ...labels };
   const multiple = question.qType === 'multiple_choice';
   const isTrueFalse = question.qType === 'true_false';
   const options = question.answers ?? [];
@@ -40,7 +43,7 @@ export function ChoiceQuestion({
     }
   }
 
-  const helper = multiple ? 'Plusieurs réponses possibles.' : null;
+  const helper = multiple ? t.multipleHelper : null;
 
   return (
     <div>
@@ -49,24 +52,37 @@ export function ChoiceQuestion({
         {options.map((opt) => {
           const isSelected = selected.includes(opt.id);
 
-          // Classe d'état + tonalité de l'icône.
-          // En révision (choix multiple), chaque option a un « bon état » :
+          // L'étudiant a-t-il répondu à cette question (au moins une sélection) ?
+          const hasSelection = pickedIds.size > 0;
+          // Classe d'état + tonalité de l'icône en révision :
           //  - à cocher + cochée      → fond vert  + ✓
-          //  - à cocher + non cochée  → contour vert (sans fond) + ✓ (manquée)
+          //  - à cocher + non cochée  → MANQUÉE :
+          //      • aucune réponse soumise → bordure rouge (sans fond) + ✗ rouge cerclé
+          //      • une réponse soumise (mais fausse) → contour vert + ✓ vert cerclé
           //  - à NE PAS cocher + cochée    → fond rouge + ✗
-          //  - à NE PAS cocher + non cochée → contour vert (sans fond) + ✓ (bien évitée)
+          //  - à NE PAS cocher + non cochée (choix multiple) → contour vert + ✓ (bien évitée)
           // V/F & choix unique : un distracteur laissé décoché reste neutre.
           let stateClass = '';
           let iconTone: ReviewTone = 'muted';
-          // L'état « contour vert » (sans fond) affiche le crochet dans un cercle vert.
           let iconCircled = false;
           if (mode === 'review') {
             const correct = correctIds.has(opt.id);
             const picked = pickedIds.has(opt.id);
-            if (correct) {
-              stateClass = picked ? styles.optionCorrect : styles.optionCorrectMissed;
+            if (correct && picked) {
+              stateClass = styles.optionCorrect;
               iconTone = 'ok';
-              iconCircled = !picked;
+            } else if (correct && !hasSelection) {
+              // Aucune réponse soumise → la bonne réponse est signalée comme manquée
+              // en rouge (✗ rouge cerclé, bordure rouge sans fond).
+              stateClass = styles.optionWrongMissed;
+              iconTone = 'bad';
+              iconCircled = true;
+            } else if (correct) {
+              // Une réponse a été soumise (mais fausse/incomplète) → la bonne réponse
+              // est montrée en vert (contour + ✓ vert cerclé).
+              stateClass = styles.optionCorrectMissed;
+              iconTone = 'ok';
+              iconCircled = true;
             } else if (picked) {
               stateClass = styles.optionWrong;
               iconTone = 'bad';
@@ -139,7 +155,11 @@ function ReviewIcon({
   }
   if (tone === 'bad') {
     return (
-      <span className={[styles.statusIcon, styles.statusBad].join(' ')}>
+      <span
+        className={[styles.statusIcon, styles.statusBad, circled ? styles.statusIconCircleBad : '']
+          .filter(Boolean)
+          .join(' ')}
+      >
         <X width={12} height={12} />
       </span>
     );

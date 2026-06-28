@@ -1,5 +1,6 @@
 import { type Question } from '../../../../types/domain';
 import { type QuestionAnswer, type QuestionResult } from '../quizAttempt';
+import { type QuestionLabels } from './questionLabels';
 
 /** Mode d'affichage d'une question : saisie (passation) ou lecture corrigée (révision). */
 export type QuestionMode = 'answer' | 'review';
@@ -15,4 +16,6 @@ export interface QuestionViewProps {
   answer: QuestionAnswer | undefined;
   result?: QuestionResult;
   onChange: (answer: QuestionAnswer) => void;
+  /** Textes des rendus (surcharge partielle des défauts). */
+  labels?: Partial<QuestionLabels>;
 }

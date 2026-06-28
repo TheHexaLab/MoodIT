@@ -5,6 +5,7 @@ import { X } from '../../../../assets/X';
 import { CodeEditor } from '../../../QuizEditor/CodeEditor';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
+import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
 
 /**
  * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
@@ -19,24 +20,26 @@ export function CodingQuestion({
   answer,
   result,
   onChange,
+  labels,
 }: QuestionViewProps): React.ReactElement {
+  const t = { ...defaultQuestionLabels, ...labels };
   const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
   const language = question.language?.name;
   const review = mode === 'review';
 
   return (
     <div>
-      {review && <span className={styles.codeLabel}>Ta réponse</span>}
+      {review && <span className={styles.codeLabel}>{t.yourAnswer}</span>}
       <CodeEditor
         value={code}
         onChange={(next) => onChange({ kind: 'coding', code: next })}
         language={language}
         readOnly={review}
         minRows={8}
-        ariaLabel={`Éditeur de code (${language ?? 'Code'})`}
+        ariaLabel={t.codeAria(language ?? 'Code')}
       />
 
-      {review && <TestResults tests={result?.tests} />}
+      {review && <TestResults tests={result?.tests} labels={t} />}
     </div>
   );
 }
@@ -44,21 +47,19 @@ export function CodingQuestion({
 /** Verdict des harnais en révision (ou note « évalué côté serveur » si non évalué). */
 function TestResults({
   tests,
+  labels,
 }: {
   tests: CodingTestResult[] | null | undefined;
+  labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    return (
-      <p className={styles.testNote}>
-        Les harnais de test sont exécutés côté serveur ; le détail n'est pas disponible ici.
-      </p>
-    );
+    return <p className={styles.testNote}>{labels.serverNote}</p>;
   }
-  const totalWeight = tests.reduce((sum, t) => sum + t.weight, 0);
+  const totalWeight = tests.reduce((sum, test) => sum + test.weight, 0);
 
   return (
     <div className={styles.testsBlock}>
-      <span className={styles.codeLabel}>Résultat des tests</span>
+      <span className={styles.codeLabel}>{labels.testsResult}</span>
       <div className={styles.tests}>
         {tests.map((t, i) => (
           <div key={i} className={styles.testRow}>

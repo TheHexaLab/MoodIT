@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddSubscriptionPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -76,7 +77,7 @@ interface AddSubscriptionPopupProps {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function AddSubscriptionPopup({

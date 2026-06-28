@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -63,11 +64,13 @@ public class CourseService {
                 .stream()
                 .map(forumService::toForumDTO)
                 .toList());
-        // Tous les quiz du cours (méta seule, sans les questions). Le DTO porte
-        // isPublished/isDaily : le front filtre s'il ne veut afficher que les publiés.
+        // Tous les quiz du cours (méta seule, sans les questions), triés par `position`.
+        // Le DTO porte isPublished/isDaily : le front filtre s'il ne veut que les publiés.
         dto.setQuizzes(course.getQuizzes() == null ? List.of()
                 : course.getQuizzes()
                 .stream()
+                .sorted(Comparator.comparing(Quiz::getPosition,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(this::toQuizDTO)
                 .toList());
 
@@ -79,6 +82,7 @@ public class CourseService {
         QuizDTO dto = new QuizDTO();
         dto.setId(quiz.getId());
         dto.setTitle(quiz.getTitle());
+        dto.setPosition(quiz.getPosition());
         dto.setIsPublished(quiz.getIsPublished());
         dto.setIsDaily(quiz.getIsDaily());
         dto.setCreatedAt(quiz.getCreatedAt());

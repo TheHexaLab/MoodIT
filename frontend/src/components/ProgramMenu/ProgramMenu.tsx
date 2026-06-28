@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './ProgramMenu.module.css';
+import { Spinner } from '../Spinner/Spinner.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { Plus } from '../../assets/Plus.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
@@ -214,7 +215,9 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           </svg>
         </button>
       ) : loading ? (
-        <span className={styles.railSpinner} role="status" aria-label="Chargement des programmes" />
+        <span className={styles.railSpinnerWrap} role="status" aria-label="Chargement des programmes" aria-busy="true">
+          <Spinner size={24} />
+        </span>
       ) : !programs || programs.length <= 0 ? (
         <></>
       ) : (

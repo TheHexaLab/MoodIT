@@ -57,13 +57,17 @@ export function CourseSectionEditor({
   quizHandlers,
   onQuizzesChange,
 }: CourseSectionEditorProps): React.ReactElement {
-  // Section QUIZ avec données : éditeur de quiz riche (liste → formulaire → question).
-  if (section.type === 'quiz' && quizzes && courseId != null) {
+  // Section QUIZ : éditeur de quiz riche (liste → formulaire → question). On NE
+  // dépend PAS de quiz déjà en cache (`quizzes` peut être undefined) : l'éditeur
+  // monte dès qu'il s'agit d'un quiz et refetch lui-même TOUS les quiz au montage
+  // (cf. useEffect onFetchQuizzes dans QuizEditor). `quizzes` ne sert que d'affichage
+  // immédiat le temps du fetch.
+  if (section.type === 'quiz' && courseId != null) {
     return (
       <QuizEditor
         courseId={courseId}
         courseSubtitle={quizSubtitle}
-        quizzes={quizzes}
+        quizzes={quizzes ?? []}
         handlers={quizHandlers}
         onQuizzesChange={onQuizzesChange}
         onClose={onClose}
