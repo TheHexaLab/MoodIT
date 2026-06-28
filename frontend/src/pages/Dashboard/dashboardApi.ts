@@ -12,7 +12,13 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
-import type { ChannelMessage } from '../../types/domain.ts';
+import type {
+  AnswerResponse,
+  ChannelMessage,
+  DragItemResponse,
+  ForumResponse,
+  QuestionResponse,
+} from '../../types/domain.ts';
 import {
   getMockForumReplies,
   getMockForumThreads,
@@ -122,13 +128,13 @@ export async function fetchCourses(programId: number): Promise<Course[]> {
     id: course.id,
     title: course.title,
     code: course.code,
-    forums: (course.forums ?? []).map((f) => ({
+    forums: (course.forums ?? []).map((f: ForumResponse) => ({
       id: f.id,
       title: f.title,
       position: f.position,
       fType: f.fTypeName,
     })),
-    quizzes: (course.quizzes ?? []).map((q) => ({
+    quizzes: (course.quizzes ?? []).map((q: QuizResponse) => ({
       id: q.id,
       title: q.title,
       position: q.position,
@@ -149,7 +155,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
     position: data.position,
     isPublished: data.isPublished,
     isDaily: data.isDaily,
-    questions: (data.questions ?? []).map((q) => ({
+    questions: (data.questions ?? []).map((q: QuestionResponse) => ({
       id: q.id,
       prompt: q.prompt,
       qType: q.qType,
@@ -157,12 +163,12 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       totalScore: q.totalScore,
       orderIndex: q.orderIndex,
       startCode: q.startCode,
-      answers: q.answers?.map((a) => ({
+      answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
         content: a.content,
         isCorrect: a.isCorrect,
       })),
-      dragItems: q.dragItems?.map((d) => ({
+      dragItems: q.dragItems?.map((d: DragItemResponse) => ({
         id: d.id,
         content: d.content,
         correctOrder: d.correctOrder,
