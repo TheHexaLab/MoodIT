@@ -3,6 +3,7 @@ import { type Quiz } from '../../../types/domain';
 import {
   type AttemptAnswers,
   type FetchQuizHandler,
+  type FetchQuizResultHandler,
   type QuestionAnswer,
   type QuizResult,
   type SubmitQuizHandler,
@@ -24,6 +25,11 @@ interface UseQuizAttemptParams {
   initialQuiz: Quiz;
   /** Chargement du détail (API-ready, GET). Absent → on reste sur `initialQuiz`. */
   onFetchQuiz?: FetchQuizHandler;
+  /**
+   * Résultat d'une tentative déjà soumise (API-ready, GET). Si non `null` au chargement,
+   * la vue s'ouvre directement sur le récap (tentative unique : pas de re-passation).
+   */
+  onFetchResult?: FetchQuizResultHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
@@ -84,6 +90,7 @@ export interface QuizAttemptApi {
 export function useQuizAttempt({
   initialQuiz,
   onFetchQuiz,
+  onFetchResult,
   onSubmitQuiz,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
@@ -102,8 +109,10 @@ export function useQuizAttempt({
 
   const mountedRef = useRef(true);
   const fetchRef = useRef(onFetchQuiz);
+  const fetchResultRef = useRef(onFetchResult);
   useEffect(() => {
     fetchRef.current = onFetchQuiz;
+    fetchResultRef.current = onFetchResult;
   });
   useEffect(() => {
     mountedRef.current = true;
@@ -122,13 +131,20 @@ export function useQuizAttempt({
     setLoadError(null);
     try {
       const fetched = await fetchQuiz(initialQuiz.id);
+      // Tentative unique : si l'utilisateur a déjà soumis, on ouvre sur le récap.
+      const existing = fetchResultRef.current ? await fetchResultRef.current(initialQuiz.id) : null;
       if (!mountedRef.current) return;
       setQuiz(fetched);
       setAnswers(initAnswers(fetched));
       setTouched(new Set());
-      setPhase('taking');
       setCurrentIndex(0);
-      setResult(null);
+      if (existing) {
+        setResult(existing);
+        setPhase('summary');
+      } else {
+        setResult(null);
+        setPhase('taking');
+      }
     } catch {
       if (!mountedRef.current) return;
       setLoadError(loadErrorMessage);

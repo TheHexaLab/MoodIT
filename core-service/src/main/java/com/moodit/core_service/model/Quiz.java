@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Data
@@ -39,4 +40,7 @@ public class Quiz {
     @ManyToOne
     @JoinColumn(name = "course_id", nullable = false)
     private Course course;
+
+    @OneToMany(mappedBy = "quiz", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Question> questions;
 }

@@ -6,21 +6,19 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
-import java.time.LocalDateTime;
+import java.util.List;
 
-/** Méta d'un quiz pour les vues de LISTE (sans les questions). */
+/** Détail complet d'un quiz (méta + questions embarquées) pour la passation/édition. */
 @Data
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "questionCount", "createdAt"})
-public class QuizDTO {
+@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "questions"})
+public class QuizDetailDTO {
     private Integer id;
     private String title;
     private Integer position;
     private Boolean isPublished;
     private Boolean isDaily;
-    /** Nombre de questions (vues de liste : sans charger les questions). */
-    private Integer questionCount;
-    private LocalDateTime createdAt;
+    private List<QuestionDTO> questions;
 }

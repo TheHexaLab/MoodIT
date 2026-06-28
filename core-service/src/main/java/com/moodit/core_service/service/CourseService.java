@@ -85,6 +85,7 @@ public class CourseService {
         dto.setPosition(quiz.getPosition());
         dto.setIsPublished(quiz.getIsPublished());
         dto.setIsDaily(quiz.getIsDaily());
+        dto.setQuestionCount(quiz.getQuestions() == null ? 0 : quiz.getQuestions().size());
         dto.setCreatedAt(quiz.getCreatedAt());
         return dto;
     }

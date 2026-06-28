@@ -334,3 +334,75 @@ export interface ForumPost {
   /** Nonce de réconciliation optimiste ↔ écho WS. */
   clientPostId?: string;
 }
+
+// ── Formes de réponse brutes du backend (DTO) ──────────────────────────────────
+// Telles que sérialisées par core-service, avant normalisation vers le modèle de
+// domaine ci-dessus (cf. les mappers dans dashboardApi.ts).
+
+/** Forum renvoyé par le backend (ForumDTO) : le type est porté par `fTypeName`. */
+export interface ForumResponse {
+  id: number;
+  title: string;
+  position?: number;
+  courseId: number;
+  fTypeId: number;
+  fTypeName: ForumType; // 'Discussion' (canal) | 'Thread' (forum)
+}
+
+/** Quiz renvoyé par le backend (QuizDTO, méta seule sans les questions). */
+export interface QuizResponse {
+  id: number;
+  title: string;
+  position?: number;
+  isPublished?: boolean;
+  isDaily?: boolean;
+  questionCount?: number;
+  createdAt?: string;
+}
+
+/** Cours renvoyé par l'endpoint enrollments (CourseForumsDTO) : forums + quiz embarqués. */
+export interface CourseForumsResponse {
+  id: number;
+  title?: string;
+  code?: string;
+  forums?: ForumResponse[];
+  quizzes?: QuizResponse[];
+}
+
+/** Option de réponse renvoyée par le backend (AnswerDTO). */
+export interface AnswerResponse {
+  id: number;
+  content: string;
+  isCorrect?: boolean;
+}
+
+/** Élément déplaçable renvoyé par le backend (DragItemDTO). */
+export interface DragItemResponse {
+  id: number;
+  content: string;
+  correctOrder?: number;
+  groupName?: string | null;
+}
+
+/** Question renvoyée par le backend (QuestionDTO) ; `qType` = slug résolu serveur. */
+export interface QuestionResponse {
+  id: number;
+  prompt: string;
+  qType: QuestionType;
+  qTypeId?: number;
+  totalScore: number;
+  orderIndex?: number;
+  startCode?: string;
+  answers?: AnswerResponse[];
+  dragItems?: DragItemResponse[];
+}
+
+/** Détail d'un quiz renvoyé par le backend (QuizDetailDTO). */
+export interface QuizDetailResponse {
+  id: number;
+  title: string;
+  position?: number;
+  isPublished?: boolean;
+  isDaily?: boolean;
+  questions?: QuestionResponse[];
+}

@@ -19,6 +19,7 @@ import com.moodit.core_service.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -145,7 +146,20 @@ public class ProgramService {
     User user =
         userRepository.findById(userCreateDTO.getId()).orElseThrow(UserNotFoundException::new);
 
-    // prevention dun crash si l'utilisateur est deja inscrit a un programme de la liste
+    Set<Integer> requestedIds = new HashSet<>(userCreateDTO.getProgramIds());
+    Integer establishmentId = userCreateDTO.getEstablishmentId();
+
+    // SYNCHRO scopée à l'établissement : on retire les programmes DE CET ÉTABLISSEMENT que
+    // l'utilisateur a déselectionnés (= désabonnement). Les programmes des autres
+    // établissements ne sont jamais touchés. establishmentId null → pas de retrait (ajout seul).
+    if (establishmentId != null) {
+      user.getPrograms().removeIf(p ->
+          p.getEstablishment() != null
+              && establishmentId.equals(p.getEstablishment().getId())
+              && !requestedIds.contains(p.getId()));
+    }
+
+    // Ajoute les programmes demandés pas encore suivis (évite les doublons).
     Set<Integer> existingProgramIds =
         user.getPrograms().stream().map(Program::getId).collect(Collectors.toSet());
 

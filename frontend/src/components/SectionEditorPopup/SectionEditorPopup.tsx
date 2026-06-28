@@ -6,7 +6,6 @@ import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
-import { namePattern } from './helpers.ts';
 import { defaultLabels } from './labels.ts';
 import type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
@@ -135,7 +134,7 @@ export function SectionEditorPopup({
 
   async function saveEdit() {
     const trimmed = draftName.trim();
-    if (!namePattern.test(trimmed) || isNameTaken(trimmed) || pending) return;
+    if (!trimmed || isNameTaken(trimmed) || pending) return;
 
     // On garde le formulaire ouvert (avec spinner) jusqu'à la résolution : la liste
     // n'est mise à jour qu'après un succès, et l'erreur laisse la saisie intacte.
@@ -233,7 +232,7 @@ export function SectionEditorPopup({
   }
 
   const draftTrimmed = draftName.trim();
-  const isDraftInvalid = !namePattern.test(draftTrimmed);
+  const isDraftInvalid = !draftTrimmed;
   const isDraftDuplicate = draftTrimmed !== '' && isNameTaken(draftTrimmed);
   const draftHasError = isDraftInvalid || isDraftDuplicate;
   const draftHint = isDraftDuplicate ? t.hintDuplicate : isDraftInvalid ? t.hintInvalid : t.hint;

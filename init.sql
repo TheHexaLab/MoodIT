@@ -535,3 +535,68 @@ INSERT INTO Vote (value_, user_id, post_id) VALUES
   (-1, 3, 12),  -- mich -1 post 12
   (1,  2, 13),  -- rosie +1 post 13
   (1,  3, 14);  -- mich +1 post 14
+
+-- ------------------------------------------------------------
+-- Q_Type  (types de question — ordre = mapping vers les slugs front)
+-- ------------------------------------------------------------
+INSERT INTO Q_Type (name) VALUES
+  ('Vrai/Faux'),        -- 1 → true_false
+  ('Choix unique'),     -- 2 → single_choice
+  ('Choix multiple'),   -- 3 → multiple_choice
+  ('Remise en ordre'),  -- 4 → ordering
+  ('Association'),       -- 5 → matching
+  ('Code');             -- 6 → coding
+
+-- ------------------------------------------------------------
+-- Enrollment  (rosie inscrite au cours 1 pour voir le quiz)
+-- ------------------------------------------------------------
+INSERT INTO Enrollment (course_id, user_id) VALUES (1, 2);  -- rosie (user 2) → MAT115 (cours 1)
+
+-- ------------------------------------------------------------
+-- Quiz  (un quiz publié dans le cours 1, tous les types sauf le code)
+-- ------------------------------------------------------------
+INSERT INTO Quiz (title, is_daily, is_published, position, course_id) VALUES
+  ('Quiz découverte — tous les types (sauf code)', FALSE, TRUE, 0, 1);  -- quiz 1
+
+-- ------------------------------------------------------------
+-- Question  (5 questions du quiz 1 : un type chacune, sauf code)
+-- ------------------------------------------------------------
+INSERT INTO Question (prompt, order_index, total_score, q_type_id, quiz_id) VALUES
+  ('Le tri par fusion (merge sort) a une complexité en **O(n log n)** dans le pire cas.', 0, 1, 1, 1),  -- Q1 Vrai/Faux
+  ('Quelle structure de données fonctionne en **LIFO** (dernier entré, premier sorti) ?', 1, 1, 2, 1),  -- Q2 Choix unique
+  ('Parmi les suivants, lesquels sont des **langages de programmation** ?',               2, 2, 3, 1),  -- Q3 Choix multiple
+  ('Remettez dans l''ordre les étapes classiques de compilation d''un programme C.',      3, 2, 4, 1),  -- Q4 Remise en ordre
+  ('Associez chaque langage à son **paradigme** dominant.',                               4, 2, 5, 1);  -- Q5 Association
+
+-- ------------------------------------------------------------
+-- Answer  (options des questions à choix : Q1, Q2, Q3)
+-- ------------------------------------------------------------
+INSERT INTO Answer (content, is_correct, question_id) VALUES
+  -- Q1 Vrai/Faux
+  ('Vrai', TRUE,  1),
+  ('Faux', FALSE, 1),
+  -- Q2 Choix unique
+  ('Pile (stack)',    TRUE,  2),
+  ('File (queue)',    FALSE, 2),
+  ('Liste chaînée',   FALSE, 2),
+  ('Arbre binaire',   FALSE, 2),
+  -- Q3 Choix multiple
+  ('Python', TRUE,  3),
+  ('HTML',   FALSE, 3),
+  ('Java',   TRUE,  3),
+  ('CSS',    FALSE, 3);
+
+-- ------------------------------------------------------------
+-- Drag_Item  (Q4 Remise en ordre : group_name NULL ; Q5 Association : par groupe)
+-- ------------------------------------------------------------
+INSERT INTO Drag_Item (content, correct_order, group_name, question_id) VALUES
+  -- Q4 Remise en ordre (ordre attendu via correct_order)
+  ('Prétraitement',     1, NULL, 4),
+  ('Compilation',       2, NULL, 4),
+  ('Assemblage',        3, NULL, 4),
+  ('Édition des liens', 4, NULL, 4),
+  -- Q5 Association (catégorie attendue via group_name ; correct_order non utilisé = 0)
+  ('Haskell', 0, 'Fonctionnel',    5),
+  ('Java',    0, 'Orienté objet',  5),
+  ('Prolog',  0, 'Logique',        5),
+  ('C',       0, 'Impératif',      5);

@@ -10,6 +10,7 @@ import { Check } from '../../../assets/Check';
 import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
   type FetchQuizHandler,
+  type FetchQuizResultHandler,
   type SubmitQuizHandler,
   isAnswered,
 } from './quizAttempt';
@@ -33,6 +34,8 @@ interface QuizViewProps {
   initialQuiz?: Quiz;
   /** Chargement du détail du quiz (API-ready, GET). */
   onFetchQuiz?: FetchQuizHandler;
+  /** Résultat d'une tentative déjà soumise (API-ready, GET) → ouvre sur le récap. */
+  onFetchResult?: FetchQuizResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Retour au tableau de bord depuis le résumé (optionnel). */
@@ -51,6 +54,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   channel,
   initialQuiz,
   onFetchQuiz,
+  onFetchResult,
   onSubmitQuiz,
   onExit,
   labels,
@@ -62,6 +66,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   const attempt = useQuizAttempt({
     initialQuiz: fallbackQuiz,
     onFetchQuiz,
+    onFetchResult,
     onSubmitQuiz,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,

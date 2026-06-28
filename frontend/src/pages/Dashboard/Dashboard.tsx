@@ -353,22 +353,13 @@ export default function Dashboard() {
     setDashboardPrograms((programs) => [...programs, created]);
   };
 
-  // Adhésion → ajoute les programmes choisis du catalogue à la liste (via api.joinPrograms).
+  // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
+  // renvoie la liste à jour ; on la réconcilie en conservant les cours déjà chargés.
   const handleJoinPrograms = async (selection: JoinSelection) => {
-    const catalog = await api.joinPrograms(selection);
+    const updated = await api.joinPrograms(selection);
     setDashboardPrograms((programs) => {
-      const existing = new Set(programs.map((p) => p.id));
-      const added = catalog
-        .filter((p) => !existing.has(p.id))
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          code: p.code,
-          cohort: p.cohort,
-          color: p.color,
-          courses: [],
-        }));
-      return [...programs, ...added];
+      const byId = new Map(programs.map((p) => [p.id, p]));
+      return updated.map((p) => byId.get(p.id) ?? p);
     });
   };
 
@@ -660,8 +651,9 @@ export default function Dashboard() {
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
-        // ── Quiz : détail + soumission servis depuis le mock (cf. dashboardApi). ──
+        // ── Quiz : détail + résultat (réhydratation) + soumission (cf. dashboardApi). ──
         onFetchQuiz={api.fetchQuiz}
+        onFetchResult={api.fetchQuizResult}
         onSubmitQuiz={api.submitQuiz}
       />
 

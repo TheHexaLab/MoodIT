@@ -10,7 +10,13 @@
  * `grading.ts`) — sauf le code, qui ne s'exécute pas dans le navigateur.
  */
 
-import { type Quiz, type Question, type QuestionType, type TestCase } from '../../../types/domain';
+import {
+  type DragItem,
+  type Quiz,
+  type Question,
+  type QuestionType,
+  type TestCase,
+} from '../../../types/domain';
 
 /** Valeur synchrone ou asynchrone : un callback d'API peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -48,15 +54,36 @@ export function answerKindFor(qType: QuestionType): QuestionAnswer['kind'] {
   }
 }
 
+/**
+ * Ordre de départ MÉLANGÉ d'une Remise en ordre, garanti DIFFÉRENT de l'ordre
+ * correct : la question ne s'ouvre jamais déjà résolue. (≤ 1 élément → tel quel.)
+ */
+function shuffledOrderingItemIds(items: DragItem[]): number[] {
+  const correct = [...items]
+    .sort((a, b) => (a.correctOrder ?? 0) - (b.correctOrder ?? 0))
+    .map((d) => d.id);
+  if (correct.length < 2) return correct;
+
+  const shuffled = [...correct];
+  const isCorrectOrder = () => shuffled.every((id, i) => id === correct[i]);
+  do {
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+  } while (isCorrectOrder());
+  return shuffled;
+}
+
 /** Réponse vide (état initial) pour une question donnée. */
 export function emptyAnswer(question: Question): QuestionAnswer {
   switch (answerKindFor(question.qType)) {
     case 'choice':
       return { kind: 'choice', answerIds: [] };
     case 'ordering':
-      // Ordre de départ = ordre de livraison (le backend le mélange ; le mock le
-      // livre tel quel). On part des `dragItems` dans l'ordre fourni.
-      return { kind: 'ordering', itemIds: (question.dragItems ?? []).map((d) => d.id) };
+      // Ordre de départ MÉLANGÉ (jamais l'ordre correct), pour que l'étudiant ait
+      // toujours quelque chose à réordonner.
+      return { kind: 'ordering', itemIds: shuffledOrderingItemIds(question.dragItems ?? []) };
     case 'matching':
       // Tous les éléments commencent « non classés » (dans la réserve).
       return {
@@ -229,3 +256,9 @@ export type FetchQuizHandler = (quizId: number) => MaybePromise<Quiz>;
  * `QuizResult`. Absent → le grader de prévisualisation local s'en charge.
  */
 export type SubmitQuizHandler = (submission: QuizSubmission) => MaybePromise<QuizResult>;
+
+/**
+ * Chargement du résultat d'une tentative DÉJÀ soumise (réhydratation, tentative unique).
+ * Renvoie `null` si l'utilisateur n'a pas encore soumis. Absent → on ouvre en passation.
+ */
+export type FetchQuizResultHandler = (quizId: number) => MaybePromise<QuizResult | null>;
