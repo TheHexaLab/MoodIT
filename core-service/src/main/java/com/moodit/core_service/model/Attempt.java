@@ -40,14 +40,6 @@ public class Attempt {
     @Column(name = "submitted_at", updatable = false)
     private LocalDateTime submittedAt;
 
-    /** Points obtenus (corrigés à la soumission). */
-    @Column(nullable = false)
-    private Integer score;
-
-    /** Barème total au moment de la tentative. */
-    @Column(name = "max_score", nullable = false)
-    private Integer maxScore;
-
     @OneToMany(mappedBy = "attempt", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Submission> submissions;
 }

@@ -15,9 +15,12 @@ import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
 import com.moodit.core_service.repository.UserRepository;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -41,6 +44,7 @@ public class QuizService {
     private final AttemptRepository attemptRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final RealtimeEventPublisher realtimePublisher;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -103,10 +107,17 @@ public class QuizService {
         applyQuizMeta(quiz, dto, course);
         quiz.setQuestions(buildQuestions(dto.getQuestions(), quiz));
 
-        return toQuizDetailDTO(quizRepository.save(quiz));
+        Quiz saved = quizRepository.save(quiz);
+        broadcastQuiz(course, saved.getId(), false); // created
+        return toQuizDetailDTO(saved);
     }
 
-    /** Met à jour un quiz complet en un appel (remplace ses questions). */
+    /**
+     * Met à jour un quiz complet en un appel. Les questions EXISTANTES sont réutilisées
+     * (même id) afin de PRÉSERVER les soumissions liées (Submission.question_id) : éditer
+     * le quiz (ex. (dés)activer les reprises) ne détruit pas l'historique des tentatives.
+     * Seules les questions réellement retirées sont supprimées (orphanRemoval).
+     */
     @Transactional
     public QuizDetailDTO updateQuiz(Integer quizId, QuizDetailDTO dto) {
         Quiz quiz = quizRepository.findById(quizId)
@@ -114,14 +125,41 @@ public class QuizService {
 
         applyQuizMeta(quiz, dto, quiz.getCourse());
 
-        // Remplacement intégral des questions : orphanRemoval supprime les anciennes.
         if (quiz.getQuestions() == null) {
             quiz.setQuestions(new ArrayList<>());
         }
-        quiz.getQuestions().clear();
-        quiz.getQuestions().addAll(buildQuestions(dto.getQuestions(), quiz));
+        List<Question> current = quiz.getQuestions();
+        Map<Integer, Question> existingById = current.stream()
+                .filter(q -> q.getId() != null)
+                .collect(Collectors.toMap(Question::getId, q -> q));
 
-        return toQuizDetailDTO(quizRepository.save(quiz));
+        List<QuestionDTO> dtos = dto.getQuestions() == null ? List.of() : dto.getQuestions();
+        Set<Integer> keptIds = dtos.stream()
+                .map(QuestionDTO::getId)
+                .filter(id -> id != null && existingById.containsKey(id))
+                .collect(Collectors.toSet());
+
+        // On NE vide PAS la collection (un clear() ré-orphanerait les questions réutilisées
+        // → suppression en cascade de leurs Submission). On retire UNIQUEMENT les questions
+        // réellement supprimées, et on met à jour / ajoute le reste en place.
+        current.removeIf(q -> q.getId() != null && !keptIds.contains(q.getId()));
+
+        int index = 0;
+        for (QuestionDTO qd : dtos) {
+            Question q;
+            if (qd.getId() != null && existingById.containsKey(qd.getId())) {
+                q = existingById.get(qd.getId()); // réutilisée → ses Submission sont préservées
+            } else {
+                q = new Question();
+                current.add(q);
+            }
+            applyQuestionFields(q, qd, index, quiz);
+            index++;
+        }
+
+        Quiz saved = quizRepository.save(quiz);
+        broadcastQuiz(saved.getCourse(), saved.getId(), true); // updated
+        return toQuizDetailDTO(saved);
     }
 
     /** Supprime un quiz et tout son contenu (cascade). */
@@ -129,7 +167,54 @@ public class QuizService {
     public void deleteQuiz(Integer quizId) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
+        Course course = quiz.getCourse();
+        // Capture les programmes AVANT delete (la collection lazy serait vidée après).
+        List<Integer> programIds = course == null || course.getPrograms() == null ? List.of()
+                : course.getPrograms().stream().map(Program::getId).toList();
+        Integer courseId = course == null ? null : course.getId();
         quizRepository.delete(quiz);
+        if (courseId != null) {
+            afterCommit(() -> {
+                for (Integer programId : programIds) {
+                    realtimePublisher.quizDeleted(programId, courseId, quizId);
+                }
+            });
+        }
+    }
+
+    /** Diffuse l'ajout/la modif d'un quiz à toutes les rooms des programmes du cours. */
+    private void broadcastQuiz(Course course, Integer quizId, boolean updated) {
+        if (course == null || course.getPrograms() == null || quizId == null) return;
+        Integer courseId = course.getId();
+        // Capturé DANS la transaction (collection lazy) ; émis APRÈS commit (cf. afterCommit).
+        List<Integer> programIds = course.getPrograms().stream().map(Program::getId).toList();
+        afterCommit(() -> {
+            for (Integer programId : programIds) {
+                if (updated) {
+                    realtimePublisher.quizUpdated(programId, courseId, quizId);
+                } else {
+                    realtimePublisher.quizCreated(programId, courseId, quizId);
+                }
+            }
+        });
+    }
+
+    /**
+     * Exécute l'action APRÈS le commit de la transaction courante (ou tout de suite hors
+     * transaction). Évite la race « event diffusé avant commit » : un client qui re-fetch à
+     * la réception verrait sinon l'ANCIEN état (ex. quiz encore brouillon).
+     */
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 
     /** Réordonne les quiz d'un cours : `quizIds` dans le nouvel ordre → position 0..n. */
@@ -147,6 +232,15 @@ public class QuizService {
                 quizRepository.save(quiz);
             }
         }
+
+        // Capturé dans la transaction ; émis après commit (cf. afterCommit).
+        List<Integer> programIds = course.getPrograms() == null ? List.of()
+                : course.getPrograms().stream().map(Program::getId).toList();
+        afterCommit(() -> {
+            for (Integer programId : programIds) {
+                realtimePublisher.quizReordered(programId, courseId);
+            }
+        });
     }
 
     // ── Soumission / correction ──────────────────────────────────────────────────
@@ -172,24 +266,20 @@ public class QuizService {
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
         QuizResultDTO result = buildResult(quiz, byQuestion);
 
-        // Nouvelle tentative (numéro = nb existant + 1).
+        // Nouvelle tentative (numéro = nb existant + 1). Aucun score n'est stocké : seules
+        // les réponses brutes le sont (content) ; le score est recalculé à la lecture.
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
         attempt.setAttemptNo((int) existing + 1);
-        attempt.setScore(result.getEarned());
-        attempt.setMaxScore(result.getMax());
         Attempt savedAttempt = attemptRepository.save(attempt);
 
-        // Une Submission par question, rattachée à la tentative (réponse brute + score).
-        Map<Integer, Integer> earnedByQuestion = result.getQuestions().stream()
-                .collect(Collectors.toMap(QuestionResultDTO::getQuestionId, QuestionResultDTO::getEarned));
+        // Une Submission par question, rattachée à la tentative (réponse brute uniquement).
         for (Question q : sortedQuestions(quiz)) {
             Submission s = new Submission();
             s.setAttempt(savedAttempt);
             s.setUser(user);
             s.setQuestion(q);
-            s.setScore(earnedByQuestion.get(q.getId()));
             s.setContent(serializeAnswer(byQuestion.get(q.getId())));
             submissionRepository.save(s);
         }
@@ -199,18 +289,27 @@ public class QuizService {
         return result;
     }
 
-    /** Historique des tentatives de l'utilisateur sur un quiz (résumés, ordre croissant). */
+    /**
+     * Historique des tentatives (résumés). earned/max sont calculés DYNAMIQUEMENT à partir
+     * du quiz COURANT (pas de valeur figée en base) : `max` = barème des questions actuelles
+     * (une question ajoutée augmente le total, une supprimée le diminue), `earned` = somme
+     * des points obtenus sur les soumissions de la tentative (une question ajoutée, non
+     * répondue, vaut 0).
+     */
     @Transactional(readOnly = true)
     public List<AttemptSummaryDTO> getMyAttempts(Integer quizId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
         return attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(quizId, user.getId()).stream()
-                .map(a -> new AttemptSummaryDTO(
-                        a.getId(),
-                        a.getAttemptNo(),
-                        a.getScore(),
-                        a.getMaxScore(),
-                        a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC)))
+                .map(a -> {
+                    QuizResultDTO r = computeAttemptResult(a);
+                    return new AttemptSummaryDTO(
+                            a.getId(),
+                            a.getAttemptNo(),
+                            r.getEarned(),
+                            r.getMax(),
+                            a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC));
+                })
                 .toList();
     }
 
@@ -221,13 +320,22 @@ public class QuizService {
                 .orElseThrow(UserNotFoundException::new);
         Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
                 .orElseThrow(AttemptNotFoundException::new);
+        return computeAttemptResult(attempt);
+    }
 
-        Map<Integer, SubmittedAnswerDTO> byQuestion =
-                (attempt.getSubmissions() == null ? List.<Submission>of() : attempt.getSubmissions()).stream()
-                        .collect(Collectors.toMap(
-                                s -> s.getQuestion().getId(),
-                                s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
-                                (a, b) -> a));
+    /**
+     * Corrige une tentative DYNAMIQUEMENT à partir du quiz COURANT : on (re)corrige chaque
+     * question actuelle avec la réponse soumise (désérialisée). Une question ajoutée après la
+     * tentative apparaît non répondue (0 / barème) ; une question supprimée n'y est plus.
+     * Aucun score n'est lu en base : tout est recalculé.
+     */
+    private QuizResultDTO computeAttemptResult(Attempt attempt) {
+        List<Submission> subs = attempt.getSubmissions() == null ? List.of() : attempt.getSubmissions();
+        Map<Integer, SubmittedAnswerDTO> byQuestion = subs.stream()
+                .collect(Collectors.toMap(
+                        s -> s.getQuestion().getId(),
+                        s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
+                        (a, b) -> a));
 
         QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion);
         result.setAttemptId(attempt.getId());
@@ -427,6 +535,77 @@ public class QuizService {
         String name = Q_TYPE_SLUG_TO_NAME.get(qd.getQType());
         return Optional.ofNullable(name).flatMap(qTypeRepository::findByName)
                 .orElseThrow(() -> new IllegalArgumentException("Type de question inconnu: " + qd.getQType()));
+    }
+
+    /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */
+    private void applyQuestionFields(Question q, QuestionDTO qd, int index, Quiz quiz) {
+        q.setQuiz(quiz);
+        q.setPrompt(qd.getPrompt());
+        q.setStartCode(qd.getStartCode());
+        q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
+        q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
+        q.setQType(resolveQType(qd));
+        applyAnswers(q, qd.getAnswers());
+        applyDragItems(q, qd.getDragItems());
+    }
+
+    /**
+     * Met à jour les options d'une question en RÉUTILISANT les Answer existantes par id
+     * (les ids restent stables → une réponse d'étudiant en cours n'est pas invalidée au
+     * rechargement). Seules les options réellement retirées sont supprimées.
+     */
+    private void applyAnswers(Question q, List<AnswerDTO> dtos) {
+        if (q.getAnswers() == null) q.setAnswers(new ArrayList<>());
+        List<Answer> current = q.getAnswers();
+        Map<Integer, Answer> existingById = current.stream()
+                .filter(a -> a.getId() != null)
+                .collect(Collectors.toMap(Answer::getId, a -> a));
+        List<AnswerDTO> list = dtos == null ? List.of() : dtos;
+        Set<Integer> keptIds = list.stream()
+                .map(AnswerDTO::getId)
+                .filter(id -> id != null && existingById.containsKey(id))
+                .collect(Collectors.toSet());
+        current.removeIf(a -> a.getId() != null && !keptIds.contains(a.getId()));
+        for (AnswerDTO ad : list) {
+            Answer a;
+            if (ad.getId() != null && existingById.containsKey(ad.getId())) {
+                a = existingById.get(ad.getId()); // réutilisée → id stable
+            } else {
+                a = new Answer();
+                a.setQuestion(q);
+                current.add(a);
+            }
+            a.setContent(ad.getContent());
+            a.setIsCorrect(Boolean.TRUE.equals(ad.getIsCorrect()));
+        }
+    }
+
+    /** Idem pour les éléments déplaçables : réutilise les DragItem existants par id (ids stables). */
+    private void applyDragItems(Question q, List<DragItemDTO> dtos) {
+        if (q.getDragItems() == null) q.setDragItems(new ArrayList<>());
+        List<DragItem> current = q.getDragItems();
+        Map<Integer, DragItem> existingById = current.stream()
+                .filter(d -> d.getId() != null)
+                .collect(Collectors.toMap(DragItem::getId, d -> d));
+        List<DragItemDTO> list = dtos == null ? List.of() : dtos;
+        Set<Integer> keptIds = list.stream()
+                .map(DragItemDTO::getId)
+                .filter(id -> id != null && existingById.containsKey(id))
+                .collect(Collectors.toSet());
+        current.removeIf(d -> d.getId() != null && !keptIds.contains(d.getId()));
+        for (DragItemDTO dd : list) {
+            DragItem d;
+            if (dd.getId() != null && existingById.containsKey(dd.getId())) {
+                d = existingById.get(dd.getId()); // réutilisé → id stable
+            } else {
+                d = new DragItem();
+                d.setQuestion(q);
+                current.add(d);
+            }
+            d.setContent(dd.getContent());
+            d.setCorrectOrder(dd.getCorrectOrder() != null ? dd.getCorrectOrder() : 0);
+            d.setGroupName(dd.getGroupName());
+        }
     }
 
     private List<Answer> buildAnswers(List<AnswerDTO> dtos, Question question) {

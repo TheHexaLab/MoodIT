@@ -223,19 +223,18 @@ CREATE TABLE Attempt(
    user_id INTEGER NOT NULL,
    attempt_no INTEGER NOT NULL,
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-   score INTEGER NOT NULL,
-   max_score INTEGER NOT NULL,
    PRIMARY KEY(id),
    UNIQUE(quiz_id, user_id, attempt_no),
    FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
 
+-- La réponse soumise est conservée (content) ; le score n'est PAS stocké : il est
+-- recalculé dynamiquement à partir du quiz courant (cf. QuizService).
 CREATE TABLE Submission(
    id SERIAL,
    content TEXT,
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-   score INTEGER,
    attempt_id INTEGER NOT NULL,
    question_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,

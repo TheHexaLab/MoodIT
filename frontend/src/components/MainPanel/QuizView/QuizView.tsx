@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import styles from './QuizView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { type Course } from '../../CourseMenu/CourseMenu';
@@ -41,8 +41,10 @@ interface QuizViewProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
-  /** Retour au tableau de bord depuis le résumé (optionnel). */
-  onExit?: () => void;
+  /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
+  staleNotice?: boolean;
+  /** Efface la bannière « quiz modifié » (après rechargement ou rejet). */
+  onReloadStale?: () => void;
   /** Libellés (coquille + résumé / carte / rendus). Défauts FR sinon. */
   labels?: QuizViewLabelsBundle;
 }
@@ -60,7 +62,8 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
-  onExit,
+  staleNotice = false,
+  onReloadStale,
   labels,
 }) => {
   const t = { ...defaultQuizViewLabels, ...labels?.view };
@@ -77,6 +80,22 @@ const QuizView: React.FC<QuizViewProps> = ({
     submitErrorMessage: t.submitError,
   });
   const { quiz, phase, currentIndex, answers, result } = attempt;
+
+  // Quiz modifié à distance (WS) : on RECHARGE immédiatement (sans toast). En passation,
+  // on conserve les réponses déjà saisies (fusion) ; sinon rechargement complet.
+  // Refs pour ne déclencher qu'au front montant de `staleNotice` (pas de double-reload).
+  const attemptRef = useRef(attempt);
+  attemptRef.current = attempt;
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const onReloadStaleRef = useRef(onReloadStale);
+  onReloadStaleRef.current = onReloadStale;
+  useEffect(() => {
+    if (!staleNotice) return;
+    if (phaseRef.current === 'taking') attemptRef.current.reloadKeepingAnswers();
+    else attemptRef.current.reload();
+    onReloadStaleRef.current?.();
+  }, [staleNotice]);
 
   const questions = quiz.questions ?? [];
   const total = questions.length;
@@ -190,15 +209,6 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (phase === 'summary') {
       return (
         <footer className={`${styles.footer} ${styles.summaryFooter}`}>
-          <button
-            type="button"
-            className={styles.navButton}
-            onClick={onExit}
-            disabled={!onExit}
-          >
-            <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-            {t.toDashboard}
-          </button>
           <button
             type="button"
             className={styles.navButton}

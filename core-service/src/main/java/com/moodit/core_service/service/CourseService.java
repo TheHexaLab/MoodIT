@@ -64,11 +64,12 @@ public class CourseService {
                 .stream()
                 .map(forumService::toForumDTO)
                 .toList());
-        // Tous les quiz du cours (méta seule, sans les questions), triés par `position`.
-        // Le DTO porte isPublished/isDaily : le front filtre s'il ne veut que les publiés.
+        // Quiz PUBLIÉS du cours (méta seule), triés par `position`. Les brouillons ne sont
+        // pas listés dans la sidebar ; l'enseignant les gère via l'éditeur (GET /quizzes).
         dto.setQuizzes(course.getQuizzes() == null ? List.of()
                 : course.getQuizzes()
                 .stream()
+                .filter(q -> Boolean.TRUE.equals(q.getIsPublished()))
                 .sorted(Comparator.comparing(Quiz::getPosition,
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(this::toQuizDTO)

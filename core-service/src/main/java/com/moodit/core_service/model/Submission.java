@@ -35,9 +35,6 @@ public class Submission {
     @Column(name = "submitted_at", nullable = false, updatable = false)
     private LocalDateTime submittedAt;
 
-    /** Points obtenus à la question (corrigés au moment de la soumission). */
-    private Integer score;
-
     @ManyToOne
     @JoinColumn(name = "question_id", nullable = false)
     private Question question;

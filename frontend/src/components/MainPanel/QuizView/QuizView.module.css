@@ -236,6 +236,11 @@
     border-top: 1px solid var(--border);
 }
 
+/* Résumé avec un seul bouton (« Revoir mes réponses » sans « Refaire ») → aligné à droite. */
+.summaryFooter:has(> button:only-child) {
+    justify-content: flex-end;
+}
+
 .navButton {
     display: inline-flex;
     align-items: center;

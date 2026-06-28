@@ -87,6 +87,12 @@ interface MainPanelProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
+  /** Bump à chaque mise à jour de quiz : remonte la vue de quiz ouverte (rechargement). */
+  quizRefreshKey?: number;
+  /** Le quiz ouvert a été modifié à distance → bannière de rechargement. */
+  quizStale?: boolean;
+  /** Ferme/efface la bannière « quiz modifié » (après rechargement ou rejet). */
+  onReloadStale?: () => void;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
 }
@@ -124,6 +130,9 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  quizRefreshKey = 0,
+  quizStale = false,
+  onReloadStale,
 }) => {
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
@@ -180,13 +189,15 @@ const MainPanel: React.FC<MainPanelProps> = ({
       case 'quiz':
         return (
           <QuizView
-            key={`${channel.type}-${channel.id}`}
+            key={`${channel.type}-${channel.id}-${quizRefreshKey}`}
             course={course}
             channel={channel}
             onFetchQuiz={onFetchQuiz}
             onFetchAttempts={onFetchAttempts}
             onFetchAttemptResult={onFetchAttemptResult}
             onSubmitQuiz={onSubmitQuiz}
+            staleNotice={quizStale}
+            onReloadStale={onReloadStale}
           />
         );
       case 'text': // fType 'Discussion'

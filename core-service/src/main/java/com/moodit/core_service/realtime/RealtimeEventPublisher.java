@@ -131,6 +131,41 @@ public class RealtimeEventPublisher {
             "change", change));
   }
 
+  /** Un quiz a été AJOUTÉ au cours : les clients rafraîchissent la liste (pas de bannière). */
+  public void quizCreated(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:created", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
+  /**
+   * Un quiz a été MODIFIÉ : les clients rafraîchissent la liste, et celui qui l'a ouvert
+   * voit une bannière « quiz modifié — recharger ».
+   */
+  public void quizUpdated(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:updated", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
+  /** Les quiz d'un cours ont été réordonnés : les clients rafraîchissent la liste. */
+  public void quizReordered(long programId, long courseId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:reordered", "programId", programId, "courseId", courseId));
+  }
+
+  /** Un quiz a été supprimé : les clients le retirent de la liste (et ferment la vue ouverte). */
+  public void quizDeleted(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:deleted", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
   // ─── Programmes / abonnements (scope = user) ──────────────────────────────
 
   public void programCreated(long userId, ProgramDto program) {

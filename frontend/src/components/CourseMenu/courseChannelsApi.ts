@@ -34,6 +34,19 @@ export interface IncomingCourseHandlers {
   onCourseUpsert: (course: Course) => void;
   /** Un cours a été supprimé du programme. */
   onCourseDelete: (courseId: number) => void;
+  /** Un quiz a été ajouté au cours (→ rafraîchit la liste). */
+  onQuizCreated?: (courseId: number, quizId: number) => void;
+  /** Un quiz du cours a été modifié (→ rafraîchit la liste + bannière si ouvert). */
+  onQuizUpdated?: (courseId: number, quizId: number) => void;
+  /** Les quiz du cours ont été réordonnés (→ rafraîchit la liste). */
+  onQuizReordered?: (courseId: number) => void;
+  /** Un quiz du cours a été supprimé (→ retrait de la liste, fermeture de la vue ouverte). */
+  onQuizDeleted?: (courseId: number, quizId: number) => void;
+  /**
+   * Reconnexion WebSocket après coupure : des évènements ont pu être manqués → on
+   * resynchronise (recharge les cours du programme, donc canaux/quiz/forums).
+   */
+  onResync?: () => void;
 }
 
 /**

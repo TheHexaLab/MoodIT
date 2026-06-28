@@ -10,6 +10,7 @@ import {
   type QuizResult,
   type SubmitQuizHandler,
   initAnswers,
+  mergeAnswers,
   toSubmission,
 } from './quizAttempt';
 import { gradeQuiz } from './grading';
@@ -48,6 +49,8 @@ export interface QuizAttemptApi {
   loading: boolean;
   loadError: string | null;
   reload: () => void;
+  /** Recharge le quiz en CONSERVANT les réponses déjà saisies (fusion). */
+  reloadKeepingAnswers: () => void;
 
   phase: QuizPhase;
   /** Index de la question affichée (en `taking` et `review`). */
@@ -187,6 +190,35 @@ export function useQuizAttempt({
     void reload();
   }, [reload]);
 
+  /** Recharge le détail du quiz en CONSERVANT les réponses en cours (fusion). Reste en passation. */
+  const reloadKeepingAnswers = useCallback(async () => {
+    const fetchQuiz = fetchRef.current;
+    if (!fetchQuiz) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const fetched = await fetchQuiz(initialQuiz.id);
+      if (!mountedRef.current) return;
+      setQuiz(fetched);
+      setAnswers((prev) => mergeAnswers(fetched, prev));
+      setTouched((prev) => {
+        const ids = new Set((fetched.questions ?? []).map((q) => q.id));
+        return new Set([...prev].filter((id) => ids.has(id)));
+      });
+      setCurrentIndex((i) =>
+        Math.max(0, Math.min(i, Math.max((fetched.questions?.length ?? 0) - 1, 0)))
+      );
+      setResult(null);
+      setCurrentAttemptId(null);
+      setPhase('taking');
+    } catch {
+      if (!mountedRef.current) return;
+      setLoadError(loadErrorMessage);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [initialQuiz.id, loadErrorMessage]);
+
   const setAnswer = useCallback((questionId: number, answer: QuestionAnswer) => {
     setAnswers((prev) => ({ ...prev, [questionId]: answer }));
     setTouched((prev) => (prev.has(questionId) ? prev : new Set(prev).add(questionId)));
@@ -278,6 +310,7 @@ export function useQuizAttempt({
       loading,
       loadError,
       reload: () => void reload(),
+      reloadKeepingAnswers: () => void reloadKeepingAnswers(),
       phase,
       currentIndex,
       answers,
@@ -303,6 +336,7 @@ export function useQuizAttempt({
       loading,
       loadError,
       reload,
+      reloadKeepingAnswers,
       phase,
       currentIndex,
       answers,

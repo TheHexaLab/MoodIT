@@ -102,6 +102,44 @@ export function initAnswers(quiz: Quiz): AttemptAnswers {
   return answers;
 }
 
+/**
+ * Fusionne les réponses courantes avec un quiz RECHARGÉ : conserve ce que l'étudiant a
+ * déjà saisi tant que ça reste valide (même type, options/éléments encore présents), et
+ * repart à vide pour les questions nouvelles ou dont la structure a changé.
+ */
+export function mergeAnswers(quiz: Quiz, previous: AttemptAnswers): AttemptAnswers {
+  const answers: AttemptAnswers = {};
+  for (const q of quiz.questions ?? []) answers[q.id] = mergeAnswer(q, previous[q.id]);
+  return answers;
+}
+
+function mergeAnswer(question: Question, prev: QuestionAnswer | undefined): QuestionAnswer {
+  const fresh = emptyAnswer(question);
+  // Type de réponse changé (ou pas de réponse antérieure) → on repart de l'état vide.
+  if (!prev || prev.kind !== fresh.kind) return fresh;
+  switch (prev.kind) {
+    case 'choice': {
+      const valid = new Set((question.answers ?? []).map((a) => a.id));
+      return { kind: 'choice', answerIds: prev.answerIds.filter((id) => valid.has(id)) };
+    }
+    case 'ordering': {
+      // Garde l'ordre choisi pour les éléments encore présents ; ajoute les nouveaux à la fin.
+      const ids = (question.dragItems ?? []).map((d) => d.id);
+      const present = new Set(ids);
+      const kept = prev.itemIds.filter((id) => present.has(id));
+      const added = ids.filter((id) => !kept.includes(id));
+      return { kind: 'ordering', itemIds: [...kept, ...added] };
+    }
+    case 'matching': {
+      const placement: Record<number, string | null> = {};
+      for (const d of question.dragItems ?? []) placement[d.id] = prev.placement[d.id] ?? null;
+      return { kind: 'matching', placement };
+    }
+    case 'coding':
+      return { kind: 'coding', code: prev.code };
+  }
+}
+
 /** Une question a-t-elle reçu une réponse (pour l'indicateur « répondue ») ? */
 export function isAnswered(answer: QuestionAnswer | undefined): boolean {
   if (!answer) return false;

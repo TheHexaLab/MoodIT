@@ -101,6 +101,12 @@ export default function Dashboard() {
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
+  // Incrémenté à chaque mise à jour de quiz → remonte la vue de quiz ouverte (rechargement).
+  const [quizRefreshKey, setQuizRefreshKey] = useState(0);
+  // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
+  const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
+  // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
+  const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
   const [popup, setPopup] = useState<PopupState | null>(null);
@@ -198,6 +204,21 @@ export default function Dashboard() {
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
   useEffect(() => {
     if (activeProgramId < 0) return;
+    // Recharge les quiz PUBLIÉS d'un cours dans la liste (ajout / modif / suppression).
+    const refreshCourseQuizzes = (courseId: number) => {
+      void api
+        .fetchPublishedQuizzes(courseId)
+        .then((quizzes) =>
+          setDashboardPrograms((programs) =>
+            mapProgramCourses(programs, activeProgramId, (course) =>
+              course.id === courseId ? { ...course, quizzes } : course
+            )
+          )
+        )
+        .catch(() => {
+          /* échec silencieux : la liste garde son état courant */
+        });
+    };
     return ws.courses.subscribe(activeProgramId, {
       onSectionChange: (courseId, sectionType, change) =>
         setDashboardPrograms((programs) =>
@@ -209,6 +230,32 @@ export default function Dashboard() {
         setDashboardPrograms((programs) => upsertCourse(programs, activeProgramId, course)),
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
+      // Un quiz a été ajouté : il apparaît dans la liste (s'il est publié).
+      onQuizCreated: (courseId) => refreshCourseQuizzes(courseId),
+      // Un quiz a été modifié : on rafraîchit la liste, et la QuizView affiche une bannière
+      // de rechargement si c'est le quiz actuellement ouvert (cf. quizStale).
+      onQuizUpdated: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setStaleQuizId(quizId);
+      },
+      // Les quiz ont été réordonnés : on rafraîchit la liste (nouvel ordre, sans bannière).
+      onQuizReordered: (courseId) => refreshCourseQuizzes(courseId),
+      // Reconnexion : des évènements ont pu être manqués → on recharge les cours du
+      // programme actif (canaux/quiz/forums resynchronisés) ET la vue de quiz ouverte
+      // (rechargement en conservant la saisie, via le mécanisme staleQuizId).
+      onResync: () => {
+        void handleFetchCourses(activeProgramId);
+        if (openQuizIdRef.current != null) setStaleQuizId(openQuizIdRef.current);
+      },
+      // Un quiz a été supprimé : il sort de la liste, on ferme sa vue si elle est ouverte,
+      // et on efface une éventuelle bannière « modifié » le concernant.
+      onQuizDeleted: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setSelectedChannelRef((prev) =>
+          prev?.type === 'quiz' && prev.id === quizId ? undefined : prev
+        );
+        setStaleQuizId((prev) => (prev === quizId ? null : prev));
+      },
     });
   }, [activeProgramId, ws]);
 
@@ -327,6 +374,8 @@ export default function Dashboard() {
         ),
       }))
     );
+    // Un quiz a changé → force le remontage de la vue de quiz ouverte (recharge le détail).
+    setQuizRefreshKey((k) => k + 1);
   };
 
   // Création d'un cours (admin) → rattaché aux programmes choisis (via api.createCourse).
@@ -504,6 +553,10 @@ export default function Dashboard() {
     : [];
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
+  // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
+  const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
+  openQuizIdRef.current = openQuizId;
+  const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
@@ -651,6 +704,9 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        quizRefreshKey={quizRefreshKey}
+        quizStale={quizStale}
+        onReloadStale={() => setStaleQuizId(null)}
       />
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que

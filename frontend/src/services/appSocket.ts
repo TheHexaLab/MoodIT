@@ -66,6 +66,10 @@ type ServerEvent =
       sectionType: string;
       change: ItemChange;
     }
+  | { type: 'quiz:created'; programId: number; courseId: number; quizId: number }
+  | { type: 'quiz:updated'; programId: number; courseId: number; quizId: number }
+  | { type: 'quiz:reordered'; programId: number; courseId: number }
+  | { type: 'quiz:deleted'; programId: number; courseId: number; quizId: number }
   // Programmes / abonnements (scope = utilisateur)
   | { type: 'program:created'; userId: number; program: Program }
   | { type: 'program:updated'; userId: number; program: Program }
@@ -150,6 +154,7 @@ export function createAppSocket(
       // handlers + une boucle ici (cf. mcpSubs).
       if (reconnected) {
         for (const handlers of mcpSubs.values()) handlers.onResync?.();
+        for (const handlers of courseSubs.values()) handlers.onResync?.();
       }
     };
 
@@ -192,6 +197,18 @@ export function createAppSocket(
           break;
         case 'section:changed':
           courseSubs.get(data.programId)?.onSectionChange(data.courseId, data.sectionType, data.change);
+          break;
+        case 'quiz:created':
+          courseSubs.get(data.programId)?.onQuizCreated?.(data.courseId, data.quizId);
+          break;
+        case 'quiz:updated':
+          courseSubs.get(data.programId)?.onQuizUpdated?.(data.courseId, data.quizId);
+          break;
+        case 'quiz:reordered':
+          courseSubs.get(data.programId)?.onQuizReordered?.(data.courseId);
+          break;
+        case 'quiz:deleted':
+          courseSubs.get(data.programId)?.onQuizDeleted?.(data.courseId, data.quizId);
           break;
         case 'program:created':
         case 'program:updated':
