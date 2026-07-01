@@ -79,7 +79,30 @@ public class PermissionService {
         // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
         // Creer un cours dans des programmes : reserve aux Administrateurs.
         new Rule(
-            "POST", "/api/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur"))
+            "POST", "/api/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur")),
+
+        // ── QUIZ ─────────────────────────────────────────────────────────────────
+        // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
+        // TODO affiner en role enseignant scope-programme (User_Program_Role) une fois
+        // la resolution quiz -> programme disponible.
+        new Rule(
+            "PUT", "/api/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+        new Rule(
+            "DELETE", "/api/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+
+        // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
+        // etre abonne a un programme du cours du quiz.
+        new Rule("GET", "/api/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
+        new Rule(
+            "POST",
+            "/api/quizzes/{quizId}/submissions",
+            (user, vars, body) -> quizAccess(user, vars)),
+        new Rule(
+            "GET", "/api/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
+        new Rule(
+            "GET",
+            "/api/quizzes/{quizId}/attempts/{attemptId}",
+            (user, vars, body) -> quizAccess(user, vars))
 
         // ── TODO : a completer (ids dans le PATH pour edit/delete) ───────────────
         //  editPost   PATCH  /api/forums/{forumId}/posts/{postId}  -> canAccessForum(vars.forumId)
@@ -131,6 +154,21 @@ public class PermissionService {
   private static long longField(JsonNode body, String field) {
     JsonNode node = body.path(field);
     return node.canConvertToLong() ? node.longValue() : -1;
+  }
+
+  // Acces a un quiz (quizId dans les variables de path) : abonne a un programme du cours.
+  private boolean quizAccess(User user, Map<String, String> vars) {
+    long quizId = longVar(vars, "quizId");
+    return quizId > 0 && membershipService.canAccessQuiz(user.getId(), quizId);
+  }
+
+  // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
+  private static long longVar(Map<String, String> vars, String name) {
+    try {
+      return Long.parseLong(vars.get(name));
+    } catch (NumberFormatException e) {
+      return -1;
+    }
   }
 
   private static boolean hasRole(User user, String roleName) {

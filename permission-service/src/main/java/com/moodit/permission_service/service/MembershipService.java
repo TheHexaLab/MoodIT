@@ -6,6 +6,7 @@
 //   user    -> c'est SA propre room (id == son user_id)
 //   program -> abonne au programme (User_Program)
 //   channel/forum -> le forum est visible : abonne au programme du cours.
+//   mcp     -> le cours est visible : abonne a un programme du cours.
 
 package com.moodit.permission_service.service;
 
@@ -38,6 +39,7 @@ public class MembershipService {
       case "user" -> id == userId;
       case "program" -> membershipRepository.isSubscribedToProgram(userId, id);
       case "channel", "forum" -> canAccessForum(userId, id);
+      case "mcp" -> canAccessCourse(userId, id);
       default -> false;
     };
   }
@@ -50,6 +52,21 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean canAccessForum(long userId, long forumId) {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
+  }
+
+  /** Le cours (scope MCP) est-il visible ? Meme regle : etre abonne a un programme du cours. */
+  @Transactional(readOnly = true)
+  public boolean canAccessCourse(long userId, long courseId) {
+    return membershipRepository.canSeeCourseViaProgram(userId, courseId);
+  }
+
+  /**
+   * Le quiz est-il accessible (lecture / soumission REST) ? Meme regle d'appartenance :
+   * etre abonne a un programme du cours auquel appartient le quiz.
+   */
+  @Transactional(readOnly = true)
+  public boolean canAccessQuiz(long userId, long quizId) {
+    return membershipRepository.canSeeQuizViaProgram(userId, quizId);
   }
 
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */

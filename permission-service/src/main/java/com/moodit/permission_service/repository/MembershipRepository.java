@@ -36,4 +36,34 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeForumViaProgram(@Param("userId") long userId, @Param("forumId") long forumId);
+
+  // Le cours appartient a un programme auquel l'utilisateur est abonne (scope MCP).
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM program_course pc
+            JOIN User_Program up ON up.program_id = pc.program_id
+            WHERE pc.course_id = :courseId AND up.user_id = :userId
+          )
+          """,
+      nativeQuery = true)
+  boolean canSeeCourseViaProgram(@Param("userId") long userId, @Param("courseId") long courseId);
+
+  // Le quiz appartient a un cours d'un programme auquel l'utilisateur est abonne
+  // (routes REST /api/quizzes/{quizId} : lecture / soumission).
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM Quiz q
+            JOIN program_course pc ON pc.course_id = q.course_id
+            JOIN User_Program up   ON up.program_id = pc.program_id
+            WHERE q.id = :quizId AND up.user_id = :userId
+          )
+          """,
+      nativeQuery = true)
+  boolean canSeeQuizViaProgram(@Param("userId") long userId, @Param("quizId") long quizId);
 }
