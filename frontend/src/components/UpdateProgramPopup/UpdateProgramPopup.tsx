@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './UpdateProgramPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { DEFAULT_PALETTE, FIELD_MAX_LENGTH, defaultLabels } from './labels.ts';
@@ -41,7 +42,7 @@ interface UpdateProgramPopupProps {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function UpdateProgramPopup({

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './EditProfilePopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Camera } from '../../assets/Camera.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
@@ -27,7 +28,7 @@ interface EditProfilePopupProps {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function EditProfilePopup({
@@ -40,11 +41,11 @@ export function EditProfilePopup({
   const t = { ...defaultLabels, ...labels };
 
   const username = user.username;
-  const [firstName, setFirstName] = useState(user.first_name);
-  const [lastName, setLastName] = useState(user.last_name);
-  const [avatarColor, setAvatarColor] = useState(user.avatar_color || DEFAULT_PALETTE[0]);
+  const [firstName, setFirstName] = useState(user.firstName);
+  const [lastName, setLastName] = useState(user.lastName);
+  const [avatarColor, setAvatarColor] = useState(user.avatarColor || DEFAULT_PALETTE[0]);
   /** Photo affichée : URL existante (user) ou aperçu local d'une photo choisie. */
-  const [avatarPhoto, setAvatarPhoto] = useState<string | null>(user.avatar_url ?? null);
+  const [avatarPhoto, setAvatarPhoto] = useState<string | null>(user.avatarUrl ?? null);
   /** Fichier de la nouvelle photo choisie (null = aucune nouvelle / retirée). */
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   /** La photo a-t-elle été modifiée par rapport à l'état initial ? */

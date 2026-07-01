@@ -1,0 +1,19 @@
+info:
+  name: GET/courses/1/forums?typeId=1
+  type: http
+  seq: 7
+
+http:
+  method: GET
+  url: "{{baseUrl}}/courses/1/forums?typeId=2"
+  params:
+    - name: typeId
+      value: "2"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

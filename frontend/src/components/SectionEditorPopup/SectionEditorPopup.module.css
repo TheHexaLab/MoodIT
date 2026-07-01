@@ -83,31 +83,6 @@ div.section-editor-popup.closing > div {
     }
 }
 
-/* Indicateur de chargement du bouton « enregistrer » (prend la couleur du texte). */
-div.section-editor-popup span.spinner {
-    display: inline-block;
-    box-sizing: border-box;
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: section-editor-popup-spin 0.6s linear infinite;
-}
-
-@keyframes section-editor-popup-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.section-editor-popup span.spinner {
-        animation-duration: 1.4s;
-    }
-}
-
 div.section-editor-popup > div > header {
     display: flex;
     justify-content: space-between;
@@ -162,7 +137,8 @@ div.section-editor-popup > div > header > button:hover {
 }
 
 div.section-editor-popup > div > header > button:active {
-    transform: scale(0.85);
+    /* Opacité (pas un scale) : éviter les clics manqués près du bord. */
+    opacity: 0.55;
 }
 
 div.section-editor-popup > div > main {

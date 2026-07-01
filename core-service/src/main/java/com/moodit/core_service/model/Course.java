@@ -29,6 +29,9 @@ public class Course {
     @OneToMany(mappedBy = "course", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Forum> forums;
 
+    @OneToMany(mappedBy = "course", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Quiz> quizzes;
+
     @ManyToMany(mappedBy = "courses")
     private List<Program> programs;
 

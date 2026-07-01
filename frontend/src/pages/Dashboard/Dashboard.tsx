@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ProgramMenu, { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
 import { useCoursesLoader } from '../../components/CourseMenu/useCoursesLoader.ts';
 import { CourseSectionEditor } from '../../components/CourseMenu/CourseSectionEditor.tsx';
+import { Spinner } from '../../components/Spinner/Spinner.tsx';
 import {
-  type ChannelMessage,
   type ChannelMessageAuthor,
   type ChannelRef,
   type ChannelTypeDefinition,
@@ -14,6 +14,8 @@ import {
 } from '../../components/CourseChannelList/CourseChannelList.tsx';
 import { defaultTypeDefinitions } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { AddCoursePopup, type NewCourse } from '../../components/AddCoursePopup/AddCoursePopup.tsx';
+import { JoinCoursesPopup } from '../../components/JoinCoursesPopup/JoinCoursesPopup.tsx';
+import { McpManagementPopup } from '../../components/McpManagementPopup/McpManagementPopup.tsx';
 import {
   AddSubscriptionPopup,
   type JoinSelection,
@@ -27,10 +29,7 @@ import {
   UpdateProgramPopup,
   type ProgramUpdate,
 } from '../../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
-import {
-  EditProfilePopup,
-  type ProfileUpdate,
-} from '../../components/EditProfilePopup/EditProfilePopup.tsx';
+import { EditProfilePopup } from '../../components/EditProfilePopup/EditProfilePopup.tsx';
 import {
   RoleEditorPopup,
   type Role,
@@ -39,28 +38,16 @@ import {
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
-import {
-  getCreateEstablishments,
-  getEstablishmentPrograms,
-  getJoinEstablishments,
-} from '../../mocks/subscriptionData.ts';
-import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
-import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
+import { ChannelTypeIcon } from '../../components/CourseChannelList/ChannelTypeIcon.tsx';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 
-// TODO [5] — supprimer cet import (et tout src/dev/) une fois le vrai WebSocket branché.
-// Une seule connexion simulée sert le chat ET le forum (deux facades).
-import {
-  mockMessageSocket,
-  mockForumSocket,
-  mockCourseSocket,
-  mockProgramsSocket,
-} from '../../dev/mockSocket.ts';
-import {
-  getMockForumReplies,
-  getMockForumThreads,
-  type ForumPost,
-} from '../../components/MainPanel/ForumView/forumThreads.ts';
+// Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
+// les programmes (quatre facades) — étape [5] du HANDOFF.
+import { createAppSocket } from '../../services/appSocket.ts';
+import { getToken } from '../../helpers/auth.ts';
+import { useCurrentUser } from '../../context/currentUserContext.ts';
+import * as api from './dashboardApi.ts';
+import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
 import {
@@ -70,44 +57,25 @@ import {
   type QuizChannelSource,
 } from '../../components/CourseChannelList/courseChannelSources.ts';
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
-import { getDashboardPrograms } from './dashboardDataSource.ts';
-import { type DemoProgram } from '../../mocks/dashboardData.ts';
+import { type DemoProgram } from './dashboardApi.ts';
 import styles from './Dashboard.module.css';
 
-const loggedInUserMock: UserMenuUser = {
-  id: 1,
-  username: 'jeandubois',
-  email: 'jeandubois@email.com',
-  first_name: 'Jean',
-  last_name: 'D.',
-  avatar_color: '#0a5cc0',
+/**
+ * Câblage des callbacks de l'éditeur de quiz sur la couche API (`dashboardApi`).
+ * Assemblage côté consommateur : l'éditeur reste « API-ready » (remplacer les corps
+ * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
+ */
+const quizEditorHandlers: QuizEditorHandlers = {
+  onFetchQuiz: api.fetchQuiz,
+  onFetchQuizzes: api.fetchQuizzes,
+  onFetchLanguages: api.fetchLanguages,
+  onFetchQuestionTypes: api.fetchQuestionTypes,
+  onCreateQuiz: api.createQuiz,
+  onUpdateQuiz: api.updateQuiz,
+  onDeleteQuiz: api.deleteQuiz,
+  onReorderQuizzes: api.reorderQuizzes,
+  onEvaluateCode: api.evaluateCode,
 };
-
-// TODO : dériver du rôle réel de l'utilisateur connecté (mock pour l'instant).
-const isAdminMock = true;
-
-// Mettre à true pour tester le chemin d'échec (rollback + ErrorPopup) des
-// operations sur les messages : envoi, modification, suppression.
-const SIMULATE_SEND_FAILURE = false;
-const SIMULATE_DELAY = 100;
-const SIMULATE_FETCH_FAILURE = false;
-
-/* ─────────────────────────────────────────────────────────────────────────────
- * TODO — BRANCHEMENT BACKEND + TEMPS RÉEL DU CHAT
- * Détails complets : src/components/MainPanel/ChannelView/HANDOFF.md
- *
- * Ordre de développement conseillé (chaque étape est isolée et testable) :
- *   [1] GET    messages    → handleFetchMessages   (afficher l'historique d'abord)
- *   [2] POST   message     → handleSendMessage     (RENVOYER le message persisté + client_msg_id)
- *   [3] PATCH  message     → handleEditMessage
- *   [4] DELETE message     → handleDeleteMessage
- *   [5] WebSocket          → remplacer les mocks par `createAppSocket(...)` (UNE connexion
- *                            pour le chat ET le forum ; scaffold prêt : src/services/appSocket.ts)
- *
- * Déjà géré côté front (ne rien recoder) : états loading/erreur, rollback optimiste,
- * déduplication optimiste ↔ écho (client_msg_id), désabonnement au changement de canal.
- * À NETTOYER en fin de parcours : tout le dossier src/dev/ (mock + menu de test).
- * ───────────────────────────────────────────────────────────────────────────── */
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
@@ -117,20 +85,28 @@ type PopupState =
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
-  | { kind: 'leaveProgram'; programId: number };
+  | { kind: 'leaveProgram'; programId: number }
+  | { kind: 'leaveCourse'; courseId: number }
+  | { kind: 'joinCourses'; programId: number }
+  | { kind: 'mcp'; courseId: number };
 
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
-  // modifications de section (réordre, renommage, ajout, suppression) se
-  // reflètent dans l'UI. Le mock ne sert que de valeur initiale.
-  const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>(getDashboardPrograms);
-  // Utilisateur connecté dans un state : les modifications de profil (nom, couleur)
-  // se reflètent dans la barre de profil. Le mock ne sert que de valeur initiale.
-  const [currentUser, setCurrentUser] = useState<UserMenuUser>(loggedInUserMock);
+  // modifications de section (réordre, renommage, ajout, suppression) se reflètent
+  // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
+  const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
+  // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
+  const { currentUser, profileLoading, isAdmin, saveProfile } = useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
+  // Incrémenté à chaque mise à jour de quiz → remonte la vue de quiz ouverte (rechargement).
+  const [quizRefreshKey, setQuizRefreshKey] = useState(0);
+  // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
+  const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
+  // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
+  const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
   const [popup, setPopup] = useState<PopupState | null>(null);
@@ -145,6 +121,20 @@ export default function Dashboard() {
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
+
+  // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
+  // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
+  // Les quatre facades (ws.channels / ws.forums / ws.courses / ws.programs) partagent
+  // cette connexion ; ws.close() la ferme volontairement (sans reconnexion).
+  const ws = useMemo(() => createAppSocket(undefined, () => getToken() ?? ''), []);
+  // Ouverture/fermeture pilotées par l'effet : en StrictMode (dev), le démontage
+  // ferme puis le remontage rouvre — la garde `ws !== socket` côté appSocket évite
+  // qu'un ancien socket en cours de connexion ne tue la nouvelle connexion.
+  useEffect(() => {
+    ws.open();
+    return () => ws.close();
+  }, [ws]);
+
   // Refs vers l'état courant : permettent au handler du socket programmes (abonné
   // une seule fois) de lire la liste / le programme actif sans capture périmée.
   const programsRef = useRef(dashboardPrograms);
@@ -154,12 +144,10 @@ export default function Dashboard() {
     activeProgramIdRef.current = activeProgramId;
   });
 
-  // GET de la liste des programmes de l'utilisateur. Mock-as-cache (délai + échec
-  // simulés) : on n'expose que loading/erreur, la liste vit dans dashboardPrograms.
-  // TODO : remplacer par un vrai GET /me/programs → setDashboardPrograms.
+  // Chargement de la liste des programmes : api.fetchPrograms renvoie les données,
+  // on les pose dans le state ; le loader pilote loading/erreur.
   const handleFetchPrograms = useCallback(async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des programmes)');
+    setDashboardPrograms(await api.fetchPrograms());
   }, []);
 
   const {
@@ -170,10 +158,14 @@ export default function Dashboard() {
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,
   // adhésion / désabonnement. Applique à la liste, et bascule le programme actif s'il
-  // disparaît. TODO [5] : remplacer mockProgramsSocket par ws.programs (createAppSocket).
+  // disparaît.
   useEffect(() => {
-    const userId = loggedInUserMock.id;
-    return mockProgramsSocket.subscribe(userId, {
+    // Abonnement sur la room user:<id> RÉELLE (issue de GET /api/me). Tant que le
+    // profil n'est pas chargé (loadingUser.id === -1), on n'ouvre rien : rejoindre
+    // user:1 alors qu'on est l'user 4 serait refusé par DbRoomAuthorizer.
+    const userId = currentUser.id;
+    if (userId < 0) return;
+    return ws.programs.subscribe(userId, {
       onProgramUpsert: (program) =>
         setDashboardPrograms((programs) => upsertProgram(programs, program)),
       onProgramRemove: (programId) => {
@@ -186,14 +178,14 @@ export default function Dashboard() {
         }
       },
     });
-  }, []);
-  // GET des cours du programme actif. Mock pour l'instant (délai + échec optionnel) :
-  // le state `dashboardPrograms` fait office de cache, on n'expose que loading/erreur.
-  // TODO [1] : remplacer par un vrai GET /programs/:id/courses → setDashboardPrograms.
-  // (reçoit programId du hook ; ignoré ici car le mock utilise le state comme cache.)
-  const handleFetchCourses = useCallback(async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des cours)');
+  }, [ws, currentUser.id]);
+  // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
+  // le programme correspondant ; le loader pilote loading/erreur.
+  const handleFetchCourses = useCallback(async (programId: number) => {
+    const courses = await api.fetchCourses(programId);
+    setDashboardPrograms((programs) =>
+      programs.map((p) => (p.id === programId ? { ...p, courses } : p))
+    );
   }, []);
 
   // Chaînage : on ne charge les cours qu'une fois la liste des programmes chargée
@@ -210,10 +202,24 @@ export default function Dashboard() {
 
   // Abonnement temps réel (scope programme) : applique les évènements cours /
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
-  // TODO [5] : remplacer mockCourseSocket par ws.courses (createAppSocket).
   useEffect(() => {
     if (activeProgramId < 0) return;
-    return mockCourseSocket.subscribe(activeProgramId, {
+    // Recharge les quiz PUBLIÉS d'un cours dans la liste (ajout / modif / suppression).
+    const refreshCourseQuizzes = (courseId: number) => {
+      void api
+        .fetchPublishedQuizzes(courseId)
+        .then((quizzes) =>
+          setDashboardPrograms((programs) =>
+            mapProgramCourses(programs, activeProgramId, (course) =>
+              course.id === courseId ? { ...course, quizzes } : course
+            )
+          )
+        )
+        .catch(() => {
+          /* échec silencieux : la liste garde son état courant */
+        });
+    };
+    return ws.courses.subscribe(activeProgramId, {
       onSectionChange: (courseId, sectionType, change) =>
         setDashboardPrograms((programs) =>
           mapProgramCourses(programs, activeProgramId, (course) =>
@@ -224,10 +230,36 @@ export default function Dashboard() {
         setDashboardPrograms((programs) => upsertCourse(programs, activeProgramId, course)),
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
+      // Un quiz a été ajouté : il apparaît dans la liste (s'il est publié).
+      onQuizCreated: (courseId) => refreshCourseQuizzes(courseId),
+      // Un quiz a été modifié : on rafraîchit la liste, et la QuizView affiche une bannière
+      // de rechargement si c'est le quiz actuellement ouvert (cf. quizStale).
+      onQuizUpdated: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setStaleQuizId(quizId);
+      },
+      // Les quiz ont été réordonnés : on rafraîchit la liste (nouvel ordre, sans bannière).
+      onQuizReordered: (courseId) => refreshCourseQuizzes(courseId),
+      // Reconnexion : des évènements ont pu être manqués → on recharge les cours du
+      // programme actif (canaux/quiz/forums resynchronisés) ET la vue de quiz ouverte
+      // (rechargement en conservant la saisie, via le mécanisme staleQuizId).
+      onResync: () => {
+        void handleFetchCourses(activeProgramId);
+        if (openQuizIdRef.current != null) setStaleQuizId(openQuizIdRef.current);
+      },
+      // Un quiz a été supprimé : il sort de la liste, on ferme sa vue si elle est ouverte,
+      // et on efface une éventuelle bannière « modifié » le concernant.
+      onQuizDeleted: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setSelectedChannelRef((prev) =>
+          prev?.type === 'quiz' && prev.id === quizId ? undefined : prev
+        );
+        setStaleQuizId((prev) => (prev === quizId ? null : prev));
+      },
     });
-  }, [activeProgramId]);
+  }, [activeProgramId, ws]);
 
-  // TODO : remplacer par une navigation ou un rendu de vue lors de l'implémentation des canaux.
+  // Ouverture d'un canal (navigation / rendu de vue à implémenter côté canaux).
   const handleOpenChannel = (channel: CourseChannel) => {
     console.log('[Dashboard] Ouverture du canal :', channel);
   };
@@ -237,35 +269,40 @@ export default function Dashboard() {
 
   // Ouvre le AddCoursePopup avec le programme courant préselectionné (admin).
   const handleAddCourse = () => {
-    if (isAdminMock) setPopup({ kind: 'addCourse', programId: activeProgramId });
+    if (isAdmin) setPopup({ kind: 'addCourse', programId: activeProgramId });
   };
   // Ouvre le UpdateCoursePopup pour le cours du crayon (admin ; crayon déjà admin-only).
   const handleEditCourse = (courseId: number) => {
-    if (isAdminMock) setPopup({ kind: 'editCourse', courseId });
+    if (isAdmin) setPopup({ kind: 'editCourse', courseId });
   };
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur,
+  // admin) : ouvre la modale de gestion des analyses MCP du cours.
+  const handleOpenMcpManagement = (courseId: number) => {
+    if (isAdmin) setPopup({ kind: 'mcp', courseId });
+  };
+  // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
+  // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
+  const handleLeaveCourse = (courseId: number) => setPopup({ kind: 'leaveCourse', courseId });
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
-  // TODO : déconnecter l'utilisateur (clear session + redirection login).
+  // Déconnexion (clear session + redirection login à implémenter).
   const handleLogout = () => console.log('[Dashboard] Déconnexion demandée.');
 
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
   const handleAddCourseToProgram = (programId: number) => {
-    if (isAdminMock) setPopup({ kind: 'addCourse', programId });
+    if (isAdmin) setPopup({ kind: 'addCourse', programId });
   };
   const handleEditProgram = (programId: number) => {
-    if (isAdminMock) setPopup({ kind: 'editProgram', programId });
+    if (isAdmin) setPopup({ kind: 'editProgram', programId });
   };
-  // GET rôles + membres d'un programme (API-ready : délai + échec simulés).
-  // TODO : GET /programs/:id/roles + /programs/:id/members.
+  // Charge rôles + membres d'un programme (via api.fetchProgramRoles) et alimente le popup.
   const fetchProgramRoles = async (programId: number) => {
     setRoleData(null);
     setRoleError(null);
     setRoleLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-      if (SIMULATE_FETCH_FAILURE) throw new Error('fetch roles failed');
-      setRoleData({ roles: getProgramRoles(), users: getProgramUsers(programId) });
+      setRoleData(await api.fetchProgramRoles(programId));
     } catch {
       setRoleError('Impossible de charger les membres du programme. Réessaie.');
     } finally {
@@ -274,34 +311,46 @@ export default function Dashboard() {
   };
 
   const handleManageRoles = (programId: number) => {
-    if (!isAdminMock) return;
+    if (!isAdmin) return;
     setPopup({ kind: 'manageRoles', programId });
     void fetchProgramRoles(programId);
   };
   const handleLeaveProgram = (programId: number) => setPopup({ kind: 'leaveProgram', programId });
+  // Rejoindre des cours d'un programme (menu contextuel, TOUS les utilisateurs) : ouvre
+  // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
+  const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
+  // Inscription aux cours choisis (via api.joinCourses). La sélection du popup REMPLACE
+  // l'ensemble des cours du programme (décochés retirés, nouveaux ajoutés). On RECHARGE
+  // ensuite les cours du programme (api.fetchCourses) pour que les cours fraîchement
+  // rejoints arrivent avec leur contenu (canaux/quiz/forums) — joinCourses ne renvoie
+  // que la méta. L'erreur remonte au popup (qui l'affiche).
+  const handleConfirmJoinCourses = async (programId: number, courseIds: number[]) => {
+    await api.joinCourses(programId, courseIds);
+    const courses = await api.fetchCourses(programId);
+    setDashboardPrograms((programs) =>
+      programs.map((program) => (program.id === programId ? { ...program, courses } : program))
+    );
+  };
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
-    if (isAdminMock) setCreatingSectionType('text');
+    if (isAdmin) setCreatingSectionType('text');
   };
   const handleCreateQuiz = () => {
-    if (isAdminMock) setCreatingSectionType('quiz');
+    if (isAdmin) setCreatingSectionType('quiz');
   };
   const handleCreateForum = () => {
-    if (isAdminMock) setCreatingSectionType('forum');
+    if (isAdmin) setCreatingSectionType('forum');
   };
-  // Persiste une modification de section (réordre/renommage/suppression/ajout).
-  // Branché sur l'API simulée (délai + échec optionnel) comme les handlers de
-  // messages : on exerce ainsi le spinner, le rollback optimiste et l'ErrorPopup
-  // du SectionEditorPopup. Le state n'est appliqué qu'après succès, pour que le
-  // rejet laisse la sidebar inchangée. TODO : POST/PATCH/DELETE backend + refetch.
+  // Persiste une modification de section (réordre/renommage/suppression/ajout) via
+  // api.changeSection. Le state n'est appliqué qu'APRÈS succès (le rejet laisse la
+  // sidebar inchangée) : on exerce ainsi spinner / rollback / ErrorPopup du popup.
   const handleSectionChange = async (
     courseId: number,
     sectionType: string,
     change: ItemChange
   ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de section)');
+    await api.changeSection(courseId, sectionType, change);
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
         ...program,
@@ -312,96 +361,60 @@ export default function Dashboard() {
     );
   };
 
-  // POST d'un nouveau cours (admin) → rattaché aux programmes choisis. Async
-  // (délai + échec simulé) : le AddCoursePopup attend la résolution, reste ouvert
-  // et affiche une erreur si ça rejette, et se ferme via onClose en cas de succès.
-  // TODO : POST /courses (title, code, program_ids) puis refetch / setState.
+  // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
+  // (création/maj/suppression/réordre). L'éditeur travaille sur la liste COMPLÈTE
+  // (brouillons compris) ; la sidebar ne montre que les PUBLIÉS → on filtre ici.
+  const handleQuizzesChange = (courseId: number, quizzes: Course['quizzes']) => {
+    const published = reposition((quizzes ?? []).filter((q) => q.isPublished));
+    setDashboardPrograms((programs) =>
+      programs.map((program) => ({
+        ...program,
+        courses: program.courses.map((course) =>
+          course.id === courseId ? { ...course, quizzes: published } : course
+        ),
+      }))
+    );
+    // Un quiz a changé → force le remontage de la vue de quiz ouverte (recharge le détail).
+    setQuizRefreshKey((k) => k + 1);
+  };
+
+  // Création d'un cours (admin) → rattaché aux programmes choisis (via api.createCourse).
+  // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (ajout de cours)');
+    const created = await api.createCourse(course);
     setDashboardPrograms((programs) =>
       programs.map((program) =>
         course.programIds.includes(program.id)
-          ? {
-              ...program,
-              courses: [
-                ...program.courses,
-                {
-                  id: nextNumericId(program.courses),
-                  code: course.code,
-                  title: course.title,
-                  channels: [],
-                  quizzes: [],
-                  forums: [],
-                },
-              ],
-            }
+          ? { ...program, courses: [...program.courses, created] }
           : program
       )
     );
   };
 
-  // POST création d'un programme → ajouté à la liste de l'utilisateur (abonné d'office).
-  // TODO : POST /programs (+ abonnement) puis refetch / setState.
+  // Création d'un programme → ajouté à la liste (abonné d'office) via api.createProgram.
   const handleCreateProgram = async (program: NewProgram) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (création de programme)');
-    setDashboardPrograms((programs) => [
-      ...programs,
-      {
-        id: nextNumericId(programs),
-        name: program.name,
-        code: program.code,
-        cohort: program.cohort,
-        color: program.color,
-        courses: [],
-      },
-    ]);
+    const created = await api.createProgram(program);
+    setDashboardPrograms((programs) => [...programs, created]);
   };
 
-  // POST adhésion → ajoute les programmes choisis du catalogue à la liste de l'utilisateur.
-  // TODO : POST /subscriptions (program_ids) puis refetch / setState.
+  // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
+  // renvoie la liste à jour ; on la réconcilie en conservant les cours déjà chargés.
   const handleJoinPrograms = async (selection: JoinSelection) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (adhésion au programme)');
+    const updated = await api.joinPrograms(selection);
     setDashboardPrograms((programs) => {
-      const existing = new Set(programs.map((p) => p.id));
-      const added = getEstablishmentPrograms(selection.establishmentId)
-        .filter((p) => selection.programIds.includes(p.id) && !existing.has(p.id))
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          code: p.code,
-          cohort: p.cohort,
-          color: p.color,
-          courses: [],
-        }));
-      return [...programs, ...added];
+      const byId = new Map(programs.map((p) => [p.id, p]));
+      return updated.map((p) => byId.get(p.id) ?? p);
     });
   };
 
-  // Loaders du AddSubscriptionPopup (GET, API-ready ; respectent SIMULATE_FETCH_FAILURE).
-  const loadCreateEstablishments = async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (établissements)');
-    return getCreateEstablishments();
-  };
-  const loadJoinEstablishments = async () => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (établissements)');
-    return getJoinEstablishments();
-  };
-  const loadEstablishmentPrograms = async (establishmentId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (programmes de l’établissement)');
-    return getEstablishmentPrograms(establishmentId);
-  };
+  // Loaders du AddSubscriptionPopup (GET) — délégués à la couche API.
+  const loadCreateEstablishments = api.fetchEstablishmentsForCreate;
+  const loadJoinEstablishments = api.fetchEstablishmentsForJoin;
+  const loadEstablishmentPrograms = api.fetchEstablishmentPrograms;
 
-  // PATCH d'un cours (admin) → met à jour code/titre dans le programme actif.
-  // TODO : PATCH /courses/:id (+ program_course pour le rattachement many-to-many).
+  // Mise à jour d'un cours (admin) → code/titre dans le programme actif (via api.updateCourse).
   const handleUpdateCourse = async (courseId: number, update: CourseUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de cours)');
+    await api.updateCourse(courseId, update);
     setDashboardPrograms((programs) =>
       mapProgramCourses(programs, activeProgramId, (course) =>
         course.id === courseId ? { ...course, code: update.code, title: update.title } : course
@@ -409,11 +422,9 @@ export default function Dashboard() {
     );
   };
 
-  // PATCH d'un programme (admin) → met à jour nom/code/cohorte/couleur.
-  // TODO : PATCH /programs/:id.
+  // Mise à jour d'un programme (admin) → nom/code/cohorte/couleur (via api.updateProgram).
   const handleUpdateProgram = async (programId: number, update: ProgramUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de programme)');
+    await api.updateProgram(programId, update);
     setDashboardPrograms((programs) =>
       programs.map((program) =>
         program.id === programId
@@ -429,40 +440,19 @@ export default function Dashboard() {
     );
   };
 
-  // PATCH du profil de l'utilisateur connecté. Async (délai + échec simulé).
-  // Au succès, on applique nom/couleur au state → la barre de profil se met à jour.
-  // TODO : PATCH /me (prénom, nom, couleur) + upload de la photo (multipart).
-  const handleSaveProfile = async (profile: ProfileUpdate) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification du profil)');
-    setCurrentUser((prev) => ({
-      ...prev,
-      first_name: profile.firstName,
-      last_name: profile.lastName,
-      avatar_color: profile.avatarColor,
-    }));
-  };
+  // Assignation/retrait d'un rôle ↔ utilisateur (admin) via api.changeRole. Le
+  // RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister.
+  const handleRoleChange = (change: RoleChange) => api.changeRole(change);
 
-  // INSERT/DELETE d'une assignation rôle ↔ utilisateur (admin). Le RoleEditorPopup
-  // gère l'optimisme + rollback ; on ne fait que persister (mock).
-  // TODO : POST/DELETE /programs/:id/roles (assign / unassign).
-  const handleRoleChange = async (change: RoleChange) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (assignation de rôle)');
-    console.log('[Dashboard] Changement de rôle :', change);
-  };
-
-  // Quitter un programme (async, API-ready). On ferme la confirmation puis on
+  // Quitter un programme (via api.leaveProgram). On ferme la confirmation puis on
   // affiche un overlay de chargement ; en cas d'échec, un ErrorPopup (sans retrait).
   // Au succès : retrait de la liste + bascule du programme actif s'il disparaît.
-  // TODO : DELETE /subscriptions/:programId.
   const handleConfirmLeaveProgram = async (programId: number) => {
     setPopup(null);
     setLeaveError(null);
     setLeaveLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-      if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (quitter le programme)');
+      await api.leaveProgram(programId);
       if (programId === activeProgramId) {
         const fallback = dashboardPrograms.find((program) => program.id !== programId);
         setActiveProgramId(fallback?.id ?? -1);
@@ -477,112 +467,70 @@ export default function Dashboard() {
     }
   };
 
+  // Quitter un cours (via api.leaveCourse). Même flux que pour un programme : overlay
+  // de chargement, ErrorPopup en cas d'échec. Au succès : retrait du cours du programme
+  // actif + reset de la sélection si c'était le cours ouvert.
+  const handleConfirmLeaveCourse = async (courseId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.leaveCourse(courseId);
+      if (courseId === effectiveSelectedCourseId) {
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
+    } catch {
+      setLeaveError('Impossible de quitter le cours. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   // Auteur des messages envoyés = utilisateur connecte (colonnes utiles de User_).
   const currentUserAuthor: ChannelMessageAuthor = {
     id: currentUser.id,
     username: currentUser.username,
-    first_name: currentUser.first_name ?? '',
-    last_name: currentUser.last_name ?? '',
+    firstName: currentUser.firstName ?? '',
+    lastName: currentUser.lastName ?? '',
+    avatarColor: currentUser.avatarColor,
+    avatarUrl: currentUser.avatarUrl,
   };
 
-  // TODO [2] — API POST du message (post_parent_id si réponse).
-  // ⚠ RENVOYER le message persisté (id réel) pour la réconciliation, et stocker le
-  //   clientMessageId pour que le broadcast WS le renvoie (dédup). Voir HANDOFF.md.
-  const handleSendMessage = async (
+  // Envoi / édition / suppression de message : délégués à la couche API
+  // (api.sendMessage doit RENVOYER le message persisté pour la réconciliation).
+  const handleSendMessage = (
+    channelId: number,
     content: string,
     parentId: number | null,
     clientMessageId: string
-  ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (envoi de message)');
-    console.log(
-      '[Dashboard] Envoi de message :',
-      content,
-      '(post_parent_id =',
-      parentId,
-      ', client_msg_id =',
-      clientMessageId,
-      ')'
-    );
-  };
+  ) => api.sendMessage(channelId, content, parentId, clientMessageId);
 
-  // TODO [3] — API PATCH du message. Simulation pour l'instant.
-  const handleEditMessage = async (messageId: number, content: string) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de message)');
-    console.log('[Dashboard] Modification du message', messageId, ':', content);
-  };
+  const handleEditMessage = (messageId: number, content: string) =>
+    api.editMessage(messageId, content);
 
-  // TODO [4] — API DELETE du message. Simulation pour l'instant.
-  const handleDeleteMessage = async (messageId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de message)');
-    console.log('[Dashboard] Suppression du message', messageId);
-  };
+  const handleDeleteMessage = (messageId: number) => api.deleteMessage(messageId);
 
   /* ───────────────────────────────────────────────────────────────────────────
    * FORUM ('Thread') — meme architecture API + temps reel que le chat.
    * À brancher : GET sujets, POST réponse, PATCH, DELETE, POST vote, WebSocket.
-   * Déjà géré côté front : loading/erreur, rollback optimiste, dédup (client_post_id),
+   * Déjà géré côté front : loading/erreur, rollback optimiste, dédup (clientPostId),
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
-  // GET sujets RACINES d'un forum (sans leurs réponses : chargement paresseux).
-  const handleFetchThreads = async (forumId: number): Promise<ForumPost[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des sujets)');
-    return getMockForumThreads(forumId);
-  };
-
-  // GET réponses DIRECTES d'un post (enfants immédiats), au dépliage d'un fil.
-  const handleFetchReplies = async (postId: number): Promise<ForumPost[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des réponses)');
-    return getMockForumReplies(postId);
-  };
-
-  // POST réponse (post_parent_id si réponse à un post). ⚠ RENVOYER le post persisté
-  // (id réel + meme client_post_id) pour la réconciliation optimiste ↔ écho WS.
-  const handleCreatePost = async (
+  const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
+  const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
+  const handleCreatePost = (
+    forumId: number,
     content: string,
     parentId: number | null,
     clientPostId: string,
     title?: string
-  ) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (publication)');
-    console.log(
-      '[Dashboard] Publication :',
-      title ? `« ${title} » — ` : '',
-      content,
-      '(parent =',
-      parentId,
-      ', client_post_id =',
-      clientPostId,
-      ')'
-    );
-  };
-
-  // PATCH post.
-  const handleEditPost = async (postId: number, content: string) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (modification de post)');
-    console.log('[Dashboard] Modification du post', postId, ':', content);
-  };
-
-  // DELETE post (cascade du sous-fil côté BD).
-  const handleDeletePost = async (postId: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (suppression de post)');
-    console.log('[Dashboard] Suppression du post', postId);
-  };
-
-  // POST/DELETE vote (value ∈ {-1, 0, 1} ; 0 = retrait).
-  const handleVotePost = async (postId: number, value: number) => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_SEND_FAILURE) throw new Error('Échec simulé (vote)');
-    console.log('[Dashboard] Vote sur le post', postId, ':', value);
-  };
+  ) => api.createPost(forumId, content, parentId, clientPostId, title);
+  const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
+  const handleDeletePost = (postId: number) => api.deletePost(postId);
+  const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
 
   const activeProgram =
     dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
@@ -601,22 +549,19 @@ export default function Dashboard() {
   const selectedCourse = getSelectedCourse(courses, effectiveSelectedCourseId);
   const selectedCourseChannels = selectedCourse
     ? normalizeCourseChannelsFromSources({
-        channels: selectedCourse.channels,
         quizzes: selectedCourse.quizzes,
         forums: selectedCourse.forums,
       })
     : [];
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
+  // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
+  const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
+  openQuizIdRef.current = openQuizId;
+  const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
-  // TODO [1] — API GET charger l'historique du canal.
-  // Simulation pour l'instant : petit délai pour montrer l'état « Chargement… »,
-  // puis on renvoie les messages mock du canal demandé.
-  const handleFetchMessages = async (channelId: number): Promise<ChannelMessage[]> => {
-    await new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-    if (SIMULATE_FETCH_FAILURE) throw new Error('Échec simulé (chargement des messages)');
-    return selectedChannel?.id === channelId ? (selectedChannel.messages ?? []) : [];
-  };
+  // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
+  const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
 
   const mobileUserInitial = getUserInitial(currentUser);
 
@@ -640,6 +585,16 @@ export default function Dashboard() {
     popup?.kind === 'editCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la confirmation « Quitter le cours » (dans le programme actif).
+  const leavingCourse =
+    popup?.kind === 'leaveCourse'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
+  // Cours ciblé par la modale « Gestion MCP » (dans le programme actif).
+  const mcpCourse =
+    popup?.kind === 'mcp'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Programme ciblé par un popup contextuel (édition / rôles / quitter).
   const popupProgram =
     popup && 'programId' in popup
@@ -649,13 +604,14 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitlePrefix={selectedChannel ? getPrefixForType(selectedChannel.type) : undefined}
+        mobileTitlePrefix={selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined}
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
           <UserMenu
             variant="compact"
             user={currentUser}
+            loading={profileLoading}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
           />
@@ -676,10 +632,11 @@ export default function Dashboard() {
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
-            isAdmin={isAdminMock}
+            isAdmin={isAdmin}
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
+            onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
         }
@@ -690,6 +647,7 @@ export default function Dashboard() {
             // pas les cours en cache : CourseMenu reste neutre jusqu'au fetch des cours.
             courses={coursesEnabled ? courses : []}
             currentUser={currentUser}
+            userLoading={profileLoading}
             selectedCourseId={effectiveSelectedCourseId}
             onSelectCourse={(courseId) => {
               setSelectedCourseId(courseId);
@@ -699,7 +657,7 @@ export default function Dashboard() {
             onSelectChannel={setSelectedChannelRef}
             onOpenChannel={handleOpenChannel}
             onSectionChange={handleSectionChange}
-            isAdmin={isAdminMock}
+            isAdmin={isAdmin}
             // CourseMenu ne reflète QUE le fetch des cours (qui n'a lieu qu'après
             // le succès du fetch programmes) → pas d'illusion de fetch parallèle.
             loading={coursesLoading}
@@ -707,14 +665,19 @@ export default function Dashboard() {
             onReloadCourses={reloadCourses}
             onAddCourse={handleAddCourse}
             onEditCourse={handleEditCourse}
+            onOpenMcpManagement={handleOpenMcpManagement}
+            onLeaveCourse={handleLeaveCourse}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
+            // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
+            quizHandlers={quizEditorHandlers}
+            onQuizzesChange={handleQuizzesChange}
           />
         }
       />
 
       <MainPanel
-        isAdmin={isAdminMock}
+        isAdmin={isAdmin}
         program={mainPanelProgram}
         selectedCourse={effectiveSelectedCourseId ?? null}
         selectedChannel={selectedChannelRef ?? null}
@@ -723,10 +686,8 @@ export default function Dashboard() {
         onSendMessage={handleSendMessage}
         onEditMessage={handleEditMessage}
         onDeleteMessage={handleDeleteMessage}
-        // TODO [5] — une seule connexion WebSocket pour le chat ET le forum :
-        //   const ws = useMemo(() => createAppSocket(import.meta.env.VITE_WS_URL, getAuthToken), []);
-        //   puis socket={ws.channels} et forumSocket={ws.forums}  (scaffold : src/services/appSocket.ts)
-        socket={mockMessageSocket}
+        // Une seule connexion WebSocket pour le chat ET le forum (mêmes rooms).
+        socket={ws.channels}
         // ── Forum ('Thread') : API + temps reel (mirror du chat, meme connexion). ──
         onFetchThreads={handleFetchThreads}
         onFetchReplies={handleFetchReplies}
@@ -734,12 +695,20 @@ export default function Dashboard() {
         onEditPost={handleEditPost}
         onDeletePost={handleDeletePost}
         onVotePost={handleVotePost}
-        forumSocket={mockForumSocket}
+        forumSocket={ws.forums}
         onAddProgram={handleAddProgram}
         onAddCourse={handleAddCourse}
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
+        // ── Quiz : détail + résultat (réhydratation) + soumission (cf. dashboardApi). ──
+        onFetchQuiz={api.fetchQuiz}
+        onFetchAttempts={api.fetchQuizAttempts}
+        onFetchAttemptResult={api.fetchAttemptResult}
+        onSubmitQuiz={api.submitQuiz}
+        quizRefreshKey={quizRefreshKey}
+        quizStale={quizStale}
+        onReloadStale={() => setStaleQuizId(null)}
       />
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que
@@ -751,6 +720,11 @@ export default function Dashboard() {
           channels={selectedCourseChannels}
           onChange={(change) => handleSectionChange(selectedCourse.id, creatingSection.type, change)}
           onClose={() => setCreatingSectionType(null)}
+          courseId={selectedCourse.id}
+          quizzes={selectedCourse.quizzes ?? []}
+          quizSubtitle={selectedCourse.code}
+          quizHandlers={quizEditorHandlers}
+          onQuizzesChange={(quizzes) => handleQuizzesChange(selectedCourse.id, quizzes)}
         />
       )}
 
@@ -788,7 +762,7 @@ export default function Dashboard() {
           loadJoinEstablishments={loadJoinEstablishments}
           loadEstablishmentPrograms={loadEstablishmentPrograms}
           subscribedProgramIds={subscribedProgramIds}
-          canCreateProgram={isAdminMock}
+          canCreateProgram={isAdmin}
         />
       )}
 
@@ -798,11 +772,11 @@ export default function Dashboard() {
           onClose={() => setPopup(null)}
           user={{
             username: currentUser.username,
-            first_name: currentUser.first_name ?? '',
-            last_name: currentUser.last_name ?? '',
-            avatar_color: currentUser.avatar_color,
+            firstName: currentUser.firstName ?? '',
+            lastName: currentUser.lastName ?? '',
+            avatarColor: currentUser.avatarColor,
           }}
-          onSave={handleSaveProfile}
+          onSave={saveProfile}
         />
       )}
 
@@ -827,8 +801,8 @@ export default function Dashboard() {
           Données chargées à la demande (GET par programme) : spinner pendant le
           chargement, ErrorPopup en cas d'échec, sinon le RoleEditorPopup. */}
       {popup?.kind === 'manageRoles' && popupProgram && roleLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && roleError && (
@@ -846,6 +820,44 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
+      {popup?.kind === 'mcp' && mcpCourse && (
+        <McpManagementPopup
+          courseId={mcpCourse.id}
+          courseLabel={
+            mcpCourse.code || mcpCourse.name || 'Cours'
+          }
+          loadAnalyses={() => api.fetchCourseAnalyses(mcpCourse.id)}
+          loadAnalysis={(id) => api.fetchCourseAnalysis(id)}
+          loadPending={() => api.fetchPendingAnalysis(mcpCourse.id)}
+          subscribeCompletion={(handlers) =>
+            ws.mcp.subscribe(mcpCourse.id, {
+              onAnalysisCreated: handlers.onCreated,
+              // Échec : ne réagit que si c'est l'utilisateur courant qui a lancé le job
+              // (le verrou MCP est par (cours, user)).
+              onAnalysisFailed: (launcherId, reason) => {
+                if (launcherId === currentUser.id) handlers.onFailed(reason);
+              },
+              onResync: handlers.onResync,
+            })
+          }
+          onAnalyze={() => api.requestCourseAnalysis(mcpCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* Rejoindre des cours d'un programme (menu contextuel, tous les utilisateurs). */}
+      {popup?.kind === 'joinCourses' && popupProgram && (
+        <JoinCoursesPopup
+          programName={popupProgram.name}
+          programColor={popupProgram.color}
+          loadCourses={() => api.fetchProgramCourses(popupProgram.id)}
+          loadJoinedCourseIds={() => api.fetchJoinedCourseIds(popupProgram.id)}
+          onJoin={(courseIds) => handleConfirmJoinCourses(popupProgram.id, courseIds)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Quitter un programme — confirmation (menu contextuel). */}
       {popup?.kind === 'leaveProgram' && popupProgram && (
         <DeleteConfirmationPopup
@@ -857,10 +869,21 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Quitter un cours — confirmation (menu contextuel). */}
+      {popup?.kind === 'leaveCourse' && leavingCourse && (
+        <DeleteConfirmationPopup
+          title="Quitter le cours ?"
+          content={`Tu ne verras plus les canaux, quiz et forums de « ${leavingCourse.code ?? leavingCourse.title ?? 'ce cours'} ». Tu pourras le rejoindre à nouveau plus tard.`}
+          labels={{ confirm: 'Quitter' }}
+          onDeleteConfirmation={() => handleConfirmLeaveCourse(leavingCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Sortie de programme en cours (DELETE) : overlay puis ErrorPopup si échec. */}
       {leaveLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {leaveError && <ErrorPopup content={leaveError} onClose={() => setLeaveError(null)} />}
@@ -869,7 +892,7 @@ export default function Dashboard() {
 }
 
 function getUserInitial(user: UserMenuUser): string {
-  const display = user.first_name?.trim() || user.username?.trim() || 'U';
+  const display = user.firstName?.trim() || user.username?.trim() || 'U';
   return display[0].toUpperCase();
 }
 
@@ -891,7 +914,7 @@ function getSelectedCourse(courses: Course[], selectedCourseId: number | undefin
 /**
  * Renvoie une copie du cours avec la modification de section appliquée.
  * - 'quiz' agit sur les quiz ; 'text'/'forum' agissent sur le sous-ensemble de
- *   forums du f_type correspondant ('Discussion' / 'Thread').
+ *   forums du fType correspondant ('Discussion' / 'Thread').
  * Les positions sont réattribuées séquentiellement après chaque changement.
  */
 /** Applique une transformation aux cours d'un programme donné (immuable). */
@@ -990,7 +1013,7 @@ function applyToForums(
   fType: ForumType,
   change: ItemChange
 ): ForumChannelSource[] {
-  const inSection = (f: ForumChannelSource) => (f.f_type ?? 'Thread') === fType;
+  const inSection = (f: ForumChannelSource) => (f.fType ?? 'Thread') === fType;
   switch (change.type) {
     case 'rename':
       return reposition(
@@ -1003,10 +1026,10 @@ function applyToForums(
     case 'create':
       return reposition([
         ...forums,
-        { id: nextNumericId(forums), title: change.item.name, f_type: fType },
+        { id: nextNumericId(forums), title: change.item.name, fType: fType },
       ]);
     case 'reorder': {
-      // On réordonne uniquement le sous-ensemble du f_type ; les autres forums
+      // On réordonne uniquement le sous-ensemble du fType ; les autres forums
       // gardent leur ordre relatif (les sections sont affichées séparément).
       const reordered = orderByIds(forums.filter(inSection), change.orderedIds);
       const others = forums.filter((f) => !inSection(f));

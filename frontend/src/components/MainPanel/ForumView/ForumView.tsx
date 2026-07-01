@@ -4,7 +4,7 @@ import {
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { contrastingTextColor } from '../../../helpers/color';
@@ -13,6 +13,7 @@ import { Pencil } from '../../../assets/Pencil';
 import { TrashCan } from '../../../assets/TrashCan';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
+import { Spinner } from '../../Spinner/Spinner';
 import { Markdown } from './Markdown';
 import { MarkdownEditor } from './MarkdownEditor';
 import {
@@ -50,7 +51,7 @@ export type {
 interface ForumViewProps {
   /** Cours auquel appartient le forum (contexte d'en-tete). */
   course: Course;
-  /** Forum selectionne (forum de f_type 'Thread' : post + reponses). */
+  /** Forum selectionne (forum de fType 'Thread' : post + reponses). */
   channel: CourseChannel;
   /** Utilisateur connecte : auteur des publications et des votes. */
   currentUser: ChannelMessageAuthor;
@@ -86,14 +87,14 @@ const INDENT_PLATEAU_DEPTH = 3;
 /** Sens de tri des sujets affiches. */
 type SortMode = 'top' | 'recent';
 
-/** Nom affiche d'un auteur (first_name + last_name). */
+/** Nom affiche d'un auteur (firstName + lastName). */
 function getAuthorName(author: ForumAuthor): string {
-  return `${author.first_name} ${author.last_name}`.trim() || author.username;
+  return `${author.firstName} ${author.lastName}`.trim() || author.username;
 }
 
 /** Deux initiales affichees dans l'avatar. */
 function getInitials(author: ForumAuthor): string {
-  const initials = `${author.first_name[0] ?? ''}${author.last_name[0] ?? ''}`.trim();
+  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
   return (initials || author.username[0] || '?').toUpperCase();
 }
 
@@ -104,16 +105,16 @@ function scoreOf(post: ForumPost): number {
 
 /** Vote de l'utilisateur `userId` sur un post (depuis la table Vote). */
 function userVoteOf(post: ForumPost, userId: number): VoteValue {
-  return post.votes.find((vote) => vote.user_id === userId)?.value ?? 0;
+  return post.votes.find((vote) => vote.userId === userId)?.value ?? 0;
 }
 
 /**
  * Nombre de reponses DIRECTES (enfants immediats) d'un post. On s'appuie sur
- * `reply_count` (connu des le chargement, meme branche non depliee) et, a defaut,
+ * `replyCount` (connu des le chargement, meme branche non depliee) et, a defaut,
  * sur les reponses deja chargees.
  */
 function replyCountOf(post: ForumPost): number {
-  return post.reply_count ?? post.replies?.length ?? 0;
+  return post.replyCount ?? post.replies?.length ?? 0;
 }
 
 /** Temps relatif court facon Reddit (« à l'instant », « il y a 3 h », « il y a 2 j »). */
@@ -138,7 +139,7 @@ function formatScore(score: number): string {
 }
 
 /**
- * Etat 6 — vue d'un forum (f_type 'Thread').
+ * Etat 6 — vue d'un forum (fType 'Thread').
  * Discussion facon Reddit : sujets votables + fils de reponses imbriquees.
  */
 const ForumView: React.FC<ForumViewProps> = ({
@@ -358,9 +359,9 @@ const ForumView: React.FC<ForumViewProps> = ({
   // Sujets racines tries : epingles d'abord, puis selon le mode choisi.
   const visibleThreads = useMemo(() => {
     const compare = (a: ForumPost, b: ForumPost): number => {
-      if (Boolean(a.is_pinned) !== Boolean(b.is_pinned)) return a.is_pinned ? -1 : 1;
+      if (Boolean(a.isPinned) !== Boolean(b.isPinned)) return a.isPinned ? -1 : 1;
       if (sort === 'recent') {
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
       return getScore(b) - getScore(a);
     };
@@ -415,7 +416,7 @@ const ForumView: React.FC<ForumViewProps> = ({
 
   /** En-tete « avatar · auteur · temps » partage sujets & reponses. */
   function renderByline(post: ForumPost) {
-    const color = post.author.avatar_color ?? DEFAULT_AVATAR_COLOR;
+    const color = post.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
     return (
       <div role="header">
         <span role="avatar" style={{ background: color, color: contrastingTextColor(color) }}>
@@ -423,8 +424,8 @@ const ForumView: React.FC<ForumViewProps> = ({
         </span>
         <span role="author">{getAuthorName(post.author)}</span>
         <span role="separator" aria-hidden="true">•</span>
-        <span role="time">{formatRelativeTime(post.created_at)}</span>
-        {post.is_pinned && <span role="pin-indicator">{t.pinned}</span>}
+        <span role="time">{formatRelativeTime(post.createdAt)}</span>
+        {post.isPinned && <span role="pin-indicator">{t.pinned}</span>}
       </div>
     );
   }
@@ -565,7 +566,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (post.replies === undefined) {
       return (
         <div role="replies-loading">
-          <span role="spinner" aria-hidden="true" />
+          <Spinner size={18} />
           <span>{t.repliesLoading}</span>
         </div>
       );
@@ -587,7 +588,7 @@ const ForumView: React.FC<ForumViewProps> = ({
    */
   function renderComment(post: ForumPost, depth: number): React.ReactElement {
     const isOpen = expanded.has(post.id);
-    // Compteur d'enfants immediats (connu meme branche non depliee, via reply_count).
+    // Compteur d'enfants immediats (connu meme branche non depliee, via replyCount).
     const count = replyCountOf(post);
     const hasReplies = count > 0;
     // Au-dela du plateau, on cesse d'indenter (les enfants ne derivent plus).
@@ -689,7 +690,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     <div className={styles['forum-view']}>
       <header>
         <p>
-          <span>{getPrefixForType(channel.type)}</span>
+          <span><ChannelTypeIcon type={channel.type} /></span>
           {channel.name}
         </p>
         <span />
@@ -752,7 +753,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         )}
         {loading ? (
           <div role="status">
-            <span role="spinner" aria-hidden="true" />
+            <Spinner size={24} />
             <p>{t.loading}</p>
           </div>
         ) : loadError ? (

@@ -9,8 +9,8 @@ export const defaultLabels: SectionEditorPopupLabels = {
   addTitle: 'Nouvel élément',
   editTitle: "Modifier l'élément",
   deleteTitle: "Supprimer l'élément ?",
-  deleteBody: (item, prefix) =>
-    `L'élément « ${prefix ? `${prefix} ` : ''}${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
+  deleteBody: (item) =>
+    `L'élément « ${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
   cancel: 'Annuler',
   save: 'Enregistrer',
   hint: 'Lettres minuscules, chiffres et tirets uniquement',

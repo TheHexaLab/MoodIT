@@ -1,0 +1,18 @@
+info:
+  name: Message · Recevoir
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: http://localhost:8081/dev/ws/message?channelId=1&content=(dev) message temps réel 👋
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse un message créé sur la room channel:<channelId>.
+  Abonne-toi à {"type":"join","scope":"channel","id":1} dans ws_connect d'abord.

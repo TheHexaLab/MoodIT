@@ -95,9 +95,13 @@ CREATE TABLE F_Type(
 CREATE TABLE Quiz(
    id SERIAL,
    title VARCHAR(128) NOT NULL,
-   description VARCHAR(512) ,
    is_daily BOOLEAN NOT NULL DEFAULT FALSE,
    is_published BOOLEAN NOT NULL DEFAULT FALSE,
+   -- L'étudiant peut-il refaire le quiz (tentatives multiples) ?
+   allow_retry BOOLEAN NOT NULL DEFAULT FALSE,
+   -- Ordre d'affichage dans la section Quiz d'un cours (réordonnable par l'enseignant).
+   -- Même rôle que Forum.position / Question.order_index.
+   position INTEGER NOT NULL DEFAULT 0,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
@@ -125,6 +129,8 @@ CREATE TABLE Post(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    content TEXT NOT NULL,
+   -- Titre d'un sujet racine de forum 'Thread' (NULL pour une réponse / message de canal).
+   title VARCHAR(256),
    forum_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    post_parent_id INTEGER,
@@ -151,19 +157,42 @@ CREATE TABLE Vote(
    FOREIGN KEY(post_id) REFERENCES Post(id) ON DELETE CASCADE
 );
 
+CREATE TABLE Language(
+   id SERIAL,
+   name VARCHAR(64) NOT NULL UNIQUE,
+   harness_template TEXT ,
+   start_code_template TEXT ,
+   -- Langage dans lequel sont ecrits les harnais des questions utilisant CE langage
+   -- (peut differer du langage du code etudiant ; ex. enonce en pseudocode, harnais
+   -- en Python). NULL = harnais dans le meme langage que la question.
+   harness_language_id INTEGER ,
+   PRIMARY KEY(id),
+   FOREIGN KEY(harness_language_id) REFERENCES Language(id)
+);
+
 CREATE TABLE Question(
    id SERIAL,
-   prompt VARCHAR(256) NOT NULL,
-   code_language VARCHAR(64) ,
-   expected_output VARCHAR(512) ,
-   start_code VARCHAR(512) ,
+   prompt TEXT NOT NULL,
+   language_id INTEGER ,
+   start_code TEXT ,
    order_index INTEGER,
    total_score INTEGER NOT NULL,
    q_type_id INTEGER NOT NULL,
    quiz_id INTEGER NOT NULL,
    PRIMARY KEY(id),
+   FOREIGN KEY(language_id) REFERENCES Language(id),
    FOREIGN KEY(q_type_id) REFERENCES Q_Type(id),
    FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE
+);
+
+CREATE TABLE Test_Case(
+   id SERIAL,
+   name VARCHAR(128) NOT NULL,
+   harness_code TEXT NOT NULL,
+   weight INTEGER NOT NULL DEFAULT 1,
+   question_id INTEGER NOT NULL,
+   PRIMARY KEY(id),
+   FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE
 );
 
 CREATE TABLE Answer(
@@ -185,27 +214,62 @@ CREATE TABLE Drag_Item(
    FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE
 );
 
+-- Une TENTATIVE de quiz par un utilisateur (regroupe les soumissions de la tentative).
+-- `attempt_no` = 1, 2, … par (quiz, user). Les tentatives multiples ne sont possibles
+-- que si Quiz.allow_retry = TRUE (contrôlé côté service).
+CREATE TABLE Attempt(
+   id SERIAL,
+   quiz_id INTEGER NOT NULL,
+   user_id INTEGER NOT NULL,
+   attempt_no INTEGER NOT NULL,
+   submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+   PRIMARY KEY(id),
+   UNIQUE(quiz_id, user_id, attempt_no),
+   FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE,
+   FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
+);
+
+-- La réponse soumise est conservée (content) ; le score n'est PAS stocké : il est
+-- recalculé dynamiquement à partir du quiz courant (cf. QuizService).
 CREATE TABLE Submission(
    id SERIAL,
-   content VARCHAR(512) ,
+   content TEXT,
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-   score INTEGER,
+   attempt_id INTEGER NOT NULL,
    question_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    PRIMARY KEY(id),
+   -- Une seule soumission par (tentative, question).
+   UNIQUE(attempt_id, question_id),
+   FOREIGN KEY(attempt_id) REFERENCES Attempt(id) ON DELETE CASCADE,
    FOREIGN KEY(question_id) REFERENCES Question(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
 
+-- Detail de correction d'une soumission de CODE : verdict (passe/echoue) par
+-- harnais. Permet d'afficher en revision quels Test_Case ont reussi/echoue, sans
+-- re-executer le code. Une ligne par (soumission, harnais).
+CREATE TABLE Submission_Test_Case(
+   submission_id INTEGER NOT NULL,
+   test_case_id INTEGER NOT NULL,
+   passed BOOLEAN NOT NULL,
+   PRIMARY KEY(submission_id, test_case_id),
+   FOREIGN KEY(submission_id) REFERENCES Submission(id) ON DELETE CASCADE,
+   FOREIGN KEY(test_case_id) REFERENCES Test_Case(id) ON DELETE CASCADE
+);
+
+-- Feedback généré par le service MCP sur un COURS (points forts/faibles).
+-- Rattaché au cours analysé ; user_id = l'enseignant qui a déclenché l'analyse.
+-- Historique conservé : une ligne par analyse (tri par created_at).
 CREATE TABLE MCP_Response(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    content TEXT NOT NULL,
    user_id INTEGER NOT NULL,
-   forum_id INTEGER NOT NULL,
+   course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE,
-   FOREIGN KEY(forum_id) REFERENCES Forum(id) ON DELETE CASCADE
+   FOREIGN KEY(course_id) REFERENCES Course(id) ON DELETE CASCADE
 );
 
 CREATE TABLE User_Program(
@@ -251,12 +315,18 @@ CREATE INDEX idx_forum_f_type_id ON Forum(f_type_id);
 CREATE INDEX idx_forum_course_id ON Forum(course_id);
 CREATE INDEX idx_post_user_id ON Post(user_id);
 CREATE INDEX idx_question_q_type_id ON Question(q_type_id);
+CREATE INDEX idx_question_language_id ON Question(language_id);
+CREATE INDEX idx_test_case_question_id ON Test_Case(question_id);
+CREATE INDEX idx_language_harness_language_id ON Language(harness_language_id);
 CREATE INDEX idx_answer_question_id ON Answer(question_id);
 CREATE INDEX idx_drag_item_question_id ON Drag_Item(question_id);
 CREATE INDEX idx_submission_question_id ON Submission(question_id);
-CREATE INDEX idx_submission_user_id ON Submission(user_id);
+CREATE INDEX idx_submission_attempt_id ON Submission(attempt_id);
+-- (user_id est deja couvert par la 1re colonne de l'index UNIQUE(user_id, question_id).)
+-- (submission_id est deja couvert par la 1re colonne de la cle primaire composite.)
+CREATE INDEX idx_submission_test_case_test_case_id ON Submission_Test_Case(test_case_id);
 CREATE INDEX idx_mcp_response_user_id ON MCP_Response(user_id);
-CREATE INDEX idx_mcp_response_forum_id ON MCP_Response(forum_id);
+CREATE INDEX idx_mcp_response_course_id ON MCP_Response(course_id);
 CREATE INDEX idx_user_program_user_id ON User_Program(user_id);
 CREATE INDEX idx_user_role_role_id ON User_Role(role_id);
 CREATE INDEX idx_program_course_course_id ON program_course(course_id);
@@ -270,6 +340,7 @@ CREATE INDEX idx_post_parent_created ON Post(post_parent_id, created_at); -- rep
 CREATE INDEX idx_vote_post_value ON Vote(post_id, value_); -- score d'un post (SUM value_) + cascade post_id
 CREATE INDEX idx_vote_quiz_value ON Vote(quiz_id, value_); -- score d'un quiz + cascade quiz_id
 CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jour" d'un cours + cascade course_id
+CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 
 -- TRIGGER
@@ -486,3 +557,68 @@ INSERT INTO Vote (value_, user_id, post_id) VALUES
   (-1, 3, 12),  -- mich -1 post 12
   (1,  2, 13),  -- rosie +1 post 13
   (1,  3, 14);  -- mich +1 post 14
+
+-- ------------------------------------------------------------
+-- Q_Type  (types de question — ordre = mapping vers les slugs front)
+-- ------------------------------------------------------------
+INSERT INTO Q_Type (name) VALUES
+  ('Vrai/Faux'),        -- 1 → true_false
+  ('Choix unique'),     -- 2 → single_choice
+  ('Choix multiple'),   -- 3 → multiple_choice
+  ('Remise en ordre'),  -- 4 → ordering
+  ('Association'),       -- 5 → matching
+  ('Code');             -- 6 → coding
+
+-- ------------------------------------------------------------
+-- Enrollment  (rosie inscrite au cours 1 pour voir le quiz)
+-- ------------------------------------------------------------
+INSERT INTO Enrollment (course_id, user_id) VALUES (1, 2);  -- rosie (user 2) → MAT115 (cours 1)
+
+-- ------------------------------------------------------------
+-- Quiz  (un quiz publié dans le cours 1, tous les types sauf le code)
+-- ------------------------------------------------------------
+INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id) VALUES
+  ('Quiz découverte — tous les types (sauf code)', FALSE, TRUE, TRUE, 0, 1);  -- quiz 1 (réessayable)
+
+-- ------------------------------------------------------------
+-- Question  (5 questions du quiz 1 : un type chacune, sauf code)
+-- ------------------------------------------------------------
+INSERT INTO Question (prompt, order_index, total_score, q_type_id, quiz_id) VALUES
+  ('Le tri par fusion (merge sort) a une complexité en **O(n log n)** dans le pire cas.', 0, 1, 1, 1),  -- Q1 Vrai/Faux
+  ('Quelle structure de données fonctionne en **LIFO** (dernier entré, premier sorti) ?', 1, 1, 2, 1),  -- Q2 Choix unique
+  ('Parmi les suivants, lesquels sont des **langages de programmation** ?',               2, 2, 3, 1),  -- Q3 Choix multiple
+  ('Remettez dans l''ordre les étapes classiques de compilation d''un programme C.',      3, 2, 4, 1),  -- Q4 Remise en ordre
+  ('Associez chaque langage à son **paradigme** dominant.',                               4, 2, 5, 1);  -- Q5 Association
+
+-- ------------------------------------------------------------
+-- Answer  (options des questions à choix : Q1, Q2, Q3)
+-- ------------------------------------------------------------
+INSERT INTO Answer (content, is_correct, question_id) VALUES
+  -- Q1 Vrai/Faux
+  ('Vrai', TRUE,  1),
+  ('Faux', FALSE, 1),
+  -- Q2 Choix unique
+  ('Pile (stack)',    TRUE,  2),
+  ('File (queue)',    FALSE, 2),
+  ('Liste chaînée',   FALSE, 2),
+  ('Arbre binaire',   FALSE, 2),
+  -- Q3 Choix multiple
+  ('Python', TRUE,  3),
+  ('HTML',   FALSE, 3),
+  ('Java',   TRUE,  3),
+  ('CSS',    FALSE, 3);
+
+-- ------------------------------------------------------------
+-- Drag_Item  (Q4 Remise en ordre : group_name NULL ; Q5 Association : par groupe)
+-- ------------------------------------------------------------
+INSERT INTO Drag_Item (content, correct_order, group_name, question_id) VALUES
+  -- Q4 Remise en ordre (ordre attendu via correct_order)
+  ('Prétraitement',     1, NULL, 4),
+  ('Compilation',       2, NULL, 4),
+  ('Assemblage',        3, NULL, 4),
+  ('Édition des liens', 4, NULL, 4),
+  -- Q5 Association (catégorie attendue via group_name ; correct_order non utilisé = 0)
+  ('Haskell', 0, 'Fonctionnel',    5),
+  ('Java',    0, 'Orienté objet',  5),
+  ('Prolog',  0, 'Logique',        5),
+  ('C',       0, 'Impératif',      5);

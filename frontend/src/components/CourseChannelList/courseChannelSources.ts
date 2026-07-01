@@ -1,9 +1,4 @@
-import {
-  type CourseChannel,
-  type Forum,
-  type ForumType,
-  type Quiz,
-} from '../../types/domain.ts';
+import { type CourseChannel, type Forum, type ForumType, type Quiz } from '../../types/domain.ts';
 
 // Entités ré-exportées depuis le modèle de domaine (source unique). Les anciens
 // noms `QuizChannelSource` / `ForumChannelSource` sont conservés en alias de compat :
@@ -13,7 +8,6 @@ export type QuizChannelSource = Quiz;
 export type ForumChannelSource = Forum;
 
 export interface CourseChannelSources {
-  channels?: CourseChannel[];
   quizzes?: Quiz[];
   forums?: Forum[];
 }
@@ -30,7 +24,6 @@ const FORUM_TYPE_TO_CHANNEL_TYPE: Record<ForumType, string> = {
  * comme des canaux, ceux de type 'Thread' comme des forums.
  */
 export function normalizeCourseChannelsFromSources(sources: CourseChannelSources): CourseChannel[] {
-  const normalizedChannels = sources.channels ?? [];
   const normalizedQuizzes = sortByPosition(sources.quizzes ?? []).map((quiz) => ({
     id: quiz.id,
     name: quiz.title,
@@ -39,11 +32,11 @@ export function normalizeCourseChannelsFromSources(sources: CourseChannelSources
   const normalizedForums = sortByPosition(sources.forums ?? []).map((forum) => ({
     id: forum.id,
     name: forum.title,
-    type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.f_type ?? 'Thread'],
+    type: FORUM_TYPE_TO_CHANNEL_TYPE[forum.fType ?? 'Thread'],
     messages: forum.messages,
   }));
 
-  return [...normalizedChannels, ...normalizedQuizzes, ...normalizedForums];
+  return [...normalizedQuizzes, ...normalizedForums];
 }
 
 /**

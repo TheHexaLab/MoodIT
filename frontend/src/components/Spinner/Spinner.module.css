@@ -1,0 +1,30 @@
+/* Spinner inline réutilisable : anneau neutre + arc teinté marque, couleurs issues
+   des variables de thème (bascule clair/sombre sans JS). Cf. LoadingPage (plein écran). */
+.spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  border: 3px solid var(--border);
+  border-top-color: var(--brand-teal);
+  border-radius: 50%;
+  animation: spinner-spin 0.8s linear infinite;
+}
+
+/* Tonalité « courante » : hérite de la couleur du texte (currentColor), pour les
+   spinners DANS un bouton plein (ex. blanc sur fond teal). Anneau fin 3/4 + arc. */
+.current {
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+}
+
+/* Respecte la préférence « réduire les animations ». */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.8s;
+  }
+}
+
+@keyframes spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

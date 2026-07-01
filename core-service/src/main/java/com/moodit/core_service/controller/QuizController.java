@@ -1,0 +1,72 @@
+package com.moodit.core_service.controller;
+
+import com.moodit.core_service.dto.AttemptSummaryDTO;
+import com.moodit.core_service.dto.QuizDetailDTO;
+import com.moodit.core_service.dto.QuizResultDTO;
+import com.moodit.core_service.dto.QuizSubmissionDTO;
+import com.moodit.core_service.service.QuizService;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/quizzes") // /api/quizzes (préfixe /api ajouté par WebMvcConfig)
+@RequiredArgsConstructor
+public class QuizController {
+
+    private final QuizService quizService;
+
+    /** Détail d'un quiz (méta + questions embarquées) pour la passation/édition. */
+    @GetMapping("/{quizId}")
+    public ResponseEntity<QuizDetailDTO> getQuizDetail(@PathVariable Integer quizId) {
+        return ResponseEntity.ok(quizService.getQuizDetail(quizId));
+    }
+
+    /** Historique des tentatives de l'utilisateur courant sur ce quiz (résumés). */
+    @GetMapping("/{quizId}/attempts")
+    public ResponseEntity<List<AttemptSummaryDTO>> getMyAttempts(
+            @PathVariable Integer quizId,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.getMyAttempts(quizId, email));
+    }
+
+    /** Détail corrigé d'une tentative donnée (révision), restreint à son propriétaire. */
+    @GetMapping("/{quizId}/attempts/{attemptId}")
+    public ResponseEntity<QuizResultDTO> getAttemptResult(
+            @PathVariable Integer quizId,
+            @PathVariable Integer attemptId,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.getAttemptResult(attemptId, email));
+    }
+
+    /** Met à jour un quiz complet (méta + questions) en un appel. */
+    @PutMapping("/{quizId}")
+    public ResponseEntity<QuizDetailDTO> updateQuiz(
+            @PathVariable Integer quizId,
+            @RequestBody QuizDetailDTO request) {
+        return ResponseEntity.ok(quizService.updateQuiz(quizId, request));
+    }
+
+    /** Supprime un quiz et tout son contenu (cascade). */
+    @DeleteMapping("/{quizId}")
+    public ResponseEntity<Void> deleteQuiz(@PathVariable Integer quizId) {
+        quizService.deleteQuiz(quizId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Soumet une tentative ; le serveur corrige (sauf code), persiste les soumissions et
+     * renvoie le résultat. Tentative unique → 409 si déjà soumis. `X-User-Email` injecté
+     * par la gateway (issu du JWT).
+     */
+    @PostMapping("/{quizId}/submissions")
+    public ResponseEntity<QuizResultDTO> submitQuiz(
+            @PathVariable Integer quizId,
+            @RequestBody QuizSubmissionDTO submission,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.submitQuiz(quizId, submission, email));
+    }
+}

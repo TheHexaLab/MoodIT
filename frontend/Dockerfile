@@ -42,11 +42,14 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    location /ws/ {
+    # Sans slash final : le client se connecte sur /ws (path exact, + ?token=...).
+    # Un "location /ws/" ne matcherait pas /ws et tomberait dans le SPA (catch-all).
+    location /ws {
         proxy_pass http://gateway:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
     }
 }
 EOF

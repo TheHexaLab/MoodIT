@@ -9,11 +9,11 @@ export type { Role };
 
 /**
  * Utilisateur AVEC ses assignations de rôles (`User_` + `User_Role`). Dérive de
- * l'entité User ; `email`/`avatar_color` sont requis dans cette vue (membres affichés).
+ * l'entité User ; `email`/`avatarColor` sont requis dans cette vue (membres affichés).
  */
 export type User = DomainUser & {
   email: string;
-  avatar_color: string;
+  avatarColor: string;
   role_ids: number[];
 };
 

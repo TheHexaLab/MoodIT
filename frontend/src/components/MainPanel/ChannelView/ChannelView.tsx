@@ -1,11 +1,12 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './ChannelView.module.css';
+import { Spinner } from '../../Spinner/Spinner';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
@@ -37,7 +38,7 @@ export type {
 interface ChannelViewProps {
   /** Cours appartenant au canal (contexte d'en-tête). */
   course: Course;
-  /** Canal sélectionné (forum de f_type 'Discussion', rendu comme un canal/chat). */
+  /** Canal sélectionné (forum de fType 'Discussion', rendu comme un canal/chat). */
   channel: CourseChannel;
   /** Utilisateur connecte : auteur des messages envoyés, et seul à pouvoir
    *  modifier/supprimer ses propres messages. */
@@ -87,14 +88,14 @@ function formatDaySeparator(iso: string): string {
   }).format(date);
 }
 
-/** Nom affiche d'un auteur (first_name + last_name). */
+/** Nom affiche d'un auteur (firstName + lastName). */
 function getAuthorName(author: ChannelMessageAuthor): string {
-  return `${author.first_name} ${author.last_name}`.trim() || author.username;
+  return `${author.firstName} ${author.lastName}`.trim() || author.username;
 }
 
-/** Deux initiales affichées dans l'avatar (first_name + last_name). */
+/** Deux initiales affichées dans l'avatar (firstName + lastName). */
 function getInitials(author: ChannelMessageAuthor): string {
-  const initials = `${author.first_name[0] ?? ''}${author.last_name[0] ?? ''}`.trim();
+  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
   return (initials || author.username[0] || '?').toUpperCase();
 }
 
@@ -105,7 +106,7 @@ function getSnippet(content: string, max = 64): string {
 }
 
 /**
- * État 5 — vue d'un canal de discussion (f_type 'Discussion').
+ * État 5 — vue d'un canal de discussion (fType 'Discussion').
  * Échange libre facon chat : liste des messages + zone de saisie.
  */
 const ChannelView: React.FC<ChannelViewProps> = ({
@@ -138,6 +139,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const messageRefs = useRef(new Map<number, HTMLLIElement>());
   /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
   const listRef = useRef<HTMLUListElement>(null);
+  /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
+  const composerRef = useRef<HTMLInputElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
 
@@ -210,9 +213,10 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     }
   }
 
-  /** Démarre une réponse à un message (affiche la barre au-dessus du composer). */
+  /** Démarre une réponse à un message (affiche la barre au-dessus du composer + focus). */
   function startReply(message: ChannelMessage) {
     setReplyingTo(message);
+    composerRef.current?.focus();
   }
 
   /** L'utilisateur connecte est-il l'auteur de ce message ? */
@@ -244,7 +248,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
       <div className={styles['channel-view']}>
         <header>
           <p>
-            <span>{getPrefixForType(channel.type)}</span>
+            <span><ChannelTypeIcon type={channel.type} /></span>
             <span>{channel.name}</span>
           </p>
           <span />
@@ -254,7 +258,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
         <div data-loading={loading || loadError ? '' : undefined}>
           {loading ? (
             <div>
-              <span className={styles.spinner} aria-hidden="true" />
+              <Spinner size={24} />
               <p>{t.loading}</p>
             </div>
           ) : loadError ? (
@@ -271,21 +275,21 @@ const ChannelView: React.FC<ChannelViewProps> = ({
           ) : (
             <ul ref={listRef} onScroll={handleListScroll}>
               {messages.map((message, index) => {
-                const avatarColor = message.author.avatar_color ?? DEFAULT_AVATAR_COLOR;
+                const avatarColor = message.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
                 const authorName = getAuthorName(message.author);
                 const previous = messages[index - 1];
                 const showDateSeparator =
-                  !previous || getDayKey(previous.created_at) !== getDayKey(message.created_at);
+                  !previous || getDayKey(previous.createdAt) !== getDayKey(message.createdAt);
                 // Reference au message parent (réponse), facon Discord.
-                const isReply = message.post_parent_id != null;
+                const isReply = message.postParentId != null;
                 const parent = isReply
-                  ? messagesById.get(message.post_parent_id as number)
+                  ? messagesById.get(message.postParentId as number)
                   : undefined;
                 return (
                   <React.Fragment key={message.id}>
                     {showDateSeparator && (
                       <li role="separator">
-                        <span>{formatDaySeparator(message.created_at)}</span>
+                        <span>{formatDaySeparator(message.createdAt)}</span>
                       </li>
                     )}
                     <li
@@ -310,9 +314,9 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               <span
                                 className={styles.replyRefAvatar}
                                 style={{
-                                  background: parent.author.avatar_color ?? DEFAULT_AVATAR_COLOR,
+                                  background: parent.author.avatarColor ?? DEFAULT_AVATAR_COLOR,
                                   color: contrastingTextColor(
-                                    parent.author.avatar_color ?? DEFAULT_AVATAR_COLOR
+                                    parent.author.avatarColor ?? DEFAULT_AVATAR_COLOR
                                   ),
                                 }}
                               >
@@ -338,7 +342,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                       <div role={editingId === message.id ? "editor" : undefined}>
                         <p>
                           <span>{authorName}</span>
-                          <span>{formatTime(message.created_at)}</span>
+                          <span>{formatTime(message.createdAt)}</span>
                         </p>
                         {editingId === message.id ? (
                           <div>
@@ -432,6 +436,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                 +
               </button>
               <input
+                ref={composerRef}
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}

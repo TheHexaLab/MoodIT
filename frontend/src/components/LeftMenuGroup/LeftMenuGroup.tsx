@@ -8,8 +8,8 @@ interface LeftMenuGroupProps {
   courseMenu: React.ReactNode;
   /** Titre affiche dans la barre mobile. */
   mobileTitle?: string;
-  /** Préfixe du titre **/
-  mobileTitlePrefix?: string;
+  /** Icône/préfixe du titre (ex. `<ChannelTypeIcon />`). */
+  mobileTitlePrefix?: React.ReactNode;
   /** Initiale affichée dans l'avatar mobile (repli si aucun menu fourni). */
   mobileUserInitial?: string;
   /** Menu du compte rendu dans la barre mobile (avatar cliquable en haut à droite). */
@@ -68,9 +68,7 @@ export default function LeftMenuGroup({
 
         <h2 className={styles.mobileTitle}>
           {mobileTitlePrefix && (
-            <span role="prefix" style={mobileTitlePrefix !== '⮡ ' ? { width: 'fit-content' } : undefined}>
-              {mobileTitlePrefix}
-            </span>
+            <span role="prefix">{mobileTitlePrefix}</span>
           )}
           <span role="title">{mobileTitle}</span>
         </h2>

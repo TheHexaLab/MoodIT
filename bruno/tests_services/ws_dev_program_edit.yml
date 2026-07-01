@@ -1,0 +1,21 @@
+info:
+  name: Programme · Modifier
+  type: http
+  seq: 11
+
+http:
+  method: PATCH
+  url: http://localhost:8081/dev/ws/program?programId=2&name=Programme modifié ✏️&code=GEL&cohort=71&color=#8b1a1a
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse la modification du programme <programId> sur user:<userId>.
+  `userId` est OMIS → défaut du contrôleur (MOCK_REALTIME_USER_ID dans
+  DevWsController). Change l'id de test à cet endroit-là, pas ici.
+  programId doit être un programme présent dans le Dashboard (sinon l'upsert
+  l'ajoute au lieu de modifier un existant).

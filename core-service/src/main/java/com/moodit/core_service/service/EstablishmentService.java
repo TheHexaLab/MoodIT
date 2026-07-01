@@ -25,6 +25,7 @@ public class EstablishmentService {
         dto.setId(est.getId());
         dto.setName(est.getName());
         dto.setDomainEmail(est.getDomainEmail());
+        dto.setProgramCount(est.getPrograms() == null ? 0 : est.getPrograms().size());
 
         return dto;
     }

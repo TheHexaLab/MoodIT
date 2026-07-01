@@ -5,6 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
+    <!--
+      Pose data-theme sur <html> AVANT le rendu React (et avant la peinture), pour que
+      même les écrans affichés très tôt (LoadingPage du garde de route) suivent le bon
+      thème. Sinon, tant que useTheme() n'a pas tourné, le @media prefers-color-scheme
+      de l'OS l'emporte → un utilisateur en thème clair mais OS sombre verrait du sombre.
+      Même clé ('moodit-theme') et même logique de défaut que helpers/theme.ts.
+    -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('moodit-theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          /* localStorage indisponible : on laisse le @media gérer le défaut. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

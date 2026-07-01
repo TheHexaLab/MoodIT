@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './ProgramMenu.module.css';
+import { Spinner } from '../Spinner/Spinner.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { Plus } from '../../assets/Plus.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
+import { LogIn } from '../../assets/LogIn.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { type Program } from '../../types/domain.ts';
-// DEV : clic droit sur l'icone de l'app → menu de test des WebSockets.
-import { WsTestContextMenu } from '../../dev/WsTestContextMenu.tsx';
 
 // Entité Program ré-exportée depuis le modèle de domaine (source unique).
 export type { Program };
@@ -54,6 +54,8 @@ interface ProgramMenuProps {
   onEditProgram?: (programId: number) => void;
   /** Menu contextuel — gerer les roles du programme (admin). */
   onManageRoles?: (programId: number) => void;
+  /** Menu contextuel — rejoindre des cours du programme (tous). */
+  onJoinCourses?: (programId: number) => void;
   /** Menu contextuel — quitter le programme (tous). */
   onLeaveProgram?: (programId: number) => void;
 }
@@ -111,6 +113,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   onAddCourseToProgram,
   onEditProgram,
   onManageRoles,
+  onJoinCourses,
   onLeaveProgram,
 }) => {
   /** Menu contextuel ouvert : programme cible + position (viewport), ou null. */
@@ -145,7 +148,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     const rect = event.currentTarget.getBoundingClientRect();
     const gap = 8;
     // Estimation de hauteur (3 actions admin + « quitter ») pour éviter le débordement bas.
-    const estimatedHeight = (isAdmin ? 4 : 1) * 40 + 16;
+    const itemCount = (isAdmin ? 3 : 0) + (onJoinCourses ? 1 : 0) + 1; // +1 = « quitter »
+    const estimatedHeight = itemCount * 40 + 16;
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
     setContextMenu({ programId, left: rect.right + gap, top });
   }
@@ -158,32 +162,29 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
 
   return (
     <nav className={styles.rail} aria-label="Programme">
-      {/* Icône applicative (meme gabarit que le programme actif).
-          Clic gauche = bascule le theme ; clic droit = menu de test WS (DEV). */}
-      <WsTestContextMenu>
-        <div className={styles.appIcon} aria-label="MoodIT">
-          <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-            <defs>
-              <linearGradient
-                id="pg-grad"
-                x1="0"
-                y1="0"
-                x2="36"
-                y2="36"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop offset="0%" stopColor="#2dd4bf" />
-                <stop offset="100%" stopColor="#0d9488" />
-              </linearGradient>
-            </defs>
-            <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
-            {/* Pictogramme minimal type message */}
-            <circle cx="13" cy="18" r="2" fill="white" />
-            <circle cx="18" cy="18" r="2" fill="white" />
-            <circle cx="23" cy="18" r="2" fill="white" />
-          </svg>
-        </div>
-      </WsTestContextMenu>
+      {/* Icône applicative (meme gabarit que le programme actif). */}
+      <div className={styles.appIcon} aria-label="MoodIT">
+        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient
+              id="pg-grad"
+              x1="0"
+              y1="0"
+              x2="36"
+              y2="36"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="#2dd4bf" />
+              <stop offset="100%" stopColor="#0d9488" />
+            </linearGradient>
+          </defs>
+          <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
+          {/* Pictogramme minimal type message */}
+          <circle cx="13" cy="18" r="2" fill="white" />
+          <circle cx="18" cy="18" r="2" fill="white" />
+          <circle cx="23" cy="18" r="2" fill="white" />
+        </svg>
+      </div>
 
       {/* Séparateur visuel */}
       <span className={styles.divider} />
@@ -214,7 +215,9 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           </svg>
         </button>
       ) : loading ? (
-        <span className={styles.railSpinner} role="status" aria-label="Chargement des programmes" />
+        <span className={styles.railSpinnerWrap} role="status" aria-label="Chargement des programmes" aria-busy="true">
+          <Spinner size={24} />
+        </span>
       ) : !programs || programs.length <= 0 ? (
         <></>
       ) : (
@@ -307,6 +310,17 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 </button>
                 <span className={styles.contextDivider} />
               </>
+            )}
+            {onJoinCourses && (
+              <button
+                type="button"
+                className={styles.contextItem}
+                role="menuitem"
+                onClick={() => runContextAction(onJoinCourses)}
+              >
+                <LogIn className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                Rejoindre des cours
+              </button>
             )}
             <button
               type="button"

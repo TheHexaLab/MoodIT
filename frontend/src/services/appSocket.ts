@@ -1,9 +1,9 @@
-import { type ChannelMessage } from '../components/CourseChannelList/CourseChannelList';
+import { type ChannelMessage } from '../types/domain.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
 } from '../components/MainPanel/ChannelView/useChannelMessages';
-import { type ForumPost } from '../components/MainPanel/ForumView/forumThreads';
+import { type ForumPost } from '../types/domain.ts';
 import {
   type ForumSocket,
   type IncomingForumHandlers,
@@ -14,12 +14,17 @@ import {
   type CourseChannelsSocket,
   type IncomingCourseHandlers,
 } from '../components/CourseMenu/CourseMenu';
-import { type ItemChange } from '../components/SectionEditorPopup/SectionEditorPopup';
+import { type ItemChange } from '../components/SectionEditorPopup/types.ts';
 import {
   type Program,
   type IncomingProgramHandlers,
   type ProgramsSocket,
 } from '../components/ProgramMenu/ProgramMenu';
+import {
+  type IncomingMcpHandlers,
+  type McpResponseSummary,
+  type McpSocket,
+} from '../components/McpManagementPopup/types.ts';
 
 /**
  * SCAFFOLD du vrai client WebSocket (à finir le jour du branchement temps réel).
@@ -61,47 +66,99 @@ type ServerEvent =
       sectionType: string;
       change: ItemChange;
     }
+  | { type: 'quiz:created'; programId: number; courseId: number; quizId: number }
+  | { type: 'quiz:updated'; programId: number; courseId: number; quizId: number }
+  | { type: 'quiz:reordered'; programId: number; courseId: number }
+  | { type: 'quiz:deleted'; programId: number; courseId: number; quizId: number }
   // Programmes / abonnements (scope = utilisateur)
   | { type: 'program:created'; userId: number; program: Program }
   | { type: 'program:updated'; userId: number; program: Program }
   | { type: 'program:deleted'; userId: number; programId: number }
   | { type: 'subscription:added'; userId: number; program: Program }
-  | { type: 'subscription:removed'; userId: number; programId: number };
+  | { type: 'subscription:removed'; userId: number; programId: number }
+  // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
+  | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
+  | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string };
 
 export interface AppSocket {
   channels: ChannelSocket;
   forums: ForumSocket;
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
+  mcp: McpSocket;
+  /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
+  open: () => void;
+  /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
+  close: () => void;
 }
 
-export function createAppSocket(url: string, getToken: () => string): AppSocket {
+/**
+ * URL du WebSocket. Par défaut : même origine que la page, en ws/wss selon http/https,
+ * sur le chemin `/ws` (proxifié par Vite en dev, par le gateway en prod). Surchargeable
+ * via `VITE_WS_URL` (ex. connexion directe au core-service sans passer par le gateway).
+ */
+export function defaultWebSocketUrl(): string {
+  const override = import.meta.env.VITE_WS_URL as string | undefined;
+  if (override) return override;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+export function createAppSocket(
+  url: string = defaultWebSocketUrl(),
+  getToken: () => string = () => ''
+): AppSocket {
   let ws: WebSocket | null = null;
   let reconnectDelay = 1000;
+  /** Fermeture demandée par le client : empêche la reconnexion automatique. */
+  let closedByClient = false;
+  let reconnectTimer: number | null = null;
+  /**
+   * Passe à true au 1er `onopen`. Permet de distinguer la connexion INITIALE (les abonnés
+   * viennent de fetcher au montage) d'une RECONNEXION (events potentiellement manqués →
+   * resync). Persiste entre les sockets successifs (closure de createAppSocket).
+   */
+  let everConnected = false;
   /** Rooms actives (on peut être abonné a plusieurs canaux / forums / programmes). */
   const channelSubs = new Map<number, IncomingMessageHandlers>();
   const forumSubs = new Map<number, IncomingForumHandlers>();
   const courseSubs = new Map<number, IncomingCourseHandlers>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
+  const mcpSubs = new Map<number, IncomingMcpHandlers>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
   };
 
   function connect() {
-    ws = new WebSocket(`${url}?token=${encodeURIComponent(getToken())}`);
+    closedByClient = false;
+    // Référence locale : permet d'ignorer les évènements d'un socket périmé (ex. un
+    // ancien socket fermé par le double-montage StrictMode pendant qu'un nouveau s'ouvre).
+    const socket = new WebSocket(`${url}?token=${encodeURIComponent(getToken())}`);
+    ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = () => {
       reconnectDelay = 1000;
+      const reconnected = everConnected;
+      everConnected = true;
       // (Re)joindre toutes les rooms actives — utile après une reconnexion.
       for (const channelId of channelSubs.keys()) send({ type: 'join', scope: 'channel', id: channelId });
       for (const forumId of forumSubs.keys()) send({ type: 'join', scope: 'forum', id: forumId });
       for (const programId of courseSubs.keys()) send({ type: 'join', scope: 'program', id: programId });
       for (const userId of programSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
-      // TODO reconnexion : refetcher les éléments manqués « depuis le dernier vu ».
+      for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
+
+      // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
+      // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
+      // pour MCP ; généralisable aux autres scopes en ajoutant `onResync?` à leurs
+      // handlers + une boucle ici (cf. mcpSubs).
+      if (reconnected) {
+        for (const handlers of mcpSubs.values()) handlers.onResync?.();
+        for (const handlers of courseSubs.values()) handlers.onResync?.();
+      }
     };
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       let data: ServerEvent;
       try {
         data = JSON.parse(event.data) as ServerEvent;
@@ -119,7 +176,7 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
           channelSubs.get(data.channelId)?.onDelete(data.messageId);
           break;
         case 'post:created':
-          // La dédup optimiste ↔ écho est gérée par le hook (client_msg_id / client_post_id).
+          // La dédup optimiste ↔ écho est gérée par le hook (clientMsgId / clientPostId).
           forumSubs.get(data.forumId)?.onPost(data.post, data.parentId);
           break;
         case 'post:edited':
@@ -141,6 +198,18 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
         case 'section:changed':
           courseSubs.get(data.programId)?.onSectionChange(data.courseId, data.sectionType, data.change);
           break;
+        case 'quiz:created':
+          courseSubs.get(data.programId)?.onQuizCreated?.(data.courseId, data.quizId);
+          break;
+        case 'quiz:updated':
+          courseSubs.get(data.programId)?.onQuizUpdated?.(data.courseId, data.quizId);
+          break;
+        case 'quiz:reordered':
+          courseSubs.get(data.programId)?.onQuizReordered?.(data.courseId);
+          break;
+        case 'quiz:deleted':
+          courseSubs.get(data.programId)?.onQuizDeleted?.(data.courseId, data.quizId);
+          break;
         case 'program:created':
         case 'program:updated':
         case 'subscription:added':
@@ -150,20 +219,26 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
         case 'subscription:removed':
           programSubs.get(data.userId)?.onProgramRemove(data.programId);
           break;
+        case 'mcp:analysis-created':
+          mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);
+          break;
+        case 'mcp:analysis-failed':
+          mcpSubs.get(data.courseId)?.onAnalysisFailed?.(data.userId, data.reason);
+          break;
       }
     };
 
-    ws.onclose = () => {
-      // Reconnexion avec backoff exponentiel plafonné.
-      // TODO : ne pas reconnecter si fermeture VOLONTAIRE (logout / unmount app).
-      window.setTimeout(connect, reconnectDelay);
+    socket.onclose = () => {
+      // Fermeture volontaire (logout / démontage), ou socket déjà remplacé par un
+      // nouveau (StrictMode) : on ne reconnecte pas.
+      if (closedByClient || ws !== socket) return;
+      // Sinon, reconnexion avec backoff exponentiel plafonné.
+      reconnectTimer = window.setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 15_000);
     };
 
-    ws.onerror = () => ws?.close();
+    socket.onerror = () => socket.close();
   }
-
-  connect();
 
   return {
     channels: {
@@ -205,6 +280,40 @@ export function createAppSocket(url: string, getToken: () => string): AppSocket 
           send({ type: 'leave', scope: 'user', id: userId });
         };
       },
+    },
+    mcp: {
+      subscribe(courseId, handlers) {
+        mcpSubs.set(courseId, handlers);
+        send({ type: 'join', scope: 'mcp', id: courseId });
+        return () => {
+          mcpSubs.delete(courseId);
+          send({ type: 'leave', scope: 'mcp', id: courseId });
+        };
+      },
+    },
+    open() {
+      // Idempotent : ne rouvre pas si une connexion est déjà en cours / établie.
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+      connect();
+    },
+    close() {
+      closedByClient = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      const socket = ws;
+      ws = null;
+      if (!socket) return;
+      if (socket.readyState === WebSocket.CONNECTING) {
+        // Fermer un socket encore en cours de connexion fait râler Chrome
+        // ("closed before the connection is established") — fréquent au double-montage
+        // StrictMode. On neutralise ses handlers et on ne le ferme qu'une fois OUVERT,
+        // ce qui est une fermeture propre (sans warning). Il ne rejoint aucune room.
+        socket.onopen = () => socket.close();
+        socket.onmessage = null;
+        socket.onclose = null;
+        socket.onerror = null;
+      } else {
+        socket.close();
+      }
     },
   };
 }

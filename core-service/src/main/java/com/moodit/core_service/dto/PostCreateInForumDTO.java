@@ -11,6 +11,8 @@ import lombok.experimental.SuperBuilder;
 @AllArgsConstructor
 public class PostCreateInForumDTO{
     private String content;
+    /** Titre d'un sujet racine de forum 'Thread' (null pour une réponse / un message). */
+    private String title;
     private Integer forumId;
     private Integer parentPostId;
 }

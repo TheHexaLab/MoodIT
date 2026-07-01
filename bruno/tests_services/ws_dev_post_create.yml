@@ -1,0 +1,20 @@
+info:
+  name: Forum · Nouveau sujet
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: http://localhost:8081/dev/ws/post?forumId=3&content=(dev) sujet temps réel 👋&title=Sujet WS
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse un nouveau sujet racine sur la room forum:<forumId> ('Thread').
+  Abonne-toi à {"type":"join","scope":"forum","id":3} d'abord.
+  Variantes dispo sur le contrôleur : PATCH et DELETE /dev/ws/post
+  (params forumId, postId, content).

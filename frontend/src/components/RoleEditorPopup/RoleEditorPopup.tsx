@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './RoleEditorPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
@@ -36,7 +37,7 @@ interface Pending {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function RoleEditorPopup({
@@ -138,7 +139,7 @@ export function RoleEditorPopup({
       if (user.role_ids.includes(roleId)) return false;
       if (query === '') return true;
       const haystack =
-        `${user.first_name} ${user.last_name} ${user.email} ${user.username}`.toLowerCase();
+        `${user.firstName} ${user.lastName} ${user.email} ${user.username}`.toLowerCase();
       return haystack.includes(query);
     });
   }
@@ -244,14 +245,14 @@ export function RoleEditorPopup({
                               disabled={pending !== null}
                               onClick={() => addUser(role.id, user.id)}
                             >
-                              <span style={{ background: user.avatar_color }}>
-                                <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                              <span style={{ background: user.avatarColor }}>
+                                <span style={{ color: contrastingTextColor(user.avatarColor) }}>
                                   {initials(user)}
                                 </span>
                               </span>
                               <div>
                                 <span>
-                                  {user.first_name} {user.last_name}
+                                  {user.firstName} {user.lastName}
                                 </span>
                                 <span>{user.email}</span>
                               </div>
@@ -270,14 +271,14 @@ export function RoleEditorPopup({
                   {usersFor(role.id).map((user) => (
                     <li key={user.id}>
                       <div>
-                        <span style={{ background: user.avatar_color }}>
-                          <span style={{ color: contrastingTextColor(user.avatar_color) }}>
+                        <span style={{ background: user.avatarColor }}>
+                          <span style={{ color: contrastingTextColor(user.avatarColor) }}>
                             {initials(user)}
                           </span>
                         </span>
                         <div>
                           <span>
-                            {user.first_name} {user.last_name}
+                            {user.firstName} {user.lastName}
                           </span>
                           <span>{user.email}</span>
                         </div>

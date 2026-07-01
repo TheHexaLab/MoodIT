@@ -13,4 +13,9 @@ import java.util.List;
 @AllArgsConstructor
 public class UserCreateInProgramsDTO extends UserDTO{
     private List<Integer> programIds;
+    /**
+     * Établissement concerné : limite la SYNCHRO aux programmes de cet établissement
+     * (déselection = désabonnement). Null → ajout seul (rétrocompat, ex. création).
+     */
+    private Integer establishmentId;
 }

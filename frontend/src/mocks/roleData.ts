@@ -17,22 +17,22 @@ const roles: Role[] = [
 
 /** Vivier d'utilisateurs (sans rôle ici : l'assignation est dérivée par programme). */
 const userPool: Omit<User, 'role_ids'>[] = [
-  { id: 1, username: 'jeandubois', first_name: 'Jean', last_name: 'Dubois', email: 'jeandubois@usherbrooke.ca', avatar_color: '#0a5cc0' },
-  { id: 2, username: 'tremblaymar', first_name: 'Marie', last_name: 'Tremblay', email: 'tremblaymar@usherbrooke.ca', avatar_color: '#f6c350' },
-  { id: 3, username: 'gagnonjp', first_name: 'Jean-Philippe', last_name: 'Gagnon', email: 'gagnonjp@usherbrooke.ca', avatar_color: '#1a6e3c' },
-  { id: 4, username: 'roygenev', first_name: 'Geneviève', last_name: 'Roy', email: 'roygenev@usherbrooke.ca', avatar_color: '#7a4e1a' },
-  { id: 5, username: 'lavoiesam', first_name: 'Samuel', last_name: 'Lavoie', email: 'lavoiesam@usherbrooke.ca', avatar_color: '#3a3a7a' },
-  { id: 6, username: 'bouchardalx', first_name: 'Alexandre', last_name: 'Bouchard', email: 'bouchardalx@usherbrooke.ca', avatar_color: '#0a7a6e' },
-  { id: 7, username: 'fortinemi', first_name: 'Émilie', last_name: 'Fortin', email: 'fortinemi@usherbrooke.ca', avatar_color: '#4a7a1a' },
-  { id: 8, username: 'morinclar', first_name: 'Clara', last_name: 'Morin', email: 'morinclar@usherbrooke.ca', avatar_color: '#5eead4' },
-  { id: 9, username: 'girardtho', first_name: 'Thomas', last_name: 'Girard', email: 'girardtho@usherbrooke.ca', avatar_color: '#9333ea' },
-  { id: 10, username: 'pelletierni', first_name: 'Nicolas', last_name: 'Pelletier', email: 'pelletierni@usherbrooke.ca', avatar_color: '#8b1a1a' },
-  { id: 11, username: 'belangerju', first_name: 'Julie', last_name: 'Bélanger', email: 'belangerju@usherbrooke.ca', avatar_color: '#0891b2' },
-  { id: 12, username: 'cotemax', first_name: 'Maxime', last_name: 'Côté', email: 'cotemax@usherbrooke.ca', avatar_color: '#b45309' },
-  { id: 13, username: 'lemieuxaud', first_name: 'Audrey', last_name: 'Lemieux', email: 'lemieuxaud@usherbrooke.ca', avatar_color: '#be185d' },
-  { id: 14, username: 'simardphi', first_name: 'Philippe', last_name: 'Simard', email: 'simardphi@usherbrooke.ca', avatar_color: '#15803d' },
-  { id: 15, username: 'caronlea', first_name: 'Léa', last_name: 'Caron', email: 'caronlea@usherbrooke.ca', avatar_color: '#1d4ed8' },
-  { id: 16, username: 'dufoursop', first_name: 'Sophie', last_name: 'Dufour', email: 'dufoursop@usherbrooke.ca', avatar_color: '#c2410c' },
+  { id: 1, username: 'jeandubois', firstName: 'Jean', lastName: 'Dubois', email: 'jeandubois@usherbrooke.ca', avatarColor: '#0a5cc0' },
+  { id: 2, username: 'tremblaymar', firstName: 'Marie', lastName: 'Tremblay', email: 'tremblaymar@usherbrooke.ca', avatarColor: '#f6c350' },
+  { id: 3, username: 'gagnonjp', firstName: 'Jean-Philippe', lastName: 'Gagnon', email: 'gagnonjp@usherbrooke.ca', avatarColor: '#1a6e3c' },
+  { id: 4, username: 'roygenev', firstName: 'Geneviève', lastName: 'Roy', email: 'roygenev@usherbrooke.ca', avatarColor: '#7a4e1a' },
+  { id: 5, username: 'lavoiesam', firstName: 'Samuel', lastName: 'Lavoie', email: 'lavoiesam@usherbrooke.ca', avatarColor: '#3a3a7a' },
+  { id: 6, username: 'bouchardalx', firstName: 'Alexandre', lastName: 'Bouchard', email: 'bouchardalx@usherbrooke.ca', avatarColor: '#0a7a6e' },
+  { id: 7, username: 'fortinemi', firstName: 'Émilie', lastName: 'Fortin', email: 'fortinemi@usherbrooke.ca', avatarColor: '#4a7a1a' },
+  { id: 8, username: 'morinclar', firstName: 'Clara', lastName: 'Morin', email: 'morinclar@usherbrooke.ca', avatarColor: '#5eead4' },
+  { id: 9, username: 'girardtho', firstName: 'Thomas', lastName: 'Girard', email: 'girardtho@usherbrooke.ca', avatarColor: '#9333ea' },
+  { id: 10, username: 'pelletierni', firstName: 'Nicolas', lastName: 'Pelletier', email: 'pelletierni@usherbrooke.ca', avatarColor: '#8b1a1a' },
+  { id: 11, username: 'belangerju', firstName: 'Julie', lastName: 'Bélanger', email: 'belangerju@usherbrooke.ca', avatarColor: '#0891b2' },
+  { id: 12, username: 'cotemax', firstName: 'Maxime', lastName: 'Côté', email: 'cotemax@usherbrooke.ca', avatarColor: '#b45309' },
+  { id: 13, username: 'lemieuxaud', firstName: 'Audrey', lastName: 'Lemieux', email: 'lemieuxaud@usherbrooke.ca', avatarColor: '#be185d' },
+  { id: 14, username: 'simardphi', firstName: 'Philippe', lastName: 'Simard', email: 'simardphi@usherbrooke.ca', avatarColor: '#15803d' },
+  { id: 15, username: 'caronlea', firstName: 'Léa', lastName: 'Caron', email: 'caronlea@usherbrooke.ca', avatarColor: '#1d4ed8' },
+  { id: 16, username: 'dufoursop', firstName: 'Sophie', lastName: 'Dufour', email: 'dufoursop@usherbrooke.ca', avatarColor: '#c2410c' },
 ];
 
 /** Rôle dérivé d'un membre selon sa position dans le programme (déterministe). */

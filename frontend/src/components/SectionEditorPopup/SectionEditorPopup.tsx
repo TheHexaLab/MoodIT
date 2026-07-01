@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './SectionEditorPopup.module.css';
+import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
-import { namePattern } from './helpers.ts';
 import { defaultLabels } from './labels.ts';
 import type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
@@ -13,8 +13,8 @@ import type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from '.
 export type { Item, ItemChange, MaybePromise, SectionEditorPopupLabels } from './types.ts';
 
 interface SectionEditorPopupProps {
-  /** Préfixe affiché devant chaque nom (ex. « # »). */
-  prefix?: string;
+  /** Icône/préfixe affiché devant chaque nom (ex. `<ChannelTypeIcon />`). */
+  prefix?: React.ReactNode;
   onClose: (...args: unknown[]) => unknown;
   itemList: Item[];
   /**
@@ -29,7 +29,7 @@ interface SectionEditorPopupProps {
 
 /** Indicateur de chargement (cercle qui tourne ; prend la couleur courante du texte). */
 function Spinner(): React.ReactElement {
-  return <span className={styles.spinner} aria-hidden="true" />;
+  return <BaseSpinner tone="current" size={16} />;
 }
 
 export function SectionEditorPopup({
@@ -134,7 +134,7 @@ export function SectionEditorPopup({
 
   async function saveEdit() {
     const trimmed = draftName.trim();
-    if (!namePattern.test(trimmed) || isNameTaken(trimmed) || pending) return;
+    if (!trimmed || isNameTaken(trimmed) || pending) return;
 
     // On garde le formulaire ouvert (avec spinner) jusqu'à la résolution : la liste
     // n'est mise à jour qu'après un succès, et l'erreur laisse la saisie intacte.
@@ -232,7 +232,7 @@ export function SectionEditorPopup({
   }
 
   const draftTrimmed = draftName.trim();
-  const isDraftInvalid = !namePattern.test(draftTrimmed);
+  const isDraftInvalid = !draftTrimmed;
   const isDraftDuplicate = draftTrimmed !== '' && isNameTaken(draftTrimmed);
   const draftHasError = isDraftInvalid || isDraftDuplicate;
   const draftHint = isDraftDuplicate ? t.hintDuplicate : isDraftInvalid ? t.hintInvalid : t.hint;
@@ -244,7 +244,7 @@ export function SectionEditorPopup({
         <h2>{titleText}</h2>
         <div>
           <div className={draftHasError ? styles.invalid : undefined}>
-            <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
+            <span>{prefix}</span>
             <input
               type="text"
               value={draftName}
@@ -315,7 +315,7 @@ export function SectionEditorPopup({
                           ⠿
                         </span>
                         <span>
-                          <span style={prefix === '⮡' ? {display: 'inline-flex', width: '0.8rem'} : undefined}>{prefix}</span>
+                          <span>{prefix}</span>
                           <span>{item.name}</span>
                         </span>
                       </div>

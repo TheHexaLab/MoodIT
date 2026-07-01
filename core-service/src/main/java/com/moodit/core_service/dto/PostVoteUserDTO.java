@@ -12,10 +12,14 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "content", "createdAt", "isPinned", "userId", "voteTotalValue", "childrenCount", "children"})
+@JsonPropertyOrder({"id", "title", "content", "createdAt", "isPinned", "postParentId", "userId", "author", "voteTotalValue", "childrenCount", "children"})
 public class PostVoteUserDTO extends PostDTO{
     private Integer voteTotalValue;
     private Integer userId;
+    /** Id du post parent (réponse) ; null pour un message/sujet racine. */
+    private Integer postParentId;
+    /** Auteur embarqué (le front attend message.author : id, username, prénom/nom, avatarColor). */
+    private UserDTO author;
     private Integer childrenCount;
     private List<PostVoteUserDTO> children;
 }

@@ -1,0 +1,17 @@
+info:
+  name: Cours · Supprimer
+  type: http
+  seq: 10
+
+http:
+  method: DELETE
+  url: http://localhost:8081/dev/ws/course?programId=1&courseId=1
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse la suppression du cours <courseId> sur program:<programId>.

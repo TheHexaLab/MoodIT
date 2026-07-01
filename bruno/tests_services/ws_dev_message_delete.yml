@@ -1,0 +1,17 @@
+info:
+  name: Message · Supprimer
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: http://localhost:8081/dev/ws/message?channelId=1&messageId=1
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse la suppression du message <messageId> sur channel:<channelId>.

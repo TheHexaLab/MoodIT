@@ -25,6 +25,9 @@
     gap: 0.625rem;
     width: 100%;
     height: 100%;
+    /* Le <button> est déjà en border-box (UA) ; on l'impose pour que la variante
+       skeleton (un <div>) ait le même box model et ne soit pas décalée vers le bas. */
+    box-sizing: border-box;
     border: none;
     background: transparent;
     color: inherit;
@@ -95,6 +98,71 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* ── État de chargement (skeleton du profil) ────────────────── */
+/* Affiché tant que GET /api/me n'a pas répondu : pastilles/lignes grises animées
+   d'un léger « shimmer », aux mêmes dimensions que l'avatar et les textes réels. */
+.userMenuLoading {
+    cursor: default;
+}
+
+.userMenuLoading:hover {
+    background: transparent;
+}
+
+.skeleton {
+    position: relative;
+    overflow: hidden;
+    /* Gris neutre (theme-aware) plutôt que la teinte bleutée --bg-active-channel. */
+    background: var(--border);
+}
+
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    /* Reflet blanc translucide : éclaircit la base dans les deux thèmes (clair ET
+       sombre), contrairement à --bg-surface qui s'inversait en sombre. */
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.45),
+        transparent
+    );
+    animation: user-menu-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Les pastilles héritent de la taille/forme via .userAvatarInitials (2rem) et
+   .compactTrigger (1.5rem) ; .skeleton fournit déjà la couleur de base. */
+.skeletonAvatar,
+.skeletonAvatarCompact {
+    background: var(--border);
+}
+
+.skeletonName {
+    width: 5.5rem;
+    height: 0.75rem;
+    border-radius: 0.25rem;
+}
+
+.skeletonHandle {
+    width: 3.5rem;
+    height: 0.625rem;
+    border-radius: 0.25rem;
+}
+
+@keyframes user-menu-shimmer {
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+        animation: none;
+    }
 }
 
 /* ── Déclencheur compact (barre mobile, en haut à droite) ───── */

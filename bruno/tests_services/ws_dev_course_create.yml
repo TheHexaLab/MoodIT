@@ -1,0 +1,20 @@
+info:
+  name: Cours · Ajouter
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: http://localhost:8081/dev/ws/course?programId=1&title=Cours temps réel
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Diffuse l'ajout d'un cours sur la room program:<programId>.
+  Abonne-toi à {"type":"join","scope":"program","id":1} d'abord.
+  Variantes dispo : PATCH et DELETE /dev/ws/course
+  (params programId, courseId, code, title).

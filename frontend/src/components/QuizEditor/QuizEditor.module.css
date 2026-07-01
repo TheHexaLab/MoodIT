@@ -1,0 +1,892 @@
+/* Styles partagés des popups de l'éditeur de quiz. Couleurs via variables de
+   thème (clair/sombre automatiques). Patron d'overlay calqué sur UpdateCoursePopup. */
+
+.overlay {
+    position: fixed;
+    /* Au-dessus de tout (les autres popups sont à 90). */
+    z-index: 1000;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1rem;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.35);
+    animation: editor-fade-in 0.2s ease-out;
+}
+
+/* Boîte animée : sa taille (largeur + hauteur) est transitionnée au changement de
+   vue. La hauteur est posée en inline par EditorShell (mesure du contenu). */
+.panel {
+    --panel-width: 30rem;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: min(var(--panel-width), 100%);
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
+    border-radius: 1rem;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: editor-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+        height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Corps : seule rangée défilante (la scrollbar ne longe QUE cette zone, pas le
+   header ni le pied). `overflow-y` est piloté en inline par EditorShell : `auto`
+   seulement si le contenu dépasse le viewport ET en mode défilant, sinon `hidden`. */
+.panelBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: hidden;
+    /* Réserve la place de la scrollbar : son apparition/disparition ne décale plus la
+       largeur du contenu (contrôles, listes déroulantes) pendant le défilement. */
+    scrollbar-gutter: stable;
+}
+
+/* Contenu mesuré (hauteur naturelle du corps) : champs de la vue. */
+.panelBodyInner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    padding: 0 1.25rem;
+}
+
+/* Pied fixe (rangée hors défilement) : reçoit la barre d'actions via portail.
+   Padding seulement s'il a du contenu (sinon, slot vide = aucune hauteur). */
+.panelFooter {
+    flex: 0 0 auto;
+}
+.panelFooter:not(:empty) {
+    padding: 0.875rem 1.25rem 1.25rem;
+}
+
+@keyframes editor-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes editor-pop-in {
+    from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes editor-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+@keyframes editor-pop-out {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+}
+.closing { animation: editor-fade-out 0.2s ease-in forwards; }
+.closing .panel { animation: editor-pop-out 0.2s ease-in forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+    .overlay, .panel { animation: none; }
+}
+
+/* ── En-tête (rangée fixe, hors défilement) ── */
+.header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 1.25rem 1.25rem 0.875rem;
+}
+.headerTitle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+.headerText { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.headerText h1 {
+    margin: 0;
+    color: var(--text);
+    font-size: 1.0625rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.headerText p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+/* Boutons retour / fermer : sans fond, hover + clic animés (comme les autres
+   popups, cf. AddSubscriptionPopup `.back`). */
+.backChevron, .closeButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, opacity 0.1s ease;
+}
+.backChevron:hover { color: var(--text); }
+/* Retour visuel au clic via l'OPACITÉ (pas un scale) : un scale rétrécit le bouton
+   sous le curseur au mousedown → les clics près du bord ne déclenchent pas le clic. */
+.backChevron:active { opacity: 0.55; }
+.closeButton { font-size: 1.125rem; }
+.closeButton:hover { color: var(--text); }
+.closeButton:active { opacity: 0.55; }
+
+/* ── Champs (label + contrôle) ── */
+.field { display: flex; flex-direction: column; gap: 0.625rem; }
+.fieldLabel {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+.fieldHint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+.input, .textarea {
+    box-sizing: border-box;
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.6875rem 0.75rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.textarea { resize: vertical; min-height: 3.25rem; line-height: 1.45; }
+.input:focus, .textarea:focus,
+.input:hover, .textarea:hover {
+    border-color: var(--brand-teal);
+}
+.input:focus, .textarea:focus {
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+.input::placeholder, .textarea::placeholder { color: var(--text-muted); }
+
+/* ── Éditeur Markdown de l'énoncé : focus teal + halo comme les inputs. Scopé à
+   CE popup (via .panelBodyInner) ; le module partagé garde son focus gris pour les
+   forums. Les sélecteurs par rôle sont globaux (non hashés par CSS Modules). ── */
+.panelBodyInner div[role^='markdown-editor'] div[role='toolbar'] {
+    transition: border-color 0.15s ease;
+}
+.panelBodyInner div[role^='markdown-editor'] > div[role='editor-main'] {
+    border-radius: 0.5rem;
+    transition: box-shadow 0.15s ease;
+}
+
+.panelBodyInner div[role^='markdown-editor'] textarea {
+    border-top-color: transparent;
+}
+
+.panelBodyInner div[role^='markdown-editor']:focus-within div[role='toolbar'],
+.panelBodyInner div[role^='markdown-editor']:focus-within textarea,
+.panelBodyInner div[role^='markdown-editor']:focus-within div[role="preview"] {
+    border-color: var(--brand-teal);
+}
+.panelBodyInner div[role^='markdown-editor']:focus-within textarea,
+.panelBodyInner div[role^='markdown-editor']:focus-within div[role="preview"]{
+    border-top-color: transparent;
+}
+.panelBodyInner div[role^='markdown-editor']:focus-within > div[role='editor-main'] {
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+}
+
+/* ── Liste déroulante personnalisée (cf. Dropdown.tsx) ──
+   Conforme au sélecteur d'établissement (AddSubscriptionPopup) : contrôle bordé
+   façon champ + chevron teal animé, menu flottant avec coche sur l'option active. */
+.dropdown { position: relative; width: 100%; }
+.dropdownControl {
+    box-sizing: border-box;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.6875rem 0.75rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dropdownControl > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dropdownControl:hover, .dropdownOpen {
+    border-color: var(--brand-teal);
+}
+
+.dropdownOpen {
+    box-shadow: 0 0 4px 3px var(--shadow-hover);
+    background: color-mix(in srgb, var(--brand-teal) 8%, transparent);
+}
+
+.dropdownChevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transform: rotate(180deg);
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+.dropdownChevronOpen {
+    color: var(--brand-teal);
+    transform: rotate(0deg);
+}
+
+.dropdownPicker {
+    --dd-row: 2.25rem;
+    --dd-gap: 0.125rem;
+    --dd-pad: 0.25rem;
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    right: 0;
+    z-index: 10;
+    margin: 0;
+    box-sizing: border-box;
+    padding: var(--dd-pad);
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--dd-gap);
+    /* Pile 3 éléments visibles (rangées + interstices + padding + bordures) ; défile au-delà. */
+    max-height: calc(3 * var(--dd-row) + 2 * var(--dd-gap) + 2 * var(--dd-pad) + 2px);
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    box-shadow: 0 8px 20px var(--shadow-modal);
+}
+.dropdownPicker > li { display: block; }
+.dropdownPicker > li > button {
+    width: 100%;
+    min-height: var(--dd-row);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.625rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+/* Contenu affiché en entier : retour à la ligne, jamais tronqué. */
+.dropdownPicker > li > button > span {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.dropdownPicker > li > button:hover { background: var(--bg-vote-pill); }
+/* Sélection : texte normal (lisible) + léger fond teal pour le marquer.
+   Sélecteur qualifié pour passer au-dessus de la règle de base du bouton. */
+.dropdownPicker > li > button.dropdownItemSelected {
+    color: var(--text);
+    font-weight: 600;
+    background: color-mix(in srgb, var(--brand-teal) 8%, transparent);
+}
+.dropdownPicker > li > button.dropdownItemSelected:hover {
+    background: color-mix(in srgb, var(--brand-teal) 14%, transparent);
+}
+
+/* Énoncé/type en pleine largeur, points en colonne étroite. */
+.row2 { display: grid; grid-template-columns: 1fr 5rem; gap: 0.75rem; }
+
+/* ── Bascules (toggle) ── */
+.toggles { display: flex; gap: 1.25rem; align-items: center; }
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: none;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+.toggleTrack {
+    position: relative;
+    width: 2.25rem;
+    height: 1.25rem;
+    border-radius: 999px;
+    background: var(--border-strong);
+    transition: background 0.15s;
+    flex: 0 0 auto;
+}
+.toggleOn { background: var(--brand-teal); }
+.toggleKnob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+}
+.toggleOn .toggleKnob { transform: translateX(1rem); }
+
+/* ── Séparateur + bandeau de section ── */
+.divider { border: none; border-top: 1px solid var(--border); margin: 0.25rem 0; }
+.sectionBar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.sectionTitle {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    color: var(--text);
+    font-size: 0.9375rem;
+    font-weight: 700;
+}
+.sectionMeta { color: var(--text-muted); font-size: 0.8125rem; font-weight: 500; }
+.sectionMeta::before { content: '· '; }
+
+/* Bouton « Ajouter » (cohérent avec les autres boutons : hover + clic animés). */
+.addLinkButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    flex: 0 0 auto;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    padding: 0.3125rem 0.5rem;
+    color: var(--brand-teal);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.addLinkButton:hover { background: var(--brand-teal-surface); }
+.addLinkButton:active { transform: scale(0.96); }
+
+/* ── Listes (quiz / questions / réponses / items / harnais) ── */
+.panelBody .list {
+    overflow-y: auto;
+}
+
+.list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Placeholder de la liste (chargement / vide) : message discret centré. */
+.listEmpty {
+    margin: 0;
+    padding: 1.25rem 0.5rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Chargement de la liste : spinner + texte, centrés verticalement. */
+.listLoading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1.5rem 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Petit espacement avant la scrollbar quand la liste déborde (≥ 5 éléments). */
+.list.questionList:has(> :nth-child(6)) {
+    padding-right: 0.5rem;
+}
+
+/* Liste des associations : pas de plafond ni de défilement interne — elle s'étend
+   et c'est le corps du popup qui défile. */
+.list.matchingList,
+.list.harnessList {
+    max-height: none;
+    overflow: visible;
+}
+
+/* Hors mobile : liste des questions (modif. de quiz) plafonnée PILE à 5 éléments.
+   Hauteur d'une ligne déduite du mobile (3 lignes = 12.5rem, soit 2 interstices de
+   0.5rem) ; 5 lignes = 5 × ligne + 4 interstices (les interstices sont en N−1, pas
+   proportionnels). Au-delà, la liste défile. */
+.questionList {
+    --q-row: calc((12.5rem - 2 * 0.5rem) / 3);
+    max-height: calc(5 * var(--q-row) + 4 * 0.5rem);
+}
+
+/* Scrollbar fine, alignée sur le reste de l'app (cf. SectionEditorPopup). */
+@supports not selector(::-webkit-scrollbar) {
+    .list,
+    .panelBody,
+    .dropdownPicker {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+.list::-webkit-scrollbar,
+.panelBody::-webkit-scrollbar,
+.dropdownPicker::-webkit-scrollbar {
+    width: 4px;
+}
+.list::-webkit-scrollbar-track,
+.panelBody::-webkit-scrollbar-track,
+.dropdownPicker::-webkit-scrollbar-track {
+    background: transparent;
+}
+.list::-webkit-scrollbar-thumb,
+.panelBody::-webkit-scrollbar-thumb,
+.dropdownPicker::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+.list::-webkit-scrollbar-thumb:hover,
+.panelBody::-webkit-scrollbar-thumb:hover,
+.dropdownPicker::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.list::-webkit-scrollbar-button,
+.panelBody::-webkit-scrollbar-button,
+.dropdownPicker::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+.listRow {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    padding: 0.625rem 0.75rem;
+    background: var(--bg-surface);
+}
+.listRowActive { border-color: var(--brand-teal); }
+.listRowDragging { opacity: 0.5; }
+
+/* Poignée de réordonnancement (souris + tactile) : `touch-action: none` empêche le
+   défilement de la page pendant le glissé au doigt. */
+.grip {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    display: inline-flex;
+    cursor: grab;
+    touch-action: none;
+}
+.grip:active { cursor: grabbing; }
+.rowBody { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.rowTitleLine { display: flex; align-items: center; gap: 0.5rem; }
+.rowTitle {
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rowSub {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rowActions { display: flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
+
+/* Mobile : actions masquées par défaut, révélées au tap sur la ligne ; et la
+   méta de la section Questions (points) passe sous le label. */
+@media (max-width: 30rem) {
+    /* Calqué sur les actions des posts de thread en tactile (role="post-actions") :
+       petit panneau flottant bordé + ombré à droite de la ligne. Toujours présent
+       mais masqué (opacity/pointer-events), révélé en FONDU — comme dans les threads. */
+    .rowActions {
+        display: flex;
+        gap: 0;
+        position: absolute;
+        top: 50%;
+        right: 0.5rem;
+        transform: translateY(-50%);
+        z-index: 2;
+        padding: 0.125rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--bg-surface);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.12s ease;
+    }
+    .rowActionsRevealed { opacity: 1; pointer-events: auto; }
+    /* Boutons : gris qui vire au teal (modifier) / rouge (supprimer), sans fond. */
+    .rowActions .iconButton {
+        width: auto;
+        height: auto;
+        padding: 0.3rem 0.5rem;
+        border-radius: 0.375rem;
+        background: transparent;
+        color: var(--text-muted);
+        transition: color 0.12s ease;
+    }
+    .rowActions .iconButton:hover { background: transparent; color: var(--brand-teal); }
+    .rowActions .iconButtonDanger:hover { background: transparent; color: var(--danger); }
+
+    .rowTitleLine { justify-content: space-between; }
+    .sectionTitle { flex-direction: column; align-items: flex-start; gap: 0; }
+    .sectionMeta::before { content: none; }
+
+    /* Chaque réponse / élément / association = encadré, en mobile. */
+    .association.answerRow {
+        border: 1.5px solid var(--border);
+        border-radius: 0.625rem;
+        padding: 0.75rem;
+    }
+
+    /* Associations : empilées en colonne — input élément (l.1) / flèche ↓ (l.2) /
+       input catégorie (l.3). La suppression passe par la flèche centrale (devient
+       poubelle quand la ligne est active). */
+    .matchingRow {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+    .matchingRow .answerInput { flex: 0 0 auto; }
+    /* L'input de groupe a une largeur fixe (flex: 0 0 9rem) qui, en colonne,
+       deviendrait une HAUTEUR de 9rem (axe principal vertical) : on rétablit une
+       hauteur naturelle et une largeur pleine. */
+    .matchingRow .groupSelect { flex: 0 0 auto; width: 100%; }
+    /* Flèche / poubelle, centrée entre les deux inputs. */
+    .matchingRow .matchSlot {
+        align-self: center;
+        pointer-events: auto;
+        cursor: pointer;
+        padding: 0.25rem;
+        /* Taille FIXE : l'échange flèche↔poubelle ne redimensionne plus la ligne
+           (et laisse respirer les icônes 16px + le padding). */
+        box-sizing: border-box;
+        width: 1.625rem;
+        height: 1.625rem;
+    }
+    .matchingRow .matchSlotArrow { transform: rotate(90deg); }
+    .matchingRow .matchSlot[data-active='true'] .matchSlotArrow { display: none; }
+    .matchingRow .matchSlot[data-active='true'] .matchSlotTrash {
+        display: inline-flex;
+        color: var(--danger);
+    }
+    /* Poubelle de bout de ligne masquée (la flèche assure la suppression). */
+    .matchingRow > .iconButtonDanger { display: none; }
+
+    /* Pied de page : les boutons (Tester / Annuler / Enregistrer) ne tiennent
+       plus sur une ligne → on les fait remplir la largeur, par rangées. */
+    .footer { flex-wrap: wrap; }
+    .footerSpacer { display: none; }
+    .footer .outlineButton,
+    .footer .ghostButton,
+    .footer .primaryButton {
+        flex: 1 1 8rem;
+        justify-content: center;
+    }
+
+    /* Liste des questions (modif. de quiz) : ~3 questions visibles avant
+       défilement (la 4e est entrevue pour signaler qu'il y en a d'autres). */
+    .questionList { max-height: 12.5rem; }
+    /* La scrollbar apparaît dès la 4e question → on réserve l'espacement avant. */
+    .questionList:has(> :nth-child(4)) { padding-right: 0.5rem; }
+
+    .answerRow.association > .answerInput,
+    .answerRow.association > .groupSelect {
+        text-align: center;
+    }
+}
+
+.iconButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: none;
+    border-radius: 0.4375rem;
+    background: transparent;
+    color: var(--icon-stroke);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.iconButton:hover { background: var(--bg-vote-pill); color: var(--brand-teal); }
+.iconButtonDanger:hover { background: var(--shadow-danger); color: var(--danger); }
+
+/* Étoile « quiz du jour ». */
+.bolt { color: var(--text-muted); display: inline-flex; flex: 0 0 auto; }
+.boltOn { color: var(--accent-amber); }
+
+/* Badges (type / statut / points). */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    flex: 0 0 auto;
+}
+.badgeType { background: var(--brand-teal-surface); color: var(--brand-teal); }
+.badgePoints { background: var(--bg-vote-pill); color: var(--text-muted); }
+.badgePublished { background: var(--brand-teal-surface); color: var(--brand-teal); }
+.badgeDraft { background: var(--bg-vote-pill); color: var(--text-muted); }
+
+/* Bouton « + Ajouter … » en pointillé. */
+.addButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4375rem;
+    width: 100%;
+    border: 1.5px dashed var(--brand-teal);
+    border-radius: 0.625rem;
+    background: transparent;
+    padding: 0.625rem;
+    color: var(--brand-teal);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.addButton:hover { background: var(--brand-teal-surface); }
+
+/* ── Réponses / items / associations ── */
+.answerRow { display: flex; align-items: center; gap: 0.625rem; }
+.answerControl {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.125rem;
+    height: 1.125rem;
+    border: 1.5px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-on-brand);
+    cursor: pointer;
+    padding: 0;
+}
+.answerControlRadio { border-radius: 50%; }
+.answerControlCheckbox { border-radius: 0.3125rem; }
+.answerControlOn { border-color: var(--brand-teal); background: var(--brand-teal); }
+.answerControlDot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--text-on-brand); }
+.answerInput { flex: 1 1 auto; min-width: 0; }
+.answerInputSelected { border-color: var(--brand-teal); background: var(--brand-teal-surface); }
+
+.orderNum {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    font-size: 0.8125rem;
+    font-weight: 700;
+}
+/* Slot central de l'association (flèche / poubelle). Desktop : aspect flèche,
+   inerte (la poubelle de bout de ligne gère la suppression). */
+.matchSlot {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    pointer-events: none;
+    cursor: default;
+}
+.matchSlotArrow { display: inline-flex; }
+.matchSlotTrash { display: none; }
+.groupSelect { flex: 0 0 9rem; }
+.groupSelectTeal {
+    border-color: var(--brand-teal);
+    background: var(--brand-teal-surface);
+    color: var(--brand-teal);
+    font-weight: 600;
+}
+
+/* Page « Tester » : on force box-sizing border-box sur tout le sous-arbre, car les
+   composants étudiant réutilisés (carte, options…) sont en width:100% + padding sans
+   border-box → sinon leur boîte dépasse et fait déborder horizontalement le popup. */
+.testArea {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+.testArea,
+.testArea * {
+    box-sizing: border-box;
+}
+
+
+.infoBanner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    border-radius: 0.625rem;
+    background: var(--brand-teal-surface);
+    padding: 0.625rem 0.75rem;
+    color: var(--brand-teal);
+    font-size: 0.78125rem;
+    line-height: 1.4;
+}
+
+/* Résumé « Harnais de test » dans l'éditeur de question Code. */
+.harnessSummary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.625rem;
+    padding: 0.75rem;
+}
+.harnessSummaryText { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.harnessSummaryTitle { color: var(--text); font-size: 0.875rem; font-weight: 600; }
+.harnessSummarySub { color: var(--text-muted); font-size: 0.75rem; }
+
+/* Carte d'un harnais (nom + poids + delete, puis code). */
+.harnessCard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    padding: 0.625rem;
+}
+/* En-tête d'un harnais : bloc de champs (nom + poids) à gauche, poubelle à droite —
+   `align-items: center` garde la poubelle centrée verticalement, même quand les
+   champs passent sur deux lignes en mobile. */
+.harnessCardHead { display: flex; align-items: center; gap: 0.5rem; }
+.harnessFields { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 auto; min-width: 0; }
+.weightField { display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto; }
+.weightLabel { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; flex: 0 0 auto; }
+.weightInput { flex: 0 0 3.25rem; text-align: center; }
+
+/* Mobile : nom et poids empilés sur une colonne. La poubelle est placée sur la
+   LIGNE DU NOM (centrée verticalement par rapport à l'input de nom), le poids
+   passant en dessous sur toute la largeur. On déplie `.harnessFields` (display:
+   contents) pour que ses enfants participent à la grille du conteneur. */
+@media (max-width: 30rem) {
+    .harnessCardHead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "name   trash"
+            "weight weight";
+        column-gap: 0.5rem;
+        row-gap: 0.5rem;
+        align-items: center;
+    }
+    .harnessFields {
+        display: contents;
+    }
+    .harnessFields > .input {
+        grid-area: name;
+    }
+    .weightField {
+        grid-area: weight;
+    }
+    .harnessCardHead > .iconButton {
+        grid-area: trash;
+    }
+}
+
+/* Pas de flèches d'incrémentation/décrémentation sur les champs nombre. */
+.input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+.input[type='number']::-webkit-outer-spin-button,
+.input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Bouton de bascule (ghost teal) « ↔ Tester ». */
+.outlineButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    border: 1px solid var(--brand-teal);
+    border-radius: 0.625rem;
+    background: transparent;
+    padding: 0.5625rem 1rem;
+    color: var(--brand-teal);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.outlineButton:hover { background: var(--brand-teal-surface); }
+
+/* ── Barre d'actions (dans le pied fixe `.panelFooter`) ── */
+.footer {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+.footerSpacer { flex: 1 1 auto; }
+.ghostButton, .primaryButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4375rem;
+    border-radius: 0.625rem;
+    padding: 0.625rem 1.125rem;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s, background 0.15s, transform 0.1s;
+}
+.ghostButton {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+}
+.ghostButton:hover { background: var(--bg-vote-pill); border-color: var(--border-strong); }
+.primaryButton {
+    border: none;
+    background: var(--brand-teal-gradient);
+    color: #fff;
+    font-weight: 700;
+}
+.primaryButton:hover:not(:disabled) { filter: brightness(1.08); }
+.primaryButton:disabled { opacity: 0.5; cursor: not-allowed; }
+.ghostButton:active, .primaryButton:active { transform: scale(0.97); }
+
+.errorText { color: var(--danger); font-size: 0.8125rem; }

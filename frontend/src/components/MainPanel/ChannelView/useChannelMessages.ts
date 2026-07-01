@@ -8,12 +8,13 @@ import {
 export type MaybePromise<T> = T | Promise<T>;
 
 /**
- * Callback d'envoi d'un message (API-ready). Reçoit le contenu, l'id du message
- * parent (`post_parent_id`, null si racine) et le `clientMessageId` (nonce). Le
- * parent persiste (POST) ; il peut renvoyer le message persiste (id reel cote
- * serveur, et le meme `client_msg_id`) qui remplacera la version optimiste.
+ * Callback d'envoi d'un message (API-ready). Reçoit l'id du canal (Forum 'Discussion')
+ * cible, le contenu, l'id du message parent (`postParentId`, null si racine) et le
+ * `clientMessageId` (nonce). Le parent persiste (POST) ; il peut renvoyer le message
+ * persiste (id reel cote serveur, et le meme `clientMsgId`) qui remplacera l'optimiste.
  */
 export type SendMessageHandler = (
+  channelId: number,
   content: string,
   parentId: number | null,
   clientMessageId: string
@@ -98,7 +99,7 @@ export interface ChannelMessagesApi {
   deleteMessage: (messageId: number) => void;
 
   // ── Événements ENTRANTS : à brancher sur la couche WebSocket.
-  /** Insère (ou réconcilie, via `client_msg_id`/`id`) un message recu en temps reel. */
+  /** Insère (ou réconcilie, via `clientMsgId`/`id`) un message recu en temps reel. */
   applyIncomingMessage: (message: ChannelMessage) => void;
   /** Applique une modification distante. */
   applyIncomingEdit: (messageId: number, content: string) => void;
@@ -106,10 +107,10 @@ export interface ChannelMessagesApi {
   applyIncomingDelete: (messageId: number) => void;
 }
 
-/** Tri chronologique (created_at puis id pour départager). */
+/** Tri chronologique (createdAt puis id pour départager). */
 function chronological(a: ChannelMessage, b: ChannelMessage): number {
-  const ta = new Date(a.created_at).getTime();
-  const tb = new Date(b.created_at).getTime();
+  const ta = new Date(a.createdAt).getTime();
+  const tb = new Date(b.createdAt).getTime();
   if (ta !== tb) return ta - tb;
   return a.id - b.id;
 }
@@ -217,23 +218,25 @@ export function useChannelMessages({
     const tempId = -seqRef.current; // id temporaire négatif, unique pour la cle React
     const optimistic: ChannelMessage = {
       id: tempId,
-      client_msg_id: clientId,
+      clientMsgId: clientId,
       content: trimmed,
-      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       author: currentUser,
-      post_parent_id: parentId,
+      postParentId: parentId,
     };
     setMessages((prev) => sortedInsert(prev, optimistic));
 
     setError(null);
     setPending(true);
     try {
-      const saved = onSendMessage ? await onSendMessage(trimmed, parentId, clientId) : undefined;
+      const saved = onSendMessage
+        ? await onSendMessage(channelId, trimmed, parentId, clientId)
+        : undefined;
       if (!mountedRef.current) return true;
       // Réconciliation : on remplace l'optimiste par la version persistante.
       if (saved) {
         setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.client_msg_id === clientId || m.id === tempId);
+          const idx = prev.findIndex((m) => m.clientMsgId === clientId || m.id === tempId);
           if (idx < 0) return sortedInsert(prev, saved);
           const next = [...prev];
           next[idx] = saved;
@@ -294,7 +297,7 @@ export function useChannelMessages({
       const idx = prev.findIndex(
         (m) =>
           m.id === message.id ||
-          (message.client_msg_id != null && m.client_msg_id === message.client_msg_id)
+          (message.clientMsgId != null && m.clientMsgId === message.clientMsgId)
       );
       if (idx < 0) return sortedInsert(prev, message);
       const next = [...prev];

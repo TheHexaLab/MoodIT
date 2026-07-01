@@ -1,43 +1,12 @@
 import React, { useState } from 'react';
-import { Highlight, type PrismTheme } from 'prism-react-renderer';
+import { Highlight } from 'prism-react-renderer';
+import { codeTheme } from './codeTheme';
 import { Copy } from '../../../assets/Copy';
 import { Check } from '../../../assets/Check';
 import './prismLanguages'; // effet de bord : enregistre les grammaires Prism
-import './Markdown.module.css'; // styles globaux (selecteurs par role/element)
-
-/**
- * Theme de coloration : les couleurs sont des variables CSS (definies dans
- * index.css pour le clair ET le sombre), donc le rendu suit le theme de l'app.
- */
-const codeTheme: PrismTheme = {
-  plain: { color: 'var(--syntax-fg)', backgroundColor: 'transparent' },
-  styles: [
-    {
-      types: ['comment', 'prolog', 'doctype', 'cdata'],
-      style: { color: 'var(--syntax-comment)', fontStyle: 'italic' },
-    },
-    { types: ['punctuation'], style: { color: 'var(--syntax-punctuation)' } },
-    {
-      types: ['keyword', 'atrule', 'important', 'selector', 'rule'],
-      style: { color: 'var(--syntax-keyword)' },
-    },
-    { types: ['tag', 'builtin', 'class-name'], style: { color: 'var(--syntax-class)' } },
-    {
-      types: ['string', 'char', 'attr-value', 'regex', 'url', 'inserted'],
-      style: { color: 'var(--syntax-string)' },
-    },
-    {
-      types: ['number', 'boolean', 'constant', 'symbol'],
-      style: { color: 'var(--syntax-number)' },
-    },
-    { types: ['function'], style: { color: 'var(--syntax-function)' } },
-    { types: ['operator', 'entity'], style: { color: 'var(--syntax-operator)' } },
-    {
-      types: ['variable', 'property', 'attr-name', 'parameter', 'deleted'],
-      style: { color: 'var(--syntax-variable)' },
-    },
-  ],
-};
+import './Markdown.css'; // styles globaux (sélecteurs par role/element) — fichier .css
+// SIMPLE (pas .module.css) : un .module.css importé pour effet de bord est tree-shaké
+// au build de prod (map de classes inutilisée), donc ses styles globaux disparaissent.
 
 /** Alias de langages courants vers le nom de grammaire Prism. */
 const LANG_ALIASES: Record<string, string> = {

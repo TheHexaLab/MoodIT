@@ -12,7 +12,7 @@ Dashboard
   └─▶ MainPanel ─▶ ChannelView ─▶ useChannelMessages  ← SOURCE DE VÉRITÉ
                                      • une seule liste `messages`
                                      • optimiste + rollback
-                                     • dédup via client_msg_id
+                                     • dédup via clientMsgId
                                      • applyIncoming* ← socket
 ```
 
@@ -28,7 +28,7 @@ Actuellement ce sont des mocks (`setTimeout` + `console.log`). Remplace les corp
 | Callback | Verbe | Doit faire / renvoyer |
 |---|---|---|
 | `handleFetchMessages(channelId)` | `GET /channels/:id/messages` | renvoyer `ChannelMessage[]` |
-| `handleSendMessage(content, parentId, clientMessageId)` | `POST` | **renvoyer le message persisté** (id réel + même `client_msg_id`) |
+| `handleSendMessage(content, parentId, clientMessageId)` | `POST` | **renvoyer le message persisté** (id réel + même `clientMsgId`) |
 | `handleEditMessage(messageId, content)` | `PATCH` | renvoyer le message persisté (optionnel) |
 | `handleDeleteMessage(messageId)` | `DELETE` | rien |
 
@@ -54,7 +54,7 @@ de canal (grâce au remount par `key`).
 
 1. **`onSendMessage` doit renvoyer le message persisté** (avec l'`id` serveur réel).
    Le hook remplace alors la version optimiste. Le serveur doit aussi **renvoyer le
-   `client_msg_id`** dans le broadcast WS → c'est ce qui évite d'afficher ton propre
+   `clientMsgId`** dans le broadcast WS → c'est ce qui évite d'afficher ton propre
    message en double (dédup déjà codée dans `applyIncomingMessage`).
 
 2. **Reconnexion = messages manqués.** À la reconnexion du socket, re-`join` les rooms

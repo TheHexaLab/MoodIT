@@ -37,7 +37,7 @@ export interface SectionEditorPopupLabels {
   editTitle: string;
   /** Titre de la confirmation de suppression. */
   deleteTitle: string;
-  /** Corps de la confirmation ; reçoit l'item et le préfixe (pas de duplication). */
+  /** Corps de la confirmation ; reçoit l'item à supprimer. */
   deleteBody: (item: Item) => string;
   /** Bouton « annuler » du formulaire. */
   cancel: string;
