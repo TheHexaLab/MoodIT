@@ -13,6 +13,8 @@
 //   curl -X POST "http://localhost:8081/dev/ws/post?forumId=9&content=Nouveau%20sujet"
 //   curl -X POST "http://localhost:8081/dev/ws/course?programId=1&title=Cours%20WS"
 //   curl -X POST "http://localhost:8081/dev/ws/program?userId=1&name=Programme%20WS"
+//   curl -X POST "http://localhost:8081/dev/ws/mcp-analysis?courseId=1&strengthsCount=3&improvementsCount=2"
+//   curl -X POST "http://localhost:8081/dev/ws/mcp-analysis-fail?courseId=1&userId=4&reason=Service%20MCP%20indisponible"
 
 package com.moodit.core_service.realtime.dev;
 
@@ -21,6 +23,7 @@ import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
+import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import java.time.Instant;
 import java.util.List;
@@ -102,6 +105,37 @@ public class DevWsController {
     long id = seq.incrementAndGet();
     publisher.courseCreated(programId, CourseDto.of(id, "WS-" + id, title));
     return "course #" + id + " diffusé sur program:" + programId;
+  }
+
+  /**
+   * Simule la RÉUSSITE d'un job d'analyse MCP : pousse le RÉSUMÉ sur la room mcp:<courseId>.
+   * Le front doit avoir le popup « Gestion MCP » ouvert sur ce cours (abonné à mcp:id).
+   * Défaut courseId=1 (tronc commun, présent dans le programme 1 dans init.sql).
+   */
+  @PostMapping("/mcp-analysis")
+  public String mcpAnalysis(
+      @RequestParam(defaultValue = "1") long courseId,
+      @RequestParam(defaultValue = "3") int strengthsCount,
+      @RequestParam(defaultValue = "2") int improvementsCount) {
+    long id = seq.incrementAndGet();
+    publisher.mcpAnalysisCreated(
+        courseId,
+        new McpResponseSummaryDto(id, Instant.now().toString(), strengthsCount, improvementsCount));
+    return "analyse MCP #" + id + " diffusée sur mcp:" + courseId;
+  }
+
+  /**
+   * Simule l'ÉCHEC d'un job d'analyse MCP : pousse `mcp:analysis-failed` sur mcp:<courseId>.
+   * `userId` = le LANCEUR (le front ne réagit que si c'est l'utilisateur courant). Défaut
+   * userId=4 (= MOCK_REALTIME_USER_ID) pour matcher le compte de test du Dashboard.
+   */
+  @PostMapping("/mcp-analysis-fail")
+  public String mcpAnalysisFail(
+      @RequestParam(defaultValue = "1") long courseId,
+      @RequestParam(defaultValue = MOCK_REALTIME_USER_ID) long userId,
+      @RequestParam(defaultValue = "Service MCP indisponible") String reason) {
+    publisher.mcpAnalysisFailed(courseId, userId, reason);
+    return "échec d'analyse MCP (user " + userId + ") diffusé sur mcp:" + courseId;
   }
 
   /** Simule l'adhésion / l'ajout d'un programme pour un utilisateur. */

@@ -85,6 +85,18 @@ class RealtimeWebSocketHandlerTest {
   }
 
   @Test
+  void scopeMcp_estAccepteEtRoute() throws Exception {
+    WebSocketSession session = openSession();
+    handler.afterConnectionEstablished(session);
+    handler.handleTextMessage(session, new TextMessage("{\"type\":\"join\",\"scope\":\"mcp\",\"id\":8}"));
+
+    publisher.mcpAnalysisCreated(
+        8, new com.moodit.core_service.realtime.dto.McpResponseSummaryDto(1, "2026-06-22T10:00:00.000Z", 3, 2));
+
+    verify(session, atLeastOnce()).sendMessage(org.mockito.ArgumentMatchers.any(TextMessage.class));
+  }
+
+  @Test
   void commandeInvalide_estIgnoreeSansErreur() throws Exception {
     WebSocketSession session = openSession();
     handler.afterConnectionEstablished(session);

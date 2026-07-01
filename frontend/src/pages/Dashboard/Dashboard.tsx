@@ -4,6 +4,7 @@ import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoade
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
 import { useCoursesLoader } from '../../components/CourseMenu/useCoursesLoader.ts';
 import { CourseSectionEditor } from '../../components/CourseMenu/CourseSectionEditor.tsx';
+import { Spinner } from '../../components/Spinner/Spinner.tsx';
 import {
   type ChannelMessageAuthor,
   type ChannelRef,
@@ -13,6 +14,8 @@ import {
 } from '../../components/CourseChannelList/CourseChannelList.tsx';
 import { defaultTypeDefinitions } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { AddCoursePopup, type NewCourse } from '../../components/AddCoursePopup/AddCoursePopup.tsx';
+import { JoinCoursesPopup } from '../../components/JoinCoursesPopup/JoinCoursesPopup.tsx';
+import { McpManagementPopup } from '../../components/McpManagementPopup/McpManagementPopup.tsx';
 import {
   AddSubscriptionPopup,
   type JoinSelection,
@@ -35,7 +38,7 @@ import {
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
-import { getPrefixForType } from '../../components/CourseChannelList/channelTypePrefix.ts';
+import { ChannelTypeIcon } from '../../components/CourseChannelList/ChannelTypeIcon.tsx';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
@@ -44,6 +47,7 @@ import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
+import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
 import LeftMenuGroup from '../../components/LeftMenuGroup/LeftMenuGroup.tsx';
 import {
@@ -56,6 +60,23 @@ import MainPanel from '../../components/MainPanel/MainPanel.tsx';
 import { type DemoProgram } from './dashboardApi.ts';
 import styles from './Dashboard.module.css';
 
+/**
+ * Câblage des callbacks de l'éditeur de quiz sur la couche API (`dashboardApi`).
+ * Assemblage côté consommateur : l'éditeur reste « API-ready » (remplacer les corps
+ * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
+ */
+const quizEditorHandlers: QuizEditorHandlers = {
+  onFetchQuiz: api.fetchQuiz,
+  onFetchQuizzes: api.fetchQuizzes,
+  onFetchLanguages: api.fetchLanguages,
+  onFetchQuestionTypes: api.fetchQuestionTypes,
+  onCreateQuiz: api.createQuiz,
+  onUpdateQuiz: api.updateQuiz,
+  onDeleteQuiz: api.deleteQuiz,
+  onReorderQuizzes: api.reorderQuizzes,
+  onEvaluateCode: api.evaluateCode,
+};
+
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
   | { kind: 'addCourse'; programId: number } // programId = programme préselectionné
@@ -64,7 +85,10 @@ type PopupState =
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
-  | { kind: 'leaveProgram'; programId: number };
+  | { kind: 'leaveProgram'; programId: number }
+  | { kind: 'leaveCourse'; courseId: number }
+  | { kind: 'joinCourses'; programId: number }
+  | { kind: 'mcp'; courseId: number };
 
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
@@ -77,6 +101,12 @@ export default function Dashboard() {
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
+  // Incrémenté à chaque mise à jour de quiz → remonte la vue de quiz ouverte (rechargement).
+  const [quizRefreshKey, setQuizRefreshKey] = useState(0);
+  // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
+  const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
+  // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
+  const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
   const [popup, setPopup] = useState<PopupState | null>(null);
@@ -90,6 +120,7 @@ export default function Dashboard() {
   // Sortie d'un programme (async : overlay de chargement + ErrorPopup en cas d'échec).
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+
 
   // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
   // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
@@ -173,6 +204,21 @@ export default function Dashboard() {
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
   useEffect(() => {
     if (activeProgramId < 0) return;
+    // Recharge les quiz PUBLIÉS d'un cours dans la liste (ajout / modif / suppression).
+    const refreshCourseQuizzes = (courseId: number) => {
+      void api
+        .fetchPublishedQuizzes(courseId)
+        .then((quizzes) =>
+          setDashboardPrograms((programs) =>
+            mapProgramCourses(programs, activeProgramId, (course) =>
+              course.id === courseId ? { ...course, quizzes } : course
+            )
+          )
+        )
+        .catch(() => {
+          /* échec silencieux : la liste garde son état courant */
+        });
+    };
     return ws.courses.subscribe(activeProgramId, {
       onSectionChange: (courseId, sectionType, change) =>
         setDashboardPrograms((programs) =>
@@ -184,6 +230,32 @@ export default function Dashboard() {
         setDashboardPrograms((programs) => upsertCourse(programs, activeProgramId, course)),
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
+      // Un quiz a été ajouté : il apparaît dans la liste (s'il est publié).
+      onQuizCreated: (courseId) => refreshCourseQuizzes(courseId),
+      // Un quiz a été modifié : on rafraîchit la liste, et la QuizView affiche une bannière
+      // de rechargement si c'est le quiz actuellement ouvert (cf. quizStale).
+      onQuizUpdated: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setStaleQuizId(quizId);
+      },
+      // Les quiz ont été réordonnés : on rafraîchit la liste (nouvel ordre, sans bannière).
+      onQuizReordered: (courseId) => refreshCourseQuizzes(courseId),
+      // Reconnexion : des évènements ont pu être manqués → on recharge les cours du
+      // programme actif (canaux/quiz/forums resynchronisés) ET la vue de quiz ouverte
+      // (rechargement en conservant la saisie, via le mécanisme staleQuizId).
+      onResync: () => {
+        void handleFetchCourses(activeProgramId);
+        if (openQuizIdRef.current != null) setStaleQuizId(openQuizIdRef.current);
+      },
+      // Un quiz a été supprimé : il sort de la liste, on ferme sa vue si elle est ouverte,
+      // et on efface une éventuelle bannière « modifié » le concernant.
+      onQuizDeleted: (courseId, quizId) => {
+        refreshCourseQuizzes(courseId);
+        setSelectedChannelRef((prev) =>
+          prev?.type === 'quiz' && prev.id === quizId ? undefined : prev
+        );
+        setStaleQuizId((prev) => (prev === quizId ? null : prev));
+      },
     });
   }, [activeProgramId, ws]);
 
@@ -203,6 +275,14 @@ export default function Dashboard() {
   const handleEditCourse = (courseId: number) => {
     if (isAdmin) setPopup({ kind: 'editCourse', courseId });
   };
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur,
+  // admin) : ouvre la modale de gestion des analyses MCP du cours.
+  const handleOpenMcpManagement = (courseId: number) => {
+    if (isAdmin) setPopup({ kind: 'mcp', courseId });
+  };
+  // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
+  // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
+  const handleLeaveCourse = (courseId: number) => setPopup({ kind: 'leaveCourse', courseId });
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
@@ -236,6 +316,21 @@ export default function Dashboard() {
     void fetchProgramRoles(programId);
   };
   const handleLeaveProgram = (programId: number) => setPopup({ kind: 'leaveProgram', programId });
+  // Rejoindre des cours d'un programme (menu contextuel, TOUS les utilisateurs) : ouvre
+  // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
+  const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
+  // Inscription aux cours choisis (via api.joinCourses). La sélection du popup REMPLACE
+  // l'ensemble des cours du programme (décochés retirés, nouveaux ajoutés). On RECHARGE
+  // ensuite les cours du programme (api.fetchCourses) pour que les cours fraîchement
+  // rejoints arrivent avec leur contenu (canaux/quiz/forums) — joinCourses ne renvoie
+  // que la méta. L'erreur remonte au popup (qui l'affiche).
+  const handleConfirmJoinCourses = async (programId: number, courseIds: number[]) => {
+    await api.joinCourses(programId, courseIds);
+    const courses = await api.fetchCourses(programId);
+    setDashboardPrograms((programs) =>
+      programs.map((program) => (program.id === programId ? { ...program, courses } : program))
+    );
+  };
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
@@ -266,6 +361,23 @@ export default function Dashboard() {
     );
   };
 
+  // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
+  // (création/maj/suppression/réordre). L'éditeur travaille sur la liste COMPLÈTE
+  // (brouillons compris) ; la sidebar ne montre que les PUBLIÉS → on filtre ici.
+  const handleQuizzesChange = (courseId: number, quizzes: Course['quizzes']) => {
+    const published = reposition((quizzes ?? []).filter((q) => q.isPublished));
+    setDashboardPrograms((programs) =>
+      programs.map((program) => ({
+        ...program,
+        courses: program.courses.map((course) =>
+          course.id === courseId ? { ...course, quizzes: published } : course
+        ),
+      }))
+    );
+    // Un quiz a changé → force le remontage de la vue de quiz ouverte (recharge le détail).
+    setQuizRefreshKey((k) => k + 1);
+  };
+
   // Création d'un cours (admin) → rattaché aux programmes choisis (via api.createCourse).
   // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
@@ -285,22 +397,13 @@ export default function Dashboard() {
     setDashboardPrograms((programs) => [...programs, created]);
   };
 
-  // Adhésion → ajoute les programmes choisis du catalogue à la liste (via api.joinPrograms).
+  // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
+  // renvoie la liste à jour ; on la réconcilie en conservant les cours déjà chargés.
   const handleJoinPrograms = async (selection: JoinSelection) => {
-    const catalog = await api.joinPrograms(selection);
+    const updated = await api.joinPrograms(selection);
     setDashboardPrograms((programs) => {
-      const existing = new Set(programs.map((p) => p.id));
-      const added = catalog
-        .filter((p) => !existing.has(p.id))
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          code: p.code,
-          cohort: p.cohort,
-          color: p.color,
-          courses: [],
-        }));
-      return [...programs, ...added];
+      const byId = new Map(programs.map((p) => [p.id, p]));
+      return updated.map((p) => byId.get(p.id) ?? p);
     });
   };
 
@@ -364,18 +467,45 @@ export default function Dashboard() {
     }
   };
 
+  // Quitter un cours (via api.leaveCourse). Même flux que pour un programme : overlay
+  // de chargement, ErrorPopup en cas d'échec. Au succès : retrait du cours du programme
+  // actif + reset de la sélection si c'était le cours ouvert.
+  const handleConfirmLeaveCourse = async (courseId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.leaveCourse(courseId);
+      if (courseId === effectiveSelectedCourseId) {
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
+    } catch {
+      setLeaveError('Impossible de quitter le cours. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   // Auteur des messages envoyés = utilisateur connecte (colonnes utiles de User_).
   const currentUserAuthor: ChannelMessageAuthor = {
     id: currentUser.id,
     username: currentUser.username,
     firstName: currentUser.firstName ?? '',
     lastName: currentUser.lastName ?? '',
+    avatarColor: currentUser.avatarColor,
+    avatarUrl: currentUser.avatarUrl,
   };
 
   // Envoi / édition / suppression de message : délégués à la couche API
   // (api.sendMessage doit RENVOYER le message persisté pour la réconciliation).
-  const handleSendMessage = (content: string, parentId: number | null, clientMessageId: string) =>
-    api.sendMessage(content, parentId, clientMessageId);
+  const handleSendMessage = (
+    channelId: number,
+    content: string,
+    parentId: number | null,
+    clientMessageId: string
+  ) => api.sendMessage(channelId, content, parentId, clientMessageId);
 
   const handleEditMessage = (messageId: number, content: string) =>
     api.editMessage(messageId, content);
@@ -392,11 +522,12 @@ export default function Dashboard() {
   const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
   const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
   const handleCreatePost = (
+    forumId: number,
     content: string,
     parentId: number | null,
     clientPostId: string,
     title?: string
-  ) => api.createPost(content, parentId, clientPostId, title);
+  ) => api.createPost(forumId, content, parentId, clientPostId, title);
   const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
   const handleDeletePost = (postId: number) => api.deletePost(postId);
   const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
@@ -418,13 +549,16 @@ export default function Dashboard() {
   const selectedCourse = getSelectedCourse(courses, effectiveSelectedCourseId);
   const selectedCourseChannels = selectedCourse
     ? normalizeCourseChannelsFromSources({
-        channels: selectedCourse.channels,
         quizzes: selectedCourse.quizzes,
         forums: selectedCourse.forums,
       })
     : [];
   const selectedChannel =
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
+  // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
+  const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
+  openQuizIdRef.current = openQuizId;
+  const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
@@ -451,6 +585,16 @@ export default function Dashboard() {
     popup?.kind === 'editCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la confirmation « Quitter le cours » (dans le programme actif).
+  const leavingCourse =
+    popup?.kind === 'leaveCourse'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
+  // Cours ciblé par la modale « Gestion MCP » (dans le programme actif).
+  const mcpCourse =
+    popup?.kind === 'mcp'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Programme ciblé par un popup contextuel (édition / rôles / quitter).
   const popupProgram =
     popup && 'programId' in popup
@@ -460,7 +604,7 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitlePrefix={selectedChannel ? getPrefixForType(selectedChannel.type) : undefined}
+        mobileTitlePrefix={selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined}
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
@@ -492,6 +636,7 @@ export default function Dashboard() {
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
+            onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
         }
@@ -520,8 +665,13 @@ export default function Dashboard() {
             onReloadCourses={reloadCourses}
             onAddCourse={handleAddCourse}
             onEditCourse={handleEditCourse}
+            onOpenMcpManagement={handleOpenMcpManagement}
+            onLeaveCourse={handleLeaveCourse}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
+            // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
+            quizHandlers={quizEditorHandlers}
+            onQuizzesChange={handleQuizzesChange}
           />
         }
       />
@@ -551,6 +701,14 @@ export default function Dashboard() {
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
+        // ── Quiz : détail + résultat (réhydratation) + soumission (cf. dashboardApi). ──
+        onFetchQuiz={api.fetchQuiz}
+        onFetchAttempts={api.fetchQuizAttempts}
+        onFetchAttemptResult={api.fetchAttemptResult}
+        onSubmitQuiz={api.submitQuiz}
+        quizRefreshKey={quizRefreshKey}
+        quizStale={quizStale}
+        onReloadStale={() => setStaleQuizId(null)}
       />
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que
@@ -562,6 +720,11 @@ export default function Dashboard() {
           channels={selectedCourseChannels}
           onChange={(change) => handleSectionChange(selectedCourse.id, creatingSection.type, change)}
           onClose={() => setCreatingSectionType(null)}
+          courseId={selectedCourse.id}
+          quizzes={selectedCourse.quizzes ?? []}
+          quizSubtitle={selectedCourse.code}
+          quizHandlers={quizEditorHandlers}
+          onQuizzesChange={(quizzes) => handleQuizzesChange(selectedCourse.id, quizzes)}
         />
       )}
 
@@ -638,8 +801,8 @@ export default function Dashboard() {
           Données chargées à la demande (GET par programme) : spinner pendant le
           chargement, ErrorPopup en cas d'échec, sinon le RoleEditorPopup. */}
       {popup?.kind === 'manageRoles' && popupProgram && roleLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && roleError && (
@@ -657,6 +820,44 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
+      {popup?.kind === 'mcp' && mcpCourse && (
+        <McpManagementPopup
+          courseId={mcpCourse.id}
+          courseLabel={
+            mcpCourse.code || mcpCourse.name || 'Cours'
+          }
+          loadAnalyses={() => api.fetchCourseAnalyses(mcpCourse.id)}
+          loadAnalysis={(id) => api.fetchCourseAnalysis(id)}
+          loadPending={() => api.fetchPendingAnalysis(mcpCourse.id)}
+          subscribeCompletion={(handlers) =>
+            ws.mcp.subscribe(mcpCourse.id, {
+              onAnalysisCreated: handlers.onCreated,
+              // Échec : ne réagit que si c'est l'utilisateur courant qui a lancé le job
+              // (le verrou MCP est par (cours, user)).
+              onAnalysisFailed: (launcherId, reason) => {
+                if (launcherId === currentUser.id) handlers.onFailed(reason);
+              },
+              onResync: handlers.onResync,
+            })
+          }
+          onAnalyze={() => api.requestCourseAnalysis(mcpCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* Rejoindre des cours d'un programme (menu contextuel, tous les utilisateurs). */}
+      {popup?.kind === 'joinCourses' && popupProgram && (
+        <JoinCoursesPopup
+          programName={popupProgram.name}
+          programColor={popupProgram.color}
+          loadCourses={() => api.fetchProgramCourses(popupProgram.id)}
+          loadJoinedCourseIds={() => api.fetchJoinedCourseIds(popupProgram.id)}
+          onJoin={(courseIds) => handleConfirmJoinCourses(popupProgram.id, courseIds)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Quitter un programme — confirmation (menu contextuel). */}
       {popup?.kind === 'leaveProgram' && popupProgram && (
         <DeleteConfirmationPopup
@@ -668,10 +869,21 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Quitter un cours — confirmation (menu contextuel). */}
+      {popup?.kind === 'leaveCourse' && leavingCourse && (
+        <DeleteConfirmationPopup
+          title="Quitter le cours ?"
+          content={`Tu ne verras plus les canaux, quiz et forums de « ${leavingCourse.code ?? leavingCourse.title ?? 'ce cours'} ». Tu pourras le rejoindre à nouveau plus tard.`}
+          labels={{ confirm: 'Quitter' }}
+          onDeleteConfirmation={() => handleConfirmLeaveCourse(leavingCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Sortie de programme en cours (DELETE) : overlay puis ErrorPopup si échec. */}
       {leaveLoading && (
-        <div className={styles.loadingOverlay} role="status" aria-live="polite">
-          <span className={styles.loadingSpinner} aria-hidden="true" />
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
         </div>
       )}
       {leaveError && <ErrorPopup content={leaveError} onClose={() => setLeaveError(null)} />}

@@ -17,6 +17,17 @@ div[role^="markdown-editor"] > div[role="editor-main"] {
     flex-direction: column;
 }
 
+/* Mode « champ » (énoncé de quiz) : intégré dans un formulaire, sans marge propre
+   (l'espacement vient du champ hôte). La barre d'outils reste collante, comme dans
+   les forums : le conteneur défilant (le corps du popup) n'a pas de padding haut,
+   donc on colle à `top: 0` (les forums utilisent -1rem pour leur padding de scroll). */
+div[role^="markdown-editor"][data-embedded] {
+    margin-top: 0;
+}
+div[role^="markdown-editor"][data-embedded] div[role="toolbar"] {
+    top: 0;
+}
+
 /* ─── Barre d'outils. ─── */
 div[role^="markdown-editor"] div[role="toolbar"] {
     display: flex;
@@ -162,6 +173,7 @@ div[role^="markdown-editor"] textarea {
     overflow-y: hidden;
     min-height: 3.5rem;
     border: 1px solid var(--border);
+    border-top-color: transparent;
     border-bottom-left-radius: 0.5rem;
     border-bottom-right-radius: 0.5rem;
     padding: 0.45rem 0.6rem;
@@ -174,8 +186,16 @@ div[role^="markdown-editor"] textarea {
     transition: border-color 0.15s ease;
 }
 
-div[role^="markdown-editor"] textarea:focus {
+div[role^="markdown-editor"]:focus-within div[role="toolbar"] {
     border-color: var(--border-strong);
+}
+
+div[role^="markdown-editor"]:focus-within textarea,
+div[role^="markdown-editor"]:focus-within div[role="preview"]{
+    border-top-color: transparent;
+    border-right-color: var(--border-strong);
+    border-left-color: var(--border-strong);
+    border-bottom-color: var(--border-strong);
 }
 
 /* ─── Apercu (rendu Markdown). ─── */
@@ -236,29 +256,6 @@ div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:
 div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:disabled {
     opacity: 0.5;
     cursor: default;
-}
-
-/* Spinner d'envoi affiche dans le bouton de validation. */
-div[role^="markdown-editor"] [role="spinner"] {
-    box-sizing: border-box;
-    width: 0.85rem;
-    height: 0.85rem;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: md-editor-spin 0.6s linear infinite;
-}
-
-@keyframes md-editor-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div[role^="markdown-editor"] [role="spinner"] {
-        animation-duration: 1.4s;
-    }
 }
 
 /* ─── Scrollbar (menu + textarea) : fine, sans boutons, alignee sur l'app. ─── */

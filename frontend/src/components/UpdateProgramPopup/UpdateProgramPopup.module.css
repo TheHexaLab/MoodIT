@@ -141,7 +141,8 @@ div.update-program > div > header > button:hover {
 }
 
 div.update-program > div > header > button:active {
-    transform: scale(0.85);
+    /* Opacité (pas un scale) : éviter les clics manqués près du bord. */
+    opacity: 0.55;
 }
 
 /* ── Champs ─────────────────────────────────────────────── */
@@ -412,30 +413,6 @@ div.update-program > div > footer > button:last-child:disabled {
 }
 
 /* ── Spinner de chargement ──────────────────────────────── */
-div.update-program span.spinner {
-    display: inline-block;
-    box-sizing: border-box;
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: update-program-spin 0.6s linear infinite;
-}
-
-@keyframes update-program-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.update-program span.spinner {
-        animation-duration: 1.4s;
-    }
-}
-
 @media (max-width: 22.5rem) {
     div.update-program > div > section.color-group {
         flex-direction: column;

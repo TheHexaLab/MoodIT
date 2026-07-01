@@ -37,20 +37,13 @@
 }
 
 /* État de chargement / d'erreur de la liste (occupe un « slot » du rail). */
-.railSpinner {
-    width: 1.5rem;
-    height: 1.5rem;
+.railSpinnerWrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
     flex-shrink: 0;
-    border-radius: 50%;
-    border: 2px solid var(--border-strong);
-    border-top-color: var(--brand-teal);
-    animation: program-rail-spin 0.7s linear infinite;
-}
-
-@keyframes program-rail-spin {
-    to {
-        transform: rotate(360deg);
-    }
 }
 
 .railRetry {
@@ -81,12 +74,6 @@
 .railRetry:focus-visible {
     outline: 2px solid var(--brand-teal);
     outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .railSpinner {
-        animation-duration: 1.6s;
-    }
 }
 
 .divider {

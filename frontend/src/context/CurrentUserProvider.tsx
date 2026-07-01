@@ -9,11 +9,7 @@ import { getMe, updateMe } from '../helpers/api.ts';
 import { getToken } from '../helpers/auth.ts';
 import type { User } from '../types/domain.ts';
 import type { ProfileUpdate } from '../components/EditProfilePopup/types.ts';
-import {
-  CurrentUserContext,
-  type AuthStatus,
-  type CurrentUserApi,
-} from './currentUserContext.ts';
+import { CurrentUserContext, type AuthStatus, type CurrentUserApi } from './currentUserContext.ts';
 
 // Identité neutre affichée tant que /api/me n'a pas répondu : aucun faux nom.
 const loadingUser: User = {
@@ -32,9 +28,7 @@ export default function CurrentUserProvider({ children }: { children: ReactNode 
   const [currentUser, setCurrentUser] = useState<User>(loadingUser);
   // 'checking' seulement s'il y a un token à valider ; sinon directement 'unauthed'
   // (pas de setState synchrone dans l'effet → pas de rendu en cascade).
-  const [status, setStatus] = useState<AuthStatus>(() =>
-    getToken() ? 'checking' : 'unauthed',
-  );
+  const [status, setStatus] = useState<AuthStatus>(() => (getToken() ? 'checking' : 'unauthed'));
 
   const isAdmin = currentUser.roles?.some((role) => role.name === ADMIN_ROLE_NAME) ?? false;
 
@@ -50,6 +44,7 @@ export default function CurrentUserProvider({ children }: { children: ReactNode 
       .then((user) => {
         if (cancelled) return;
         setCurrentUser(user);
+        localStorage.setItem('moodit_user_id', String(user.id));
         setStatus('authed');
       })
       .catch(() => {

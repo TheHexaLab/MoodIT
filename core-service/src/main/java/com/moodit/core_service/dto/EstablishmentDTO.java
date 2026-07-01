@@ -12,4 +12,6 @@ public class EstablishmentDTO {
     private Integer id;
     private String name;
     private String domainEmail;
+    /** Nombre de programmes de l'établissement (catalogue d'adhésion). */
+    private Integer programCount;
 }

@@ -1,0 +1,30 @@
+info:
+  name: MCP · Analyse échouée
+  type: http
+  seq: 14
+
+http:
+  method: POST
+  url: http://localhost:8081/dev/ws/mcp-analysis-fail?courseId=1&userId=4&reason=Service MCP indisponible
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |
+  Simule l'ÉCHEC d'un job d'analyse MCP : pousse `mcp:analysis-failed`
+  sur la room mcp:<courseId>.
+
+  `userId` = le LANCEUR du job : le front ne réagit (rouvre l'action +
+  affiche l'erreur) que si c'est l'utilisateur courant. Garde-le aligné sur
+  le compte de test du Dashboard (défaut 4 = MOCK_REALTIME_USER_ID).
+
+  Abonne-toi d'abord côté WS : {"type":"join","scope":"mcp","id":1}.
+
+  Côté front : avec le popup « Gestion MCP » ouvert sur ce cours et une
+  analyse « en cours » lancée par cet utilisateur → l'état « en cours » se
+  ferme et un popup d'erreur (`reason`) s'affiche.
+
+  Params : courseId, userId, reason.

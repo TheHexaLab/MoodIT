@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import styles from './CourseChannelList.module.css';
-import { getPrefixForType } from './channelTypePrefix';
+import { ChannelTypeIcon } from './ChannelTypeIcon';
 import { defaultTypeDefinitions } from './channelTypeDefinitions.ts';
 import { Edit } from '../../assets/Edit.tsx';
 import { type ChannelMessage, type CourseChannel, type User } from '../../types/domain.ts';
@@ -152,15 +152,8 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
                         }}
                         aria-current={isSelected ? 'page' : undefined}
                       >
-                        <span
-                          className={styles.channelPrefix}
-                          style={
-                            getPrefixForType(channel.type) === '⮡ '
-                              ? { display: 'inline-flex', width: '0.6rem' }
-                              : undefined
-                          }
-                        >
-                          {getPrefixForType(channel.type)}
+                        <span className={styles.channelPrefix}>
+                          <ChannelTypeIcon type={channel.type} />
                         </span>
                         <span className={styles.channelName}>{channel.name}</span>
                       </button>

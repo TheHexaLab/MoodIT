@@ -25,6 +25,12 @@ import ForumView, {
   type VotePostHandler,
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
+import {
+  type FetchAttemptResultHandler,
+  type FetchAttemptsHandler,
+  type FetchQuizHandler,
+  type SubmitQuizHandler,
+} from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
 import EmptyCourseState from './states/EmptyCourseState/EmptyCourseState.tsx';
@@ -73,6 +79,20 @@ interface MainPanelProps {
   onCreateChannel?: () => void;
   /** Ouvre le formulaire de creation de quiz (admin). */
   onCreateQuiz?: () => void;
+  /** Chargement du detail d'un quiz (API-ready ; voir QuizView). */
+  onFetchQuiz?: FetchQuizHandler;
+  /** Historique des tentatives (API-ready ; voir QuizView). */
+  onFetchAttempts?: FetchAttemptsHandler;
+  /** Détail corrigé d'une tentative (API-ready ; voir QuizView). */
+  onFetchAttemptResult?: FetchAttemptResultHandler;
+  /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
+  onSubmitQuiz?: SubmitQuizHandler;
+  /** Bump à chaque mise à jour de quiz : remonte la vue de quiz ouverte (rechargement). */
+  quizRefreshKey?: number;
+  /** Le quiz ouvert a été modifié à distance → bannière de rechargement. */
+  quizStale?: boolean;
+  /** Ferme/efface la bannière « quiz modifié » (après rechargement ou rejet). */
+  onReloadStale?: () => void;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
 }
@@ -106,6 +126,13 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onCreateChannel,
   onCreateQuiz,
   onCreateForum,
+  onFetchQuiz,
+  onFetchAttempts,
+  onFetchAttemptResult,
+  onSubmitQuiz,
+  quizRefreshKey = 0,
+  quizStale = false,
+  onReloadStale,
 }) => {
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
@@ -121,7 +148,6 @@ const MainPanel: React.FC<MainPanelProps> = ({
     const course = courses.find((c) => c.id === selectedCourse) ?? null;
     const courseChannels = course
       ? normalizeCourseChannelsFromSources({
-          channels: course.channels,
           quizzes: course.quizzes,
           forums: course.forums,
         })
@@ -161,7 +187,19 @@ const MainPanel: React.FC<MainPanelProps> = ({
           />
         );
       case 'quiz':
-        return <QuizView course={course} channel={channel} />;
+        return (
+          <QuizView
+            key={`${channel.type}-${channel.id}-${quizRefreshKey}`}
+            course={course}
+            channel={channel}
+            onFetchQuiz={onFetchQuiz}
+            onFetchAttempts={onFetchAttempts}
+            onFetchAttemptResult={onFetchAttemptResult}
+            onSubmitQuiz={onSubmitQuiz}
+            staleNotice={quizStale}
+            onReloadStale={onReloadStale}
+          />
+        );
       case 'text': // fType 'Discussion'
       default:
         return (

@@ -1,6 +1,6 @@
 div.update-course {
     position: fixed;
-    z-index: 79;
+    z-index: 90;
     inset: 0;
     display: flex;
     justify-content: center;
@@ -140,7 +140,8 @@ div.update-course > div > header > button:hover {
 }
 
 div.update-course > div > header > button:active {
-    transform: scale(0.85);
+    /* Opacité (pas un scale) : éviter les clics manqués près du bord. */
+    opacity: 0.55;
 }
 
 /* ── Libellés de champ (partagés) ───────────────────────── */
@@ -639,30 +640,5 @@ div.update-course > div > footer > button:last-child:disabled {
     div.update-course > div > footer > button {
         padding: 0.625rem 1rem;
         flex-grow: 0;
-    }
-}
-
-/* Indicateur de chargement affiché dans le bouton « enregistrer » pendant l'enregistrement. */
-div.update-course span.spinner {
-    display: inline-block;
-    box-sizing: border-box;
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: update-course-spin 0.6s linear infinite;
-}
-
-@keyframes update-course-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.update-course span.spinner {
-        animation-duration: 1.4s;
     }
 }

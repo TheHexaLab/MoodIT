@@ -24,6 +24,7 @@ import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
+import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -130,6 +131,41 @@ public class RealtimeEventPublisher {
             "change", change));
   }
 
+  /** Un quiz a été AJOUTÉ au cours : les clients rafraîchissent la liste (pas de bannière). */
+  public void quizCreated(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:created", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
+  /**
+   * Un quiz a été MODIFIÉ : les clients rafraîchissent la liste, et celui qui l'a ouvert
+   * voit une bannière « quiz modifié — recharger ».
+   */
+  public void quizUpdated(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:updated", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
+  /** Les quiz d'un cours ont été réordonnés : les clients rafraîchissent la liste. */
+  public void quizReordered(long programId, long courseId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:reordered", "programId", programId, "courseId", courseId));
+  }
+
+  /** Un quiz a été supprimé : les clients le retirent de la liste (et ferment la vue ouverte). */
+  public void quizDeleted(long programId, long courseId, long quizId) {
+    emit(
+        "program",
+        programId,
+        event("quiz:deleted", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
   // ─── Programmes / abonnements (scope = user) ──────────────────────────────
 
   public void programCreated(long userId, ProgramDto program) {
@@ -150,6 +186,29 @@ public class RealtimeEventPublisher {
 
   public void subscriptionRemoved(long userId, long programId) {
     emit("user", userId, event("subscription:removed", "userId", userId, "programId", programId));
+  }
+
+  // ─── Analyses MCP (scope = course) ────────────────────────────────────────
+  // Poussé quand un job d'analyse MCP se termine. Room "mcp:<courseId>" : tous les
+  // abonnés au feedback de ce cours reçoivent le RÉSUMÉ (le détail se fetch au clic).
+
+  public void mcpAnalysisCreated(long courseId, McpResponseSummaryDto analysis) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-created", "courseId", courseId, "analysis", analysis));
+  }
+
+  /**
+   * Job d'analyse MCP ÉCHOUÉ (LLM indisponible, timeout…). Porte le `userId` du LANCEUR :
+   * seul lui doit voir l'erreur et pouvoir relancer (le verrou est par (cours, user)).
+   * `reason` optionnel : message d'erreur à afficher (null → libellé générique du front).
+   */
+  public void mcpAnalysisFailed(long courseId, long userId, String reason) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-failed", "courseId", courseId, "userId", userId, "reason", reason));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

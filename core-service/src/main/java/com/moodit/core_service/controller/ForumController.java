@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 
 @RestController
 @RequestMapping("/forums")
@@ -38,9 +40,34 @@ public class ForumController {
                                                   @RequestParam(defaultValue = "false") boolean loadChildren) {
         return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren));
     }
+
+    @GetMapping("/{forumId}/messages")
+    public ResponseEntity<List<PostVoteUserDTO>> getAllMessagesByForum(@PathVariable Integer forumId) {
+        return ResponseEntity.ok(
+                forumService.getAllMessagesByForum(forumId)
+        );
+    }
+
+    @GetMapping("/{forumId}/posts")
+    public ResponseEntity<List<PostVoteUserDTO>> getAllPostsByForum(
+            @PathVariable Integer forumId,
+            @RequestParam(defaultValue = "false") boolean loadChildren) {
+
+        return ResponseEntity.ok(
+                forumService.getAllPostsByForum(forumId, loadChildren)
+        );
+    }
     //endregion
 
     //region POST
+    @PostMapping("/messages")
+    public ResponseEntity<Void> addMessageToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
+                                               @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
+        forumService.addPostToForum(postCreateInForumDTO, email);
+
+        return ResponseEntity.noContent().build(); //code 204
+    }
+
     @PostMapping("/posts")
     public ResponseEntity<Void> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
                                                @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
@@ -48,6 +75,7 @@ public class ForumController {
 
         return ResponseEntity.noContent().build(); //code 204
     }
+
     @PostMapping("/posts/votes")
     public ResponseEntity<Void> addVoteToPost(@RequestBody VoteCreateInPostDTO voteCreateInPostDTO,
                                               @RequestHeader("X-User-Email") String email) {

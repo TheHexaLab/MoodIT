@@ -20,6 +20,7 @@ docs: |
     {"type":"join","scope":"forum","id":3}
     {"type":"join","scope":"program","id":1}
     {"type":"join","scope":"user","id":1}
+    {"type":"join","scope":"mcp","id":1}
   Se désabonner : {"type":"leave","scope":"channel","id":1}
 
   Le `join` n'est accepté que si l'utilisateur du token est autorisé sur

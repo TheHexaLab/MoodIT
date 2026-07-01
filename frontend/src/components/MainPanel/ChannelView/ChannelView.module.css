@@ -34,8 +34,11 @@ div.channel-view > header > p:first-of-type {
 }
 
 div.channel-view > header > p:first-of-type > span:first-of-type {
+    display: inline-flex;
+    align-items: center;
     color: var(--text-muted);
-    font-size: 1.375rem;
+    /* Taille de l'icône SVG (1em), calée pour s'équilibrer avec le nom (1rem). */
+    font-size: 1.0625rem;
 }
 
 div.channel-view > header > p:first-of-type > span:last-of-type {
@@ -410,29 +413,6 @@ div.channel-view > div > div:first-child > p {
     font-family: Inter, sans-serif;
     font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
     text-align: center;
-}
-
-/* Spinner de l'état de chargement des messages. */
-div.channel-view > div > div:first-child > .spinner {
-    box-sizing: border-box;
-    width: 1.5rem;
-    height: 1.5rem;
-    border: 2px solid var(--text-muted);
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: channel-view-spin 0.6s linear infinite;
-}
-
-@keyframes channel-view-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.channel-view > div > div:first-child > .spinner {
-        animation-duration: 1.4s;
-    }
 }
 
 /* Bouton « Réessayer » de l'état d'erreur de chargement. */

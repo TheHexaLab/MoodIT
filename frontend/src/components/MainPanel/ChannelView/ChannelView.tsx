@@ -1,11 +1,12 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './ChannelView.module.css';
+import { Spinner } from '../../Spinner/Spinner';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
@@ -138,6 +139,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const messageRefs = useRef(new Map<number, HTMLLIElement>());
   /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
   const listRef = useRef<HTMLUListElement>(null);
+  /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
+  const composerRef = useRef<HTMLInputElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
 
@@ -210,9 +213,10 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     }
   }
 
-  /** Démarre une réponse à un message (affiche la barre au-dessus du composer). */
+  /** Démarre une réponse à un message (affiche la barre au-dessus du composer + focus). */
   function startReply(message: ChannelMessage) {
     setReplyingTo(message);
+    composerRef.current?.focus();
   }
 
   /** L'utilisateur connecte est-il l'auteur de ce message ? */
@@ -244,7 +248,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
       <div className={styles['channel-view']}>
         <header>
           <p>
-            <span>{getPrefixForType(channel.type)}</span>
+            <span><ChannelTypeIcon type={channel.type} /></span>
             <span>{channel.name}</span>
           </p>
           <span />
@@ -254,7 +258,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
         <div data-loading={loading || loadError ? '' : undefined}>
           {loading ? (
             <div>
-              <span className={styles.spinner} aria-hidden="true" />
+              <Spinner size={24} />
               <p>{t.loading}</p>
             </div>
           ) : loadError ? (
@@ -432,6 +436,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                 +
               </button>
               <input
+                ref={composerRef}
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}

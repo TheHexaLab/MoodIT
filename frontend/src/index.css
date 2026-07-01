@@ -29,6 +29,13 @@
     --danger-alt: #e5484d;
     --warning: #f5a623;
     --accent-amber: #f6c350;
+    /* Pastilles de score (révision/résumé des quiz) : plein / nul / partiel. */
+    --badge-success-bg: #ccfbf1;
+    --badge-success-fg: #0a6a60;
+    --badge-danger-bg: #fdecec;
+    --badge-danger-fg: #db2e2e;
+    --badge-warn-bg: #fdf3d7;
+    --badge-warn-fg: #9a6700;
     --scrim: rgba(0, 0, 0, 0.45);
     --brand-teal: #0d9488;
     --brand-teal-hover: brightness(0.5);
@@ -96,6 +103,13 @@
         --text-muted: #9a9ab2;
         --text-on-brand: #ffffff;
         --icon-stroke: #a6a6bc;
+        /* Pastilles de score (versions sombres). */
+        --badge-success-bg: rgba(20, 184, 166, 0.18);
+        --badge-success-fg: #5eead4;
+        --badge-danger-bg: rgba(229, 72, 77, 0.18);
+        --badge-danger-fg: #ff8585;
+        --badge-warn-bg: rgba(245, 166, 35, 0.18);
+        --badge-warn-fg: #f5c87a;
         --brand-teal: #14b8a6;
         --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
@@ -143,6 +157,13 @@
     --text-muted: #9a9ab2;
     --text-on-brand: #ffffff;
     --icon-stroke: #a6a6bc;
+    /* Pastilles de score (versions sombres). */
+    --badge-success-bg: rgba(20, 184, 166, 0.18);
+    --badge-success-fg: #5eead4;
+    --badge-danger-bg: rgba(229, 72, 77, 0.18);
+    --badge-danger-fg: #ff8585;
+    --badge-warn-bg: rgba(245, 166, 35, 0.18);
+    --badge-warn-fg: #f5c87a;
     --brand-teal: #14b8a6;
     --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);

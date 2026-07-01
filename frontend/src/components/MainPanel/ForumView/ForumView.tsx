@@ -4,7 +4,7 @@ import {
   type ChannelMessageAuthor,
   type CourseChannel,
 } from '../../CourseChannelList/CourseChannelList';
-import { getPrefixForType } from '../../CourseChannelList/channelTypePrefix';
+import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { contrastingTextColor } from '../../../helpers/color';
@@ -13,6 +13,7 @@ import { Pencil } from '../../../assets/Pencil';
 import { TrashCan } from '../../../assets/TrashCan';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
+import { Spinner } from '../../Spinner/Spinner';
 import { Markdown } from './Markdown';
 import { MarkdownEditor } from './MarkdownEditor';
 import {
@@ -565,7 +566,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (post.replies === undefined) {
       return (
         <div role="replies-loading">
-          <span role="spinner" aria-hidden="true" />
+          <Spinner size={18} />
           <span>{t.repliesLoading}</span>
         </div>
       );
@@ -689,7 +690,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     <div className={styles['forum-view']}>
       <header>
         <p>
-          <span>{getPrefixForType(channel.type)}</span>
+          <span><ChannelTypeIcon type={channel.type} /></span>
           {channel.name}
         </p>
         <span />
@@ -752,7 +753,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         )}
         {loading ? (
           <div role="status">
-            <span role="spinner" aria-hidden="true" />
+            <Spinner size={24} />
             <p>{t.loading}</p>
           </div>
         ) : loadError ? (
