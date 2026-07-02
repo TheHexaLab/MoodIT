@@ -326,4 +326,19 @@ public class PermissionService {
     Set<String> roles = user.getRoles().stream().map(Role::getName).collect(Collectors.toSet());
     return roles.contains(roleName);
   }
+
+  // ── PREDICAT GENERIQUE : role SCOPE A UN PROGRAMME ────────────────────────────────
+  // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme DANS le programme vise
+  // (table User_Program_Role) — ex. "enseignant du programme {programId}". A distinguer
+  // de hasRole, qui verifie un role GLOBAL (user_role). programId lu dans une variable
+  // de PATH.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("POST", "/programs/{programId}/courses",
+  //       (user, vars, body) -> hasRoleInProgram(user, vars, "Enseignant", "programId")),
+  private boolean hasRoleInProgram(
+      User user, Map<String, String> vars, String roleName, String programVar) {
+    long programId = longVar(vars, programVar);
+    return programId > 0 && membershipService.hasRoleInProgram(user.getId(), programId, roleName);
+  }
 }

@@ -94,4 +94,22 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           "SELECT EXISTS(SELECT 1 FROM Vote WHERE id = :voteId AND user_id = :userId)",
       nativeQuery = true)
   boolean isVoteOwner(@Param("userId") long userId, @Param("voteId") long voteId);
+
+  // L'utilisateur a-t-il le role (nomme) DANS ce programme ? (table User_Program_Role)
+  // A distinguer du role GLOBAL (user_role) porte par l'entite User / hasRole.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r ON r.id = upr.role_id
+            WHERE upr.user_id = :userId AND upr.program_id = :programId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInProgram(
+      @Param("userId") long userId,
+      @Param("programId") long programId,
+      @Param("roleName") String roleName);
 }

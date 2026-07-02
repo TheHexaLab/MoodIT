@@ -125,6 +125,16 @@ public class MembershipService {
     return membershipRepository.isVoteOwner(userId, voteId);
   }
 
+  /**
+   * L'utilisateur a-t-il le role (nomme) DANS ce programme ? Regle : ligne dans
+   * User_Program_Role liant user + programme + role. A distinguer du role GLOBAL
+   * (user_role) verifie par PermissionService.hasRole.
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInProgram(long userId, long programId, String roleName) {
+    return membershipRepository.hasRoleInProgram(userId, programId, roleName);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {
