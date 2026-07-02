@@ -262,6 +262,19 @@ public class PermissionService {
     return courseId > 0 && membershipService.isEnrolledInCourse(user.getId(), courseId);
   }
 
+  // ── PREDICAT GENERIQUE : l'utilisateur est le createur du post ─────────────────────
+  // Verifie que le post vise a bien ete cree par l'utilisateur AUTHENTIFIE (Post.user_id).
+  // Sert aux actions reservees a l'auteur (editer / supprimer son propre post). postId lu
+  // dans une variable de PATH.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("DELETE", "/forums/{forumId}/posts/{postId}",
+  //       (user, vars, body) -> isPostAuthor(user, vars, "postId")),
+  private boolean isPostAuthor(User user, Map<String, String> vars, String postVar) {
+    long postId = longVar(vars, postVar);
+    return postId > 0 && membershipService.isPostAuthor(user.getId(), postId);
+  }
+
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
   private static long longVar(Map<String, String> vars, String name) {
     try {

@@ -107,6 +107,15 @@ public class MembershipService {
     return membershipRepository.isEnrolledInCourse(userId, courseId);
   }
 
+  /**
+   * L'utilisateur est-il le createur (auteur) du post ? Regle : Post.user_id == userId.
+   * Sert aux actions reservees a l'auteur (editer / supprimer son propre post).
+   */
+  @Transactional(readOnly = true)
+  public boolean isPostAuthor(long userId, long postId) {
+    return membershipRepository.isPostAuthor(userId, postId);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

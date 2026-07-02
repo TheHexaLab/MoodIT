@@ -80,4 +80,11 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           "SELECT EXISTS(SELECT 1 FROM Enrollment WHERE user_id = :userId AND course_id = :courseId)",
       nativeQuery = true)
   boolean isEnrolledInCourse(@Param("userId") long userId, @Param("courseId") long courseId);
+
+  // L'utilisateur est-il le createur (auteur) de ce post ? (colonne Post.user_id)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Post WHERE id = :postId AND user_id = :userId)",
+      nativeQuery = true)
+  boolean isPostAuthor(@Param("userId") long userId, @Param("postId") long postId);
 }
