@@ -364,6 +364,41 @@ public class QuizService {
     }
 
     /**
+     * Agrégat de réussite aux quiz d'un COURS (pour l'analyse MCP) : re-note chaque tentative
+     * via {@link #computeAttemptResult} et moyenne les % par tentative. Les questions de CODE
+     * sont EXCLUES (core ne les note pas : elles compteraient 0 et fausseraient la moyenne ;
+     * leur réussite est mesurée séparément via les tests). Aucune note n'est stockée.
+     */
+    @Transactional(readOnly = true)
+    public CourseQuizStatsDTO getCourseQuizStats(Integer courseId) {
+        List<Attempt> attempts = attemptRepository.findByQuiz_Course_Id(courseId);
+        List<Double> percentages = new ArrayList<>();
+        Set<Integer> students = new HashSet<>();
+        for (Attempt attempt : attempts) {
+            Set<Integer> codeQuestionIds = sortedQuestions(attempt.getQuiz()).stream()
+                    .filter(q -> "coding".equals(slugFor(q)))
+                    .map(Question::getId)
+                    .collect(Collectors.toSet());
+            QuizResultDTO result = computeAttemptResult(attempt);
+            int earned = 0;
+            int max = 0;
+            for (QuestionResultDTO qr : result.getQuestions()) {
+                if (codeQuestionIds.contains(qr.getQuestionId())) continue;
+                earned += qr.getEarned();
+                max += qr.getMax();
+            }
+            if (max > 0) {
+                percentages.add(100.0 * earned / max);
+                students.add(attempt.getUser().getId());
+            }
+        }
+        Integer average = percentages.isEmpty()
+                ? null
+                : (int) Math.round(percentages.stream().mapToDouble(Double::doubleValue).average().orElse(0));
+        return new CourseQuizStatsDTO(average, percentages.size(), students.size());
+    }
+
+    /**
      * Corrige une tentative DYNAMIQUEMENT à partir du quiz COURANT : on (re)corrige chaque
      * question actuelle avec la réponse soumise (désérialisée). Une question ajoutée après la
      * tentative apparaît non répondue (0 / barème) ; une question supprimée n'y est plus.

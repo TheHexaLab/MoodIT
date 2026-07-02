@@ -839,6 +839,10 @@ export default function Dashboard() {
               onAnalysisFailed: (launcherId, reason) => {
                 if (launcherId === currentUser.id) handlers.onFailed(reason);
               },
+              // Progression : idem, seul le lanceur (verrou par (cours, user)) l'affiche.
+              onAnalysisProgress: (launcherId, step) => {
+                if (launcherId === currentUser.id) handlers.onProgress(step);
+              },
               onResync: handlers.onResync,
             })
           }

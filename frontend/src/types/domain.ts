@@ -287,10 +287,21 @@ export interface McpResponse {
 export interface McpAnalysis {
   /** Score global du cours (0–100). */
   score: number;
+  /** Synthèse narrative (2–4 phrases). Optionnel (absent des analyses antérieures). */
+  summary?: string;
+  /** Sous-scores par dimension (0–100). Optionnel. */
+  dimensions?: {
+    content: number;
+    engagement: number;
+    success: number;
+    sentiment: number;
+  };
   /** Points forts identifiés. */
   strengths: string[];
   /** Points à améliorer. */
   improvements: string[];
+  /** Recommandations actionnables et priorisées. Optionnel. */
+  recommendations?: string[];
   /** Volumétrie ayant servi à l'analyse. */
   sources: {
     quizCount: number;
