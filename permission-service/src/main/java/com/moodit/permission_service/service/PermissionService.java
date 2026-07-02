@@ -358,4 +358,19 @@ public class PermissionService {
     long programId = longVar(vars, programVar);
     return programId > 0 && membershipService.hasRoleInProgram(user.getId(), programId, roleName);
   }
+
+  // ── PREDICAT GENERIQUE : role SUR UN COURS (ex. "prof du cours") ───────────────────
+  // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme sur le cours vise : role
+  // scope-programme (User_Program_Role) ET cours rattache a ce programme (program_course).
+  // Avec roleName = "Enseignant" -> "est-ce le prof du cours ?". courseId lu dans une
+  // variable de PATH.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("PUT", "/courses/{courseId}",
+  //       (user, vars, body) -> hasRoleInCourse(user, vars, "Enseignant", "courseId")),
+  private boolean hasRoleInCourse(
+      User user, Map<String, String> vars, String roleName, String courseVar) {
+    long courseId = longVar(vars, courseVar);
+    return courseId > 0 && membershipService.hasRoleInCourse(user.getId(), courseId, roleName);
+  }
 }

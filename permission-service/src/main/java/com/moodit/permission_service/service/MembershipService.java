@@ -155,6 +155,16 @@ public class MembershipService {
     };
   }
 
+  /**
+   * L'utilisateur a-t-il le role (nomme) SUR ce cours ? Combine le role scope-programme
+   * (User_Program_Role) et l'appartenance du cours a ce programme (program_course). Avec
+   * roleName = "Enseignant", repond a "est-ce le prof du cours ?".
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInCourse(long userId, long courseId, String roleName) {
+    return membershipRepository.hasRoleInCourse(userId, courseId, roleName);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

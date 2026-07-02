@@ -112,4 +112,24 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("userId") long userId,
       @Param("programId") long programId,
       @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) SUR ce cours ? Combine role scope-programme
+  // (User_Program_Role) et appartenance du cours au programme (program_course). Ex. avec
+  // roleName = 'Enseignant' : "est-il prof du cours ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            WHERE upr.user_id = :userId AND pc.course_id = :courseId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInCourse(
+      @Param("userId") long userId,
+      @Param("courseId") long courseId,
+      @Param("roleName") String roleName);
 }
