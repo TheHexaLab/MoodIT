@@ -275,6 +275,19 @@ public class PermissionService {
     return postId > 0 && membershipService.isPostAuthor(user.getId(), postId);
   }
 
+  // ── PREDICAT GENERIQUE : le vote appartient a l'utilisateur ────────────────────────
+  // Verifie que le vote vise appartient a l'utilisateur AUTHENTIFIE (Vote.user_id). Sert
+  // aux actions reservees au votant (modifier / retirer son propre vote). voteId lu dans
+  // une variable de PATH.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("DELETE", "/forums/posts/votes/{voteId}",
+  //       (user, vars, body) -> isVoteOwner(user, vars, "voteId")),
+  private boolean isVoteOwner(User user, Map<String, String> vars, String voteVar) {
+    long voteId = longVar(vars, voteVar);
+    return voteId > 0 && membershipService.isVoteOwner(user.getId(), voteId);
+  }
+
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
   private static long longVar(Map<String, String> vars, String name) {
     try {

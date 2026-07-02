@@ -87,4 +87,11 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           "SELECT EXISTS(SELECT 1 FROM Post WHERE id = :postId AND user_id = :userId)",
       nativeQuery = true)
   boolean isPostAuthor(@Param("userId") long userId, @Param("postId") long postId);
+
+  // Le vote appartient-il a cet utilisateur ? (colonne Vote.user_id)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Vote WHERE id = :voteId AND user_id = :userId)",
+      nativeQuery = true)
+  boolean isVoteOwner(@Param("userId") long userId, @Param("voteId") long voteId);
 }

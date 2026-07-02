@@ -116,6 +116,15 @@ public class MembershipService {
     return membershipRepository.isPostAuthor(userId, postId);
   }
 
+  /**
+   * Le vote appartient-il a l'utilisateur ? Regle : Vote.user_id == userId. Sert aux actions
+   * reservees au votant (modifier / retirer son propre vote).
+   */
+  @Transactional(readOnly = true)
+  public boolean isVoteOwner(long userId, long voteId) {
+    return membershipRepository.isVoteOwner(userId, voteId);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {
