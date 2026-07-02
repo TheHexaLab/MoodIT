@@ -55,22 +55,67 @@ public class PermissionService {
 
   private record Rule(String method, String pattern, AccessCheck check) {}
 
+  // Prefixe commun a TOUTES les routes REST. Cote core, il est ajoute automatiquement aux
+  // controleurs (WebConfig.configurePathMatch -> addPathPrefix("/api", ...)), donc le path
+  // reel qui arrive ici commence toujours par "/api". On l'ajoute une seule fois via la
+  // fabrique rule(...) pour ne pas avoir a le repeter (ni risquer de l'oublier) dans chaque
+  // regle : on ecrit "/forums/posts", pas "/api/forums/posts".
+  private static final String API_PREFIX = "/api";
+
+  // Fabrique une regle avec le prefixe /api applique au motif. TOUJOURS passer par ici
+  // plutot que `new Rule(...)` directement, pour garder les motifs sans "/api".
+  private static Rule rule(String method, String path, AccessCheck check) {
+    return new Rule(method, API_PREFIX + path, check);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════
+  //  REGISTRE DES REGLES — c'est ICI qu'on ajoute une regle, route par route.
+  // ═══════════════════════════════════════════════════════════════════════════════════
+  //
+  //  RECETTE pour ajouter une regle :
+  //    1. Regarder le controleur core concerne (ForumController, ProgramController,
+  //       QuizController...) : relever la METHODE HTTP et le CHEMIN exact.
+  //    2. Reperer ou est l'id de la ressource a proteger :
+  //         - dans le CHEMIN     -> utiliser un motif {var} et le lire via `vars`
+  //                                 (ex. "/quizzes/{quizId}" -> vars.get("quizId")).
+  //         - dans le BODY JSON  -> le lire via `longField(body, "forumId")`.
+  //           (convention de l'equipe : les POST de creation mettent l'id parent dans le
+  //            body, ex. forumId dans PostCreateInForumDTO. Le gateway nous transmet le body.)
+  //    3. Choisir le predicat d'autorisation :
+  //         - APPARTENANCE (fin) : membershipService.canAccessForum / canAccessCourse /
+  //           canAccessQuiz (delegue au MembershipRepository, SQL sur init.sql).
+  //         - ROLE (grossier)    : hasRole(user, "Administrateur").
+  //    4. Ajouter `rule(methode, motif, (user, vars, body) -> <predicat>)` a la liste.
+  //       ⚠️ Ecrire le motif SANS "/api" : la fabrique rule(...) l'ajoute automatiquement
+  //          (ex. "/forums/posts", pas "/api/forums/posts").
+  //
+  //  RAPPELS sur le moteur (voir aussi l'en-tete de la classe) :
+  //    - La 1re regle qui matche (methode + motif) tranche ; l'ordre compte.
+  //    - AUCUNE regle ne matche => acces AUTORISE (default-allow). On ne liste donc QUE
+  //      les routes a restreindre ; l'identite est deja garantie par le gateway (JWT).
+  //    - Un predicat qui renvoie false => 403 cote gateway. Toute exception => refus.
+  //    - Toujours valider que l'id est > 0 avant d'interroger la BD (voir exemples).
+  //
+  //  CONVENTIONS de placement de l'id selon le verbe :
+  //    - POST creation   -> id parent dans le BODY   (canAccess...(body.xxxId))
+  //    - GET / PUT / DELETE / sous-ressource -> id dans le PATH (vars.get("xxxId"))
+  // ═══════════════════════════════════════════════════════════════════════════════════
   private List<Rule> buildRules() {
     return List.of(
         // ── FIN (appartenance), id dans le BODY ──────────────────────────────────
         // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
-        new Rule(
+        rule(
             "POST",
-            "/api/forums/posts",
+            "/forums/posts",
             (user, vars, body) -> {
               long forumId = longField(body, "forumId");
               return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
             }),
 
         // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
-        new Rule(
+        rule(
             "POST",
-            "/api/forums/posts/votes",
+            "/forums/posts/votes",
             (user, vars, body) -> {
               long forumId = longField(body, "forumId");
               return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
@@ -78,35 +123,63 @@ public class PermissionService {
 
         // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
         // Creer un cours dans des programmes : reserve aux Administrateurs.
-        new Rule(
-            "POST", "/api/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur")),
+        rule("POST", "/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur")),
 
         // ── QUIZ ─────────────────────────────────────────────────────────────────
         // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
         // TODO affiner en role enseignant scope-programme (User_Program_Role) une fois
         // la resolution quiz -> programme disponible.
-        new Rule(
-            "PUT", "/api/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
-        new Rule(
-            "DELETE", "/api/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+        rule("PUT", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+        rule("DELETE", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
         // etre abonne a un programme du cours du quiz.
-        new Rule("GET", "/api/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
-        new Rule(
-            "POST",
-            "/api/quizzes/{quizId}/submissions",
-            (user, vars, body) -> quizAccess(user, vars)),
-        new Rule(
-            "GET", "/api/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
-        new Rule(
+        rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
+        rule("POST", "/quizzes/{quizId}/submissions", (user, vars, body) -> quizAccess(user, vars)),
+        rule("GET", "/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
+        rule(
             "GET",
-            "/api/quizzes/{quizId}/attempts/{attemptId}",
+            "/quizzes/{quizId}/attempts/{attemptId}",
             (user, vars, body) -> quizAccess(user, vars))
 
-        // ── TODO : a completer (ids dans le PATH pour edit/delete) ───────────────
-        //  editPost   PATCH  /api/forums/{forumId}/posts/{postId}  -> canAccessForum(vars.forumId)
-        //  deletePost DELETE /api/forums/{forumId}/posts/{postId}  -> canAccessForum(vars.forumId) OU role
+        // ── EXEMPLE COMMENTE : a decommenter + adapter ────────
+        //
+        //  Cas : editer un post d'un forum.  Controleur core -> ForumController :
+        //    @PatchMapping("/forums/{forumId}/posts/{postId}")   (le /api est ajoute par le core)
+        //  L'id du forum est dans le PATH (pas dans le body) => on le lit via `vars`.
+        //  Autorisation voulue : etre membre du forum (meme regle d'appartenance qu'un post).
+        //
+        //  Etapes appliquees (voir la RECETTE en haut de la methode) :
+        //    1. methode = "PATCH", motif = "/forums/{forumId}/posts/{postId}"  (SANS /api)
+        //    2. id dans le PATH -> longVar(vars, "forumId")
+        //    3. predicat = appartenance -> membershipService.canAccessForum(...)
+        //    4. on garde le meme style que les regles quiz ci-dessus.
+        //
+        //  rule(
+        //      "PATCH",
+        //      "/forums/{forumId}/posts/{postId}",
+        //      (user, vars, body) -> {
+        //        long forumId = longVar(vars, "forumId");        // id dans le PATH
+        //        return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+        //      }),
+        //
+        //  Variante « role » (ex. supprimer un post reserve aux Administrateurs) :
+        //  rule(
+        //      "DELETE",
+        //      "/forums/{forumId}/posts/{postId}",
+        //      (user, vars, body) -> hasRole(user, "Administrateur")),
+        //
+        //  Variante « id dans le BODY » (POST de creation, cf. regles forums plus haut) :
+        //  rule(
+        //      "POST",
+        //      "/forums/comments",
+        //      (user, vars, body) -> {
+        //        long forumId = longField(body, "forumId");      // id dans le BODY
+        //        return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+        //      }),
+        //
+        //  ⚠️ La derniere regle de la liste ne prend PAS de virgule finale — pense a
+        //     ajouter la virgule sur la regle quiz au-dessus quand tu decommentes ici.
         );
   }
 
@@ -169,6 +242,31 @@ public class PermissionService {
     } catch (NumberFormatException e) {
       return -1;
     }
+  }
+
+  // ── PREDICAT GENERIQUE : "c'est bien SON compte" ────────────────────────────────
+  // S'assure que l'utilisateur authentifie (identite prouvee par le token, validee en
+  // amont par le gateway + auth-service) est bien celui vise par la requete. Le JWT ne
+  // porte que l'email ; on compare donc l'id du User charge par email a l'id de la requete.
+  //
+  // Deux variantes selon l'emplacement de l'id-utilisateur (cf. conventions du registre) :
+  //   - id dans le PATH  (GET/PUT/PATCH/DELETE /users/{userId}) -> isSelfFromPath
+  //   - id dans le BODY  (POST portant un userId dans le DTO)   -> isSelfFromBody
+  //
+  // Reutilise longVar / longField (qui renvoient -1 si l'id est absent / non numerique
+  // -> refus propre, jamais d'egalite accidentelle).
+  //
+  // EXEMPLES d'utilisation dans buildRules() (a decommenter + adapter) :
+  //   // id dans le PATH
+  //   rule("PATCH", "/users/{userId}", (user, vars, body) -> isSelfFromPath(user, vars, "userId")),
+  //   // id dans le BODY
+  //   rule("POST", "/quelque/route", (user, vars, body) -> isSelfFromBody(user, body, "userId")),
+  private static boolean isSelfFromPath(User user, Map<String, String> vars, String varName) {
+    return longVar(vars, varName) == user.getId();
+  }
+
+  private static boolean isSelfFromBody(User user, JsonNode body, String field) {
+    return longField(body, field) == user.getId();
   }
 
   private static boolean hasRole(User user, String roleName) {

@@ -40,6 +40,25 @@ public class MembershipService {
       case "program" -> membershipRepository.isSubscribedToProgram(userId, id);
       case "channel", "forum" -> canAccessForum(userId, id);
       case "mcp" -> canAccessCourse(userId, id);
+
+      // ── EXEMPLE COMMENTE (pour le collegue) : ajouter un nouveau scope de room ──
+      //
+      //  Cote core, le RoomAuthorizer appelle canJoin(email, scope, id) au `join` d'une
+      //  room "scope:id" (ex. le front s'abonne a "quiz:42"). Pour autoriser un nouveau
+      //  type de room, il suffit d'ajouter un `case` ici :
+      //
+      //    case "quiz" -> canAccessQuiz(userId, id);   // reutilise une verif existante
+      //
+      //  Si l'appartenance a verifier n'existe pas encore, on l'ajoute en 2 temps :
+      //    1. une methode canAccessXxx(...) ci-dessous (transaction lecture seule) ;
+      //    2. la requete SQL EXISTS correspondante dans MembershipRepository.
+      //  Exemple d'une room "groupe de discussion" propre a un cours :
+      //
+      //    case "studygroup" -> membershipRepository.isMemberOfStudyGroup(userId, id);
+      //
+      //  ⚠️ Fail-closed : tout scope non reconnu tombe dans `default -> false` (join refuse).
+      //     Le scope doit matcher EXACTEMENT la chaine envoyee par le core (sensible a la casse).
+
       default -> false;
     };
   }
