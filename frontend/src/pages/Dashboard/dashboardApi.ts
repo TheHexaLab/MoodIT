@@ -547,8 +547,12 @@ export async function updateCourse(courseId: number, update: CourseUpdate): Prom
 
 /** TODO — Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */
 export async function updateProgram(programId: number, update: ProgramUpdate): Promise<void> {
-  await simulateWrite('Échec simulé (modification de programme)');
-  console.log(programId, update);
+  const res = await apiFetch(`/api/programs/${programId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error('Échec modification du programme');
 }
 
 /** TODO — Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
