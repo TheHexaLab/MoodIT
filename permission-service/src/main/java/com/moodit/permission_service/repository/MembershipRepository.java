@@ -66,4 +66,18 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeQuizViaProgram(@Param("userId") long userId, @Param("quizId") long quizId);
+
+  // Le cours appartient-il (structurellement) au programme ? (table de jointure program_course)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM program_course WHERE course_id = :courseId AND program_id = :programId)",
+      nativeQuery = true)
+  boolean isCourseInProgram(@Param("courseId") long courseId, @Param("programId") long programId);
+
+  // L'utilisateur est-il inscrit a ce cours ? (inscription directe, table Enrollment)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Enrollment WHERE user_id = :userId AND course_id = :courseId)",
+      nativeQuery = true)
+  boolean isEnrolledInCourse(@Param("userId") long userId, @Param("courseId") long courseId);
 }

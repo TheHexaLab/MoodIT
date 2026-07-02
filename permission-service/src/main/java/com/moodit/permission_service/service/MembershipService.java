@@ -88,6 +88,25 @@ public class MembershipService {
     return membershipRepository.canSeeQuizViaProgram(userId, quizId);
   }
 
+  /**
+   * Le cours fait-il (structurellement) partie du programme ? Lien de la table de jointure
+   * program_course, independant de tout utilisateur.
+   */
+  @Transactional(readOnly = true)
+  public boolean isCourseInProgram(long courseId, long programId) {
+    return membershipRepository.isCourseInProgram(courseId, programId);
+  }
+
+  /**
+   * Le cours fait-il partie des cours de l'utilisateur ? Regle : inscription directe au cours
+   * (Enrollment). A distinguer de canAccessCourse, qui verifie l'acces via l'abonnement a un
+   * programme du cours.
+   */
+  @Transactional(readOnly = true)
+  public boolean isEnrolledInCourse(long userId, long courseId) {
+    return membershipRepository.isEnrolledInCourse(userId, courseId);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

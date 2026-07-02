@@ -235,6 +235,33 @@ public class PermissionService {
     return quizId > 0 && membershipService.canAccessQuiz(user.getId(), quizId);
   }
 
+  // ── PREDICAT GENERIQUE : le cours fait partie du programme ────────────────────────
+  // Verifie le lien structurel program_course (independant de l'utilisateur). Generique :
+  // on passe le nom des variables de PATH ou se trouvent les ids.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("GET", "/programs/{programId}/courses/{courseId}",
+  //       (user, vars, body) -> courseInProgram(vars, "courseId", "programId")),
+  private boolean courseInProgram(Map<String, String> vars, String courseVar, String programVar) {
+    long courseId = longVar(vars, courseVar);
+    long programId = longVar(vars, programVar);
+    return courseId > 0 && programId > 0
+        && membershipService.isCourseInProgram(courseId, programId);
+  }
+
+  // ── PREDICAT GENERIQUE : le cours fait partie des cours de l'utilisateur ───────────
+  // "Les cours d'un utilisateur" = inscription directe (Enrollment) de l'utilisateur
+  // AUTHENTIFIE (identite issue du token, pas un id arbitraire de la requete). courseId
+  // lu dans une variable de PATH.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("GET", "/users/{userId}/courses/{courseId}",
+  //       (user, vars, body) -> userHasCourse(user, vars, "courseId")),
+  private boolean userHasCourse(User user, Map<String, String> vars, String courseVar) {
+    long courseId = longVar(vars, courseVar);
+    return courseId > 0 && membershipService.isEnrolledInCourse(user.getId(), courseId);
+  }
+
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
   private static long longVar(Map<String, String> vars, String name) {
     try {
