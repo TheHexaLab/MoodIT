@@ -563,9 +563,11 @@ export async function leaveProgram(programId: number): Promise<void> {
 
 /** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
 export async function leaveCourse(courseId: number): Promise<void> {
-  console.log('leaveCourse');
-  await simulateWrite('Échec simulé (quitter le cours)');
-  console.log(courseId);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/courses/${courseId}/users/${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Échec quitter le cours');
 }
 
 /**

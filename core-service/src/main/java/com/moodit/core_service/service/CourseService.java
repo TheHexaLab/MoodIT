@@ -225,4 +225,11 @@ public class CourseService {
         .map(this::toCourseDTO)
         .toList();
   }
+
+  public void removeUserFromCourse(Integer courseId, Integer userId) {
+    User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
+
+    user.getEnrollments().removeIf(e -> e.getCourse().getId().equals(courseId));
+    userRepository.save(user);
+  }
 }
