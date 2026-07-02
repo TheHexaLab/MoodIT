@@ -39,6 +39,8 @@ export interface QuizViewLabels {
   submit: string;
   /** Bouton « soumettre » pendant l'envoi. */
   submitting: string;
+  /** Infobulle du bouton « soumettre » grisé : tentative unique déjà utilisée. */
+  alreadySubmitted: string;
   /** Bouton « terminé » (fin de révision). */
   done: string;
   /** aria-label d'un point de progression. */
@@ -63,6 +65,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   next: 'Suivant',
   submit: 'Soumettre',
   submitting: 'Envoi…',
+  alreadySubmitted: 'Vous avez déjà soumis ce quiz (une seule tentative autorisée).',
   done: 'Terminé',
   dotAria: (index) => `Question ${index}`,
 };

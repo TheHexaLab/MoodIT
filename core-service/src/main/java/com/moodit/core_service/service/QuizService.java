@@ -6,6 +6,7 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
+import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
@@ -17,6 +18,7 @@ import com.moodit.core_service.repository.SubmissionRepository;
 import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -85,12 +87,39 @@ public class QuizService {
                 .toList();
     }
 
-    /** Détail complet d'un quiz (méta + questions embarquées). Sans les harnais (Test_Case). */
+    /**
+     * Détail d'un quiz pour la PASSATION (étudiant). Les champs de correction
+     * (isCorrect, correctOrder, groupName) et les harnais (Test_Case) sont EXCLUS :
+     * le client n'en a pas besoin (la correction se fait côté serveur) et les exposer
+     * permettrait de tricher.
+     */
     @Transactional(readOnly = true)
     public QuizDetailDTO getQuizDetail(Integer quizId) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
-        return toQuizDetailDTO(quiz);
+        return toQuizDetailDTO(quiz, false);
+    }
+
+    /**
+     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : inclut la correction
+     * (isCorrect, correctOrder, groupName). Réservé aux administrateurs — un étudiant
+     * qui appellerait cet endpoint reçoit 403.
+     */
+    @Transactional(readOnly = true)
+    public QuizDetailDTO getQuizForEdit(Integer quizId, String userEmail) {
+        requireAdmin(userEmail);
+        Quiz quiz = quizRepository.findById(quizId)
+                .orElseThrow(QuizNotFoundException::new);
+        return toQuizDetailDTO(quiz, true);
+    }
+
+    /** Vérifie que l'utilisateur (mail du JWT) a le rôle « Administrateur », sinon 403. */
+    private void requireAdmin(String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(UserNotFoundException::new);
+        boolean admin = user.getRoles() != null && user.getRoles().stream()
+                .anyMatch(r -> "Administrateur".equals(r.getName()));
+        if (!admin) throw new ForbiddenException();
     }
 
     // ── Écriture (éditeur enseignant) ────────────────────────────────────────────
@@ -109,7 +138,7 @@ public class QuizService {
 
         Quiz saved = quizRepository.save(quiz);
         broadcastQuiz(course, saved.getId(), false); // created
-        return toQuizDetailDTO(saved);
+        return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
 
     /**
@@ -159,7 +188,7 @@ public class QuizService {
 
         Quiz saved = quizRepository.save(quiz);
         broadcastQuiz(saved.getCourse(), saved.getId(), true); // updated
-        return toQuizDetailDTO(saved);
+        return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
 
     /** Supprime un quiz et tout son contenu (cascade). */
@@ -268,11 +297,22 @@ public class QuizService {
 
         // Nouvelle tentative (numéro = nb existant + 1). Aucun score n'est stocké : seules
         // les réponses brutes le sont (content) ; le score est recalculé à la lecture.
+        //
+        // Le pré-check `existing`/allowRetry ci-dessus n'est PAS atomique : deux POST
+        // concurrents (double-clic, rejeu) peuvent tous deux lire existing == 0. La
+        // garantie réelle vient de la contrainte UNIQUE (quiz_id, user_id, attempt_no)
+        // en base : le 2e insert du même attempt_no lève une DataIntegrityViolation,
+        // qu'on traduit en 409 (tentative déjà soumise).
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
         attempt.setAttemptNo((int) existing + 1);
-        Attempt savedAttempt = attemptRepository.save(attempt);
+        Attempt savedAttempt;
+        try {
+            savedAttempt = attemptRepository.saveAndFlush(attempt);
+        } catch (DataIntegrityViolationException e) {
+            throw new AlreadySubmittedException();
+        }
 
         // Une Submission par question, rattachée à la tentative (réponse brute uniquement).
         for (Question q : sortedQuestions(quiz)) {
@@ -650,7 +690,11 @@ public class QuizService {
                 .build();
     }
 
-    private QuizDetailDTO toQuizDetailDTO(Quiz quiz) {
+    /**
+     * @param includeCorrection true pour l'ÉDITEUR (expose isCorrect/correctOrder/groupName),
+     *                           false pour la PASSATION (ces champs restent null → omis du JSON).
+     */
+    private QuizDetailDTO toQuizDetailDTO(Quiz quiz, boolean includeCorrection) {
         return QuizDetailDTO.builder()
                 .id(quiz.getId())
                 .title(quiz.getTitle())
@@ -662,12 +706,12 @@ public class QuizService {
                         : quiz.getQuestions().stream()
                         .sorted(Comparator.comparing(Question::getOrderIndex,
                                 Comparator.nullsLast(Comparator.naturalOrder())))
-                        .map(this::toQuestionDTO)
+                        .map(q -> toQuestionDTO(q, includeCorrection))
                         .toList())
                 .build();
     }
 
-    private QuestionDTO toQuestionDTO(Question question) {
+    private QuestionDTO toQuestionDTO(Question question, boolean includeCorrection) {
         return QuestionDTO.builder()
                 .id(question.getId())
                 .prompt(question.getPrompt())
@@ -677,9 +721,11 @@ public class QuizService {
                 .orderIndex(question.getOrderIndex())
                 .startCode(question.getStartCode())
                 .answers(question.getAnswers() == null ? List.of()
-                        : question.getAnswers().stream().map(this::toAnswerDTO).toList())
+                        : question.getAnswers().stream()
+                        .map(a -> toAnswerDTO(a, includeCorrection)).toList())
                 .dragItems(question.getDragItems() == null ? List.of()
-                        : question.getDragItems().stream().map(this::toDragItemDTO).toList())
+                        : question.getDragItems().stream()
+                        .map(d -> toDragItemDTO(d, includeCorrection)).toList())
                 .build();
     }
 
@@ -688,20 +734,22 @@ public class QuizService {
         return Q_TYPE_NAME_TO_SLUG.get(question.getQType().getName());
     }
 
-    private AnswerDTO toAnswerDTO(Answer answer) {
+    private AnswerDTO toAnswerDTO(Answer answer, boolean includeCorrection) {
         return AnswerDTO.builder()
                 .id(answer.getId())
                 .content(answer.getContent())
-                .isCorrect(answer.getIsCorrect())
+                // Passation : null → champ omis (cf. @JsonInclude NON_NULL).
+                .isCorrect(includeCorrection ? answer.getIsCorrect() : null)
                 .build();
     }
 
-    private DragItemDTO toDragItemDTO(DragItem dragItem) {
+    private DragItemDTO toDragItemDTO(DragItem dragItem, boolean includeCorrection) {
         return DragItemDTO.builder()
                 .id(dragItem.getId())
                 .content(dragItem.getContent())
-                .correctOrder(dragItem.getCorrectOrder())
-                .groupName(dragItem.getGroupName())
+                // Passation : null → champs omis (cf. @JsonInclude NON_NULL).
+                .correctOrder(includeCorrection ? dragItem.getCorrectOrder() : null)
+                .groupName(includeCorrection ? dragItem.getGroupName() : null)
                 .build();
     }
 }

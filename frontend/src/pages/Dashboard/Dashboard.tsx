@@ -66,7 +66,8 @@ import styles from './Dashboard.module.css';
  * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
  */
 const quizEditorHandlers: QuizEditorHandlers = {
-  onFetchQuiz: api.fetchQuiz,
+  // Éditeur enseignant → détail AVEC correction (endpoint /edit, réservé aux admins).
+  onFetchQuiz: api.fetchQuizForEdit,
   onFetchQuizzes: api.fetchQuizzes,
   onFetchLanguages: api.fetchLanguages,
   onFetchQuestionTypes: api.fetchQuestionTypes,

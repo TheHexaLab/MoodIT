@@ -77,6 +77,11 @@ export interface QuizAttemptApi {
   currentAttemptId: number | null;
   /** Le quiz autorise-t-il une nouvelle tentative ? */
   allowRetry: boolean;
+  /**
+   * L'étudiant a déjà consommé sa tentative unique (au moins une tentative ET reprise
+   * interdite) → la soumission doit être bloquée côté UI (miroir du 409 backend).
+   */
+  alreadySubmitted: boolean;
   /** Relance une nouvelle tentative (repasse en `taking`). */
   retry: () => void;
   /** Affiche le récap d'une tentative passée. */
@@ -303,6 +308,7 @@ export function useQuizAttempt({
   const backToSummary = useCallback(() => setPhase('summary'), []);
 
   const allowRetry = Boolean(quiz.allowRetry);
+  const alreadySubmitted = !allowRetry && attempts.length > 0;
 
   return useMemo<QuizAttemptApi>(
     () => ({
@@ -321,6 +327,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      alreadySubmitted,
       retry,
       selectAttempt: (attemptId: number) => void selectAttempt(attemptId),
       setAnswer,
@@ -347,6 +354,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      alreadySubmitted,
       retry,
       selectAttempt,
       setAnswer,

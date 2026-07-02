@@ -193,9 +193,23 @@ function toQuizMeta(q: QuizResponse): Quiz {
   };
 }
 
-/** Charger le détail d'un quiz (questions embarquées) pour la passation côté étudiant. */
+/**
+ * Charger le détail d'un quiz (questions embarquées) pour la PASSATION côté étudiant.
+ * Le backend n'inclut PAS la correction (isCorrect/correctOrder/groupName) sur cet
+ * endpoint : impossible de tricher via l'onglet réseau.
+ */
 export async function fetchQuiz(quizId: number): Promise<Quiz> {
   const res = await apiFetch(`/api/quizzes/${quizId}`);
+  if (!res.ok) throw new Error('Échec chargement du quiz');
+  return toQuiz(await res.json());
+}
+
+/**
+ * Charger le détail COMPLET d'un quiz pour l'ÉDITEUR enseignant : inclut la correction
+ * (isCorrect/correctOrder/groupName). Réservé aux admins côté backend (403 sinon).
+ */
+export async function fetchQuizForEdit(quizId: number): Promise<Quiz> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/edit`);
   if (!res.ok) throw new Error('Échec chargement du quiz');
   return toQuiz(await res.json());
 }

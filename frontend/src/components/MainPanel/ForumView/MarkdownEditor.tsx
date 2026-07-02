@@ -1,5 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import './MarkdownEditor.module.css'; // styles globaux (selecteurs par role/element)
+import './MarkdownEditor.css'; // styles GLOBAUX (sélecteurs par role/élément, aucune classe).
+// NB : fichier volontairement .css (et non .module.css). Un import side-effect d'un
+// CSS Module est tree-shaké au build prod (aucune classe utilisée → import « inutile »),
+// ce qui faisait disparaître ces styles en production alors qu'ils tenaient en dev.
 import { Spinner } from '../../Spinner/Spinner';
 import { Markdown } from './Markdown';
 import { defaultMarkdownEditorLabels } from './labels';
