@@ -208,4 +208,12 @@ public class ProgramService {
   public Program findProgramById(Integer programId) {
     return programRepository.findById(programId).orElseThrow(ProgramNotFoundException::new);
   }
+
+  // Quitter un programme
+  public void removeUserFromProgram(Integer programId, Integer userId) {
+    User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
+
+    user.getPrograms().removeIf(p -> p.getId().equals(programId));
+    userRepository.save(user);
+  }
 }

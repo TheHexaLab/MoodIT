@@ -557,8 +557,11 @@ export async function updateProgram(programId: number, update: ProgramUpdate): P
 
 /** TODO — Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
 export async function leaveProgram(programId: number): Promise<void> {
-  await simulateWrite('Échec simulé (quitter le programme)');
-  console.log(programId);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/programs/${programId}/users/${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Échec quitter le programme');
 }
 
 /** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
