@@ -5,11 +5,14 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
+import java.util.List;
+
 @Data
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
 public class CourseUpdateDTO {
-    private String title;
-    private String code;
+  private String title;
+  private String code;
+  private List<Integer> programIds;
 }

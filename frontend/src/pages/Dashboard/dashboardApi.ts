@@ -44,11 +44,7 @@ import {
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 //import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
-import {
-  type Language,
-  type QuestionTypeOption,
-  type Quiz,
-} from '../../types/domain.ts';
+import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
   type AttemptSummary,
   type CodeEvaluationInput,
@@ -541,9 +537,12 @@ export async function joinPrograms(selection: JoinSelection): Promise<DemoProgra
  * aux programmes (relation many-to-many program_course).
  */
 export async function updateCourse(courseId: number, update: CourseUpdate): Promise<void> {
-  console.log('updateCourse');
-  await simulateWrite('Échec simulé (modification de cours)');
-  console.log(courseId, update);
+  const res = await apiFetch(`/api/courses/${courseId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error('Échec modification du cours');
 }
 
 /** TODO — Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */

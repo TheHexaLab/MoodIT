@@ -153,10 +153,12 @@ public class ProgramService {
     // l'utilisateur a déselectionnés (= désabonnement). Les programmes des autres
     // établissements ne sont jamais touchés. establishmentId null → pas de retrait (ajout seul).
     if (establishmentId != null) {
-      user.getPrograms().removeIf(p ->
-          p.getEstablishment() != null
-              && establishmentId.equals(p.getEstablishment().getId())
-              && !requestedIds.contains(p.getId()));
+      user.getPrograms()
+          .removeIf(
+              p ->
+                  p.getEstablishment() != null
+                      && establishmentId.equals(p.getEstablishment().getId())
+                      && !requestedIds.contains(p.getId()));
     }
 
     // Ajoute les programmes demandés pas encore suivis (évite les doublons).
@@ -201,5 +203,9 @@ public class ProgramService {
     programRepository.save(program);
     return toProgramDTO(program);
   }
+
   // endregion
+  public Program findProgramById(Integer programId) {
+    return programRepository.findById(programId).orElseThrow(ProgramNotFoundException::new);
+  }
 }
