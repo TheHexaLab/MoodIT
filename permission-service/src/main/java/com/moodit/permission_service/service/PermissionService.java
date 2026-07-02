@@ -288,6 +288,23 @@ public class PermissionService {
     return voteId > 0 && membershipService.isVoteOwner(user.getId(), voteId);
   }
 
+  // ── PREDICAT GENERIQUE : "c'est l'user qui l'a cree" ──────────────────────────────
+  // Verification de propriete generique, tous types de ressources confondus : l'utilisateur
+  // AUTHENTIFIE est-il le createur de la ressource visee ? On passe le type (aiguille vers la
+  // bonne table cote MembershipService, fail-closed) et le nom de la variable de PATH portant
+  // l'id. Unifie les cas isPostAuthor / isVoteOwner sous un seul point d'appel.
+  //
+  // EXEMPLE dans buildRules() :
+  //   rule("DELETE", "/forums/{forumId}/posts/{postId}",
+  //       (user, vars, body) -> isCreator(user, vars, "post", "postId")),
+  //   rule("DELETE", "/forums/posts/votes/{voteId}",
+  //       (user, vars, body) -> isCreator(user, vars, "vote", "voteId")),
+  private boolean isCreator(
+      User user, Map<String, String> vars, String resourceType, String idVar) {
+    long id = longVar(vars, idVar);
+    return id > 0 && membershipService.isResourceOwner(user.getId(), resourceType, id);
+  }
+
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
   private static long longVar(Map<String, String> vars, String name) {
     try {

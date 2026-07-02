@@ -135,6 +135,26 @@ public class MembershipService {
     return membershipRepository.hasRoleInProgram(userId, programId, roleName);
   }
 
+  /**
+   * L'utilisateur est-il le CREATEUR de la ressource visee ? Point d'entree GENERIQUE de la
+   * verification de propriete : chaque ressource stocke son createur dans une table/colonne
+   * differente, et un nom de table ne peut pas etre un parametre SQL — on aiguille donc par
+   * type vers la requete dediee (deja ecrites : post, vote...).
+   *
+   * Fail-closed : tout type non reconnu renvoie false (acces refuse). Le type doit matcher
+   * EXACTEMENT la chaine passee par la regle (sensible a la casse). Pour couvrir une nouvelle
+   * ressource "creee par l'user", ajouter un `case` ici + la requete EXISTS correspondante
+   * dans MembershipRepository (meme forme que isPostAuthor / isVoteOwner).
+   */
+  @Transactional(readOnly = true)
+  public boolean isResourceOwner(long userId, String resourceType, long resourceId) {
+    return switch (resourceType) {
+      case "post" -> membershipRepository.isPostAuthor(userId, resourceId);
+      case "vote" -> membershipRepository.isVoteOwner(userId, resourceId);
+      default -> false;
+    };
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {
