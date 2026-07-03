@@ -121,7 +121,6 @@ export default function Dashboard() {
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
-
   // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
   // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
   // Les quatre facades (ws.channels / ws.forums / ws.courses / ws.programs) partagent
@@ -345,11 +344,7 @@ export default function Dashboard() {
   // Persiste une modification de section (réordre/renommage/suppression/ajout) via
   // api.changeSection. Le state n'est appliqué qu'APRÈS succès (le rejet laisse la
   // sidebar inchangée) : on exerce ainsi spinner / rollback / ErrorPopup du popup.
-  const handleSectionChange = async (
-    courseId: number,
-    sectionType: string,
-    change: ItemChange
-  ) => {
+  const handleSectionChange = async (courseId: number, sectionType: string, change: ItemChange) => {
     await api.changeSection(courseId, sectionType, change);
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
@@ -520,7 +515,7 @@ export default function Dashboard() {
    * ─────────────────────────────────────────────────────────────────────────── */
 
   const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
-  const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
+  const handleFetchReplies = (forumId: number, postId: number) => api.fetchReplies(forumId, postId);
   const handleCreatePost = (
     forumId: number,
     content: string,
@@ -532,8 +527,7 @@ export default function Dashboard() {
   const handleDeletePost = (postId: number) => api.deletePost(postId);
   const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
 
-  const activeProgram =
-    dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
+  const activeProgram = dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
   // Programme passé à MainPanel selon l'avancement des fetchs (chaînage programmes → cours) :
   // - programmes pas prêts (chargement / erreur)            → null            → NoProgramState
   // - programme prêt mais cours en cours de chargement      → sans ses cours  → NoCourseState
@@ -604,7 +598,9 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitlePrefix={selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined}
+        mobileTitlePrefix={
+          selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
+        }
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
@@ -626,7 +622,9 @@ export default function Dashboard() {
 
               const nextProgram = dashboardPrograms.find((program) => program.id === nextProgramId);
 
-              setSelectedCourseId(getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined));
+              setSelectedCourseId(
+                getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined)
+              );
             }}
             onAddProgram={handleAddProgram}
             loading={programsLoading}
@@ -718,7 +716,9 @@ export default function Dashboard() {
         <CourseSectionEditor
           section={creatingSection}
           channels={selectedCourseChannels}
-          onChange={(change) => handleSectionChange(selectedCourse.id, creatingSection.type, change)}
+          onChange={(change) =>
+            handleSectionChange(selectedCourse.id, creatingSection.type, change)
+          }
           onClose={() => setCreatingSectionType(null)}
           courseId={selectedCourse.id}
           quizzes={selectedCourse.quizzes ?? []}
@@ -806,10 +806,7 @@ export default function Dashboard() {
         </div>
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && roleError && (
-        <ErrorPopup
-          content={roleError}
-          onClose={() => setPopup(null)}
-        />
+        <ErrorPopup content={roleError} onClose={() => setPopup(null)} />
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && !roleError && roleData && (
         <RoleEditorPopup
@@ -824,9 +821,7 @@ export default function Dashboard() {
       {popup?.kind === 'mcp' && mcpCourse && (
         <McpManagementPopup
           courseId={mcpCourse.id}
-          courseLabel={
-            mcpCourse.code || mcpCourse.name || 'Cours'
-          }
+          courseLabel={mcpCourse.code || mcpCourse.name || 'Cours'}
           loadAnalyses={() => api.fetchCourseAnalyses(mcpCourse.id)}
           loadAnalysis={(id) => api.fetchCourseAnalysis(id)}
           loadPending={() => api.fetchPendingAnalysis(mcpCourse.id)}
@@ -924,9 +919,7 @@ function mapProgramCourses(
   mapCourse: (course: Course) => Course
 ): DemoProgram[] {
   return programs.map((program) =>
-    program.id === programId
-      ? { ...program, courses: program.courses.map(mapCourse) }
-      : program
+    program.id === programId ? { ...program, courses: program.courses.map(mapCourse) } : program
   );
 }
 

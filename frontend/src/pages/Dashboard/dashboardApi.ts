@@ -21,10 +21,6 @@ import type {
   PostVoteUserDTO,
   QuestionResponse,
 } from '../../types/domain.ts';
-import {
-  getMockForumReplies,
-
-} from '../../components/MainPanel/ForumView/forumThreads.ts';
 //import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
 import type {
   Course,
@@ -762,10 +758,21 @@ export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
  * TODO — Charger les réponses DIRECTES (enfants immédiats) d'un post, au moment où
  * l'utilisateur déplie le fil.
  */
-export async function fetchReplies(postId: number) {
-  console.log('fetchReplies');
-  await simulateFetch('Échec simulé (chargement des réponses)');
-  return getMockForumReplies(postId);
+export async function fetchReplies(forumId: number, postId: number): Promise<ForumPost[]> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}?loadChildren=true`);
+  if (!res.ok) throw new Error('Échec chargement des réponses');
+  const data: PostVoteUserDTO = await res.json();
+  return (data.children ?? []).map((p) => ({
+    id: p.id,
+    content: p.content,
+    createdAt: p.createdAt,
+    title: p.title,
+    isPinned: p.isPinned,
+    author: p.author,
+    votes: p.voteTotalValue ? [{ userId: p.author.id, value: p.voteTotalValue as 1 | -1 }] : [],
+    replyCount: p.childrenCount,
+    replies: undefined,
+  }));
 }
 
 /**

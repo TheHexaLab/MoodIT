@@ -19,7 +19,7 @@ export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>
  * Appele quand l'utilisateur deplie un fil : on ne descend qu'un seul niveau a la
  * fois. Chaque enfant renvoye porte a son tour `replyCount` pour ses propres reponses.
  */
-export type FetchRepliesHandler = (postId: number) => MaybePromise<ForumPost[]>;
+export type FetchRepliesHandler = (forumId: number, postId: number) => MaybePromise<ForumPost[]>;
 
 /**
  * Publication d'un post (API-ready, POST). Reçoit l'id du forum ('Thread') cible, le
@@ -125,7 +125,11 @@ export interface ForumThreadsApi {
 // ─── Helpers d'arbre (purs, immutables). ───
 
 /** Remplace (immutablement) le post `id` par `updater(post)`, partout dans l'arbre. */
-function mapPost(posts: ForumPost[], id: number, updater: (post: ForumPost) => ForumPost): ForumPost[] {
+function mapPost(
+  posts: ForumPost[],
+  id: number,
+  updater: (post: ForumPost) => ForumPost
+): ForumPost[] {
   return posts.map((post) => {
     if (post.id === id) return updater(post);
     if (post.replies?.length) return { ...post, replies: mapPost(post.replies, id, updater) };
@@ -137,7 +141,9 @@ function mapPost(posts: ForumPost[], id: number, updater: (post: ForumPost) => F
 function removeFromTree(posts: ForumPost[], id: number): ForumPost[] {
   return posts
     .filter((post) => post.id !== id)
-    .map((post) => (post.replies?.length ? { ...post, replies: removeFromTree(post.replies, id) } : post));
+    .map((post) =>
+      post.replies?.length ? { ...post, replies: removeFromTree(post.replies, id) } : post
+    );
 }
 
 /** Ajuste (de `delta`) le compteur de reponses directes du post `parentId`. */
@@ -150,11 +156,16 @@ function adjustReplyCount(posts: ForumPost[], parentId: number | null, delta: nu
 }
 
 /** Insere `reply` sous `parentId` (ou a la racine si null). */
-function insertIntoTree(posts: ForumPost[], parentId: number | null, reply: ForumPost): ForumPost[] {
+function insertIntoTree(
+  posts: ForumPost[],
+  parentId: number | null,
+  reply: ForumPost
+): ForumPost[] {
   if (parentId === null) return [...posts, reply];
   return posts.map((post) => {
     if (post.id === parentId) return { ...post, replies: [...(post.replies ?? []), reply] };
-    if (post.replies?.length) return { ...post, replies: insertIntoTree(post.replies, parentId, reply) };
+    if (post.replies?.length)
+      return { ...post, replies: insertIntoTree(post.replies, parentId, reply) };
     return post;
   });
 }
@@ -184,7 +195,11 @@ function findByClientId(posts: ForumPost[], clientId: string): ForumPost | undef
 }
 
 /** Id du parent du post `id` (null si racine, undefined si introuvable). */
-function findParentId(posts: ForumPost[], id: number, parent: number | null = null): number | null | undefined {
+function findParentId(
+  posts: ForumPost[],
+  id: number,
+  parent: number | null = null
+): number | null | undefined {
   for (const post of posts) {
     if (post.id === id) return parent;
     if (post.replies?.length) {
@@ -294,10 +309,14 @@ export function useForumThreads({
     });
     setLoadingReplies((prev) => new Set(prev).add(postId));
     try {
-      const children = fetchReplies ? await fetchReplies(postId) : [];
+      const children = fetchReplies ? await fetchReplies(forumId, postId) : [];
       if (!mountedRef.current) return true;
       setThreads((prev) =>
-        mapPost(prev, postId, (post) => ({ ...post, replies: children, replyCount: children.length }))
+        mapPost(prev, postId, (post) => ({
+          ...post,
+          replies: children,
+          replyCount: children.length,
+        }))
       );
       return true;
     } catch {
@@ -411,7 +430,9 @@ export function useForumThreads({
     setError(null);
     setPending(true);
     try {
-      const saved = onCreatePost ? await onCreatePost(forumId, trimmed, parentId, clientId) : undefined;
+      const saved = onCreatePost
+        ? await onCreatePost(forumId, trimmed, parentId, clientId)
+        : undefined;
       if (!mountedRef.current) return true;
       // Reconciliation : on remplace l'optimiste par la version persistante.
       if (saved) {
@@ -474,7 +495,8 @@ export function useForumThreads({
 
     runMutation(
       () => (onDeletePost ? onDeletePost(postId) : undefined),
-      () => setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, target), parentId, 1)),
+      () =>
+        setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, target), parentId, 1)),
       "La suppression n'a pas pu être effectuée. Réessayez."
     );
   }
@@ -529,7 +551,14 @@ export function useForumThreads({
       onDelete: applyIncomingDelete,
       onVote: applyIncomingVote,
     });
-  }, [socket, forumId, applyIncomingPost, applyIncomingEdit, applyIncomingDelete, applyIncomingVote]);
+  }, [
+    socket,
+    forumId,
+    applyIncomingPost,
+    applyIncomingEdit,
+    applyIncomingDelete,
+    applyIncomingVote,
+  ]);
 
   return {
     threads,

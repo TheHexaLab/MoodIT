@@ -181,7 +181,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     initialThreads: [],
     currentUser,
     onFetchThreads,
-    onFetchReplies,
+    onFetchReplies: onFetchReplies ? (postId) => onFetchReplies(channel.id, postId) : undefined,
     onCreatePost,
     onEditPost,
     onDeletePost,
@@ -320,7 +320,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   /** Ouvre le formulaire de nouveau sujet (remplace la liste). */
   function startCompose() {
     if (composing) {
-      return
+      return;
     }
     setComposing(true);
     setNewTitle('');
@@ -423,7 +423,9 @@ const ForumView: React.FC<ForumViewProps> = ({
           <span>{getInitials(post.author)}</span>
         </span>
         <span role="author">{getAuthorName(post.author)}</span>
-        <span role="separator" aria-hidden="true">•</span>
+        <span role="separator" aria-hidden="true">
+          •
+        </span>
         <span role="time">{formatRelativeTime(post.createdAt)}</span>
         {post.isPinned && <span role="pin-indicator">{t.pinned}</span>}
       </div>
@@ -458,7 +460,9 @@ const ForumView: React.FC<ForumViewProps> = ({
         aria-label={open ? t.collapseReplies : t.expandReplies}
       >
         <Chevron open={open} />
-        <span>{count} {count > 1 ? t.replyMany : t.replyOne}</span>
+        <span>
+          {count} {count > 1 ? t.replyMany : t.replyOne}
+        </span>
       </button>
     );
   }
@@ -482,12 +486,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (!isOwn(post)) return null;
     return (
       <>
-        <button
-          type="button"
-          role="edit"
-          aria-label={t.edit}
-          onClick={() => startEdit(post)}
-        >
+        <button type="button" role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
           <Pencil width={14} height={14} />
         </button>
         <button
@@ -690,7 +689,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     <div className={styles['forum-view']}>
       <header>
         <p>
-          <span><ChannelTypeIcon type={channel.type} /></span>
+          <span>
+            <ChannelTypeIcon type={channel.type} />
+          </span>
           {channel.name}
         </p>
         <span />
@@ -718,7 +719,11 @@ const ForumView: React.FC<ForumViewProps> = ({
               {t.sortRecent}
             </button>
           </div>
-          <button type="button" role={`new-post${composing ? '-composing' : ''}`} onClick={startCompose}>
+          <button
+            type="button"
+            role={`new-post${composing ? '-composing' : ''}`}
+            onClick={startCompose}
+          >
             +<span>{t.newThread}</span>
           </button>
         </div>
