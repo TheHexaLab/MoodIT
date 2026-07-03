@@ -410,3 +410,17 @@ export interface QuizDetailResponse {
   allowRetry?: boolean;
   questions?: QuestionResponse[];
 }
+
+/** Post renvoyé par le backend (PostVoteUserDTO). */
+export interface PostVoteUserDTO {
+  id: number;
+  content: string;
+  createdAt: string;
+  title?: string;
+  isPinned?: boolean;
+  postParentId?: number | null;
+  author: User;
+  voteTotalValue?: number;
+  childrenCount?: number;
+  children?: PostVoteUserDTO[];
+}

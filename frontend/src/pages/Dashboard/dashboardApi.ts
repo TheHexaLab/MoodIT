@@ -16,12 +16,14 @@ import type {
   AnswerResponse,
   ChannelMessage,
   DragItemResponse,
+  ForumPost,
   ForumResponse,
+  PostVoteUserDTO,
   QuestionResponse,
 } from '../../types/domain.ts';
 import {
   getMockForumReplies,
-  getMockForumThreads,
+
 } from '../../components/MainPanel/ForumView/forumThreads.ts';
 //import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
 import type {
@@ -739,9 +741,21 @@ export async function deleteMessage(messageId: number): Promise<void> {
  * TODO — Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement
  * paresseux : les réponses sont récupérées à la demande via fetchReplies).
  */
-export async function fetchThreads(forumId: number) {
-  await simulateFetch('Échec simulé (chargement des sujets)');
-  return getMockForumThreads(forumId);
+export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts`);
+  if (!res.ok) throw new Error('Échec chargement des sujets');
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map((p) => ({
+    id: p.id,
+    content: p.content,
+    createdAt: p.createdAt,
+    title: p.title,
+    isPinned: p.isPinned,
+    author: p.author,
+    votes: p.voteTotalValue ? [{ userId: p.author.id, value: p.voteTotalValue as 1 | -1 }] : [],
+    replyCount: p.childrenCount,
+    replies: undefined,
+  }));
 }
 
 /**
