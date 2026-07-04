@@ -3,8 +3,10 @@
 // venir. Les collègues pourront remplacer cette impl par un repository JPA sans
 // toucher au contrôleur.
 
-package com.moodit.core_service.user;
+package com.moodit.core_service.repository;
 
+import com.moodit.core_service.dto.MeDto;
+import com.moodit.core_service.dto.Role;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
