@@ -87,10 +87,12 @@ public class McpAnalysisRunner {
                             analysis.improvements().size()));
         } catch (Exception e) {
             // Erreur inattendue (base, sérialisation…) : marque FAILED et notifie l'échec.
-            log.warn("Analyse MCP #{} (cours {}) échouée : {}", responseId, courseId, e.getMessage());
+            // Le détail reste dans les logs ; on ne pousse au client qu'un motif générique
+            // (le e.getMessage() brut peut divulguer des infos internes : SQL, chemins…).
+            log.warn("Analyse MCP #{} (cours {}) échouée : {}", responseId, courseId, e.getMessage(), e);
             response.setStatus(McpStatus.FAILED);
             mcpResponseRepository.save(response);
-            realtimeGateway.analysisFailed(courseId, userId, e.getMessage());
+            realtimeGateway.analysisFailed(courseId, userId, "Analyse indisponible pour le moment.");
         }
     }
 }

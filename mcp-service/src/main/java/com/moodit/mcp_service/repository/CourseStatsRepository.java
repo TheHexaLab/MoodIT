@@ -42,7 +42,7 @@ public class CourseStatsRepository {
      */
     public List<String> sampleForumMessages(int courseId, int limit) {
         return jdbc.queryForList(
-                "SELECT LEFT(p.content, 240) FROM post p JOIN forum f ON f.id = p.forum_id "
+                "SELECT LEFT(p.content, 400) FROM post p JOIN forum f ON f.id = p.forum_id "
                         + "WHERE f.course_id = ? AND p.content IS NOT NULL AND p.content <> '' "
                         + "ORDER BY p.created_at DESC LIMIT ?",
                 String.class, courseId, limit);

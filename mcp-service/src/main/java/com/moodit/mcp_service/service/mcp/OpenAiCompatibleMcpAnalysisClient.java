@@ -3,6 +3,7 @@ package com.moodit.mcp_service.service.mcp;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.moodit.mcp_service.dto.McpAnalysis;
+import com.moodit.mcp_service.util.ForumTextRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -234,14 +235,20 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
                         formatForumSamples(ctx.forumSamples()));
     }
 
-    /** Met en forme les extraits de messages en liste à puces (ou une mention si vide). */
+    /**
+     * Met en forme les extraits de messages en liste à puces (ou une mention si vide). Chaque
+     * extrait est ANONYMISÉ ({@link ForumTextRedactor}) avant d'être injecté dans le prompt :
+     * le texte part vers un LLM externe (Groq), on retire donc le PII à haut risque (courriels,
+     * liens, numéros) tout en préservant le ressenti.
+     */
     private static String formatForumSamples(List<String> samples) {
         if (samples == null || samples.isEmpty()) {
             return "  (aucun message)";
         }
         StringBuilder sb = new StringBuilder();
         for (String message : samples) {
-            sb.append("  - ").append(message.replace('\n', ' ').trim()).append('\n');
+            String safe = ForumTextRedactor.redact(message).replace('\n', ' ').trim();
+            sb.append("  - ").append(safe).append('\n');
         }
         return sb.toString().stripTrailing();
     }
