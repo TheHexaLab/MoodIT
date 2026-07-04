@@ -44,6 +44,7 @@ services:
     depends_on:
       - core-service
       - auth-service
+      - permission-service
 
   #Core service -------------------------------------------------
   core-service:
@@ -63,6 +64,18 @@ services:
   auth-service:
     build: ./auth-service
     container_name: moodit_auth
+    env_file:
+      - .env.docker
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  #Permission service -------------------------------------------------
+  permission-service:
+    build: ./permission-service
+    container_name: moodit_permission
     env_file:
       - .env.docker
     networks:

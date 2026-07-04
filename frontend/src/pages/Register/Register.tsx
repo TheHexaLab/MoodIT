@@ -6,7 +6,7 @@ import { Lightanddark } from '../../assets/light-dark-btn';
 import { EyeIcon } from '../../assets/eye';
 import logo from '../../assets/Logo.png';
 import { Link, useNavigate } from 'react-router-dom';
-import { classifyServerError } from '../../helpers/serverError';
+import { classifyServerError, publicServerError } from '../../helpers/serverError';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -53,7 +53,7 @@ export default function Register() {
     } else if (field === 'password') {
       setFieldErrors({ password: message });
     } else {
-      setServerError(message);
+      setServerError(publicServerError(message));
     }
   }
 
@@ -109,15 +109,6 @@ export default function Register() {
       </aside>
 
       <main className={styles.formSide}>
-        <button
-          type="button"
-          className="light-dark-btn"
-          onClick={toggleTheme}
-          aria-label="Changer de thème"
-        >
-          <Lightanddark isDark={theme === 'dark'} />
-        </button>
-
         <div className={styles.card}>
               <header className={styles.cardHeader}>
                 <h2>Créer un compte</h2>
@@ -297,9 +288,32 @@ export default function Register() {
         </div>
 
         <footer className={styles.pageFooter}>
-          © 2026 MoodIT · Confidentialité · Conditions d'utilisation
+          © 2026 MoodIT ·{' '}
+          <a
+            href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Confidentialité
+          </a>{' '}
+          ·{' '}
+          <a
+            href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Conditions d'utilisation
+          </a>
         </footer>
       </main>
+      <button
+        type="button"
+        className="light-dark-btn"
+        onClick={toggleTheme}
+        aria-label="Changer de thème"
+      >
+        <Lightanddark isDark={theme === 'dark'} />
+      </button>
     </div>
   );
 }
