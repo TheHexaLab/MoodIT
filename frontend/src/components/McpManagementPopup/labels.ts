@@ -34,8 +34,6 @@ export const defaultLabels: McpManagementPopupLabels = {
   back: 'Retour',
   detailTitle: () => 'Bilan MCP',
   scoreTitle: 'Bilan global du cours',
-  detailMeta: (strengths, improvements, quiz, messages) =>
-    `${strengths} point${plural(strengths)} fort${plural(strengths)} · ${improvements} à améliorer · basé sur ${quiz} quiz et ${messages} messages`,
   summaryLabel: 'SYNTHÈSE',
   dimensionsLabel: 'RÉPARTITION PAR DIMENSION',
   dimContent: 'Contenu',

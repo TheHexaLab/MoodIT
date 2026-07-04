@@ -420,14 +420,6 @@ export function McpManagementPopup({
               >
                 {detailAnalysis.score} %
               </span>
-              <span className={styles.scoreMeta}>
-                {t.detailMeta(
-                  detailAnalysis.strengths.length,
-                  detailAnalysis.improvements.length,
-                  detailAnalysis.sources.quizCount,
-                  detailAnalysis.sources.forumMessageCount,
-                )}
-              </span>
             </section>
 
             {detailAnalysis.summary && (

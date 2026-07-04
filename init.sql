@@ -813,8 +813,11 @@ JOIN LATERAL (
 
 -- ============================================================
 --  Démo MCP — cours MOYEN (MCP150) : signaux TIÈDES → score attendu en zone « warning »
---  (50-69%). 3 quiz (dont 1 auto-corrigé à 50% de moyenne), ~8 messages d'avis MITIGÉS,
---  3 inscrits. (Repli déterministe : 40 + 12 + 4 + 3 = 59.)
+--  (50-69%, front). 6 quiz (dont 1 auto-corrigé à ~67% de moyenne), ~9 messages d'avis
+--  MITIGÉS et ÉQUILIBRÉS (positif/neutre/négatif), 3 inscrits. Calibré pour que le LLM
+--  (qwen2.5) lise « moyen », pas seulement le repli déterministe qui donnait 59.
+--  NB : le score LLM n'est pas déterministe (température 0.2) → il peut osciller de
+--  quelques points d'une analyse à l'autre.
 -- ============================================================
 
 INSERT INTO program_course (program_id, course_id) VALUES
@@ -824,10 +827,10 @@ INSERT INTO Enrollment (course_id, user_id)
 SELECT (SELECT id FROM Course WHERE code = 'MCP150'), s.u
 FROM (VALUES (1), (2), (3)) AS s(u);
 
--- 2 quiz génériques (pour le compte de quiz).
+-- 5 quiz génériques (pour le compte de quiz — signal « contenu » moyen, pas famélique).
 INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id)
 SELECT 'Quiz ' || g, FALSE, TRUE, FALSE, g, (SELECT id FROM Course WHERE code = 'MCP150')
-FROM generate_series(1, 2) AS g;
+FROM generate_series(1, 5) AS g;
 
 -- Messages de forum MITIGÉS (ni enthousiastes ni catastrophés).
 INSERT INTO Post (content, forum_id, user_id, is_pinned)
@@ -836,19 +839,20 @@ SELECT m.content,
         WHERE f.course_id = (SELECT id FROM Course WHERE code = 'MCP150') AND f.f_type_id = 1),
        m.uid, FALSE
 FROM (VALUES
-   ('Le cours est correct mais les explications manquent parfois de clarté.', 2),
-   ('Les quiz sont utiles, même si un peu répétitifs.', 3),
-   ('J''ai du mal avec le rythme, c''est parfois trop rapide.', 2),
-   ('Pas mal dans l''ensemble, mais on manque d''exemples concrets.', 3),
-   ('Le prof répond aux questions, c''est appréciable.', 1),
-   ('Certains sujets sont confus, il faudrait plus de structure.', 2),
+   ('Le cours est plutôt bien structuré et le prof reste disponible.', 1),
+   ('Les quiz aident vraiment à réviser, j''ai senti une progression.', 2),
+   ('Bonne ambiance générale, le contenu est correct dans l''ensemble.', 3),
+   ('J''apprécie les retours du prof sur les exercices.', 1),
    ('Ça va, sans plus, j''attends de voir la suite.', 3),
-   ('Les délais sont serrés mais gérables.', 2)
+   ('Les délais sont serrés mais gérables.', 2),
+   ('Les explications manquent parfois de clarté sur les points avancés.', 2),
+   ('Le rythme est un peu rapide par moments.', 3),
+   ('On manque d''exemples concrets sur certains sujets.', 2)
 ) AS m(content, uid);
 
 -- Quiz auto-corrigé « Quiz noté — mi-parcours » : moyenne 50% (chacun 1/2).
 INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id)
-VALUES ('Quiz noté — mi-parcours', FALSE, TRUE, FALSE, 3,
+VALUES ('Quiz noté — mi-parcours', FALSE, TRUE, FALSE, 6,
         (SELECT id FROM Course WHERE code = 'MCP150'));
 
 INSERT INTO Question (prompt, order_index, total_score, q_type_id, quiz_id)
@@ -882,9 +886,9 @@ FROM (VALUES (1), (2), (3)) AS s(u);
 INSERT INTO Submission (content, attempt_id, question_id, user_id)
 SELECT '{"answerIds":[' || ans.id || ']}', att.id, q.id, att.user_id
 FROM (VALUES
-   (1, 0, TRUE), (1, 1, FALSE),    -- user 1 : 1/2 → 50%
-   (2, 0, FALSE), (2, 1, TRUE),    -- user 2 : 1/2 → 50%
-   (3, 0, TRUE), (3, 1, FALSE)     -- user 3 : 1/2 → 50%
+   (1, 0, TRUE), (1, 1, TRUE),     -- user 1 : 2/2 → 100%
+   (2, 0, TRUE), (2, 1, FALSE),    -- user 2 : 1/2 → 50%
+   (3, 0, FALSE), (3, 1, TRUE)     -- user 3 : 1/2 → 50% (moyenne = 4/6 ≈ 67%)
 ) AS s(uid, oidx, correct)
 JOIN Quiz z ON z.title = 'Quiz noté — mi-parcours'
            AND z.course_id = (SELECT id FROM Course WHERE code = 'MCP150')

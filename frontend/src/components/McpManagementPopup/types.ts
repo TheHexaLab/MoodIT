@@ -79,8 +79,6 @@ export interface McpManagementPopupLabels {
   detailTitle: (dateTime: string) => string;
   /** Titre du bloc score. */
   scoreTitle: string;
-  /** Méta sous le score (forces / à améliorer / sources). */
-  detailMeta: (strengths: number, improvements: number, quiz: number, messages: number) => string;
   /** Libellé de section de la synthèse narrative. */
   summaryLabel: string;
   /** Libellé de section des sous-scores par dimension. */
