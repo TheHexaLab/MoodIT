@@ -42,7 +42,7 @@ class JwtAuthFilterTest {
     ReflectionTestUtils.setField(filter, "authServiceUrl", AUTH_URL);
     ReflectionTestUtils.setField(filter, "permissionServiceUrl", PERMISSION_URL);
     // Par défaut (dev) : le header Bearer est toléré (Bruno / tests API).
-    ReflectionTestUtils.setField(filter, "allowHeaderToken", true);
+    ReflectionTestUtils.setField(filter, "allowLegacyToken", true);
   }
 
   private String validToken(String email) {
@@ -202,10 +202,10 @@ class JwtAuthFilterTest {
 
   @Test
   void headerToken_rejectedWhenHeaderToleranceDisabled() throws Exception {
-    // Prod (allowHeaderToken=false) : un token présenté en header seul est ignoré -> 401,
+    // Prod (allowLegacyToken=false) : un token présenté en header seul est ignoré -> 401,
     // même valide. Seul le cookie compte.
     stubValidate(true, false);
-    ReflectionTestUtils.setField(filter, "allowHeaderToken", false);
+    ReflectionTestUtils.setField(filter, "allowLegacyToken", false);
     MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
     req.addHeader("Authorization", "Bearer " + validToken("header@usherbrooke.ca"));
     MockFilterChain chain = new MockFilterChain();
@@ -220,7 +220,7 @@ class JwtAuthFilterTest {
   void cookieToken_acceptedWhenHeaderToleranceDisabled() throws Exception {
     // Prod : le cookie reste le mécanisme normal, indépendant de la tolérance header.
     stubValidate(true, false);
-    ReflectionTestUtils.setField(filter, "allowHeaderToken", false);
+    ReflectionTestUtils.setField(filter, "allowLegacyToken", false);
     MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
     req.setCookies(new Cookie("moodit_token", validToken("cookie@usherbrooke.ca")));
     MockFilterChain chain = new MockFilterChain();

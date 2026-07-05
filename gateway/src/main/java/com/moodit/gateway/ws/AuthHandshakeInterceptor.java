@@ -1,6 +1,6 @@
 // Handshake WebSocket du gateway : point d'authentification unique du temps réel.
-//   - Récupère le token : cookie moodit_token d'abord (nouveau mécanisme), à défaut la
-//     query ?token= (ancien front, retirée à la fin de la bascule).
+//   - Récupère le token : cookie moodit_token d'abord ; à défaut la query ?token=,
+//     mais uniquement si allowLegacyToken (dev). En prod : cookie-only.
 //   - Validation FORTE via /auth/validate : confirme que le token est encore ACTIF en BD
 //     (révocation / session unique). Le check WS de core ne fait que la signature ; cette
 //     couche comble ce manque au point d'entrée unique.
@@ -34,6 +34,11 @@ public class AuthHandshakeInterceptor implements HandshakeInterceptor {
 
   @Value("${app.auth-service.url}")
   private String authServiceUrl;
+
+  // Tolérance d'un token hors cookie (ici : query ?token=). true en dev, false en prod
+  // (cookie-only). Même propriété que le filtre REST : un seul interrupteur legacy.
+  @Value("${app.auth.allow-legacy-token:true}")
+  private boolean allowLegacyToken;
 
   private final RestClient restClient = RestClient.create();
 
@@ -84,7 +89,8 @@ public class AuthHandshakeInterceptor implements HandshakeInterceptor {
     // Rien à faire après l'upgrade.
   }
 
-  // Token : cookie moodit_token d'abord, à défaut query ?token= (repli le temps de la bascule).
+  // Token : cookie moodit_token d'abord ; à défaut query ?token=, uniquement si
+  // allowLegacyToken (dev). En prod, seul le cookie est retenu.
   private String extractToken(ServerHttpRequest request) {
     if (request instanceof ServletServerHttpRequest servletRequest) {
       Cookie[] cookies = servletRequest.getServletRequest().getCookies();
@@ -98,6 +104,12 @@ public class AuthHandshakeInterceptor implements HandshakeInterceptor {
         }
       }
     }
-    return UriComponentsBuilder.fromUri(request.getURI()).build().getQueryParams().getFirst("token");
+    if (allowLegacyToken) {
+      return UriComponentsBuilder.fromUri(request.getURI())
+          .build()
+          .getQueryParams()
+          .getFirst("token");
+    }
+    return null;
   }
 }

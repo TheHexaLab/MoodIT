@@ -37,11 +37,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   @Value("${app.permission-service.url}")
   private String permissionServiceUrl;
 
-  // Tolérance du token en header Authorization: Bearer (en plus du cookie). true en dev
+  // Tolérance d'un token hors cookie (ici : header Authorization: Bearer). true en dev
   // (Bruno / tests API), false en prod : le navigateur envoie le cookie, seul un client
   // hors-app présenterait un header -> refusé en prod pour un chemin d'auth unique.
-  @Value("${app.auth.allow-header-token:true}")
-  private boolean allowHeaderToken;
+  @Value("${app.auth.allow-legacy-token:true}")
+  private boolean allowLegacyToken;
 
   private final RestClient restClient = RestClient.create();
 
@@ -179,7 +179,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
   // Extraction du token :
   //   1) cookie moodit_token (HttpOnly) — mécanisme unique en prod ;
-  //   2) header Authorization: Bearer — uniquement si allowHeaderToken (dev : Bruno/tests).
+  //   2) header Authorization: Bearer — uniquement si allowLegacyToken (dev : Bruno/tests).
   private String extractToken(HttpServletRequest request) {
     Cookie[] cookies = request.getCookies();
     if (cookies != null) {
@@ -191,7 +191,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
       }
     }
-    if (allowHeaderToken) {
+    if (allowLegacyToken) {
       String authHeader = request.getHeader("Authorization");
       if (authHeader != null && authHeader.startsWith("Bearer ")) {
         return authHeader.substring(7);
