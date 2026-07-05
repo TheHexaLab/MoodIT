@@ -18,7 +18,7 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "prompt", "qType", "qTypeId", "totalScore", "orderIndex", "language", "startCode", "answers", "dragItems", "testCases"})
+@JsonPropertyOrder({"id", "prompt", "qType", "qTypeId", "totalScore", "orderIndex", "language", "startCode", "answers", "dragItems", "groups", "testCases"})
 public class QuestionDTO {
     private Integer id;
     private String prompt;
@@ -31,6 +31,12 @@ public class QuestionDTO {
     private String startCode;
     private List<AnswerDTO> answers;
     private List<DragItemDTO> dragItems;
+    /**
+     * Catégories d'une question d'association (zones de dépôt) = groupes DISTINCTS. Exposé à
+     * l'étudiant (il doit voir les zones), CONTRAIREMENT au groupe correct de CHAQUE item
+     * (DragItemDTO.groupName, masqué en passation pour ne pas divulguer la réponse).
+     */
+    private List<String> groups;
     /**
      * Harnais de test (questions Code). Présent UNIQUEMENT pour l'éditeur enseignant ; en
      * PASSATION on laisse null → omis du JSON pour ne pas divulguer le code des tests.

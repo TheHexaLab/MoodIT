@@ -879,6 +879,9 @@ public class QuizService {
                 .dragItems(question.getDragItems() == null ? List.of()
                         : question.getDragItems().stream()
                         .map(d -> toDragItemDTO(d, includeCorrection)).toList())
+                // Catégories (zones) d'une association : groupes DISTINCTS, exposés à l'étudiant
+                // (les zones de dépôt) — le groupe correct de chaque item reste, lui, masqué.
+                .groups(distinctGroups(question))
                 // Harnais : ÉDITEUR seulement. En passation → null (omis) : code des tests caché.
                 .testCases(includeCorrection && question.getTestCases() != null
                         ? question.getTestCases().stream().map(this::toTestCaseDTO).toList()
@@ -917,5 +920,22 @@ public class QuizService {
                 .correctOrder(includeCorrection ? dragItem.getCorrectOrder() : null)
                 .groupName(includeCorrection ? dragItem.getGroupName() : null)
                 .build();
+    }
+
+    /**
+     * Catégories DISTINCTES (zones de dépôt) d'une association. TRIÉES ALPHABÉTIQUEMENT à dessein :
+     * l'ordre d'apparition des items corrélerait avec l'ordre des items (non mélangés) et révélerait
+     * le mapping item→groupe. Le tri décorrèle l'ordre affiché de la solution.
+     */
+    private static List<String> distinctGroups(Question question) {
+        if (question.getDragItems() == null) {
+            return List.of();
+        }
+        return question.getDragItems().stream()
+                .map(DragItem::getGroupName)
+                .filter(g -> g != null && !g.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
     }
 }

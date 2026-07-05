@@ -159,6 +159,9 @@ function toQuiz(data: QuizDetailResponse): Quiz {
         correctOrder: d.correctOrder,
         groupName: d.groupName,
       })),
+      // Catégories (zones) d'une association : exposées même en passation (le mapping item→groupe
+      // reste masqué). Fallback dérivé des items côté rendu si absent (anciens quiz / éditeur).
+      groups: q.groups,
       // Harnais : présents seulement via /edit (éditeur) ; absents en passation étudiante.
       testCases: q.testCases,
     })),
