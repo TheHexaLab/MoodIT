@@ -425,6 +425,43 @@ class AuthServiceTest {
         .isInstanceOf(InvalidVerificationCodeException.class);
   }
 
+  // ----- validate -----
+
+  @Test
+  void validate_nullActiveTokenHash_returnsFalse_withoutHashing() {
+    // Fix B4 : aucun token actif (jamais connecté / après logout) -> false, sans comparer
+    // contre la chaîne littérale "null".
+    User u = verifiedUser();
+    u.setActiveTokenHash(null);
+    when(jwtService.isTokenValid("jwt-token")).thenReturn(true);
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    assertThat(authService.validate("jwt-token")).isFalse();
+    verify(jwtService, never()).hashToken(anyString(), anyString());
+  }
+
+  @Test
+  void validate_matchingHash_returnsTrue() {
+    User u = verifiedUser();
+    u.setActiveTokenHash("token-hash");
+    when(jwtService.isTokenValid("jwt-token")).thenReturn(true);
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+    when(jwtService.hashToken("jwt-token", "karine.roussel@usherbrooke.ca"))
+        .thenReturn("token-hash");
+
+    assertThat(authService.validate("jwt-token")).isTrue();
+  }
+
+  @Test
+  void validate_invalidSignature_returnsFalse() {
+    when(jwtService.isTokenValid("bad")).thenReturn(false);
+
+    assertThat(authService.validate("bad")).isFalse();
+    verify(userRepository, never()).findByEmail(anyString());
+  }
+
   // ----- verifyDev -----
 
   @Test

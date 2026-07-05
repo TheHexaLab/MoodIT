@@ -8,6 +8,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   private String permissionServiceUrl;
 
   private final RestClient restClient = RestClient.create();
+
+  // Nom du cookie porteur du JWT (aligné avec auth-service AuthCookie.NAME).
+  private static final String TOKEN_COOKIE = "moodit_token";
 
   // Taille max d'un body mis en cache pour transmission au permission-service (garde-fou
   // memoire : on ne bufferise pas un payload geant).
@@ -69,9 +73,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     // Empêche un client d'injecter lui-même l'identité : on neutralise tout X-User-Email entrant.
     HttpServletRequest sanitized = new StrippedHeaderRequest(base, "X-User-Email");
 
-    // Vérifier le header Authorization
-    String authHeader = sanitized.getHeader("Authorization");
-    if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+    // Récupérer le token : cookie moodit_token d'abord (nouveau mécanisme), à défaut le
+    // header Authorization: Bearer (ancien mécanisme — retiré à la fin de la bascule).
+    String token = extractToken(sanitized);
+    if (token == null || token.isBlank()) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       response.getWriter().write("Token manquant");
       return;
@@ -79,7 +84,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     // 1) Validation locale rapide : signature + expiration (rejette les tokens grossiers
     //    sans solliciter l'auth-service).
-    String token = authHeader.substring(7);
     Claims claims;
     try {
       claims =
@@ -98,7 +102,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
           restClient
               .post()
               .uri(authServiceUrl + "/auth/validate")
-              .header("Authorization", authHeader)
+              .header("Authorization", "Bearer " + token)
               .retrieve()
               .body(Boolean.class);
     } catch (Exception e) {
@@ -165,6 +169,27 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       return false;
     }
     return request.getContentLengthLong() <= MAX_CACHED_BODY;
+  }
+
+  // Extraction du token, dans l'ordre de la bascule douce :
+  //   1) cookie moodit_token (HttpOnly, nouveau mécanisme) ;
+  //   2) header Authorization: Bearer (ancien mécanisme, à retirer au nettoyage final).
+  private String extractToken(HttpServletRequest request) {
+    Cookie[] cookies = request.getCookies();
+    if (cookies != null) {
+      for (Cookie cookie : cookies) {
+        if (TOKEN_COOKIE.equals(cookie.getName())
+            && cookie.getValue() != null
+            && !cookie.getValue().isBlank()) {
+          return cookie.getValue();
+        }
+      }
+    }
+    String authHeader = request.getHeader("Authorization");
+    if (authHeader != null && authHeader.startsWith("Bearer ")) {
+      return authHeader.substring(7);
+    }
+    return null;
   }
 
   private SecretKey getSigningKey() {

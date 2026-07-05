@@ -5,10 +5,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.moodit.auth_service.config.AuthCookie;
+import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import com.moodit.auth_service.exception.EmailAlreadyUsedException;
@@ -20,7 +24,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -33,6 +39,8 @@ class AuthControllerTest {
   @Autowired private MockMvc mockMvc;
 
   @MockitoBean private AuthService authService;
+
+  @MockitoBean private AuthCookie authCookie;
 
   private static final String VALID_BODY =
       """
@@ -119,6 +127,23 @@ class AuthControllerTest {
         .andExpect(content().string("false"));
 
     verify(authService, never()).validate(anyString());
+  }
+
+  @Test
+  void verify2FA_success_setsCookie_andKeepsTokenInBody() throws Exception {
+    // Bascule douce : le token doit être posé en cookie ET rester dans le body.
+    when(authService.verify2FA("karine@usherbrooke.ca", "123456"))
+        .thenReturn(
+            new AuthResponse("jwt-token", "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
+    when(authCookie.build("jwt-token"))
+        .thenReturn(ResponseCookie.from("moodit_token", "jwt-token").httpOnly(true).build());
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
+        .andExpect(content().json("{\"token\":\"jwt-token\"}"));
   }
 
   @Test

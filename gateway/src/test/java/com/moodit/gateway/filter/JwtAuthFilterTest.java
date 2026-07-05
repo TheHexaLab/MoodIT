@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -165,6 +166,51 @@ class JwtAuthFilterTest {
     assertThat(forwarded.getHeaders("X-User-Email").hasMoreElements()).isFalse();
     assertThat(java.util.Collections.list(forwarded.getHeaderNames()))
         .doesNotContain("X-User-Email");
+  }
+
+  @Test
+  void validTokenInCookie_passesAndInjectsEmail() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.setCookies(new Cookie("moodit_token", validToken("cookie@usherbrooke.ca")));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("cookie@usherbrooke.ca");
+  }
+
+  @Test
+  void cookieTakesPrecedenceOverHeader() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.setCookies(new Cookie("moodit_token", validToken("cookie@usherbrooke.ca")));
+    req.addHeader("Authorization", "Bearer " + validToken("header@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    // Le cookie prime : l'email injecté vient du token du cookie, pas du header.
+    assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("cookie@usherbrooke.ca");
+  }
+
+  @Test
+  void blankCookie_fallsBackToHeader() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.setCookies(new Cookie("moodit_token", "")); // cookie vide -> ignoré, fallback header
+    req.addHeader("Authorization", "Bearer " + validToken("header@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("header@usherbrooke.ca");
   }
 
   @Test
