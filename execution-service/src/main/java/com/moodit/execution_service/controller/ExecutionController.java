@@ -1,6 +1,8 @@
 package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.dto.EvaluateRequest;
+import com.moodit.execution_service.dto.RunRequest;
+import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.service.ExecutionService;
 
@@ -32,5 +34,11 @@ public class ExecutionController {
     @PostMapping("/evaluate")
     public ResponseEntity<List<TestResult>> evaluate(@Valid @RequestBody EvaluateRequest request) {
         return ResponseEntity.ok(executionService.evaluate(request));
+    }
+
+    /** Exécute le code TEL QUEL (sans harnais) et renvoie sa sortie brute (bouton « play »). */
+    @PostMapping("/run")
+    public ResponseEntity<RunResult> run(@Valid @RequestBody RunRequest request) {
+        return ResponseEntity.ok(executionService.run(request));
     }
 }

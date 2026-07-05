@@ -28,6 +28,19 @@ public class CodeAssembler {
     }
 
     /**
+     * Assemble le code pour une EXÉCUTION SIMPLE (sans harnais) : on lance le programme tel quel et
+     * on renvoie sa sortie. Même périmètre de langages que {@link #assemble} (Python pour l'instant).
+     */
+    public Assembled assembleRun(String language, String studentCode) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        String code = studentCode == null ? "" : studentCode;
+        return switch (lang) {
+            case "python" -> new Assembled("python", List.of(new PistonClient.File("main.py", code)));
+            default -> throw new UnsupportedLanguageException(language);
+        };
+    }
+
+    /**
      * Python : code étudiant, puis harnais enveloppé dans une fonction appelée ; son booléen de
      * retour → exit 0/1, toute exception → exit 1. Le harnais est un CORPS de fonction (cf.
      * harness_template), donc indenté d'un niveau.
