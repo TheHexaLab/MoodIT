@@ -904,11 +904,14 @@ $hc$),
   );
 }
 $sc$,
- $hc$// HARNAIS en JavaScript pour un composant JSX (React).
-// Le composant de l'étudiant (ex. `Composant`) est RENDU EN HTML — équivalent de :
-//   const html = ReactDOMServer.renderToStaticMarkup(<Composant />);
-// Inspecte la chaîne `html`, ou parse-la en DOM (comme une réponse HTML) pour la requêter.
-// Contrat : RENVOIE true (réussi) ; une exception (rendu échoué) vaut échec.
+ $hc$// HARNAIS en JavaScript pour un composant JSX (React). Disponible dans le harnais :
+//   • html          : rendu statique de <Composant /> (sans props) ;
+//   • render(C, p)  : rend un composant avec des props → HTML, ex. render(Composant, { nom: "X" }) ;
+//   • mount(C, p)   : MONTE le composant dans le DOM (interactif) → renvoie le conteneur ;
+//   • click(el) / fireEvent(el, type, init) : simulent un événement AVEC mise à jour de l'état ;
+//   • document, window, React, useState/useEffect/…, et les fonctions définies par l'étudiant.
+// Interactif : const c = mount(Composant); click(c.querySelector("button")); return c.textContent.includes("1");
+// Contrat : RENVOIE true (réussi) ; une exception (transpilation / rendu échoué) vaut échec.
 return html.includes(ATTENDU);
 $hc$),
 ('TSX',
@@ -918,11 +921,14 @@ $hc$),
   );
 }
 $sc$,
- $hc$// HARNAIS en JavaScript pour un composant TSX (React + TypeScript).
-// Le composant de l'étudiant (ex. `Composant`) est RENDU EN HTML — équivalent de :
-//   const html = ReactDOMServer.renderToStaticMarkup(<Composant />);
-// Inspecte la chaîne `html`, ou parse-la en DOM (comme une réponse HTML) pour la requêter.
-// Contrat : RENVOIE true (réussi) ; une exception (rendu échoué) vaut échec.
+ $hc$// HARNAIS en JavaScript pour un composant TSX (React + TypeScript). Disponible dans le harnais :
+//   • html          : rendu statique de <Composant /> (sans props) ;
+//   • render(C, p)  : rend un composant avec des props → HTML, ex. render(Composant, { nom: "X" }) ;
+//   • mount(C, p)   : MONTE le composant dans le DOM (interactif) → renvoie le conteneur ;
+//   • click(el) / fireEvent(el, type, init) : simulent un événement AVEC mise à jour de l'état ;
+//   • document, window, React, useState/useEffect/…, et les fonctions définies par l'étudiant.
+// Interactif : const c = mount(Composant); click(c.querySelector("button")); return c.textContent.includes("1");
+// Contrat : RENVOIE true (réussi) ; une exception (transpilation / rendu échoué) vaut échec.
 return html.includes(ATTENDU);
 $hc$),
 ('JSON',
@@ -1521,6 +1527,84 @@ SELECT NOT EXISTS (SELECT 1 FROM solution WHERE nom = 'Bob');$h$, 1),
 INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
 SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
    AND (SELECT name FROM pragma_table_info('solution')) = 'nom';$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ── Questions vues/markup (HTML, JSX, TSX) — ordre 22-24. HTML : harnais JS sur `doc` (DOM parsé
+-- via parseur embarqué) ; JSX/TSX : composant rendu en HTML (`html`) via React/Babel embarqués.
+-- Validé end-to-end.
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('HTML', 'Crée une page avec un titre h1 contenant « Bonjour » et un lien a vers https://exemple.com.', 22,
+    $sc$<!DOCTYPE html>
+<html lang="fr">
+  <head><meta charset="utf-8" /><title></title></head>
+  <body>
+    <!-- à compléter : un <h1> et un <a> -->
+  </body>
+</html>
+$sc$),
+   ('JSX', 'Complète Composant pour rendre un h1 contenant « Bonjour ».', 23,
+    $sc$function Composant() {
+  return (
+    <div>{/* à compléter */}</div>
+  );
+}
+$sc$),
+   ('TSX', 'Complète Composant (TSX) pour rendre, dans un span, la somme de 2 et 3.', 24,
+    $sc$function Composant(): JSX.Element {
+  return (
+    <div>{/* à compléter */}</div>
+  );
+}
+$sc$)
+) AS v(lang, prompt, oidx, start_code);
+
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (22, 'titre h1 = Bonjour',    $h$return doc.querySelector('h1')?.textContent.trim() === 'Bonjour';$h$, 1),
+   (22, 'lien vers exemple.com', $h$return doc.querySelector('a')?.getAttribute('href') === 'https://exemple.com';$h$, 1),
+   (23, 'rend h1 Bonjour',       $h$return html.includes('<h1>Bonjour</h1>');$h$, 1),
+   (24, 'somme dans span',       $h$return html.includes('<span>5</span>');$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ── Question INTERACTIVE (compteur React) — ordre 25. Montre mount()/click() : le harnais monte le
+-- composant dans un DOM (happy-dom), clique et vérifie que l'état React a changé. Validé end-to-end.
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('JSX', 'Interactif : écris Composant, un bouton affichant un compteur (départ 0) incrémenté à chaque clic.', 25,
+    $sc$function Composant() {
+  // Astuce : const [n, setN] = React.useState(0);
+  return (
+    <button>{/* à compléter : afficher le compteur, +1 au clic */}</button>
+  );
+}
+$sc$)
+) AS v(lang, prompt, oidx, start_code);
+
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (25, 'départ à 0',         $h$const c = mount(Composant);
+return c.querySelector('button').textContent.trim() === '0';$h$, 1),
+   (25, 'incrémente au clic', $h$const c = mount(Composant);
+const btn = c.querySelector('button');
+click(btn);
+if (btn.textContent.trim() !== '1') return false;
+click(btn);
+return btn.textContent.trim() === '2';$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'

@@ -142,7 +142,8 @@ services:
   # de langages sont installés dans le volume piston_data (persistés entre redémarrages). Exposé
   # UNIQUEMENT sur le réseau interne — jamais au gateway.
   piston:
-    image: ghcr.io/engineer-man/piston:latest
+    # Image Piston patchée (limite body-parser relevée pour les bundles JS HTML/JSX/TSX). cf. piston/Dockerfile
+    build: ./piston
     container_name: moodit_piston
     privileged: true
     volumes:

@@ -1,10 +1,17 @@
 package com.moodit.execution_service.assembly;
 
 import com.moodit.execution_service.piston.PistonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -13,12 +20,33 @@ import java.util.stream.Collectors;
  * de retour. Le contrat du harnais (le corps RENVOIE un booléen ; une exception/panic vaut échec)
  * est enveloppé ici, PAR LANGAGE, en miroir des {@code harness_template} semés en base.
  *
- * <p>Langages exécutables pris en charge : Python, JavaScript, TypeScript, Bash, PHP, Go, Rust, C,
- * C++, C#, Java. Les langages « données/vues » (HTML, JSON, JSX, TSX) et SQL relèvent d'un autre
- * contrat (hôte JS / comparaison de sortie) et ne sont pas encore gérés ici.
+ * <p>Langages gérés (les 16) : Python, JavaScript, TypeScript, Bash, PHP, Go, Rust, C, C++, C#,
+ * Java, JSON, SQL, HTML, JSX, TSX. Les langages « données/vues » sont validés par un harnais JS via
+ * des libs EMBARQUÉES injectées dans la soumission : HTML → parseur DOM ({@code htmlparser.js},
+ * {@code doc}) ; JSX/TSX → Babel + React + ReactDOMServer ({@code react-runtime.js}, rendu en
+ * {@code html}). SQL → vue {@code solution} + verdict sur la sortie (cf. ExecutionService).
  */
 @Component
 public class CodeAssembler {
+
+    /** Bundles JS embarqués (cf. Dockerfile, étape jsvendor), chargés une fois puis mis en cache. */
+    private final Path vendorDir;
+    private final Map<String, String> vendorCache = new ConcurrentHashMap<>();
+
+    public CodeAssembler(@Value("${app.vendor-dir:/app/vendor}") String vendorDir) {
+        this.vendorDir = Path.of(vendorDir);
+    }
+
+    /** Contenu d'un bundle vendor (ex. htmlparser.js), lu depuis l'image et mémorisé. */
+    private String vendor(String name) {
+        return vendorCache.computeIfAbsent(name, n -> {
+            try {
+                return Files.readString(vendorDir.resolve(n));
+            } catch (IOException e) {
+                throw new UncheckedIOException("Bundle d'exécution introuvable : " + n, e);
+            }
+        });
+    }
 
     /** Programme prêt pour Piston : langage Piston + fichiers. */
     public record Assembled(String pistonLanguage, List<PistonClient.File> files) {}
@@ -40,6 +68,8 @@ public class CodeAssembler {
             case "java" -> assembleJava(code, harness);
             case "json" -> assembleJson(code, harness);
             case "sql" -> assembleSql(code, harness);
+            case "html" -> assembleHtml(code, harness);
+            case "jsx", "tsx" -> assembleJsx(code, harness);
             default -> throw new UnsupportedLanguageException(language);
         };
     }
@@ -392,5 +422,59 @@ public class CodeAssembler {
                 + harnessCode
                 + "\n";
         return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program)));
+    }
+
+    // ── HTML ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * HTML : markup non exécutable, validé par un harnais JavaScript (cf. harness_language_id). Le
+     * HTML de l'étudiant est parsé en DOM via le bundle embarqué {@code htmlparser.js} et fourni au
+     * harnais comme {@code doc} (API façon DOM : {@code querySelector}, {@code textContent},
+     * {@code getAttribute}…). Le harnais (corps JS) interroge {@code doc} et renvoie un booléen.
+     */
+    private Assembled assembleHtml(String studentHtml, String harnessCode) {
+        String main = "const __moodit_fs = require('fs');\n"
+                + "const { parse: __moodit_parse } = require('./htmlparser.js');\n"
+                + "let doc;\n"
+                + "try {\n"
+                + "  doc = __moodit_parse(__moodit_fs.readFileSync(__dirname + '/submission.html', 'utf8'));\n"
+                + "} catch (__moodit_e) {\n"
+                + "  console.error('HTML illisible : ' + (__moodit_e && __moodit_e.message ? __moodit_e.message : String(__moodit_e)));\n"
+                + "  process.exit(1);\n"
+                + "}\n"
+                + "function __moodit_harness() {\n"
+                + harnessCode
+                + "\n}\n"
+                + "try {\n"
+                + "  const __moodit_result = __moodit_harness();\n"
+                + "  process.exit(__moodit_result ? 0 : 1);\n"
+                + "} catch (__moodit_e) {\n"
+                + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
+                + "  process.exit(1);\n"
+                + "}\n";
+        return new Assembled("javascript", List.of(
+                new PistonClient.File("main.js", main),
+                new PistonClient.File("htmlparser.js", vendor("htmlparser.js")),
+                new PistonClient.File("submission.html", studentHtml)));
+    }
+
+    // ── JSX / TSX (React) ────────────────────────────────────────────────────────
+
+    /**
+     * JSX/TSX : composant React validé par un harnais JavaScript. Le code étudiant est TRANSPILÉ
+     * (Babel embarqué, presets react + typescript), le composant {@code Composant} est instancié et
+     * RENDU en HTML statique (ReactDOMServer embarqué) → fourni au harnais comme la chaîne
+     * {@code html}. Le harnais (corps JS) inspecte {@code html} et renvoie un booléen. Un rendu qui
+     * échoue (transpilation, composant manquant, exception au rendu) vaut échec.
+     */
+    private Assembled assembleJsx(String studentCode, String harnessCode) {
+        // Le runner (jsx-main.js, fichier fixe embarqué) transpile le composant, monte un DOM
+        // (happy-dom) et exécute le harnais dans la même portée. Le harnais reçoit ainsi html,
+        // render/mount/click/fireEvent, document/window, React + hooks, et les fonctions étudiant.
+        return new Assembled("javascript", List.of(
+                new PistonClient.File("main.js", vendor("jsx-main.js")),
+                new PistonClient.File("react-runtime.js", vendor("react-runtime.js")),
+                new PistonClient.File("component.tsx", studentCode),
+                new PistonClient.File("harness.js", harnessCode)));
     }
 }

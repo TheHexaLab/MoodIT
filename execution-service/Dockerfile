@@ -1,3 +1,17 @@
+# JS vendor stage : bundle en fichiers UNIQUES les libs JS injectées dans le sandbox Piston pour
+# les langages « données/vues » (HTML → parseur DOM). Piston n'a ni npm ni réseau : on embarque
+# ces bundles dans l'image et l'assembleur les joint à la soumission.
+FROM node:20-alpine AS jsvendor
+WORKDIR /vendor
+RUN npm install node-html-parser@6.1.13 react@18.3.1 react-dom@18.3.1 @babel/standalone@7.24.7 happy-dom@14.12.3 esbuild@0.21.5
+# HTML : node-html-parser expose parse()/querySelector()/textContent/getAttribute (API façon DOM).
+RUN printf "module.exports = require('node-html-parser');" > html-entry.js \
+ && npx esbuild html-entry.js --bundle --minify --platform=node --format=cjs --outfile=/out/htmlparser.js
+# JSX/TSX : React + ReactDOMServer (rendu statique) + ReactDOMClient + act + happy-dom (rendu
+# INTERACTIF : DOM, événements, état) + Babel standalone (transpilation JSX/TSX).
+RUN printf "module.exports={React:require('react'),ReactDOMServer:require('react-dom/server'),ReactDOMClient:require('react-dom/client'),act:require('react-dom/test-utils').act,HappyDOM:require('happy-dom'),Babel:require('@babel/standalone')};" > react-entry.js \
+ && npx esbuild react-entry.js --bundle --minify --platform=node --format=cjs --outfile=/out/react-runtime.js
+
 # Build stage
 FROM eclipse-temurin:25-jdk AS builder
 WORKDIR /app
@@ -13,5 +27,8 @@ RUN ./gradlew bootJar --no-daemon
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar
+COPY --from=jsvendor /out /app/vendor
+# Runner JSX/TSX fixe (injecté tel quel par CodeAssembler).
+COPY vendor/jsx-main.js /app/vendor/jsx-main.js
 EXPOSE 8084
 ENTRYPOINT ["java", "-jar", "app.jar"]
