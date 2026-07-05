@@ -248,12 +248,19 @@ public class AuthService {
       return false;
     }
 
+    // Aucun token actif (jamais connecté, ou révoqué au logout) : rien à comparer.
+    // On rejette explicitement plutôt que de comparer contre la chaîne littérale "null".
+    String activeTokenHash = user.getActiveTokenHash();
+    if (activeTokenHash == null) {
+      return false;
+    }
+
     // Vérifier le hash du token. Comparaison à temps constant pour ne pas révéler,
     // par le temps de réponse, à quel préfixe deux hash diffèrent.
     String hashedToken = jwtService.hashToken(token, email);
     return MessageDigest.isEqual(
         hashedToken.getBytes(StandardCharsets.UTF_8),
-        String.valueOf(user.getActiveTokenHash()).getBytes(StandardCharsets.UTF_8));
+        activeTokenHash.getBytes(StandardCharsets.UTF_8));
   }
 
   // Vérification manuelle pour le dev : promeut l'inscription en attente vers un vrai compte

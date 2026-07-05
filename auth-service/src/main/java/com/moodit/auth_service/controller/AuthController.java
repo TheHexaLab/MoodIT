@@ -7,9 +7,12 @@ import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.dto.ResendCodeRequest;
 import com.moodit.auth_service.dto.VerifyCodeRequest;
+import com.moodit.auth_service.config.AuthCookie;
 import com.moodit.auth_service.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +24,7 @@ import java.util.Map;
 public class AuthController {
 
   private final AuthService authService;
+  private final AuthCookie authCookie;
 
   @PostMapping("/register")
   public ResponseEntity<Map<String, String>> register(@Valid @RequestBody RegisterRequest request) {
@@ -50,7 +54,12 @@ public class AuthController {
 
   @PostMapping("/verify-2fa")
   public ResponseEntity<AuthResponse> verify2FA(@Valid @RequestBody VerifyCodeRequest req) {
-    return ResponseEntity.ok(authService.verify2FA(req.getEmail(), req.getCode()));
+    AuthResponse body = authService.verify2FA(req.getEmail(), req.getCode());
+    // Bascule douce : on pose le token en cookie HttpOnly (nouveau mecanisme) ET on le
+    // laisse dans le corps (ancien mecanisme, lu par le front pas encore migre). Le champ
+    // token du body sera retire une fois le front bascule (etape de nettoyage).
+    ResponseCookie cookie = authCookie.build(body.getToken());
+    return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body);
   }
 
   @PostMapping("/resend-code")
