@@ -15,7 +15,7 @@ import java.time.Instant;
 public class AttemptSummaryDTO {
     private Integer id;
     private Integer attemptNo;
-    private Integer earned;
-    private Integer max;
+    private Double earned;
+    private Double max;
     private Instant submittedAt;
 }

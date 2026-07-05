@@ -45,7 +45,8 @@ export function QuizSummary({
   const isPending = (questionId: number): boolean =>
     result.questions.find((q) => q.questionId === questionId)?.tests == null;
   const anyPending = questions.some((q) => q.qType === 'coding' && isPending(q.id));
-  const percent = result.max > 0 ? Math.round((result.earned / result.max) * 100) : 0;
+  // Pourcentage global au dixième près (format X.X).
+  const percent = result.max > 0 ? Math.round((result.earned / result.max) * 1000) / 10 : 0;
   // Palier global (rouge < 50 % / jaune 50-77 % / vert ≥ 78 %) pour l'en-tête. Neutre tant que
   // la validation du code n'est pas finie (score non définitif).
   const overallTone = scoreTone(result.earned, result.max);
@@ -58,7 +59,7 @@ export function QuizSummary({
   const perfectCount = result.questions.filter((q) => q.max > 0 && q.earned >= q.max).length;
   // Meilleur score parmi les tentatives (affiché quand il y en a plusieurs).
   const bestPercent = attempts.reduce(
-    (best, a) => Math.max(best, a.max > 0 ? Math.round((a.earned / a.max) * 100) : 0),
+    (best, a) => Math.max(best, a.max > 0 ? Math.round((a.earned / a.max) * 1000) / 10 : 0),
     0
   );
 

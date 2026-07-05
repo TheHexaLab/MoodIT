@@ -176,7 +176,7 @@ CREATE TABLE Question(
    language_id INTEGER ,
    start_code TEXT ,
    order_index INTEGER,
-   total_score INTEGER NOT NULL,
+   total_score NUMERIC(4,1) NOT NULL,   -- score au dixième près (format X.X)
    q_type_id INTEGER NOT NULL,
    quiz_id INTEGER NOT NULL,
    PRIMARY KEY(id),

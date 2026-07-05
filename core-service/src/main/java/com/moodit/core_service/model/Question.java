@@ -29,7 +29,7 @@ public class Question {
     private Integer orderIndex;
 
     @Column(name = "total_score", nullable = false)
-    private Integer totalScore;
+    private Double totalScore;
 
     @ManyToOne
     @JoinColumn(name = "q_type_id", nullable = false)

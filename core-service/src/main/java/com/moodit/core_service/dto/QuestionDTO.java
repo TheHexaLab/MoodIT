@@ -24,7 +24,7 @@ public class QuestionDTO {
     private String prompt;
     private String qType;
     private Integer qTypeId;
-    private Integer totalScore;
+    private Double totalScore;
     private Integer orderIndex;
     /** Langage d'exécution (questions Code) : light (id+name) en lecture, id lu à l'écriture. */
     private LanguageDTO language;

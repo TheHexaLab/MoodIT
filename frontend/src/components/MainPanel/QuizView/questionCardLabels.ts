@@ -1,3 +1,5 @@
+import { formatScore } from './formatScore';
+
 /**
  * Libellés de la carte de question (en-tête : barème / score). Passés via `labels`
  * (en Partial) ; les champs omis prennent les défauts.
@@ -14,6 +16,6 @@ export interface QuestionCardLabels {
 /** Textes par défaut (FR) de la carte de question. */
 export const defaultQuestionCardLabels: QuestionCardLabels = {
   questionLabel: (index) => `Question ${index}`,
-  points: (value) => `${value} pts`,
-  score: (earned, max) => `${earned} / ${max} pts`,
+  points: (value) => `${formatScore(value)} pts`,
+  score: (earned, max) => `${formatScore(earned)} / ${formatScore(max)} pts`,
 };

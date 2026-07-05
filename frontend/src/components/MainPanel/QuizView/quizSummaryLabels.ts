@@ -1,3 +1,5 @@
+import { formatScore } from './formatScore';
+
 /**
  * Libellés de l'écran récapitulatif. Passés via `labels` (en Partial) ; les champs
  * omis prennent les défauts. Les formatters gèrent les pluriels.
@@ -38,15 +40,15 @@ export const defaultQuizSummaryLabels: QuizSummaryLabels = {
   validating: 'Validation en cours…',
   validatingSub: 'Les questions de code sont en cours d’évaluation…',
   rowPending: 'En attente…',
-  percent: (value) => `${value} %`,
+  percent: (value) => `${formatScore(value)} %`,
   summarySub: (earned, max, perfect, total) => {
     const s = perfect > 1 ? 's' : '';
-    return `${earned} / ${max} points · ${perfect} question${s} parfaite${s} sur ${total}`;
+    return `${formatScore(earned)} / ${formatScore(max)} points · ${perfect} question${s} parfaite${s} sur ${total}`;
   },
   detailTitle: 'Détail par question',
   rowText: (title) => title,
-  rowScore: (earned, max) => `${earned} / ${max}`,
-  bestScore: (percent) => `Meilleur score : ${percent} %`,
+  rowScore: (earned, max) => `${formatScore(earned)} / ${formatScore(max)}`,
+  bestScore: (percent) => `Meilleur score : ${formatScore(percent)} %`,
   attemptsLabel: 'Tentatives',
-  attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${earned}/${max}`,
+  attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${formatScore(earned)}/${formatScore(max)}`,
 };

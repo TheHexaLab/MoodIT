@@ -23,7 +23,7 @@ final class CodeGrading {
     static QuestionResultDTO pending(Question question) {
         return QuestionResultDTO.builder()
                 .questionId(question.getId())
-                .earned(0)
+                .earned(0.0)
                 .max(question.getTotalScore())
                 .tests(null)
                 .build();
@@ -48,8 +48,9 @@ final class CodeGrading {
             if (passed) passedWeight += weight;
             tests.add(new CodingTestResultDTO(tc.getName(), passed, weight));
         }
-        int total = question.getTotalScore() != null ? question.getTotalScore() : 0;
-        int earned = totalWeight == 0 ? 0 : Math.round((float) total * passedWeight / totalWeight);
+        double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;
+        // Score au dixième près : total × (poids réussis / poids total).
+        double earned = totalWeight == 0 ? 0.0 : Math.round(total * passedWeight / totalWeight * 10.0) / 10.0;
         return QuestionResultDTO.builder()
                 .questionId(question.getId())
                 .earned(earned)

@@ -406,8 +406,8 @@ public class QuizService {
                     .map(Question::getId)
                     .collect(Collectors.toSet());
             QuizResultDTO result = computeAttemptResult(attempt);
-            int earned = 0;
-            int max = 0;
+            double earned = 0;
+            double max = 0;
             for (QuestionResultDTO qr : result.getQuestions()) {
                 if (codeQuestionIds.contains(qr.getQuestionId())) continue;
                 earned += qr.getEarned();
@@ -463,8 +463,8 @@ public class QuizService {
                 .toList();
         return QuizResultDTO.builder()
                 .quizId(quiz.getId())
-                .earned(results.stream().mapToInt(QuestionResultDTO::getEarned).sum())
-                .max(results.stream().mapToInt(QuestionResultDTO::getMax).sum())
+                .earned(round1(results.stream().mapToDouble(QuestionResultDTO::getEarned).sum()))
+                .max(round1(results.stream().mapToDouble(QuestionResultDTO::getMax).sum()))
                 .questions(results)
                 .build();
     }
@@ -550,8 +550,8 @@ public class QuizService {
                 ? answer.getAnswerIds() : List.of();
         Set<Integer> correctSet = new HashSet<>(correctIds);
 
-        int total = question.getTotalScore();
-        int earned;
+        double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;
+        double earned;
         if ("multiple_choice".equals(slug)) {
             long good = selectedIds.stream().filter(correctSet::contains).count();
             long bad = selectedIds.stream().filter(id -> !correctSet.contains(id)).count();
@@ -560,7 +560,7 @@ public class QuizService {
         } else {
             Set<Integer> selectedSet = new HashSet<>(selectedIds);
             boolean exact = selectedSet.equals(correctSet);
-            earned = exact ? total : 0;
+            earned = exact ? total : 0.0;
         }
 
         return QuestionResultDTO.builder()
@@ -618,9 +618,14 @@ public class QuizService {
                 .build();
     }
 
-    /** Score proportionnel borné, arrondi : total × clamp(ratio, 0, 1). */
-    private int scaled(int total, double ratio) {
-        return (int) Math.round(total * Math.max(0, Math.min(1, ratio)));
+    /** Score proportionnel borné, arrondi au DIXIÈME : total × clamp(ratio, 0, 1). */
+    private double scaled(double total, double ratio) {
+        return round1(total * Math.max(0, Math.min(1, ratio)));
+    }
+
+    /** Arrondi au dixième (les scores de question sont au format X.X). */
+    private static double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     // ── Construction d'entités (écriture) ────────────────────────────────────────
@@ -644,7 +649,7 @@ public class QuizService {
             q.setPrompt(qd.getPrompt());
             q.setStartCode(qd.getStartCode());
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
-            q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
+            q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
             q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
@@ -672,7 +677,7 @@ public class QuizService {
         q.setPrompt(qd.getPrompt());
         q.setStartCode(qd.getStartCode());
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
-        q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
+        q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));
         q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());

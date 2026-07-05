@@ -40,7 +40,9 @@ function codingResult(
 ): QuestionResult {
   const totalWeight = tests.reduce((sum, t) => sum + t.weight, 0);
   const passedWeight = tests.reduce((sum, t) => sum + (t.passed ? t.weight : 0), 0);
-  const earned = totalWeight === 0 ? 0 : Math.round((question.totalScore * passedWeight) / totalWeight);
+  // Score au dixième près (format X.X), comme le backend.
+  const earned =
+    totalWeight === 0 ? 0 : Math.round((question.totalScore * passedWeight) / totalWeight * 10) / 10;
   return { questionId: question.id, earned, max: question.totalScore, tests };
 }
 
