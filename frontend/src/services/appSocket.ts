@@ -25,6 +25,11 @@ import {
   type McpResponseSummary,
   type McpSocket,
 } from '../components/McpManagementPopup/types.ts';
+import {
+  type IncomingQuizGradeHandlers,
+  type QuizGradingSocket,
+} from '../components/MainPanel/QuizView/quizAttempt';
+import { type QuestionResult } from '../components/MainPanel/QuizView/quizAttempt';
 
 /**
  * SCAFFOLD du vrai client WebSocket (à finir le jour du branchement temps réel).
@@ -79,7 +84,8 @@ type ServerEvent =
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
   | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
   | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string }
-  | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string };
+  | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string }
+  | { type: 'quiz:code-graded'; userId: number; attemptId: number; questions: QuestionResult[] };
 
 export interface AppSocket {
   channels: ChannelSocket;
@@ -87,6 +93,7 @@ export interface AppSocket {
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
   mcp: McpSocket;
+  quizGrading: QuizGradingSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -126,6 +133,9 @@ export function createAppSocket(
   const courseSubs = new Map<number, IncomingCourseHandlers>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
+  // Correction de code (scope user, room "user:<id>") : Map SÉPARÉE de programSubs pour que
+  // QuizView et le menu Programmes puissent s'abonner au même scope sans se piétiner.
+  const quizGradeSubs = new Map<number, IncomingQuizGradeHandlers>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -148,6 +158,7 @@ export function createAppSocket(
       for (const programId of courseSubs.keys()) send({ type: 'join', scope: 'program', id: programId });
       for (const userId of programSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
       for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
+      for (const userId of quizGradeSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
       // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
@@ -229,6 +240,9 @@ export function createAppSocket(
         case 'mcp:analysis-progress':
           mcpSubs.get(data.courseId)?.onAnalysisProgress?.(data.userId, data.step);
           break;
+        case 'quiz:code-graded':
+          quizGradeSubs.get(data.userId)?.onCodeGraded(data.attemptId, data.questions);
+          break;
       }
     };
 
@@ -292,6 +306,17 @@ export function createAppSocket(
         return () => {
           mcpSubs.delete(courseId);
           send({ type: 'leave', scope: 'mcp', id: courseId });
+        };
+      },
+    },
+    quizGrading: {
+      subscribe(userId, handlers) {
+        quizGradeSubs.set(userId, handlers);
+        send({ type: 'join', scope: 'user', id: userId });
+        return () => {
+          quizGradeSubs.delete(userId);
+          // Pas de 'leave' : la room "user" est aussi tenue par l'abonnement Programmes
+          // (toujours actif tant que connecté) — envoyer leave le couperait.
         };
       },
     },

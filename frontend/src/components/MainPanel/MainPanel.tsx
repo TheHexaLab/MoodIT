@@ -30,6 +30,7 @@ import {
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type SubmitQuizHandler,
+  type SubscribeCodeGrading,
 } from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
@@ -87,6 +88,7 @@ interface MainPanelProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
+  onSubscribeCodeGrading?: SubscribeCodeGrading;
   /** Bump à chaque mise à jour de quiz : remonte la vue de quiz ouverte (rechargement). */
   quizRefreshKey?: number;
   /** Le quiz ouvert a été modifié à distance → bannière de rechargement. */
@@ -130,6 +132,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  onSubscribeCodeGrading,
   quizRefreshKey = 0,
   quizStale = false,
   onReloadStale,
@@ -196,6 +199,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onFetchAttempts={onFetchAttempts}
             onFetchAttemptResult={onFetchAttemptResult}
             onSubmitQuiz={onSubmitQuiz}
+            onSubscribeCodeGrading={onSubscribeCodeGrading}
             staleNotice={quizStale}
             onReloadStale={onReloadStale}
           />

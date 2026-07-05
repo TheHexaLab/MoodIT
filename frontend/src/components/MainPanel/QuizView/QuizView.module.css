@@ -378,6 +378,28 @@
     font-weight: 800;
     line-height: 1;
 }
+/* Palier global (rouge < 50 % / jaune 50-77 % / vert ≥ 78 %) : pastille d'en-tête + score. */
+.headGood {
+    background: var(--badge-success-bg);
+    color: var(--badge-success-fg);
+}
+.headWarn {
+    background: var(--badge-warn-bg);
+    color: var(--badge-warn-fg);
+}
+.headBad {
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
+}
+.scoreGood {
+    color: var(--badge-success-fg);
+}
+.scoreWarn {
+    color: var(--badge-warn-fg);
+}
+.scoreBad {
+    color: var(--badge-danger-fg);
+}
 
 .summarySub {
     color: var(--text-muted);

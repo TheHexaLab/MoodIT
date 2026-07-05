@@ -61,9 +61,9 @@ function PointsPill({
     return <span className={styles.points}>{labels.points(question.totalScore)}</span>;
   }
   const toneClass = {
-    full: styles.pointsFull,
-    zero: styles.pointsZero,
-    partial: styles.pointsPartial,
+    good: styles.pointsFull,
+    warn: styles.pointsPartial,
+    bad: styles.pointsZero,
   }[scoreTone(result.earned, result.max)];
   return (
     <span className={[styles.points, toneClass].join(' ')}>

@@ -44,6 +44,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
+import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
@@ -180,6 +181,14 @@ export default function Dashboard() {
       },
     });
   }, [ws, currentUser.id]);
+
+  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
+  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
+  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
+    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
+    [ws, currentUser.id]
+  );
+
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
   // le programme correspondant ; le loader pilote loading/erreur.
   const handleFetchCourses = useCallback(async (programId: number) => {
@@ -707,6 +716,7 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        onSubscribeCodeGrading={subscribeCodeGrading}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}

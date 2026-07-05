@@ -13,6 +13,7 @@ import {
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type SubmitQuizHandler,
+  type SubscribeCodeGrading,
   isAnswered,
 } from './quizAttempt';
 import { useQuizAttempt } from './useQuizAttempt';
@@ -41,6 +42,8 @@ interface QuizViewProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
+  /** Abonnement à la correction async des questions Code (WS) → live-update des verdicts. */
+  onSubscribeCodeGrading?: SubscribeCodeGrading;
   /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
   staleNotice?: boolean;
   /** Efface la bannière « quiz modifié » (après rechargement ou rejet). */
@@ -62,6 +65,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  onSubscribeCodeGrading,
   staleNotice = false,
   onReloadStale,
   labels,
@@ -76,6 +80,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchAttempts,
     onFetchAttemptResult,
     onSubmitQuiz,
+    onSubscribeCodeGrading,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
   });

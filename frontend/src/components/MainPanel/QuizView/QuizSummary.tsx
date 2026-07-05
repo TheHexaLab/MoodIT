@@ -2,10 +2,12 @@ import React from 'react';
 import styles from './QuizView.module.css';
 import { Check } from '../../../assets/Check';
 import { X } from '../../../assets/X';
+import { AlertCircle } from '../../../assets/AlertCircle';
 import { Chevron } from '../../../assets/Chevron';
 import { QUESTION_TYPE_LABELS, type Quiz } from '../../../types/domain';
 import { type AttemptSummary, type QuizResult } from './quizAttempt';
 import { scoreTone, type ScoreTone } from './scoreTone';
+import { Spinner } from '../../Spinner/Spinner';
 import { defaultQuizSummaryLabels, type QuizSummaryLabels } from './quizSummaryLabels';
 
 interface QuizSummaryProps {
@@ -38,7 +40,21 @@ export function QuizSummary({
 }: QuizSummaryProps): React.ReactElement {
   const t = { ...defaultQuizSummaryLabels, ...labels };
   const questions = quiz.questions ?? [];
+  // Une question Code sans verdict (tests null) = correction async pas encore terminée : on
+  // affiche « en attente », PAS un échec, et le score global reste « en validation ».
+  const isPending = (questionId: number): boolean =>
+    result.questions.find((q) => q.questionId === questionId)?.tests == null;
+  const anyPending = questions.some((q) => q.qType === 'coding' && isPending(q.id));
   const percent = result.max > 0 ? Math.round((result.earned / result.max) * 100) : 0;
+  // Palier global (rouge < 50 % / jaune 50-77 % / vert ≥ 78 %) pour l'en-tête. Neutre tant que
+  // la validation du code n'est pas finie (score non définitif).
+  const overallTone = scoreTone(result.earned, result.max);
+  const headToneClass = anyPending
+    ? ''
+    : { good: styles.headGood, warn: styles.headWarn, bad: styles.headBad }[overallTone];
+  const scoreToneClass = anyPending
+    ? ''
+    : { good: styles.scoreGood, warn: styles.scoreWarn, bad: styles.scoreBad }[overallTone];
   const perfectCount = result.questions.filter((q) => q.max > 0 && q.earned >= q.max).length;
   // Meilleur score parmi les tentatives (affiché quand il y en a plusieurs).
   const bestPercent = attempts.reduce(
@@ -49,13 +65,25 @@ export function QuizSummary({
   return (
     <article className={styles.card}>
       <div className={styles.summaryHead}>
-        <span className={styles.summaryCheck}>
-          <Check width={28} height={28} />
+        <span className={[styles.summaryCheck, headToneClass].filter(Boolean).join(' ')}>
+          {anyPending || overallTone === 'good' ? (
+            <Check width={28} height={28} />
+          ) : overallTone === 'warn' ? (
+            <AlertCircle width={28} height={28} />
+          ) : (
+            <X width={26} height={26} />
+          )}
         </span>
-        <h2 className={styles.summaryTitle}>{t.completedTitle(quiz.title)}</h2>
-        <div className={styles.summaryScore}>{t.percent(percent)}</div>
+        <h2 className={styles.summaryTitle}>
+          {anyPending ? t.submittedTitle(quiz.title) : t.completedTitle(quiz.title)}
+        </h2>
+        <div className={[styles.summaryScore, scoreToneClass].filter(Boolean).join(' ')}>
+          {anyPending ? '-' : t.percent(percent)}
+        </div>
         <div className={styles.summarySub}>
-          {t.summarySub(result.earned, result.max, perfectCount, questions.length)}
+          {anyPending
+            ? t.validatingSub
+            : t.summarySub(result.earned, result.max, perfectCount, questions.length)}
         </div>
         {attempts.length > 1 && (
           <div className={styles.summarySub}>{t.bestScore(bestPercent)}</div>
@@ -91,7 +119,8 @@ export function QuizSummary({
       <div className={styles.summaryList}>
         {questions.map((question, index) => {
           const qResult = result.questions.find((r) => r.questionId === question.id);
-          const tone = qResult ? scoreTone(qResult.earned, qResult.max) : 'zero';
+          const pending = question.qType === 'coding' && isPending(question.id);
+          const tone = qResult ? scoreTone(qResult.earned, qResult.max) : 'bad';
           const title = firstLine(question.prompt);
           return (
             <button
@@ -100,11 +129,19 @@ export function QuizSummary({
               className={styles.summaryRow}
               onClick={() => onReview(index)}
             >
-              <StatusDot tone={tone} />
+              {pending ? (
+                <span className={styles.summaryRowIcon}>
+                  <Spinner tone="current" size={14} />
+                </span>
+              ) : (
+                <StatusDot tone={tone} />
+              )}
               <span className={styles.badge}>{QUESTION_TYPE_LABELS[question.qType]}</span>
               <span className={styles.summaryRowText}>{t.rowText(title)}</span>
               <span className={styles.summaryRowScore}>
-                {t.rowScore(qResult?.earned ?? 0, qResult?.max ?? question.totalScore)}
+                {pending
+                  ? t.rowPending
+                  : t.rowScore(qResult?.earned ?? 0, qResult?.max ?? question.totalScore)}
               </span>
               <span className={styles.summaryRowChevron}>
                 <Chevron width={16} height={16} style={{ transform: 'rotate(90deg)' }} />
@@ -119,21 +156,25 @@ export function QuizSummary({
 
 /** Icône d'état d'une ligne : ✓ (parfait) / ✗ (nul) / ◐ (partiel). */
 function StatusDot({ tone }: { tone: ScoreTone }): React.ReactElement {
-  if (tone === 'full') {
+  if (tone === 'good') {
     return (
       <span className={[styles.summaryRowIcon, styles.pointsFull].join(' ')}>
         <Check width={14} height={14} />
       </span>
     );
   }
-  if (tone === 'zero') {
+  if (tone === 'bad') {
     return (
       <span className={[styles.summaryRowIcon, styles.pointsZero].join(' ')}>
         <X width={12} height={12} />
       </span>
     );
   }
-  return <span className={[styles.summaryRowIcon, styles.pointsPartial].join(' ')}>◐</span>;
+  return (
+    <span className={[styles.summaryRowIcon, styles.pointsPartial].join(' ')}>
+      <AlertCircle width={14} height={14} />
+    </span>
+  );
 }
 
 /** Première ligne « parlante » du prompt Markdown (titre court de la question). */

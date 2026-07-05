@@ -3,6 +3,7 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { CodeEditor } from '../../../QuizEditor/CodeEditor';
+import { Spinner } from '../../../Spinner/Spinner';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
@@ -53,7 +54,13 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    return <p className={styles.testNote}>{labels.serverNote}</p>;
+    // Verdicts pas encore reçus : la correction du code tourne en async (sandbox). Le WS
+    // `quiz:code-graded` remplacera ce placeholder par les résultats dès qu'ils arrivent.
+    return (
+      <p className={styles.testNote}>
+        <Spinner tone="current" size={14} /> {labels.evaluating}
+      </p>
+    );
   }
   const totalWeight = tests.reduce((sum, test) => sum + test.weight, 0);
 

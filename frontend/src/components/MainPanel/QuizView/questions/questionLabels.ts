@@ -17,6 +17,8 @@ export interface QuestionLabels {
   testsResult: string;
   /** Note quand le détail des harnais n'est pas disponible. */
   serverNote: string;
+  /** Affiché tant que la correction async du code (exécution sandbox) n'a pas renvoyé les verdicts. */
+  evaluating: string;
   /** aria-label de l'éditeur de code (nom du langage). */
   codeAria: (language: string) => string;
 }
@@ -31,5 +33,6 @@ export const defaultQuestionLabels: QuestionLabels = {
   testsResult: 'Résultat des tests',
   serverNote:
     "Les harnais de test sont exécutés côté serveur ; le détail n'est pas disponible ici.",
+  evaluating: 'Évaluation du code en cours…',
   codeAria: (language) => `Éditeur de code (${language})`,
 };
