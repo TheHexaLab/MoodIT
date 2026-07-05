@@ -3,10 +3,7 @@ package com.moodit.core_service.service;
 // Model
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.UserNotFoundException;
-import com.moodit.core_service.model.Course;
-import com.moodit.core_service.model.Enrollment;
-import com.moodit.core_service.model.Program;
-import com.moodit.core_service.model.User;
+import com.moodit.core_service.model.*;
 import com.moodit.core_service.service.ProgramService;
 // Repository
 import com.moodit.core_service.repository.UserRepository;
@@ -37,6 +34,13 @@ public class UserService {
     dto.setAvatarColor(user.getAvatarColor());
     dto.setCreatedAt(user.getCreatedAt());
     // dto.setVerifiedEmail(user.getVerifiedEmail());
+
+    dto.setRoles(
+            user.getRoles()
+                    .stream()
+                    .map(Role::getId)
+                    .toList()
+    );
 
     return dto;
   }

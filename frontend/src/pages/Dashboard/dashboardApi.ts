@@ -10,7 +10,7 @@ import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
 import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
-import type { RoleChange } from '../../components/RoleEditorPopup/types.ts';
+import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import type {
   AnswerResponse,
@@ -39,7 +39,7 @@ import {
   markAnalysisPending,
 } from '../../mocks/mcpData.ts';
 //import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
-import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
+//import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 //import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
@@ -339,8 +339,24 @@ export async function reorderQuizzes(courseId: number, quizIds: number[]): Promi
  * RoleEditorPopup.
  */
 export async function fetchProgramRoles(programId: number) {
-  await simulateFetch('fetch roles failed');
-  return { roles: getProgramRoles(), users: getProgramUsers(programId) };
+  const [rolesRes, usersRes] = await Promise.all([
+    apiFetch('/api/roles'),
+    apiFetch(`/api/programs/${programId}/users`),
+  ]);
+
+  if (!rolesRes.ok || !usersRes.ok) {
+    throw new Error('fetch roles failed');
+  }
+
+  const users = (await usersRes.json()).map((u: User) => ({
+    ...u,
+    role_ids: u.roles ?? [],
+  }));
+
+  return {
+    roles: await rolesRes.json(),
+    users: users,
+  };
 }
 
 // ── Établissements / catalogue (AddSubscriptionPopup) ──────────────────────────

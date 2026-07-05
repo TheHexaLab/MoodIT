@@ -4,6 +4,7 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Course;
+import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
 
 // DTO
@@ -31,6 +32,7 @@ public class ProgramService {
   private final ProgramRepository programRepository;
   private final CourseRepository courseRepository;
   private final UserRepository userRepository;
+  //private final UserService userService;
 
   // region Transformations d'Entités (entité BD -> DTO)
   public ProgramDTO toProgramDTO(Program program) {
@@ -106,6 +108,36 @@ public class ProgramService {
         .findFirst()
         .map(this::toCourseDTO)
         .orElseThrow(() -> new CourseNotFoundException());
+  }
+
+  public List<UserDTO> getUsersByProgram(Integer programId) {
+
+    return userRepository.findDistinctByPrograms_Id(programId)
+            .stream()
+            .map(this::toUserDTO)
+            .toList();
+  }
+
+  private UserDTO toUserDTO(User user) {
+    UserDTO dto = new UserDTO();
+
+    dto.setId(user.getId());
+    dto.setUsername(user.getUsername());
+    dto.setFirstName(user.getFirstName());
+    dto.setLastName(user.getLastName());
+    dto.setEmail(user.getEmail());
+    dto.setSettings(user.getSettings());
+    dto.setAvatarColor(user.getAvatarColor());
+    dto.setCreatedAt(user.getCreatedAt());
+
+    dto.setRoles(
+            user.getRoles()
+                    .stream()
+                    .map(Role::getId)
+                    .toList()
+    );
+
+    return  dto;
   }
 
   // endregion

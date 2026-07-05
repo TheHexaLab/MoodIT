@@ -16,4 +16,5 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     List<User> findByPrograms_IdAndRoles_Id(Integer programId, Integer roleId);
     Optional<User> findByEmail(String email);
 
+    List<User> findDistinctByPrograms_Id(Integer programId);
 }

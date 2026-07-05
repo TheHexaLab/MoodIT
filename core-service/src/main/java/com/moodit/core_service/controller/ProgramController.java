@@ -45,6 +45,11 @@ public class ProgramController {
     return ResponseEntity.ok(programService.getCourseByProgram(programId, courseId));
   }
 
+  @GetMapping("/{programId}/users")
+  public ResponseEntity<List<UserDTO>> getUsersByProgram(@PathVariable Integer programId) {
+    return ResponseEntity.ok(programService.getUsersByProgram(programId));
+  }
+
   // endregion
 
   // region POST
