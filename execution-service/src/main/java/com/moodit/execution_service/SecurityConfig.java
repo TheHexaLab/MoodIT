@@ -31,6 +31,9 @@ public class SecurityConfig {
                 .addFilterBefore(gatewayAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/error").permitAll()
+                        // Appels internes (core-service) : authentifiés par jeton dans le contrôleur,
+                        // jamais exposés par le gateway.
+                        .requestMatchers("/internal/**").permitAll()
                         .anyRequest().authenticated());
         return http.build();
     }
