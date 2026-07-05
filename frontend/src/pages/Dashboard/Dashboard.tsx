@@ -44,7 +44,6 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
-import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
 import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
@@ -123,10 +122,11 @@ export default function Dashboard() {
 
 
   // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
-  // créée une fois au montage. Le token est lu à (re)connexion via getToken (localStorage).
+  // créée une fois au montage. L'authentification se fait au handshake via le cookie
+  // HttpOnly `moodit_token` (envoyé automatiquement par le navigateur, même origine).
   // Les quatre facades (ws.channels / ws.forums / ws.courses / ws.programs) partagent
   // cette connexion ; ws.close() la ferme volontairement (sans reconnexion).
-  const ws = useMemo(() => createAppSocket(undefined, () => getToken() ?? ''), []);
+  const ws = useMemo(() => createAppSocket(), []);
   // Ouverture/fermeture pilotées par l'effet : en StrictMode (dev), le démontage
   // ferme puis le remontage rouvre — la garde `ws !== socket` côté appSocket évite
   // qu'un ancien socket en cours de connexion ne tue la nouvelle connexion.

@@ -1,4 +1,4 @@
-import { getToken, clearToken } from './auth';
+import { clearToken } from './auth';
 import { type User } from '../types/domain';
 
 export interface RegisterPayload {
@@ -10,7 +10,9 @@ export interface RegisterPayload {
 }
 
 export interface AuthResponse {
-  token: string;
+  // Le token n'est plus renvoyé dans le corps : il est posé en cookie HttpOnly par
+  // l'auth-service. Champ conservé optionnel par compatibilité, mais non utilisé.
+  token?: string;
   username: string;
   email: string;
   firstName: string;
@@ -22,20 +24,13 @@ export interface RegisterResponse {
 }
 
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  // L'authentification passe désormais par le cookie HttpOnly `moodit_token`, envoyé
-  // automatiquement grâce à credentials:'include' (indispensable si l'origine diffère).
-  // Transition : on continue d'envoyer le header Bearer tant qu'un token localStorage
-  // subsiste (anciennes sessions) — le gateway lit le cookie en priorité, le header en
-  // repli. Le header (et le localStorage) seront retirés à l'étape de nettoyage.
-  const token = getToken();
-  const headers = new Headers(init.headers as HeadersInit);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const res = await fetch(input, { ...init, headers, credentials: 'include' });
+  // L'authentification passe par le cookie HttpOnly `moodit_token`, envoyé automatiquement
+  // grâce à credentials:'include'. Le front ne manipule plus le token (invisible au JS).
+  const res = await fetch(input, { ...init, credentials: 'include' });
 
   if (res.status === 401) {
+    // Session invalide/expirée : le cookie HttpOnly ne peut pas être effacé ici (seul le
+    // serveur le peut) ; on purge un éventuel résidu localStorage et on renvoie au login.
     clearToken();
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';

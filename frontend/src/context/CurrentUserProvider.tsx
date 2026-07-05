@@ -6,7 +6,6 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { getMe, updateMe } from '../helpers/api.ts';
-import { getToken } from '../helpers/auth.ts';
 import type { User } from '../types/domain.ts';
 import type { ProfileUpdate } from '../components/EditProfilePopup/types.ts';
 import { CurrentUserContext, type AuthStatus, type CurrentUserApi } from './currentUserContext.ts';
@@ -26,9 +25,9 @@ const ADMIN_ROLE_NAME = 'Administrateur';
 
 export default function CurrentUserProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(loadingUser);
-  // 'checking' seulement s'il y a un token à valider ; sinon directement 'unauthed'
-  // (pas de setState synchrone dans l'effet → pas de rendu en cascade).
-  const [status, setStatus] = useState<AuthStatus>(() => (getToken() ? 'checking' : 'unauthed'));
+  // Le token est dans un cookie HttpOnly : le JS ne peut pas savoir a priori s'il existe.
+  // On part donc toujours en 'checking' et on laisse GET /api/me trancher (succès = authed).
+  const [status, setStatus] = useState<AuthStatus>('checking');
 
   const isAdmin = currentUser.roles?.some((role) => role.name === ADMIN_ROLE_NAME) ?? false;
 
@@ -37,8 +36,6 @@ export default function CurrentUserProvider({ children }: { children: ReactNode 
   // authentification. En cas d'échec (401 déjà purgé/redirigé par apiFetch, ou 503),
   // on refuse l'accès.
   useEffect(() => {
-    if (!getToken()) return; // status déjà 'unauthed' via l'init
-
     let cancelled = false;
     getMe()
       .then((user) => {

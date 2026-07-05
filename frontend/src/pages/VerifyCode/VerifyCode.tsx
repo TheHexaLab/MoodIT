@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import styles from './VerifyCode.module.css';
 import { useTheme } from '../../helpers/theme';
-import { saveToken } from '../../helpers/auth';
 import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 
@@ -55,9 +54,9 @@ export default function VerifyCode() {
         await verifyEmail(email, code);
         setSuccess(true);
       } else {
-        // 2FA — stocker le token (via le helper, source unique de la clé) et rediriger
-        const data = await verify2FA(email, code);
-        saveToken(data.token);
+        // 2FA — l'auth-service pose le cookie HttpOnly `moodit_token` dans la réponse
+        // (credentials:'include'). Rien à stocker côté JS : on redirige.
+        await verify2FA(email, code);
         navigate('/');
       }
     } catch (err) {

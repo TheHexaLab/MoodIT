@@ -41,6 +41,8 @@ class JwtAuthFilterTest {
     ReflectionTestUtils.setField(filter, "publicRoutesConfig", "/auth/login,/auth/register");
     ReflectionTestUtils.setField(filter, "authServiceUrl", AUTH_URL);
     ReflectionTestUtils.setField(filter, "permissionServiceUrl", PERMISSION_URL);
+    // Par défaut (dev) : le header Bearer est toléré (Bruno / tests API).
+    ReflectionTestUtils.setField(filter, "allowHeaderToken", true);
   }
 
   private String validToken(String email) {
@@ -195,6 +197,38 @@ class JwtAuthFilterTest {
     assertThat(res.getStatus()).isEqualTo(200);
     HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
     // Le cookie prime : l'email injecté vient du token du cookie, pas du header.
+    assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("cookie@usherbrooke.ca");
+  }
+
+  @Test
+  void headerToken_rejectedWhenHeaderToleranceDisabled() throws Exception {
+    // Prod (allowHeaderToken=false) : un token présenté en header seul est ignoré -> 401,
+    // même valide. Seul le cookie compte.
+    stubValidate(true, false);
+    ReflectionTestUtils.setField(filter, "allowHeaderToken", false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Bearer " + validToken("header@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void cookieToken_acceptedWhenHeaderToleranceDisabled() throws Exception {
+    // Prod : le cookie reste le mécanisme normal, indépendant de la tolérance header.
+    stubValidate(true, false);
+    ReflectionTestUtils.setField(filter, "allowHeaderToken", false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.setCookies(new Cookie("moodit_token", validToken("cookie@usherbrooke.ca")));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
     assertThat(forwarded.getHeader("X-User-Email")).isEqualTo("cookie@usherbrooke.ca");
   }
 

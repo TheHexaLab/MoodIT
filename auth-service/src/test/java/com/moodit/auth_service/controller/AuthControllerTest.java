@@ -9,6 +9,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.moodit.auth_service.config.AuthCookie;
@@ -130,8 +131,8 @@ class AuthControllerTest {
   }
 
   @Test
-  void verify2FA_success_setsCookie_andKeepsTokenInBody() throws Exception {
-    // Bascule douce : le token doit être posé en cookie ET rester dans le body.
+  void verify2FA_success_setsCookie_andOmitsTokenFromBody() throws Exception {
+    // Nettoyage : le token est posé en cookie HttpOnly et RETIRÉ du corps JSON.
     when(authService.verify2FA("karine@usherbrooke.ca", "123456"))
         .thenReturn(
             new AuthResponse("jwt-token", "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
@@ -143,7 +144,8 @@ class AuthControllerTest {
         .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
-        .andExpect(content().json("{\"token\":\"jwt-token\"}"));
+        .andExpect(jsonPath("$.token").doesNotExist()) // token absent du corps
+        .andExpect(jsonPath("$.username").value("rkarine"));
   }
 
   @Test

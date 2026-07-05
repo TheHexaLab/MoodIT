@@ -55,10 +55,10 @@ public class AuthController {
   @PostMapping("/verify-2fa")
   public ResponseEntity<AuthResponse> verify2FA(@Valid @RequestBody VerifyCodeRequest req) {
     AuthResponse body = authService.verify2FA(req.getEmail(), req.getCode());
-    // Bascule douce : on pose le token en cookie HttpOnly (nouveau mecanisme) ET on le
-    // laisse dans le corps (ancien mecanisme, lu par le front pas encore migre). Le champ
-    // token du body sera retire une fois le front bascule (etape de nettoyage).
+    // Le token est posé UNIQUEMENT en cookie HttpOnly (invisible au JS). On le retire du
+    // corps après avoir construit le cookie : @JsonInclude(NON_NULL) l'exclut alors du JSON.
     ResponseCookie cookie = authCookie.build(body.getToken());
+    body.setToken(null);
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body);
   }
 
