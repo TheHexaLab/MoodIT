@@ -9,17 +9,23 @@ import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
 /**
  * Évalue une soumission contre chaque harnais : assemble code+harnais, exécute dans Piston, en
- * déduit le verdict. Un harnais réussit si le programme se termine en {@code exit 0} SANS signal
- * (pas de timeout/OOM) et sans échec de compilation. Chaque test tourne dans une exécution Piston
- * ISOLÉE (indépendante des autres).
+ * déduit le verdict. ANTI-TRICHE : le verdict ne dépend PAS de l'exit code (falsifiable par un
+ * {@code exit(0)} anticipé ou une neutralisation d'exit), mais de la présence d'un NONCE ALÉATOIRE
+ * secret que SEUL le harnais émet en cas de succès. Chaque test tourne dans une exécution Piston
+ * ISOLÉE. (Résiduel connu : un étudiant qui LIT la source assemblée peut extraire le nonce/harnais
+ * — non éliminable dans ce modèle sans passer au « juge par sortie ».)
  */
 @Service
 public class ExecutionService {
+
+    private static final SecureRandom RNG = new SecureRandom();
 
     private final CodeAssembler assembler;
     private final PistonClient piston;
@@ -29,10 +35,18 @@ public class ExecutionService {
         this.piston = piston;
     }
 
+    /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
+    private static String newNonce() {
+        byte[] bytes = new byte[24];
+        RNG.nextBytes(bytes);
+        return "MOODIT_OK_" + HexFormat.of().formatHex(bytes);
+    }
+
     public List<TestResult> evaluate(EvaluateRequest request) {
         List<TestResult> results = new ArrayList<>();
         for (TestCaseInput testCase : request.testCases()) {
-            results.add(runOne(request.language(), request.version(), request.code(), testCase));
+            // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
+            results.add(runOne(request.language(), request.version(), request.code(), testCase, newNonce()));
         }
         return results;
     }
@@ -65,8 +79,9 @@ public class ExecutionService {
                 compileOutput, timedOut);
     }
 
-    private TestResult runOne(String language, String version, String code, TestCaseInput testCase) {
-        CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode());
+    private TestResult runOne(String language, String version, String code, TestCaseInput testCase,
+            String nonce) {
+        CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
         PistonClient.Result result = piston.execute(assembled.pistonLanguage(), version, assembled.files());
         int weight = testCase.effectiveWeight();
 
@@ -86,8 +101,16 @@ public class ExecutionService {
             return sqlResult(testCase.name(), weight, run);
         }
 
-        boolean passed = run != null && run.signal() == null && run.code() != null && run.code() == 0;
+        // Verdict ANTI-TRICHE : réussi SEULEMENT si le harnais a émis le nonce secret (sur stderr ;
+        // stdout par sécurité). Un exit(0) anticipé ou une neutralisation d'exit n'émet pas le nonce
+        // → échec. Un signal (timeout/OOM) → échec.
+        boolean passed = run != null && run.signal() == null
+                && (contains(run.stderr(), nonce) || contains(run.stdout(), nonce));
         return new TestResult(testCase.name(), weight, passed, passed ? null : runFailureDetail(run));
+    }
+
+    private static boolean contains(String haystack, String needle) {
+        return haystack != null && haystack.contains(needle);
     }
 
     /** Verdict d'un test SQL : réussi si la dernière ligne non vide de stdout vaut « 1 ». */

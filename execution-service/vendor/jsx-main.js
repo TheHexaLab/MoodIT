@@ -51,4 +51,9 @@ try {
   console.error(e && e.stack ? e.stack : String(e));
   process.exit(1);
 }
+// Anti-triche : n'émettre le nonce secret sur stderr QUE si le harnais a réussi. Le verdict est
+// lu sur la présence du nonce (pas sur l'exit code, falsifiable).
+if (result) {
+  try { process.stderr.write(fs.readFileSync(__dirname + '/moodit-nonce.txt', 'utf8')); } catch (e) {}
+}
 process.exit(result ? 0 : 1);

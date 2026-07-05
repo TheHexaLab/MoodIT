@@ -51,25 +51,25 @@ public class CodeAssembler {
     /** Programme prêt pour Piston : langage Piston + fichiers. */
     public record Assembled(String pistonLanguage, List<PistonClient.File> files) {}
 
-    public Assembled assemble(String language, String studentCode, String harnessCode) {
+    public Assembled assemble(String language, String studentCode, String harnessCode, String nonce) {
         String code = studentCode == null ? "" : studentCode;
         String harness = harnessCode == null ? "" : harnessCode;
         return switch (canon(language)) {
-            case "python" -> assemblePython(code, harness);
-            case "javascript" -> assembleJs("javascript", "main.js", code, harness, false);
-            case "typescript" -> assembleJs("typescript", "main.ts", code, harness, true);
-            case "php" -> assemblePhp(code, harness);
-            case "bash" -> assembleBash(code, harness);
-            case "go" -> assembleGo(code, harness);
-            case "rust" -> assembleRust(code, harness);
-            case "c" -> assembleC(code, harness);
-            case "c++" -> assembleCpp(code, harness);
-            case "csharp" -> assembleCSharp(code, harness);
-            case "java" -> assembleJava(code, harness);
-            case "json" -> assembleJson(code, harness);
+            case "python" -> assemblePython(code, harness, nonce);
+            case "javascript" -> assembleJs("javascript", "main.js", code, harness, false, nonce);
+            case "typescript" -> assembleJs("typescript", "main.ts", code, harness, true, nonce);
+            case "php" -> assemblePhp(code, harness, nonce);
+            case "bash" -> assembleBash(code, harness, nonce);
+            case "go" -> assembleGo(code, harness, nonce);
+            case "rust" -> assembleRust(code, harness, nonce);
+            case "c" -> assembleC(code, harness, nonce);
+            case "c++" -> assembleCpp(code, harness, nonce);
+            case "csharp" -> assembleCSharp(code, harness, nonce);
+            case "java" -> assembleJava(code, harness, nonce);
+            case "json" -> assembleJson(code, harness, nonce);
             case "sql" -> assembleSql(code, harness);
-            case "html" -> assembleHtml(code, harness);
-            case "jsx", "tsx" -> assembleJsx(code, harness);
+            case "html" -> assembleHtml(code, harness, nonce);
+            case "jsx", "tsx" -> assembleJsx(code, harness, nonce);
             default -> throw new UnsupportedLanguageException(language);
         };
     }
@@ -133,13 +133,15 @@ public class CodeAssembler {
      * Python : code étudiant, puis harnais enveloppé dans une fonction appelée ; son booléen de
      * retour → exit 0/1, toute exception → exit 1. Le harnais est un CORPS de fonction (indenté).
      */
-    private Assembled assemblePython(String studentCode, String harnessCode) {
+    private Assembled assemblePython(String studentCode, String harnessCode, String nonce) {
         String program = studentCode
                 + "\n\n\ndef __moodit_harness():\n"
                 + indent(harnessCode, "    ")
                 + "\n\nimport sys as __moodit_sys\n"
                 + "try:\n"
                 + "    __moodit_result = __moodit_harness()\n"
+                + "    if __moodit_result:\n"
+                + "        __moodit_sys.stderr.write(\"" + nonce + "\")\n"
                 + "    __moodit_sys.exit(0 if __moodit_result else 1)\n"
                 + "except SystemExit:\n"
                 + "    raise\n"
@@ -157,7 +159,7 @@ public class CodeAssembler {
      * typer) — une erreur de type se traduirait sinon en échec de compilation parasite.
      */
     private Assembled assembleJs(String pistonLanguage, String fileName, String studentCode,
-                                 String harnessCode, boolean typescript) {
+                                 String harnessCode, boolean typescript, String nonce) {
         String header = typescript ? "// @ts-nocheck\n" : "";
         String program = header
                 + studentCode
@@ -166,6 +168,7 @@ public class CodeAssembler {
                 + "\n}\n"
                 + "try {\n"
                 + "  const __moodit_result = __moodit_harness();\n"
+                + "  if (__moodit_result) process.stderr.write(\"" + nonce + "\");\n"
                 + "  process.exit(__moodit_result ? 0 : 1);\n"
                 + "} catch (__moodit_e) {\n"
                 + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
@@ -180,13 +183,14 @@ public class CodeAssembler {
      * PHP : le code étudiant ouvre déjà {@code <?php} ; on ajoute à la suite (même mode PHP) le
      * harnais dans une fonction, exécutée : retour booléen → exit 0/1, {@code Throwable} → exit 1.
      */
-    private Assembled assemblePhp(String studentCode, String harnessCode) {
+    private Assembled assemblePhp(String studentCode, String harnessCode, String nonce) {
         String program = studentCode
                 + "\n\nfunction __moodit_harness() {\n"
                 + harnessCode
                 + "\n}\n"
                 + "try {\n"
                 + "  $__moodit_result = __moodit_harness();\n"
+                + "  if ($__moodit_result) fwrite(STDERR, \"" + nonce + "\");\n"
                 + "  exit($__moodit_result ? 0 : 1);\n"
                 + "} catch (\\Throwable $__moodit_e) {\n"
                 + "  fwrite(STDERR, (string) $__moodit_e);\n"
@@ -202,11 +206,13 @@ public class CodeAssembler {
      * SORTIE (0 = réussi). On termine sur le statut du harnais. {@code set -e} laisse une erreur
      * intermédiaire échouer.
      */
-    private Assembled assembleBash(String studentCode, String harnessCode) {
+    private Assembled assembleBash(String studentCode, String harnessCode, String nonce) {
         String program = studentCode
                 + "\n\n# --- harnais ---\n"
                 + harnessCode
-                + "\nexit $?\n";
+                + "\n__moodit_rc=$?\n"
+                + "[ \"$__moodit_rc\" -eq 0 ] && printf '%s' '" + nonce + "' >&2\n"
+                + "exit \"$__moodit_rc\"\n";
         return new Assembled("bash", List.of(new PistonClient.File("main.sh", program)));
     }
 
@@ -217,15 +223,15 @@ public class CodeAssembler {
      * appelle le harnais. Réussi → sortie normale (exit 0) ; échec → {@code panic} (exit non nul) —
      * ainsi aucun import supplémentaire (os/fmt) n'est requis, évitant les conflits d'imports.
      */
-    private Assembled assembleGo(String studentCode, String harnessCode) {
+    private Assembled assembleGo(String studentCode, String harnessCode, String nonce) {
         String neutralized = studentCode.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
         String program = neutralized
                 + "\n\nfunc __moodit_harness() bool {\n"
                 + harnessCode
                 + "\n}\n"
                 + "func main() {\n"
-                + "\tif !__moodit_harness() {\n"
-                + "\t\tpanic(\"harnais: echec\")\n"
+                + "\tif __moodit_harness() {\n"
+                + "\t\tprint(\"" + nonce + "\")\n"
                 + "\t}\n"
                 + "}\n";
         return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
@@ -238,14 +244,16 @@ public class CodeAssembler {
      * harnais (dernière expression = valeur de retour). {@code assert!} panique (exit non nul) si
      * faux ; un {@code panic!} de l'étudiant vaut aussi échec. Aucun import requis.
      */
-    private Assembled assembleRust(String studentCode, String harnessCode) {
+    private Assembled assembleRust(String studentCode, String harnessCode, String nonce) {
         String neutralized = studentCode.replaceAll("fn\\s+main\\s*\\(", "fn __moodit_student_main(");
         String program = neutralized
                 + "\n\nfn __moodit_harness() -> bool {\n"
                 + harnessCode
                 + "\n}\n"
                 + "fn main() {\n"
-                + "    assert!(__moodit_harness(), \"harnais: echec\");\n"
+                + "    if __moodit_harness() {\n"
+                + "        eprint!(\"" + nonce + "\");\n"
+                + "    }\n"
                 + "}\n";
         return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
     }
@@ -257,14 +265,19 @@ public class CodeAssembler {
      * code, puis rétabli. Le harnais renvoie un {@code int} (non nul = réussi, cf. contrat) ; notre
      * main en déduit l'exit code. Pas d'exceptions en C.
      */
-    private Assembled assembleC(String studentCode, String harnessCode) {
+    private Assembled assembleC(String studentCode, String harnessCode, String nonce) {
         String program = "#define main __moodit_student_main\n"
                 + studentCode
                 + "\n#undef main\n"
+                + "#include <stdio.h>\n"
                 + "static int __moodit_harness(void) {\n"
                 + harnessCode
                 + "\n}\n"
-                + "int main(void) { return __moodit_harness() != 0 ? 0 : 1; }\n";
+                + "int main(void) {\n"
+                + "    int __moodit_r = __moodit_harness();\n"
+                + "    if (__moodit_r != 0) fputs(\"" + nonce + "\", stderr);\n"
+                + "    return __moodit_r != 0 ? 0 : 1;\n"
+                + "}\n";
         return new Assembled("c", List.of(new PistonClient.File("main.c", program)));
     }
 
@@ -274,16 +287,19 @@ public class CodeAssembler {
      * C++ : même bascule par macro que le C. Le harnais renvoie un {@code bool} ; une exception
      * (capturée) vaut échec (exit 1).
      */
-    private Assembled assembleCpp(String studentCode, String harnessCode) {
+    private Assembled assembleCpp(String studentCode, String harnessCode, String nonce) {
         String program = "#define main __moodit_student_main\n"
                 + studentCode
                 + "\n#undef main\n"
+                + "#include <iostream>\n"
                 + "static bool __moodit_harness() {\n"
                 + harnessCode
                 + "\n}\n"
                 + "int main() {\n"
-                + "    try { return __moodit_harness() ? 0 : 1; }\n"
-                + "    catch (...) { return 1; }\n"
+                + "    try {\n"
+                + "        if (__moodit_harness()) { std::cerr << \"" + nonce + "\"; return 0; }\n"
+                + "        return 1;\n"
+                + "    } catch (...) { return 1; }\n"
                 + "}\n";
         return new Assembled("c++", List.of(new PistonClient.File("main.cpp", program)));
     }
@@ -295,7 +311,7 @@ public class CodeAssembler {
      * nôtre). Le harnais renvoie un {@code bool} ; une exception vaut échec. On qualifie tout via
      * {@code System.*} pour ne dépendre d'aucun {@code using} supplémentaire.
      */
-    private Assembled assembleCSharp(String studentCode, String harnessCode) {
+    private Assembled assembleCSharp(String studentCode, String harnessCode, String nonce) {
         String neutralized = studentCode.replaceAll(
                 "(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
         String program = neutralized
@@ -304,7 +320,10 @@ public class CodeAssembler {
                 + harnessCode
                 + "\n    }\n"
                 + "    static int Main() {\n"
-                + "        try { return __moodit_run() ? 0 : 1; }\n"
+                + "        try {\n"
+                + "            if (__moodit_run()) { System.Console.Error.Write(\"" + nonce + "\"); return 0; }\n"
+                + "            return 1;\n"
+                + "        }\n"
                 + "        catch (System.Exception __e) { System.Console.Error.WriteLine(__e); return 1; }\n"
                 + "    }\n"
                 + "}\n";
@@ -322,7 +341,7 @@ public class CodeAssembler {
      * le {@code main} étudiant pour éviter deux entrées. Le harnais référence les classes étudiant
      * (ex. {@code new Rectangle(...)}, {@code Solution.solution(...)}).
      */
-    private Assembled assembleJava(String studentCode, String harnessCode) {
+    private Assembled assembleJava(String studentCode, String harnessCode, String nonce) {
         String neutralized = studentCode
                 .replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
         String program = "public class __MooditMain {\n"
@@ -331,7 +350,9 @@ public class CodeAssembler {
                 + "\n    }\n"
                 + "    public static void main(String[] __args) {\n"
                 + "        try {\n"
-                + "            System.exit(__moodit_harness() ? 0 : 1);\n"
+                + "            boolean __moodit_r = __moodit_harness();\n"
+                + "            if (__moodit_r) System.err.print(\"" + nonce + "\");\n"
+                + "            System.exit(__moodit_r ? 0 : 1);\n"
                 + "        } catch (Throwable __t) {\n"
                 + "            __t.printStackTrace();\n"
                 + "            System.exit(1);\n"
@@ -360,7 +381,7 @@ public class CodeAssembler {
      * JSON de l'étudiant est écrit dans un fichier voisin, parsé en {@code data} ; un JSON invalide
      * (parse échoué) vaut échec. Le harnais (corps JS) inspecte {@code data} et renvoie un booléen.
      */
-    private Assembled assembleJson(String studentJson, String harnessCode) {
+    private Assembled assembleJson(String studentJson, String harnessCode, String nonce) {
         String main = "const __moodit_fs = require('fs');\n"
                 + "let data;\n"
                 + "try {\n"
@@ -374,6 +395,7 @@ public class CodeAssembler {
                 + "\n}\n"
                 + "try {\n"
                 + "  const __moodit_result = __moodit_harness();\n"
+                + "  if (__moodit_result) process.stderr.write(\"" + nonce + "\");\n"
                 + "  process.exit(__moodit_result ? 0 : 1);\n"
                 + "} catch (__moodit_e) {\n"
                 + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
@@ -432,7 +454,7 @@ public class CodeAssembler {
      * harnais comme {@code doc} (API façon DOM : {@code querySelector}, {@code textContent},
      * {@code getAttribute}…). Le harnais (corps JS) interroge {@code doc} et renvoie un booléen.
      */
-    private Assembled assembleHtml(String studentHtml, String harnessCode) {
+    private Assembled assembleHtml(String studentHtml, String harnessCode, String nonce) {
         String main = "const __moodit_fs = require('fs');\n"
                 + "const { parse: __moodit_parse } = require('./htmlparser.js');\n"
                 + "let doc;\n"
@@ -447,6 +469,7 @@ public class CodeAssembler {
                 + "\n}\n"
                 + "try {\n"
                 + "  const __moodit_result = __moodit_harness();\n"
+                + "  if (__moodit_result) process.stderr.write(\"" + nonce + "\");\n"
                 + "  process.exit(__moodit_result ? 0 : 1);\n"
                 + "} catch (__moodit_e) {\n"
                 + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
@@ -467,14 +490,16 @@ public class CodeAssembler {
      * {@code html}. Le harnais (corps JS) inspecte {@code html} et renvoie un booléen. Un rendu qui
      * échoue (transpilation, composant manquant, exception au rendu) vaut échec.
      */
-    private Assembled assembleJsx(String studentCode, String harnessCode) {
+    private Assembled assembleJsx(String studentCode, String harnessCode, String nonce) {
         // Le runner (jsx-main.js, fichier fixe embarqué) transpile le composant, monte un DOM
         // (happy-dom) et exécute le harnais dans la même portée. Le harnais reçoit ainsi html,
         // render/mount/click/fireEvent, document/window, React + hooks, et les fonctions étudiant.
+        // Le nonce anti-triche est fourni via un fichier voisin, émis sur stderr en cas de succès.
         return new Assembled("javascript", List.of(
                 new PistonClient.File("main.js", vendor("jsx-main.js")),
                 new PistonClient.File("react-runtime.js", vendor("react-runtime.js")),
                 new PistonClient.File("component.tsx", studentCode),
-                new PistonClient.File("harness.js", harnessCode)));
+                new PistonClient.File("harness.js", harnessCode),
+                new PistonClient.File("moodit-nonce.txt", nonce)));
     }
 }

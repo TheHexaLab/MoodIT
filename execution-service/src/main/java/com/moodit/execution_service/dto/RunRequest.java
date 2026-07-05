@@ -2,6 +2,7 @@ package com.moodit.execution_service.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
  * Demande d'EXÉCUTION simple d'un code (bouton « play » des éditeurs de quiz : côté étudiant et
@@ -12,4 +13,4 @@ import jakarta.validation.constraints.NotNull;
 public record RunRequest(
         @NotBlank String language,
         String version,
-        @NotNull String code) {}
+        @NotNull @Size(max = 100_000) String code) {}
