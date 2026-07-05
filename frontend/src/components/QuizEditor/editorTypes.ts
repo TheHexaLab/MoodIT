@@ -18,6 +18,8 @@ import {
 import {
   type CodeEvaluationInput,
   type CodingTestResult,
+  type RunCodeInput,
+  type RunResult,
 } from '../MainPanel/QuizView/quizAttempt';
 
 /** Valeur synchrone ou asynchrone. */
@@ -100,6 +102,11 @@ export interface QuizEditorHandlers {
    * harnais, renvoie le verdict par test. Sert au bouton « Tester » d'une question Code.
    */
   onEvaluateCode?: (input: CodeEvaluationInput) => MaybePromise<CodingTestResult[]>;
+  /**
+   * Exécute un code TEL QUEL (sans harnais) dans le sandbox : sert au bouton « play » de
+   * l'onglet « Tester » d'une question Code. Renvoie la sortie brute (stdout/stderr/exit).
+   */
+  onRunCode?: (input: RunCodeInput) => MaybePromise<RunResult>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */

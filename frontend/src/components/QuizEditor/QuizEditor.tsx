@@ -559,6 +559,7 @@ export function QuizEditor({
             languages={effectiveLanguages}
             onRequestLanguages={requestLanguages}
             onEvaluateCode={handlers.onEvaluateCode}
+            onRunCode={handlers.onRunCode}
             labels={labels?.test}
           />
         )}

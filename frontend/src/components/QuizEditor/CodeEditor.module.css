@@ -12,6 +12,122 @@
     border-color: var(--brand-teal);
 }
 
+/* Barre d'outils : bouton « play » (à gauche) + langage du code (à droite). */
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3125rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--syntax-bg);
+}
+/* Bouton d'exécution : symbole seul (triangle contour teal), poussé à droite, sans chrome. */
+.runButton {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
+    color: var(--brand-teal);
+    background: transparent;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.runButton:hover:not(:disabled) { background: var(--brand-teal-surface); }
+.runButton:active:not(:disabled) { transform: scale(0.9); }
+.runButton:disabled { opacity: 0.6; cursor: default; }
+
+/* Spinner d'exécution en teinte neutre (jamais rouge/vert/teal, quel que soit le contexte). */
+.spinnerNeutral {
+    display: inline-flex;
+    color: var(--text-muted);
+}
+
+/* Langage du code, à gauche de la barre d'outils. */
+.langLabel {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* Console d'exécution intégrée (sortie du « play »), en bas du cadre. */
+.console {
+    border-top: 1px solid var(--border);
+    background: var(--syntax-bg);
+}
+.consoleHead {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.375rem 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+.consoleTitle {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.consoleStatus {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.statusOk { color: var(--success); }
+.statusBad { color: var(--danger); }
+.consoleClose {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.consoleClose:hover { background: var(--brand-teal-surface); color: var(--syntax-fg); }
+.consoleBody {
+    padding: 0.5rem 0.75rem;
+    max-height: 14rem;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.consoleBody::-webkit-scrollbar { width: 6px; height: 6px; }
+.consoleBody::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.outBlock {
+    margin: 0;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--syntax-fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    tab-size: 4;
+}
+.errBlock { color: var(--danger); }
+.emptyOut { color: var(--syntax-comment); font-style: italic; }
+.blockLabel {
+    display: block;
+    margin: 0.5rem 0 0.1875rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.blockLabel:first-child { margin-top: 0; }
+
 /* Métriques monospace PARTAGÉES par la gouttière, la couche colorée et le textarea
    (via `font: inherit`) : indispensable pour que numéros, coloration et texte saisi
    restent alignés au pixel. */

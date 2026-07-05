@@ -21,6 +21,8 @@ export interface QuestionLabels {
   evaluating: string;
   /** aria-label de l'éditeur de code (nom du langage). */
   codeAria: (language: string) => string;
+  /** Libellé du bouton d'exécution (« play ») de l'éditeur de code. */
+  runCode: string;
 }
 
 /** Textes par défaut (FR) des rendus de question. */
@@ -35,4 +37,5 @@ export const defaultQuestionLabels: QuestionLabels = {
     "Les harnais de test sont exécutés côté serveur ; le détail n'est pas disponible ici.",
   evaluating: 'Évaluation du code en cours…',
   codeAria: (language) => `Éditeur de code (${language})`,
+  runCode: 'Exécuter',
 };

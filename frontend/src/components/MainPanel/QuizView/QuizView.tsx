@@ -12,6 +12,7 @@ import {
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
+  type RunCodeHandler,
   type SubmitQuizHandler,
   type SubscribeCodeGrading,
   isAnswered,
@@ -44,6 +45,8 @@ interface QuizViewProps {
   onSubmitQuiz?: SubmitQuizHandler;
   /** Abonnement à la correction async des questions Code (WS) → live-update des verdicts. */
   onSubscribeCodeGrading?: SubscribeCodeGrading;
+  /** Exécute le code d'une question Code dans le sandbox (bouton « play » de l'éditeur). */
+  onRunCode?: RunCodeHandler;
   /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
   staleNotice?: boolean;
   /** Efface la bannière « quiz modifié » (après rechargement ou rejet). */
@@ -66,6 +69,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttemptResult,
   onSubmitQuiz,
   onSubscribeCodeGrading,
+  onRunCode,
   staleNotice = false,
   onReloadStale,
   labels,
@@ -200,6 +204,7 @@ const QuizView: React.FC<QuizViewProps> = ({
             result={qResult}
             onChange={(a) => attempt.setAnswer(question.id, a)}
             labels={labels?.question}
+            onRunCode={onRunCode}
           />
         </QuestionCard>
       </div>

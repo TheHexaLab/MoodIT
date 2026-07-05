@@ -47,6 +47,8 @@ import {
   type CodingTestResult,
   type QuizResult,
   type QuizSubmission,
+  type RunCodeInput,
+  type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
@@ -290,6 +292,20 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     }),
   });
   if (!res.ok) throw new Error("Échec de l'évaluation du code");
+  return await res.json();
+}
+
+/**
+ * Exécute un code TEL QUEL (sans harnais) dans le sandbox et renvoie sa sortie brute
+ * (stdout/stderr/exit). Sert au bouton « play » des éditeurs de code (étudiant + onglet « Tester »).
+ */
+export async function runCode(input: RunCodeInput): Promise<RunResult> {
+  const res = await apiFetch('/exec/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: input.language, code: input.code }),
+  });
+  if (!res.ok) throw new Error("Échec de l'exécution du code");
   return await res.json();
 }
 

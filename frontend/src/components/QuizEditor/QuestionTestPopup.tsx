@@ -13,6 +13,7 @@ import {
   type CodingTestResult,
   type QuestionAnswer,
   type QuestionResult,
+  type RunCodeHandler,
 } from '../MainPanel/QuizView/quizAttempt';
 import { type Language } from '../../types/domain';
 import { defaultQuestionTestLabels, type QuestionTestLabels } from './questionTestLabels';
@@ -26,6 +27,8 @@ interface QuestionTestBodyProps {
   onRequestLanguages?: () => void;
   /** Évalue une question Code via l'API (exécution serveur des harnais). */
   onEvaluateCode?: (input: CodeEvaluationInput) => Promise<CodingTestResult[]> | CodingTestResult[];
+  /** Exécute le code courant sans harnais (bouton « play » de l'éditeur). */
+  onRunCode?: RunCodeHandler;
   /** Textes (surcharge partielle des défauts). */
   labels?: Partial<QuestionTestLabels>;
 }
@@ -55,6 +58,7 @@ export function QuestionTestBody({
   languages,
   onRequestLanguages,
   onEvaluateCode,
+  onRunCode,
   labels,
 }: QuestionTestBodyProps): React.ReactElement {
   const t = { ...defaultQuestionTestLabels, ...labels };
@@ -121,6 +125,7 @@ export function QuestionTestBody({
             answer={answer}
             result={result ?? undefined}
             onChange={setAnswer}
+            onRunCode={onRunCode}
           />
         </QuestionCard>
       </div>

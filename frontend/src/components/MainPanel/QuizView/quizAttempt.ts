@@ -206,6 +206,32 @@ export interface CodeEvaluationInput {
 }
 
 /**
+ * Charge utile d'une EXÉCUTION SIMPLE (bouton « play ») : le code à lancer tel quel, sans harnais.
+ * Le langage choisit l'exécuteur du sandbox.
+ */
+export interface RunCodeInput {
+  language?: string;
+  code: string;
+}
+
+/**
+ * Sortie brute d'une exécution simple (miroir du `RunResult` backend). `stderr` porte la stack
+ * trace en cas d'exception ; `signal` non nul (ex. SIGKILL) = interrompu (dépassement temps/mémoire).
+ */
+export interface RunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: string | null;
+  /** Sortie de compilation (langages compilés) — null pour Python. */
+  compileOutput: string | null;
+  timedOut: boolean;
+}
+
+/** Lance un code dans le sandbox et renvoie sa sortie (bouton « play » des éditeurs). */
+export type RunCodeHandler = (input: RunCodeInput) => MaybePromise<RunResult>;
+
+/**
  * Résultat corrigé d'UNE question (vérité serveur). `earned`/`max` pilotent
  * l'affichage du score ; les champs optionnels alimentent l'écran de révision
  * selon le type (réponses correctes, ordre attendu, placements, harnais).

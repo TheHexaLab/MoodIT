@@ -22,6 +22,7 @@ export function CodingQuestion({
   result,
   onChange,
   labels,
+  onRunCode,
 }: QuestionViewProps): React.ReactElement {
   const t = { ...defaultQuestionLabels, ...labels };
   const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
@@ -38,6 +39,9 @@ export function CodingQuestion({
         readOnly={review}
         minRows={8}
         ariaLabel={t.codeAria(language ?? 'Code')}
+        // Bouton « play » : exécute le code courant dans le sandbox (hors révision).
+        onRun={onRunCode && !review ? (src) => onRunCode({ language, code: src }) : undefined}
+        runLabel={t.runCode}
       />
 
       {review && <TestResults tests={result?.tests} labels={t} />}

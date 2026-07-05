@@ -77,6 +77,7 @@ const quizEditorHandlers: QuizEditorHandlers = {
   onDeleteQuiz: api.deleteQuiz,
   onReorderQuizzes: api.reorderQuizzes,
   onEvaluateCode: api.evaluateCode,
+  onRunCode: api.runCode,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
@@ -717,6 +718,7 @@ export default function Dashboard() {
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
         onSubscribeCodeGrading={subscribeCodeGrading}
+        onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
