@@ -35,6 +35,11 @@ public class Question {
     @JoinColumn(name = "q_type_id", nullable = false)
     private QType qType;
 
+    /** Langage d'exécution — uniquement pour les questions Code (null sinon). */
+    @ManyToOne
+    @JoinColumn(name = "language_id")
+    private Language language;
+
     @ManyToOne
     @JoinColumn(name = "quiz_id", nullable = false)
     private Quiz quiz;
@@ -44,4 +49,8 @@ public class Question {
 
     @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<DragItem> dragItems;
+
+    /** Harnais de test — uniquement pour les questions Code (données cachées au répondant). */
+    @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<TestCase> testCases;
 }

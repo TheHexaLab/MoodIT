@@ -409,9 +409,13 @@ export interface QuestionResponse {
   qTypeId?: number;
   totalScore: number;
   orderIndex?: number;
+  /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
+  language?: Language;
   startCode?: string;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
+  /** Harnais de test (questions Code) : présent UNIQUEMENT côté éditeur (absent en passation). */
+  testCases?: TestCase[];
 }
 
 /** Détail d'un quiz renvoyé par le backend (QuizDetailDTO). */

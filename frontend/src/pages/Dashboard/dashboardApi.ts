@@ -48,7 +48,6 @@ import {
   type QuizResult,
   type QuizSubmission,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
-import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
@@ -145,6 +144,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       qTypeId: q.qTypeId,
       totalScore: q.totalScore,
       orderIndex: q.orderIndex,
+      language: q.language,
       startCode: q.startCode,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
@@ -157,6 +157,8 @@ function toQuiz(data: QuizDetailResponse): Quiz {
         correctOrder: d.correctOrder,
         groupName: d.groupName,
       })),
+      // Harnais : présents seulement via /edit (éditeur) ; absents en passation étudiante.
+      testCases: q.testCases,
     })),
   };
 }
@@ -218,10 +220,6 @@ export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
 }
 
 /**
- * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
- * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
- */
-/**
  * Types de question disponibles (table Q_Type : id + name FR). Alimente le sélecteur
  * de type de l'éditeur de question.
  */
@@ -231,10 +229,14 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
   return await res.json();
 }
 
+/**
+ * Langages d'exécution disponibles (table Language) : alimente le sélecteur de langage de
+ * l'éditeur de code (templates de harnais / code de départ inclus).
+ */
 export async function fetchLanguages(): Promise<Language[]> {
-  await simulateFetch('Échec simulé (chargement des langages)');
-  console.log(DEFAULT_LANGUAGES);
-  return DEFAULT_LANGUAGES;
+  const res = await apiFetch('/api/languages');
+  if (!res.ok) throw new Error('Échec chargement des langages');
+  return await res.json();
 }
 
 /**

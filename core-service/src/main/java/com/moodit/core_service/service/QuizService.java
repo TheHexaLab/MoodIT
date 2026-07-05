@@ -12,6 +12,7 @@ import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
@@ -42,6 +43,7 @@ public class QuizService {
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
     private final QTypeRepository qTypeRepository;
+    private final LanguageRepository languageRepository;
     private final SubmissionRepository submissionRepository;
     private final AttemptRepository attemptRepository;
     private final UserRepository userRepository;
@@ -71,6 +73,21 @@ public class QuizService {
         return qTypeRepository.findAll().stream()
                 .sorted(Comparator.comparing(QType::getId))
                 .map(t -> new QuestionTypeDTO(t.getId(), Q_TYPE_NAME_TO_SLUG.get(t.getName()), t.getName()))
+                .toList();
+    }
+
+    /** Langages d'exécution (table Language), COMPLETS (templates inclus) pour l'éditeur, triés par id. */
+    @Transactional(readOnly = true)
+    public List<LanguageDTO> getLanguages() {
+        return languageRepository.findAll().stream()
+                .sorted(Comparator.comparing(Language::getId))
+                .map(l -> LanguageDTO.builder()
+                        .id(l.getId())
+                        .name(l.getName())
+                        .harnessTemplate(l.getHarnessTemplate())
+                        .startCodeTemplate(l.getStartCodeTemplate())
+                        .harnessLanguageId(l.getHarnessLanguageId())
+                        .build())
                 .toList();
     }
 
@@ -594,8 +611,10 @@ public class QuizService {
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
             q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
             q.setQType(resolveQType(qd));
+            q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
+            q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
             index++;
         }
@@ -620,8 +639,18 @@ public class QuizService {
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
         q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
         q.setQType(resolveQType(qd));
+        q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
         applyDragItems(q, qd.getDragItems());
+        applyTestCases(q, qd.getTestCases());
+    }
+
+    /** Résout le langage d'une question Code depuis le DTO (id imbriqué). null si absent/non-code. */
+    private Language resolveLanguage(QuestionDTO qd) {
+        if (qd.getLanguage() == null || qd.getLanguage().getId() == null) return null;
+        return languageRepository.findById(qd.getLanguage().getId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Langage inconnu: " + qd.getLanguage().getId()));
     }
 
     /**
@@ -710,6 +739,48 @@ public class QuizService {
         return items;
     }
 
+    private List<TestCase> buildTestCases(List<TestCaseDTO> dtos, Question question) {
+        List<TestCase> testCases = new ArrayList<>();
+        if (dtos == null) return testCases;
+        for (TestCaseDTO td : dtos) {
+            TestCase tc = new TestCase();
+            tc.setName(td.getName());
+            tc.setHarnessCode(td.getHarnessCode());
+            tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
+            tc.setQuestion(question);
+            testCases.add(tc);
+        }
+        return testCases;
+    }
+
+    /** Idem pour les harnais : réutilise les Test_Case existants par id (ids stables). */
+    private void applyTestCases(Question q, List<TestCaseDTO> dtos) {
+        if (q.getTestCases() == null) q.setTestCases(new ArrayList<>());
+        List<TestCase> current = q.getTestCases();
+        Map<Integer, TestCase> existingById = current.stream()
+                .filter(tc -> tc.getId() != null)
+                .collect(Collectors.toMap(TestCase::getId, tc -> tc));
+        List<TestCaseDTO> list = dtos == null ? List.of() : dtos;
+        Set<Integer> keptIds = list.stream()
+                .map(TestCaseDTO::getId)
+                .filter(id -> id != null && existingById.containsKey(id))
+                .collect(Collectors.toSet());
+        current.removeIf(tc -> tc.getId() != null && !keptIds.contains(tc.getId()));
+        for (TestCaseDTO td : list) {
+            TestCase tc;
+            if (td.getId() != null && existingById.containsKey(td.getId())) {
+                tc = existingById.get(td.getId()); // réutilisé → id stable
+            } else {
+                tc = new TestCase();
+                tc.setQuestion(q);
+                current.add(tc);
+            }
+            tc.setName(td.getName());
+            tc.setHarnessCode(td.getHarnessCode());
+            tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
+        }
+    }
+
     // ── Mapping entité → DTO ─────────────────────────────────────────────────────
 
     private QuizDTO toQuizMetaDTO(Quiz quiz) {
@@ -754,6 +825,13 @@ public class QuizService {
                 .qTypeId(question.getQType() != null ? question.getQType().getId() : null)
                 .totalScore(question.getTotalScore())
                 .orderIndex(question.getOrderIndex())
+                // Langage LIGHT (id + name) : suffit à la coloration et à pré-sélectionner
+                // dans l'éditeur ; on n'expose pas les templates de harnais en passation.
+                .language(question.getLanguage() == null ? null
+                        : LanguageDTO.builder()
+                        .id(question.getLanguage().getId())
+                        .name(question.getLanguage().getName())
+                        .build())
                 .startCode(question.getStartCode())
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
@@ -761,6 +839,19 @@ public class QuizService {
                 .dragItems(question.getDragItems() == null ? List.of()
                         : question.getDragItems().stream()
                         .map(d -> toDragItemDTO(d, includeCorrection)).toList())
+                // Harnais : ÉDITEUR seulement. En passation → null (omis) : code des tests caché.
+                .testCases(includeCorrection && question.getTestCases() != null
+                        ? question.getTestCases().stream().map(this::toTestCaseDTO).toList()
+                        : null)
+                .build();
+    }
+
+    private TestCaseDTO toTestCaseDTO(TestCase testCase) {
+        return TestCaseDTO.builder()
+                .id(testCase.getId())
+                .name(testCase.getName())
+                .harnessCode(testCase.getHarnessCode())
+                .weight(testCase.getWeight())
                 .build();
     }
 

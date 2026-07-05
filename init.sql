@@ -701,7 +701,17 @@ FROM (VALUES
 
 -- Quiz noté avec une question de CODE + 3 cas de test, tenté par les 3 étudiants.
 -- Résultats semés : user 1 → 3/3, users 2 et 3 → 2/3 (échec du 3e test) = 7/9 ≈ 78%.
-INSERT INTO Language (name) VALUES ('Python') ON CONFLICT (name) DO NOTHING;
+-- Langages d'exécution proposés par l'éditeur de questions Code (GET /api/languages).
+INSERT INTO Language (name) VALUES
+   ('Python'), ('JavaScript'), ('TypeScript'), ('SQL'), ('Java'), ('C'), ('C++'),
+   ('C#'), ('Bash'), ('HTML'), ('Rust'), ('PHP'), ('JSX'), ('TSX'), ('JSON'), ('Go')
+ON CONFLICT (name) DO NOTHING;
+
+-- Harnais écrits dans un AUTRE langage : HTML/JSON/JSX/TSX (markup/données/vues, non
+-- auto-testables) sont validés par un harnais JavaScript. Les autres → harnais dans leur
+-- propre langage (harness_language_id NULL).
+UPDATE Language SET harness_language_id = (SELECT id FROM Language WHERE name = 'JavaScript')
+WHERE name IN ('HTML', 'JSON', 'JSX', 'TSX');
 
 INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id)
 VALUES ('Quiz noté — exercice de code', FALSE, TRUE, FALSE, 9,
