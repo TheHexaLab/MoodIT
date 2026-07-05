@@ -701,10 +701,207 @@ FROM (VALUES
 
 -- Quiz noté avec une question de CODE + 3 cas de test, tenté par les 3 étudiants.
 -- Résultats semés : user 1 → 3/3, users 2 et 3 → 2/3 (échec du 3e test) = 7/9 ≈ 78%.
--- Langages d'exécution proposés par l'éditeur de questions Code (GET /api/languages).
-INSERT INTO Language (name) VALUES
-   ('Python'), ('JavaScript'), ('TypeScript'), ('SQL'), ('Java'), ('C'), ('C++'),
-   ('C#'), ('Bash'), ('HTML'), ('Rust'), ('PHP'), ('JSX'), ('TSX'), ('JSON'), ('Go')
+-- Langages d'exécution (GET /api/languages). start_code_template : squelette montré à
+-- l'ÉTUDIANT. harness_template : gabarit du harnais pour le PROF, écrit dans le langage DU
+-- HARNAIS (celui de la question, ou son harness_language_id : HTML/JSON/JSX/TSX → JavaScript).
+-- Contrat du sandbox rappelé dans chaque en-tête : le harnais RENVOIE un booléen (true = réussi ;
+-- une exception/erreur vaut échec) ; le code de l'étudiant y est accessible (point d'entrée
+-- solution(), ou contenu parsé pour HTML/JSON/JSX/TSX).
+INSERT INTO Language (name, start_code_template, harness_template) VALUES
+('Python',
+ $sc$def solution():
+    # à compléter
+    pass
+$sc$,
+ $hc$# HARNAIS (Python) — exécuté après le code de l'étudiant, dans le même espace de noms.
+# Contrat : RENVOIE True (réussi) ou False ; une exception (ex. assert) vaut échec.
+# Le point d'entrée de l'étudiant est appelable directement, ex. solution(...).
+return solution() == ATTENDU
+$hc$),
+('JavaScript',
+ $sc$function solution() {
+  // à compléter
+}
+$sc$,
+ $hc$// HARNAIS (JavaScript) — exécuté après le code de l'étudiant, dans la même portée.
+// Contrat : RENVOIE true (réussi) ou false ; un throw vaut échec.
+// Le point d'entrée de l'étudiant est appelable directement, ex. solution(...).
+return solution() === ATTENDU;
+$hc$),
+('TypeScript',
+ $sc$function solution(): void {
+  // à compléter
+}
+$sc$,
+ $hc$// HARNAIS (TypeScript) — exécuté après le code de l'étudiant, dans la même portée.
+// Contrat : RENVOIE true (réussi) ou false ; un throw vaut échec.
+// Le point d'entrée de l'étudiant est appelable directement, ex. solution(...).
+return solution() === ATTENDU;
+$hc$),
+('SQL',
+ $sc$-- Écris ta requête ici
+$sc$,
+ $hc$-- HARNAIS (SQL) — requête de vérification exécutée après celle de l'étudiant.
+-- Contrat : renvoie UNE valeur booléenne (TRUE = réussi).
+-- Le résultat de l'étudiant est accessible (ex. vue/table temporaire 'solution').
+SELECT (/* résultat étudiant */) = ATTENDU;
+$hc$),
+('Java',
+ $sc$public class Solution {
+    public static void main(String[] args) {
+        // à compléter
+    }
+}
+$sc$,
+ $hc$// HARNAIS (Java) — exécuté après le code de l'étudiant (ses classes sont accessibles).
+// Contrat : RENVOIE un boolean (true = réussi) ; une exception vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. Solution.solution(...).
+return solution().equals(ATTENDU);
+$hc$),
+('C',
+ $sc$#include <stdio.h>
+
+int main(void) {
+    // à compléter
+    return 0;
+}
+$sc$,
+ $hc$// HARNAIS (C) — exécuté après le code de l'étudiant (ses fonctions sont accessibles).
+// Contrat : RENVOIE une valeur non nulle si réussi, 0 sinon.
+// Appelle le point d'entrée de l'étudiant, ex. solution(...).
+return solution() == ATTENDU;
+$hc$),
+('C++',
+ $sc$#include <iostream>
+
+int main() {
+    // à compléter
+    return 0;
+}
+$sc$,
+ $hc$// HARNAIS (C++) — exécuté après le code de l'étudiant (ses symboles sont accessibles).
+// Contrat : RENVOIE true (réussi) ; une exception vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. solution(...).
+return solution() == ATTENDU;
+$hc$),
+('C#',
+ $sc$using System;
+
+class Solution
+{
+    static void Main()
+    {
+        // à compléter
+    }
+}
+$sc$,
+ $hc$// HARNAIS (C#) — exécuté après le code de l'étudiant (ses classes sont accessibles).
+// Contrat : RENVOIE un bool (true = réussi) ; une exception vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. Solution.solution(...).
+return solution().Equals(ATTENDU);
+$hc$),
+('Bash',
+ $sc$#!/usr/bin/env bash
+# à compléter
+$sc$,
+ $hc$# HARNAIS (Bash) — exécuté après le script de l'étudiant.
+# Le script de l'étudiant est sourcé : ses fonctions/variables sont disponibles, et sa sortie
+# standard est capturable, ex. resultat="$(solution)".
+# Contrat : code de sortie 0 = réussi, tout code non nul = échec (utilise test / [ ]).
+[ "$(solution)" = "ATTENDU" ]
+$hc$),
+('HTML',
+ $sc$<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title></title>
+  </head>
+  <body>
+    <!-- à compléter -->
+  </body>
+</html>
+$sc$,
+ $hc$// HARNAIS en JavaScript pour une réponse HTML (le HTML n'est pas exécutable seul).
+// Le HTML de l'étudiant est parsé en DOM et fourni via `doc` (un Document) — équivalent de :
+//   const doc = new DOMParser().parseFromString(reponseHtml, "text/html");
+// Interroge-le avec l'API DOM : doc.querySelector(...), .textContent, .getAttribute(...).
+// Contrat : RENVOIE true (réussi) ; une exception vaut échec.
+return doc.querySelector("h1")?.textContent.trim() === ATTENDU;
+$hc$),
+('Rust',
+ $sc$fn solution() {
+    // à compléter
+}
+$sc$,
+ $hc$// HARNAIS (Rust) — exécuté après le code de l'étudiant.
+// Contrat : la DERNIÈRE expression est la valeur de retour (true = réussi) ; un panic! vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. solution(...).
+solution() == ATTENDU
+$hc$),
+('PHP',
+ $sc$<?php
+// à compléter
+$sc$,
+ $hc$// HARNAIS (PHP) — exécuté après le code de l'étudiant.
+// Contrat : RENVOIE true (réussi) ; une exception vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. solution(...).
+return solution() === ATTENDU;
+$hc$),
+('JSX',
+ $sc$function Composant() {
+  return (
+    <div>{/* à compléter */}</div>
+  );
+}
+$sc$,
+ $hc$// HARNAIS en JavaScript pour un composant JSX (React).
+// Le composant de l'étudiant (ex. `Composant`) est RENDU EN HTML — équivalent de :
+//   const html = ReactDOMServer.renderToStaticMarkup(<Composant />);
+// Inspecte la chaîne `html`, ou parse-la en DOM (comme une réponse HTML) pour la requêter.
+// Contrat : RENVOIE true (réussi) ; une exception (rendu échoué) vaut échec.
+return html.includes(ATTENDU);
+$hc$),
+('TSX',
+ $sc$function Composant(): JSX.Element {
+  return (
+    <div>{/* à compléter */}</div>
+  );
+}
+$sc$,
+ $hc$// HARNAIS en JavaScript pour un composant TSX (React + TypeScript).
+// Le composant de l'étudiant (ex. `Composant`) est RENDU EN HTML — équivalent de :
+//   const html = ReactDOMServer.renderToStaticMarkup(<Composant />);
+// Inspecte la chaîne `html`, ou parse-la en DOM (comme une réponse HTML) pour la requêter.
+// Contrat : RENVOIE true (réussi) ; une exception (rendu échoué) vaut échec.
+return html.includes(ATTENDU);
+$hc$),
+('JSON',
+ $sc${
+  "_commentaire": "à compléter — remplace ce contenu par ta réponse JSON"
+}
+$sc$,
+ $hc$// HARNAIS en JavaScript pour une réponse JSON (données, non exécutables).
+// Le JSON de l'étudiant est parsé et fourni via `data` (objet JS) — équivalent de :
+//   const data = JSON.parse(reponseJson);
+// Vérifie sa structure / ses valeurs : data.champ, Array.isArray(data), data.length…
+// Contrat : RENVOIE true (réussi) ; une exception (JSON invalide) vaut échec.
+return data.nom === ATTENDU;
+$hc$),
+('Go',
+ $sc$package main
+
+import "fmt"
+
+func main() {
+    // à compléter
+}
+$sc$,
+ $hc$// HARNAIS (Go) — exécuté après le code de l'étudiant.
+// Contrat : RENVOIE true (réussi) ; un panic vaut échec.
+// Appelle le point d'entrée de l'étudiant, ex. solution(...).
+return solution() == ATTENDU
+$hc$)
 ON CONFLICT (name) DO NOTHING;
 
 -- Harnais écrits dans un AUTRE langage : HTML/JSON/JSX/TSX (markup/données/vues, non

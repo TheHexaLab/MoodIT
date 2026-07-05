@@ -14,6 +14,7 @@ import {
 } from '../../types/domain';
 import {
   FALLBACK_LANGUAGES,
+  defaultHarness,
   draftToQuestion,
   emptyQuestionDraft,
   questionToDraft,
@@ -504,32 +505,40 @@ export function QuizEditor({
           />
         )}
 
-        {view.kind === 'harness' && activeQuiz && (
-          <HarnessBody
-            testCases={view.draft.testCases ?? []}
-            language={harnessLanguageName(view.draft.languageId, effectiveLanguages ?? FALLBACK_LANGUAGES)}
-            onRequestLanguages={requestLanguages}
-            labels={labels?.harness}
-            onCancel={() =>
-              setView({
-                kind: 'question',
-                quizId: view.quizId,
-                quizIsNew: view.quizIsNew,
-                draft: view.draft,
-                isNew: view.isNew,
-              })
-            }
-            onSave={(testCases) =>
-              setView({
-                kind: 'question',
-                quizId: view.quizId,
-                quizIsNew: view.quizIsNew,
-                draft: { ...view.draft, testCases },
-                isNew: view.isNew,
-              })
-            }
-          />
-        )}
+        {view.kind === 'harness' &&
+          activeQuiz &&
+          (() => {
+            const langs = effectiveLanguages ?? FALLBACK_LANGUAGES;
+            const questionLang = langs.find((l) => l.id === view.draft.languageId);
+            const harnessLang = resolveHarnessLanguage(view.draft.languageId, langs);
+            return (
+              <HarnessBody
+                testCases={view.draft.testCases ?? []}
+                harnessLanguage={harnessLang}
+                defaultHarnessCode={defaultHarness(questionLang, harnessLang)}
+                onRequestLanguages={requestLanguages}
+                labels={labels?.harness}
+                onCancel={() =>
+                  setView({
+                    kind: 'question',
+                    quizId: view.quizId,
+                    quizIsNew: view.quizIsNew,
+                    draft: view.draft,
+                    isNew: view.isNew,
+                  })
+                }
+                onSave={(testCases) =>
+                  setView({
+                    kind: 'question',
+                    quizId: view.quizId,
+                    quizIsNew: view.quizIsNew,
+                    draft: { ...view.draft, testCases },
+                    isNew: view.isNew,
+                  })
+                }
+              />
+            );
+          })()}
 
         {view.kind === 'test' && activeQuiz && (
           <QuestionTestBody
@@ -557,21 +566,21 @@ export function QuizEditor({
 }
 
 /**
- * Langage (nom) dans lequel s'écrivent les harnais d'une question, pour la coloration :
- * le langage de la question peut désigner un AUTRE langage de harnais via
- * `Language.harnessLanguageId` (sinon = le langage de la question lui-même).
+ * Langage dans lequel s'écrivent les harnais d'une question (pour la coloration ET le
+ * squelette d'un nouveau harnais) : le langage de la question peut désigner un AUTRE langage
+ * de harnais via `Language.harnessLanguageId` (sinon = le langage de la question lui-même).
  */
-function harnessLanguageName(
+function resolveHarnessLanguage(
   languageId: number | undefined,
   languages: Language[]
-): string | undefined {
+): Language | undefined {
   const questionLang = languages.find((l) => l.id === languageId);
   if (!questionLang) return undefined;
   const harnessLang =
     questionLang.harnessLanguageId != null
       ? languages.find((l) => l.id === questionLang.harnessLanguageId)
       : undefined;
-  return (harnessLang ?? questionLang).name;
+  return harnessLang ?? questionLang;
 }
 
 /** Sous-titre de l'éditeur de question : « Question # » (via le formatter de labels). */
