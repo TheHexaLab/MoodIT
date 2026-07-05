@@ -22,13 +22,18 @@ export interface RegisterResponse {
 }
 
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  // L'authentification passe désormais par le cookie HttpOnly `moodit_token`, envoyé
+  // automatiquement grâce à credentials:'include' (indispensable si l'origine diffère).
+  // Transition : on continue d'envoyer le header Bearer tant qu'un token localStorage
+  // subsiste (anciennes sessions) — le gateway lit le cookie en priorité, le header en
+  // repli. Le header (et le localStorage) seront retirés à l'étape de nettoyage.
   const token = getToken();
   const headers = new Headers(init.headers as HeadersInit);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(input, { ...init, headers });
+  const res = await fetch(input, { ...init, headers, credentials: 'include' });
 
   if (res.status === 401) {
     clearToken();
@@ -87,6 +92,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterRespon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -102,6 +108,7 @@ export async function login(payload: { email: string; password: string }): Promi
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -119,6 +126,7 @@ export async function verifyEmail(email: string, code: string): Promise<{ messag
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -134,6 +142,7 @@ export async function verify2FA(email: string, code: string): Promise<AuthRespon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
+    credentials: 'include', // stocke le Set-Cookie moodit_token renvoyé par l'auth-service
   });
 
   if (!res.ok) {
@@ -149,6 +158,7 @@ export async function resendCode(email: string, mode: string): Promise<{ message
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, mode }),
+    credentials: 'include',
   });
 
   if (!res.ok) {
