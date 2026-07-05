@@ -618,13 +618,14 @@ public class QuizService {
                 .build();
     }
 
-    /** Score proportionnel borné, arrondi au DIXIÈME : total × clamp(ratio, 0, 1). */
-    private double scaled(double total, double ratio) {
+    /** Score proportionnel borné, arrondi au DIXIÈME : total × clamp(ratio, 0, 1). Package-private
+     *  (au lieu de private) pour être testable directement. */
+    static double scaled(double total, double ratio) {
         return round1(total * Math.max(0, Math.min(1, ratio)));
     }
 
     /** Arrondi au dixième (les scores de question sont au format X.X). */
-    private static double round1(double value) {
+    static double round1(double value) {
         return Math.round(value * 10.0) / 10.0;
     }
 
@@ -927,7 +928,7 @@ public class QuizService {
      * l'ordre d'apparition des items corrélerait avec l'ordre des items (non mélangés) et révélerait
      * le mapping item→groupe. Le tri décorrèle l'ordre affiché de la solution.
      */
-    private static List<String> distinctGroups(Question question) {
+    static List<String> distinctGroups(Question question) {
         if (question.getDragItems() == null) {
             return List.of();
         }
