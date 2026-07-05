@@ -736,14 +736,38 @@ export async function sendMessage(
 }
 
 /** TODO — Modifier le contenu d'un message existant. */
-export async function editMessage(messageId: number, content: string): Promise<void> {
-  await simulateWrite('Échec simulé (modification de message)');
+export async function editMessage(
+  forumID: number,
+  messageId: number,
+  content: string
+): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumID}/posts/${messageId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la modification du message');
+  }
+
   console.log('[api] Modification du message', messageId, ':', content);
 }
 
 /** TODO — Supprimer un message. */
-export async function deleteMessage(messageId: number): Promise<void> {
-  await simulateWrite('Échec simulé (suppression de message)');
+export async function deleteMessage(forumID: number, messageId: number): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumID}/posts/${messageId}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la suppression du message');
+  }
+
   console.log('[api] Suppression du message', messageId);
 }
 
@@ -827,14 +851,34 @@ export async function createPost(
 }
 
 /** TODO — Modifier le contenu d'un post. */
-export async function editPost(postId: number, content: string): Promise<void> {
-  await simulateWrite('Échec simulé (modification de post)');
+export async function editPost(forumId: number, postId: number, content: string): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la modification du post');
+  }
+
   console.log('[api] Modification du post', postId, ':', content);
 }
 
 /** TODO — Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
-export async function deletePost(postId: number): Promise<void> {
-  await simulateWrite('Échec simulé (suppression de post)');
+export async function deletePost(forumId: number, postId: number): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la suppression du post');
+  }
+
   console.log('[api] Suppression du post', postId);
 }
 
