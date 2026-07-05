@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.SourceType;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Soumission d'un étudiant à UNE question, rattachée à une tentative (table Submission).
@@ -42,4 +43,8 @@ public class Submission {
     @ManyToOne
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    /** Verdicts par harnais (questions Code), écrits par le job de correction. */
+    @OneToMany(mappedBy = "submission", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<SubmissionTestCase> testCaseResults;
 }

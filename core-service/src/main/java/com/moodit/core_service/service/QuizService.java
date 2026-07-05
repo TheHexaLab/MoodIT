@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +50,7 @@ public class QuizService {
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final RealtimeEventPublisher realtimePublisher;
+    private final CodeGradingRunner codeGradingRunner;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -310,7 +312,9 @@ public class QuizService {
         }
 
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
-        QuizResultDTO result = buildResult(quiz, byQuestion);
+        // Types « à réponses » corrigés tout de suite ; questions Code renvoyées « en cours »
+        // (tests = null), corrigées ensuite en async (cf. déclenchement plus bas).
+        QuizResultDTO result = buildResult(quiz, byQuestion, Map.of());
 
         // Nouvelle tentative (numéro = nb existant + 1). Aucun score n'est stocké : seules
         // les réponses brutes le sont (content) ; le score est recalculé à la lecture.
@@ -340,6 +344,11 @@ public class QuizService {
             s.setContent(serializeAnswer(byQuestion.get(q.getId())));
             submissionRepository.save(s);
         }
+
+        // Corrige les questions Code EN ASYNC (exécution sandbox lente), APRÈS commit pour que le
+        // job voie la tentative + les submissions persistées. Verdicts poussés ensuite par WS.
+        Integer attemptId = savedAttempt.getId();
+        afterCommit(() -> codeGradingRunner.gradeAttempt(attemptId));
 
         result.setAttemptId(savedAttempt.getId());
         result.setAttemptNo(savedAttempt.getAttemptNo());
@@ -428,8 +437,11 @@ public class QuizService {
                         s -> s.getQuestion().getId(),
                         s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
                         (a, b) -> a));
+        // Submissions par question → verdicts persistés lus pour les questions Code.
+        Map<Integer, Submission> submissionByQuestion = subs.stream()
+                .collect(Collectors.toMap(s -> s.getQuestion().getId(), s -> s, (a, b) -> a));
 
-        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion);
+        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion, submissionByQuestion);
         result.setAttemptId(attempt.getId());
         result.setAttemptNo(attempt.getAttemptNo());
         return result;
@@ -440,10 +452,14 @@ public class QuizService {
                 .collect(Collectors.toMap(SubmittedAnswerDTO::getQuestionId, a -> a, (a, b) -> a));
     }
 
-    /** Corrige toutes les questions du quiz à partir des réponses fournies (sans persister). */
-    private QuizResultDTO buildResult(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+    /**
+     * Corrige toutes les questions du quiz. {@code submissionByQuestion} porte les verdicts
+     * persistés des questions Code (vide à la soumission → Code « en cours »).
+     */
+    private QuizResultDTO buildResult(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion,
+            Map<Integer, Submission> submissionByQuestion) {
         List<QuestionResultDTO> results = sortedQuestions(quiz).stream()
-                .map(q -> gradeQuestion(q, byQuestion.get(q.getId())))
+                .map(q -> gradeQuestion(q, byQuestion.get(q.getId()), submissionByQuestion.get(q.getId())))
                 .toList();
         return QuizResultDTO.builder()
                 .quizId(quiz.getId())
@@ -489,21 +505,40 @@ public class QuizService {
 
     // ── Grading (porté de grading.ts côté front) ─────────────────────────────────
 
-    private QuestionResultDTO gradeQuestion(Question question, SubmittedAnswerDTO answer) {
+    private QuestionResultDTO gradeQuestion(
+            Question question, SubmittedAnswerDTO answer, Submission submission) {
         String slug = slugFor(question);
         if (slug == null) slug = "";
         return switch (slug) {
             case "true_false", "single_choice", "multiple_choice" -> gradeChoice(question, answer, slug);
             case "ordering" -> gradeOrdering(question, answer);
             case "matching" -> gradeMatching(question, answer);
-            default -> // coding : non corrigé côté serveur
-                    QuestionResultDTO.builder()
-                            .questionId(question.getId())
-                            .earned(0)
-                            .max(question.getTotalScore())
-                            .tests(null)
-                            .build();
+            case "coding" -> gradeCoding(question, submission);
+            default -> CodeGrading.pending(question);
         };
+    }
+
+    /**
+     * Note une question Code à partir des verdicts PERSISTÉS (Submission_Test_Case). Sans verdict
+     * (submission absente ou correction async pas encore terminée) → « en cours » (tests = null).
+     */
+    private QuestionResultDTO gradeCoding(Question question, Submission submission) {
+        List<TestCase> harnesses = orderedTestCases(question);
+        Map<Integer, Boolean> passedByTestCaseId = new HashMap<>();
+        if (submission != null && submission.getTestCaseResults() != null) {
+            for (SubmissionTestCase verdict : submission.getTestCaseResults()) {
+                passedByTestCaseId.put(
+                        verdict.getTestCase().getId(), Boolean.TRUE.equals(verdict.getPassed()));
+            }
+        }
+        return CodeGrading.build(question, harnesses, passedByTestCaseId);
+    }
+
+    private static List<TestCase> orderedTestCases(Question question) {
+        if (question.getTestCases() == null) return List.of();
+        return question.getTestCases().stream()
+                .sorted(Comparator.comparing(TestCase::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
     }
 
     private QuestionResultDTO gradeChoice(Question question, SubmittedAnswerDTO answer, String slug) {
