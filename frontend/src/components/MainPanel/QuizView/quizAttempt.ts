@@ -198,6 +198,8 @@ export interface CodingTestResult {
  * corriger une question Code à l'unité (ex. bouton « Tester » de l'éditeur).
  */
 export interface CodeEvaluationInput {
+  /** Nom du langage de la question (ex. « Python ») — le service d'exécution en a besoin. */
+  language?: string;
   languageId?: number;
   code: string;
   testCases: TestCase[];

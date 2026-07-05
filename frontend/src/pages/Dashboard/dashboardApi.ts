@@ -271,20 +271,26 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
- * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
- * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
- * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
+ * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * bouton « Tester » de l'éditeur (sans persistance).
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  await simulateWrite('Échec simulé (évaluation du code)');
-  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
-  const attempted = input.code.trim().length > 0;
-  return input.testCases.map((t, i) => ({
-    name: t.name,
-    passed: attempted && i % 2 === 0,
-    weight: t.weight,
-  }));
+  const res = await apiFetch('/exec/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      language: input.language,
+      code: input.code,
+      testCases: input.testCases.map((t) => ({
+        name: t.name,
+        harnessCode: t.harnessCode,
+        weight: t.weight,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Échec de l'évaluation du code");
+  return await res.json();
 }
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────

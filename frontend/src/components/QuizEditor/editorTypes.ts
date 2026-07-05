@@ -132,7 +132,9 @@ export const FALLBACK_LANGUAGES: Language[] = DEFAULT_LANGUAGES.filter(
 
 /** Squelette de code de départ proposé par langage (par nom, insensible à la casse). */
 const START_CODE_BY_LANGUAGE: Record<string, string> = {
-  python: 'def solution():\n    # à compléter\n    pass\n',
+  python:
+    '# Sandbox : bibliothèque standard complète + numpy, pandas, scipy, sympy (aucun réseau).\n' +
+    'def solution():\n    # à compléter\n    pass\n',
   javascript: 'function solution() {\n  // à compléter\n}\n',
   typescript: 'function solution(): void {\n  // à compléter\n}\n',
   sql: '-- Écris ta requête ici\n',

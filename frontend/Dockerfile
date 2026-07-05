@@ -36,6 +36,12 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    location /exec/ {
+        proxy_pass http://gateway:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
     location /auth/ {
         proxy_pass http://gateway:8080;
         proxy_set_header Host $host;

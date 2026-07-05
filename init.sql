@@ -709,13 +709,15 @@ FROM (VALUES
 -- solution(), ou contenu parsé pour HTML/JSON/JSX/TSX).
 INSERT INTO Language (name, start_code_template, harness_template) VALUES
 ('Python',
- $sc$def solution():
+ $sc$# Sandbox : bibliothèque standard complète + numpy, pandas, scipy, sympy (aucun réseau).
+def solution():
     # à compléter
     pass
 $sc$,
  $hc$# HARNAIS (Python) — exécuté après le code de l'étudiant, dans le même espace de noms.
 # Contrat : RENVOIE True (réussi) ou False ; une exception (ex. assert) vaut échec.
 # Le point d'entrée de l'étudiant est appelable directement, ex. solution(...).
+# Sandbox : bibliothèque standard complète + numpy, pandas, scipy, sympy (aucun réseau).
 return solution() == ATTENDU
 $hc$),
 ('JavaScript',
@@ -1106,3 +1108,60 @@ JOIN LATERAL (
     WHERE a.question_id = q.id AND a.is_correct = s.correct
     ORDER BY a.id LIMIT 1
 ) ans ON TRUE;
+
+-- ============================================================
+--  Démo — Questions de CODE (Python) : quiz prêt à l'emploi pour tester le bouton
+--  « Tester » (exécution Piston). 5 questions avec harnais (retour booléen). Attaché à
+--  GIF201. start_code = squelette ; on écrit la solution dans l'onglet Tester.
+-- ============================================================
+INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id)
+VALUES ('Démo — Questions de code (Python)', FALSE, TRUE, TRUE, 20,
+        (SELECT id FROM Course WHERE code = 'GIF201'));
+
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = 'Python'), v.start_code, v.oidx, v.score, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (Python)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('Écris une fonction somme(a, b) qui renvoie la somme de deux entiers.', 0, 4,
+    $sc$def somme(a, b):
+    pass
+$sc$),
+   ('Écris est_pair(n) qui renvoie True si n est pair, False sinon.', 1, 3,
+    $sc$def est_pair(n):
+    pass
+$sc$),
+   ('Écris inverser(s) qui renvoie la chaîne s à l''envers.', 2, 3,
+    $sc$def inverser(s):
+    pass
+$sc$),
+   ('Écris maximum(liste) qui renvoie le plus grand élément de la liste.', 3, 3,
+    $sc$def maximum(liste):
+    pass
+$sc$),
+   ('Écris moyenne(liste) qui renvoie la moyenne arithmétique de la liste.', 4, 3,
+    $sc$def moyenne(liste):
+    pass
+$sc$)
+) AS v(prompt, oidx, score, start_code);
+
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (0, '1+2 = 3',        $h$return somme(1, 2) == 3$h$, 1),
+   (0, 'négatifs',       $h$return somme(-4, 4) == 0$h$, 1),
+   (0, 'grands nombres', $h$return somme(1000, 337) == 1337$h$, 2),
+   (1, 'pair',           $h$return est_pair(4)$h$, 1),
+   (1, 'impair',         $h$return not est_pair(7)$h$, 1),
+   (1, 'zéro',           $h$return est_pair(0)$h$, 1),
+   (2, 'abc vers cba',   $h$return inverser("abc") == "cba"$h$, 1),
+   (2, 'chaîne vide',    $h$return inverser("") == ""$h$, 1),
+   (2, 'palindrome',     $h$return inverser("radar") == "radar"$h$, 1),
+   (3, 'cas simple',     $h$return maximum([3, 1, 4, 1, 5, 9, 2]) == 9$h$, 1),
+   (3, 'négatifs',       $h$return maximum([-5, -2, -9]) == -2$h$, 2),
+   (4, 'vs numpy',       $h$import numpy as np
+return abs(moyenne([1, 2, 3, 4, 5]) - np.mean([1, 2, 3, 4, 5])) < 1e-9$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (Python)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));

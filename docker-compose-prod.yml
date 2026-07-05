@@ -136,9 +136,62 @@ services:
       ollama-init:
         condition: service_completed_successfully
 
+  #Piston (sandbox d'exécution du code étudiant NON FIABLE) --------------
+  # Moteur open-source multi-langages : isolation (isolate/nsjail), pas de réseau à l'exécution,
+  # limites CPU/mémoire/temps. `privileged` requis par isolate (cgroups/namespaces). Les paquets
+  # de langages sont installés dans le volume piston_data (persistés entre redémarrages). Exposé
+  # UNIQUEMENT sur le réseau interne — jamais au gateway.
+  piston:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: moodit_piston
+    privileged: true
+    volumes:
+      - piston_data:/piston/packages
+    networks:
+      - internal
+
+  #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
+  # Idempotent (paquets persistés dans piston_data). Ajouter ici chaque langage au fur et à
+  # mesure qu'il est supporté par l'assembleur de execution-service.
+  piston-init:
+    image: curlimages/curl:latest
+    container_name: moodit_piston_init
+    depends_on:
+      - piston
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1;
+        do echo "attente de piston..."; sleep 2; done;
+        curl -sS -X POST http://piston:2000/api/v2/packages
+        -H 'Content-Type: application/json'
+        -d '{"language":"python","version":"3.12.0"}' || true;
+        curl -fsS http://piston:2000/api/v2/runtimes | grep -q '"language":"python"'
+        || { echo "echec: python absent de piston"; exit 1; }
+    restart: "no"
+    networks:
+      - internal
+
+  #Execution service (exécute le code étudiant via le sandbox Piston) ----
+  execution-service:
+    build: ./execution-service
+    container_name: moodit_execution
+    env_file:
+      - .env.docker
+    environment:
+      PISTON_URL: http://piston:2000   # sandbox sur le réseau interne
+    networks:
+      - internal
+    depends_on:
+      # Ne démarre qu'une fois les langages installés dans Piston.
+      piston-init:
+        condition: service_completed_successfully
+
 volumes:
   postgres_data:
   ollama_data:
+  piston_data:
 
 networks:
   internal:

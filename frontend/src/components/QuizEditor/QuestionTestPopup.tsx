@@ -84,6 +84,7 @@ export function QuestionTestBody({
       setEvaluating(true);
       try {
         const tests = await onEvaluateCode({
+          language: question.language?.name,
           languageId: question.language?.id,
           code: answer.kind === 'coding' ? answer.code : '',
           testCases: question.testCases ?? [],
