@@ -1,11 +1,13 @@
-// Proxy WebSocket du gateway : pour chaque client navigateur connecté sur /ws, on
-// ouvre une connexion AVAL vers core-service (en transmettant la query ?token=...)
-// et on relaie les trames dans les deux sens. Le gateway est ainsi le point d'entrée
-// unique ; l'authentification réelle (validation du JWT) reste faite par core-service
-// à son propre handshake.
+// Proxy WebSocket du gateway : pour chaque client navigateur connecté sur /ws, on ouvre
+// une connexion AVAL vers core-service et on relaie les trames dans les deux sens. Le
+// token (validé par AuthHandshakeInterceptor) est réinjecté vers core en header
+// Authorization — et non plus en query — pour ne pas exposer le JWT dans les logs/URLs.
+// Le gateway est le point d'entrée et d'authentification unique ; core revalide la
+// signature à son propre handshake (défense en profondeur).
 
 package com.moodit.gateway.ws;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
@@ -44,12 +47,18 @@ public class WebSocketProxyHandler extends AbstractWebSocketHandler {
     WebSocketSession client =
         new ConcurrentWebSocketSessionDecorator(clientRaw, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT);
 
-    String query = (String) clientRaw.getAttributes().get(QueryCaptureHandshakeInterceptor.QUERY_ATTR);
-    String url = (query != null && !query.isBlank()) ? coreWsUrl + "?" + query : coreWsUrl;
+    // Token validé au handshake amont : réinjecté vers core en header Authorization.
+    String token = (String) clientRaw.getAttributes().get(AuthHandshakeInterceptor.TOKEN_ATTR);
+    WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
+    if (token != null && !token.isBlank()) {
+      headers.add("Authorization", "Bearer " + token);
+    }
 
     try {
       WebSocketSession downstream =
-          new StandardWebSocketClient().execute(new DownstreamRelayHandler(client), url).get();
+          new StandardWebSocketClient()
+              .execute(new DownstreamRelayHandler(client), headers, URI.create(coreWsUrl))
+              .get();
       downstreamByClient.put(clientRaw.getId(), downstream);
     } catch (Exception e) {
       // Core indisponible / token refusé au handshake aval : on ferme le client.
