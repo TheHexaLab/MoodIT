@@ -168,7 +168,7 @@ services:
           echo "attente de piston..."; sleep 2;
         done
         for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
-                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2; do
+                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2 sqlite3:3.36.0; do
           lang=$${pkg%%:*}; ver=$${pkg##*:};
           echo "installation $$lang $$ver...";
           curl -sS -X POST http://piston:2000/api/v2/packages \
@@ -176,10 +176,10 @@ services:
             -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
         done
         rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
-        for l in python javascript typescript bash php go rust c c++ csharp java; do
+        for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
           echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
         done
-        echo "piston pret (11 langages)";
+        echo "piston pret (12 runtimes ; + JSON via node)";
     restart: "no"
     networks:
       - internal

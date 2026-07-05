@@ -78,8 +78,50 @@ public class ExecutionService {
         }
 
         PistonClient.Stage run = result.run();
+
+        // SQL : le verdict se lit sur la SORTIE (dernière ligne == 1), pas via l'exit code — SQLite
+        // renvoie 0 même pour un booléen faux. Un exit non-zéro = vraie erreur SQL (syntaxe, table
+        // manquante…) → échec, message = stderr.
+        if ("sqlite3".equals(assembled.pistonLanguage())) {
+            return sqlResult(testCase.name(), weight, run);
+        }
+
         boolean passed = run != null && run.signal() == null && run.code() != null && run.code() == 0;
         return new TestResult(testCase.name(), weight, passed, passed ? null : runFailureDetail(run));
+    }
+
+    /** Verdict d'un test SQL : réussi si la dernière ligne non vide de stdout vaut « 1 ». */
+    private static TestResult sqlResult(String name, int weight, PistonClient.Stage run) {
+        if (run == null) {
+            return new TestResult(name, weight, false, "Aucune sortie SQL");
+        }
+        if (run.signal() != null) {
+            return new TestResult(name, weight, false,
+                    "Interrompu (signal " + run.signal() + ") — dépassement de temps ou de mémoire probable");
+        }
+        if (run.code() != null && run.code() != 0) {
+            return new TestResult(name, weight, false,
+                    firstNonBlank(run.stderr(), run.message(), "Erreur SQL"));
+        }
+        String last = lastNonBlank(run.stdout());
+        boolean passed = "1".equals(last);
+        return new TestResult(name, weight, passed, passed ? null
+                : "Le harnais a renvoyé faux (dernière valeur : " + (last == null ? "aucune" : last) + ")");
+    }
+
+    /** Dernière ligne non vide d'une sortie (le verdict SQL, après d'éventuelles lignes de debug). */
+    private static String lastNonBlank(String output) {
+        if (output == null) {
+            return null;
+        }
+        String[] lines = output.split("\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i].strip();
+            if (!line.isEmpty()) {
+                return line;
+            }
+        }
+        return null;
     }
 
     /** Message d'échec exploitable pour le prof (signal = timeout/OOM, sinon stderr). */

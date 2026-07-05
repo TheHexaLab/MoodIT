@@ -745,12 +745,17 @@ $sc$,
 return solution() === ATTENDU;
 $hc$),
 ('SQL',
- $sc$-- Écris ta requête ici
+ $sc$-- Sandbox : SQLite 3 en mémoire (aucun réseau). Écris ta requête (SELECT) ci-dessous ;
+-- elle est exposée au harnais comme la vue « solution ».
+SELECT /* à compléter */;
 $sc$,
- $hc$-- HARNAIS (SQL) — requête de vérification exécutée après celle de l'étudiant.
--- Contrat : renvoie UNE valeur booléenne (TRUE = réussi).
--- Le résultat de l'étudiant est accessible (ex. vue/table temporaire 'solution').
-SELECT (/* résultat étudiant */) = ATTENDU;
+ $hc$-- HARNAIS (SQL) — la requête de l'étudiant est exposée comme la vue « solution ».
+-- 1) crée le jeu de données de test (CREATE TABLE + INSERT) sur lequel porte la requête ;
+-- 2) TERMINE par UN SELECT booléen (1 = réussi) comparant « solution » à l'attendu.
+-- La DERNIÈRE valeur affichée fait foi ; une erreur SQL (table manquante, syntaxe…) vaut échec.
+CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0);
+SELECT (SELECT count(*) FROM solution) = 1 AND (SELECT nom FROM solution) = 'Alice';
 $hc$),
 ('Java',
  $sc$// Sandbox : bibliothèque standard Java (JDK, aucun réseau).
@@ -1476,6 +1481,46 @@ r.aire() == 25$h$, 1),
    (18, 'carré 5x5', $h$return new Rectangle(5, 5).aire() == 25;$h$, 1),
    (19, 'aire 3x4',  $h$return new Rectangle(3, 4).aire() == 12;$h$, 1),
    (19, 'carré 5x5', $h$return new Rectangle(5, 5).aire() == 25;$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ── Questions données/requête (JSON, SQL) — ajoutées au même quiz démo (ordre 20-21). JSON :
+-- validé par un harnais JS sur `data` (JSON parsé). SQL : requête exposée comme la vue `solution`,
+-- le harnais fournit les données et termine par un SELECT booléen. Validé end-to-end.
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('JSON', 'Écris un objet JSON avec une clé nom (chaîne non vide) et une clé age (nombre entier positif).', 20,
+    $sc${
+  "nom": "",
+  "age": 0
+}
+$sc$),
+   ('SQL', 'Sélectionne les noms (colonne nom) des utilisateurs actifs (actif = 1) de la table utilisateurs.', 21,
+    $sc$-- La table utilisateurs(nom, actif) est fournie par le test.
+SELECT /* à compléter */;
+$sc$)
+) AS v(lang, prompt, oidx, start_code);
+
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (20, 'nom = chaîne non vide', $h$return typeof data.nom === 'string' && data.nom.length > 0;$h$, 1),
+   (20, 'age = entier positif',  $h$return Number.isInteger(data.age) && data.age > 0;$h$, 1),
+   (21, 'deux actifs',           $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
+SELECT (SELECT count(*) FROM solution) = 2;$h$, 1),
+   (21, 'exclut les inactifs',   $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
+SELECT NOT EXISTS (SELECT 1 FROM solution WHERE nom = 'Bob');$h$, 1),
+   (21, 'colonne nom uniquement', $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
+SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
+   AND (SELECT name FROM pragma_table_info('solution')) = 'nom';$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'

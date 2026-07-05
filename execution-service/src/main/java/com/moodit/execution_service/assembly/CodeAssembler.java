@@ -38,6 +38,8 @@ public class CodeAssembler {
             case "c++" -> assembleCpp(code, harness);
             case "csharp" -> assembleCSharp(code, harness);
             case "java" -> assembleJava(code, harness);
+            case "json" -> assembleJson(code, harness);
+            case "sql" -> assembleSql(code, harness);
             default -> throw new UnsupportedLanguageException(language);
         };
     }
@@ -61,6 +63,8 @@ public class CodeAssembler {
             case "c++" -> run("c++", "main.cpp", code);
             case "csharp" -> run("csharp", "main.cs", code);
             case "java" -> run("java", javaFileName(code), code);
+            case "json" -> runJson(code);
+            case "sql" -> run("sqlite3", "main.sql", code);
             default -> throw new UnsupportedLanguageException(language);
         };
     }
@@ -77,6 +81,7 @@ public class CodeAssembler {
             case "cs", "c-sharp", "csharp", "c#" -> "csharp";
             case "shell", "sh" -> "bash";
             case "golang" -> "go";
+            case "sqlite", "sqlite3" -> "sql";
             default -> lang;
         };
     }
@@ -316,5 +321,76 @@ public class CodeAssembler {
         var matcher = java.util.regex.Pattern
                 .compile("public\\s+class\\s+(\\w+)").matcher(studentCode);
         return matcher.find() ? matcher.group(1) + ".java" : "Main.java";
+    }
+
+    // ── JSON ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * JSON : donnée non exécutable, VALIDÉE par un harnais JavaScript (cf. harness_language_id). Le
+     * JSON de l'étudiant est écrit dans un fichier voisin, parsé en {@code data} ; un JSON invalide
+     * (parse échoué) vaut échec. Le harnais (corps JS) inspecte {@code data} et renvoie un booléen.
+     */
+    private Assembled assembleJson(String studentJson, String harnessCode) {
+        String main = "const __moodit_fs = require('fs');\n"
+                + "let data;\n"
+                + "try {\n"
+                + "  data = JSON.parse(__moodit_fs.readFileSync(__dirname + '/submission.json', 'utf8'));\n"
+                + "} catch (__moodit_e) {\n"
+                + "  console.error('JSON invalide: ' + (__moodit_e && __moodit_e.message ? __moodit_e.message : String(__moodit_e)));\n"
+                + "  process.exit(1);\n"
+                + "}\n"
+                + "function __moodit_harness() {\n"
+                + harnessCode
+                + "\n}\n"
+                + "try {\n"
+                + "  const __moodit_result = __moodit_harness();\n"
+                + "  process.exit(__moodit_result ? 0 : 1);\n"
+                + "} catch (__moodit_e) {\n"
+                + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
+                + "  process.exit(1);\n"
+                + "}\n";
+        return new Assembled("javascript", List.of(
+                new PistonClient.File("main.js", main),
+                new PistonClient.File("submission.json", studentJson)));
+    }
+
+    /**
+     * « Run » d'un JSON (non exécutable) : on VALIDE et on RÉ-INDENTE le JSON — sortie = JSON
+     * reformaté si valide, message d'erreur (+ exit 1) si invalide. Donne un retour utile au « play ».
+     */
+    private Assembled runJson(String studentJson) {
+        String main = "const __moodit_fs = require('fs');\n"
+                + "try {\n"
+                + "  const data = JSON.parse(__moodit_fs.readFileSync(__dirname + '/submission.json', 'utf8'));\n"
+                + "  console.log(JSON.stringify(data, null, 2));\n"
+                + "} catch (__moodit_e) {\n"
+                + "  console.error('JSON invalide: ' + (__moodit_e && __moodit_e.message ? __moodit_e.message : String(__moodit_e)));\n"
+                + "  process.exit(1);\n"
+                + "}\n";
+        return new Assembled("javascript", List.of(
+                new PistonClient.File("main.js", main),
+                new PistonClient.File("submission.json", studentJson)));
+    }
+
+    // ── SQL (SQLite) ─────────────────────────────────────────────────────────────
+
+    /**
+     * SQL : la requête de l'étudiant est exposée comme la VUE {@code solution} (créée AVANT les
+     * tables — SQLite la résout paresseusement à la lecture). Le harnais qui suit crée le jeu de
+     * données de test puis TERMINE par un SELECT booléen (1 = réussi) comparant {@code solution} à
+     * l'attendu. Le verdict est lu sur la SORTIE (dernière ligne == 1), pas via l'exit code —
+     * SQLite ne met pas l'exit à non-zéro pour un booléen faux (cf. ExecutionService).
+     */
+    private Assembled assembleSql(String studentQuery, String harnessCode) {
+        String query = studentQuery.strip();
+        while (query.endsWith(";")) {
+            query = query.substring(0, query.length() - 1).stripTrailing();
+        }
+        String program = "CREATE VIEW solution AS\n"
+                + query
+                + ";\n\n"
+                + harnessCode
+                + "\n";
+        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program)));
     }
 }
