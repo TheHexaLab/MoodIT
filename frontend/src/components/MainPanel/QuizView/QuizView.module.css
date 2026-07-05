@@ -310,17 +310,30 @@
 
 /* Points de progression (un par question). Au milieu du pied de page : cède
    l'espace et masque le débordement plutôt que de pousser les boutons hors-cadre. */
+/* Rangée défilable de points (un par question) : au milieu du pied de page, elle cède l'espace
+   (flex-shrink) et DÉFILE horizontalement au lieu de rogner/déborder. Scrollbar masquée ; le point
+   actif est recentré en JS (cf. QuizView.tsx). S'adapte à n'importe quel nombre de questions. */
 .dots {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 0.4375rem;
     flex: 0 1 auto;
     min-width: 0;
-    overflow: hidden;
+    /* offsetParent des points : indispensable pour que `offsetLeft` (utilisé au recentrage JS)
+       soit relatif à CETTE rangée, sinon le scroll vise la mauvaise position. */
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    scrollbar-width: none; /* Firefox */
+}
+.dots::-webkit-scrollbar {
+    display: none; /* Chrome/Safari : barre masquée, défilement conservé */
 }
 
 .dot {
+    flex: 0 0 auto;
     width: 7px;
     height: 7px;
     border-radius: 999px;
@@ -574,8 +587,8 @@
     .header {
         height: 3.25rem;
     }
-    /* Mobile : on masque les points de progression du pied de page (la barre du haut
-       suffit à indiquer l'avancement) → plus de place pour les boutons de navigation. */
+    /* Mobile : on masque les points de progression (la barre du haut suffit à indiquer
+       l'avancement) → plus de place pour les boutons de navigation. */
     .dots {
         display: none;
     }

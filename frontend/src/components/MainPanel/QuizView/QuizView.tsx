@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import styles from './QuizView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { type Course } from '../../CourseMenu/CourseMenu';
@@ -113,6 +113,24 @@ const QuizView: React.FC<QuizViewProps> = ({
   // Barre de progression : fraction courante (100 % au résumé).
   const progress =
     phase === 'summary' ? 1 : total > 0 ? (currentIndex + 1) / total : 0;
+
+  // Menu de points défilable : on garde le point actif (marqué data-active) TOUJOURS visible, mais
+  // sans scroll superflu — on ne défile QUE s'il sort du cadre (avec une petite marge de contexte),
+  // sinon on ne bouge pas. Défile uniquement le conteneur (scrollLeft), pas le reste de la page.
+  const dotsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const container = dotsRef.current;
+    const active = container?.querySelector<HTMLElement>('[data-active]');
+    if (!container || !active) return;
+    const left = active.offsetLeft;
+    const right = left + active.offsetWidth;
+    const margin = active.offsetWidth; // garde un point de contexte de part et d'autre
+    if (left - margin < container.scrollLeft) {
+      container.scrollLeft = left - margin;
+    } else if (right + margin > container.scrollLeft + container.clientWidth) {
+      container.scrollLeft = right + margin - container.clientWidth;
+    }
+  }, [currentIndex, total, phase]);
 
   return (
     <div className={styles.view}>
@@ -249,11 +267,14 @@ const QuizView: React.FC<QuizViewProps> = ({
           {t.prev}
         </button>
 
-        <div className={styles.dots}>
+        {/* Rangée de points défilable (scrollbar masquée) : tous les points restent cliquables ;
+            le point actif est recentré en JS. S'adapte à n'importe quel nombre de questions. */}
+        <div className={styles.dots} ref={dotsRef}>
           {questions.map((q, i) => (
             <button
               type="button"
               key={q.id}
+              data-active={i === currentIndex ? '' : undefined}
               className={[
                 styles.dot,
                 i === currentIndex ? styles.dotActive : '',
