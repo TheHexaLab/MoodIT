@@ -151,8 +151,10 @@ services:
       - internal
 
   #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
-  # Idempotent (paquets persistés dans piston_data). Ajouter ici chaque langage au fur et à
-  # mesure qu'il est supporté par l'assembleur de execution-service.
+  # Idempotent (paquets persistés dans piston_data). Les PAQUETS installés (à gauche) diffèrent
+  # parfois du nom de RUNTIME exposé par Piston (node→javascript, gcc→c/c++, mono→csharp) : on
+  # installe par paquet, on vérifie par runtime. Ajouter ici chaque langage supporté par
+  # l'assembleur de execution-service.
   piston-init:
     image: curlimages/curl:latest
     container_name: moodit_piston_init
@@ -161,14 +163,23 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - >-
-        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1;
-        do echo "attente de piston..."; sleep 2; done;
-        curl -sS -X POST http://piston:2000/api/v2/packages
-        -H 'Content-Type: application/json'
-        -d '{"language":"python","version":"3.12.0"}' || true;
-        curl -fsS http://piston:2000/api/v2/runtimes | grep -q '"language":"python"'
-        || { echo "echec: python absent de piston"; exit 1; }
+      - |-
+        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do
+          echo "attente de piston..."; sleep 2;
+        done
+        for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
+                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2; do
+          lang=$${pkg%%:*}; ver=$${pkg##*:};
+          echo "installation $$lang $$ver...";
+          curl -sS -X POST http://piston:2000/api/v2/packages \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
+        done
+        rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
+        for l in python javascript typescript bash php go rust c c++ csharp java; do
+          echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
+        done
+        echo "piston pret (11 langages)";
     restart: "no"
     networks:
       - internal

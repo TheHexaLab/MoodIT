@@ -721,7 +721,8 @@ $sc$,
 return solution() == ATTENDU
 $hc$),
 ('JavaScript',
- $sc$function solution() {
+ $sc$// Sandbox : Node.js 20, bibliothèque standard (aucun réseau, aucun paquet npm).
+function solution() {
   // à compléter
 }
 $sc$,
@@ -731,8 +732,11 @@ $sc$,
 return solution() === ATTENDU;
 $hc$),
 ('TypeScript',
- $sc$function solution(): void {
+ $sc$// Sandbox : TypeScript 5 transpilé et exécuté sur Node.js 20 ; bibliothèque standard
+// (aucun réseau, aucun paquet npm). Le typage est permissif à l'exécution.
+function solution(): number {
   // à compléter
+  return 0;
 }
 $sc$,
  $hc$// HARNAIS (TypeScript) — exécuté après le code de l'étudiant, dans la même portée.
@@ -749,62 +753,91 @@ $sc$,
 SELECT (/* résultat étudiant */) = ATTENDU;
 $hc$),
 ('Java',
- $sc$public class Solution {
-    public static void main(String[] args) {
+ $sc$// Sandbox : bibliothèque standard Java (JDK, aucun réseau).
+public class Solution {
+    public static int solution() {
         // à compléter
+        return 0;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(solution());
     }
 }
 $sc$,
- $hc$// HARNAIS (Java) — exécuté après le code de l'étudiant (ses classes sont accessibles).
+ $hc$// HARNAIS (Java) — exécuté après le code de l'étudiant (son main est neutralisé, ses classes restent accessibles).
 // Contrat : RENVOIE un boolean (true = réussi) ; une exception vaut échec.
-// Appelle le point d'entrée de l'étudiant, ex. Solution.solution(...).
-return solution().equals(ATTENDU);
+// Appelle le point d'entrée QUALIFIÉ de l'étudiant, ex. Solution.solution(...).
+return Solution.solution() == ATTENDU;
 $hc$),
 ('C',
- $sc$#include <stdio.h>
+ $sc$// Sandbox : bibliothèque standard C (libc, aucun réseau).
+#include <stdio.h>
 
-int main(void) {
+int solution(void) {
     // à compléter
     return 0;
 }
+
+int main(void) {
+    printf("%d\n", solution());
+    return 0;
+}
 $sc$,
- $hc$// HARNAIS (C) — exécuté après le code de l'étudiant (ses fonctions sont accessibles).
+ $hc$// HARNAIS (C) — exécuté après le code de l'étudiant (son main est neutralisé, ses fonctions restent accessibles).
 // Contrat : RENVOIE une valeur non nulle si réussi, 0 sinon.
 // Appelle le point d'entrée de l'étudiant, ex. solution(...).
 return solution() == ATTENDU;
 $hc$),
 ('C++',
- $sc$#include <iostream>
+ $sc$// Sandbox : bibliothèque standard C++ (STL, aucun réseau).
+#include <iostream>
 
-int main() {
+int solution() {
     // à compléter
     return 0;
 }
+
+int main() {
+    std::cout << solution() << std::endl;
+    return 0;
+}
 $sc$,
- $hc$// HARNAIS (C++) — exécuté après le code de l'étudiant (ses symboles sont accessibles).
+ $hc$// HARNAIS (C++) — exécuté après le code de l'étudiant (son main est neutralisé, ses symboles restent accessibles).
 // Contrat : RENVOIE true (réussi) ; une exception vaut échec.
 // Appelle le point d'entrée de l'étudiant, ex. solution(...).
 return solution() == ATTENDU;
 $hc$),
 ('C#',
- $sc$using System;
+ $sc$// Sandbox : bibliothèque standard .NET/Mono (aucun réseau).
+using System;
 
 class Solution
 {
-    static void Main()
+    public static int solution()
     {
         // à compléter
+        return 0;
+    }
+
+    static void Main()
+    {
+        Console.WriteLine(solution());
     }
 }
 $sc$,
- $hc$// HARNAIS (C#) — exécuté après le code de l'étudiant (ses classes sont accessibles).
+ $hc$// HARNAIS (C#) — exécuté après le code de l'étudiant (son Main est neutralisé, ses classes restent accessibles).
 // Contrat : RENVOIE un bool (true = réussi) ; une exception vaut échec.
-// Appelle le point d'entrée de l'étudiant, ex. Solution.solution(...).
-return solution().Equals(ATTENDU);
+// Appelle le point d'entrée QUALIFIÉ de l'étudiant, ex. Solution.solution(...).
+return Solution.solution().Equals(ATTENDU);
 $hc$),
 ('Bash',
  $sc$#!/usr/bin/env bash
-# à compléter
+# Sandbox : bash 5.2 + coreutils GNU (aucun réseau).
+solution() {
+  # à compléter
+  :
+}
 $sc$,
  $hc$# HARNAIS (Bash) — exécuté après le script de l'étudiant.
 # Le script de l'étudiant est sourcé : ses fonctions/variables sont disponibles, et sa sortie
@@ -832,18 +865,27 @@ $sc$,
 return doc.querySelector("h1")?.textContent.trim() === ATTENDU;
 $hc$),
 ('Rust',
- $sc$fn solution() {
+ $sc$// Sandbox : bibliothèque standard Rust (aucun réseau, pas de crate externe).
+fn solution() -> i32 {
     // à compléter
+    0
+}
+
+fn main() {
+    println!("{}", solution());
 }
 $sc$,
- $hc$// HARNAIS (Rust) — exécuté après le code de l'étudiant.
+ $hc$// HARNAIS (Rust) — exécuté après le code de l'étudiant (son main est neutralisé).
 // Contrat : la DERNIÈRE expression est la valeur de retour (true = réussi) ; un panic! vaut échec.
 // Appelle le point d'entrée de l'étudiant, ex. solution(...).
 solution() == ATTENDU
 $hc$),
 ('PHP',
  $sc$<?php
-// à compléter
+// Sandbox : PHP 8.2, bibliothèque standard (aucun réseau, aucun paquet Composer).
+function solution() {
+  // à compléter
+}
 $sc$,
  $hc$// HARNAIS (PHP) — exécuté après le code de l'étudiant.
 // Contrat : RENVOIE true (réussi) ; une exception vaut échec.
@@ -891,15 +933,21 @@ $sc$,
 return data.nom === ATTENDU;
 $hc$),
 ('Go',
- $sc$package main
+ $sc$// Sandbox : bibliothèque standard Go (aucun réseau).
+package main
 
 import "fmt"
 
-func main() {
+func solution() int {
     // à compléter
+    return 0
+}
+
+func main() {
+    fmt.Println(solution())
 }
 $sc$,
- $hc$// HARNAIS (Go) — exécuté après le code de l'étudiant.
+ $hc$// HARNAIS (Go) — exécuté après le code de l'étudiant (son main est neutralisé).
 // Contrat : RENVOIE true (réussi) ; un panic vaut échec.
 // Appelle le point d'entrée de l'étudiant, ex. solution(...).
 return solution() == ATTENDU
@@ -1110,58 +1158,325 @@ JOIN LATERAL (
 ) ans ON TRUE;
 
 -- ============================================================
---  Démo — Questions de CODE (Python) : quiz prêt à l'emploi pour tester le bouton
---  « Tester » (exécution Piston). 5 questions avec harnais (retour booléen). Attaché à
---  GIF201. start_code = squelette ; on écrit la solution dans l'onglet Tester.
+--  Démo — Questions de CODE (multi-langages) : quiz prêt à l'emploi pour tester le bouton
+--  « Tester » et le bouton « play » (exécution Piston) sur les 11 langages exécutables. UNE
+--  question par langage, même tâche : doubler(n) renvoie 2 × n (identifiant valide partout —
+--  on évite « double », mot-clé réservé). Attaché à GIF201. start_code = squelette ; on écrit
+--  la solution dans l'onglet Tester. Chaque question a 2 harnais (retour booléen).
 -- ============================================================
 INSERT INTO Quiz (title, is_daily, is_published, allow_retry, position, course_id)
-VALUES ('Démo — Questions de code (Python)', FALSE, TRUE, TRUE, 20,
+VALUES ('Démo — Questions de code (multi-langages)', FALSE, TRUE, TRUE, 20,
         (SELECT id FROM Course WHERE code = 'GIF201'));
 
 INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
-SELECT v.prompt, (SELECT id FROM Language WHERE name = 'Python'), v.start_code, v.oidx, v.score, 6, q.id
-FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (Python)'
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
                           AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
 (VALUES
-   ('Écris une fonction somme(a, b) qui renvoie la somme de deux entiers.', 0, 4,
-    $sc$def somme(a, b):
+   ('Python', 'Implémente doubler(n) qui renvoie le double de n.', 0,
+    $sc$def doubler(n):
     pass
 $sc$),
-   ('Écris est_pair(n) qui renvoie True si n est pair, False sinon.', 1, 3,
-    $sc$def est_pair(n):
-    pass
+   ('JavaScript', 'Implémente doubler(n) qui renvoie le double de n.', 1,
+    $sc$function doubler(n) {
+  // à compléter
+}
 $sc$),
-   ('Écris inverser(s) qui renvoie la chaîne s à l''envers.', 2, 3,
-    $sc$def inverser(s):
-    pass
+   ('TypeScript', 'Implémente doubler(n) qui renvoie le double de n.', 2,
+    $sc$function doubler(n: number): number {
+  // à compléter
+  return 0;
+}
 $sc$),
-   ('Écris maximum(liste) qui renvoie le plus grand élément de la liste.', 3, 3,
-    $sc$def maximum(liste):
-    pass
+   ('PHP', 'Implémente doubler(n) qui renvoie le double de n.', 3,
+    $sc$<?php
+function doubler($n) {
+  // à compléter
+}
 $sc$),
-   ('Écris moyenne(liste) qui renvoie la moyenne arithmétique de la liste.', 4, 3,
-    $sc$def moyenne(liste):
-    pass
+   ('Bash', 'Implémente doubler qui écrit le double de son 1er argument.', 4,
+    $sc$#!/usr/bin/env bash
+doubler() {
+  # à compléter
+  echo 0
+}
+$sc$),
+   ('Go', 'Implémente doubler(n) qui renvoie le double de n.', 5,
+    $sc$package main
+
+import "fmt"
+
+func doubler(n int) int {
+    // à compléter
+    return 0
+}
+
+func main() {
+    fmt.Println(doubler(5))
+}
+$sc$),
+   ('Rust', 'Implémente doubler(n) qui renvoie le double de n.', 6,
+    $sc$fn doubler(n: i32) -> i32 {
+    // à compléter
+    0
+}
+
+fn main() {
+    println!("{}", doubler(5));
+}
+$sc$),
+   ('C', 'Implémente doubler(n) qui renvoie le double de n.', 7,
+    $sc$#include <stdio.h>
+
+int doubler(int n) {
+    // à compléter
+    return 0;
+}
+
+int main(void) {
+    printf("%d\n", doubler(5));
+    return 0;
+}
+$sc$),
+   ('C++', 'Implémente doubler(n) qui renvoie le double de n.', 8,
+    $sc$#include <iostream>
+
+int doubler(int n) {
+    // à compléter
+    return 0;
+}
+
+int main() {
+    std::cout << doubler(5) << std::endl;
+    return 0;
+}
+$sc$),
+   ('C#', 'Implémente doubler(n) qui renvoie le double de n.', 9,
+    $sc$using System;
+
+class Solution {
+    public static int doubler(int n) {
+        // à compléter
+        return 0;
+    }
+
+    static void Main() {
+        Console.WriteLine(doubler(5));
+    }
+}
+$sc$),
+   ('Java', 'Implémente doubler(n) qui renvoie le double de n.', 10,
+    $sc$public class Solution {
+    public static int doubler(int n) {
+        // à compléter
+        return 0;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(doubler(5));
+    }
+}
 $sc$)
-) AS v(prompt, oidx, score, start_code);
+) AS v(lang, prompt, oidx, start_code);
 
 INSERT INTO Test_Case (name, harness_code, weight, question_id)
 SELECT v.name, v.hc, v.w, qn.id
 FROM (VALUES
-   (0, '1+2 = 3',        $h$return somme(1, 2) == 3$h$, 1),
-   (0, 'négatifs',       $h$return somme(-4, 4) == 0$h$, 1),
-   (0, 'grands nombres', $h$return somme(1000, 337) == 1337$h$, 2),
-   (1, 'pair',           $h$return est_pair(4)$h$, 1),
-   (1, 'impair',         $h$return not est_pair(7)$h$, 1),
-   (1, 'zéro',           $h$return est_pair(0)$h$, 1),
-   (2, 'abc vers cba',   $h$return inverser("abc") == "cba"$h$, 1),
-   (2, 'chaîne vide',    $h$return inverser("") == ""$h$, 1),
-   (2, 'palindrome',     $h$return inverser("radar") == "radar"$h$, 1),
-   (3, 'cas simple',     $h$return maximum([3, 1, 4, 1, 5, 9, 2]) == 9$h$, 1),
-   (3, 'négatifs',       $h$return maximum([-5, -2, -9]) == -2$h$, 2),
-   (4, 'vs numpy',       $h$import numpy as np
-return abs(moyenne([1, 2, 3, 4, 5]) - np.mean([1, 2, 3, 4, 5])) < 1e-9$h$, 1)
+   (0, 'double de 5',   $h$return doubler(5) == 10$h$, 1),
+   (0, 'négatif',       $h$return doubler(-3) == -6$h$, 1),
+   (1, 'double de 5',   $h$return doubler(5) === 10;$h$, 1),
+   (1, 'négatif',       $h$return doubler(-3) === -6;$h$, 1),
+   (2, 'double de 5',   $h$return doubler(5) === 10;$h$, 1),
+   (2, 'négatif',       $h$return doubler(-3) === -6;$h$, 1),
+   (3, 'double de 5',   $h$return doubler(5) === 10;$h$, 1),
+   (3, 'négatif',       $h$return doubler(-3) === -6;$h$, 1),
+   (4, 'double de 5',   $h$[ "$(doubler 5)" = "10" ]$h$, 1),
+   (4, 'négatif',       $h$[ "$(doubler -3)" = "-6" ]$h$, 1),
+   (5, 'double de 5',   $h$return doubler(5) == 10$h$, 1),
+   (5, 'négatif',       $h$return doubler(-3) == -6$h$, 1),
+   (6, 'double de 5',   $h$doubler(5) == 10$h$, 1),
+   (6, 'négatif',       $h$doubler(-3) == -6$h$, 1),
+   (7, 'double de 5',   $h$return doubler(5) == 10;$h$, 1),
+   (7, 'négatif',       $h$return doubler(-3) == -6;$h$, 1),
+   (8, 'double de 5',   $h$return doubler(5) == 10;$h$, 1),
+   (8, 'négatif',       $h$return doubler(-3) == -6;$h$, 1),
+   (9, 'double de 5',   $h$return Solution.doubler(5) == 10;$h$, 1),
+   (9, 'négatif',       $h$return Solution.doubler(-3) == -6;$h$, 1),
+   (10, 'double de 5',  $h$return Solution.doubler(5) == 10;$h$, 1),
+   (10, 'négatif',      $h$return Solution.doubler(-3) == -6;$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
-                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (Python)'
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ── Questions ORIENTÉES OBJET (POO) : classe/struct Rectangle(largeur, hauteur) + méthode aire().
+-- Ajoutées au même quiz démo (ordre 11-19). Uniquement les langages POO (ni C ni Bash). Le harnais
+-- instancie la classe étudiante et vérifie son aire. Validé end-to-end sur les 9 langages.
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('Python', 'POO : implémente Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 11,
+    $sc$class Rectangle:
+    def __init__(self, largeur, hauteur):
+        # à compléter
+        pass
+
+    def aire(self):
+        # à compléter
+        pass
+$sc$),
+   ('JavaScript', 'POO : implémente Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 12,
+    $sc$class Rectangle {
+  constructor(largeur, hauteur) {
+    // à compléter
+  }
+  aire() {
+    // à compléter
+  }
+}
+$sc$),
+   ('TypeScript', 'POO : implémente Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 13,
+    $sc$class Rectangle {
+  constructor(private largeur: number, private hauteur: number) {}
+
+  aire(): number {
+    // à compléter
+    return 0;
+  }
+}
+$sc$),
+   ('PHP', 'POO : implémente Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 14,
+    $sc$<?php
+class Rectangle {
+  public function __construct($largeur, $hauteur) {
+    // à compléter
+  }
+  public function aire() {
+    // à compléter
+  }
+}
+$sc$),
+   ('Go', 'POO : implémente le type Rectangle (struct) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 15,
+    $sc$package main
+
+import "fmt"
+
+type Rectangle struct {
+    largeur, hauteur int
+}
+
+func (r Rectangle) aire() int {
+    // à compléter
+    return 0
+}
+
+func main() {
+    fmt.Println(Rectangle{3, 4}.aire())
+}
+$sc$),
+   ('Rust', 'POO : implémente le type Rectangle (struct) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 16,
+    $sc$struct Rectangle {
+    largeur: i32,
+    hauteur: i32,
+}
+
+impl Rectangle {
+    fn aire(&self) -> i32 {
+        // à compléter
+        0
+    }
+}
+
+fn main() {
+    let r = Rectangle { largeur: 3, hauteur: 4 };
+    println!("{}", r.aire());
+}
+$sc$),
+   ('C++', 'POO : implémente la classe Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 17,
+    $sc$#include <iostream>
+
+class Rectangle {
+    int largeur, hauteur;
+public:
+    Rectangle(int largeur, int hauteur) : largeur(largeur), hauteur(hauteur) {}
+    int aire() {
+        // à compléter
+        return 0;
+    }
+};
+
+int main() {
+    std::cout << Rectangle(3, 4).aire() << std::endl;
+    return 0;
+}
+$sc$),
+   ('C#', 'POO : implémente la classe Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 18,
+    $sc$using System;
+
+class Rectangle {
+    int largeur, hauteur;
+    public Rectangle(int largeur, int hauteur) { this.largeur = largeur; this.hauteur = hauteur; }
+    public int aire() {
+        // à compléter
+        return 0;
+    }
+}
+
+class Program {
+    static void Main() {
+        Console.WriteLine(new Rectangle(3, 4).aire());
+    }
+}
+$sc$),
+   ('Java', 'POO : implémente la classe Rectangle(largeur, hauteur) avec une méthode aire() renvoyant son aire (largeur x hauteur).', 19,
+    $sc$public class Rectangle {
+    private int largeur, hauteur;
+
+    public Rectangle(int largeur, int hauteur) {
+        this.largeur = largeur;
+        this.hauteur = hauteur;
+    }
+
+    public int aire() {
+        // à compléter
+        return 0;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(new Rectangle(3, 4).aire());
+    }
+}
+$sc$)
+) AS v(lang, prompt, oidx, start_code);
+
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (11, 'aire 3x4',  $h$return Rectangle(3, 4).aire() == 12$h$, 1),
+   (11, 'carré 5x5', $h$return Rectangle(5, 5).aire() == 25$h$, 1),
+   (12, 'aire 3x4',  $h$return new Rectangle(3, 4).aire() === 12;$h$, 1),
+   (12, 'carré 5x5', $h$return new Rectangle(5, 5).aire() === 25;$h$, 1),
+   (13, 'aire 3x4',  $h$return new Rectangle(3, 4).aire() === 12;$h$, 1),
+   (13, 'carré 5x5', $h$return new Rectangle(5, 5).aire() === 25;$h$, 1),
+   (14, 'aire 3x4',  $h$return (new Rectangle(3, 4))->aire() === 12;$h$, 1),
+   (14, 'carré 5x5', $h$return (new Rectangle(5, 5))->aire() === 25;$h$, 1),
+   (15, 'aire 3x4',  $h$r := Rectangle{largeur: 3, hauteur: 4}
+return r.aire() == 12$h$, 1),
+   (15, 'carré 5x5', $h$r := Rectangle{largeur: 5, hauteur: 5}
+return r.aire() == 25$h$, 1),
+   (16, 'aire 3x4',  $h$let r = Rectangle { largeur: 3, hauteur: 4 };
+r.aire() == 12$h$, 1),
+   (16, 'carré 5x5', $h$let r = Rectangle { largeur: 5, hauteur: 5 };
+r.aire() == 25$h$, 1),
+   (17, 'aire 3x4',  $h$return Rectangle(3, 4).aire() == 12;$h$, 1),
+   (17, 'carré 5x5', $h$return Rectangle(5, 5).aire() == 25;$h$, 1),
+   (18, 'aire 3x4',  $h$return new Rectangle(3, 4).aire() == 12;$h$, 1),
+   (18, 'carré 5x5', $h$return new Rectangle(5, 5).aire() == 25;$h$, 1),
+   (19, 'aire 3x4',  $h$return new Rectangle(3, 4).aire() == 12;$h$, 1),
+   (19, 'carré 5x5', $h$return new Rectangle(5, 5).aire() == 25;$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
                                                        AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
