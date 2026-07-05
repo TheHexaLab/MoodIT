@@ -9,6 +9,14 @@ import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
 
 /**
+ * Langages SANS exécution autonome utile → pas de bouton « play » :
+ *  - SQL : la requête a besoin des données de test (fournies par le harnais, secret côté étudiant) ;
+ *  - HTML / JSX / TSX : ne s'exécutent pas seuls (validés via un harnais JS).
+ * Ces langages restent testables via l'onglet « Tester » / la soumission (qui exécute les harnais).
+ */
+const NO_STANDALONE_RUN = new Set(['sql', 'html', 'jsx', 'tsx']);
+
+/**
  * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
  * gouttière, coloration syntaxique, auto-indentation…), pré-rempli avec `start_code`.
  * La vraie exécution des harnais est SERVEUR ; en révision, l'éditeur passe en lecture
@@ -28,6 +36,8 @@ export function CodingQuestion({
   const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
   const language = question.language?.name;
   const review = mode === 'review';
+  // Le « play » n'a de sens que si le langage s'exécute seul (cf. NO_STANDALONE_RUN).
+  const runnable = !!language && !NO_STANDALONE_RUN.has(language.toLowerCase());
 
   return (
     <div>
@@ -39,8 +49,8 @@ export function CodingQuestion({
         readOnly={review}
         minRows={8}
         ariaLabel={t.codeAria(language ?? 'Code')}
-        // Bouton « play » : exécute le code courant dans le sandbox (hors révision).
-        onRun={onRunCode && !review ? (src) => onRunCode({ language, code: src }) : undefined}
+        // Bouton « play » : exécute le code courant dans le sandbox (hors révision, langage autonome).
+        onRun={onRunCode && !review && runnable ? (src) => onRunCode({ language, code: src }) : undefined}
         runLabel={t.runCode}
       />
 
