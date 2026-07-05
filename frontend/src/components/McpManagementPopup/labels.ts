@@ -39,6 +39,7 @@ export const defaultLabels: McpManagementPopupLabels = {
   dimContent: 'Contenu',
   dimEngagement: 'Engagement',
   dimSuccess: 'Réussite',
+  dimNa: 'N/D',
   dimSentiment: 'Ressenti',
   tabStrengths: 'Points forts',
   tabImprovements: 'À améliorer',

@@ -69,15 +69,27 @@ function Spinner(): React.ReactElement {
 }
 
 /** Barre horizontale d'un sous-score de dimension (0–100). */
-function DimensionBar({ label, value }: { label: string; value: number }): React.ReactElement {
-  const pct = Math.max(0, Math.min(100, Math.round(value)));
+function DimensionBar({
+  label,
+  value,
+  naLabel,
+}: {
+  label: string;
+  value: number | null;
+  naLabel: string;
+}): React.ReactElement {
+  // null = N/D (donnée absente) : barre vide + libellé, pas un 0 ni un 50 trompeur.
+  const na = value === null || value === undefined;
+  const pct = na ? 0 : Math.max(0, Math.min(100, Math.round(value)));
   return (
     <div className={styles.dimRow}>
       <span className={styles.dimLabel}>{label}</span>
       <span className={styles.dimTrack} aria-hidden="true">
-        <span className={styles.dimFill} style={{ width: `${pct}%` }} />
+        {!na && <span className={styles.dimFill} style={{ width: `${pct}%` }} />}
       </span>
-      <span className={styles.dimValue}>{pct}</span>
+      <span className={`${styles.dimValue}${na ? ` ${styles.dimValueNa}` : ''}`}>
+        {na ? naLabel : pct}
+      </span>
     </div>
   );
 }
@@ -432,10 +444,10 @@ export function McpManagementPopup({
             {detailDimensions && (
               <section className={styles.dimensions}>
                 <span className={styles.sectionLabel}>{t.dimensionsLabel}</span>
-                <DimensionBar label={t.dimContent} value={detailDimensions.content} />
-                <DimensionBar label={t.dimEngagement} value={detailDimensions.engagement} />
-                <DimensionBar label={t.dimSuccess} value={detailDimensions.success} />
-                <DimensionBar label={t.dimSentiment} value={detailDimensions.sentiment} />
+                <DimensionBar label={t.dimContent} value={detailDimensions.content} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimEngagement} value={detailDimensions.engagement} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimSuccess} value={detailDimensions.success} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimSentiment} value={detailDimensions.sentiment} naLabel={t.dimNa} />
               </section>
             )}
 

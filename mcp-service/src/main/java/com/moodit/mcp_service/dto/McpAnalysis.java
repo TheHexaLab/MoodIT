@@ -24,13 +24,18 @@ public record McpAnalysis(
         List<String> recommendations,
         Sources sources) {
 
-    /** Sous-scores 0-100 par dimension d'analyse. */
+    /**
+     * Sous-scores 0-100 par dimension. {@code content}/{@code engagement} sont toujours
+     * mesurables (0 = néant, pas d'inconnue). {@code success}/{@code sentiment} valent
+     * {@code null} = N/D quand la donnée sous-jacente est absente (aucune note/code, aucun
+     * message) — on n'affiche PAS un 50 trompeur. Décidé côté backend, jamais par le LLM.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Dimensions(
-            int content,      // richesse du contenu / offre de quiz
-            int engagement,   // activité des forums + participation aux quiz
-            int success,      // réussite (tests de code)
-            int sentiment) {} // ressenti des étudiants (déduit des messages)
+            int content,          // richesse du contenu / offre de quiz
+            int engagement,       // activité des forums + participation aux quiz
+            Integer success,      // réussite (quiz/code) ; null = N/D (aucune donnée)
+            Integer sentiment) {} // ressenti (messages) ; null = N/D (aucun message)
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Sources(

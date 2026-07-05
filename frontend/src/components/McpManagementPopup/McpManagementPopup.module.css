@@ -568,6 +568,11 @@
   color: var(--text);
   text-align: right;
 }
+/* Dimension sans donnée (N/D) : texte discret, pas de mise en avant. */
+.dimValueNa {
+  font-weight: 500;
+  color: var(--text-muted);
+}
 
 .footnote {
   display: flex;

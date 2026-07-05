@@ -29,8 +29,9 @@ class DeterministicMcpAnalysisTest {
         assertThat(a.sources().quizCount()).isZero();
         assertThat(a.sources().forumMessageCount()).isZero();
         assertThat(a.sources().studentCount()).isZero();
-        // Sans LLM, le ressenti n'est pas calculable → neutre 50.
-        assertThat(a.dimensions().sentiment()).isEqualTo(50);
+        // Sans LLM le ressenti n'est pas analysable, et sans note/code la réussite non plus → N/D.
+        assertThat(a.dimensions().sentiment()).isNull();
+        assertThat(a.dimensions().success()).isNull();
         assertThat(a.improvements()).isNotEmpty();
         assertThat(a.summary()).contains("secours");
     }
@@ -41,9 +42,9 @@ class DeterministicMcpAnalysisTest {
 
         // 40 + min(10,8)*4 + min(40,40)/2 + min(20,20) = 40+32+20+20 = 112 → borné à 100.
         assertThat(a.score()).isEqualTo(100);
-        // success privilégie la moyenne quiz quand elle existe.
+        // success privilégie la moyenne quiz quand elle existe ; ressenti N/D sans LLM.
         assertThat(a.dimensions().success()).isEqualTo(85);
-        assertThat(a.dimensions().sentiment()).isEqualTo(50);
+        assertThat(a.dimensions().sentiment()).isNull();
         assertThat(a.sources().quizCount()).isEqualTo(10);
         assertThat(a.strengths()).hasSizeGreaterThanOrEqualTo(4);
     }

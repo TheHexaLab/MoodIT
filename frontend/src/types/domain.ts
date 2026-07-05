@@ -289,12 +289,15 @@ export interface McpAnalysis {
   score: number;
   /** Synthèse narrative (2–4 phrases). Optionnel (absent des analyses antérieures). */
   summary?: string;
-  /** Sous-scores par dimension (0–100). Optionnel. */
+  /**
+   * Sous-scores par dimension (0–100). Optionnel. `success`/`sentiment` peuvent être `null`
+   * (N/D) quand la donnée sous-jacente est absente (aucune note/code, aucun message).
+   */
   dimensions?: {
     content: number;
     engagement: number;
-    success: number;
-    sentiment: number;
+    success: number | null;
+    sentiment: number | null;
   };
   /** Points forts identifiés. */
   strengths: string[];

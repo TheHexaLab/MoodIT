@@ -44,6 +44,23 @@ dependencies {
 }
 
 tasks.withType<Test> {
-	useJUnitPlatform()
 	jvmArgs("-XX:+EnableDynamicAgentLoading")
+}
+
+// Test par défaut : exclut l'éval LLM (opt-in, nécessite Ollama + non déterministe).
+tasks.test {
+	useJUnitPlatform { excludeTags("llm-eval") }
+}
+
+// Harnais d'éval du prompt LLM : ./gradlew llmEval  (cf. LlmAnalysisEvalIT pour les prérequis).
+tasks.register<Test>("llmEval") {
+	description = "Éval du prompt d'analyse contre un vrai Ollama (opt-in, non déterministe)."
+	group = "verification"
+	// Réutilise les classes et le classpath du source set `test` (sinon NO-SOURCE).
+	val testSs = sourceSets.test.get()
+	testClassesDirs = testSs.output.classesDirs
+	classpath = testSs.runtimeClasspath
+	useJUnitPlatform { includeTags("llm-eval") }
+	outputs.upToDateWhen { false }          // toujours relancer
+	testLogging { showStandardStreams = true } // afficher le scorecard imprimé
 }

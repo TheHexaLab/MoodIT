@@ -88,6 +88,8 @@ export interface McpManagementPopupLabels {
   dimEngagement: string;
   dimSuccess: string;
   dimSentiment: string;
+  /** Libellé d'une dimension sans donnée (N/D). */
+  dimNa: string;
   /** Onglet « points forts ». */
   tabStrengths: string;
   /** Onglet « à améliorer ». */

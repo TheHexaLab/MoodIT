@@ -124,10 +124,10 @@ public final class DeterministicMcpAnalysis {
         // success : priorité au score moyen aux quiz, sinon réussite au code, sinon participation.
         int content = clamp(Math.min(quizzes, 8) * 12 + (quizzes > 0 ? 4 : 0));
         int engagement = clamp(Math.min(messages, 40) * 2 + Math.min(ctx.quizAttempts(), 20) * 2);
-        int success = quizScore != null ? quizScore
-                : codeRate != null ? codeRate
-                : (ctx.quizAttempts() > 0 ? 60 : 40);
-        int sentiment = 50;
+        // N/D (null) quand rien à mesurer : réussite sans note ni code ; ressenti TOUJOURS N/D en
+        // repli (aucune analyse de texte possible sans LLM).
+        Integer success = quizScore != null ? quizScore : codeRate;
+        Integer sentiment = null;
         McpAnalysis.Dimensions dimensions =
                 new McpAnalysis.Dimensions(content, engagement, success, sentiment);
 
