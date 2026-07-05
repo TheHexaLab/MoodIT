@@ -20,7 +20,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
   @Override
   public void configurePathMatch(PathMatchConfigurer configurer) {
+    // Le préfixe /api s'applique à tous les @RestController SAUF les outils realtime/dev et
+    // les endpoints INTERNES (service à service : /internal/**, non exposés par le gateway).
     configurer.addPathPrefix(
-        "/api", type -> !type.getPackageName().startsWith("com.moodit.core_service.realtime"));
+        "/api",
+        type -> {
+          String pkg = type.getPackageName();
+          return !pkg.startsWith("com.moodit.core_service.realtime")
+              && !pkg.startsWith("com.moodit.core_service.internal");
+        });
   }
 }

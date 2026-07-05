@@ -22,15 +22,31 @@ export const defaultLabels: McpManagementPopupLabels = {
   retry: 'Réessayer',
   analyzeError:
     'L’analyse n’a pas pu être générée. Le service d’analyse MCP est momentanément indisponible.',
+  // Étapes de progression poussées par le serveur (clé → texte). Clé inconnue → libellé neutre.
+  analyzeProgress: (step) =>
+    ({
+      collecting: 'Collecte des données du cours…',
+      analyzing: 'Analyse par l’IA en cours…',
+      fallback: 'IA indisponible : analyse de secours…',
+    })[step] ?? 'Analyse en cours…',
   errorTitle: 'Une erreur est survenue',
   errorClose: 'Fermer',
   back: 'Retour',
-  detailTitle: (dateTime) => `Analyse du ${dateTime}`,
+  detailTitle: () => 'Bilan MCP',
   scoreTitle: 'Bilan global du cours',
-  detailMeta: (strengths, improvements, quiz, messages) =>
-    `${strengths} point${plural(strengths)} fort${plural(strengths)} · ${improvements} à améliorer · basé sur ${quiz} quiz et ${messages} messages`,
+  summaryLabel: 'SYNTHÈSE',
+  dimensionsLabel: 'RÉPARTITION PAR DIMENSION',
+  dimContent: 'Contenu',
+  dimEngagement: 'Engagement',
+  dimSuccess: 'Réussite',
+  dimNa: 'N/D',
+  dimSentiment: 'Ressenti',
   tabStrengths: 'Points forts',
   tabImprovements: 'À améliorer',
+  tabRecommendations: 'Recommandations',
+  emptyStrengths: 'Aucun point fort identifié pour ce cours.',
+  emptyImprovements: 'Aucun axe d’amélioration identifié.',
+  emptyRecommendations: 'Aucune recommandation.',
   generatedNote: (date, author) => `Généré le ${date}${author ? ` par ${author}` : ''}`,
   scopeNote: (quiz, messages, students) =>
     `Sources : ${quiz} quiz, ${messages} messages, ${students} étudiants.`,

@@ -81,7 +81,8 @@ type ServerEvent =
   | { type: 'subscription:removed'; userId: number; programId: number }
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
   | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
-  | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string };
+  | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string }
+  | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string };
 
 export interface AppSocket {
   channels: ChannelSocket;
@@ -226,6 +227,9 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
           break;
         case 'mcp:analysis-failed':
           mcpSubs.get(data.courseId)?.onAnalysisFailed?.(data.userId, data.reason);
+          break;
+        case 'mcp:analysis-progress':
+          mcpSubs.get(data.courseId)?.onAnalysisProgress?.(data.userId, data.step);
           break;
       }
     };

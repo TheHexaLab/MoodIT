@@ -6,6 +6,7 @@ import { Check } from '../../assets/Check.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { CircleCheck } from '../../assets/CircleCheck.tsx';
 import { AlertCircle } from '../../assets/AlertCircle.tsx';
+import { X } from '../../assets/X.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { defaultLabels } from './labels.ts';
 import type {
@@ -14,7 +15,7 @@ import type {
   McpResponse,
   McpResponseSummary,
 } from './types.ts';
-import type { McpAnalysis, User } from '../../types/domain.ts';
+import type { McpAnalysis } from '../../types/domain.ts';
 
 // Ré-export de l'API publique.
 export type {
@@ -48,6 +49,7 @@ interface McpManagementPopupProps {
   subscribeCompletion: (handlers: {
     onCreated: (summary: McpResponseSummary) => void;
     onFailed: (reason?: string) => void;
+    onProgress: (step: string) => void;
     onResync: () => void;
   }) => () => void;
   /**
@@ -66,6 +68,32 @@ function Spinner(): React.ReactElement {
   return <BaseSpinner tone="current" size={16} />;
 }
 
+/** Barre horizontale d'un sous-score de dimension (0–100). */
+function DimensionBar({
+  label,
+  value,
+  naLabel,
+}: {
+  label: string;
+  value: number | null;
+  naLabel: string;
+}): React.ReactElement {
+  // null = N/D (donnée absente) : barre vide + libellé, pas un 0 ni un 50 trompeur.
+  const na = value === null || value === undefined;
+  const pct = na ? 0 : Math.max(0, Math.min(100, Math.round(value)));
+  return (
+    <div className={styles.dimRow}>
+      <span className={styles.dimLabel}>{label}</span>
+      <span className={styles.dimTrack} aria-hidden="true">
+        {!na && <span className={styles.dimFill} style={{ width: `${pct}%` }} />}
+      </span>
+      <span className={`${styles.dimValue}${na ? ` ${styles.dimValueNa}` : ''}`}>
+        {na ? naLabel : pct}
+      </span>
+    </div>
+  );
+}
+
 /** Parse l'analyse structurée sérialisée dans MCP_Response.content (null si invalide). */
 function parseAnalysis(content: string): McpAnalysis | null {
   try {
@@ -81,18 +109,6 @@ function formatDateTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return `${date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} · ${date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-/** Nom affichable de l'auteur de l'analyse (prénom nom, sinon username ; '' si absent). */
-function authorName(author?: User): string {
-  if (!author) return '';
-  return `${author.firstName} ${author.lastName}`.trim() || author.username;
 }
 
 export function McpManagementPopup({
@@ -119,10 +135,12 @@ export function McpManagementPopup({
   const [detailResponse, setDetailResponse] = useState<McpResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(false);
-  const [tab, setTab] = useState<'strengths' | 'improvements'>('strengths');
+  const [tab, setTab] = useState<'strengths' | 'improvements' | 'recommendations'>('strengths');
 
   /** Analyse en cours ? Réhydraté au montage via loadPending (cf. effet de sondage). */
   const [analyzing, setAnalyzing] = useState(false);
+  /** Étape courante du job en cours (clé poussée par le serveur ; null = pas d'étape reçue). */
+  const [progressStep, setProgressStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   /** Animation de transition entre pages (liste ↔ détail) : clé (remonte) + sens. */
@@ -222,6 +240,7 @@ export function McpManagementPopup({
   async function analyze() {
     if (analyzing) return;
     setError(null);
+    setProgressStep(null);
     setAnalyzing(true);
     try {
       // POST asynchrone : marque « en cours » côté serveur (visible par loadPending) et
@@ -262,14 +281,21 @@ export function McpManagementPopup({
         if (!mountedRef.current) return;
         setSummaries((prev) => (prev.some((s) => s.id === summary.id) ? prev : [summary, ...prev]));
         setAnalyzing(false);
+        setProgressStep(null);
       },
       onFailed: (reason) => {
         if (!mountedRef.current) return;
         setAnalyzing(false);
+        setProgressStep(null);
         // Message clair et explicatif côté UI ; la `reason` technique du serveur (ex.
         // « Service MCP indisponible ») n'est pas affichée telle quelle, juste loggée.
         if (reason) console.warn('Analyse MCP échouée :', reason);
         setError(analyzeErrorRef.current);
+      },
+      // Étape de progression poussée par le serveur : affichée sous le bouton pendant l'attente.
+      onProgress: (step) => {
+        if (!mountedRef.current) return;
+        setProgressStep(step);
       },
       // Reconnexion WS : refetch SILENCIEUX (sans spinner) de la liste + du statut « en
       // cours ». Réconcilie un analysis-created/failed manqué pendant la coupure (le
@@ -280,6 +306,7 @@ export function McpManagementPopup({
             if (!mountedRef.current) return;
             if (Array.isArray(list)) setSummaries(list);
             setAnalyzing(pending === true);
+            if (pending !== true) setProgressStep(null);
           })
           .catch(() => {
             /* échec réseau : on garde l'état courant ; le prochain onResync réessaiera */
@@ -315,30 +342,47 @@ export function McpManagementPopup({
 
   // ── Vue détail (analyse sélectionnée) ───────────────────────────────────────
   const detailAnalysis = detailResponse ? parseAnalysis(detailResponse.content) : null;
-  const detailItems =
-    detailAnalysis ? (tab === 'strengths' ? detailAnalysis.strengths : detailAnalysis.improvements) : [];
+  const detailRecommendations = detailAnalysis?.recommendations ?? [];
+  const hasRecommendations = detailRecommendations.length > 0;
+  const detailItems = !detailAnalysis
+    ? []
+    : tab === 'strengths'
+      ? detailAnalysis.strengths
+      : tab === 'improvements'
+        ? detailAnalysis.improvements
+        : detailRecommendations;
+  const detailDimensions = detailAnalysis?.dimensions;
+  // Palier du bilan global : <50 rouge (x), 50-69 jaune (warning), ≥70 vert (crochet).
+  const scoreTier: 'bad' | 'warn' | 'good' = !detailAnalysis
+    ? 'good'
+    : detailAnalysis.score < 50
+      ? 'bad'
+      : detailAnalysis.score < 70
+        ? 'warn'
+        : 'good';
 
-  const detailView = selectedSummary ? (
-    <>
-      <header className={styles.header}>
-        <button
-          type="button"
-          className={styles.back}
-          aria-label={t.back}
-          onClick={() => setSelectedSummary(null)}
-        >
-          <Chevron className={styles.backChevron} width="1.125rem" height="1.125rem" />
-        </button>
-        <div className={styles.headerText}>
-          <h1>{t.detailTitle(formatDateTime(selectedSummary.createdAt))}</h1>
-          <p>{courseLabel}</p>
-        </div>
-        <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
-          ✕
-        </button>
-      </header>
+  const detailHeader = (
+    <header className={styles.header}>
+      <button
+        type="button"
+        className={styles.back}
+        aria-label={t.back}
+        onClick={() => setSelectedSummary(null)}
+      >
+        <Chevron className={styles.backChevron} width="1.125rem" height="1.125rem" />
+      </button>
+      <div className={styles.headerText}>
+        <h1>{t.detailTitle('')}</h1>
+        <p>{courseLabel}</p>
+      </div>
+      <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
+        ✕
+      </button>
+    </header>
+  );
 
-      <div className={styles.body}>
+  const detailBody = selectedSummary ? (
+    <div className={styles.body}>
         {detailLoading ? (
           <div className={styles.stateMsg} role="status" aria-live="polite">
             <Spinner />
@@ -358,20 +402,54 @@ export function McpManagementPopup({
         ) : (
           <>
             <section className={styles.scoreHero}>
-              <span className={styles.scoreBadge} aria-hidden="true">
-                <Check width="1.875rem" height="1.875rem" />
-              </span>
-              <span className={styles.scoreTitle}>{t.scoreTitle}</span>
-              <span className={styles.score}>{detailAnalysis.score} %</span>
-              <span className={styles.scoreMeta}>
-                {t.detailMeta(
-                  detailAnalysis.strengths.length,
-                  detailAnalysis.improvements.length,
-                  detailAnalysis.sources.quizCount,
-                  detailAnalysis.sources.forumMessageCount,
+              <span
+                className={`${styles.scoreBadge}${
+                  scoreTier === 'bad'
+                    ? ` ${styles.scoreBadgeBad}`
+                    : scoreTier === 'warn'
+                      ? ` ${styles.scoreBadgeWarn}`
+                      : ''
+                }`}
+                aria-hidden="true"
+              >
+                {scoreTier === 'bad' ? (
+                  <X width="1.875rem" height="1.875rem" />
+                ) : scoreTier === 'warn' ? (
+                  <AlertCircle width="1.875rem" height="1.875rem" />
+                ) : (
+                  <Check width="1.875rem" height="1.875rem" />
                 )}
               </span>
+              <span className={styles.scoreTitle}>{t.scoreTitle}</span>
+              <span
+                className={`${styles.score}${
+                  scoreTier === 'bad'
+                    ? ` ${styles.scoreBad}`
+                    : scoreTier === 'warn'
+                      ? ` ${styles.scoreWarn}`
+                      : ''
+                }`}
+              >
+                {detailAnalysis.score} %
+              </span>
             </section>
+
+            {detailAnalysis.summary && (
+              <section className={styles.summary}>
+                <span className={styles.sectionLabel}>{t.summaryLabel}</span>
+                <p>{detailAnalysis.summary}</p>
+              </section>
+            )}
+
+            {detailDimensions && (
+              <section className={styles.dimensions}>
+                <span className={styles.sectionLabel}>{t.dimensionsLabel}</span>
+                <DimensionBar label={t.dimContent} value={detailDimensions.content} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimEngagement} value={detailDimensions.engagement} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimSuccess} value={detailDimensions.success} naLabel={t.dimNa} />
+                <DimensionBar label={t.dimSentiment} value={detailDimensions.sentiment} naLabel={t.dimNa} />
+              </section>
+            )}
 
             <div className={styles.tabs} role="tablist">
               <button
@@ -392,30 +470,47 @@ export function McpManagementPopup({
               >
                 {t.tabImprovements}
               </button>
+              {hasRecommendations && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'recommendations'}
+                  className={`${styles.tab}${tab === 'recommendations' ? ` ${styles.tabActive}` : ''}`}
+                  onClick={() => setTab('recommendations')}
+                >
+                  {t.tabRecommendations}
+                </button>
+              )}
             </div>
 
             <span className={styles.divider} />
 
-            <ul className={styles.points}>
-              {detailItems.map((item, index) => (
-                <li key={index} className={styles.point}>
-                  {tab === 'strengths' ? (
-                    <CircleCheck className={styles.pointIconStrength} width="1rem" height="1rem" aria-hidden="true" />
-                  ) : (
-                    <AlertCircle className={styles.pointIconImprove} width="1rem" height="1rem" aria-hidden="true" />
-                  )}
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+            {detailItems.length === 0 ? (
+              <p className={styles.emptyPoints}>
+                {tab === 'strengths'
+                  ? t.emptyStrengths
+                  : tab === 'improvements'
+                    ? t.emptyImprovements
+                    : t.emptyRecommendations}
+              </p>
+            ) : (
+              <ul className={styles.points}>
+                {detailItems.map((item, index) => (
+                  <li key={index} className={styles.point}>
+                    {tab === 'strengths' ? (
+                      <CircleCheck className={styles.pointIconStrength} width="1rem" height="1rem" aria-hidden="true" />
+                    ) : tab === 'improvements' ? (
+                      <AlertCircle className={styles.pointIconImprove} width="1rem" height="1rem" aria-hidden="true" />
+                    ) : (
+                      <Sparkles className={styles.pointIconReco} width="1rem" height="1rem" aria-hidden="true" />
+                    )}
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             <p className={styles.footnote}>
-              <span>
-                {t.generatedNote(
-                  formatDate(selectedSummary.createdAt),
-                  authorName(detailResponse?.author),
-                )}
-              </span>
               <span>
                 {t.scopeNote(
                   detailAnalysis.sources.quizCount,
@@ -427,30 +522,36 @@ export function McpManagementPopup({
           </>
         )}
       </div>
-    </>
   ) : null;
 
   // ── Vue liste (historique + action) ─────────────────────────────────────────
-  const listView = (
-    <>
-      <header className={styles.header}>
-        <span className={styles.headerIcon} aria-hidden="true">
-          <Sparkles width="1.5rem" height="1.5rem" />
-        </span>
-        <div className={styles.headerText}>
-          <h1>{t.title}</h1>
-          <p>{t.subtitle(courseLabel)}</p>
-        </div>
-        <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
-          ✕
-        </button>
-      </header>
+  const listHeader = (
+    <header className={styles.header}>
+      <span className={styles.headerIcon} aria-hidden="true">
+        <Sparkles width="1.5rem" height="1.5rem" />
+      </span>
+      <div className={styles.headerText}>
+        <h1>{t.title}</h1>
+        <p>{t.subtitle(courseLabel)}</p>
+      </div>
+      <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
+        ✕
+      </button>
+    </header>
+  );
 
-      <div className={styles.body}>
+  const listBody = (
+    <div className={styles.body}>
         <section className={styles.analyzeBanner}>
           <div className={styles.analyzeText}>
             <h2>{t.analyzeTitle}</h2>
-            <p>{t.analyzeDescription}</p>
+            {analyzing ? (
+              <p className={styles.analyzeProgress} role="status" aria-live="polite">
+                {t.analyzeProgress(progressStep ?? '')}
+              </p>
+            ) : (
+              <p>{t.analyzeDescription}</p>
+            )}
           </div>
           <button type="button" className={styles.analyzeBtn} onClick={analyze} disabled={analyzing}>
             {analyzing ? (
@@ -502,7 +603,6 @@ export function McpManagementPopup({
           </ul>
         )}
       </div>
-    </>
   );
 
   // Sens de l'animation, ajusté pendant le rendu quand on change de page (motif React
@@ -521,11 +621,14 @@ export function McpManagementPopup({
         }}
       >
         <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
-          {/* Viewport à hauteur animée ; le contenu (clé = page) glisse à chaque changement. */}
+          {/* En-tête STICKY : hors du viewport animé (position:sticky ne fonctionne pas sous
+              un ancêtre overflow:hidden). Il change instantanément entre liste et détail. */}
+          {selectedSummary ? detailHeader : listHeader}
+          {/* Viewport à hauteur animée ; le corps (clé = page) glisse à chaque changement. */}
           <div className={styles.viewport} style={height != null ? { height } : undefined}>
             <div ref={measureRef}>
               <div key={anim.key} data-dir={anim.dir} className={styles.view}>
-                {detailView ?? listView}
+                {detailBody ?? listBody}
               </div>
             </div>
           </div>

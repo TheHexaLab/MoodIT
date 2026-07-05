@@ -2,7 +2,7 @@
 // Volontairement restreint — on ne laisse PAS modifier username/email/rôles ici.
 // La photo (multipart) n'est pas gérée : pas d'infra de stockage de fichiers (TODO).
 
-package com.moodit.core_service.user;
+package com.moodit.core_service.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

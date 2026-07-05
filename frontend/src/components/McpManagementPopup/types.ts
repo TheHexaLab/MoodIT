@@ -17,6 +17,12 @@ export interface IncomingMcpHandlers {
    */
   onAnalysisFailed?: (userId: number, reason?: string) => void;
   /**
+   * ÉTAPE de progression d'un job en cours (collecte / analyse IA / repli…). `userId` = le
+   * lanceur ; le consommateur ne réagit que si c'est l'utilisateur courant. `step` = clé
+   * d'étape, mappée en libellé par le composant.
+   */
+  onAnalysisProgress?: (userId: number, step: string) => void;
+  /**
    * Appelé après une RECONNEXION du WebSocket (pas au 1er connect) : des événements ont
    * pu être manqués pendant la coupure → le consommateur doit se resynchroniser (refetch).
    */
@@ -61,6 +67,8 @@ export interface McpManagementPopupLabels {
   retry: string;
   /** Message d'erreur quand l'analyse échoue. */
   analyzeError: string;
+  /** Libellé de l'étape de progression affichée pendant l'analyse (reçoit la clé d'étape). */
+  analyzeProgress: (step: string) => string;
   /** Titre du popup d'erreur. */
   errorTitle: string;
   /** Bouton « fermer » du popup d'erreur. */
@@ -71,12 +79,27 @@ export interface McpManagementPopupLabels {
   detailTitle: (dateTime: string) => string;
   /** Titre du bloc score. */
   scoreTitle: string;
-  /** Méta sous le score (forces / à améliorer / sources). */
-  detailMeta: (strengths: number, improvements: number, quiz: number, messages: number) => string;
+  /** Libellé de section de la synthèse narrative. */
+  summaryLabel: string;
+  /** Libellé de section des sous-scores par dimension. */
+  dimensionsLabel: string;
+  /** Libellés des 4 dimensions (content / engagement / success / sentiment). */
+  dimContent: string;
+  dimEngagement: string;
+  dimSuccess: string;
+  dimSentiment: string;
+  /** Libellé d'une dimension sans donnée (N/D). */
+  dimNa: string;
   /** Onglet « points forts ». */
   tabStrengths: string;
   /** Onglet « à améliorer ». */
   tabImprovements: string;
+  /** Onglet « recommandations ». */
+  tabRecommendations: string;
+  /** Messages affichés quand l'onglet sélectionné du détail est vide. */
+  emptyStrengths: string;
+  emptyImprovements: string;
+  emptyRecommendations: string;
   /** Note de bas, 1re ligne : date + auteur. `author` vide = mention « par … » omise. */
   generatedNote: (date: string, author: string) => string;
   /** Note de bas, 2e ligne : portée de l'analyse (sources). */
