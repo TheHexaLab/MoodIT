@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup';
 import { EditorShell, Portal } from './EditorShell';
+import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { QuizListBody } from './QuizListPopup';
 import { QuizFormBody } from './QuizFormPopup';
 import { QuestionFormBody } from './QuestionFormPopup';
@@ -99,6 +100,9 @@ export function QuizEditor({
   const [pendingDelete, setPendingDelete] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Échec de chargement du détail d'un quiz (clic sur le crayon) : affiché en POPUP, PAS en
+  // inline dans le formulaire — on reste sur la liste. `retryEdit` rejoue l'ouverture.
+  const [loadFailedQuiz, setLoadFailedQuiz] = useState<Quiz | null>(null);
 
   // AUCUN cache : l'éditeur refetch la liste COMPLÈTE (brouillons compris) à CHAQUE
   // fois que la vue liste s'affiche — à l'ouverture ET au retour depuis l'édition/
@@ -181,6 +185,7 @@ export function QuizEditor({
 
   async function openEdit(quiz: Quiz) {
     setError(null);
+    setLoadFailedQuiz(null);
     snapshotRef.current = quizzes; // état à restaurer si « Annuler »
     // AUCUN cache : on refetch le détail (questions) du quiz à CHAQUE ouverture.
     let full = quiz;
@@ -190,7 +195,11 @@ export function QuizEditor({
         full = await handlers.onFetchQuiz(quiz.id);
         upsertQuiz(full);
       } catch {
-        setError(t.loadError);
+        // Échec : on NE navigue PAS vers le formulaire (sinon message inline). On reste sur la
+        // liste et on remonte un popup d'erreur (avec « Réessayer »).
+        setOpeningQuizId(null);
+        setLoadFailedQuiz(quiz);
+        return;
       } finally {
         setOpeningQuizId(null);
       }
@@ -364,8 +373,8 @@ export function QuizEditor({
           subtitle: t.listSubtitle,
           onBack: undefined as (() => void) | undefined,
           width: '29rem',
-          // Liste + formulaire de quiz : pas de défilement global (la liste des
-          // questions a son propre défilement interne, plafonnée à 17rem).
+          // La liste des quiz a son PROPRE défilement interne, plafonné à ~5 lignes (cf. .list) :
+          // pas de défilement global du panneau (qui reste ainsi compact, mobile compris).
           scrollBody: false,
           desktopMaxVh: undefined as number | undefined,
         }
@@ -375,8 +384,12 @@ export function QuizEditor({
             subtitle: courseSubtitle,
             onBack: cancelForm,
             width: '34rem',
-            scrollBody: false,
-            desktopMaxVh: undefined as number | undefined,
+            // Contrairement à la liste des quiz (plafond interne à 5 lignes), le formulaire n'a
+            // pas de défilement interne sur sa liste de questions : au-delà de quelques questions
+            // le contenu débordait sans être atteignable. On fait défiler tout le corps (comme les
+            // vues question/harnais/test), le pied restant épinglé.
+            scrollBody: true,
+            desktopMaxVh: 60,
           }
         : view.kind === 'question'
           ? {
@@ -558,6 +571,20 @@ export function QuizEditor({
             content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
             onDeleteConfirmation={confirmDelete}
             onClose={() => setPendingDelete(null)}
+          />
+        </Portal>
+      )}
+
+      {loadFailedQuiz && (
+        <Portal>
+          <ErrorPopup
+            content={t.loadError}
+            onClose={() => setLoadFailedQuiz(null)}
+            onRetry={() => {
+              const quiz = loadFailedQuiz;
+              setLoadFailedQuiz(null);
+              void openEdit(quiz);
+            }}
           />
         </Portal>
       )}
