@@ -62,6 +62,11 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        # Sans ça, nginx ferme une WebSocket inactive au bout de 60 s (défaut) → reconnexion
+        # + resync → la vue quiz se recharge toute seule (« stutter »). On tolère de longues
+        # périodes sans message (un quiz ouvert et inactif est normal).
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }
 EOF

@@ -121,6 +121,10 @@ export function createAppSocket(
   /** Fermeture demandée par le client : empêche la reconnexion automatique. */
   let closedByClient = false;
   let reconnectTimer: number | null = null;
+  // Heartbeat : ping applicatif périodique pour garder la connexion active (le serveur ignore les
+  // types inconnus). Évite qu'un proxy/NAT ferme une WebSocket inactive → reconnexion + resync qui
+  // rechargerait la vue quiz toute seule.
+  let heartbeatTimer: number | null = null;
   /**
    * Passe à true au 1er `onopen`. Permet de distinguer la connexion INITIALE (les abonnés
    * viennent de fetcher au montage) d'une RECONNEXION (events potentiellement manqués →
@@ -152,6 +156,9 @@ export function createAppSocket(
       reconnectDelay = 1000;
       const reconnected = everConnected;
       everConnected = true;
+      // Ping toutes les 30 s tant que la socket est ouverte (garde la connexion vivante).
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+      heartbeatTimer = window.setInterval(() => send({ type: 'ping' }), 30_000);
       // (Re)joindre toutes les rooms actives — utile après une reconnexion.
       for (const channelId of channelSubs.keys()) send({ type: 'join', scope: 'channel', id: channelId });
       for (const forumId of forumSubs.keys()) send({ type: 'join', scope: 'forum', id: forumId });
@@ -247,6 +254,10 @@ export function createAppSocket(
     };
 
     socket.onclose = () => {
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       // Fermeture volontaire (logout / démontage), ou socket déjà remplacé par un
       // nouveau (StrictMode) : on ne reconnecte pas.
       if (closedByClient || ws !== socket) return;
@@ -328,6 +339,10 @@ export function createAppSocket(
     close() {
       closedByClient = true;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       const socket = ws;
       ws = null;
       if (!socket) return;
