@@ -196,3 +196,38 @@ body {
     color: var(--text);
     font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
+
+/* ── Sélection de texte ──────────────────────────────────────────────────────
+   Couleur de sélection en teinte de marque (vert-sarcelle) au lieu du bleu système, partout. */
+::selection {
+    background: rgba(20, 184, 166, 0.3);
+}
+::-moz-selection {
+    background: rgba(20, 184, 166, 0.3);
+}
+
+/* Par défaut RIEN n'est sélectionnable (évite les sélections parasites de l'interface). */
+* {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* Exceptions — l'utilisateur PEUT sélectionner :
+   1) toute entrée de texte (input / textarea / contenteditable) ;
+   2) les messages de canal et les posts/réponses de forum (et leur contenu).
+   `[role] *` : `*` ci-dessus s'applique aussi aux descendants, il faut donc les réautoriser. */
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+[role="message"],
+[role="message"] *,
+[role="thread-main"],
+[role="thread-main"] *,
+[role="comment-body"],
+[role="comment-body"] *,
+.selectable,
+.selectable * {
+    -webkit-user-select: text;
+    user-select: text;
+}
