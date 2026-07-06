@@ -13,10 +13,16 @@ import com.moodit.core_service.repository.ForumRepository;
 import com.moodit.core_service.repository.PostRepository;
 import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.repository.VoteRepository;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.realtime.dto.Author;
+import com.moodit.core_service.realtime.dto.ChannelMessageDto;
+import com.moodit.core_service.realtime.dto.ForumPostDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,6 +42,36 @@ public class ForumService {
     private final PostRepository postRepository;
     private final VoteRepository voteRepository;
     private final UserRepository userRepository;
+    private final RealtimeEventPublisher realtimePublisher;
+
+    // ── Temps réel ───────────────────────────────────────────────────────────────
+    /** Un canal 'Discussion' (chat) ⇒ room `channel:` ; sinon 'Thread' ⇒ room `forum:`. */
+    private boolean isDiscussion(Forum forum) {
+        return "Discussion".equals(forum.getFType().getName());
+    }
+
+    /** Auteur embarqué dans un évènement temps réel (sous-ensemble de User_). */
+    private Author toAuthor(User user) {
+        return new Author(user.getId(), user.getUsername(), user.getFirstName(),
+                user.getLastName(), user.getAvatarColor());
+    }
+
+    /**
+     * Exécute l'action APRÈS le commit de la transaction (ou tout de suite hors transaction).
+     * Évite la race « écho diffusé avant commit » : un client qui re-fetch verrait l'ancien état.
+     */
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
 
     //region Transformations d'Entités (entité BD -> DTO)
     /** Auteur d'un post embarqué dans le DTO (le front lit message.author : prénom/nom, avatarColor…). */
@@ -229,6 +265,35 @@ public class ForumService {
         // généré par la BD, afin de renvoyer le post persisté au client (réconciliation
         // de l'affichage optimiste : remplace l'id temporaire négatif par l'id réel).
         Post saved = postRepository.saveAndFlush(post);
+
+        // ── Diffusion temps réel (après commit) : les autres abonnés à ce forum/canal
+        // voient le message/post apparaître LIVE ; l'auteur déduplique via clientId. ──
+        long forumId = forum.getId();
+        long postId = saved.getId();
+        String content = saved.getContent();
+        Instant createdInstant = toUtcInstant(saved.getCreatedAt());
+        String createdAt = createdInstant == null ? null : createdInstant.toString();
+        Author author = toAuthor(user);
+        Long parentId = saved.getParent() != null ? saved.getParent().getId().longValue() : null;
+        boolean discussion = isDiscussion(forum);
+        String title = saved.getTitle();
+        Boolean isPinned = saved.getIsPinned();
+        // Le front envoie clientMessageId (chat) ou clientPostId (forum) selon le cas.
+        String clientId = discussion
+                ? postCreateInForumDTO.getClientMessageId()
+                : postCreateInForumDTO.getClientPostId();
+        afterCommit(() -> {
+            if (discussion) {
+                realtimePublisher.messageCreated(forumId,
+                        new ChannelMessageDto(postId, content, createdAt, author, parentId, clientId));
+            } else {
+                realtimePublisher.postCreated(forumId,
+                        new ForumPostDto(postId, content, createdAt, author, isPinned, title,
+                                List.of(), List.of(), 0, clientId),
+                        parentId);
+            }
+        });
+
         // Post neuf : aucun vote encore → userVoteValue null (l'auteur suffit comme contexte).
         return toPostVoteUserDTO(saved, false, user.getId());
     }
@@ -239,6 +304,9 @@ public class ForumService {
 
         Optional<Vote> existingVote = voteRepository.findByUserIdAndPostId(user.getId(), voteCreateInPostDTO.getPostId());
 
+        // Valeur RÉSULTANTE du vote de l'utilisateur après l'opération (0 = retiré) : c'est
+        // ce que les autres abonnés appliquent (withVote côté front).
+        int result;
         if (existingVote.isEmpty()) {
             Post post = forumRepository.findById(voteCreateInPostDTO.getForumId())
                     .orElseThrow(ForumNotFoundException::new)
@@ -252,14 +320,24 @@ public class ForumService {
             vote.setUser(user);
             vote.setValue(voteCreateInPostDTO.getVoteValue());
             voteRepository.save(vote);
+            result = voteCreateInPostDTO.getVoteValue();
 
         } else if (existingVote.get().getValue().equals(voteCreateInPostDTO.getVoteValue())) {
             // Même valeur: annuler
             voteRepository.delete(existingVote.get());
+            result = 0;
         } else {
             // Valeur opposée: changer
             existingVote.get().setValue(voteCreateInPostDTO.getVoteValue());
+            result = voteCreateInPostDTO.getVoteValue();
         }
+
+        // ── Diffusion temps réel (après commit) sur la room du forum. ──
+        long forumId = voteCreateInPostDTO.getForumId();
+        long postId = voteCreateInPostDTO.getPostId();
+        long userId = user.getId();
+        int resultingValue = result;
+        afterCommit(() -> realtimePublisher.postVoted(forumId, postId, userId, resultingValue));
     }
     //endregion
 
@@ -291,6 +369,19 @@ public class ForumService {
             post.setIsPinned(forumUpdatePostDTO.getIsPinned());
         }
 
+        // ── Diffusion temps réel (après commit) : seul le contenu est propagé (les events
+        // WS *:edited ne portent que le contenu ; isPinned n'est pas encore diffusé). ──
+        if (forumUpdatePostDTO.getContent() != null) {
+            long fId = forum.getId();
+            long pId = post.getId();
+            String content = post.getContent();
+            boolean discussion = isDiscussion(forum);
+            afterCommit(() -> {
+                if (discussion) realtimePublisher.messageEdited(fId, pId, content);
+                else realtimePublisher.postEdited(fId, pId, content);
+            });
+        }
+
         return toPostDTO(post);
     }
     //endregion
@@ -302,6 +393,7 @@ public class ForumService {
 
         forumRepository.delete(forum); //ON DELETE CASCADE
     }
+    @Transactional
     public void deletePost(Integer forumId, Integer postId) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
@@ -311,7 +403,17 @@ public class ForumService {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Post not found"));
 
+        // Capturé AVANT delete (f_type du forum encore accessible) ; émis après commit.
+        long fId = forum.getId();
+        long pId = post.getId();
+        boolean discussion = isDiscussion(forum);
+
         postRepository.delete(post); //ON DELETE CASCADE
+
+        afterCommit(() -> {
+            if (discussion) realtimePublisher.messageDeleted(fId, pId);
+            else realtimePublisher.postDeleted(fId, pId);
+        });
     }
     //endregion
 

@@ -377,19 +377,19 @@ export default function Dashboard() {
   // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
     const created = await api.createCourse(course);
+    // upsert (pas append) : idempotent face à l'écho WS `course:created` de sa PROPRE
+    // création (sinon le créateur verrait le cours en double si l'écho arrive pendant l'await).
     setDashboardPrograms((programs) =>
-      programs.map((program) =>
-        course.programIds.includes(program.id)
-          ? { ...program, courses: [...program.courses, created] }
-          : program
-      )
+      course.programIds.reduce((acc, pid) => upsertCourse(acc, pid, created), programs)
     );
   };
 
   // Création d'un programme → ajouté à la liste (abonné d'office) via api.createProgram.
   const handleCreateProgram = async (program: NewProgram) => {
     const created = await api.createProgram(program);
-    setDashboardPrograms((programs) => [...programs, created]);
+    // upsert (pas append) : idempotent face à l'écho WS `subscription:added` de sa PROPRE
+    // création (sinon le créateur verrait le programme en double).
+    setDashboardPrograms((programs) => upsertProgram(programs, created));
   };
 
   // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
@@ -974,7 +974,12 @@ function upsertCourse(programs: DemoProgram[], programId: number, course: Course
     return {
       ...program,
       courses: exists
-        ? program.courses.map((c) => (c.id === course.id ? course : c))
+        ? // Cours existant → fusion META seulement (titre/code). Ses sections (quiz, canaux,
+          // forums) ont leurs PROPRES events WS (quiz:*, section:changed) : un `course:edited`
+          // ne doit PAS les écraser (son DTO ne les porte pas), sinon elles disparaîtraient.
+          program.courses.map((c) =>
+            c.id === course.id ? { ...c, title: course.title, code: course.code } : c
+          )
         : [...program.courses, course],
     };
   });

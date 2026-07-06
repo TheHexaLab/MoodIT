@@ -26,6 +26,8 @@ public class EstablishmentService {
         dto.setName(est.getName());
         dto.setDomainEmail(est.getDomainEmail());
         dto.setProgramCount(est.getPrograms() == null ? 0 : est.getPrograms().size());
+        dto.setProgramCodes(est.getPrograms() == null ? List.of()
+                : est.getPrograms().stream().map(Program::getCode).toList());
 
         return dto;
     }

@@ -8,9 +8,13 @@ import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.EnrollmentRepository;
 import com.moodit.core_service.repository.ForumRepository;
 import com.moodit.core_service.repository.UserRepository;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.realtime.dto.CourseDto;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -29,6 +33,21 @@ public class CourseService {
   private final ProgramService programService;
   private final UserRepository userRepository;
   private final EnrollmentRepository enrollmentRepository;
+  private final RealtimeEventPublisher realtimePublisher;
+
+  /** Exécute l'action après le commit (ou tout de suite hors transaction). */
+  private void afterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          action.run();
+        }
+      });
+    } else {
+      action.run();
+    }
+  }
 
   public CourseDTO toCourseDTO(Course course) {
     CourseDTO dto = new CourseDTO();
@@ -147,6 +166,7 @@ public class CourseService {
     return forumService.toForumDTO(saved);
   }
 
+  @Transactional
   public CourseDTO updateCourse(Integer courseId, CourseUpdateDTO dto) {
     Course course = courseRepository.findById(courseId).orElseThrow(CourseNotFoundException::new);
 
@@ -157,19 +177,43 @@ public class CourseService {
       course.setCode(dto.getCode());
     }
     if (dto.getProgramIds() != null) {
+      // Liste MUTABLE (pas .toList() immuable) : l'entité est managée (@Transactional),
+      // Hibernate synchronise la collection au flush et doit pouvoir la muter.
       List<Program> programs =
-          dto.getProgramIds().stream().map(programService::findProgramById).toList();
+          dto.getProgramIds().stream()
+              .map(programService::findProgramById)
+              .collect(Collectors.toList());
       course.setPrograms(programs);
     }
 
     Course saved = courseRepository.save(course);
+
+    // ── Temps réel : le cours modifié est répercuté LIVE dans chaque programme (room program:<id>).
+    // Version simple : on émet courseEdited aux programmes ACTUELS (un changement d'appartenance
+    // via programIds n'émet pas de created/deleted sur le delta — cas admin rare, à raffiner). ──
+    long cId = saved.getId();
+    String code = saved.getCode();
+    String title = saved.getTitle();
+    List<Integer> programIds =
+        saved.getPrograms() == null ? List.of() : saved.getPrograms().stream().map(Program::getId).toList();
+    afterCommit(() ->
+        programIds.forEach(pid -> realtimePublisher.courseEdited(pid, CourseDto.of(cId, code, title))));
+
     return toCourseDTO(saved);
   }
 
+  @Transactional
   public void deleteCourse(Integer courseId) {
     Course course = courseRepository.findById(courseId).orElseThrow(CourseNotFoundException::new);
 
+    // Capturé AVANT delete (collection lazy vidée ensuite) ; émis après commit.
+    long cId = course.getId();
+    List<Integer> programIds =
+        course.getPrograms() == null ? List.of() : course.getPrograms().stream().map(Program::getId).toList();
+
     courseRepository.delete(course);
+
+    afterCommit(() -> programIds.forEach(pid -> realtimePublisher.courseDeleted(pid, cId)));
   }
 
   @Transactional

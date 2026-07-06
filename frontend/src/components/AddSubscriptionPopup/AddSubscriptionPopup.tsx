@@ -287,7 +287,9 @@ export function AddSubscriptionPopup({
   const codeTaken =
     selectedEstablishment !== undefined &&
     trimmedCode !== '' &&
-    selectedEstablishment.programCodes.some((c) => c.toUpperCase() === trimmedCode.toUpperCase());
+    (selectedEstablishment.programCodes ?? []).some(
+      (c) => c.toUpperCase() === trimmedCode.toUpperCase()
+    );
 
   const canSubmit =
     trimmedCode !== '' &&

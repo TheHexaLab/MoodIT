@@ -17,9 +17,16 @@ import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserRepository;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.realtime.dto.CourseDto;
+import com.moodit.core_service.realtime.dto.ProgramDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -32,7 +39,27 @@ public class ProgramService {
   private final ProgramRepository programRepository;
   private final CourseRepository courseRepository;
   private final UserRepository userRepository;
+  private final RealtimeEventPublisher realtimePublisher;
   //private final UserService userService;
+
+  /** DTO temps réel d'un programme (scope user:<id>). */
+  private ProgramDto toRealtimeProgramDto(Program p) {
+    return new ProgramDto(p.getId(), p.getName(), p.getCode(), p.getCohort(), p.getColor());
+  }
+
+  /** Exécute l'action après le commit (ou tout de suite hors transaction). */
+  private void afterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          action.run();
+        }
+      });
+    } else {
+      action.run();
+    }
+  }
 
   // region Transformations d'Entités (entité BD -> DTO)
   public ProgramDTO toProgramDTO(Program program) {
@@ -143,6 +170,7 @@ public class ProgramService {
   // endregion
 
   // region POST
+  @Transactional
   public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO) {
     if (courseCreateDTO == null || courseCreateDTO.getProgramIds() == null) {
       throw new IllegalArgumentException();
@@ -167,9 +195,18 @@ public class ProgramService {
     programs.forEach(p -> p.getCourses().add(course));
     programRepository.saveAll(programs);
 
+    // ── Temps réel : le cours apparaît LIVE dans chaque programme concerné (room program:<id>). ──
+    long courseId = course.getId();
+    String code = course.getCode();
+    String title = course.getTitle();
+    List<Integer> programIds = programs.stream().map(Program::getId).toList();
+    afterCommit(() ->
+        programIds.forEach(pid -> realtimePublisher.courseCreated(pid, CourseDto.of(courseId, code, title))));
+
     return toCourseDTO(course);
   }
 
+  @Transactional
   public void addUserToPrograms(UserCreateInProgramsDTO userCreateDTO) {
     if (userCreateDTO == null || userCreateDTO.getProgramIds() == null) {
       throw new IllegalArgumentException("programIds cannot be null");
@@ -184,13 +221,18 @@ public class ProgramService {
     // SYNCHRO scopée à l'établissement : on retire les programmes DE CET ÉTABLISSEMENT que
     // l'utilisateur a déselectionnés (= désabonnement). Les programmes des autres
     // établissements ne sont jamais touchés. establishmentId null → pas de retrait (ajout seul).
+    List<Integer> removedIds = new ArrayList<>();
     if (establishmentId != null) {
       user.getPrograms()
           .removeIf(
-              p ->
-                  p.getEstablishment() != null
-                      && establishmentId.equals(p.getEstablishment().getId())
-                      && !requestedIds.contains(p.getId()));
+              p -> {
+                boolean remove =
+                    p.getEstablishment() != null
+                        && establishmentId.equals(p.getEstablishment().getId())
+                        && !requestedIds.contains(p.getId());
+                if (remove) removedIds.add(p.getId());
+                return remove;
+              });
     }
 
     // Ajoute les programmes demandés pas encore suivis (évite les doublons).
@@ -207,11 +249,20 @@ public class ProgramService {
     user.getPrograms().addAll(programsToAdd);
 
     userRepository.save(user);
+
+    // ── Temps réel (room user:<id>) : la liste des programmes suivis se met à jour LIVE. ──
+    long userId = user.getId();
+    List<ProgramDto> addedDtos = programsToAdd.stream().map(this::toRealtimeProgramDto).toList();
+    afterCommit(() -> {
+      removedIds.forEach(pid -> realtimePublisher.subscriptionRemoved(userId, pid));
+      addedDtos.forEach(dto -> realtimePublisher.subscriptionAdded(userId, dto));
+    });
   }
 
   // endregion
 
   // region PATCH
+  @Transactional
   public ProgramDTO updateProgram(Integer programId, ProgramUpdateDTO programUpdateDTO) {
     if (programId == null || programUpdateDTO == null) {
       throw new IllegalArgumentException("L'identifiant et le DTO ne peuvent pas être nuls");
@@ -233,6 +284,13 @@ public class ProgramService {
     }
 
     programRepository.save(program);
+
+    // ── Temps réel : chaque ABONNÉ (room user:<id>) voit le programme mis à jour LIVE. ──
+    ProgramDto dto = toRealtimeProgramDto(program);
+    List<Integer> subscriberIds =
+        userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
+    afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programUpdated(uid, dto)));
+
     return toProgramDTO(program);
   }
 
@@ -242,10 +300,16 @@ public class ProgramService {
   }
 
   // Quitter un programme
+  @Transactional
   public void removeUserFromProgram(Integer programId, Integer userId) {
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
     user.getPrograms().removeIf(p -> p.getId().equals(programId));
     userRepository.save(user);
+
+    // ── Temps réel : l'utilisateur qui quitte (room user:<id>) retire le programme de sa liste. ──
+    long uId = user.getId();
+    long pId = programId;
+    afterCommit(() -> realtimePublisher.subscriptionRemoved(uId, pId));
   }
 }
