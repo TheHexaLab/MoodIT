@@ -3,6 +3,8 @@ package com.moodit.core_service.realtime.internal;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -66,9 +68,14 @@ public class RealtimeInternalController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Jeton partagé requis dès qu'il est configuré (vide → contrôle désactivé). */
+    /** Jeton partagé requis dès qu'il est configuré (vide → contrôle désactivé).
+     *  Comparaison en temps CONSTANT (MessageDigest.isEqual) pour ne pas fuir le jeton
+     *  via le timing. En prod, le jeton est obligatoire (cf. application-prod.properties). */
     private boolean unauthorized(String token) {
-        return internalToken != null && !internalToken.isBlank() && !internalToken.equals(token);
+        if (internalToken == null || internalToken.isBlank()) return false;
+        if (token == null) return true;
+        return !MessageDigest.isEqual(
+                internalToken.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8));
     }
 
     public record AnalysisCreatedRequest(
