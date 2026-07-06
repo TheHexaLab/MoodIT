@@ -44,6 +44,7 @@ services:
     depends_on:
       - core-service
       - auth-service
+      - mcp-service
 
   #Core service -------------------------------------------------
   core-service:
@@ -71,8 +72,73 @@ services:
       postgres:
         condition: service_healthy
 
+  #Ollama (LLM local, API compatible OpenAI) --------------------
+  # Sert le modèle sur le réseau interne : aucune donnée ne sort vers un tiers.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: moodit_ollama
+    volumes:
+      - ollama_data:/root/.ollama   # modèles persistés : pas de re-téléchargement au redémarrage
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # GPU (NVIDIA) : indispensable pour une latence correcte sur un modèle 7B.
+    # Requiert le NVIDIA Container Toolkit (Docker Desktop + WSL2 sous Windows). Si absent,
+    # COMMENTER ce bloc « deploy » → repli CPU (beaucoup plus lent, timeout probable au 1er appel).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - internal
+
+  #Ollama-init : tire le modèle au démarrage puis s'arrête (one-shot) ----
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: moodit_ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434   # cible le conteneur ollama, pas soi-même
+    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:7b-instruct"]
+    restart: "no"
+    networks:
+      - internal
+
+  #MCP service (analyse de cours via LLM Ollama local) ------------------
+  mcp-service:
+    build: ./mcp-service
+    container_name: moodit_mcp
+    env_file:
+      - .env.docker
+    environment:
+      # Le WS vit dans core-service : mcp-service pousse ses résultats via l'endpoint interne.
+      CORE_SERVICE_HOST: core-service
+      # LLM = conteneur Ollama sur le réseau interne (aucune donnée ne sort vers un tiers).
+      # La clé LLM_API_KEY (placeholder "ollama") vient de .env.docker.
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_MODEL: qwen2.5:7b-instruct
+      # 1er appel après démarrage : chargement du modèle en VRAM → on élargit le timeout.
+      LLM_TIMEOUT_MS: "120000"
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Ne démarre qu'une fois le modèle réellement tiré (sinon 1er appel → 404 model not found).
+      ollama-init:
+        condition: service_completed_successfully
+
 volumes:
   postgres_data:
+  ollama_data:
 
 networks:
   internal:

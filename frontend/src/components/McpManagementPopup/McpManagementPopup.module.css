@@ -15,6 +15,8 @@
   display: flex;
   box-sizing: border-box;
   width: min(47.5rem, 100% - 2rem);
+  /* Fallback vh pour les navigateurs sans dvh (sinon pas de max-height → pas de scroll). */
+  max-height: calc(100vh - 2rem);
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
   flex-direction: column;
@@ -23,7 +25,12 @@
   background: var(--bg-surface);
   box-shadow: 0 12px 32px var(--shadow-modal);
   animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Scrollbar native masquée : elle chevaucherait les coins arrondis de la modale (aucune
+     façon fiable et cross-navigateur de l'en écarter). Le contenu reste défilable à la
+     molette et au tactile. */
+  scrollbar-width: none;
 }
+.dialog::-webkit-scrollbar { display: none; }
 
 .scrim.closing {
   animation: mcp-fade-out 0.2s ease-in forwards;
@@ -80,11 +87,19 @@
   gap: 0.875rem;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border);
+  /* Collé en haut du conteneur scrollable (.dialog) : le corps défile dessous. Fond opaque
+     pour masquer le contenu qui passe derrière. */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-surface);
 }
 
 .headerIcon {
   display: flex;
   flex-shrink: 0;
+  /* Centrée verticalement face au titre (le header aligne ses enfants en flex-start). */
+  align-self: center;
   color: var(--brand-teal);
 }
 
@@ -133,7 +148,8 @@
   flex-shrink: 0;
   justify-content: center;
   align-items: center;
-  margin-top: 0.125rem;
+  /* Centré verticalement face au titre (le header aligne ses enfants en flex-start). */
+  align-self: center;
   padding: 0;
   background: none;
   border: none;
@@ -186,6 +202,23 @@
   font-weight: 400;
   line-height: 1.25rem;
   color: var(--text-muted);
+}
+/* Statut live pendant l'analyse : ton de marque + léger clignotement pour signaler l'attente. */
+.analyzeProgress {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  color: var(--brand-teal);
+  animation: mcpProgressPulse 1.4s ease-in-out infinite;
+}
+@keyframes mcpProgressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .analyzeProgress { animation: none; }
 }
 .analyzeBtn {
   display: inline-flex;
@@ -355,13 +388,17 @@
   line-height: 1.1;
   color: var(--brand-teal);
 }
-.scoreMeta {
-  font-family: Inter, sans-serif;
-  font-size: 0.8125rem;
-  font-weight: 400;
-  color: var(--text-muted);
-  text-align: center;
+/* Paliers du bilan global : jaune (50-69%), rouge (<50%). ≥70% = vert par défaut. */
+.scoreBadgeWarn {
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-surface));
+  color: var(--warning);
 }
+.scoreBadgeBad {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-surface));
+  color: var(--danger);
+}
+.scoreWarn { color: var(--warning); }
+.scoreBad { color: var(--danger); }
 
 /* ── Vue détail : onglets ────────────────────────────────── */
 .tabs {
@@ -460,6 +497,82 @@
   margin-top: 0.25rem;
   color: var(--warning);
 }
+.pointIconReco {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  color: var(--brand-teal);
+}
+/* État vide d'un onglet (ex. aucun point fort pour un cours inactif). */
+.emptyPoints {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+/* ── Vue détail : synthèse + dimensions ────────────────────── */
+.sectionLabel {
+  font-family: Inter, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.summary p {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.35rem;
+  color: var(--text-body);
+}
+.dimensions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.dimRow {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 2rem;
+  align-items: center;
+  gap: 0.625rem;
+}
+.dimLabel {
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--text-body);
+}
+.dimTrack {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.dimFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-teal);
+  transition: width 0.4s ease;
+}
+.dimValue {
+  font-family: Inter, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+/* Dimension sans donnée (N/D) : texte discret, pas de mise en avant. */
+.dimValueNa {
+  font-weight: 500;
+  color: var(--text-muted);
+}
 
 .footnote {
   display: flex;
@@ -481,8 +594,35 @@
   }
   .analyzeBtn { width: 100%; }
   .historyRow { flex-wrap: wrap; }
-  /* Liste des points : 4 lignes max en mobile (au lieu de 6). */
-  .points { --point-visible-lines: 4; }
-  /* Onglets centrés horizontalement en mobile. */
-  .tabs { justify-content: center; }
+
+  /* En-tête + corps plus compacts en mobile (même retrait gauche pour l'alignement). */
+  .header { padding: 0.875rem 1rem; }
+  .body { padding: 1rem 1rem 1.25rem; }
+
+  /* Onglets défilables horizontalement : 3 pastilles peuvent dépasser sur écran étroit.
+     Piste de scroll masquée (le geste suffit). */
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* Mobile : un SEUL conteneur de défilement (le .dialog). On neutralise le clip de
+     l'animation de taille (hauteur figée en JS) et le scroll interne des points, sinon
+     le défilement tactile reste piégé dans ces sous-conteneurs. L'anim de taille est
+     sacrifiée sur mobile au profit d'un scroll fiable de toute la modale. */
+  .viewport {
+    height: auto !important;
+    overflow: visible;
+  }
+  .points {
+    max-height: none;
+    overflow: visible;
+  }
 }

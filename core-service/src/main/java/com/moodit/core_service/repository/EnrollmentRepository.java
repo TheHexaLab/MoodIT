@@ -18,4 +18,7 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Integer>
 
     // Get all enrollments of a course
     List<Enrollment> findByCourseId(Integer courseId);
+
+    // Nombre d'étudiants inscrits à un cours (contexte d'analyse MCP)
+    long countByCourseId(Integer courseId);
 }

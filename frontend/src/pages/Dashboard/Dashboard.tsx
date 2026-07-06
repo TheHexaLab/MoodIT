@@ -66,7 +66,8 @@ import styles from './Dashboard.module.css';
  * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
  */
 const quizEditorHandlers: QuizEditorHandlers = {
-  onFetchQuiz: api.fetchQuiz,
+  // Éditeur enseignant → détail AVEC correction (endpoint /edit, réservé aux admins).
+  onFetchQuiz: api.fetchQuizForEdit,
   onFetchQuizzes: api.fetchQuizzes,
   onFetchLanguages: api.fetchLanguages,
   onFetchQuestionTypes: api.fetchQuestionTypes,
@@ -843,6 +844,10 @@ export default function Dashboard() {
               // (le verrou MCP est par (cours, user)).
               onAnalysisFailed: (launcherId, reason) => {
                 if (launcherId === currentUser.id) handlers.onFailed(reason);
+              },
+              // Progression : idem, seul le lanceur (verrou par (cours, user)) l'affiche.
+              onAnalysisProgress: (launcherId, step) => {
+                if (launcherId === currentUser.id) handlers.onProgress(step);
               },
               onResync: handlers.onResync,
             })

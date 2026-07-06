@@ -6,7 +6,7 @@
 // `roles` = rôles GLOBAUX (User_Role). Le front en dérive `isAdmin` (rôle
 // « Administrateur »). Les rôles par programme (User_Program_Role) ne sont pas ici.
 
-package com.moodit.core_service.user;
+package com.moodit.core_service.dto;
 
 import java.util.List;
 

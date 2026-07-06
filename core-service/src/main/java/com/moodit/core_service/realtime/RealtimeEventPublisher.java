@@ -211,6 +211,18 @@ public class RealtimeEventPublisher {
         event("mcp:analysis-failed", "courseId", courseId, "userId", userId, "reason", reason));
   }
 
+  /**
+   * Étape de PROGRESSION d'un job d'analyse MCP en cours (feedback temps réel : collecte,
+   * analyse IA, repli…). Porte le `userId` du LANCEUR (seul lui affiche la progression, le
+   * verrou étant par (cours, user)). `step` = clé d'étape, mappée en libellé côté front.
+   */
+  public void mcpAnalysisProgress(long courseId, long userId, String step) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-progress", "courseId", courseId, "userId", userId, "step", step));
+  }
+
   // ─── Interne ──────────────────────────────────────────────────────────────
 
   /** Sérialise l'évènement et le diffuse à la room (scope:id). */

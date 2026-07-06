@@ -19,10 +19,25 @@ public class QuizController {
 
     private final QuizService quizService;
 
-    /** Détail d'un quiz (méta + questions embarquées) pour la passation/édition. */
+    /**
+     * Détail d'un quiz pour la PASSATION (étudiant) : SANS les champs de correction
+     * (isCorrect/correctOrder/groupName) ni les harnais. La correction est faite côté
+     * serveur (submitQuiz), le client n'a donc pas besoin de ces champs.
+     */
     @GetMapping("/{quizId}")
     public ResponseEntity<QuizDetailDTO> getQuizDetail(@PathVariable Integer quizId) {
         return ResponseEntity.ok(quizService.getQuizDetail(quizId));
+    }
+
+    /**
+     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : AVEC la correction. Réservé
+     * aux administrateurs (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     */
+    @GetMapping("/{quizId}/edit")
+    public ResponseEntity<QuizDetailDTO> getQuizForEdit(
+            @PathVariable Integer quizId,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.getQuizForEdit(quizId, email));
     }
 
     /** Historique des tentatives de l'utilisateur courant sur ce quiz (résumés). */

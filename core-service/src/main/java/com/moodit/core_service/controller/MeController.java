@@ -6,8 +6,11 @@
 //
 // Routage : le gateway mappe /api/** → core-service (application.properties).
 
-package com.moodit.core_service.user;
+package com.moodit.core_service.controller;
 
+import com.moodit.core_service.dto.MeDto;
+import com.moodit.core_service.dto.UpdateMeRequest;
+import com.moodit.core_service.repository.MeRepository;
 import jakarta.validation.Valid;
 import java.security.Principal;
 import org.springframework.http.ResponseEntity;
