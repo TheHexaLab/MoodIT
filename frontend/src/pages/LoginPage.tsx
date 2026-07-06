@@ -128,14 +128,9 @@ export default function LoginPage() {
                   <EyeIcon visible={showPassword} />
                 </button>
               </div>
-              <a
-                href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="forgot-link"
-              >
+              <Link to="/forgot-password" className="forgot-link">
                 Mot de passe oublié ?
-              </a>
+              </Link>
             </div>
             <button type="submit" className="btn-primary" disabled={submitting}>
               {submitting ? 'Connexion...' : 'Se connecter →'}

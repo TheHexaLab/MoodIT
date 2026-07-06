@@ -1,0 +1,194 @@
+import { useState, useEffect } from 'react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
+import '../LoginPage.css';
+import { EyeIcon } from '../../assets/eye';
+import { Lightanddark } from '../../assets/light-dark-btn';
+import logo from '../../assets/Logo.png';
+import { resetPassword, forgotPassword } from '../../helpers/api';
+import { useTheme } from '../../helpers/theme';
+
+// Étape 2 du « mot de passe oublié » : saisie du code reçu par email + nouveau mot de passe.
+// L'email provient de location.state (posé par ForgotPassword). En accès direct (state vide),
+// on renvoie vers l'étape 1.
+export default function ResetPassword() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
+
+  const email: string = location.state?.email || '';
+
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
+
+  // Accès direct / rafraîchissement : sans email on ne peut rien réinitialiser.
+  useEffect(() => {
+    if (!email) navigate('/forgot-password', { replace: true });
+  }, [email, navigate]);
+
+  // Compte à rebours du renvoi (aligné sur le cooldown serveur de 60 s).
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (code.length !== 6) {
+      setError('Le code doit contenir 6 chiffres');
+      return;
+    }
+    if (password.length < 8 || password.length > 128) {
+      setError('Le mot de passe doit contenir entre 8 et 128 caractères');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await resetPassword(email, code, password);
+      setSuccess(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleResend() {
+    if (cooldown > 0 || resending) return;
+    setError('');
+    setResendMsg('');
+    setResending(true);
+    try {
+      await forgotPassword(email);
+      setResendMsg('Si un compte existe, un nouveau code a été envoyé.');
+      setCooldown(60);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
+    } finally {
+      setResending(false);
+    }
+  }
+
+  if (!email) return null;
+
+  return (
+    <div className="page">
+      <aside className="aside">
+        <div className="bubble-1" />
+        <div className="bubble-2" />
+        <div className="bubble-3" />
+        <div className="aside-content">
+          <div className="logo-wrapper">
+            <img src={logo} alt="Logo MoodIT" />
+          </div>
+          <h1 className="app-name">MoodIT</h1>
+          <p className="app-tagline">
+            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp;</span>
+            <span className={'app-tagline-text'}>c'était pas assez chaotique.</span>
+          </p>
+        </div>
+      </aside>
+
+      <main className="main">
+        <div className="form-card">
+          {success ? (
+            <>
+              <h2 className="form-title">Mot de passe réinitialisé ✅</h2>
+              <p className="form-subtitle">
+                Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.
+              </p>
+              <Link to="/login" className="btn-primary">
+                Se connecter →
+              </Link>
+            </>
+          ) : (
+            <>
+              <h2 className="form-title">Réinitialiser le mot de passe</h2>
+              <p className="form-subtitle">
+                Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
+              </p>
+
+              <form className="form" onSubmit={handleSubmit}>
+                {error && <p className="server-error">⚠ {error}</p>}
+
+                <div className="field">
+                  <label className="label">Code à 6 chiffres</label>
+                  <input
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={code}
+                    maxLength={6}
+                    placeholder="123456"
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="label">Nouveau mot de passe</label>
+                  <div className="input-wrapper">
+                    <input
+                      className="input"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="••••••••••"
+                      value={password}
+                      maxLength={128}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="eye-btn"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Masquer' : 'Afficher'}
+                    >
+                      <EyeIcon visible={showPassword} />
+                    </button>
+                  </div>
+                </div>
+
+                <button type="submit" className="btn-primary" disabled={submitting}>
+                  {submitting ? 'Réinitialisation...' : 'Réinitialiser →'}
+                </button>
+
+                {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
+                <p className="register-row">
+                  Pas reçu le code ?{' '}
+                  <button
+                    type="button"
+                    className="register-link"
+                    onClick={handleResend}
+                    disabled={cooldown > 0 || resending}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  >
+                    {cooldown > 0 ? `Renvoyer (${cooldown}s)` : resending ? 'Envoi...' : 'Renvoyer'}
+                  </button>
+                </p>
+                <p className="register-row">
+                  <Link to="/login" className="register-link">
+                    ← Retour à la connexion
+                  </Link>
+                </p>
+              </form>
+            </>
+          )}
+        </div>
+
+        <footer className="footer">© 2026 MoodIT · Confidentialité · Conditions d'utilisation</footer>
+      </main>
+      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+        <Lightanddark isDark={theme === 'dark'} />
+      </button>
+    </div>
+  );
+}
