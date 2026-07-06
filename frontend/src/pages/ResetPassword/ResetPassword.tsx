@@ -39,6 +39,17 @@ export default function ResetPassword() {
     return () => clearTimeout(id);
   }, [cooldown]);
 
+  // Même barème que la page Register (0 = vide → 4 = fort).
+  function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
+    if (pw.length === 0) return 0;
+    if (pw.length < 8) return 1;
+    const hasNumber = /[0-9]/.test(pw);
+    const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw);
+    if (hasNumber && hasSpecial) return 4;
+    if (hasNumber || hasSpecial) return 3;
+    return 2;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -46,8 +57,12 @@ export default function ResetPassword() {
       setError('Le code doit contenir 6 chiffres');
       return;
     }
-    if (password.length < 8 || password.length > 128) {
-      setError('Le mot de passe doit contenir entre 8 et 128 caractères');
+    if (!password) {
+      setError('Le mot de passe est requis');
+      return;
+    }
+    if (passwordStrength(password) < 2) {
+      setError('Mot de passe trop faible');
       return;
     }
 
@@ -135,7 +150,17 @@ export default function ResetPassword() {
                 </div>
 
                 <div className="field">
-                  <label className="label">Nouveau mot de passe</label>
+                  <div className="label-row">
+                    <label className="label">Nouveau mot de passe</label>
+                    {password && (
+                      <span className="strength-label" data-level={passwordStrength(password)}>
+                        {passwordStrength(password) === 1 && 'Mot de passe trop court'}
+                        {passwordStrength(password) === 2 && 'Mot de passe faible'}
+                        {passwordStrength(password) === 3 && 'Mot de passe moyen'}
+                        {passwordStrength(password) === 4 && 'Mot de passe fort'}
+                      </span>
+                    )}
+                  </div>
                   <div className="input-wrapper">
                     <input
                       className="input"
@@ -155,6 +180,14 @@ export default function ResetPassword() {
                       <EyeIcon visible={showPassword} />
                     </button>
                   </div>
+                  {password && (
+                    <div className="strength" data-level={passwordStrength(password)}>
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
                 </div>
 
                 <button type="submit" className="btn-primary" disabled={submitting}>

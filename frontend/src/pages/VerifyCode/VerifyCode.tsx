@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
-import styles from './VerifyCode.module.css';
+import '../LoginPage.css';
 import { useTheme } from '../../helpers/theme';
 import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
+import logo from '../../assets/Logo.png';
 
 type Mode = 'email' | '2fa';
 
@@ -40,7 +41,8 @@ export default function VerifyCode() {
     return () => clearTimeout(id);
   }, [cooldown]);
 
-  async function handleSubmit() {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setError('');
 
     if (code.length !== 6) {
@@ -89,49 +91,49 @@ export default function VerifyCode() {
   }
 
   return (
-    <div className={styles.page}>
-      <aside className={styles.brand}>
-        <div className={styles.brandInner}>
-          <h1 className={styles.brandTitle}>MoodIT</h1>
-          <p className={styles.brandTagline}>Parce que Moodle, c'était pas assez chaotique.</p>
+    <div className="page">
+      <aside className="aside">
+        <div className="bubble-1" />
+        <div className="bubble-2" />
+        <div className="bubble-3" />
+        <div className="aside-content">
+          <div className="logo-wrapper">
+            <img src={logo} alt="Logo MoodIT" />
+          </div>
+          <h1 className="app-name">MoodIT</h1>
+          <p className="app-tagline">
+            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp;</span>
+            <span className={'app-tagline-text'}>c'était pas assez chaotique.</span>
+          </p>
         </div>
       </aside>
 
-      <main className={styles.formSide}>
-        <button
-          type="button"
-          className="light-dark-btn"
-          onClick={toggleTheme}
-          aria-label="Changer de thème"
-        >
-          <Lightanddark isDark={theme === 'dark'} />
-        </button>
-
-        <div className={styles.card}>
+      <main className="main">
+        <div className="form-card">
           {success ? (
-            <div className={styles.successBox}>
-              <h2>Email vérifié! ✅</h2>
-              <p>Votre compte est maintenant actif.</p>
-              <Link to="/login" className={styles.submitLink}>
+            <>
+              <h2 className="form-title">Email vérifié ✅</h2>
+              <p className="form-subtitle">Votre compte est maintenant actif.</p>
+              <Link to="/login" className="btn-primary">
                 Se connecter →
               </Link>
-            </div>
+            </>
           ) : (
             <>
-              <header className={styles.cardHeader}>
-                <h2>{isEmailVerification ? 'Vérifiez votre email' : 'Double authentification'}</h2>
-                <p>
-                  Un code a été envoyé à <strong>{email}</strong>.
-                  Il expire dans 15 minutes.
-                </p>
-              </header>
+              <h2 className="form-title">
+                {isEmailVerification ? 'Vérifiez votre email 📧' : 'Double authentification 🔒'}
+              </h2>
+              <p className="form-subtitle">
+                Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
+              </p>
 
-              {error && <p className={styles.serverError}>⚠ {error}</p>}
+              <form className="form" onSubmit={handleSubmit}>
+                {error && <p className="server-error">⚠ {error}</p>}
 
-              <div className={styles.field}>
-                <label className={styles.label}>Code à 6 chiffres</label>
-                <div className={styles.inputWrap}>
+                <div className="field">
+                  <label className="label">Code à 6 chiffres</label>
                   <input
+                    className="input"
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
@@ -141,46 +143,43 @@ export default function VerifyCode() {
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                   />
                 </div>
-              </div>
 
-              <button
-                type="button"
-                className={styles.submit}
-                onClick={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? 'Vérification...' : 'Vérifier →'}
-              </button>
-
-              <div className={styles.resendRow}>
-                {resendMsg && <p className={styles.resendMsg}>{resendMsg}</p>}
-                <button
-                  type="button"
-                  className={styles.resendBtn}
-                  onClick={handleResend}
-                  disabled={cooldown > 0 || resending}
-                >
-                  {cooldown > 0
-                    ? `Renvoyer le code (${cooldown}s)`
-                    : resending
-                      ? 'Envoi...'
-                      : 'Renvoyer le code'}
+                <button type="submit" className="btn-primary" disabled={submitting}>
+                  {submitting ? 'Vérification...' : 'Vérifier →'}
                 </button>
-              </div>
 
-              <p className={styles.backLink}>
-                <Link to={isEmailVerification ? '/register' : '/login'}>
-                  ← Retour
-                </Link>
-              </p>
+                {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
+                <p className="register-row">
+                  Pas reçu le code ?{' '}
+                  <button
+                    type="button"
+                    className="register-link"
+                    onClick={handleResend}
+                    disabled={cooldown > 0 || resending}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  >
+                    {cooldown > 0
+                      ? `Renvoyer (${cooldown}s)`
+                      : resending
+                        ? 'Envoi...'
+                        : 'Renvoyer le code'}
+                  </button>
+                </p>
+                <p className="register-row">
+                  <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
+                    ← Retour
+                  </Link>
+                </p>
+              </form>
             </>
           )}
         </div>
 
-        <footer className={styles.pageFooter}>
-          © 2026 MoodIT · Confidentialité · Conditions d'utilisation
-        </footer>
+        <footer className="footer">© 2026 MoodIT · Confidentialité · Conditions d'utilisation</footer>
       </main>
+      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+        <Lightanddark isDark={theme === 'dark'} />
+      </button>
     </div>
   );
 }
