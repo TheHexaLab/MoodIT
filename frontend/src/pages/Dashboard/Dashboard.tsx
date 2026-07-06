@@ -226,8 +226,11 @@ export default function Dashboard() {
             course.id === courseId ? applySectionChange(course, sectionType, change) : course
           )
         ),
+      // WS course:created/edited → mise à jour MÉTA d'un cours déjà présent uniquement.
+      // On n'AJOUTE pas : un cours neuf (ou édité) auquel l'utilisateur n'est pas inscrit
+      // ne doit pas apparaître dans sa sidebar (il l'ajoutera en le rejoignant).
       onCourseUpsert: (course) =>
-        setDashboardPrograms((programs) => upsertCourse(programs, activeProgramId, course)),
+        setDashboardPrograms((programs) => updateCourseMeta(programs, activeProgramId, course)),
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
       // Un quiz a été ajouté : il apparaît dans la liste (s'il est publié).
@@ -988,6 +991,26 @@ function upsertCourse(programs: DemoProgram[], programId: number, course: Course
         : [...program.courses, course],
     };
   });
+}
+
+/**
+ * Met à jour la MÉTA (titre/code) d'un cours DÉJÀ présent dans un programme. N'AJOUTE
+ * jamais de cours : les events WS `course:created`/`course:edited` sont diffusés à TOUS les
+ * abonnés du programme, mais la sidebar ne liste que les cours où l'utilisateur est INSCRIT
+ * (on n'y entre que par une inscription). Un cours absent (= non inscrit) → no-op, sinon un
+ * cours fraîchement créé apparaîtrait comme « rejoint » chez des non-inscrits.
+ */
+function updateCourseMeta(programs: DemoProgram[], programId: number, course: Course): DemoProgram[] {
+  return programs.map((program) =>
+    program.id === programId
+      ? {
+          ...program,
+          courses: program.courses.map((c) =>
+            c.id === course.id ? { ...c, title: course.title, code: course.code } : c
+          ),
+        }
+      : program
+  );
 }
 
 /** Retire un cours d'un programme. */

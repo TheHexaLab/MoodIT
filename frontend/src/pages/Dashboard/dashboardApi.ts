@@ -774,6 +774,11 @@ export async function deleteMessage(forumID: number, messageId: number): Promise
 
 // ── Forum ('Thread') ───────────────────────────────────────────────────────────
 
+/** Id numérique de l'utilisateur courant (lu du localStorage, comme le reste du fichier). */
+function currentUserId(): number {
+  return Number(localStorage.getItem('moodit_user_id')) || 0;
+}
+
 /**
  * PostVoteUserDTO (backend) → ForumPost (modèle). Le vote PROPRE de l'utilisateur
  * (`userVoteValue`) va dans `votes` — attribué à SON id, pour que le front surligne le

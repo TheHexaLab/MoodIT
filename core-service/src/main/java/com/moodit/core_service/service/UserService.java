@@ -4,6 +4,9 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
+// Import explicite : `Role` existe aussi dans dto.* → lève l'ambiguïté des wildcards
+// (user.getRoles() renvoie l'entité model.Role).
+import com.moodit.core_service.model.Role;
 import com.moodit.core_service.service.ProgramService;
 // Repository
 import com.moodit.core_service.repository.UserRepository;
