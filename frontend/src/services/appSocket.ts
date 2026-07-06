@@ -199,6 +199,8 @@ export function createAppSocket(
       for (const programId of courseSubs.keys()) send({ type: 'join', scope: 'program', id: programId });
       for (const userId of programSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
       for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
+      // Room UNIQUE du catalogue d'établissements (id 0), si le popup est ouvert.
+      if (establishmentSubs.size > 0) send({ type: 'join', scope: 'establishment', id: 0 });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
       // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
@@ -379,11 +381,15 @@ export function createAppSocket(
       },
     },
     establishments: {
-      // Évènement GLOBAL (pas de room à rejoindre) : on ajoute juste le handler au set.
+      // Room UNIQUE « establishment » (id 0) : on la rejoint au 1er abonné, on la quitte au
+      // dernier (évite de diffuser à toutes les sessions inutilement).
       subscribe(handler) {
+        const wasEmpty = establishmentSubs.size === 0;
         establishmentSubs.add(handler);
+        if (wasEmpty) send({ type: 'join', scope: 'establishment', id: 0 });
         return () => {
           establishmentSubs.delete(handler);
+          if (establishmentSubs.size === 0) send({ type: 'leave', scope: 'establishment', id: 0 });
         };
       },
     },

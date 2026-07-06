@@ -127,13 +127,15 @@ public class UserService {
    * sur "Enseignant" ; null si aucun rôle de programme.
    */
   private String highestRoleName(Set<Integer> roleIds, Map<Integer, String> roleNameById) {
-    boolean isAdmin = roleIds.stream().anyMatch(id -> "Administrateur".equals(roleNameById.get(id)));
+    boolean isAdmin =
+        roleIds.stream().anyMatch(id -> RoleNames.ADMIN.equals(roleNameById.get(id)));
     if (isAdmin) {
-      return "Administrateur";
+      return RoleNames.ADMIN;
     }
-    boolean isTeacher = roleIds.stream().anyMatch(id -> "Enseignant".equals(roleNameById.get(id)));
+    boolean isTeacher =
+        roleIds.stream().anyMatch(id -> RoleNames.TEACHER.equals(roleNameById.get(id)));
     if (isTeacher) {
-      return "Enseignant";
+      return RoleNames.TEACHER;
     }
     return null;
   }

@@ -5,6 +5,7 @@ import com.moodit.core_service.dto.RoleDTO;
 import com.moodit.core_service.dto.UserDTO;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Role;
+import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
@@ -166,11 +167,11 @@ public class RoleService {
                 userProgramRoleRepository.findByProgramIdAndUserId(programId, userId).stream()
                         .map(upr -> roleNameById.get(upr.getRoleId()))
                         .collect(Collectors.toList());
-        if (names.contains("Administrateur")) {
-            return "Administrateur";
+        if (names.contains(RoleNames.ADMIN)) {
+            return RoleNames.ADMIN;
         }
-        if (names.contains("Enseignant")) {
-            return "Enseignant";
+        if (names.contains(RoleNames.TEACHER)) {
+            return RoleNames.TEACHER;
         }
         return null;
     }

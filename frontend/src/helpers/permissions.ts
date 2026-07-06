@@ -18,6 +18,7 @@
  *  - aucun rôle : aucune action d'administration.
  */
 import { type Program } from '../types/domain.ts';
+import { ROLE } from './roles.ts';
 
 export interface ProgramPermissions {
   /** Gérer le contenu : cours, canaux, quiz, forums. */
@@ -35,8 +36,8 @@ export function getProgramPermissions(
   isGlobalAdmin: boolean
 ): ProgramPermissions {
   const role = program?.roleName ?? null;
-  const isProgramAdmin = role === 'Administrateur';
-  const isTeacher = role === 'Enseignant';
+  const isProgramAdmin = role === ROLE.ADMIN;
+  const isTeacher = role === ROLE.TEACHER;
 
   return {
     canManageContent: isGlobalAdmin || isProgramAdmin || isTeacher,

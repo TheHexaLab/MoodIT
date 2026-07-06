@@ -47,6 +47,9 @@ public class DbRoomAuthorizer implements RoomAuthorizer {
       case "program" -> isSubscribedToProgram(userId, id);
       case "channel", "forum" -> canSeeForum(userId, id);
       case "mcp" -> canSeeCourse(userId, id);
+      // Catalogue d'établissements : room UNIQUE (id 0), plateforme → tout utilisateur
+      // authentifié peut la rejoindre (aucune donnée sensible : nom/domaine/programmes publics).
+      case "establishment" -> true;
       default -> false;
     };
   }

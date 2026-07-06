@@ -47,6 +47,7 @@ import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
+import { ROLE } from '../../helpers/roles.ts';
 import * as api from './dashboardApi.ts';
 import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
@@ -1008,13 +1009,13 @@ export default function Dashboard() {
             canAssign={(roleId) => {
               const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
               // Gardien : peut tout attribuer. Admin général : uniquement « Administrateur ».
-              return isGuardian || name === 'Administrateur';
+              return isGuardian || name === ROLE.ADMIN;
             }}
             canUnassign={(roleId, userId) => {
               if (!isGuardian) return false; // l'admin général ne retire personne
               const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
               // Anti-lockout : un gardien ne peut pas retirer SON PROPRE rôle gardien.
-              if (name === 'Gardien' && userId === currentUser.id) return false;
+              if (name === ROLE.GUARDIAN && userId === currentUser.id) return false;
               return true;
             }}
           />

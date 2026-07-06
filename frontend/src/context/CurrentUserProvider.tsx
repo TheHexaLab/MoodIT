@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getMe, updateMe } from '../helpers/api.ts';
 import { getToken } from '../helpers/auth.ts';
+import { ROLE } from '../helpers/roles.ts';
 import type { Role, User } from '../types/domain.ts';
 import type { ProfileUpdate } from '../components/EditProfilePopup/types.ts';
 import { CurrentUserContext, type AuthStatus, type CurrentUserApi } from './currentUserContext.ts';
@@ -23,8 +24,8 @@ const loadingUser: User = {
 // Rôles GLOBAUX (User_Role) accordant les droits plateforme. Le gardien est
 // au-dessus de l'administrateur général : il en est un SUPERSET (isAdmin true pour les deux).
 // Les rôles enseignant/administrateur PAR programme (User_Program_Role) ne sont pas gérés ici.
-const ADMIN_ROLE_NAME = 'Administrateur';
-const SUPER_ADMIN_ROLE_NAME = 'Gardien';
+const ADMIN_ROLE_NAME = ROLE.ADMIN;
+const SUPER_ADMIN_ROLE_NAME = ROLE.GUARDIAN;
 
 export default function CurrentUserProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(loadingUser);

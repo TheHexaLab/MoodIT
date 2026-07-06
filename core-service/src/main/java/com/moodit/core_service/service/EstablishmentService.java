@@ -94,6 +94,7 @@ public class EstablishmentService {
     }
 
 
+    @Transactional
     public EstablishmentDTO create(EstablishmentDTO dto) {
 
         Establishment est = new Establishment();
@@ -102,9 +103,12 @@ public class EstablishmentService {
 
         Establishment saved = establishmentRepository.save(est);
 
-        // ── Temps réel (GLOBAL) : le nouvel établissement apparaît LIVE dans le popup. ──
-        realtimePublisher.establishmentUpserted(
-                saved.getId(), saved.getName(), saved.getDomainEmail(), 0, List.of());
+        // ── Temps réel (GLOBAL) : le nouvel établissement apparaît LIVE dans le popup. Émis APRÈS
+        // le commit (afterCommit) pour ne pas diffuser un état non persisté. ──
+        long id = saved.getId();
+        String name = saved.getName();
+        String domainEmail = saved.getDomainEmail();
+        afterCommit(() -> realtimePublisher.establishmentUpserted(id, name, domainEmail, 0, List.of()));
 
         return establishmentToDTO(saved);
     }
@@ -131,6 +135,7 @@ public class EstablishmentService {
         return programService.toProgramDTO(saved);
     }
 
+    @Transactional
     public EstablishmentDTO updateEstablishment(
             Integer establishmentId,
             EstablishmentUpdateDTO dto) {
@@ -150,13 +155,15 @@ public class EstablishmentService {
 
         EstablishmentDTO result = establishmentToDTO(saved);
 
-        // ── Temps réel (GLOBAL) : nom/domaine mis à jour LIVE dans le popup (par id). ──
-        realtimePublisher.establishmentUpserted(
-                result.getId(),
-                result.getName(),
-                result.getDomainEmail(),
-                result.getProgramCount(),
-                result.getProgramCodes());
+        // ── Temps réel (GLOBAL) : nom/domaine mis à jour LIVE dans le popup (par id). Émis APRÈS
+        // le commit (afterCommit). ──
+        afterCommit(() ->
+                realtimePublisher.establishmentUpserted(
+                        result.getId(),
+                        result.getName(),
+                        result.getDomainEmail(),
+                        result.getProgramCount(),
+                        result.getProgramCodes()));
 
         return result;
     }

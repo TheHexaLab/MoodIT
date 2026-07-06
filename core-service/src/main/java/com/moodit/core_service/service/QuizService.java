@@ -118,7 +118,7 @@ public class QuizService {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
         boolean admin = user.getRoles() != null && user.getRoles().stream()
-                .anyMatch(r -> "Administrateur".equals(r.getName()));
+                .anyMatch(r -> RoleNames.ADMIN.equals(r.getName()));
         if (!admin) throw new ForbiddenException();
     }
 

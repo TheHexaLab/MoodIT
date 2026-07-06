@@ -225,8 +225,13 @@ public class RealtimeEventPublisher {
    * gardien/abonné peut le voir dans le popup « Ajouter un programme »). Chaque client met à jour
    * l'établissement par id : nombre de programmes, codes, ET la liste détaillée si elle est ouverte.
    */
+  /** Room UNIQUE du catalogue d'établissements (plateforme) : scope "establishment", id fixe. */
+  private static final long ESTABLISHMENT_ROOM = 0L;
+
   public void establishmentUpdated(long establishmentId, List<ProgramDto> programs) {
-    emitAll(
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
         event("establishment:updated", "establishmentId", establishmentId, "programs", programs));
   }
 
@@ -237,7 +242,9 @@ public class RealtimeEventPublisher {
    */
   public void establishmentUpserted(
       long id, String name, String domainEmail, int programCount, List<String> programCodes) {
-    emitAll(
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
         event(
             "establishment:upserted",
             "id", id,
@@ -247,9 +254,12 @@ public class RealtimeEventPublisher {
             "programCodes", programCodes));
   }
 
-  /** Un établissement a été SUPPRIMÉ. Évènement GLOBAL : le popup le retire de ses listes. */
+  /** Un établissement a été SUPPRIMÉ : le popup le retire de ses listes (room establishment). */
   public void establishmentDeleted(long id) {
-    emitAll(event("establishment:deleted", "establishmentId", id));
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
+        event("establishment:deleted", "establishmentId", id));
   }
 
   // ─── Analyses MCP (scope = course) ────────────────────────────────────────
