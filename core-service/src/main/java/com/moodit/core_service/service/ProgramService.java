@@ -324,10 +324,34 @@ public class ProgramService {
         userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
     afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programUpdated(uid, dto)));
 
+    // ── Temps réel (GLOBAL) : le catalogue de l'établissement change (nom/code/couleur…) → le
+    // popup « Ajouter un programme » met à jour la liste des programmes LIVE. ──
+    if (program.getEstablishment() != null) {
+      publishEstablishmentCatalog(program.getEstablishment().getId());
+    }
+
     return toProgramDTO(program);
   }
 
   // endregion
+
+  /**
+   * Diffuse (GLOBAL, after-commit) la LISTE À JOUR des programmes d'un établissement pour le popup
+   * « Ajouter un programme ». Appelé après un ajout / une modification / une suppression de
+   * programme. La requête auto-flush les changements en attente avant de lire.
+   */
+  public void publishEstablishmentCatalog(Integer establishmentId) {
+    if (establishmentId == null) {
+      return;
+    }
+    long estId = establishmentId;
+    List<ProgramDto> programs =
+        programRepository.findByEstablishment_Id(establishmentId).stream()
+            .map(this::toRealtimeProgramDto)
+            .toList();
+    afterCommit(() -> realtimePublisher.establishmentUpdated(estId, programs));
+  }
+
   public Program findProgramById(Integer programId) {
     return programRepository.findById(programId).orElseThrow(ProgramNotFoundException::new);
   }
@@ -352,6 +376,10 @@ public class ProgramService {
     Program program =
         programRepository.findById(programId).orElseThrow(ProgramNotFoundException::new);
 
+    // Établissement du programme capturé AVANT delete (pour l'écho catalogue).
+    Integer establishmentId =
+        program.getEstablishment() != null ? program.getEstablishment().getId() : null;
+
     // Abonnés capturés AVANT delete (pour l'écho WS user:<id> ; collection lazy vidée ensuite).
     List<Integer> subscriberIds =
         userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
@@ -362,5 +390,9 @@ public class ProgramService {
 
     // ── Temps réel : chaque abonné (room user:<id>) retire le programme de sa liste. ──
     afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programDeleted(uid, programId)));
+
+    // ── Temps réel (GLOBAL) : le catalogue de l'établissement change → le popup « Ajouter un
+    // programme » met à jour la liste des programmes LIVE (la requête auto-flush le retrait). ──
+    publishEstablishmentCatalog(establishmentId);
   }
 }

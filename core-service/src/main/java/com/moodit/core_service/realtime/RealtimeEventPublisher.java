@@ -219,6 +219,39 @@ public class RealtimeEventPublisher {
     emit("user", userId, event("user:globalRolesChanged", "userId", userId, "roles", roles));
   }
 
+  /**
+   * Le CATALOGUE d'un établissement a changé (programme ajouté / modifié / supprimé) : on diffuse
+   * la LISTE À JOUR de ses programmes. Évènement GLOBAL (le catalogue est plateforme, tout
+   * gardien/abonné peut le voir dans le popup « Ajouter un programme »). Chaque client met à jour
+   * l'établissement par id : nombre de programmes, codes, ET la liste détaillée si elle est ouverte.
+   */
+  public void establishmentUpdated(long establishmentId, List<ProgramDto> programs) {
+    emitAll(
+        event("establishment:updated", "establishmentId", establishmentId, "programs", programs));
+  }
+
+  /**
+   * Un établissement a été CRÉÉ ou MODIFIÉ (nom / domaine). Évènement GLOBAL : le popup
+   * « Ajouter un programme » ajoute l'établissement (s'il est nouveau) ou met à jour son
+   * nom/domaine, par id.
+   */
+  public void establishmentUpserted(
+      long id, String name, String domainEmail, int programCount, List<String> programCodes) {
+    emitAll(
+        event(
+            "establishment:upserted",
+            "id", id,
+            "name", name,
+            "domainEmail", domainEmail,
+            "programCount", programCount,
+            "programCodes", programCodes));
+  }
+
+  /** Un établissement a été SUPPRIMÉ. Évènement GLOBAL : le popup le retire de ses listes. */
+  public void establishmentDeleted(long id) {
+    emitAll(event("establishment:deleted", "establishmentId", id));
+  }
+
   // ─── Analyses MCP (scope = course) ────────────────────────────────────────
   // Poussé quand un job d'analyse MCP se termine. Room "mcp:<courseId>" : tous les
   // abonnés au feedback de ce cours reçoivent le RÉSUMÉ (le détail se fetch au clic).

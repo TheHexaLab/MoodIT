@@ -93,7 +93,41 @@ type ServerEvent =
   | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string }
   // Profil utilisateur mis à jour (scope GLOBAL) : l'auteur des messages/posts change
   // partout. Appliqué à TOUS les canaux et forums abonnés (pas de room précise).
-  | { type: 'user:updated'; user: AuthorUpdate };
+  | { type: 'user:updated'; user: AuthorUpdate }
+  // Catalogue d'un établissement mis à jour (scope GLOBAL) : LISTE à jour de ses programmes.
+  // Le popup « Ajouter un programme » (s'il est ouvert) met à jour l'établissement par id
+  // (nombre, codes, et liste détaillée si elle est affichée).
+  | { type: 'establishment:updated'; establishmentId: number; programs: Program[] }
+  // Établissement créé / modifié (nom, domaine) — scope GLOBAL.
+  | {
+      type: 'establishment:upserted';
+      id: number;
+      name: string;
+      domainEmail: string;
+      programCount: number;
+      programCodes: string[];
+    }
+  // Établissement supprimé — scope GLOBAL.
+  | { type: 'establishment:deleted'; establishmentId: number };
+
+/** Évènement temps réel sur le catalogue d'établissements (scope GLOBAL). */
+export type EstablishmentEvent =
+  | { kind: 'catalog'; establishmentId: number; programs: Program[] }
+  | {
+      kind: 'upserted';
+      id: number;
+      name: string;
+      domainEmail: string;
+      programCount: number;
+      programCodes: string[];
+    }
+  | { kind: 'deleted'; establishmentId: number };
+
+/** Facade « établissements » : s'abonner aux évènements GLOBAUX du catalogue. */
+export interface EstablishmentsSocket {
+  /** S'abonne ; renvoie la fonction de désabonnement. */
+  subscribe: (handler: (event: EstablishmentEvent) => void) => () => void;
+}
 
 export interface AppSocket {
   channels: ChannelSocket;
@@ -101,6 +135,7 @@ export interface AppSocket {
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
   mcp: McpSocket;
+  establishments: EstablishmentsSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -138,6 +173,8 @@ export function createAppSocket(
   const channelSubs = new Map<number, IncomingMessageHandlers>();
   const forumSubs = new Map<number, IncomingForumHandlers>();
   const courseSubs = new Map<number, IncomingCourseHandlers>();
+  /** Abonnés aux évènements GLOBAUX du catalogue d'établissements (popup ouvert). */
+  const establishmentSubs = new Set<(event: EstablishmentEvent) => void>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
 
@@ -255,6 +292,26 @@ export function createAppSocket(
           for (const handlers of channelSubs.values()) handlers.onUserUpdate?.(data.user);
           for (const handlers of forumSubs.values()) handlers.onUserUpdate?.(data.user);
           break;
+        case 'establishment:updated':
+          // Évènement GLOBAL : on notifie les abonnés (popup « Ajouter un programme » ouvert).
+          for (const handler of establishmentSubs)
+            handler({ kind: 'catalog', establishmentId: data.establishmentId, programs: data.programs });
+          break;
+        case 'establishment:upserted':
+          for (const handler of establishmentSubs)
+            handler({
+              kind: 'upserted',
+              id: data.id,
+              name: data.name,
+              domainEmail: data.domainEmail,
+              programCount: data.programCount,
+              programCodes: data.programCodes,
+            });
+          break;
+        case 'establishment:deleted':
+          for (const handler of establishmentSubs)
+            handler({ kind: 'deleted', establishmentId: data.establishmentId });
+          break;
       }
     };
 
@@ -318,6 +375,15 @@ export function createAppSocket(
         return () => {
           mcpSubs.delete(courseId);
           send({ type: 'leave', scope: 'mcp', id: courseId });
+        };
+      },
+    },
+    establishments: {
+      // Évènement GLOBAL (pas de room à rejoindre) : on ajoute juste le handler au set.
+      subscribe(handler) {
+        establishmentSubs.add(handler);
+        return () => {
+          establishmentSubs.delete(handler);
         };
       },
     },

@@ -30,7 +30,6 @@ import {
   type ProgramUpdate,
 } from '../../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
 import { EditProfilePopup } from '../../components/EditProfilePopup/EditProfilePopup.tsx';
-import { EstablishmentManagerPopup } from '../../components/EstablishmentManagerPopup/EstablishmentManagerPopup.tsx';
 import {
   RoleEditorPopup,
   type Role,
@@ -89,7 +88,6 @@ type PopupState =
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
   | { kind: 'manageGlobalRoles' } // gestion des administrateurs (rôles globaux / plateforme)
-  | { kind: 'manageEstablishments' } // gestion des établissements (gardien)
   | { kind: 'leaveProgram'; programId: number }
   | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
@@ -908,21 +906,15 @@ export default function Dashboard() {
           loadEstablishmentPrograms={loadEstablishmentPrograms}
           subscribedProgramIds={subscribedProgramIds}
           canCreateProgram={isAdmin}
-          // 3e option (gardien uniquement) : ouvrir le gestionnaire des établissements.
-          onManageEstablishments={
-            isGuardian ? () => setPopup({ kind: 'manageEstablishments' }) : undefined
-          }
-        />
-      )}
-
-      {/* Gestion des établissements (gardien) — accès via le menu « + Ajouter un programme ». */}
-      {popup?.kind === 'manageEstablishments' && (
-        <EstablishmentManagerPopup
-          onClose={() => setPopup(null)}
-          onLoad={api.fetchEstablishments}
-          onCreate={api.createEstablishment}
-          onUpdate={api.updateEstablishment}
-          onDelete={api.deleteEstablishment}
+          // 3e option du menu (gardien uniquement) : étape de gestion des établissements.
+          canManageEstablishments={isGuardian}
+          loadEstablishments={api.fetchEstablishments}
+          onCreateEstablishment={api.createEstablishment}
+          onUpdateEstablishment={api.updateEstablishment}
+          onDeleteEstablishment={api.deleteEstablishment}
+          // Temps réel : le nombre de programmes d'un établissement se met à jour LIVE dans le
+          // popup (création de programme par soi ou un autre gardien). `ws` est stable (useMemo).
+          subscribeEstablishmentUpdates={ws.establishments.subscribe}
         />
       )}
 
@@ -1084,7 +1076,7 @@ export default function Dashboard() {
       {popup?.kind === 'deleteProgram' && popupProgram && (
         <DeleteConfirmationPopup
           title="Supprimer le programme ?"
-          content={`Le programme « ${popupProgram.name} » sera supprimé DÉFINITIVEMENT pour tous ses membres (abonnements et accès retirés). Les cours partagés avec d'autres programmes sont conservés. Cette action est irréversible.`}
+          content={`Le programme « ${popupProgram.name} » sera supprimé définitivement pour tous ses membres (abonnements et accès retirés). Les cours partagés avec d'autres programmes sont conservés. Cette action est irréversible.`}
           labels={{ confirm: 'Supprimer' }}
           onDeleteConfirmation={() => handleConfirmDeleteProgram(popupProgram.id)}
           onClose={() => setPopup(null)}
@@ -1107,7 +1099,7 @@ export default function Dashboard() {
       {popup?.kind === 'deleteCourse' && deletingCourse && (
         <DeleteConfirmationPopup
           title="Supprimer le cours ?"
-          content={`Le cours « ${deletingCourse.code ?? deletingCourse.title ?? 'ce cours'} » et tout son contenu (canaux, quiz, forums) seront supprimés DÉFINITIVEMENT pour tous les inscrits. Cette action est irréversible.`}
+          content={`Le cours « ${deletingCourse.code ?? deletingCourse.title ?? 'ce cours'} » et tout son contenu (canaux, quiz, forums) seront supprimés définitivement pour tous les inscrits. Cette action est irréversible.`}
           labels={{ confirm: 'Supprimer' }}
           onDeleteConfirmation={() => handleConfirmDeleteCourse(deletingCourse.id)}
           onClose={() => setPopup(null)}

@@ -54,6 +54,22 @@ export interface AddSubscriptionPopupLabels {
   manageEstablishmentsTitle: string;
   /** Description de l'option « gérer les établissements » (menu). */
   manageEstablishmentsSubtitle: string;
+  /** Bouton d'ajout d'un établissement (étape « gérer ») + titre du formulaire d'ajout. */
+  addEstablishment: string;
+  /** Titre du formulaire d'édition d'un établissement. */
+  editEstablishment: string;
+  /** Bouton de validation du formulaire d'édition d'un établissement (« Enregistrer »). */
+  saveEstablishment: string;
+  /** Invite du champ nom d'établissement. */
+  establishmentNamePlaceholder: string;
+  /** Invite du champ domaine courriel d'établissement. */
+  establishmentDomainPlaceholder: string;
+  /** Message d'erreur affiché quand le domaine courriel est mal formé. */
+  establishmentDomainInvalid: string;
+  /** Message d'erreur affiché quand le domaine courriel est déjà utilisé (409). */
+  establishmentDomainTaken: string;
+  /** Titre du popup de confirmation de suppression d'un établissement. */
+  deleteEstablishmentTitle: string;
   /** Sous-titre de l'étape recherche d'établissement (vue rejoindre). */
   joinSearchSubtitle: string;
   /** Sous-titre de l'étape sélection des programmes (vue rejoindre). */

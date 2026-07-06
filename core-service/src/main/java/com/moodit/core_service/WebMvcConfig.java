@@ -20,13 +20,18 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
   @Override
   public void configurePathMatch(PathMatchConfigurer configurer) {
-    // Le préfixe /api s'applique à tous les @RestController SAUF les outils realtime/dev et
-    // les endpoints INTERNES (service à service : /internal/**, non exposés par le gateway).
+    // Le préfixe /api ne s'applique QU'À NOS contrôleurs (package com.moodit.core_service),
+    // SAUF les outils realtime/dev et les endpoints INTERNES (service à service : /internal/**).
+    //
+    // ⚠ On EXCLUT explicitement les contrôleurs de Spring (ex. BasicErrorController) : sinon
+    // /error devient /api/error, et le forward interne vers /error (déclenché par toute
+    // exception non gérée) ne mappe plus rien → 404 trompeur au lieu du vrai code (500…).
     configurer.addPathPrefix(
         "/api",
         type -> {
           String pkg = type.getPackageName();
-          return !pkg.startsWith("com.moodit.core_service.realtime")
+          return pkg.startsWith("com.moodit.core_service")
+              && !pkg.startsWith("com.moodit.core_service.realtime")
               && !pkg.startsWith("com.moodit.core_service.internal");
         });
   }

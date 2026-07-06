@@ -31,7 +31,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -207,33 +206,6 @@ public class ForumService {
         if (children == null) return List.of();
         return children.stream()
                 .map(child -> toPostVoteUserDTO(child, false, currentUserId))
-                .toList();
-    }
-
-    public List<PostVoteUserDTO> getAllPostsByForum(Integer forumId, boolean loadChildren, String email) {
-        Integer currentUserId = resolveUserId(email);
-        Forum forum = forumRepository.findById(forumId)
-                .orElseThrow(ForumNotFoundException::new);
-
-        return forum.getPosts().stream()
-                .filter(p -> p.getParent() == null) // only root posts OR remove this if you want all
-                .map(p -> toPostVoteUserDTO(p, loadChildren, currentUserId))
-                .toList();
-    }
-
-    /**
-     * TOUS les messages d'un canal 'Discussion' (racines ET réponses), à PLAT et triés
-     * chronologiquement. Le front les relie via `postParentId` (style chat/Discord).
-     */
-    public List<PostVoteUserDTO> getAllMessagesByForum(Integer forumId, String email) {
-        Integer currentUserId = resolveUserId(email);
-        Forum forum = forumRepository.findById(forumId)
-                .orElseThrow(ForumNotFoundException::new);
-
-        return forum.getPosts().stream()
-                .sorted(Comparator.comparing(Post::getCreatedAt,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(p -> toPostVoteUserDTO(p, false, currentUserId))
                 .toList();
     }
 

@@ -3,9 +3,14 @@ import styles from './AddSubscriptionPopup.module.css';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { Check } from '../../assets/Check.tsx';
+import { Pencil } from '../../assets/Pencil.tsx';
+import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
+import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import type { ManagedEstablishment } from '../../types/domain.ts';
+import type { EstablishmentEvent } from '../../services/appSocket.ts';
 import { byName, normalize } from './helpers.ts';
 import { DEFAULT_COLOR, DEFAULT_PALETTE, FIELD_MAX_LENGTH, defaultLabels } from './labels.ts';
 import type {
@@ -30,11 +35,18 @@ export type {
   Program,
 } from './types.ts';
 
+/** Tri des établissements par nom (stable : hors composant pour ne pas être une dépendance). */
+const byNameSort = (a: ManagedEstablishment, b: ManagedEstablishment) =>
+  a.name.localeCompare(b.name);
+
 /** Opération asynchrone en cours (pilote les spinners et le verrouillage). */
 type Pending =
   | { kind: 'create' }
   | { kind: 'join' }
   | { kind: 'establishment'; id: number }
+  | { kind: 'manage' }
+  | { kind: 'estSave'; id: number | 'new' }
+  | { kind: 'estDelete'; id: number }
   | { kind: 'submit' };
 
 interface AddSubscriptionPopupProps {
@@ -72,10 +84,28 @@ interface AddSubscriptionPopupProps {
    */
   canCreateProgram?: boolean;
   /**
-   * Ouvre le gestionnaire des établissements. Fourni UNIQUEMENT aux gardiens : sinon la 3e
-   * option du menu (« Gérer les établissements ») n'est pas proposée.
+   * L'utilisateur peut-il gérer les établissements ? (réservé aux gardiens.) Si true, une 3e
+   * option du menu (« Gérer les établissements ») ouvre une étape de CRUD. Requiert les
+   * callbacks `loadEstablishments` / `onCreate|Update|DeleteEstablishment`.
    */
-  onManageEstablishments?: () => void;
+  canManageEstablishments?: boolean;
+  /** Charge la liste des établissements (étape « gérer »). */
+  loadEstablishments?: () => MaybePromise<ManagedEstablishment[]>;
+  /** Crée un établissement ; résout avec l'établissement persisté. */
+  onCreateEstablishment?: (name: string, domainEmail: string) => MaybePromise<ManagedEstablishment>;
+  /** Modifie un établissement ; résout avec l'établissement à jour. */
+  onUpdateEstablishment?: (
+    id: number,
+    update: { name: string; domainEmail: string }
+  ) => MaybePromise<ManagedEstablishment>;
+  /** Supprime un établissement (DESTRUCTIF : cascade programmes/cours/membres). */
+  onDeleteEstablishment?: (id: number) => MaybePromise<unknown>;
+  /**
+   * S'abonne aux mises à jour temps réel du catalogue d'établissements (nombre de programmes +
+   * codes). Tant que le popup est ouvert, les listes se mettent à jour LIVE par id. Renvoie la
+   * fonction de désabonnement.
+   */
+  subscribeEstablishmentUpdates?: (handler: (event: EstablishmentEvent) => void) => () => void;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
 }
@@ -95,13 +125,18 @@ export function AddSubscriptionPopup({
   subscribedProgramIds,
   palette = DEFAULT_PALETTE,
   canCreateProgram = true,
-  onManageEstablishments,
+  canManageEstablishments = false,
+  loadEstablishments,
+  onCreateEstablishment,
+  onUpdateEstablishment,
+  onDeleteEstablishment,
+  subscribeEstablishmentUpdates,
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
-  /** Vue affichée : menu de choix, formulaire de création, ou recherche pour rejoindre. */
-  const [view, setView] = useState<'menu' | 'create' | 'join'>('menu');
+  /** Vue affichée : menu, création, adhésion, ou gestion des établissements. */
+  const [view, setView] = useState<'menu' | 'create' | 'join' | 'manage'>('menu');
   /** Opération async en cours : pilote les spinners et empêche les doubles déclenchements. */
   const [pending, setPending] = useState<Pending | null>(null);
   /** Message d'erreur de la dernière opération async (null = aucune). */
@@ -141,6 +176,15 @@ export function AddSubscriptionPopup({
   const [joinSearch, setJoinSearch] = useState('');
   const [programSearch, setProgramSearch] = useState('');
   const [selectedProgramIds, setSelectedProgramIds] = useState<number[]>([]);
+
+  // Vue « gérer les établissements » : liste + ligne en édition ('new' = ajout) + brouillon + confirmation.
+  const [manageEstablishments, setManageEstablishments] = useState<ManagedEstablishment[]>([]);
+  const [estEditing, setEstEditing] = useState<number | 'new' | null>(null);
+  const [estName, setEstName] = useState('');
+  const [estDomain, setEstDomain] = useState('');
+  /** Domaine rejeté par le serveur (409 : déjà utilisé) — affiche une erreur inline dédiée. */
+  const [estDomainTaken, setEstDomainTaken] = useState<string | null>(null);
+  const [confirmDeleteEst, setConfirmDeleteEst] = useState<ManagedEstablishment | null>(null);
 
   const [isClosing, setIsClosing] = useState(false);
   const pendingAction = useRef<(() => void) | null>(null);
@@ -239,6 +283,119 @@ export function AddSubscriptionPopup({
     );
   }
 
+  // ── Vue « gérer les établissements » (gardien) ──────────────────────────────
+  /** Entre dans l'étape « gérer » après avoir chargé la liste des établissements. */
+  function enterManage() {
+    if (!canManageEstablishments || !loadEstablishments) return;
+    runLoad<ManagedEstablishment>({ kind: 'manage' }, loadEstablishments, (data) => {
+      setManageEstablishments([...data].sort(byNameSort));
+      setEstEditing(null);
+      setEstName('');
+      setEstDomain('');
+      setConfirmDeleteEst(null);
+      setView('manage');
+    });
+  }
+
+  // Format du domaine courriel — MÊME règle que la contrainte CHECK de la BD
+  // (chk_domain_email : ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$). La BD garantit aussi l'UNICITÉ
+  // (domain_email UNIQUE) : pas de dédup côté front, on valide juste le format ici.
+  const estDomainTrimmed = estDomain.trim();
+  const estDomainFormatValid = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(estDomainTrimmed);
+  /** Le domaine saisi est-il celui que le serveur a refusé (déjà pris) ? */
+  const estDomainTakenNow =
+    estDomainTaken !== null && estDomainTrimmed !== '' && estDomainTrimmed === estDomainTaken;
+  /** Affiche l'état d'erreur si le domaine saisi est mal formé OU déjà pris. */
+  const estDomainInvalid = estDomainTrimmed !== '' && (!estDomainFormatValid || estDomainTakenNow);
+  const estDraftValid = estName.trim() !== '' && estDomainFormatValid && !estDomainTakenNow;
+
+  function startAddEstablishment() {
+    setError(null);
+    setEstEditing('new');
+    setEstName('');
+    setEstDomain('');
+    setEstDomainTaken(null);
+  }
+
+  function startEditEstablishment(est: ManagedEstablishment) {
+    setError(null);
+    setEstEditing(est.id);
+    setEstName(est.name);
+    setEstDomain(est.domainEmail ?? '');
+    setEstDomainTaken(null);
+  }
+
+  function cancelEstEdit() {
+    setEstEditing(null);
+    setEstName('');
+    setEstDomain('');
+    setEstDomainTaken(null);
+  }
+
+  /** Crée ou modifie l'établissement en cours d'édition (optimisme géré par le serveur). */
+  async function saveEstablishment() {
+    if (!estDraftValid || pending !== null) return;
+    const name = estName.trim();
+    const domainEmail = estDomain.trim();
+    const editing = estEditing;
+    const reqId = ++requestRef.current;
+    setError(null);
+    setPending({ kind: 'estSave', id: editing === 'new' ? 'new' : (editing as number) });
+    try {
+      if (editing === 'new') {
+        if (!onCreateEstablishment) return;
+        const created = await onCreateEstablishment(name, domainEmail);
+        if (!mountedRef.current || requestRef.current !== reqId) return;
+        // UPSERT (pas un append aveugle) : l'écho WS `establishment:upserted` peut arriver AVANT
+        // cette réponse HTTP et avoir déjà ajouté l'établissement → sinon on le dédouble.
+        setManageEstablishments((prev) =>
+          (prev.some((e) => e.id === created.id)
+            ? prev.map((e) => (e.id === created.id ? created : e))
+            : [...prev, created]
+          ).sort(byNameSort)
+        );
+      } else if (typeof editing === 'number') {
+        if (!onUpdateEstablishment) return;
+        const updated = await onUpdateEstablishment(editing, { name, domainEmail });
+        if (!mountedRef.current || requestRef.current !== reqId) return;
+        setManageEstablishments((prev) =>
+          prev.map((e) => (e.id === editing ? updated : e)).sort(byNameSort)
+        );
+      }
+      cancelEstEdit();
+    } catch (e) {
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      // 409 (domaine déjà pris) → erreur INLINE sur le champ ; sinon erreur d'ENREGISTREMENT
+      // (pas « chargement » : c'est une écriture).
+      if (e instanceof Error && e.message === 'duplicate-domain') {
+        setEstDomainTaken(domainEmail);
+      } else {
+        setError(t.saveError);
+      }
+    } finally {
+      if (mountedRef.current && requestRef.current === reqId) setPending(null);
+    }
+  }
+
+  /** Supprime l'établissement confirmé (DESTRUCTIF : cascade côté BD). */
+  async function deleteEstablishmentConfirmed() {
+    const target = confirmDeleteEst;
+    if (!target || !onDeleteEstablishment || pending !== null) return;
+    setConfirmDeleteEst(null);
+    const reqId = ++requestRef.current;
+    setError(null);
+    setPending({ kind: 'estDelete', id: target.id });
+    try {
+      await onDeleteEstablishment(target.id);
+      if (!mountedRef.current || requestRef.current !== reqId) return;
+      setManageEstablishments((prev) => prev.filter((e) => e.id !== target.id));
+    } catch {
+      if (mountedRef.current && requestRef.current === reqId) setError(t.saveError);
+    } finally {
+      if (mountedRef.current && requestRef.current === reqId) setPending(null);
+    }
+  }
+
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
   useEffect(() => {
     mountedRef.current = true;
@@ -246,6 +403,74 @@ export function AddSubscriptionPopup({
       mountedRef.current = false;
     };
   }, []);
+
+  // Ref de l'établissement dont on consulte les programmes (lue par le handler WS, stable).
+  const joinEstablishmentIdRef = useRef(joinEstablishmentId);
+  useEffect(() => {
+    joinEstablishmentIdRef.current = joinEstablishmentId;
+  });
+
+  // Temps réel (popup ouvert) : le catalogue d'établissements se met à jour LIVE dans les trois
+  // listes (créer / rejoindre / gérer). 'catalog' = programmes d'un établissement ; 'upserted' =
+  // établissement créé/renommé ; 'deleted' = établissement supprimé.
+  useEffect(() => {
+    if (!subscribeEstablishmentUpdates) return;
+    return subscribeEstablishmentUpdates((event) => {
+      if (event.kind === 'catalog') {
+        const { establishmentId, programs } = event;
+        const programCount = programs.length;
+        const programCodes = programs.map((p) => p.code);
+        setCreateEstablishments((prev) =>
+          prev.map((e) => (e.id === establishmentId ? { ...e, programCodes } : e))
+        );
+        setJoinEstablishments((prev) =>
+          prev.map((e) => (e.id === establishmentId ? { ...e, programCount } : e))
+        );
+        setManageEstablishments((prev) =>
+          prev.map((e) => (e.id === establishmentId ? { ...e, programCount, programCodes } : e))
+        );
+        // Liste détaillée ouverte sur cet établissement → on la remplace par la liste à jour.
+        if (joinEstablishmentIdRef.current === establishmentId) setEstablishmentPrograms(programs);
+        return;
+      }
+
+      if (event.kind === 'upserted') {
+        const { id, name, domainEmail, programCount, programCodes } = event;
+        setCreateEstablishments((prev) =>
+          prev.some((e) => e.id === id)
+            ? prev.map((e) => (e.id === id ? { ...e, name, domainEmail, programCodes } : e))
+            : [...prev, { id, name, domainEmail, programCodes }]
+        );
+        setJoinEstablishments((prev) =>
+          prev.some((e) => e.id === id)
+            ? prev.map((e) => (e.id === id ? { ...e, name, domainEmail, programCount } : e))
+            : [...prev, { id, name, domainEmail, programCount }]
+        );
+        setManageEstablishments((prev) =>
+          (prev.some((e) => e.id === id)
+            ? prev.map((e) =>
+                e.id === id ? { ...e, name, domainEmail, programCount, programCodes } : e
+              )
+            : [...prev, { id, name, domainEmail, programCount, programCodes }]
+          ).sort(byNameSort)
+        );
+        return;
+      }
+
+      // event.kind === 'deleted'
+      const removedId = event.establishmentId;
+      setCreateEstablishments((prev) => prev.filter((e) => e.id !== removedId));
+      setJoinEstablishments((prev) => prev.filter((e) => e.id !== removedId));
+      setManageEstablishments((prev) => prev.filter((e) => e.id !== removedId));
+      // Si on consultait justement ses programmes → retour à la recherche.
+      if (joinEstablishmentIdRef.current === removedId) {
+        setJoinEstablishmentId(null);
+        setEstablishmentPrograms([]);
+        setSelectedProgramIds([]);
+        setProgramSearch('');
+      }
+    });
+  }, [subscribeEstablishmentUpdates]);
 
   // Ferme le menu établissement quand on clique en dehors du champ.
   useEffect(() => {
@@ -377,7 +602,7 @@ export function AddSubscriptionPopup({
 
   // ── En-tête (titre, sous-titre, action « retour ») selon la vue/étape ──
   const headerBack: (() => void) | null =
-    view === 'create'
+    view === 'create' || view === 'manage'
       ? goMenu
       : view === 'join'
         ? joinEstablishmentId !== null
@@ -390,21 +615,25 @@ export function AddSubscriptionPopup({
       ? t.title
       : view === 'create'
         ? t.createTitle
-        : joinEstablishmentId !== null
-          ? (joinEstablishment?.name ?? t.joinTitle)
-          : t.joinTitle;
+        : view === 'manage'
+          ? t.manageEstablishmentsTitle
+          : joinEstablishmentId !== null
+            ? (joinEstablishment?.name ?? t.joinTitle)
+            : t.joinTitle;
 
   const headerSubtitle =
     view === 'menu'
       ? t.subtitle
       : view === 'create'
         ? t.createSubtitle
-        : joinEstablishmentId === null
-          ? t.joinSearchSubtitle
-          : t.joinProgramsSubtitle;
+        : view === 'manage'
+          ? t.manageEstablishmentsSubtitle
+          : joinEstablishmentId === null
+            ? t.joinSearchSubtitle
+            : t.joinProgramsSubtitle;
 
   // ── Animation de transition entre étapes ────────────────────────────
-  // Profondeur de l'étape courante : menu (0) → création / recherche (1) → programmes (2).
+  // Profondeur de l'étape courante : menu (0) → création / recherche / gérer (1) → programmes (2).
   const stepDepth = view === 'menu' ? 0 : view === 'join' && joinEstablishmentId !== null ? 2 : 1;
   // Clé d'étape : un changement remonte le conteneur, ce qui rejoue l'animation d'entrée.
   const stepKey =
@@ -412,9 +641,11 @@ export function AddSubscriptionPopup({
       ? 'menu'
       : view === 'create'
         ? 'create'
-        : joinEstablishmentId !== null
-          ? 'join-programs'
-          : 'join-search';
+        : view === 'manage'
+          ? 'manage'
+          : joinEstablishmentId !== null
+            ? 'join-programs'
+            : 'join-search';
   // Sens de l'animation, ajusté pendant le rendu quand la profondeur change
   // (motif React « adjusting state during render ») : recul si on remonte la pile.
   const [stepState, setStepState] = useState<{ depth: number; direction: 'forward' | 'back' }>({
@@ -460,18 +691,18 @@ export function AddSubscriptionPopup({
           <Chevron className={styles.chevron} width="1rem" height="1rem" />
         )}
       </button>
-      {onManageEstablishments && (
-        <button
-          type="button"
-          disabled={pending !== null}
-          onClick={() => requestClose(onManageEstablishments)}
-        >
+      {canManageEstablishments && (
+        <button type="button" disabled={pending !== null} onClick={enterManage}>
           <span>⚙</span>
           <div>
             <span>{t.manageEstablishmentsTitle}</span>
             <span>{t.manageEstablishmentsSubtitle}</span>
           </div>
-          <Chevron className={styles.chevron} width="1rem" height="1rem" />
+          {pending?.kind === 'manage' ? (
+            <Spinner />
+          ) : (
+            <Chevron className={styles.chevron} width="1rem" height="1rem" />
+          )}
         </button>
       )}
     </nav>
@@ -735,15 +966,157 @@ export function AddSubscriptionPopup({
     </>
   );
 
+  /**
+   * Corps du formulaire d'ajout / d'édition d'un établissement. Structure IDENTIQUE au
+   * formulaire d'édition d'une section (SectionEditorPopup.editRowInner) : titre, groupe de
+   * champs, actions annuler/enregistrer — le style `est-edit-row` reprend `.edit-row`.
+   */
+  function establishmentFormInner(titleText: string): React.ReactElement {
+    return (
+      <>
+        <h2>{titleText}</h2>
+        <div>
+          <div>
+            <input
+              type="text"
+              placeholder={t.establishmentNamePlaceholder}
+              maxLength={FIELD_MAX_LENGTH}
+              value={estName}
+              autoFocus
+              onChange={(e) => setEstName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveEstablishment();
+                if (e.key === 'Escape') cancelEstEdit();
+              }}
+            />
+          </div>
+          <div className={estDomainInvalid ? styles.invalid : undefined}>
+            <input
+              type="text"
+              placeholder={t.establishmentDomainPlaceholder}
+              value={estDomain}
+              aria-invalid={estDomainInvalid}
+              onChange={(e) => setEstDomain(e.target.value.toLowerCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveEstablishment();
+                if (e.key === 'Escape') cancelEstEdit();
+              }}
+            />
+          </div>
+          {estDomainInvalid && (
+            <p className={styles.invalid}>
+              {estDomainTakenNow ? t.establishmentDomainTaken : t.establishmentDomainInvalid}
+            </p>
+          )}
+        </div>
+        <div>
+          <button type="button" onClick={cancelEstEdit} disabled={pending !== null}>
+            {t.cancel}
+          </button>
+          <button
+            type="button"
+            onClick={saveEstablishment}
+            disabled={!estDraftValid || pending !== null}
+          >
+            {pending?.kind === 'estSave' ? (
+              <Spinner />
+            ) : estEditing === 'new' ? (
+              t.submit
+            ) : (
+              t.saveEstablishment
+            )}
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  /** Étape « gérer les établissements » : liste + suppression ; ajout/édition via le formulaire. */
+  const manageStep: React.ReactElement = (
+    <>
+      <section key="manage" className={styles.join}>
+        <ul className={styles['est-list']}>
+          {manageEstablishments.length === 0 && estEditing !== 'new' ? (
+            <li className={styles.empty}>{t.noEstablishments}</li>
+          ) : (
+            manageEstablishments.map((est) =>
+              estEditing === est.id ? (
+                <li key={est.id} className={styles['est-edit-row']}>
+                  {establishmentFormInner(t.editEstablishment)}
+                </li>
+              ) : (
+                <li key={est.id} className={styles['est-row']}>
+                  <div className={styles['est-info']}>
+                    <span>{est.name}</span>
+                    <span>
+                      {est.domainEmail}
+                      {typeof est.programCount === 'number'
+                        ? ` · ${t.programCount(est.programCount)}`
+                        : ''}
+                    </span>
+                  </div>
+                  <div className={styles['est-actions']}>
+                    {pending?.kind === 'estDelete' && pending.id === est.id ? (
+                      <Spinner />
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Modifier"
+                          onClick={() => startEditEstablishment(est)}
+                          disabled={pending !== null || estEditing !== null}
+                        >
+                          <Pencil width="1rem" height="1rem" />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles['est-danger']}
+                          aria-label="Supprimer"
+                          onClick={() => setConfirmDeleteEst(est)}
+                          disabled={pending !== null || estEditing !== null}
+                        >
+                          <TrashCan width="1rem" height="1rem" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              )
+            )
+          )}
+        </ul>
+      </section>
+
+      {/* Bouton d'ajout en BAS (ou formulaire d'ajout à sa place) — même schéma que le
+          SectionEditorPopup. */}
+      <footer className={styles['est-footer']}>
+        {estEditing === 'new' ? (
+          <div className={styles['est-edit-row']}>{establishmentFormInner(t.addEstablishment)}</div>
+        ) : (
+          <button
+            type="button"
+            className={styles['est-add']}
+            onClick={startAddEstablishment}
+            disabled={pending !== null || estEditing !== null}
+          >
+            +<span>{t.addEstablishment}</span>
+          </button>
+        )}
+      </footer>
+    </>
+  );
+
   // Bloc de l'étape courante, injecté dans le conteneur animé.
   const stepContent =
     view === 'menu'
       ? menuStep
       : view === 'create'
         ? createStep
-        : joinEstablishmentId === null
-          ? joinSearchStep
-          : joinProgramsStep;
+        : view === 'manage'
+          ? manageStep
+          : joinEstablishmentId === null
+            ? joinSearchStep
+            : joinProgramsStep;
 
   return (
     <>
@@ -787,6 +1160,21 @@ export function AddSubscriptionPopup({
           content={error}
           labels={{ title: t.errorTitle, close: t.errorClose }}
           onClose={() => setError(null)}
+        />
+      )}
+
+      {confirmDeleteEst && (
+        <DeleteConfirmationPopup
+          title={t.deleteEstablishmentTitle}
+          content={
+            `Supprimer « ${confirmDeleteEst.name} » ?` +
+            (confirmDeleteEst.programCount
+              ? ` Ses ${confirmDeleteEst.programCount} programme(s) et tout leur contenu (cours, membres) seront aussi supprimés.`
+              : '') +
+            ' Cette action est irréversible.'
+          }
+          onDeleteConfirmation={deleteEstablishmentConfirmed}
+          onClose={() => setConfirmDeleteEst(null)}
         />
       )}
     </>

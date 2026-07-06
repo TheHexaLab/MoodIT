@@ -482,6 +482,12 @@ export async function fetchEstablishments(): Promise<ManagedEstablishment[]> {
   return res.json();
 }
 
+/**
+ * Sentinelle levée quand le domaine courriel est déjà pris (409 : contrainte UNIQUE côté BD).
+ * Le popup l'intercepte pour afficher un message inline plutôt qu'une erreur générique.
+ */
+export const DUPLICATE_DOMAIN = 'duplicate-domain';
+
 /** Créer un établissement (gardien). Renvoie l'établissement persisté. */
 export async function createEstablishment(
   name: string,
@@ -492,6 +498,7 @@ export async function createEstablishment(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, domainEmail }),
   });
+  if (res.status === 409) throw new Error(DUPLICATE_DOMAIN);
   if (!res.ok) throw new Error("Échec de la création de l'établissement");
   return res.json();
 }
@@ -506,6 +513,7 @@ export async function updateEstablishment(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(update),
   });
+  if (res.status === 409) throw new Error(DUPLICATE_DOMAIN);
   if (!res.ok) throw new Error("Échec de la modification de l'établissement");
   return res.json();
 }
