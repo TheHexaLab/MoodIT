@@ -1,4 +1,4 @@
-import { type AuthorUpdate, type ChannelMessage } from '../types/domain.ts';
+import { type AuthorUpdate, type ChannelMessage, type Role } from '../types/domain.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
@@ -82,6 +82,9 @@ type ServerEvent =
       programId: number;
       roleName: 'Administrateur' | 'Enseignant' | null;
     }
+  // Les rôles GLOBAUX de l'utilisateur (User_Role) ont changé → il re-dérive ses droits
+  // plateforme (admin général / Gardien). `roles` = liste globale à jour.
+  | { type: 'user:globalRolesChanged'; userId: number; roles: Role[] }
   | { type: 'subscription:added'; userId: number; program: Program }
   | { type: 'subscription:removed'; userId: number; programId: number }
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
@@ -233,6 +236,9 @@ export function createAppSocket(
           break;
         case 'program:roleChanged':
           programSubs.get(data.userId)?.onProgramRoleChange?.(data.programId, data.roleName);
+          break;
+        case 'user:globalRolesChanged':
+          programSubs.get(data.userId)?.onGlobalRolesChange?.(data.roles);
           break;
         case 'mcp:analysis-created':
           mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);

@@ -18,6 +18,7 @@ import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -233,6 +234,39 @@ public class ForumService {
                 .sorted(Comparator.comparing(Post::getCreatedAt,
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(p -> toPostVoteUserDTO(p, false, currentUserId))
+                .toList();
+    }
+
+    /**
+     * PAGE de messages d'un canal (racines ET réponses à plat), par CURSEUR : les `limit`
+     * messages les plus récents AVANT `before` (id ; null = derniers messages). Renvoyés du plus
+     * RÉCENT au plus ANCIEN (le front prépend les plus anciens en préservant le scroll).
+     */
+    public List<PostVoteUserDTO> getMessagesPage(
+            Integer forumId, Integer before, int limit, String email) {
+        Integer currentUserId = resolveUserId(email);
+        forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
+        int safeLimit = limit <= 0 ? 30 : Math.min(limit, 100);
+
+        return postRepository.findMessagesPage(forumId, before, PageRequest.of(0, safeLimit)).stream()
+                .map(p -> toPostVoteUserDTO(p, false, currentUserId))
+                .toList();
+    }
+
+    /**
+     * PAGE de sujets RACINES d'un forum, par CURSEUR : les `limit` sujets les plus récents AVANT
+     * `before` (id ; null = derniers sujets). Du plus RÉCENT au plus ANCIEN (le front les append
+     * en scrollant vers le bas).
+     */
+    public List<PostVoteUserDTO> getRootPostsPage(
+            Integer forumId, Integer before, int limit, boolean loadChildren, String email) {
+        Integer currentUserId = resolveUserId(email);
+        forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
+        int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
+
+        return postRepository.findRootPostsPage(forumId, before, PageRequest.of(0, safeLimit))
+                .stream()
+                .map(p -> toPostVoteUserDTO(p, loadChildren, currentUserId))
                 .toList();
     }
     //endregion

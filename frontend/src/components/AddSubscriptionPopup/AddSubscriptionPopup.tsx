@@ -71,6 +71,11 @@ interface AddSubscriptionPopupProps {
    * l'adhésion à un programme existant reste possible. Défaut : true.
    */
   canCreateProgram?: boolean;
+  /**
+   * Ouvre le gestionnaire des établissements. Fourni UNIQUEMENT aux gardiens : sinon la 3e
+   * option du menu (« Gérer les établissements ») n'est pas proposée.
+   */
+  onManageEstablishments?: () => void;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
 }
@@ -90,6 +95,7 @@ export function AddSubscriptionPopup({
   subscribedProgramIds,
   palette = DEFAULT_PALETTE,
   canCreateProgram = true,
+  onManageEstablishments,
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
@@ -454,6 +460,20 @@ export function AddSubscriptionPopup({
           <Chevron className={styles.chevron} width="1rem" height="1rem" />
         )}
       </button>
+      {onManageEstablishments && (
+        <button
+          type="button"
+          disabled={pending !== null}
+          onClick={() => requestClose(onManageEstablishments)}
+        >
+          <span>⚙</span>
+          <div>
+            <span>{t.manageEstablishmentsTitle}</span>
+            <span>{t.manageEstablishmentsSubtitle}</span>
+          </div>
+          <Chevron className={styles.chevron} width="1rem" height="1rem" />
+        </button>
+      )}
     </nav>
   );
 

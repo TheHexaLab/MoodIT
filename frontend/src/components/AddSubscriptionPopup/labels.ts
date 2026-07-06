@@ -8,6 +8,8 @@ export const defaultLabels: AddSubscriptionPopupLabels = {
   createSubtitle: 'Configure un nouveau programme',
   joinTitle: 'Rejoindre un programme',
   joinSubtitle: "Sélectionne les programmes qui t'intéressent",
+  manageEstablishmentsTitle: 'Gérer les établissements',
+  manageEstablishmentsSubtitle: 'Ajouter, modifier ou supprimer des établissements',
   joinSearchSubtitle: 'Recherche et sélectionne ton établissement.',
   joinProgramsSubtitle: 'Sélectionne un ou plusieurs programmes à rejoindre.',
   programSearchPlaceholder: 'Rechercher un programme…',

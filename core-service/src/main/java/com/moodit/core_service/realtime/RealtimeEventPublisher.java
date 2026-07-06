@@ -27,7 +27,9 @@ import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
+import com.moodit.core_service.realtime.dto.RoleDto;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -206,6 +208,15 @@ public class RealtimeEventPublisher {
             "userId", userId,
             "programId", programId,
             "roleName", roleName));
+  }
+
+  /**
+   * Les rôles GLOBAUX de l'utilisateur ont changé (User_Role) : il re-dérive ses droits
+   * plateforme LIVE (admin général / superadministrateur → bouton « Gérer les administrateurs »,
+   * suppression de programme…). Scope user:&lt;userId&gt;. `roles` = liste à jour de ses rôles globaux.
+   */
+  public void globalRolesChanged(long userId, List<RoleDto> roles) {
+    emit("user", userId, event("user:globalRolesChanged", "userId", userId, "roles", roles));
   }
 
   // ─── Analyses MCP (scope = course) ────────────────────────────────────────

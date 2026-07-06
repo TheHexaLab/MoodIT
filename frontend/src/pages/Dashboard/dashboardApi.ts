@@ -24,6 +24,7 @@ import type {
 import type {
   Course,
   CourseForumsResponse,
+  ManagedEstablishment,
   McpResponse,
   McpResponseSummary,
   QuizDetailResponse,
@@ -332,7 +333,8 @@ export async function reorderQuizzes(courseId: number, quizIds: number[]): Promi
  */
 export async function fetchProgramRoles(programId: number) {
   const [rolesRes, usersRes] = await Promise.all([
-    apiFetch('/api/roles'),
+    // scope=program → seuls les rôles attribuables dans un programme (pas Gardien).
+    apiFetch('/api/roles?scope=program'),
     apiFetch(`/api/programs/${programId}/users`),
   ]);
 
@@ -349,6 +351,98 @@ export async function fetchProgramRoles(programId: number) {
     roles: await rolesRes.json(),
     users: users,
   };
+}
+
+/**
+ * Charger les données du gestionnaire des ADMINISTRATEURS (rôles globaux, plateforme) : les
+ * rôles attribuables globalement (Administrateur, Gardien) ET tous les utilisateurs
+ * avec leurs rôles globaux (User_Role). Alimente le popup accessible depuis le profil.
+ */
+export async function fetchGlobalRoles() {
+  const [rolesRes, usersRes] = await Promise.all([
+    apiFetch('/api/roles?scope=global'),
+    apiFetch('/api/roles/global/users'),
+  ]);
+
+  if (!rolesRes.ok || !usersRes.ok) {
+    throw new Error('fetch global roles failed');
+  }
+
+  const users = (await usersRes.json()).map((u: User) => ({
+    ...u,
+    role_ids: u.roles ?? [],
+  }));
+
+  return {
+    roles: await rolesRes.json(),
+    users: users,
+  };
+}
+
+/**
+ * Candidats paginés à l'attribution d'un rôle GLOBAL (utilisateurs n'ayant pas `roleId`),
+ * filtrés côté serveur par `search`. Alimente le sélecteur d'ajout du popup admins (infinite
+ * scroll + recherche BD). Renvoie une page de `size` utilisateurs au plus.
+ */
+export async function fetchGlobalRoleCandidates(
+  roleId: number,
+  search: string,
+  page: number,
+  size: number
+): Promise<User[]> {
+  const params = new URLSearchParams({
+    roleId: String(roleId),
+    search,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await apiFetch(`/api/roles/global/candidates?${params.toString()}`);
+  if (!res.ok) throw new Error('Échec chargement des candidats');
+  return (await res.json()).map((u: User) => ({ ...u, role_ids: u.roles ?? [] }));
+}
+
+/**
+ * Candidats paginés à l'attribution d'un rôle DANS un programme : MEMBRES du programme
+ * (User_Program) n'ayant pas `roleId`, filtrés côté serveur par `search`. Alimente le sélecteur
+ * d'ajout du popup « Gérer les rôles » (infinite scroll + recherche BD).
+ */
+export async function fetchProgramRoleCandidates(
+  programId: number,
+  roleId: number,
+  search: string,
+  page: number,
+  size: number
+): Promise<User[]> {
+  const params = new URLSearchParams({
+    roleId: String(roleId),
+    search,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await apiFetch(
+    `/api/programs/${programId}/role-candidates?${params.toString()}`
+  );
+  if (!res.ok) throw new Error('Échec chargement des candidats');
+  return (await res.json()).map((u: User) => ({ ...u, role_ids: u.roles ?? [] }));
+}
+
+/**
+ * Assigner ou retirer un rôle GLOBAL (plateforme) à un utilisateur (User_Role). Le popup gère
+ * l'optimisme + rollback ; on ne fait que persister. Enforcement front (le backend n'y re-vérifie
+ * pas les droits de l'appelant).
+ */
+export async function changeGlobalRole(change: RoleChange): Promise<void> {
+  const res = await apiFetch(`/api/roles/global/change`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(change),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec assignation de rôle global');
+  }
 }
 
 // ── Établissements / catalogue (AddSubscriptionPopup) ──────────────────────────
@@ -376,6 +470,53 @@ export async function fetchEstablishmentsForJoin() {
   }
 
   return await res.json();
+}
+
+/**
+ * Lister TOUS les établissements pour le gestionnaire des établissements (gardien) : id, nom,
+ * domaine courriel, nombre de programmes. Réutilise GET /api/establishments.
+ */
+export async function fetchEstablishments(): Promise<ManagedEstablishment[]> {
+  const res = await apiFetch('/api/establishments');
+  if (!res.ok) throw new Error('Échec chargement des établissements');
+  return res.json();
+}
+
+/** Créer un établissement (gardien). Renvoie l'établissement persisté. */
+export async function createEstablishment(
+  name: string,
+  domainEmail: string
+): Promise<ManagedEstablishment> {
+  const res = await apiFetch('/api/establishments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, domainEmail }),
+  });
+  if (!res.ok) throw new Error("Échec de la création de l'établissement");
+  return res.json();
+}
+
+/** Modifier un établissement (gardien). Renvoie l'établissement à jour. */
+export async function updateEstablishment(
+  establishmentId: number,
+  update: { name?: string; domainEmail?: string }
+): Promise<ManagedEstablishment> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error("Échec de la modification de l'établissement");
+  return res.json();
+}
+
+/**
+ * Supprimer un établissement (gardien). DESTRUCTIF : supprime en cascade ses programmes
+ * (et leurs cours/membres) côté BD. À confirmer avant appel.
+ */
+export async function deleteEstablishment(establishmentId: number): Promise<void> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error("Échec de la suppression de l'établissement");
 }
 
 /**
@@ -693,20 +834,25 @@ export async function changeRole(programId: number, change: RoleChange): Promise
 
 // ── Chat ('Discussion') ────────────────────────────────────────────────────────
 
-/** Charger l'historique des messages d'un canal de chat. */
-export async function fetchMessages(channelId: number): Promise<ChannelMessage[]> {
-  console.log('fetchMessages');
-  const res = await apiFetch(`/api/forums/${channelId}/messages`);
+/**
+ * Charger une PAGE de messages d'un canal (infinite scroll « plus ancien »). `before` = id du
+ * plus ancien message déjà chargé (absent = page la plus récente) ; `limit` = taille de page.
+ * Le backend renvoie du plus récent au plus ancien ; le hook re-trie chronologiquement.
+ */
+export async function fetchMessages(
+  channelId: number,
+  before?: number,
+  limit = 30
+): Promise<ChannelMessage[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before != null) params.set('before', String(before));
+  const res = await apiFetch(`/api/forums/${channelId}/messages?${params.toString()}`);
 
   if (!res.ok) {
     throw new Error('Échec chargement des messages');
   }
 
-  const messages = await res.json();
-
-  console.log('Messages: ', messages);
-
-  return messages;
+  return res.json();
 }
 
 /**
@@ -817,11 +963,19 @@ function toForumPost(p: PostVoteUserDTO): ForumPost {
 }
 
 /**
- * Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement paresseux :
- * les réponses sont récupérées à la demande via fetchReplies).
+ * Charger une PAGE de sujets RACINES d'un forum (infinite scroll « charger plus »), SANS leurs
+ * réponses (chargement paresseux via fetchReplies). `before` = id du plus ancien sujet déjà
+ * affiché (absent = page la plus récente) ; `limit` = taille de page. Renvoyés du plus récent
+ * au plus ancien.
  */
-export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
-  const res = await apiFetch(`/api/forums/${forumId}/posts`);
+export async function fetchThreads(
+  forumId: number,
+  before?: number,
+  limit = 20
+): Promise<ForumPost[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before != null) params.set('before', String(before));
+  const res = await apiFetch(`/api/forums/${forumId}/posts?${params.toString()}`);
   if (!res.ok) throw new Error('Échec chargement des sujets');
   const data: PostVoteUserDTO[] = await res.json();
   return data.map(toForumPost);

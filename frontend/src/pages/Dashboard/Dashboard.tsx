@@ -30,6 +30,7 @@ import {
   type ProgramUpdate,
 } from '../../components/UpdateProgramPopup/UpdateProgramPopup.tsx';
 import { EditProfilePopup } from '../../components/EditProfilePopup/EditProfilePopup.tsx';
+import { EstablishmentManagerPopup } from '../../components/EstablishmentManagerPopup/EstablishmentManagerPopup.tsx';
 import {
   RoleEditorPopup,
   type Role,
@@ -87,6 +88,8 @@ type PopupState =
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
+  | { kind: 'manageGlobalRoles' } // gestion des administrateurs (rôles globaux / plateforme)
+  | { kind: 'manageEstablishments' } // gestion des établissements (gardien)
   | { kind: 'leaveProgram'; programId: number }
   | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
@@ -100,7 +103,8 @@ export default function Dashboard() {
   // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
   const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
   // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
-  const { currentUser, profileLoading, isAdmin, saveProfile } = useCurrentUser();
+  const { currentUser, profileLoading, isAdmin, isGuardian, saveProfile, applyGlobalRoles } =
+    useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
@@ -128,6 +132,12 @@ export default function Dashboard() {
   const [roleData, setRoleData] = useState<{ roles: Role[]; users: User[] } | null>(null);
   const [roleLoading, setRoleLoading] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
+  // Données du gestionnaire des administrateurs (rôles GLOBAUX), chargées à l'ouverture.
+  const [globalRoleData, setGlobalRoleData] = useState<{ roles: Role[]; users: User[] } | null>(
+    null
+  );
+  const [globalRoleLoading, setGlobalRoleLoading] = useState(false);
+  const [globalRoleError, setGlobalRoleError] = useState<string | null>(null);
   // Sortie d'un programme (async : overlay de chargement + ErrorPopup en cas d'échec).
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
@@ -193,8 +203,11 @@ export default function Dashboard() {
         setDashboardPrograms((programs) =>
           programs.map((p) => (p.id === programId ? { ...p, roleName } : p))
         ),
+      // Mes rôles GLOBAUX ont changé → on remplace ceux du profil ; isAdmin/isGuardian
+      // se recalculent (bouton « Gérer les administrateurs », droits de suppression…).
+      onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
     });
-  }, [ws, currentUser.id]);
+  }, [ws, currentUser.id, applyGlobalRoles]);
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
   // le programme correspondant ; le loader pilote loading/erreur.
   const handleFetchCourses = useCallback(async (programId: number) => {
@@ -314,6 +327,29 @@ export default function Dashboard() {
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
   const handleLogout = () => console.log('[Dashboard] Déconnexion demandée.');
+
+  // ── Gestion des administrateurs (rôles GLOBAUX / plateforme) ──
+  // Charge rôles globaux + utilisateurs (via api.fetchGlobalRoles) et alimente le popup.
+  const fetchGlobalRoles = async () => {
+    setGlobalRoleData(null);
+    setGlobalRoleError(null);
+    setGlobalRoleLoading(true);
+    try {
+      setGlobalRoleData(await api.fetchGlobalRoles());
+    } catch {
+      setGlobalRoleError('Impossible de charger les administrateurs. Réessaie.');
+    } finally {
+      setGlobalRoleLoading(false);
+    }
+  };
+  // Ouvre le gestionnaire des administrateurs (réservé aux admins globaux / gardiens).
+  const handleManageAdmins = () => {
+    if (!isAdmin) return;
+    setPopup({ kind: 'manageGlobalRoles' });
+    void fetchGlobalRoles();
+  };
+  // Persiste un changement de rôle GLOBAL (User_Role) via api.changeGlobalRole.
+  const handleGlobalRoleChange = (change: RoleChange) => api.changeGlobalRole(change);
 
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
@@ -603,7 +639,8 @@ export default function Dashboard() {
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
-  const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
+  const handleFetchThreads = (forumId: number, before?: number, limit?: number) =>
+    api.fetchThreads(forumId, before, limit);
   const handleFetchReplies = (forumId: number, postId: number) => api.fetchReplies(forumId, postId);
   const handleCreatePost = (
     forumId: number,
@@ -652,7 +689,8 @@ export default function Dashboard() {
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
-  const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
+  const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>
+    api.fetchMessages(channelId, before, limit);
 
   const mobileUserInitial = getUserInitial(currentUser);
 
@@ -711,6 +749,7 @@ export default function Dashboard() {
             user={currentUser}
             loading={profileLoading}
             onEditProfile={handleEditProfile}
+            onManageAdmins={isAdmin ? handleManageAdmins : undefined}
             onLogout={handleLogout}
           />
         }
@@ -771,6 +810,7 @@ export default function Dashboard() {
             onLeaveCourse={handleLeaveCourse}
             onDeleteCourse={handleDeleteCourse}
             onEditProfile={handleEditProfile}
+            onManageAdmins={isAdmin ? handleManageAdmins : undefined}
             onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
             quizHandlers={quizEditorHandlers}
@@ -868,6 +908,21 @@ export default function Dashboard() {
           loadEstablishmentPrograms={loadEstablishmentPrograms}
           subscribedProgramIds={subscribedProgramIds}
           canCreateProgram={isAdmin}
+          // 3e option (gardien uniquement) : ouvrir le gestionnaire des établissements.
+          onManageEstablishments={
+            isGuardian ? () => setPopup({ kind: 'manageEstablishments' }) : undefined
+          }
+        />
+      )}
+
+      {/* Gestion des établissements (gardien) — accès via le menu « + Ajouter un programme ». */}
+      {popup?.kind === 'manageEstablishments' && (
+        <EstablishmentManagerPopup
+          onClose={() => setPopup(null)}
+          onLoad={api.fetchEstablishments}
+          onCreate={api.createEstablishment}
+          onUpdate={api.updateEstablishment}
+          onDelete={api.deleteEstablishment}
         />
       )}
 
@@ -919,8 +974,59 @@ export default function Dashboard() {
           roles={roleData.roles}
           users={roleData.users}
           onChange={(change) => handleRoleChange(popupProgram.id, change)}
+          // Candidats chargés côté SERVEUR (pagination 10 par 10 + recherche BD) parmi les
+          // MEMBRES du programme (User_Program) n'ayant pas encore le rôle.
+          loadCandidates={(roleId, search, page, size) =>
+            api.fetchProgramRoleCandidates(popupProgram.id, roleId, search, page, size)
+          }
         />
       )}
+
+      {/* Gestion des ADMINISTRATEURS (rôles globaux / plateforme) — accès depuis le profil.
+          Gating par rôle :
+            - gardien : ajoute/retire admins généraux ET gardiens, sauf SON PROPRE
+              rôle gardien (anti-lockout) ;
+            - admin général : ajoute seulement des admins généraux, ne retire rien. */}
+      {popup?.kind === 'manageGlobalRoles' && globalRoleLoading && (
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
+        </div>
+      )}
+      {popup?.kind === 'manageGlobalRoles' && !globalRoleLoading && globalRoleError && (
+        <ErrorPopup content={globalRoleError} onClose={() => setPopup(null)} />
+      )}
+      {popup?.kind === 'manageGlobalRoles' &&
+        !globalRoleLoading &&
+        !globalRoleError &&
+        globalRoleData && (
+          <RoleEditorPopup
+            onClose={() => setPopup(null)}
+            roles={globalRoleData.roles}
+            users={globalRoleData.users}
+            onChange={handleGlobalRoleChange}
+            // Candidats chargés côté SERVEUR (pagination 10 par 10 + recherche BD) : la liste
+            // « tous les utilisateurs » peut être grande, on ne la charge pas d'un coup.
+            loadCandidates={(roleId, search, page, size) =>
+              api.fetchGlobalRoleCandidates(roleId, search, page, size)
+            }
+            labels={{
+              title: 'Gérer les administrateurs',
+              subtitle: 'Administrateurs généraux et gardiens de la plateforme.',
+            }}
+            canAssign={(roleId) => {
+              const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
+              // Gardien : peut tout attribuer. Admin général : uniquement « Administrateur ».
+              return isGuardian || name === 'Administrateur';
+            }}
+            canUnassign={(roleId, userId) => {
+              if (!isGuardian) return false; // l'admin général ne retire personne
+              const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
+              // Anti-lockout : un gardien ne peut pas retirer SON PROPRE rôle gardien.
+              if (name === 'Gardien' && userId === currentUser.id) return false;
+              return true;
+            }}
+          />
+        )}
 
       {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
       {popup?.kind === 'mcp' && mcpCourse && (

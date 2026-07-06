@@ -20,6 +20,7 @@ import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
 import java.util.Map;
+import org.springframework.data.domain.PageRequest;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
@@ -151,6 +152,32 @@ public class ProgramService {
                     Collectors.mapping(UserProgramRole::getRoleId, Collectors.toList())));
 
     return userRepository.findDistinctByPrograms_Id(programId).stream()
+        .map(u -> toUserDTO(u, rolesByUser.getOrDefault(u.getId(), List.of())))
+        .toList();
+  }
+
+  /**
+   * Candidats paginés à l'attribution d'un rôle DANS un programme : MEMBRES du programme
+   * (User_Program) n'ayant pas `roleId`, filtrés côté BD par `search`. Alimente le sélecteur
+   * d'ajout du popup « Gérer les rôles » (infinite scroll + recherche). Chaque candidat porte
+   * ses rôles ACTUELS dans ce programme (pour l'affichage correct des sections après ajout).
+   */
+  public List<UserDTO> getProgramRoleCandidates(
+      Integer programId, Integer roleId, String search, int page, int size) {
+    String q = search == null ? "" : search.trim().toLowerCase();
+    int safeSize = size <= 0 ? 10 : Math.min(size, 50);
+    int safePage = Math.max(page, 0);
+
+    Map<Integer, List<Integer>> rolesByUser =
+        userProgramRoleRepository.findByProgramId(programId).stream()
+            .collect(
+                Collectors.groupingBy(
+                    UserProgramRole::getUserId,
+                    Collectors.mapping(UserProgramRole::getRoleId, Collectors.toList())));
+
+    return userRepository
+        .findProgramRoleCandidates(programId, roleId, q, PageRequest.of(safePage, safeSize))
+        .stream()
         .map(u -> toUserDTO(u, rolesByUser.getOrDefault(u.getId(), List.of())))
         .toList();
   }

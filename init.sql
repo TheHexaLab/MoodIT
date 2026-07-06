@@ -65,6 +65,15 @@ CREATE TABLE Pending_Registration(
 CREATE TABLE Role(
    id SERIAL,
    name VARCHAR(128) NOT NULL UNIQUE,
+   -- Portée d'ATTRIBUTION du rôle (pilote quels rôles apparaissent dans quel popup) :
+   --   program_assignable : attribuable dans le popup « Gérer les rôles » d'un programme
+   --                        (User_Program_Role) — ex. Enseignant, Administrateur.
+   --   global_assignable  : attribuable dans le popup de gestion des administrateurs
+   --                        (User_Role, rôles PLATEFORME) — ex. Administrateur, Superadministrateur.
+   -- Le Superadministrateur est global_assignable = TRUE mais program_assignable = FALSE :
+   -- il ne peut donc PAS être donné via le popup d'un programme.
+   program_assignable BOOLEAN NOT NULL DEFAULT TRUE,
+   global_assignable BOOLEAN NOT NULL DEFAULT FALSE,
    PRIMARY KEY(id)
 );
 
@@ -376,12 +385,17 @@ INSERT INTO Program (name, code, cohort, color, establishment_id) VALUES
 -- ------------------------------------------------------------
 -- Role
 -- ------------------------------------------------------------
--- Seulement 2 rôles : Enseignant (id=1) et Administrateur (id=2).
--- Administrateur GLOBAL (User_Role) = super-admin plateforme (seul à pouvoir supprimer un programme).
--- Rôles PAR PROGRAMME (User_Program_Role) : Enseignant / Administrateur pilotent les permissions.
-INSERT INTO Role (name) VALUES
-  ('Enseignant'),
-  ('Administrateur');
+-- Rôles (id dans l'ordre d'insertion) :
+--   1 Enseignant          — PAR PROGRAMME : gère le contenu (cours/canaux/quiz/forums).
+--   2 Administrateur      — PAR PROGRAMME : tout sauf supprimer le programme ; GLOBAL : admin
+--                           général de la plateforme (peut supprimer un programme).
+--   3 Superadministrateur — GLOBAL uniquement (au-dessus d'Administrateur) : gère qui devient
+--                           administrateur général et superadministrateur. NON attribuable dans
+--                           le popup d'un programme (program_assignable = FALSE).
+INSERT INTO Role (name, program_assignable, global_assignable) VALUES
+  ('Enseignant',          TRUE,  FALSE),
+  ('Administrateur',      TRUE,  TRUE),
+  ('Gardien', FALSE, TRUE);
 
 -- ------------------------------------------------------------
 -- User  
@@ -394,14 +408,31 @@ INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
 
 INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
   ('mich1234', 'mich', 'normand', 'mich1234@usherbrooke.ca', 'hash.pour.tester3');
+
+-- Utilisateurs de TEST en masse (ids 4..43) : de quoi éprouver la pagination (10 par 10) et la
+-- recherche serveur du popup de gestion des administrateurs. Prénoms variés pour tester le filtre.
+INSERT INTO User_ (username, first_name, last_name, email, password_hash)
+SELECT
+  'user' || g,
+  (ARRAY['Alice','Benoit','Chloé','David','Émilie','Félix','Gabrielle','Hugo','Inès','Jacob',
+         'Katia','Louis','Maya','Nathan','Olivia','Pierre','Quentin','Rosalie','Samuel','Thomas'])[1 + (g % 20)],
+  (ARRAY['Roy','Gagnon','Tremblay','Côté','Bouchard','Gauthier','Morin','Lavoie','Fortin','Bergeron'])[1 + (g % 10)],
+  'user' || g || '@usherbrooke.ca',
+  'hash.pour.tester'
+FROM generate_series(1, 40) AS g;
+
 -- ------------------------------------------------------------
--- User_Role  
+-- User_Role
 -- ------------------------------------------------------------
--- Rôles GLOBAUX (User_Role) : réservés au super-admin plateforme.
--- Seul admin est Administrateur GLOBAL → seul habilité à SUPPRIMER un programme.
--- rosie / mich n'ont PAS de rôle global : leurs droits viennent de User_Program_Role.
+-- Rôles GLOBAUX (User_Role) : rôles PLATEFORME.
+--   admin (1) → Superadministrateur (3) : peut nommer/retirer administrateurs généraux ET
+--               superadministrateurs. Superset des droits d'admin général.
+--   mich  (3) → Administrateur (2)      : administrateur général (peut AJOUTER d'autres admins
+--               généraux, mais pas en retirer ; ne peut pas toucher aux superadministrateurs).
+-- rosie (2) n'a PAS de rôle global : ses droits viennent de User_Program_Role.
 INSERT INTO User_Role (user_id, role_id) VALUES
-  (1, 2);  -- admin (user_id=1) → Administrateur GLOBAL (role_id=2)
+  (1, 3),
+  (3, 2);
 
 -- ------------------------------------------------------------
 -- User_Programme 
@@ -655,16 +686,6 @@ INSERT INTO User_Program (program_id, user_id) VALUES (1, 1);
 
 -- Abonner mich (user 3) au programme GIN (1) aussi.
 INSERT INTO User_Program (program_id, user_id) VALUES (1, 3);
-
--- ------------------------------------------------------------
--- User_Program_Role : rôles PAR PROGRAMME (pilotent les permissions front).
---   rosie (2) → Administrateur (2) DANS le programme 1 : tout sauf SUPPRIMER le programme.
---   mich  (3) → Enseignant     (1) DANS le programme 1 : gère le contenu, ne touche pas au programme.
--- (admin reste super-admin GLOBAL via User_Role, seul à pouvoir supprimer un programme.)
--- ------------------------------------------------------------
-INSERT INTO User_Program_Role (program_id, user_id, role_id) VALUES
-  (1, 2, 2),
-  (1, 3, 1);
 
 -- ---- MCP100 (bonne note) : 3 inscrits, 10 quiz, ~22 messages avec de VRAIS avis,
 -- un quiz de code tenté (≈78% de cas de test) et un quiz auto-corrigé tenté (67% de moyenne).

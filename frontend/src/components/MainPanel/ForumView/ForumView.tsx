@@ -170,6 +170,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     loading,
     loadError,
     reload,
+    hasMore,
+    loadingMore,
+    loadMore,
     loadingReplies,
     replyErrors,
     loadReplies,
@@ -258,6 +261,15 @@ const ForumView: React.FC<ForumViewProps> = ({
   function handleReload() {
     setExpanded(new Set());
     reload();
+  }
+
+  /** Infinite scroll : charge des sujets plus anciens quand on approche du bas de la liste. */
+  function handleBodyScroll() {
+    const body = bodyRef.current;
+    if (!body || !hasMore || loadingMore) return;
+    if (body.scrollHeight - body.scrollTop - body.clientHeight < 120) {
+      loadMore();
+    }
   }
 
   /** L'utilisateur connecte est-il l'auteur du post ? (debloque modifier/supprimer). */
@@ -763,7 +775,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         </div>
       )}
 
-      <div role="body" ref={bodyRef}>
+      <div role="body" ref={bodyRef} onScroll={handleBodyScroll}>
         {/* Formulaire « Nouveau sujet » : inline en tete de la liste (pas une autre page). */}
         {composing && (
           <div role="new-thread">
@@ -808,7 +820,14 @@ const ForumView: React.FC<ForumViewProps> = ({
             <p>{t.empty}</p>
           )
         ) : (
-          <ul>{visibleThreads.map(renderThreadCard)}</ul>
+          <>
+            <ul>{visibleThreads.map(renderThreadCard)}</ul>
+            {loadingMore && (
+              <div role="status" aria-live="polite">
+                <Spinner size={20} />
+              </div>
+            )}
+          </>
         )}
       </div>
 

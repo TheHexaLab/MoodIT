@@ -63,12 +63,15 @@ interface UseChannelMessagesParams {
   /** Utilisateur connecte : auteur des envois optimistes. */
   currentUser: ChannelMessageAuthor;
   /**
-   * Chargement de l'historique du canal (API-ready, GET). Si fourni, il est
-   * appele au montage : `loading` passe a true puis la liste est remplacee par le
-   * resultat (ou `loadError` est renseigne en cas d'echec). Si absent, le hook se
-   * contente de `initialMessages` (cas mock / pas de backend).
+   * Chargement d'une PAGE de messages (API-ready, GET). `before` = id du plus ancien message
+   * déjà chargé (absent = page la plus récente) ; `limit` = taille de page. Appelé au montage
+   * (page récente) puis à chaque « charger plus ancien » (infinite scroll). Absent → mode mock.
    */
-  onFetchMessages?: (channelId: number) => MaybePromise<ChannelMessage[]>;
+  onFetchMessages?: (
+    channelId: number,
+    before?: number,
+    limit?: number
+  ) => MaybePromise<ChannelMessage[]>;
   /** Persistance (API). Optionnels : sans eux, le hook reste purement optimiste. */
   onSendMessage?: SendMessageHandler;
   onEditMessage?: EditMessageHandler;
@@ -86,6 +89,12 @@ export interface ChannelMessagesApi {
   loadError: string | null;
   /** Relance le chargement de l'historique (bouton « Réessayer »). */
   reload: () => void;
+  /** Reste-t-il des messages plus ANCIENS à charger ? (dernière page pleine). */
+  hasMore: boolean;
+  /** Chargement d'une page de messages plus anciens en cours (infinite scroll). */
+  loadingOlder: boolean;
+  /** Charge la page de messages plus ANCIENS (avant le plus ancien déjà chargé). */
+  loadOlder: () => void;
   /** Envoi async en cours ? (désactive le bouton d'envoi). */
   pending: boolean;
   /** Message d'erreur de la dernière opération (null = aucune). */
@@ -109,6 +118,9 @@ export interface ChannelMessagesApi {
   /** Applique une suppression distante. */
   applyIncomingDelete: (messageId: number) => void;
 }
+
+/** Taille d'une page de messages (chargement initial + « plus ancien »). */
+const MESSAGES_PAGE_SIZE = 30;
 
 /** Tri chronologique (createdAt puis id pour départager). */
 function chronological(a: ChannelMessage, b: ChannelMessage): number {
@@ -153,6 +165,12 @@ export function useChannelMessages({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Reste-t-il des messages plus anciens à charger ? (dernière page reçue pleine). */
+  const [hasMore, setHasMore] = useState(false);
+  /** Chargement d'une page plus ancienne en cours (verrou anti double-déclenchement). */
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** Verrou synchrone du chargement « plus ancien » (l'état est asynchrone). */
+  const loadingOlderRef = useRef(false);
 
   /** Composant monte ? Ignore les réponses async revenant apres démontage. */
   const mountedRef = useRef(true);
@@ -164,6 +182,11 @@ export function useChannelMessages({
   useEffect(() => {
     fetchRef.current = onFetchMessages;
   });
+  /** Dernière liste de messages (ref stable → loadOlder lit sans se recréer). */
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -172,21 +195,57 @@ export function useChannelMessages({
     };
   }, []);
 
-  /** Charge (ou recharge) l'historique du canal via `onFetchMessages`. */
+  /** Charge (ou recharge) la page LA PLUS RÉCENTE du canal via `onFetchMessages`. */
   const reload = useCallback(async () => {
     const fetchMessages = fetchRef.current;
     if (!fetchMessages) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const fetched = await fetchMessages(channelId);
+      const fetched = await fetchMessages(channelId, undefined, MESSAGES_PAGE_SIZE);
       if (!mountedRef.current) return;
       setMessages([...fetched].sort(chronological));
+      // Page pleine → il reste probablement des messages plus anciens.
+      setHasMore(fetched.length >= MESSAGES_PAGE_SIZE);
     } catch {
       if (!mountedRef.current) return;
       setLoadError('Impossible de charger les messages. Réessayez.');
     } finally {
       if (mountedRef.current) setLoading(false);
+    }
+  }, [channelId]);
+
+  /**
+   * Charge la page de messages PLUS ANCIENS (curseur = plus petit id RÉEL déjà chargé, en
+   * ignorant les optimistes à id négatif). Fusionne sans doublon ; met à jour `hasMore`.
+   */
+  const loadOlder = useCallback(async () => {
+    const fetchMessages = fetchRef.current;
+    // Verrou SYNCHRONE via ref : l'état loadingOlder est asynchrone, pas fiable pour l'anti-doublon.
+    if (!fetchMessages || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    try {
+      // Plus ancien id réel (positif) actuellement affiché = curseur.
+      const oldestId = messagesRef.current
+        .filter((m) => m.id > 0)
+        .reduce((min, m) => (m.id < min ? m.id : min), Number.POSITIVE_INFINITY);
+      const before = Number.isFinite(oldestId) ? oldestId : undefined;
+
+      const older = await fetchMessages(channelId, before, MESSAGES_PAGE_SIZE);
+      if (!mountedRef.current) return;
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        const merged = [...prev, ...older.filter((m) => !known.has(m.id))];
+        return merged.sort(chronological);
+      });
+      setHasMore(older.length >= MESSAGES_PAGE_SIZE);
+    } catch {
+      // Silencieux : on n'affiche pas d'erreur bloquante pour un chargement d'historique.
+    } finally {
+      loadingOlderRef.current = false;
+      if (mountedRef.current) setLoadingOlder(false);
     }
   }, [channelId]);
 
@@ -366,6 +425,9 @@ export function useChannelMessages({
     loading,
     loadError,
     reload: () => void reload(),
+    hasMore,
+    loadingOlder,
+    loadOlder: () => void loadOlder(),
     pending,
     error,
     clearError,

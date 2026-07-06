@@ -50,6 +50,21 @@ public class ProgramController {
     return ResponseEntity.ok(programService.getUsersByProgram(programId));
   }
 
+  /**
+   * Candidats paginés à l'attribution d'un rôle DANS ce programme (membres n'ayant pas `roleId`),
+   * filtrés côté BD par `search`. Alimente le sélecteur d'ajout du popup « Gérer les rôles ».
+   */
+  @GetMapping("/{programId}/role-candidates")
+  public ResponseEntity<List<UserDTO>> getProgramRoleCandidates(
+      @PathVariable Integer programId,
+      @RequestParam("roleId") Integer roleId,
+      @RequestParam(name = "search", required = false) String search,
+      @RequestParam(name = "page", defaultValue = "0") int page,
+      @RequestParam(name = "size", defaultValue = "10") int size) {
+    return ResponseEntity.ok(
+        programService.getProgramRoleCandidates(programId, roleId, search, page, size));
+  }
+
   // endregion
 
   // region POST

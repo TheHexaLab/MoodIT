@@ -50,6 +50,10 @@ export interface AddSubscriptionPopupLabels {
   joinTitle: string;
   /** Description de l'option « rejoindre » (menu). */
   joinSubtitle: string;
+  /** Titre de l'option « gérer les établissements » (menu, réservée aux gardiens). */
+  manageEstablishmentsTitle: string;
+  /** Description de l'option « gérer les établissements » (menu). */
+  manageEstablishmentsSubtitle: string;
   /** Sous-titre de l'étape recherche d'établissement (vue rejoindre). */
   joinSearchSubtitle: string;
   /** Sous-titre de l'étape sélection des programmes (vue rejoindre). */

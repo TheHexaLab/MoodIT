@@ -116,4 +116,16 @@ public class EstablishmentService {
 
         return establishmentToDTO(saved);
     }
+
+    /**
+     * Supprime un établissement. La contrainte FK Program.establishment_id ON DELETE CASCADE
+     * supprime en base les programmes rattachés (et, en cascade, leurs liens cours/membres) :
+     * action DESTRUCTIVE, à confirmer côté front.
+     */
+    public void deleteEstablishment(Integer establishmentId) {
+        Establishment establishment = establishmentRepository.findById(establishmentId)
+                .orElseThrow(EstablishmentNotFoundException::new);
+
+        establishmentRepository.delete(establishment);
+    }
 }

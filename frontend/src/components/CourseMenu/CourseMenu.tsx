@@ -124,6 +124,8 @@ interface CourseMenuProps {
   userLoading?: boolean;
   /** Ouvre le formulaire de modification du profil (menu du compte). */
   onEditProfile?: () => void;
+  /** Ouvre le gestionnaire des administrateurs (menu du compte ; masqué si absent). */
+  onManageAdmins?: () => void;
   /** Déconnecte l'utilisateur (menu du compte). */
   onLogout?: () => void;
   /**
@@ -163,6 +165,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   currentUser,
   userLoading = false,
   onEditProfile,
+  onManageAdmins,
   onLogout,
   quizHandlers,
   onQuizzesChange,
@@ -517,6 +520,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           user={currentUser}
           loading={userLoading}
           onEditProfile={onEditProfile}
+          onManageAdmins={onManageAdmins}
           onLogout={onLogout}
         />
       </footer>

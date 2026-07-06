@@ -47,7 +47,10 @@ public class Post {
     @JoinColumn(name = "post_parent_id")
     private Post parent;
 
+    // Ordre EXPLICITE des réponses : ancien → récent. Garantit un placement cohérent (les
+    // nouvelles réponses, optimistes ou reçues en WebSocket, sont ajoutées en fin côté front).
     @OneToMany(mappedBy = "parent", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    @OrderBy("createdAt ASC, id ASC")
     private List<Post> children;
 
     @OneToMany(mappedBy = "post", cascade = CascadeType.REMOVE, orphanRemoval = true)

@@ -13,7 +13,14 @@ export type VoteValue = 1 | 0 | -1;
  * RACINES (sans leurs reponses) ; chaque racine porte `replyCount`. Les reponses
  * sont ensuite chargees paresseusement, branche par branche (voir `FetchRepliesHandler`).
  */
-export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>;
+export type FetchThreadsHandler = (
+  forumId: number,
+  before?: number,
+  limit?: number
+) => MaybePromise<ForumPost[]>;
+
+/** Taille d'une page de sujets (chargement initial + « charger plus »). */
+const THREADS_PAGE_SIZE = 20;
 
 /**
  * Chargement des reponses DIRECTES (enfants immediats) d'un post (API-ready, GET).
@@ -95,6 +102,12 @@ export interface ForumThreadsApi {
   loadError: string | null;
   /** Relance le chargement (bouton « Réessayer »). */
   reload: () => void;
+  /** Reste-t-il des sujets plus ANCIENS à charger ? (dernière page pleine). */
+  hasMore: boolean;
+  /** Chargement d'une page de sujets plus anciens en cours (infinite scroll). */
+  loadingMore: boolean;
+  /** Charge la page de sujets plus ANCIENS (avant le plus ancien déjà affiché). */
+  loadMore: () => void;
   /** Posts dont les reponses directes sont en cours de chargement (lazy). */
   loadingReplies: Set<number>;
   /** Posts dont le chargement des reponses a echoue (bouton « Réessayer » de branche). */
@@ -255,6 +268,12 @@ export function useForumThreads({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Reste-t-il des sujets plus anciens à charger ? (dernière page reçue pleine). */
+  const [hasMore, setHasMore] = useState(false);
+  /** Chargement d'une page de sujets plus anciens en cours (verrou anti double-déclenchement). */
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** Verrou synchrone du chargement « plus » (l'état est asynchrone). */
+  const loadingMoreRef = useRef(false);
   // Chargement paresseux des branches : suivi par post (id).
   const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
   const [replyErrors, setReplyErrors] = useState<Set<number>>(new Set());
@@ -266,6 +285,11 @@ export function useForumThreads({
   useEffect(() => {
     fetchRef.current = onFetchThreads;
     fetchRepliesRef.current = onFetchReplies;
+  });
+  /** Dernière liste de sujets (ref stable → loadMore lit sans se recréer). */
+  const threadsRef = useRef(threads);
+  useEffect(() => {
+    threadsRef.current = threads;
   });
 
   useEffect(() => {
@@ -285,14 +309,48 @@ export function useForumThreads({
     setLoadingReplies(new Set());
     setReplyErrors(new Set());
     try {
-      const fetched = await fetchThreads(forumId);
+      const fetched = await fetchThreads(forumId, undefined, THREADS_PAGE_SIZE);
       if (!mountedRef.current) return;
       setThreads(fetched);
+      // Page pleine → il reste probablement des sujets plus anciens.
+      setHasMore(fetched.length >= THREADS_PAGE_SIZE);
     } catch {
       if (!mountedRef.current) return;
       setLoadError('Impossible de charger les sujets. Réessayez.');
     } finally {
       if (mountedRef.current) setLoading(false);
+    }
+  }, [forumId]);
+
+  /**
+   * Charge la page de sujets PLUS ANCIENS (curseur = plus petit id RÉEL déjà affiché, en
+   * ignorant les optimistes à id négatif). Append sans doublon ; met à jour `hasMore`.
+   */
+  const loadMore = useCallback(async () => {
+    const fetchThreads = fetchRef.current;
+    // Verrou SYNCHRONE via ref : l'état loadingMore est asynchrone, pas fiable pour l'anti-doublon.
+    if (!fetchThreads || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    try {
+      const oldestId = threadsRef.current
+        .filter((t) => t.id > 0)
+        .reduce((min, t) => (t.id < min ? t.id : min), Number.POSITIVE_INFINITY);
+      const before = Number.isFinite(oldestId) ? oldestId : undefined;
+
+      const older = await fetchThreads(forumId, before, THREADS_PAGE_SIZE);
+      if (!mountedRef.current) return;
+      setThreads((prev) => {
+        const known = new Set(prev.map((t) => t.id));
+        return [...prev, ...older.filter((t) => !known.has(t.id))];
+      });
+      setHasMore(older.length >= THREADS_PAGE_SIZE);
+    } catch {
+      // Silencieux : chargement d'historique, pas d'erreur bloquante.
+    } finally {
+      loadingMoreRef.current = false;
+      if (mountedRef.current) setLoadingMore(false);
     }
   }, [forumId]);
 
@@ -637,6 +695,9 @@ export function useForumThreads({
     loading,
     loadError,
     reload: () => void reload(),
+    hasMore,
+    loadingMore,
+    loadMore: () => void loadMore(),
     loadingReplies,
     replyErrors,
     loadReplies,

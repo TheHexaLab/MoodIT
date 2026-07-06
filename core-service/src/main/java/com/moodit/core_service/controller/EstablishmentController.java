@@ -59,4 +59,10 @@ public class EstablishmentController {
                 establishmentService.updateEstablishment(establishmentId, request)
         );
     }
+
+    @DeleteMapping("/{establishmentId}")
+    public ResponseEntity<Void> deleteEstablishment(@PathVariable Integer establishmentId) {
+        establishmentService.deleteEstablishment(establishmentId);
+        return ResponseEntity.noContent().build();
+    }
 }

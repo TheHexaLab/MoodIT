@@ -22,6 +22,15 @@ export interface Establishment {
   domainEmail?: string;
 }
 
+/**
+ * Établissement enrichi (EstablishmentDTO) pour le gestionnaire des établissements (gardien) :
+ * ajoute le nombre de programmes et les codes existants.
+ */
+export interface ManagedEstablishment extends Establishment {
+  programCount?: number;
+  programCodes?: string[];
+}
+
 /** Rôle (table Role) : Étudiant / Enseignant / Auxiliaire / Administrateur. */
 export interface Role {
   id: number;

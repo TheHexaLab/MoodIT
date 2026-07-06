@@ -50,22 +50,36 @@ public class ForumController {
         return ResponseEntity.ok(forumService.getRepliesByPost(forumId, postId, email));
     }
 
+    /**
+     * Messages d'un canal, paginés par CURSEUR (infinite scroll « charger plus ancien »).
+     * `before` = id du plus ancien message déjà chargé (absent = page la plus récente) ;
+     * `limit` = taille de page. Renvoyés du plus récent au plus ancien.
+     */
     @GetMapping("/{forumId}/messages")
     public ResponseEntity<List<PostVoteUserDTO>> getAllMessagesByForum(@PathVariable Integer forumId,
+                                                  @RequestParam(required = false) Integer before,
+                                                  @RequestParam(defaultValue = "30") int limit,
                                                   @RequestHeader(value = "X-User-Email", required = false) String email) {
         return ResponseEntity.ok(
-                forumService.getAllMessagesByForum(forumId, email)
+                forumService.getMessagesPage(forumId, before, limit, email)
         );
     }
 
+    /**
+     * Sujets racines d'un forum, paginés par CURSEUR (infinite scroll « charger plus »).
+     * `before` = id du plus ancien sujet déjà affiché (absent = page la plus récente) ;
+     * `limit` = taille de page. Renvoyés du plus récent au plus ancien.
+     */
     @GetMapping("/{forumId}/posts")
     public ResponseEntity<List<PostVoteUserDTO>> getAllPostsByForum(
             @PathVariable Integer forumId,
             @RequestParam(defaultValue = "false") boolean loadChildren,
+            @RequestParam(required = false) Integer before,
+            @RequestParam(defaultValue = "20") int limit,
             @RequestHeader(value = "X-User-Email", required = false) String email) {
 
         return ResponseEntity.ok(
-                forumService.getAllPostsByForum(forumId, loadChildren, email)
+                forumService.getRootPostsPage(forumId, before, limit, loadChildren, email)
         );
     }
     //endregion

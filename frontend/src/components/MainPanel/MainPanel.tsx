@@ -47,8 +47,12 @@ interface MainPanelProps {
   selectedChannel: ChannelRef | null;
   /** Utilisateur connecte (auteur des messages envoyes dans un canal). */
   currentUser: ChannelMessageAuthor;
-  /** Chargement de l'historique d'un canal (API-ready ; voir ChannelView). */
-  onFetchMessages?: (channelId: number) => MaybePromise<ChannelMessage[]>;
+  /** Chargement paginé des messages d'un canal (API-ready ; voir ChannelView). */
+  onFetchMessages?: (
+    channelId: number,
+    before?: number,
+    limit?: number
+  ) => MaybePromise<ChannelMessage[]>;
   /** Envoi d'un message dans le canal actif (API-ready ; voir ChannelView). */
   onSendMessage?: SendMessageHandler;
   /** Modification d'un de ses messages (API-ready ; voir ChannelView). */
