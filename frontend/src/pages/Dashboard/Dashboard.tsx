@@ -502,10 +502,13 @@ export default function Dashboard() {
     clientMessageId: string
   ) => api.sendMessage(channelId, content, parentId, clientMessageId);
 
+  // L'édition/suppression porte sur un message du canal ACTUELLEMENT ouvert : l'API
+  // route via /api/forums/{forumID}/posts/{id}, où forumID = l'id du canal sélectionné.
   const handleEditMessage = (messageId: number, content: string) =>
-    api.editMessage(messageId, content);
+    api.editMessage(selectedChannelRef?.id ?? -1, messageId, content);
 
-  const handleDeleteMessage = (messageId: number) => api.deleteMessage(messageId);
+  const handleDeleteMessage = (messageId: number) =>
+    api.deleteMessage(selectedChannelRef?.id ?? -1, messageId);
 
   /* ───────────────────────────────────────────────────────────────────────────
    * FORUM ('Thread') — meme architecture API + temps reel que le chat.
@@ -523,9 +526,13 @@ export default function Dashboard() {
     clientPostId: string,
     title?: string
   ) => api.createPost(forumId, content, parentId, clientPostId, title);
-  const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
-  const handleDeletePost = (postId: number) => api.deletePost(postId);
-  const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
+  const handleEditPost = (postId: number, content: string) =>
+    api.editPost(selectedChannelRef?.id ?? -1, postId, content);
+  const handleDeletePost = (postId: number) => api.deletePost(selectedChannelRef?.id ?? -1, postId);
+  // Le vote porte sur un post du forum ACTUELLEMENT ouvert. `value` est la direction
+  // cliquée (±1) fournie par useForumThreads — le backend gère l'annulation (toggle).
+  const handleVotePost = (postId: number, value: number) =>
+    api.votePost(selectedChannelRef?.id ?? -1, postId, value as 1 | -1);
 
   const activeProgram = dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
   // Programme passé à MainPanel selon l'avancement des fetchs (chaînage programmes → cours) :
@@ -551,7 +558,11 @@ export default function Dashboard() {
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
   // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
   const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
-  openQuizIdRef.current = openQuizId;
+  // La ref (lue depuis les closures WS, ex. resync) est synchronisée hors rendu :
+  // muter une ref pendant le rendu est interdit (React 19 / react-hooks/refs).
+  useEffect(() => {
+    openQuizIdRef.current = openQuizId;
+  }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.

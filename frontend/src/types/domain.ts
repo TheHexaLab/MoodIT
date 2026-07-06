@@ -328,7 +328,16 @@ export interface ForumPost {
   isPinned?: boolean;
   /** Titre du sujet (les posts racines d'un Thread en ont un). */
   title?: string;
+  /**
+   * Votes CONNUS localement : le vote de l'utilisateur courant (0 ou 1 entrée) plus,
+   * transitoirement, les votes live d'autres utilisateurs reçus par WebSocket. Le total
+   * serveur (hors utilisateur courant) est porté à part par `othersVoteTotal` — le backend
+   * n'envoie qu'un agrégat, pas la liste complète des votes.
+   */
   votes: PostVote[];
+  /** Somme des votes des AUTRES utilisateurs (= voteTotalValue serveur − vote propre).
+   *  Base du score affiché, à laquelle s'ajoute le vote (optimiste) de l'utilisateur. */
+  othersVoteTotal?: number;
   /** Réponses directes ; `undefined` = pas encore chargées, `[]` = chargées et vides. */
   replies?: ForumPost[];
   /** Nombre de réponses directes, connu dès le chargement (avant dépliage). */
@@ -421,6 +430,8 @@ export interface PostVoteUserDTO {
   postParentId?: number | null;
   author: User;
   voteTotalValue?: number;
+  /** Vote de l'utilisateur COURANT sur ce post (1 / -1 / null s'il n'a pas voté). */
+  userVoteValue?: number | null;
   childrenCount?: number;
   children?: PostVoteUserDTO[];
 }

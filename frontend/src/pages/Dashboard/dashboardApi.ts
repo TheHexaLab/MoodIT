@@ -715,7 +715,7 @@ export async function sendMessage(
   content: string,
   parentId: number | null,
   clientMessageId: string
-): Promise<void> {
+): Promise<ChannelMessage> {
   console.log('sendMessage');
   const res = await apiFetch('/api/forums/messages', {
     method: 'POST',
@@ -733,6 +733,18 @@ export async function sendMessage(
   if (!res.ok) {
     throw new Error("Échec de l'envoi du message");
   }
+
+  // 201 → message persisté : on le renvoie pour remplacer l'optimiste (id réel). On
+  // reporte `clientMessageId` (absent du DTO serveur) pour la dédup de l'écho WS.
+  const saved: PostVoteUserDTO = await res.json();
+  return {
+    id: saved.id,
+    content: saved.content,
+    createdAt: saved.createdAt,
+    author: saved.author,
+    postParentId: saved.postParentId,
+    clientMsgId: clientMessageId,
+  };
 }
 
 /** TODO — Modifier le contenu d'un message existant. */
@@ -774,6 +786,28 @@ export async function deleteMessage(forumID: number, messageId: number): Promise
 // ── Forum ('Thread') ───────────────────────────────────────────────────────────
 
 /**
+ * PostVoteUserDTO (backend) → ForumPost (modèle). Le vote PROPRE de l'utilisateur
+ * (`userVoteValue`) va dans `votes` — attribué à SON id, pour que le front surligne le
+ * bon bouton. Le reste du score va dans `othersVoteTotal` (le backend n'envoie qu'un
+ * agrégat, pas la liste complète des votes). Score affiché = othersVoteTotal + vote propre.
+ */
+function toForumPost(p: PostVoteUserDTO): ForumPost {
+  const myVote = p.userVoteValue ?? 0;
+  return {
+    id: p.id,
+    content: p.content,
+    createdAt: p.createdAt,
+    title: p.title,
+    isPinned: p.isPinned,
+    author: p.author,
+    votes: myVote ? [{ userId: currentUserId(), value: myVote as 1 | -1 }] : [],
+    othersVoteTotal: (p.voteTotalValue ?? 0) - myVote,
+    replyCount: p.childrenCount,
+    replies: undefined,
+  };
+}
+
+/**
  * TODO — Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement
  * paresseux : les réponses sont récupérées à la demande via fetchReplies).
  */
@@ -781,17 +815,7 @@ export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
   const res = await apiFetch(`/api/forums/${forumId}/posts`);
   if (!res.ok) throw new Error('Échec chargement des sujets');
   const data: PostVoteUserDTO[] = await res.json();
-  return data.map((p) => ({
-    id: p.id,
-    content: p.content,
-    createdAt: p.createdAt,
-    title: p.title,
-    isPinned: p.isPinned,
-    author: p.author,
-    votes: p.voteTotalValue ? [{ userId: p.author.id, value: p.voteTotalValue as 1 | -1 }] : [],
-    replyCount: p.childrenCount,
-    replies: undefined,
-  }));
+  return data.map(toForumPost);
 }
 
 /**
@@ -799,20 +823,12 @@ export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
  * l'utilisateur déplie le fil.
  */
 export async function fetchReplies(forumId: number, postId: number): Promise<ForumPost[]> {
-  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}?loadChildren=true`);
+  // Endpoint dédié : renvoie DIRECTEMENT la liste des réponses immédiates (enfants),
+  // sans query param fragile. Robuste au passage gateway/proxy.
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}/replies`);
   if (!res.ok) throw new Error('Échec chargement des réponses');
-  const data: PostVoteUserDTO = await res.json();
-  return (data.children ?? []).map((p) => ({
-    id: p.id,
-    content: p.content,
-    createdAt: p.createdAt,
-    title: p.title,
-    isPinned: p.isPinned,
-    author: p.author,
-    votes: p.voteTotalValue ? [{ userId: p.author.id, value: p.voteTotalValue as 1 | -1 }] : [],
-    replyCount: p.childrenCount,
-    replies: undefined,
-  }));
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map(toForumPost);
 }
 
 /**
@@ -826,7 +842,7 @@ export async function createPost(
   parentId: number | null,
   clientPostId: string,
   title?: string
-): Promise<void> {
+): Promise<ForumPost> {
   console.log('createPost');
   const email = localStorage.getItem('moodit_user_email');
 
@@ -848,6 +864,11 @@ export async function createPost(
   if (!res.ok) {
     throw new Error('Échec de la publication du post');
   }
+
+  // 201 → post persisté : on le renvoie pour remplacer l'optimiste (id réel), même
+  // forme que fetchThreads. `clientPostId` reporté pour la dédup de l'écho WS.
+  const saved: PostVoteUserDTO = await res.json();
+  return { ...toForumPost(saved), clientPostId };
 }
 
 /** TODO — Modifier le contenu d'un post. */
@@ -883,10 +904,23 @@ export async function deletePost(forumId: number, postId: number): Promise<void>
 }
 
 /**
- * TODO — Enregistrer le vote de l'utilisateur sur un post. `value` ∈ {-1, 0, 1} où
- * 0 = retrait du vote (un seul vote par utilisateur et par post).
+ * Enregistrer le vote de l'utilisateur sur un post. `value` = DIRECTION cliquée
+ * (+1 ou -1) — jamais 0. Le backend applique un modèle « toggle » (cf.
+ * ForumService.addVoteToPost) : pas de vote → crée ; même valeur re-envoyée →
+ * supprime (annulation) ; valeur opposée → bascule. La table Vote impose
+ * CHECK(value_ IN (-1, 1)) : envoyer 0 déclencherait une erreur BD, d'où la
+ * direction brute. `forumId` est requis (le DTO cible le post PAR son forum).
+ * L'utilisateur vient du JWT (X-User-Email injecté par le gateway).
  */
-export async function votePost(postId: number, value: number): Promise<void> {
-  await simulateWrite('Échec simulé (vote)');
-  console.log('[api] Vote sur le post', postId, ':', value);
+export async function votePost(
+  forumId: number,
+  postId: number,
+  value: 1 | -1
+): Promise<void> {
+  const res = await apiFetch('/api/forums/posts/votes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forumId, postId, voteValue: value }),
+  });
+  if (!res.ok) throw new Error('Échec du vote');
 }

@@ -98,9 +98,13 @@ function getInitials(author: ForumAuthor): string {
   return (initials || author.username[0] || '?').toUpperCase();
 }
 
-/** Score d'un post : SUM(value_) de tous ses votes. */
+/**
+ * Score d'un post : votes des autres utilisateurs (agrégat serveur `othersVoteTotal`)
+ * + votes connus localement (`votes` = vote propre de l'utilisateur, éventuellement des
+ * votes live d'autres). Le vote propre étant dans `votes`, il n'est PAS dans othersVoteTotal.
+ */
 function scoreOf(post: ForumPost): number {
-  return post.votes.reduce((sum, vote) => sum + vote.value, 0);
+  return (post.othersVoteTotal ?? 0) + post.votes.reduce((sum, vote) => sum + vote.value, 0);
 }
 
 /** Vote de l'utilisateur `userId` sur un post (depuis la table Vote). */
@@ -181,7 +185,10 @@ const ForumView: React.FC<ForumViewProps> = ({
     initialThreads: [],
     currentUser,
     onFetchThreads,
-    onFetchReplies: onFetchReplies ? (postId) => onFetchReplies(channel.id, postId) : undefined,
+    // Le hook appelle onFetchReplies(forumId, postId) — il fournit DÉJÀ le forumId
+    // (= channel.id). On passe donc le handler tel quel. Un wrapper (postId)=>... à un
+    // seul paramètre écraserait le postId avec le forumId (bug : fetch /posts/{forumId}).
+    onFetchReplies,
     onCreatePost,
     onEditPost,
     onDeletePost,

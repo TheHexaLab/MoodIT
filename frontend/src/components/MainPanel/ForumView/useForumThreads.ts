@@ -300,6 +300,12 @@ export function useForumThreads({
    * chargera ses propres reponses a son tour quand on le depliera.
    */
   const loadReplies = useCallback(async (postId: number): Promise<boolean> => {
+    // Post pas encore persisté (id temporaire négatif) : il ne peut avoir aucune réponse
+    // côté serveur. On évite un GET /posts/-1 qui répondrait 404 ; ses réponses sont [].
+    if (postId < 0) {
+      setThreads((prev) => mapPost(prev, postId, (post) => ({ ...post, replies: [], replyCount: 0 })));
+      return true;
+    }
     const fetchReplies = fetchRepliesRef.current;
     setReplyErrors((prev) => {
       if (!prev.has(postId)) return prev;
@@ -351,15 +357,21 @@ export function useForumThreads({
   }
 
   function vote(postId: number, direction: 1 | -1) {
+    // Post pas encore persisté (id temporaire négatif) : aucune action serveur
+    // possible tant que la création n'est pas confirmée (cf. reconciliation).
+    if (postId < 0) return;
     const post = findInTree(threads, postId);
     if (!post) return;
     const current = post.votes.find((v) => v.userId === currentUser.id)?.value ?? 0;
     const nextValue: VoteValue = current === direction ? 0 : direction;
     const previousVotes = post.votes;
+    // Affichage optimiste : `nextValue` (0 = vote retiré localement).
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, currentUser.id, nextValue)));
 
     runMutation(
-      () => (onVotePost ? onVotePost(postId, nextValue) : undefined),
+      // API : on envoie la DIRECTION cliquée (±1), pas `nextValue`. Le backend applique
+      // le toggle (même direction re-cliquée → annule) et la table Vote interdit 0.
+      () => (onVotePost ? onVotePost(postId, direction) : undefined),
       () => setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, votes: previousVotes }))),
       "Votre vote n'a pas pu être enregistré. Réessayez."
     );
@@ -454,6 +466,8 @@ export function useForumThreads({
 
   async function editPost(postId: number, content: string): Promise<boolean> {
     const trimmed = content.trim();
+    // id temporaire négatif = post pas encore confirmé côté serveur : on bloque.
+    if (postId < 0) return false;
     const target = findInTree(threads, postId);
     if (!target || !trimmed || trimmed === target.content) return false;
 
@@ -487,6 +501,8 @@ export function useForumThreads({
   }
 
   function deletePost(postId: number) {
+    // id temporaire négatif = post pas encore confirmé côté serveur : on bloque.
+    if (postId < 0) return;
     const target = findInTree(threads, postId);
     if (!target) return;
     const parentId = findParentId(threads, postId) ?? null;

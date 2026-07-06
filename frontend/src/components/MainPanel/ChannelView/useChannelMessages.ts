@@ -256,6 +256,8 @@ export function useChannelMessages({
 
   function editMessage(messageId: number, content: string) {
     const trimmed = content.trim();
+    // id temporaire négatif = message pas encore confirmé côté serveur : on bloque.
+    if (messageId < 0) return;
     const target = messages.find((m) => m.id === messageId);
     if (!target || !trimmed || trimmed === target.content) return;
 
@@ -279,6 +281,8 @@ export function useChannelMessages({
   }
 
   function deleteMessage(messageId: number) {
+    // id temporaire négatif = message pas encore confirmé côté serveur : on bloque.
+    if (messageId < 0) return;
     const target = messages.find((m) => m.id === messageId);
     if (!target) return;
 
