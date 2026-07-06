@@ -46,6 +46,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
+import { getProgramPermissions } from '../../helpers/permissions.ts';
 import * as api from './dashboardApi.ts';
 import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
@@ -87,7 +88,9 @@ type PopupState =
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
   | { kind: 'leaveProgram'; programId: number }
+  | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
+  | { kind: 'deleteCourse'; courseId: number }
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
 
@@ -102,6 +105,13 @@ export default function Dashboard() {
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
+  // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
+  // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
+  const permsForProgram = (programId: number) =>
+    getProgramPermissions(
+      dashboardPrograms.find((program) => program.id === programId) ?? null,
+      isAdmin
+    );
   // Incrémenté à chaque mise à jour de quiz → remonte la vue de quiz ouverte (rechargement).
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
@@ -177,6 +187,12 @@ export default function Dashboard() {
           setSelectedChannelRef(undefined);
         }
       },
+      // Mon rôle DANS ce programme a changé → on met à jour son roleName ; les menus
+      // d'actions administratives (permsForProgram) se re-gatent automatiquement.
+      onProgramRoleChange: (programId, roleName) =>
+        setDashboardPrograms((programs) =>
+          programs.map((p) => (p.id === programId ? { ...p, roleName } : p))
+        ),
     });
   }, [ws, currentUser.id]);
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
@@ -270,22 +286,30 @@ export default function Dashboard() {
   // Ouvre le AddSubscriptionPopup (création / adhésion à un programme).
   const handleAddProgram = () => setPopup({ kind: 'addSubscription' });
 
-  // Ouvre le AddCoursePopup avec le programme courant préselectionné (admin).
+  // Ouvre le AddCoursePopup avec le programme courant préselectionné (gestion contenu).
   const handleAddCourse = () => {
-    if (isAdmin) setPopup({ kind: 'addCourse', programId: activeProgramId });
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'addCourse', programId: activeProgramId });
   };
-  // Ouvre le UpdateCoursePopup pour le cours du crayon (admin ; crayon déjà admin-only).
+  // Ouvre le UpdateCoursePopup pour le cours du crayon (gestion contenu du programme actif).
   const handleEditCourse = (courseId: number) => {
-    if (isAdmin) setPopup({ kind: 'editCourse', courseId });
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'editCourse', courseId });
   };
-  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur,
-  // admin) : ouvre la modale de gestion des analyses MCP du cours.
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur) :
+  // ouvre la modale de gestion des analyses MCP du cours (gestion contenu).
   const handleOpenMcpManagement = (courseId: number) => {
-    if (isAdmin) setPopup({ kind: 'mcp', courseId });
+    if (permsForProgram(activeProgramId).canManageContent) setPopup({ kind: 'mcp', courseId });
   };
   // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
   // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
   const handleLeaveCourse = (courseId: number) => setPopup({ kind: 'leaveCourse', courseId });
+  // « Supprimer le cours » (menu contextuel, gestion contenu) : ouvre la confirmation. La
+  // suppression réelle est faite par handleConfirmDeleteCourse (via api.deleteCourse).
+  const handleDeleteCourse = (courseId: number) => {
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'deleteCourse', courseId });
+  };
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
@@ -294,10 +318,10 @@ export default function Dashboard() {
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
   const handleAddCourseToProgram = (programId: number) => {
-    if (isAdmin) setPopup({ kind: 'addCourse', programId });
+    if (permsForProgram(programId).canManageContent) setPopup({ kind: 'addCourse', programId });
   };
   const handleEditProgram = (programId: number) => {
-    if (isAdmin) setPopup({ kind: 'editProgram', programId });
+    if (permsForProgram(programId).canEditProgram) setPopup({ kind: 'editProgram', programId });
   };
   // Charge rôles + membres d'un programme (via api.fetchProgramRoles) et alimente le popup.
   const fetchProgramRoles = async (programId: number) => {
@@ -314,11 +338,16 @@ export default function Dashboard() {
   };
 
   const handleManageRoles = (programId: number) => {
-    if (!isAdmin) return;
+    if (!permsForProgram(programId).canManageRoles) return;
     setPopup({ kind: 'manageRoles', programId });
     void fetchProgramRoles(programId);
   };
   const handleLeaveProgram = (programId: number) => setPopup({ kind: 'leaveProgram', programId });
+  // « Supprimer le programme » (menu contextuel, super-admin GLOBAL uniquement) : ouvre la
+  // confirmation. La suppression réelle est faite par handleConfirmDeleteProgram (via api.deleteProgram).
+  const handleDeleteProgram = (programId: number) => {
+    if (permsForProgram(programId).canDeleteProgram) setPopup({ kind: 'deleteProgram', programId });
+  };
   // Rejoindre des cours d'un programme (menu contextuel, TOUS les utilisateurs) : ouvre
   // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
   const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
@@ -337,27 +366,32 @@ export default function Dashboard() {
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
-    if (isAdmin) setCreatingSectionType('text');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('text');
   };
   const handleCreateQuiz = () => {
-    if (isAdmin) setCreatingSectionType('quiz');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('quiz');
   };
   const handleCreateForum = () => {
-    if (isAdmin) setCreatingSectionType('forum');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('forum');
   };
   // Persiste une modification de section (réordre/renommage/suppression/ajout) via
   // api.changeSection. Le state n'est appliqué qu'APRÈS succès (le rejet laisse la
   // sidebar inchangée) : on exerce ainsi spinner / rollback / ErrorPopup du popup.
   const handleSectionChange = async (courseId: number, sectionType: string, change: ItemChange) => {
-    await api.changeSection(courseId, sectionType, change);
+    // Le backend renvoie le changement APPLIQUÉ (create → id RÉEL du forum) : on l'applique
+    // lui, pas l'optimiste, pour que l'écho WS `section:changed` (même id) soit idempotent.
+    const applied = await api.changeSection(courseId, sectionType, change);
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
         ...program,
         courses: program.courses.map((course) =>
-          course.id === courseId ? applySectionChange(course, sectionType, change) : course
+          course.id === courseId ? applySectionChange(course, sectionType, applied) : course
         ),
       }))
     );
+    // Renvoyé au SectionEditorPopup : il réconcilie l'id RÉEL du forum créé dans son état
+    // interne (sinon un renommage/suppression enchaîné enverrait l'id temporaire au backend).
+    return applied;
   };
 
   // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
@@ -439,9 +473,11 @@ export default function Dashboard() {
     );
   };
 
-  // Assignation/retrait d'un rôle ↔ utilisateur (admin) via api.changeRole. Le
-  // RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister.
-  const handleRoleChange = (change: RoleChange) => api.changeRole(change);
+  // Assignation/retrait d'un rôle ↔ utilisateur DANS un programme via api.changeRole. Le
+  // RoleEditorPopup ignore le programme : le Dashboard injecte le `programId` (celui du popup
+  // « Gérer les rôles »). Le popup gère l'optimisme + rollback ; on ne fait que persister.
+  const handleRoleChange = (programId: number, change: RoleChange) =>
+    api.changeRole(programId, change);
 
   // Quitter un programme (via api.leaveProgram). On ferme la confirmation puis on
   // affiche un overlay de chargement ; en cas d'échec, un ErrorPopup (sans retrait).
@@ -466,6 +502,30 @@ export default function Dashboard() {
     }
   };
 
+  // Supprimer un programme (admin, via api.deleteProgram) — le retire pour TOUS. Même flux
+  // que « quitter » : overlay de chargement, ErrorPopup en cas d'échec. Au succès : retrait
+  // de la liste + bascule du programme actif s'il disparaît. Les autres clients le retirent
+  // via l'écho WS `program:deleted` (onProgramRemove).
+  const handleConfirmDeleteProgram = async (programId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.deleteProgram(programId);
+      if (programId === activeProgramId) {
+        const fallback = dashboardPrograms.find((program) => program.id !== programId);
+        setActiveProgramId(fallback?.id ?? -1);
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => programs.filter((program) => program.id !== programId));
+    } catch {
+      setLeaveError('Impossible de supprimer le programme. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   // Quitter un cours (via api.leaveCourse). Même flux que pour un programme : overlay
   // de chargement, ErrorPopup en cas d'échec. Au succès : retrait du cours du programme
   // actif + reset de la sélection si c'était le cours ouvert.
@@ -482,6 +542,28 @@ export default function Dashboard() {
       setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
     } catch {
       setLeaveError('Impossible de quitter le cours. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  // Supprimer un cours (admin, via api.deleteCourse) — le retire pour TOUS. Même flux que
+  // « quitter » : overlay de chargement, ErrorPopup en cas d'échec. Au succès : retrait du
+  // cours du programme actif + reset de la sélection si c'était le cours ouvert. Les autres
+  // clients le retirent via l'écho WS `course:deleted` (onCourseDelete).
+  const handleConfirmDeleteCourse = async (courseId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.deleteCourse(courseId);
+      if (courseId === effectiveSelectedCourseId) {
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
+    } catch {
+      setLeaveError('Impossible de supprimer le cours. Réessaie.');
     } finally {
       setLeaveLoading(false);
     }
@@ -530,8 +612,8 @@ export default function Dashboard() {
     clientPostId: string,
     title?: string
   ) => api.createPost(forumId, content, parentId, clientPostId, title);
-  const handleEditPost = (postId: number, content: string) =>
-    api.editPost(selectedChannelRef?.id ?? -1, postId, content);
+  const handleEditPost = (postId: number, content: string, title?: string) =>
+    api.editPost(selectedChannelRef?.id ?? -1, postId, content, title);
   const handleDeletePost = (postId: number) => api.deletePost(selectedChannelRef?.id ?? -1, postId);
   // Le vote porte sur un post du forum ACTUELLEMENT ouvert. `value` est la direction
   // cliquée (±1) fournie par useForumThreads — le backend gère l'annulation (toggle).
@@ -599,6 +681,11 @@ export default function Dashboard() {
     popup?.kind === 'leaveCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la confirmation « Supprimer le cours » (dans le programme actif).
+  const deletingCourse =
+    popup?.kind === 'deleteCourse'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Cours ciblé par la modale « Gestion MCP » (dans le programme actif).
   const mcpCourse =
     popup?.kind === 'mcp'
@@ -645,10 +732,11 @@ export default function Dashboard() {
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
-            isAdmin={isAdmin}
+            isGlobalAdmin={isAdmin}
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
+            onDeleteProgram={handleDeleteProgram}
             onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
@@ -670,7 +758,8 @@ export default function Dashboard() {
             onSelectChannel={setSelectedChannelRef}
             onOpenChannel={handleOpenChannel}
             onSectionChange={handleSectionChange}
-            isAdmin={isAdmin}
+            // Gestion du contenu du programme actif (Enseignant / Administrateur / super-admin).
+            isAdmin={permsForProgram(activeProgramId).canManageContent}
             // CourseMenu ne reflète QUE le fetch des cours (qui n'a lieu qu'après
             // le succès du fetch programmes) → pas d'illusion de fetch parallèle.
             loading={coursesLoading}
@@ -680,6 +769,7 @@ export default function Dashboard() {
             onEditCourse={handleEditCourse}
             onOpenMcpManagement={handleOpenMcpManagement}
             onLeaveCourse={handleLeaveCourse}
+            onDeleteCourse={handleDeleteCourse}
             onEditProfile={handleEditProfile}
             onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
@@ -690,7 +780,7 @@ export default function Dashboard() {
       />
 
       <MainPanel
-        isAdmin={isAdmin}
+        isAdmin={permsForProgram(activeProgramId).canManageContent}
         program={mainPanelProgram}
         selectedCourse={effectiveSelectedCourseId ?? null}
         selectedChannel={selectedChannelRef ?? null}
@@ -828,7 +918,7 @@ export default function Dashboard() {
           onClose={() => setPopup(null)}
           roles={roleData.roles}
           users={roleData.users}
-          onChange={handleRoleChange}
+          onChange={(change) => handleRoleChange(popupProgram.id, change)}
         />
       )}
 
@@ -883,6 +973,18 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Supprimer un programme — confirmation (menu contextuel, admin). Action DÉFINITIVE
+          et pour TOUS : suppression en cascade (abonnements, liens cours, rôles). */}
+      {popup?.kind === 'deleteProgram' && popupProgram && (
+        <DeleteConfirmationPopup
+          title="Supprimer le programme ?"
+          content={`Le programme « ${popupProgram.name} » sera supprimé DÉFINITIVEMENT pour tous ses membres (abonnements et accès retirés). Les cours partagés avec d'autres programmes sont conservés. Cette action est irréversible.`}
+          labels={{ confirm: 'Supprimer' }}
+          onDeleteConfirmation={() => handleConfirmDeleteProgram(popupProgram.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Quitter un cours — confirmation (menu contextuel). */}
       {popup?.kind === 'leaveCourse' && leavingCourse && (
         <DeleteConfirmationPopup
@@ -890,6 +992,18 @@ export default function Dashboard() {
           content={`Tu ne verras plus les canaux, quiz et forums de « ${leavingCourse.code ?? leavingCourse.title ?? 'ce cours'} ». Tu pourras le rejoindre à nouveau plus tard.`}
           labels={{ confirm: 'Quitter' }}
           onDeleteConfirmation={() => handleConfirmLeaveCourse(leavingCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* Supprimer un cours — confirmation (menu contextuel, admin). Action DÉFINITIVE et
+          pour TOUS : suppression en cascade (sections, quiz, forums, inscriptions). */}
+      {popup?.kind === 'deleteCourse' && deletingCourse && (
+        <DeleteConfirmationPopup
+          title="Supprimer le cours ?"
+          content={`Le cours « ${deletingCourse.code ?? deletingCourse.title ?? 'ce cours'} » et tout son contenu (canaux, quiz, forums) seront supprimés DÉFINITIVEMENT pour tous les inscrits. Cette action est irréversible.`}
+          labels={{ confirm: 'Supprimer' }}
+          onDeleteConfirmation={() => handleConfirmDeleteCourse(deletingCourse.id)}
           onClose={() => setPopup(null)}
         />
       )}
@@ -1060,11 +1174,17 @@ function applyToForums(
       );
     case 'delete':
       return reposition(forums.filter((f) => !(inSection(f) && String(f.id) === change.id)));
-    case 'create':
-      return reposition([
-        ...forums,
-        { id: nextNumericId(forums), title: change.item.name, fType: fType },
-      ]);
+    case 'create': {
+      // id RÉEL fourni par le backend (via handleSectionChange / écho WS) → on l'utilise ;
+      // à défaut un id temporaire. Dédup par id : l'écho WS de sa propre création (ou une
+      // double réception) ne crée pas de doublon.
+      const id =
+        change.item.id != null && change.item.id !== ''
+          ? Number(change.item.id)
+          : nextNumericId(forums);
+      if (forums.some((f) => f.id === id)) return reposition(forums);
+      return reposition([...forums, { id, title: change.item.name, fType: fType }]);
+    }
     case 'reorder': {
       // On réordonne uniquement le sous-ensemble du fType ; les autres forums
       // gardent leur ordre relatif (les sections sont affichées séparément).

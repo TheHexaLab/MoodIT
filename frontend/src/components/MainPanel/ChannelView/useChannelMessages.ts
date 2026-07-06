@@ -3,6 +3,7 @@ import {
   type ChannelMessage,
   type ChannelMessageAuthor,
 } from '../../CourseChannelList/CourseChannelList';
+import { type AuthorUpdate } from '../../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : un callback d'API peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -40,6 +41,8 @@ export interface IncomingMessageHandlers {
   onEdit: (messageId: number, content: string) => void;
   /** Un message a ete supprime. */
   onDelete: (messageId: number) => void;
+  /** Un utilisateur a modifie son profil (GLOBAL) : maj de l'auteur des messages, par id. */
+  onUserUpdate?: (user: AuthorUpdate) => void;
 }
 
 /**
@@ -318,6 +321,27 @@ export function useChannelMessages({
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 
+  // Profil modifie (GLOBAL) : on remplace prenom/nom/couleur/username de l'auteur sur
+  // tous les messages de cet utilisateur deja charges.
+  const applyIncomingUserUpdate = useCallback((user: AuthorUpdate) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.author.id === user.id
+          ? {
+              ...m,
+              author: {
+                ...m.author,
+                username: user.username,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                avatarColor: user.avatarColor,
+              },
+            }
+          : m
+      )
+    );
+  }, []);
+
   // Abonnement temps reel : on branche les evenements du socket sur la liste.
   // Le desabonnement (cleanup) se declenche au demontage / changement de canal.
   useEffect(() => {
@@ -326,8 +350,16 @@ export function useChannelMessages({
       onMessage: applyIncomingMessage,
       onEdit: applyIncomingEdit,
       onDelete: applyIncomingDelete,
+      onUserUpdate: applyIncomingUserUpdate,
     });
-  }, [socket, channelId, applyIncomingMessage, applyIncomingEdit, applyIncomingDelete]);
+  }, [
+    socket,
+    channelId,
+    applyIncomingMessage,
+    applyIncomingEdit,
+    applyIncomingDelete,
+    applyIncomingUserUpdate,
+  ]);
 
   return {
     messages,

@@ -9,11 +9,16 @@ import com.moodit.core_service.model.*;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.service.ProgramService;
 // Repository
+import com.moodit.core_service.repository.RoleRepository;
+import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 // Le pont entre le Controller et le Repository
 @Service
@@ -23,6 +28,8 @@ public class UserService {
   private final UserRepository userRepository;
   private final ProgramService programService;
   private final CourseService courseService;
+  private final UserProgramRoleRepository userProgramRoleRepository;
+  private final RoleRepository roleRepository;
 
   // region Transformations d'Entités (entité BD -> DTO)
   public UserDTO toUserDTO(User user) {
@@ -90,7 +97,45 @@ public class UserService {
 
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
-    return user.getPrograms().stream().map(programService::toProgramDTO).toList();
+    // Rôles PAR PROGRAMME de CET utilisateur (User_Program_Role) → programId -> {roleIds}.
+    Map<Integer, Set<Integer>> roleIdsByProgram =
+        userProgramRoleRepository.findByUserId(userId).stream()
+            .collect(
+                Collectors.groupingBy(
+                    UserProgramRole::getProgramId,
+                    Collectors.mapping(UserProgramRole::getRoleId, Collectors.toSet())));
+
+    // roleId -> nom (pour déterminer le rôle le plus élevé sans coder en dur les ids).
+    Map<Integer, String> roleNameById =
+        roleRepository.findAll().stream()
+            .collect(Collectors.toMap(Role::getId, Role::getName));
+
+    return user.getPrograms().stream()
+        .map(
+            p -> {
+              ProgramDTO dto = programService.toProgramDTO(p);
+              dto.setRoleName(
+                  highestRoleName(
+                      roleIdsByProgram.getOrDefault(p.getId(), Set.of()), roleNameById));
+              return dto;
+            })
+        .toList();
+  }
+
+  /**
+   * Rôle le plus élevé parmi les rôles de programme d'un utilisateur : "Administrateur" prime
+   * sur "Enseignant" ; null si aucun rôle de programme.
+   */
+  private String highestRoleName(Set<Integer> roleIds, Map<Integer, String> roleNameById) {
+    boolean isAdmin = roleIds.stream().anyMatch(id -> "Administrateur".equals(roleNameById.get(id)));
+    if (isAdmin) {
+      return "Administrateur";
+    }
+    boolean isTeacher = roleIds.stream().anyMatch(id -> "Enseignant".equals(roleNameById.get(id)));
+    if (isTeacher) {
+      return "Enseignant";
+    }
+    return null;
   }
 
   public UserDTO updateUser(Integer userId, UserUpdateDTO dto) {

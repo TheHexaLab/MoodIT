@@ -32,6 +32,15 @@ export interface IncomingProgramHandlers {
   onProgramUpsert: (program: Program) => void;
   /** Un programme a été supprimé, ou l'utilisateur l'a quitté / en a été retiré. */
   onProgramRemove: (programId: number) => void;
+  /**
+   * Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) : ses menus
+   * d'actions administratives se re-gatent. `roleName` = rôle le plus élevé restant
+   * ('Administrateur' / 'Enseignant') ou null (plus aucun rôle dans ce programme).
+   */
+  onProgramRoleChange?: (
+    programId: number,
+    roleName: 'Administrateur' | 'Enseignant' | null
+  ) => void;
 }
 
 /**

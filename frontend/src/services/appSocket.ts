@@ -1,4 +1,4 @@
-import { type ChannelMessage } from '../types/domain.ts';
+import { type AuthorUpdate, type ChannelMessage } from '../types/domain.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
@@ -52,7 +52,7 @@ type ServerEvent =
   | { type: 'message:deleted'; channelId: number; messageId: number }
   // Forum
   | { type: 'post:created'; forumId: number; post: ForumPost; parentId: number | null }
-  | { type: 'post:edited'; forumId: number; postId: number; content: string }
+  | { type: 'post:edited'; forumId: number; postId: number; content: string; title?: string | null }
   | { type: 'post:deleted'; forumId: number; postId: number }
   | { type: 'post:voted'; forumId: number; postId: number; userId: number; value: VoteValue }
   // Cours / sections (scope = programme)
@@ -74,12 +74,23 @@ type ServerEvent =
   | { type: 'program:created'; userId: number; program: Program }
   | { type: 'program:updated'; userId: number; program: Program }
   | { type: 'program:deleted'; userId: number; programId: number }
+  // Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) → ses menus
+  // d'actions administratives se re-gatent. `roleName` = rôle le plus élevé restant, ou null.
+  | {
+      type: 'program:roleChanged';
+      userId: number;
+      programId: number;
+      roleName: 'Administrateur' | 'Enseignant' | null;
+    }
   | { type: 'subscription:added'; userId: number; program: Program }
   | { type: 'subscription:removed'; userId: number; programId: number }
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
   | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
   | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string }
-  | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string };
+  | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string }
+  // Profil utilisateur mis à jour (scope GLOBAL) : l'auteur des messages/posts change
+  // partout. Appliqué à TOUS les canaux et forums abonnés (pas de room précise).
+  | { type: 'user:updated'; user: AuthorUpdate };
 
 export interface AppSocket {
   channels: ChannelSocket;
@@ -181,7 +192,7 @@ export function createAppSocket(
           forumSubs.get(data.forumId)?.onPost(data.post, data.parentId);
           break;
         case 'post:edited':
-          forumSubs.get(data.forumId)?.onEdit(data.postId, data.content);
+          forumSubs.get(data.forumId)?.onEdit(data.postId, data.content, data.title);
           break;
         case 'post:deleted':
           forumSubs.get(data.forumId)?.onDelete(data.postId);
@@ -220,6 +231,9 @@ export function createAppSocket(
         case 'subscription:removed':
           programSubs.get(data.userId)?.onProgramRemove(data.programId);
           break;
+        case 'program:roleChanged':
+          programSubs.get(data.userId)?.onProgramRoleChange?.(data.programId, data.roleName);
+          break;
         case 'mcp:analysis-created':
           mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);
           break;
@@ -228,6 +242,12 @@ export function createAppSocket(
           break;
         case 'mcp:analysis-progress':
           mcpSubs.get(data.courseId)?.onAnalysisProgress?.(data.userId, data.step);
+          break;
+        case 'user:updated':
+          // Évènement GLOBAL : on ne connaît pas les rooms où l'auteur apparaît → on
+          // notifie TOUS les canaux et forums abonnés, qui mettent à jour l'auteur par id.
+          for (const handlers of channelSubs.values()) handlers.onUserUpdate?.(data.user);
+          for (const handlers of forumSubs.values()) handlers.onUserUpdate?.(data.user);
           break;
       }
     };

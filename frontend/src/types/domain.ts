@@ -49,6 +49,18 @@ export interface User {
 }
 
 /**
+ * Champs d'auteur mis à jour en temps réel (WS `user:updated`) quand un utilisateur modifie
+ * son profil : le front remplace ces champs sur tous ses messages/posts chargés (par `id`).
+ */
+export interface AuthorUpdate {
+  id: number;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatarColor?: string;
+}
+
+/**
  * Programme (table Program). `courses` / `label` sont des commodités côté front :
  * `courses` est embarqué par l'API au chargement d'un programme ; `label` est un
  * override d'affichage optionnel.
@@ -62,6 +74,12 @@ export interface Program {
   establishmentId?: number;
   label?: string;
   courses?: Course[];
+  /**
+   * Rôle le plus élevé de l'utilisateur COURANT dans ce programme (User_Program_Role) :
+   * 'Administrateur', 'Enseignant' ou null/absent (aucun). Pilote les permissions front
+   * (cf. permissions.ts). Renseigné par fetchPrograms via le champ `roleName` du ProgramDTO.
+   */
+  roleName?: 'Administrateur' | 'Enseignant' | null;
 }
 
 /**

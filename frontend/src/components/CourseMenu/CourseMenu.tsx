@@ -112,6 +112,11 @@ interface CourseMenuProps {
    */
   onLeaveCourse?: (courseId: number) => void;
   /**
+   * « Supprimer le cours » (clic droit sur le sélecteur, admin uniquement). Action
+   * destructive : retire le cours pour tous. Absent → item du menu contextuel masqué.
+   */
+  onDeleteCourse?: (courseId: number) => void;
+  /**
    * Utilisateur connecte affiche en bas du panneau.
    */
   currentUser?: UserMenuUser | null;
@@ -154,6 +159,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   onEditCourse,
   onOpenMcpManagement,
   onLeaveCourse,
+  onDeleteCourse,
   currentUser,
   userLoading = false,
   onEditProfile,
@@ -339,7 +345,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
 
   // Actions admin du menu contextuel (modifier, gestion MCP) ; « quitter le cours »
   // reste accessible à TOUS. On n'ouvre le menu que s'il aura au moins un item.
-  const hasAdminContextActions = isAdmin && (Boolean(onEditCourse) || Boolean(onOpenMcpManagement));
+  const hasAdminContextActions =
+    isAdmin && (Boolean(onEditCourse) || Boolean(onOpenMcpManagement) || Boolean(onDeleteCourse));
   const hasContextMenu = hasAdminContextActions || Boolean(onLeaveCourse);
 
   // Clic droit sur le sélecteur de cours → menu contextuel. Ancré sous le sélecteur
@@ -555,6 +562,14 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             onLeaveCourse
               ? () => {
                   onLeaveCourse(selectedCourse.id);
+                  setCtxMenuPos(null);
+                }
+              : undefined
+          }
+          onDeleteCourse={
+            isAdmin && onDeleteCourse
+              ? () => {
+                  onDeleteCourse(selectedCourse.id);
                   setCtxMenuPos(null);
                 }
               : undefined

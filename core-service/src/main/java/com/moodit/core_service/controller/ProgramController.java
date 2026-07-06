@@ -86,4 +86,11 @@ public class ProgramController {
     programService.removeUserFromProgram(programId, userId);
     return ResponseEntity.noContent().build();
   }
+
+  // Supprimer un programme (admin) — cascade + diffusion WS program:deleted à chaque abonné.
+  @DeleteMapping("/{programId}")
+  public ResponseEntity<Void> deleteProgram(@PathVariable Integer programId) {
+    programService.deleteProgram(programId);
+    return ResponseEntity.noContent().build();
+  }
 }

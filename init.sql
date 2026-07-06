@@ -376,10 +376,11 @@ INSERT INTO Program (name, code, cohort, color, establishment_id) VALUES
 -- ------------------------------------------------------------
 -- Role
 -- ------------------------------------------------------------
+-- Seulement 2 rôles : Enseignant (id=1) et Administrateur (id=2).
+-- Administrateur GLOBAL (User_Role) = super-admin plateforme (seul à pouvoir supprimer un programme).
+-- Rôles PAR PROGRAMME (User_Program_Role) : Enseignant / Administrateur pilotent les permissions.
 INSERT INTO Role (name) VALUES
-  ('Étudiant'),
   ('Enseignant'),
-  ('Auxiliaire'),
   ('Administrateur');
 
 -- ------------------------------------------------------------
@@ -396,14 +397,11 @@ INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
 -- ------------------------------------------------------------
 -- User_Role  
 -- ------------------------------------------------------------
+-- Rôles GLOBAUX (User_Role) : réservés au super-admin plateforme.
+-- Seul admin est Administrateur GLOBAL → seul habilité à SUPPRIMER un programme.
+-- rosie / mich n'ont PAS de rôle global : leurs droits viennent de User_Program_Role.
 INSERT INTO User_Role (user_id, role_id) VALUES
-  (1, 4);  -- admin (user_id=1) → Administrateur (role_id=4)
-
-INSERT INTO User_Role (user_id, role_id) VALUES
-  (2, 1);  -- rosie (user_id=2) → etudiant (role_id=1)
-
-INSERT INTO User_Role (user_id, role_id) VALUES
-  (3, 1);  -- mich (user_id=3) → etudiant (role_id=1)
+  (1, 2);  -- admin (user_id=1) → Administrateur GLOBAL (role_id=2)
 
 -- ------------------------------------------------------------
 -- User_Programme 
@@ -654,6 +652,19 @@ INSERT INTO program_course (program_id, course_id) VALUES
 
 -- Abonner l'admin (user 1) au programme GIN (1) pour qu'il voie ces cours.
 INSERT INTO User_Program (program_id, user_id) VALUES (1, 1);
+
+-- Abonner mich (user 3) au programme GIN (1) aussi.
+INSERT INTO User_Program (program_id, user_id) VALUES (1, 3);
+
+-- ------------------------------------------------------------
+-- User_Program_Role : rôles PAR PROGRAMME (pilotent les permissions front).
+--   rosie (2) → Administrateur (2) DANS le programme 1 : tout sauf SUPPRIMER le programme.
+--   mich  (3) → Enseignant     (1) DANS le programme 1 : gère le contenu, ne touche pas au programme.
+-- (admin reste super-admin GLOBAL via User_Role, seul à pouvoir supprimer un programme.)
+-- ------------------------------------------------------------
+INSERT INTO User_Program_Role (program_id, user_id, role_id) VALUES
+  (1, 2, 2),
+  (1, 3, 1);
 
 -- ---- MCP100 (bonne note) : 3 inscrits, 10 quiz, ~22 messages avec de VRAIS avis,
 -- un quiz de code tenté (≈78% de cas de test) et un quiz auto-corrigé tenté (67% de moyenne).

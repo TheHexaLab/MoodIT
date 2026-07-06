@@ -14,9 +14,12 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.ProgramNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 
+import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.ProgramRepository;
+import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
+import java.util.Map;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
@@ -39,6 +42,7 @@ public class ProgramService {
   private final ProgramRepository programRepository;
   private final CourseRepository courseRepository;
   private final UserRepository userRepository;
+  private final UserProgramRoleRepository userProgramRoleRepository;
   private final RealtimeEventPublisher realtimePublisher;
   //private final UserService userService;
 
@@ -138,14 +142,20 @@ public class ProgramService {
   }
 
   public List<UserDTO> getUsersByProgram(Integer programId) {
+    // Rôles PAR PROGRAMME (User_Program_Role) — PAS les rôles globaux (User_Role).
+    Map<Integer, List<Integer>> rolesByUser =
+        userProgramRoleRepository.findByProgramId(programId).stream()
+            .collect(
+                Collectors.groupingBy(
+                    UserProgramRole::getUserId,
+                    Collectors.mapping(UserProgramRole::getRoleId, Collectors.toList())));
 
-    return userRepository.findDistinctByPrograms_Id(programId)
-            .stream()
-            .map(this::toUserDTO)
-            .toList();
+    return userRepository.findDistinctByPrograms_Id(programId).stream()
+        .map(u -> toUserDTO(u, rolesByUser.getOrDefault(u.getId(), List.of())))
+        .toList();
   }
 
-  private UserDTO toUserDTO(User user) {
+  private UserDTO toUserDTO(User user, List<Integer> programRoleIds) {
     UserDTO dto = new UserDTO();
 
     dto.setId(user.getId());
@@ -157,12 +167,8 @@ public class ProgramService {
     dto.setAvatarColor(user.getAvatarColor());
     dto.setCreatedAt(user.getCreatedAt());
 
-    dto.setRoles(
-            user.getRoles()
-                    .stream()
-                    .map(Role::getId)
-                    .toList()
-    );
+    // Rôles de l'utilisateur DANS ce programme (peut être vide).
+    dto.setRoles(programRoleIds);
 
     return  dto;
   }
@@ -311,5 +317,23 @@ public class ProgramService {
     long uId = user.getId();
     long pId = programId;
     afterCommit(() -> realtimePublisher.subscriptionRemoved(uId, pId));
+  }
+
+  // Supprimer un programme (admin) — le retire pour TOUS ses abonnés.
+  @Transactional
+  public void deleteProgram(Integer programId) {
+    Program program =
+        programRepository.findById(programId).orElseThrow(ProgramNotFoundException::new);
+
+    // Abonnés capturés AVANT delete (pour l'écho WS user:<id> ; collection lazy vidée ensuite).
+    List<Integer> subscriberIds =
+        userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
+
+    // ON DELETE CASCADE en base : User_Program, program_course (les cours PARTAGÉS restent,
+    // seul le lien est retiré), User_Program_Role.
+    programRepository.delete(program);
+
+    // ── Temps réel : chaque abonné (room user:<id>) retire le programme de sa liste. ──
+    afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programDeleted(uid, programId)));
   }
 }

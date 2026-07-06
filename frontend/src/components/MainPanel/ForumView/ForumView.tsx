@@ -205,6 +205,8 @@ const ForumView: React.FC<ForumViewProps> = ({
   /** Post en cours d'edition inline (null = aucun) + brouillon courant. */
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  // Titre en cours d'édition (sujet racine uniquement ; vide pour une réponse).
+  const [editTitleDraft, setEditTitleDraft] = useState('');
   /** Post auquel on redige une reponse (null = aucun) + brouillon courant. */
   const [replyingTo, setReplyingTo] = useState<number | null>(null);
   const [replyDraft, setReplyDraft] = useState('');
@@ -299,23 +301,31 @@ const ForumView: React.FC<ForumViewProps> = ({
     setConfirmDeleteId(null);
     setEditingId(post.id);
     setEditDraft(post.content);
+    setEditTitleDraft(post.title ?? '');
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditDraft('');
+    setEditTitleDraft('');
   }
 
-  /** Valide la modification inline (optimiste via le hook) ; rouvre l'editeur si echec. */
-  async function submitEdit(post: ForumPost) {
+  /**
+   * Valide la modification inline (optimiste via le hook) ; rouvre l'editeur si echec.
+   * `isThread` = sujet racine → le titre est editable et OBLIGATOIRE (comme le contenu).
+   */
+  async function submitEdit(post: ForumPost, isThread: boolean) {
     const content = editDraft.trim();
+    const title = editTitleDraft.trim();
+    // Rien de vide (le bouton est deja desactive, filet de securite).
+    if (!content || (isThread && !title)) return;
     cancelEdit();
-    if (!content || content === post.content) return;
-    const ok = await editPost(post.id, content);
+    const ok = await editPost(post.id, content, isThread ? title : undefined);
     if (!ok) {
       // Échec : on rouvre l'editeur avec la saisie pour pouvoir reessayer.
       setEditingId(post.id);
       setEditDraft(content);
+      if (isThread) setEditTitleDraft(title);
     }
   }
 
@@ -440,16 +450,31 @@ const ForumView: React.FC<ForumViewProps> = ({
   }
 
   /** Editeur Markdown inline (modification d'un post). */
-  function renderEditor(post: ForumPost) {
+  function renderEditor(post: ForumPost, isThread: boolean) {
     return (
-      <MarkdownEditor
-        value={editDraft}
-        onChange={setEditDraft}
-        onSubmit={() => submitEdit(post)}
-        onCancel={cancelEdit}
-        submitLabel={t.editSave}
-        placeholder={t.editPlaceholder}
-      />
+      <>
+        {/* Titre editable uniquement pour un sujet racine ; obligatoire (disableSubmit). */}
+        {isThread && (
+          <input
+            type="text"
+            role="edit-title"
+            value={editTitleDraft}
+            onChange={(event) => setEditTitleDraft(event.target.value)}
+            placeholder={t.newThreadTitle}
+            aria-label={t.newThreadTitle}
+            maxLength={128}
+          />
+        )}
+        <MarkdownEditor
+          value={editDraft}
+          onChange={setEditDraft}
+          onSubmit={() => submitEdit(post, isThread)}
+          onCancel={cancelEdit}
+          submitLabel={t.editSave}
+          placeholder={t.editPlaceholder}
+          disableSubmit={isThread && editTitleDraft.trim() === ''}
+        />
+      </>
     );
   }
 
@@ -519,7 +544,8 @@ const ForumView: React.FC<ForumViewProps> = ({
       <div role="comment-body">
         {renderByline(post)}
         {editing ? (
-          renderEditor(post)
+          // Une réponse n'a pas de titre → isThread=false.
+          renderEditor(post, false)
         ) : (
           // Une réponse prend aussi en charge le Markdown.
           <Markdown source={post.content} />
@@ -657,7 +683,8 @@ const ForumView: React.FC<ForumViewProps> = ({
           {renderByline(post)}
           {post.title && <h2 role="thread-title">{post.title}</h2>}
           {editing ? (
-            renderEditor(post)
+            // Sujet racine → titre editable (isThread=true).
+            renderEditor(post, true)
           ) : (
             // Un post parent (sujet) prend en charge le Markdown.
             <Markdown source={post.content} />

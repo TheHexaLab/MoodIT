@@ -208,7 +208,8 @@
 
 .coursePicker > ul {
     --picker-row-height: 3.25rem;
-    --picker-visible-rows: 4;
+    /* Nombre de cours visibles avant scroll : 5 tiennent flush (au-delà, la liste défile). */
+    --picker-visible-rows: 5;
     --picker-row-gap: 0.125rem;
 
     box-sizing: border-box;
@@ -234,7 +235,10 @@
 }
 
 .coursePicker > ul::-webkit-scrollbar {
-    width: 4px;
+    /* Piste élargie : la barre n'apparaît qu'au scroll, donc l'espace créé (bordure
+       transparente du pouce ci-dessous) n'existe QUE quand la scrollbar est là. Plus
+       large = plus d'espace entre les éléments et la barre (padding-right effectif au scroll). */
+    width: 0.875rem;
 }
 
 .coursePicker > ul::-webkit-scrollbar-track {
@@ -244,13 +248,24 @@
 .coursePicker > ul::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
+    /* Pouce visible ~4px (= piste − bordures), poussé vers le bord droit par des bordures
+       transparentes ASYMÉTRIQUES : gros espace à GAUCHE (entre les éléments et le pouce),
+       petit à droite (pouce ↔ bord). background limité au padding-box. */
+    border-left: 0.5rem solid transparent;
+    border-right: 0.125rem solid transparent;
+    background-clip: padding-box;
 }
 
 .coursePicker > ul::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
+    background-clip: padding-box;
 }
 
 .coursePicker > ul > li {
+    /* Hauteur FIXE = --picker-row-height : rend le calcul de max-height de la liste EXACT
+       (le contenu réel — code + titre — est plus court que la ligne, donc pas de rognage).
+       Sans ça, 5 cours ne remplissaient pas la hauteur estimée → liste « pas flush ». */
+    flex: 0 0 var(--picker-row-height);
     display: flex;
     align-items: stretch;
     border-radius: 0.375rem;

@@ -365,20 +365,24 @@ public class ForumService {
         if (forumUpdatePostDTO.getContent() != null) {
             post.setContent(forumUpdatePostDTO.getContent());
         }
+        if (forumUpdatePostDTO.getTitle() != null) {
+            post.setTitle(forumUpdatePostDTO.getTitle());
+        }
         if (forumUpdatePostDTO.getIsPinned() != null) {
             post.setIsPinned(forumUpdatePostDTO.getIsPinned());
         }
 
-        // ── Diffusion temps réel (après commit) : seul le contenu est propagé (les events
-        // WS *:edited ne portent que le contenu ; isPinned n'est pas encore diffusé). ──
-        if (forumUpdatePostDTO.getContent() != null) {
+        // ── Diffusion temps réel (après commit) : contenu + titre propagés (isPinned pas
+        // encore diffusé). Le chat n'a pas de titre → messageEdited (contenu seul). ──
+        if (forumUpdatePostDTO.getContent() != null || forumUpdatePostDTO.getTitle() != null) {
             long fId = forum.getId();
             long pId = post.getId();
             String content = post.getContent();
+            String title = post.getTitle();
             boolean discussion = isDiscussion(forum);
             afterCommit(() -> {
                 if (discussion) realtimePublisher.messageEdited(fId, pId, content);
-                else realtimePublisher.postEdited(fId, pId, content);
+                else realtimePublisher.postEdited(fId, pId, content, title);
             });
         }
 

@@ -1,5 +1,6 @@
 package com.moodit.core_service.controller;
 
+import com.moodit.core_service.dto.ChangeRoleRequest;
 import com.moodit.core_service.dto.RoleDTO;
 import com.moodit.core_service.service.RoleService;
 import lombok.RequiredArgsConstructor;
@@ -18,5 +19,12 @@ public class RoleController {
     @GetMapping
     public ResponseEntity<List<RoleDTO>> getAllRoles() {
         return ResponseEntity.ok(roleService.findAll());
+    }
+
+    /** Assigner / retirer un rôle à un membre DANS un programme (User_Program_Role). */
+    @PostMapping("/change")
+    public ResponseEntity<Void> changeRole(@RequestBody ChangeRoleRequest request) {
+        roleService.changeRole(request);
+        return ResponseEntity.noContent().build();
     }
 }

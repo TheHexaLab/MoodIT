@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ForumAuthor, type ForumPost } from './forumThreads';
+import { type AuthorUpdate } from '../../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : un callback d'API peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -35,8 +36,13 @@ export type CreatePostHandler = (
   title?: string
 ) => MaybePromise<ForumPost | void>;
 
-/** Modification d'un post (API-ready, PATCH). Peut renvoyer le post persiste. */
-export type EditPostHandler = (postId: number, content: string) => MaybePromise<ForumPost | void>;
+/** Modification d'un post (API-ready, PATCH). `title` = nouveau titre d'un sujet racine
+ *  (absent pour une réponse). Peut renvoyer le post persiste. */
+export type EditPostHandler = (
+  postId: number,
+  content: string,
+  title?: string
+) => MaybePromise<ForumPost | void>;
 
 /** Suppression d'un post (API-ready, DELETE). Cote BD : ON DELETE CASCADE du sous-fil. */
 export type DeletePostHandler = (postId: number) => MaybePromise<unknown>;
@@ -48,12 +54,14 @@ export type VotePostHandler = (postId: number, value: VoteValue) => MaybePromise
 export interface IncomingForumHandlers {
   /** Un post a ete cree (par soi ou un autre utilisateur), sous `parentId`. */
   onPost: (post: ForumPost, parentId: number | null) => void;
-  /** Un post a ete modifie. */
-  onEdit: (postId: number, content: string) => void;
+  /** Un post a ete modifie (contenu, et titre pour un sujet racine). */
+  onEdit: (postId: number, content: string, title?: string | null) => void;
   /** Un post a ete supprime (avec son sous-fil). */
   onDelete: (postId: number) => void;
   /** Un vote a change : `userId` met son vote a `value` sur `postId`. */
   onVote: (postId: number, userId: number, value: VoteValue) => void;
+  /** Un utilisateur a modifie son profil (GLOBAL) : maj de l'auteur des posts, par id. */
+  onUserUpdate?: (user: AuthorUpdate) => void;
 }
 
 /**
@@ -111,7 +119,7 @@ export interface ForumThreadsApi {
   /** Publie une reponse ; resout a `true` en cas de succes, `false` si echec. */
   addReply: (parentId: number, content: string) => Promise<boolean>;
   /** Modifie un post (optimiste) ; resout a `true` en cas de succes, `false` si echec. */
-  editPost: (postId: number, content: string) => Promise<boolean>;
+  editPost: (postId: number, content: string, title?: string) => Promise<boolean>;
   /** Supprime un post et son sous-fil (optimiste). */
   deletePost: (postId: number) => void;
 
@@ -464,19 +472,32 @@ export function useForumThreads({
     }
   }
 
-  async function editPost(postId: number, content: string): Promise<boolean> {
+  async function editPost(postId: number, content: string, title?: string): Promise<boolean> {
     const trimmed = content.trim();
+    const trimmedTitle = title?.trim();
     // id temporaire négatif = post pas encore confirmé côté serveur : on bloque.
     if (postId < 0) return false;
     const target = findInTree(threads, postId);
-    if (!target || !trimmed || trimmed === target.content) return false;
+    // Contenu OBLIGATOIRE ; titre obligatoire s'il est fourni (sujet racine).
+    if (!target || !trimmed || (trimmedTitle !== undefined && !trimmedTitle)) return false;
+    // Rien à enregistrer si contenu ET titre sont inchangés.
+    const contentSame = trimmed === target.content;
+    const titleSame = trimmedTitle === undefined || trimmedTitle === (target.title ?? '');
+    if (contentSame && titleSame) return false;
 
     const previousContent = target.content;
-    setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content: trimmed })));
+    const previousTitle = target.title;
+    setThreads((prev) =>
+      mapPost(prev, postId, (p) => ({
+        ...p,
+        content: trimmed,
+        ...(trimmedTitle !== undefined ? { title: trimmedTitle } : {}),
+      }))
+    );
 
     setError(null);
     try {
-      const saved = onEditPost ? await onEditPost(postId, trimmed) : undefined;
+      const saved = onEditPost ? await onEditPost(postId, trimmed, trimmedTitle) : undefined;
       if (!mountedRef.current) return true;
       // Le serveur fait foi sur le contenu final, mais le PATCH ne renvoie pas le
       // sous-arbre : on fusionne ses champs en PRESERVANT les reponses deja chargees
@@ -494,7 +515,9 @@ export function useForumThreads({
       return true;
     } catch {
       if (!mountedRef.current) return false;
-      setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content: previousContent }))); // rollback
+      setThreads((prev) =>
+        mapPost(prev, postId, (p) => ({ ...p, content: previousContent, title: previousTitle }))
+      ); // rollback contenu + titre
       setError("La modification n'a pas pu être enregistrée. Réessayez.");
       return false;
     }
@@ -544,9 +567,19 @@ export function useForumThreads({
     });
   }, []);
 
-  const applyIncomingEdit = useCallback((postId: number, content: string) => {
-    setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content })));
-  }, []);
+  const applyIncomingEdit = useCallback(
+    (postId: number, content: string, title?: string | null) => {
+      setThreads((prev) =>
+        mapPost(prev, postId, (p) => ({
+          ...p,
+          content,
+          // title fourni (sujet racine) → on l'applique ; null/undefined (réponse) → inchangé.
+          ...(title != null ? { title } : {}),
+        }))
+      );
+    },
+    []
+  );
 
   const applyIncomingDelete = useCallback((postId: number) => {
     setThreads((prev) => {
@@ -559,6 +592,27 @@ export function useForumThreads({
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, userId, value)));
   }, []);
 
+  // Profil modifie (GLOBAL) : on remplace prenom/nom/couleur/username de l'auteur sur
+  // tous les posts de cet utilisateur dans l'arbre (racines ET reponses imbriquees).
+  const applyIncomingUserUpdate = useCallback((user: AuthorUpdate) => {
+    const updateAuthors = (posts: ForumPost[]): ForumPost[] =>
+      posts.map((p) => ({
+        ...p,
+        author:
+          p.author.id === user.id
+            ? {
+                ...p.author,
+                username: user.username,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                avatarColor: user.avatarColor,
+              }
+            : p.author,
+        replies: p.replies ? updateAuthors(p.replies) : p.replies,
+      }));
+    setThreads((prev) => updateAuthors(prev));
+  }, []);
+
   useEffect(() => {
     if (!socket) return;
     return socket.subscribe(forumId, {
@@ -566,6 +620,7 @@ export function useForumThreads({
       onEdit: applyIncomingEdit,
       onDelete: applyIncomingDelete,
       onVote: applyIncomingVote,
+      onUserUpdate: applyIncomingUserUpdate,
     });
   }, [
     socket,
@@ -574,6 +629,7 @@ export function useForumThreads({
     applyIncomingEdit,
     applyIncomingDelete,
     applyIncomingVote,
+    applyIncomingUserUpdate,
   ]);
 
   return {

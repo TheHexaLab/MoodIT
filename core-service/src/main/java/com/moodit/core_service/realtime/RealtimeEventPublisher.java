@@ -20,6 +20,7 @@ package com.moodit.core_service.realtime;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
@@ -77,11 +78,13 @@ public class RealtimeEventPublisher {
         event("post:created", "forumId", forumId, "post", post, "parentId", parentId));
   }
 
-  public void postEdited(long forumId, long postId, String content) {
+  /** `title` = nouveau titre d'un sujet racine ('Thread'), ou null pour une réponse. */
+  public void postEdited(long forumId, long postId, String content, String title) {
     emit(
         "forum",
         forumId,
-        event("post:edited", "forumId", forumId, "postId", postId, "content", content));
+        event(
+            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title));
   }
 
   public void postDeleted(long forumId, long postId) {
@@ -188,6 +191,23 @@ public class RealtimeEventPublisher {
     emit("user", userId, event("subscription:removed", "userId", userId, "programId", programId));
   }
 
+  /**
+   * Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) : ses menus
+   * d'actions administratives se re-calculent LIVE. Scope user:&lt;userId&gt; (le rôle est
+   * propre à cet utilisateur). `roleName` = rôle le plus élevé restant ("Administrateur",
+   * "Enseignant") ou null (plus aucun rôle dans ce programme).
+   */
+  public void programRoleChanged(long userId, long programId, String roleName) {
+    emit(
+        "user",
+        userId,
+        event(
+            "program:roleChanged",
+            "userId", userId,
+            "programId", programId,
+            "roleName", roleName));
+  }
+
   // ─── Analyses MCP (scope = course) ────────────────────────────────────────
   // Poussé quand un job d'analyse MCP se termine. Room "mcp:<courseId>" : tous les
   // abonnés au feedback de ce cours reçoivent le RÉSUMÉ (le détail se fetch au clic).
@@ -223,6 +243,15 @@ public class RealtimeEventPublisher {
         event("mcp:analysis-progress", "courseId", courseId, "userId", userId, "step", step));
   }
 
+  // ─── Utilisateur (scope = GLOBAL) ─────────────────────────────────────────
+  // Un utilisateur a modifié son profil (prénom / nom / couleur d'avatar). L'auteur peut
+  // apparaître dans n'importe quel canal ou forum : on diffuse donc à TOUTES les sessions,
+  // et chaque client met à jour l'auteur des messages/posts déjà chargés (par id).
+
+  public void userUpdated(Author author) {
+    emitAll(event("user:updated", "user", author));
+  }
+
   // ─── Interne ──────────────────────────────────────────────────────────────
 
   /** Sérialise l'évènement et le diffuse à la room (scope:id). */
@@ -231,6 +260,15 @@ public class RealtimeEventPublisher {
       registry.broadcast(scope, id, objectMapper.writeValueAsString(payload));
     } catch (JsonProcessingException e) {
       log.error("Échec de sérialisation de l'évènement {} ({}:{})", payload.get("type"), scope, id, e);
+    }
+  }
+
+  /** Sérialise l'évènement et le diffuse à TOUTES les sessions (évènement global). */
+  private void emitAll(Map<String, Object> payload) {
+    try {
+      registry.broadcastAll(objectMapper.writeValueAsString(payload));
+    } catch (JsonProcessingException e) {
+      log.error("Échec de sérialisation de l'évènement global {}", payload.get("type"), e);
     }
   }
 

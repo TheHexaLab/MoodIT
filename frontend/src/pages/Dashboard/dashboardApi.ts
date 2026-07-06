@@ -1,10 +1,9 @@
 // Couche « API » du Dashboard, regroupée ici pour un seul point de bascule vers le
-// vrai backend. POUR L'INSTANT chaque fonction simule l'appel réseau (latence +
-// échec optionnel) et renvoie des données mock — mais la signature est déjà celle
-// attendue. Le Dashboard se contente d'orchestrer l'état autour.
+// vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
+// Dashboard se contente d'orchestrer l'état autour.
 //
-// TODO (global) : remplacer le corps de chaque fonction `simulate*` ci-dessous
-// par un vrai apiFetch(...) (cf. src/helpers/api.ts), sans toucher au Dashboard.
+// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE) et evaluateCode
+// (service d'exécution). Elles utilisent encore les helpers simulate* ci-dessous.
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -70,10 +69,9 @@ async function simulateWrite(errorMessage: string): Promise<void> {
 // ── Programmes / cours (chargement) ────────────────────────────────────────────
 
 /**
- * TODO — Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les
- * cours sont chargés séparément (fetchCourses) à l'entrée dans un programme : on
- * renvoie donc ici les programmes SANS leurs cours.
- * DONE
+ * Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les cours sont
+ * chargés séparément (fetchCourses) à l'entrée dans un programme : on renvoie donc ici
+ * les programmes SANS leurs cours.
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
   console.log('fetchPrograms');
@@ -84,7 +82,7 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
   return data.map((p: DemoProgram) => ({ ...p, courses: [] }));
 }
 
-/** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
+/** Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
 export async function fetchCourses(programId: number): Promise<Course[]> {
   const userId = localStorage.getItem('moodit_user_id');
 
@@ -212,10 +210,6 @@ export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
 }
 
 /**
- * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
- * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
- */
-/**
  * Types de question disponibles (table Q_Type : id + name FR). Alimente le sélecteur
  * de type de l'éditeur de question.
  */
@@ -225,6 +219,10 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
   return await res.json();
 }
 
+/**
+ * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
+ * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
+ */
 export async function fetchLanguages(): Promise<Language[]> {
   await simulateFetch('Échec simulé (chargement des langages)');
   console.log(DEFAULT_LANGUAGES);
@@ -329,9 +327,8 @@ export async function reorderQuizzes(courseId: number, quizIds: number[]): Promi
 }
 
 /**
- * TODO — Charger les données du gestionnaire de rôles d'un programme :
- * la liste des rôles attribuables ET la liste des membres avec le rôle de chacun. Alimente le
- * RoleEditorPopup.
+ * Charger les données du gestionnaire de rôles d'un programme : la liste des rôles
+ * attribuables ET la liste des membres avec le rôle de chacun. Alimente le RoleEditorPopup.
  */
 export async function fetchProgramRoles(programId: number) {
   const [rolesRes, usersRes] = await Promise.all([
@@ -357,8 +354,8 @@ export async function fetchProgramRoles(programId: number) {
 // ── Établissements / catalogue (AddSubscriptionPopup) ──────────────────────────
 
 /**
- * TODO — Lister les établissements dans lesquels l'utilisateur peut CRÉER un
- * programme (1re étape du AddSubscriptionPopup en mode création).
+ * Lister les établissements dans lesquels l'utilisateur peut CRÉER un programme
+ * (1re étape du AddSubscriptionPopup en mode création).
  */
 export async function fetchEstablishmentsForCreate() {
   const res = await apiFetch('/api/establishments');
@@ -367,8 +364,8 @@ export async function fetchEstablishmentsForCreate() {
 }
 
 /**
- * TODO — Lister les établissements dont l'utilisateur peut REJOINDRE des programmes
- * existants (1re étape du AddSubscriptionPopup en mode adhésion).
+ * Lister les établissements dont l'utilisateur peut REJOINDRE des programmes existants
+ * (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
   console.log('fetchEstablishmentsForJoin');
@@ -382,8 +379,8 @@ export async function fetchEstablishmentsForJoin() {
 }
 
 /**
- * TODO — Lister le catalogue des programmes existants d'un établissement
- * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
+ * Lister le catalogue des programmes existants d'un établissement pour que l'utilisateur
+ * choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
   console.log('fetchEstablishmentPrograms');
@@ -397,7 +394,7 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
 }
 
 /**
- * TODO — Lister les cours rejoignables d'un programme.
+ * Lister les cours rejoignables d'un programme.
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
@@ -418,9 +415,8 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
 }
 
 /**
- * TODO — Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ rattaché (ses inscriptions).
- * Sert à pré-cocher le JoinCoursesPopup, indépendamment
- * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
+ * Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ inscrit. Sert à
+ * pré-cocher le JoinCoursesPopup, indépendamment de l'état (lazy-loaded) du Dashboard.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
   console.log('fetchJoinedCourseIds');
@@ -470,9 +466,8 @@ export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
 // ── Programmes / cours (écriture) ──────────────────────────────────────────────
 
 /**
- * TODO — Créer un cours (titre, code) et le rattacher aux programmes choisis
- * (`programIds`). Renvoie le cours persisté (id attribué par le « serveur ») pour
- * que le Dashboard l'insère dans sa liste.
+ * Créer un cours (titre, code) et le rattacher aux programmes choisis (`programIds`).
+ * Renvoie le cours persisté (id attribué par le serveur) pour que le Dashboard l'insère.
  */
 export async function createCourse(course: NewCourse): Promise<Course> {
   const res = await apiFetch('/api/programs/courses', {
@@ -490,8 +485,8 @@ export async function createCourse(course: NewCourse): Promise<Course> {
 }
 
 /**
- * TODO — Créer un nouveau programme et y abonner l'utilisateur d'office. Renvoie le
- * programme persisté (id attribué par le « serveur ») pour l'ajouter à la liste.
+ * Créer un nouveau programme et y abonner l'utilisateur d'office. Renvoie le programme
+ * persisté (id attribué par le serveur) pour l'ajouter à la liste.
  */
 export async function createProgram(program: NewProgram): Promise<DemoProgram> {
   const res = await apiFetch('/api/establishments/programs', {
@@ -513,8 +508,8 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
 }
 
 /**
- * TODO — Abonner l'utilisateur aux programmes sélectionnés du catalogue. Renvoie les
- * programmes ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
+ * Abonner l'utilisateur aux programmes sélectionnés du catalogue. Renvoie les programmes
+ * ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
  */
 export async function joinPrograms(selection: JoinSelection): Promise<DemoProgram[]> {
   const userId = localStorage.getItem('moodit_user_id');
@@ -542,8 +537,8 @@ export async function joinPrograms(selection: JoinSelection): Promise<DemoProgra
 }
 
 /**
- * TODO — Mettre à jour un cours (code, titre) et, le cas échéant, son rattachement
- * aux programmes (relation many-to-many program_course).
+ * Mettre à jour un cours (code, titre) et, le cas échéant, son rattachement aux
+ * programmes (relation many-to-many program_course).
  */
 export async function updateCourse(courseId: number, update: CourseUpdate): Promise<void> {
   const res = await apiFetch(`/api/courses/${courseId}`, {
@@ -554,7 +549,7 @@ export async function updateCourse(courseId: number, update: CourseUpdate): Prom
   if (!res.ok) throw new Error('Échec modification du cours');
 }
 
-/** TODO — Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */
+/** Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */
 export async function updateProgram(programId: number, update: ProgramUpdate): Promise<void> {
   const res = await apiFetch(`/api/programs/${programId}`, {
     method: 'PATCH',
@@ -564,7 +559,7 @@ export async function updateProgram(programId: number, update: ProgramUpdate): P
   if (!res.ok) throw new Error('Échec modification du programme');
 }
 
-/** TODO — Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
+/** Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
 export async function leaveProgram(programId: number): Promise<void> {
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/programs/${programId}/users/${userId}`, {
@@ -573,13 +568,32 @@ export async function leaveProgram(programId: number): Promise<void> {
   if (!res.ok) throw new Error('Échec quitter le programme');
 }
 
-/** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
+/**
+ * Supprimer un programme (admin) — le retire pour TOUS ses abonnés (cascade BD :
+ * abonnements, liens cours, rôles ; les cours partagés restent). Le backend diffuse
+ * `program:deleted` sur la room de chaque abonné.
+ */
+export async function deleteProgram(programId: number): Promise<void> {
+  const res = await apiFetch(`/api/programs/${programId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Échec suppression du programme');
+}
+
+/** Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
 export async function leaveCourse(courseId: number): Promise<void> {
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/courses/${courseId}/users/${userId}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error('Échec quitter le cours');
+}
+
+/**
+ * Supprimer un cours (admin) — le retire pour TOUS ses programmes (cascade BD : sections,
+ * quiz, forums, inscriptions). Le backend diffuse `course:deleted` sur chaque programme.
+ */
+export async function deleteCourse(courseId: number): Promise<void> {
+  const res = await apiFetch(`/api/courses/${courseId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Échec suppression du cours');
 }
 
 /**
@@ -595,9 +609,9 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
 }
 
 /**
- * TODO — Inscrire l'utilisateur aux cours choisis d'un programme. Renvoie les cours
- * rejoints (forme `Course`, sans canaux) pour que le Dashboard les fusionne dans le
- * programme. `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
+ * Inscrire l'utilisateur aux cours choisis d'un programme. Renvoie les cours rejoints
+ * (forme `Course`, sans canaux) pour que le Dashboard les fusionne dans le programme.
+ * `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
  */
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
   console.log('joinCourses', programId);
@@ -630,16 +644,18 @@ export async function joinCourses(programId: number, courseIds: number[]): Promi
 }
 
 /**
- * TODO — Persister une modification de la structure d'un cours : ajout, renommage,
- * suppression ou réordonnancement d'une section (canal, quiz ou forum). `change`
- * décrit l'opération exacte ; `sectionType` indique la famille de section visée.
+ * Persiste une modification de structure d'un cours (canal 'text' / forum) : ajout,
+ * renommage, suppression ou réordonnancement. `change` décrit l'opération. Endpoint DÉDIÉ
+ * `/sections` (distinct de PATCH /courses/{id} qui édite titre/code). Renvoie le changement
+ * APPLIQUÉ — pour un `create`, avec l'id RÉEL du forum (réconciliation de l'optimiste). Le
+ * backend diffuse `section:changed` en WS. (Les quiz passent par leurs propres handlers.)
  */
 export async function changeSection(
   courseId: number,
   sectionType: string,
   change: ItemChange
-): Promise<void> {
-  const res = await apiFetch(`/api/courses/${courseId}`, {
+): Promise<ItemChange> {
+  const res = await apiFetch(`/api/courses/${courseId}/sections`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -653,19 +669,21 @@ export async function changeSection(
   if (!res.ok) {
     throw new Error('Échec modification de section');
   }
+  return (await res.json()) as ItemChange;
 }
 
 /**
- * TODO — Attribuer ou retirer un rôle à un membre dans un programme (le RoleEditorPopup
- * gère l'optimisme + rollback : on ne fait que persister le changement).
+ * Attribuer ou retirer un rôle à un membre DANS un programme (INSERT/DELETE User_Program_Role).
+ * Le RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister. Le popup ignore
+ * le programme : le Dashboard fournit le `programId` (les rôles sont scopés au programme).
  */
-export async function changeRole(change: RoleChange): Promise<void> {
+export async function changeRole(programId: number, change: RoleChange): Promise<void> {
   const res = await apiFetch(`/api/roles/change`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(change),
+    body: JSON.stringify({ ...change, programId }),
   });
 
   if (!res.ok) {
@@ -675,10 +693,7 @@ export async function changeRole(change: RoleChange): Promise<void> {
 
 // ── Chat ('Discussion') ────────────────────────────────────────────────────────
 
-/**
- * TODO — Charger l'historique des messages d'un canal de chat. Le mock recherche le
- * canal dans les programmes mock (par id) et renvoie ses messages.
- */
+/** Charger l'historique des messages d'un canal de chat. */
 export async function fetchMessages(channelId: number): Promise<ChannelMessage[]> {
   console.log('fetchMessages');
   const res = await apiFetch(`/api/forums/${channelId}/messages`);
@@ -695,9 +710,9 @@ export async function fetchMessages(channelId: number): Promise<ChannelMessage[]
 }
 
 /**
- * TODO — Publier un message dans le canal `channelId` (réponse à un autre si `parentId`).
- * Devra RENVOYER le message persisté (id réel) en conservant le `clientMessageId`, afin
- * de réconcilier l'affichage optimiste et de dédupliquer l'écho reçu par WebSocket.
+ * Publier un message dans le canal `channelId` (réponse à un autre si `parentId`). Renvoie
+ * le message persisté (id réel) en conservant le `clientMessageId`, pour réconcilier
+ * l'affichage optimiste et dédupliquer l'écho reçu par WebSocket.
  */
 export async function sendMessage(
   channelId: number,
@@ -736,7 +751,7 @@ export async function sendMessage(
   };
 }
 
-/** TODO — Modifier le contenu d'un message existant. */
+/** Modifier le contenu d'un message existant. */
 export async function editMessage(
   forumID: number,
   messageId: number,
@@ -759,7 +774,7 @@ export async function editMessage(
   console.log('[api] Modification du message', messageId, ':', content);
 }
 
-/** TODO — Supprimer un message. */
+/** Supprimer un message. */
 export async function deleteMessage(forumID: number, messageId: number): Promise<void> {
   const res = await apiFetch(`/api/forums/${forumID}/posts/${messageId}`, {
     method: 'DELETE',
@@ -802,8 +817,8 @@ function toForumPost(p: PostVoteUserDTO): ForumPost {
 }
 
 /**
- * TODO — Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement
- * paresseux : les réponses sont récupérées à la demande via fetchReplies).
+ * Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement paresseux :
+ * les réponses sont récupérées à la demande via fetchReplies).
  */
 export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
   const res = await apiFetch(`/api/forums/${forumId}/posts`);
@@ -813,8 +828,8 @@ export async function fetchThreads(forumId: number): Promise<ForumPost[]> {
 }
 
 /**
- * TODO — Charger les réponses DIRECTES (enfants immédiats) d'un post, au moment où
- * l'utilisateur déplie le fil.
+ * Charger les réponses DIRECTES (enfants immédiats) d'un post, au moment où l'utilisateur
+ * déplie le fil.
  */
 export async function fetchReplies(forumId: number, postId: number): Promise<ForumPost[]> {
   // Endpoint dédié : renvoie DIRECTEMENT la liste des réponses immédiates (enfants),
@@ -826,9 +841,9 @@ export async function fetchReplies(forumId: number, postId: number): Promise<For
 }
 
 /**
- * TODO — Publier un sujet ou une réponse dans le forum `forumId` (réponse si `parentId`,
- * avec un `title` pour un sujet racine). Devra RENVOYER le post persisté (id réel) en
- * conservant le `clientPostId` pour la réconciliation optimiste ↔ écho WebSocket.
+ * Publier un sujet ou une réponse dans le forum `forumId` (réponse si `parentId`, avec un
+ * `title` pour un sujet racine). Renvoie le post persisté (id réel) en conservant le
+ * `clientPostId` pour la réconciliation optimiste ↔ écho WebSocket.
  */
 export async function createPost(
   forumId: number,
@@ -865,16 +880,19 @@ export async function createPost(
   return { ...toForumPost(saved), clientPostId };
 }
 
-/** TODO — Modifier le contenu d'un post. */
-export async function editPost(forumId: number, postId: number, content: string): Promise<void> {
+/** Modifier le contenu d'un post ; `title` (sujet racine 'Thread') envoyé s'il est fourni. */
+export async function editPost(
+  forumId: number,
+  postId: number,
+  content: string,
+  title?: string
+): Promise<void> {
   const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      content,
-    }),
+    body: JSON.stringify(title !== undefined ? { content, title } : { content }),
   });
 
   if (!res.ok) {
@@ -884,7 +902,7 @@ export async function editPost(forumId: number, postId: number, content: string)
   console.log('[api] Modification du post', postId, ':', content);
 }
 
-/** TODO — Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
+/** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
 export async function deletePost(forumId: number, postId: number): Promise<void> {
   const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
     method: 'DELETE',

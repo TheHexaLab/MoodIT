@@ -2,6 +2,7 @@ package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.CourseNotFoundException;
+import com.moodit.core_service.exception.ForumNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.CourseRepository;
@@ -10,6 +11,9 @@ import com.moodit.core_service.repository.ForumRepository;
 import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.CourseDto;
+import com.moodit.core_service.realtime.dto.ItemChangeDto;
+import com.moodit.core_service.realtime.dto.ItemDto;
+import java.util.Objects;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -214,6 +218,99 @@ public class CourseService {
     courseRepository.delete(course);
 
     afterCommit(() -> programIds.forEach(pid -> realtimePublisher.courseDeleted(pid, cId)));
+  }
+
+  /** F_Type.id des sections : 'text' = canal 'Discussion' (1), 'forum' = 'Thread' (2). */
+  private static final int F_TYPE_DISCUSSION = 1;
+  private static final int F_TYPE_THREAD = 2;
+
+  /**
+   * Persiste une modification de section (canal 'text' / forum) et la diffuse en temps réel.
+   * Agit sur des Forum du bon f_type. Pour un `create`, renvoie le changement AVEC l'id RÉEL
+   * (le front réconcilie son affichage optimiste ; l'écho WS est alors idempotent par id).
+   * Les quiz ont leurs propres endpoints (createQuiz/reorderQuizzes…) — pas concernés ici.
+   */
+  @Transactional
+  public ItemChangeDto changeSection(Integer courseId, String sectionType, ItemChangeDto change) {
+    Course course = courseRepository.findById(courseId).orElseThrow(CourseNotFoundException::new);
+    int fTypeId = "text".equals(sectionType) ? F_TYPE_DISCUSSION : F_TYPE_THREAD;
+
+    ItemChangeDto emitted;
+    switch (change.type()) {
+      case "create" -> {
+        Forum forum = new Forum();
+        forum.setTitle(change.item().name());
+        forum.setCourse(course);
+        FType ft = new FType();
+        ft.setId(fTypeId);
+        forum.setFType(ft);
+        forum.setPosition(nextPosition(course, fTypeId));
+        Forum saved = forumRepository.saveAndFlush(forum); // flush → id réel
+        // Cohérence de la collection managée (orphanRemoval) : le forum créé y figure.
+        if (course.getForums() != null) course.getForums().add(saved);
+        emitted = ItemChangeDto.create(new ItemDto(String.valueOf(saved.getId()), saved.getTitle()));
+      }
+      case "rename" -> {
+        Forum forum = forumInCourse(course, change.id());
+        forum.setTitle(change.name());
+        forumRepository.save(forum);
+        emitted = ItemChangeDto.rename(change.id(), change.name());
+      }
+      case "delete" -> {
+        Forum forum = forumInCourse(course, change.id());
+        // orphanRemoval=true sur Course.forums : on RETIRE de la collection managée (au lieu
+        // de forumRepository.delete, qui serait annulé par la cascade tant que le forum y est).
+        course.getForums().remove(forum);
+        emitted = ItemChangeDto.delete(change.id());
+      }
+      case "reorder" -> {
+        int pos = 0;
+        for (String id : change.orderedIds()) {
+          Forum forum = forumInCourse(course, id);
+          forum.setPosition(pos++);
+          forumRepository.save(forum);
+        }
+        emitted = ItemChangeDto.reorder(change.orderedIds());
+      }
+      default -> throw new IllegalArgumentException("Type de changement inconnu : " + change.type());
+    }
+
+    // ── Temps réel : la modification est répercutée dans chaque programme du cours. ──
+    long cId = course.getId();
+    List<Integer> programIds =
+        course.getPrograms() == null ? List.of() : course.getPrograms().stream().map(Program::getId).toList();
+    ItemChangeDto ws = emitted;
+    afterCommit(() ->
+        programIds.forEach(pid -> realtimePublisher.sectionChanged(pid, cId, sectionType, ws)));
+
+    return emitted;
+  }
+
+  /** Position en fin de section : max(position) du f_type dans le cours + 1 (0 si vide). */
+  private int nextPosition(Course course, int fTypeId) {
+    if (course.getForums() == null) return 0;
+    return course.getForums().stream()
+        .filter(f -> f.getFType() != null && Objects.equals(f.getFType().getId(), fTypeId))
+        .map(Forum::getPosition)
+        .filter(Objects::nonNull)
+        .max(Integer::compareTo)
+        .map(p -> p + 1)
+        .orElse(0);
+  }
+
+  /** Retrouve un Forum du cours par son id (chaîne côté front → Integer). */
+  private Forum forumInCourse(Course course, String idStr) {
+    Integer id;
+    try {
+      id = Integer.valueOf(idStr);
+    } catch (NumberFormatException e) {
+      // id temporaire non réconcilié (ex. crypto.randomUUID d'un create non persisté) : 404 propre.
+      throw new ForumNotFoundException();
+    }
+    return (course.getForums() == null ? List.<Forum>of() : course.getForums()).stream()
+        .filter(f -> f.getId().equals(id))
+        .findFirst()
+        .orElseThrow(ForumNotFoundException::new);
   }
 
   @Transactional

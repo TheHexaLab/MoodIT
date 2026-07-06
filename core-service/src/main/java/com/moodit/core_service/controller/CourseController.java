@@ -6,6 +6,8 @@ import com.moodit.core_service.dto.CourseUpdateDTO;
 import com.moodit.core_service.dto.ForumDTO;
 import com.moodit.core_service.dto.QuizDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
+import com.moodit.core_service.dto.SectionChangeRequest;
+import com.moodit.core_service.realtime.dto.ItemChangeDto;
 
 // Service
 import com.moodit.core_service.dto.UserCreateInCoursesDTO;
@@ -65,6 +67,19 @@ public class CourseController {
       @PathVariable Integer courseId, @RequestBody CourseUpdateDTO request) {
 
     return ResponseEntity.ok(courseService.updateCourse(courseId, request));
+  }
+
+  /**
+   * Modification d'une SECTION (canal 'text' / forum) : create/rename/delete/reorder d'un
+   * Forum. Endpoint distinct de PATCH /{courseId} (qui édite titre/code/programmes). Renvoie
+   * le changement appliqué (avec l'id RÉEL pour un create) ; diffuse `section:changed` en WS.
+   */
+  @PatchMapping("/{courseId}/sections")
+  public ResponseEntity<ItemChangeDto> changeSection(
+      @PathVariable Integer courseId, @RequestBody SectionChangeRequest request) {
+
+    return ResponseEntity.ok(
+        courseService.changeSection(courseId, request.getSectionType(), request.getChange()));
   }
 
   @DeleteMapping("/{courseId}")
