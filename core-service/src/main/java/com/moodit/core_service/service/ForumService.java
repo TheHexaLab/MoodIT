@@ -31,7 +31,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -204,8 +206,55 @@ public class ForumService {
 
         List<Post> children = post.getChildren();
         if (children == null) return List.of();
-        return children.stream()
-                .map(child -> toPostVoteUserDTO(child, false, currentUserId))
+        return toPostVoteUserDTOBatch(children, currentUserId);
+    }
+
+    /**
+     * Construit les DTO d'un LOT de posts SANS N+1 (cas loadChildren = false : listes paginées /
+     * réponses) : la somme des votes, le vote propre et le nombre de réponses sont chargés par
+     * REQUÊTES AGRÉGÉES groupées (3 requêtes, indépendamment de la taille du lot) ; l'auteur et le
+     * parent (ManyToOne) sont initialisés par lots via @BatchSize. Résultat IDENTIQUE à
+     * toPostVoteUserDTO(p, false, currentUserId), post par post.
+     */
+    private List<PostVoteUserDTO> toPostVoteUserDTOBatch(List<Post> posts, Integer currentUserId) {
+        if (posts.isEmpty()) return List.of();
+
+        List<Integer> ids = posts.stream().map(Post::getId).toList();
+
+        Map<Integer, Integer> voteTotalById = new HashMap<>();
+        for (Object[] row : voteRepository.sumValueByPostIds(ids)) {
+            voteTotalById.put((Integer) row[0], ((Number) row[1]).intValue());
+        }
+
+        Map<Integer, Integer> userVoteById = new HashMap<>();
+        if (currentUserId != null) {
+            for (Object[] row : voteRepository.valueByUserAndPostIds(currentUserId, ids)) {
+                userVoteById.put((Integer) row[0], (Integer) row[1]);
+            }
+        }
+
+        Map<Integer, Integer> childCountById = new HashMap<>();
+        for (Object[] row : postRepository.countChildrenByParentIds(ids)) {
+            childCountById.put((Integer) row[0], ((Number) row[1]).intValue());
+        }
+
+        return posts.stream()
+                .map(p -> {
+                    PostVoteUserDTO dto = new PostVoteUserDTO();
+                    dto.setId(p.getId());
+                    dto.setCreatedAt(toUtcInstant(p.getCreatedAt()));
+                    dto.setContent(p.getContent());
+                    dto.setTitle(p.getTitle());
+                    dto.setIsPinned(p.getIsPinned());
+                    dto.setVoteTotalValue(voteTotalById.getOrDefault(p.getId(), 0));
+                    dto.setUserVoteValue(userVoteById.get(p.getId()));
+                    dto.setUserId(p.getUser().getId());
+                    dto.setPostParentId(p.getParent() != null ? p.getParent().getId() : null);
+                    dto.setAuthor(toAuthorDTO(p.getUser()));
+                    dto.setChildrenCount(childCountById.getOrDefault(p.getId(), 0));
+                    dto.setChildren(null);
+                    return dto;
+                })
                 .toList();
     }
 
@@ -220,9 +269,9 @@ public class ForumService {
         forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
         int safeLimit = limit <= 0 ? 30 : Math.min(limit, 100);
 
-        return postRepository.findMessagesPage(forumId, before, PageRequest.of(0, safeLimit)).stream()
-                .map(p -> toPostVoteUserDTO(p, false, currentUserId))
-                .toList();
+        return toPostVoteUserDTOBatch(
+                postRepository.findMessagesPage(forumId, before, PageRequest.of(0, safeLimit)),
+                currentUserId);
     }
 
     /**
@@ -236,10 +285,14 @@ public class ForumService {
         forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
         int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
 
-        return postRepository.findRootPostsPage(forumId, before, PageRequest.of(0, safeLimit))
-                .stream()
-                .map(p -> toPostVoteUserDTO(p, loadChildren, currentUserId))
-                .toList();
+        List<Post> page =
+                postRepository.findRootPostsPage(forumId, before, PageRequest.of(0, safeLimit));
+        // loadChildren = true (rare) : on garde le mapping par post (sous-arbres). Sinon (cas des
+        // listes paginées) : mapping par LOT sans N+1.
+        if (loadChildren) {
+            return page.stream().map(p -> toPostVoteUserDTO(p, true, currentUserId)).toList();
+        }
+        return toPostVoteUserDTOBatch(page, currentUserId);
     }
     //endregion
 

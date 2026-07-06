@@ -40,4 +40,13 @@ public interface PostRepository extends JpaRepository<Post, Integer> {
             + " ORDER BY p.id DESC")
     List<Post> findRootPostsPage(
         @Param("forumId") Integer forumId, @Param("before") Integer before, Pageable pageable);
+
+    /**
+     * Nombre de réponses directes GROUPÉ par post parent, pour un lot de posts. Évite le N+1
+     * (1 requête au lieu de `post.getChildren().size()` par post). Chaque ligne = [parentId, count].
+     */
+    @Query(
+        "SELECT p.parent.id, COUNT(p) FROM Post p WHERE p.parent.id IN :parentIds"
+            + " GROUP BY p.parent.id")
+    List<Object[]> countChildrenByParentIds(@Param("parentIds") List<Integer> parentIds);
 }
