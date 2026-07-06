@@ -68,6 +68,21 @@ mcp-service/*.iws
 mcp-service/*.ipr
 mcp-service/.run
 
+# ==============================
+# Permission Service — Java / Spring Boot / Gradle
+# ==============================
+permission-service/build/
+permission-service/.gradle/
+permission-service/out/
+permission-service/*.class
+permission-service/*.jar
+permission-service/*.war
+permission-service/.idea/*
+permission-service/*.iml
+permission-service/*.iws
+permission-service/*.ipr
+permission-service/.run
+
 # Eclipse / STS
 .classpath
 .project
