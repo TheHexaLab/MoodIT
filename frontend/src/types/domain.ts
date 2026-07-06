@@ -12,6 +12,8 @@
  * « programme + cours » embarque `courses`).
  */
 
+import type { ProgramRoleName } from '../helpers/roles.ts';
+
 /** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses. */
 export type ForumType = 'Discussion' | 'Thread';
 
@@ -85,10 +87,10 @@ export interface Program {
   courses?: Course[];
   /**
    * Rôle le plus élevé de l'utilisateur COURANT dans ce programme (User_Program_Role) :
-   * 'Administrateur', 'Enseignant' ou null/absent (aucun). Pilote les permissions front
+   * Administrateur, Enseignant ou null/absent (aucun). Pilote les permissions front
    * (cf. permissions.ts). Renseigné par fetchPrograms via le champ `roleName` du ProgramDTO.
    */
-  roleName?: 'Administrateur' | 'Enseignant' | null;
+  roleName?: ProgramRoleName | null;
 }
 
 /**

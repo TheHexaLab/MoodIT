@@ -1,4 +1,5 @@
 import { type AuthorUpdate, type ChannelMessage, type Role } from '../types/domain.ts';
+import { type ProgramRoleName } from '../helpers/roles.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
@@ -80,7 +81,7 @@ type ServerEvent =
       type: 'program:roleChanged';
       userId: number;
       programId: number;
-      roleName: 'Administrateur' | 'Enseignant' | null;
+      roleName: ProgramRoleName | null;
     }
   // Les rôles GLOBAUX de l'utilisateur (User_Role) ont changé → il re-dérive ses droits
   // plateforme (admin général / Gardien). `roles` = liste globale à jour.

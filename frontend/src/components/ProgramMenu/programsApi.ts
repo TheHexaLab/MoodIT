@@ -1,5 +1,6 @@
 import { type Program } from './ProgramMenu';
 import { type Role } from '../../types/domain.ts';
+import { type ProgramRoleName } from '../../helpers/roles.ts';
 
 /**
  * Contrat « API + temps réel » de ProgramMenu (miroir de CourseMenu).
@@ -40,7 +41,7 @@ export interface IncomingProgramHandlers {
    */
   onProgramRoleChange?: (
     programId: number,
-    roleName: 'Administrateur' | 'Enseignant' | null
+    roleName: ProgramRoleName | null
   ) => void;
   /**
    * Les rôles GLOBAUX de l'utilisateur (User_Role) ont changé : il re-dérive ses droits

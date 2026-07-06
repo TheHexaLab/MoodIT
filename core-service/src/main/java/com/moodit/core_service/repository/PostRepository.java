@@ -17,6 +17,10 @@ public interface PostRepository extends JpaRepository<Post, Integer> {
      * Page de messages d'un canal (racines ET réponses, à plat), du plus RÉCENT au plus ancien.
      * Pagination par CURSEUR : `before` = id du plus ancien déjà chargé (null = page la plus
      * récente). `id < :before` charge les messages plus ANCIENS. `pageable` porte la limite.
+     *
+     * NB : le curseur par id suppose que l'ordre des id (SERIAL, monotone croissant à l'insertion)
+     * correspond à l'ordre chronologique (created_at). Vrai tant que les posts sont insérés dans
+     * l'ordre — le cas ici. Un import/backfill hors ordre casserait cette hypothèse.
      */
     @Query(
         "SELECT p FROM Post p WHERE p.forum.id = :forumId"

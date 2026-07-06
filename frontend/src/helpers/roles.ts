@@ -14,3 +14,6 @@ export const ROLE = {
 
 /** Nom de rôle affichable dans une permission (programme ou global). */
 export type RoleName = (typeof ROLE)[keyof typeof ROLE];
+
+/** Rôle possible d'un utilisateur DANS un programme (User_Program_Role) : Administrateur ou Enseignant. */
+export type ProgramRoleName = typeof ROLE.ADMIN | typeof ROLE.TEACHER;
