@@ -16,6 +16,8 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 
 @RestController
@@ -62,9 +64,28 @@ public class AuthController {
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body);
   }
 
+  @PostMapping("/logout")
+  public ResponseEntity<Void> logout(HttpServletRequest request) {
+    authService.logout(extractTokenFromCookie(request));
+    return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, authCookie.clear().toString()).build();
+  }
+
   @PostMapping("/resend-code")
   public ResponseEntity<Map<String, String>> resendCode(
       @Valid @RequestBody ResendCodeRequest req) {
     return ResponseEntity.ok(authService.resendCode(req.getEmail(), req.getMode()));
+  }
+
+  private String extractTokenFromCookie(HttpServletRequest request) {
+    Cookie[] cookies = request.getCookies();
+    if (cookies == null) {
+      return null;
+    }
+    for (Cookie cookie : cookies) {
+      if (AuthCookie.NAME.equals(cookie.getName())) {
+        return cookie.getValue();
+      }
+    }
+    return null;
   }
 }

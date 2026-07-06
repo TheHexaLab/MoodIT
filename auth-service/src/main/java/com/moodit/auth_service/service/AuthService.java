@@ -263,6 +263,31 @@ public class AuthService {
         activeTokenHash.getBytes(StandardCharsets.UTF_8));
   }
 
+  public void logout(String token) {
+    if (token == null || token.isBlank()) {
+      return;
+    }
+
+    String email;
+    try {
+      email = jwtService.extractEmail(token);
+    } catch (Exception e) {
+      return;
+    }
+
+    if (email == null || email.isBlank()) {
+      return;
+    }
+
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      return;
+    }
+
+    user.setActiveTokenHash(null);
+    userRepository.save(user);
+  }
+
   // Vérification manuelle pour le dev : promeut l'inscription en attente vers un vrai compte
   @Transactional
   public Map<String, String> verifyDev(String username) {
