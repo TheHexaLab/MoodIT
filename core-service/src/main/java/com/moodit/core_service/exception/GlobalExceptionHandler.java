@@ -86,4 +86,12 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.NOT_FOUND) //Code 404
                 .body(ex.getMessage());
     }
+
+    //Accès refusé (droits insuffisants, ex. détail d'édition d'un quiz réservé aux admins)
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<String> handleForbidden(ForbiddenException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN) //Code 403
+                .body(ex.getMessage());
+    }
 }

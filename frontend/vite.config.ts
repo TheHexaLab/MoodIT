@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true,
         },
+        '/mcp': {
+          target: backendUrl,
+          changeOrigin: true,
+        },
         '/auth': {
           target: backendUrl,
           changeOrigin: true,

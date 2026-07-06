@@ -287,12 +287,16 @@ const QuizView: React.FC<QuizViewProps> = ({
     }
 
     if (isLast) {
+      // Grisé pendant l'envoi ET si la tentative unique est déjà consommée (miroir du
+      // 409 backend : évite le double-clic / rejeu qui serait de toute façon rejeté).
+      const disabled = attempt.submitting || attempt.alreadySubmitted;
       return (
         <button
           type="button"
           className={styles.primaryButton}
           onClick={attempt.submit}
-          disabled={attempt.submitting}
+          disabled={disabled}
+          title={attempt.alreadySubmitted ? t.alreadySubmitted : undefined}
         >
           {attempt.submitting ? t.submitting : t.submit} <Check width={15} height={15} />
         </button>

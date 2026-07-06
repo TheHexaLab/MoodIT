@@ -53,6 +53,21 @@ gateway/*.iws
 gateway/*.ipr
 gateway/.run
 
+# ==============================
+# MCP Service — Java / Spring Boot / Gradle
+# ==============================
+mcp-service/build/
+mcp-service/.gradle/
+mcp-service/out/
+mcp-service/*.class
+mcp-service/*.jar
+mcp-service/*.war
+mcp-service/.idea/*
+mcp-service/*.iml
+mcp-service/*.iws
+mcp-service/*.ipr
+mcp-service/.run
+
 # Eclipse / STS
 .classpath
 .project
