@@ -267,7 +267,9 @@ CREATE TABLE MCP_Response(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
    content TEXT,
-   status VARCHAR(16) NOT NULL DEFAULT 'done',
+   -- Défaut 'pending' (état logique d'une ligne fraîchement insérée). Le service pose
+   -- toujours le statut explicitement ; ce défaut protège un INSERT manuel oublié.
+   status VARCHAR(16) NOT NULL DEFAULT 'pending',
    user_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
