@@ -12,12 +12,16 @@
     border-color: var(--brand-teal);
 }
 
-/* Barre d'outils : bouton « play » (à gauche) + langage du code (à droite). */
+/* Barre d'outils : bouton « play » (à gauche) + langage du code (à droite).
+   `min-height` = hauteur du bouton « play » (icône 14px + padding 0.25rem = 1.375rem) :
+   la barre garde la MÊME hauteur pour les langages sans bouton (SQL/HTML/JSX/TSX), où
+   seule l'étiquette de langage — plus courte — serait présente. */
 .toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
+    min-height: 1.375rem;
     padding: 0.3125rem 0.5rem;
     border-bottom: 1px solid var(--border);
     background: var(--syntax-bg);

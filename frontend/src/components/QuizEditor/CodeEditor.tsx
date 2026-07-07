@@ -358,25 +358,31 @@ export function CodeEditor({
 
   return (
     <div className={styles.editor}>
-      {onRun && !readOnly && (
+      {/* Barre d'outils : affichée dès qu'il y a un langage À MONTRER ou un bouton « play ».
+          L'étiquette de langage reste visible en lecture seule (révision d'un quiz) et pour
+          les langages sans exécution autonome (SQL/HTML/JSX/TSX : pas de `onRun`). Le bouton
+          « play », lui, n'apparaît qu'en saisie (hors lecture seule). */}
+      {(language || (onRun && !readOnly)) && (
         <div className={styles.toolbar}>
           {language && <span className={styles.langLabel}>{language}</span>}
-          <button
-            type="button"
-            className={styles.runButton}
-            onClick={run}
-            disabled={running}
-            aria-label={runLabel}
-            title={runLabel}
-          >
-            {running ? (
-              <span className={styles.spinnerNeutral}>
-                <Spinner tone="current" size={14} />
-              </span>
-            ) : (
-              <Play width={14} height={14} />
-            )}
-          </button>
+          {onRun && !readOnly && (
+            <button
+              type="button"
+              className={styles.runButton}
+              onClick={run}
+              disabled={running}
+              aria-label={runLabel}
+              title={runLabel}
+            >
+              {running ? (
+                <span className={styles.spinnerNeutral}>
+                  <Spinner tone="current" size={14} />
+                </span>
+              ) : (
+                <Play width={14} height={14} />
+              )}
+            </button>
+          )}
         </div>
       )}
       <div className={styles.body}>

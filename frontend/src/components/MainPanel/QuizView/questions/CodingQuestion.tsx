@@ -42,7 +42,10 @@ export function CodingQuestion({
   return (
     <div>
       {review && <span className={styles.codeLabel}>{t.yourAnswer}</span>}
+      {/* Clé = id de la question : au changement de question, l'éditeur est remonté, ce qui
+          FERME la console d'exécution (et efface sa sortie) restée ouverte sur la précédente. */}
       <CodeEditor
+        key={question.id}
         value={code}
         onChange={(next) => onChange({ kind: 'coding', code: next })}
         language={language}

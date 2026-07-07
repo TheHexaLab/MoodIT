@@ -149,6 +149,18 @@
     container-name: quizcard;
 }
 
+/* Variante « nue » (aperçu « Tester » de l'éditeur) : question SANS le rectangle
+   (bordure, fond, ombre) ni le padding. On conserve `container-type`/largeur pour que
+   les rendus responsives (requêtes de conteneur `quizcard`) continuent de fonctionner. */
+.cardBare {
+    max-width: none;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    padding: 0;
+}
+
 /* En-tête de carte : badge + « Question N » + pastille de points. */
 .cardHeader {
     display: flex;

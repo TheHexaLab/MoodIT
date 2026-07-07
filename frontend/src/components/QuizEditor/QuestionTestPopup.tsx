@@ -120,7 +120,7 @@ export function QuestionTestBody({
       <div className={styles.testArea}>
         <div className={styles.infoBanner}>{t.infoBanner}</div>
 
-        <QuestionCard question={question} index={0} result={result ?? undefined}>
+        <QuestionCard question={question} index={0} result={result ?? undefined} bare>
           <QuestionRenderer
             question={question}
             mode={reviewing ? 'review' : 'answer'}
