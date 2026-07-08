@@ -85,7 +85,11 @@ jobs:
 
       - name: Démarrer Piston + installer les runtimes
         run: |
-          touch .env.docker   # les autres services y réfèrent ; vide suffit (on ne démarre que Piston)
+          # docker compose interpole et VALIDE tout le fichier prod même si on ne démarre que piston :
+          # les ports des autres services (${GATEWAY_PORT}, ${FRONTEND_PORT}) doivent donc résoudre vers
+          # une valeur, sinon « no port specified: :<empty> ». Valeurs bidons — ces services ne démarrent
+          # pas ici ; on veut juste un fichier interpolable. (POSTGRES_* : silence les warnings healthcheck.)
+          printf 'FRONTEND_PORT=5173\nGATEWAY_PORT=8080\nPOSTGRES_USER=postgres\nPOSTGRES_DB=moodit_db\n' > .env.docker
           docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml up -d --build piston
           # piston-init attend Piston puis installe les runtimes (langages) et s'arrête.
           docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml run --rm piston-init
