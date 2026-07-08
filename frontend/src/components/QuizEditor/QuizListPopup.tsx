@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { usePointerReorder } from './usePointerReorder';
@@ -70,9 +70,42 @@ export function QuizListBody({
   const byId = new Map(quizzes.map((q) => [q.id, q]));
   const ordered = order.map((id) => byId.get(id)).filter((q): q is Quiz => !!q);
 
+  // Plafonne la liste à EXACTEMENT 5 lignes (« flush ») : on mesure la hauteur réelle des 5
+  // premières lignes (gaps compris) plutôt que de deviner un rem. Au-delà de 5 → scroll interne.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const measure = () => {
+      const rows = list.querySelectorAll<HTMLElement>('[data-reorder-id]');
+      if (rows.length > 5) {
+        setMaxHeight(rows[4].offsetTop + rows[4].offsetHeight - rows[0].offsetTop);
+      } else {
+        setMaxHeight(undefined);
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    let cancelled = false;
+    document.fonts?.ready?.then(() => {
+      if (!cancelled) measure();
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('resize', measure);
+    };
+  }, [ordered.length]);
+
   return (
     <>
-      <div className={styles.list}>
+      <div
+        ref={listRef}
+        className={[styles.list, styles.quizList, maxHeight != null ? styles.quizListScroll : '']
+          .filter(Boolean)
+          .join(' ')}
+        style={maxHeight != null ? { maxHeight } : undefined}
+      >
         {loading && ordered.length === 0 && (
           <div className={styles.listLoading} role="status" aria-live="polite" aria-busy="true">
             <Spinner size={26} />

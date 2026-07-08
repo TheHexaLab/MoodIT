@@ -44,6 +44,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
+import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import * as api from './dashboardApi.ts';
@@ -66,7 +67,8 @@ import styles from './Dashboard.module.css';
  * mock des fonctions `api.*` par des apiFetch suffit, sans toucher à ce mapping).
  */
 const quizEditorHandlers: QuizEditorHandlers = {
-  onFetchQuiz: api.fetchQuiz,
+  // Éditeur enseignant → détail AVEC correction (endpoint /edit, réservé aux admins).
+  onFetchQuiz: api.fetchQuizForEdit,
   onFetchQuizzes: api.fetchQuizzes,
   onFetchLanguages: api.fetchLanguages,
   onFetchQuestionTypes: api.fetchQuestionTypes,
@@ -75,6 +77,7 @@ const quizEditorHandlers: QuizEditorHandlers = {
   onDeleteQuiz: api.deleteQuiz,
   onReorderQuizzes: api.reorderQuizzes,
   onEvaluateCode: api.evaluateCode,
+  onRunCode: api.runCode,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
@@ -179,6 +182,14 @@ export default function Dashboard() {
       },
     });
   }, [ws, currentUser.id]);
+
+  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
+  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
+  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
+    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
+    [ws, currentUser.id]
+  );
+
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
   // le programme correspondant ; le loader pilote loading/erreur.
   const handleFetchCourses = useCallback(async (programId: number) => {
@@ -706,6 +717,8 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        onSubscribeCodeGrading={subscribeCodeGrading}
+        onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
@@ -837,6 +850,10 @@ export default function Dashboard() {
               // (le verrou MCP est par (cours, user)).
               onAnalysisFailed: (launcherId, reason) => {
                 if (launcherId === currentUser.id) handlers.onFailed(reason);
+              },
+              // Progression : idem, seul le lanceur (verrou par (cours, user)) l'affiche.
+              onAnalysisProgress: (launcherId, step) => {
+                if (launcherId === currentUser.id) handlers.onProgress(step);
               },
               onResync: handlers.onResync,
             })

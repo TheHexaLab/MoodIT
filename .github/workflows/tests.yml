@@ -1,0 +1,130 @@
+name: Tests
+
+# Lance les tests unitaires/d'intégration des services Gradle à chaque PR et sur push vers main.
+# Le Dockerfile de prod fait `bootJar` (qui NE lance PAS les tests) : cette CI est donc
+# le seul filet qui empêche un test cassé d'être fusionné.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gradle:
+    name: ${{ matrix.service }} — ./gradlew test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # un service qui casse ne masque pas le résultat des autres
+      matrix:
+        service: [auth-service, core-service, execution-service, gateway, mcp-service]
+
+    # Postgres requis par CoreServiceApplicationTests (@SpringBootTest démarre tout le
+    # contexte, qui ouvre la datasource au boot). Aligné sur les valeurs par défaut de
+    # l'appli (localhost:5432 / moodit_db / postgres / postgres) → aucun env à surcharger.
+    # Idle pour les autres services (auth/gateway/mcp/execution ne s'y connectent pas).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: moodit_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle          # cache les dépendances Gradle par service
+
+      # Le gradlew est committé sans bit exécutable (mode 100644, dépôt Windows) :
+      # on le rend exécutable ici pour éviter « Permission denied » sur le runner Linux.
+      - name: Run tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test --no-daemon --console=plain
+
+      - name: Publier le rapport de tests
+        if: always()             # même en cas d'échec, on veut voir quels tests ont cassé
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/tests/test/
+          if-no-files-found: ignore
+
+  # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
+  # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
+  # exécute le VRAI code (assemblage + verdict) contre un Piston réel — c'est le filet qui prouve
+  # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
+  # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
+  integration:
+    name: execution-service — intégration (Piston réel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Démarrer Piston + installer les runtimes
+        # docker compose interpole et VALIDE tout le fichier prod même si on ne démarre que piston : les
+        # ports des autres services (${GATEWAY_PORT}, ${FRONTEND_PORT}) doivent résoudre vers une valeur,
+        # sinon « no port specified: :<empty> ». L'interpolation ${VAR} lit l'ENVIRONNEMENT DU SHELL (pas
+        # le fichier `env_file:` des services, qui n'injecte que dans les conteneurs) → on les met ici.
+        # Valeurs bidons : ces services ne démarrent pas dans ce job.
+        env:
+          FRONTEND_PORT: "5173"
+          GATEWAY_PORT: "8080"
+          POSTGRES_USER: postgres
+          POSTGRES_DB: moodit_db
+        run: |
+          touch .env.docker   # requis : des services le déclarent en `env_file:` (vide suffit ici)
+          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml up -d --build piston
+          # piston-init attend Piston puis installe les runtimes (langages) et s'arrête.
+          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml run --rm piston-init
+
+      - name: Bundle react-runtime.js (nécessaire aux cas JSX/TSX)
+        run: |
+          docker build --target jsvendor -t moodit-jsvendor execution-service
+          cid=$(docker create moodit-jsvendor)
+          mkdir -p vendor-ci
+          docker cp "$cid:/out/." vendor-ci/
+          docker rm "$cid"
+
+      - name: Tests d'intégration
+        working-directory: execution-service
+        env:
+          PISTON_URL: http://localhost:2000
+          APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
+          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent) doit FAIRE
+          # ÉCHOUER le job, pas l'ignorer : sinon un Piston qui ne démarre pas laisserait ce gate de
+          # sécurité passer au vert sans avoir rien exécuté. (En local, drapeau absent → tests ignorés.)
+          PISTON_REQUIRED: "true"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test --tests "*ExecutionIntegrationTest" --no-daemon --console=plain
+
+      - name: Publier le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results
+          path: execution-service/build/reports/tests/test/
+          if-no-files-found: ignore

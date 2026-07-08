@@ -1,3 +1,5 @@
+import { formatScore } from './formatScore';
+
 /**
  * Libellés de l'écran récapitulatif. Passés via `labels` (en Partial) ; les champs
  * omis prennent les défauts. Les formatters gèrent les pluriels.
@@ -5,6 +7,14 @@
 export interface QuizSummaryLabels {
   /** Titre « <quiz> — terminé ! ». */
   completedTitle: (title: string) => string;
+  /** Titre tant que la correction du code n'est pas finie (« <quiz> — soumis »). */
+  submittedTitle: (title: string) => string;
+  /** Score global affiché quand des questions Code sont encore en validation. */
+  validating: string;
+  /** Sous-titre pendant la validation du code. */
+  validatingSub: string;
+  /** Score d'une ligne de question Code encore en cours d'évaluation. */
+  rowPending: string;
   /** Pourcentage global. */
   percent: (value: number) => string;
   /** Sous-titre : score + nombre de questions parfaites. */
@@ -26,15 +36,19 @@ export interface QuizSummaryLabels {
 /** Textes par défaut (FR) du récapitulatif. */
 export const defaultQuizSummaryLabels: QuizSummaryLabels = {
   completedTitle: (title) => `${title} — terminé !`,
-  percent: (value) => `${value} %`,
+  submittedTitle: (title) => `${title} — soumis`,
+  validating: 'Validation en cours…',
+  validatingSub: 'Les questions de code sont en cours d’évaluation…',
+  rowPending: 'En attente…',
+  percent: (value) => `${formatScore(value)} %`,
   summarySub: (earned, max, perfect, total) => {
     const s = perfect > 1 ? 's' : '';
-    return `${earned} / ${max} points · ${perfect} question${s} parfaite${s} sur ${total}`;
+    return `${formatScore(earned)} / ${formatScore(max)} points · ${perfect} question${s} parfaite${s} sur ${total}`;
   },
   detailTitle: 'Détail par question',
   rowText: (title) => title,
-  rowScore: (earned, max) => `${earned} / ${max}`,
-  bestScore: (percent) => `Meilleur score : ${percent} %`,
+  rowScore: (earned, max) => `${formatScore(earned)} / ${formatScore(max)}`,
+  bestScore: (percent) => `Meilleur score : ${formatScore(percent)} %`,
   attemptsLabel: 'Tentatives',
-  attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${earned}/${max}`,
+  attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${formatScore(earned)}/${formatScore(max)}`,
 };

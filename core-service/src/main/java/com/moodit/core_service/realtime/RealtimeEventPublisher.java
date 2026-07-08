@@ -26,7 +26,9 @@ import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
+import com.moodit.core_service.dto.QuestionResultDTO;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -209,6 +211,29 @@ public class RealtimeEventPublisher {
         "mcp",
         courseId,
         event("mcp:analysis-failed", "courseId", courseId, "userId", userId, "reason", reason));
+  }
+
+  /**
+   * Étape de PROGRESSION d'un job d'analyse MCP en cours (feedback temps réel : collecte,
+   * analyse IA, repli…). Porte le `userId` du LANCEUR (seul lui affiche la progression, le
+   * verrou étant par (cours, user)). `step` = clé d'étape, mappée en libellé côté front.
+   */
+  public void mcpAnalysisProgress(long courseId, long userId, String step) {
+    emit(
+        "mcp",
+        courseId,
+        event("mcp:analysis-progress", "courseId", courseId, "userId", userId, "step", step));
+  }
+
+  // ─── Correction de code (scope = user) ───────────────────────────────────
+  // Poussé quand le job de correction des questions Code d'une tentative se termine. Room
+  // "user:<userId>" : seul l'étudiant qui a soumis reçoit ses verdicts + son score recalculé.
+
+  public void quizCodeGraded(long userId, long attemptId, List<QuestionResultDTO> questions) {
+    emit(
+        "user",
+        userId,
+        event("quiz:code-graded", "userId", userId, "attemptId", attemptId, "questions", questions));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

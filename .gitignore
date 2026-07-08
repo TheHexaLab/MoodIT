@@ -53,6 +53,34 @@ gateway/*.iws
 gateway/*.ipr
 gateway/.run
 
+# ==============================
+# Execution Service — Java / Spring Boot / Gradle
+# ==============================
+execution-service/build/
+execution-service/.gradle/
+execution-service/out/
+execution-service/*.class
+execution-service/*.jar
+execution-service/*.war
+execution-service/.idea/*
+execution-service/*.iml
+execution-service/.run
+
+# ==============================
+# MCP Service — Java / Spring Boot / Gradle
+# ==============================
+mcp-service/build/
+mcp-service/.gradle/
+mcp-service/out/
+mcp-service/*.class
+mcp-service/*.jar
+mcp-service/*.war
+mcp-service/.idea/*
+mcp-service/*.iml
+mcp-service/*.iws
+mcp-service/*.ipr
+mcp-service/.run
+
 # Eclipse / STS
 .classpath
 .project

@@ -13,6 +13,7 @@ import {
   type CodingTestResult,
   type QuestionAnswer,
   type QuestionResult,
+  type RunCodeHandler,
 } from '../MainPanel/QuizView/quizAttempt';
 import { type Language } from '../../types/domain';
 import { defaultQuestionTestLabels, type QuestionTestLabels } from './questionTestLabels';
@@ -26,6 +27,8 @@ interface QuestionTestBodyProps {
   onRequestLanguages?: () => void;
   /** Évalue une question Code via l'API (exécution serveur des harnais). */
   onEvaluateCode?: (input: CodeEvaluationInput) => Promise<CodingTestResult[]> | CodingTestResult[];
+  /** Exécute le code courant sans harnais (bouton « play » de l'éditeur). */
+  onRunCode?: RunCodeHandler;
   /** Textes (surcharge partielle des défauts). */
   labels?: Partial<QuestionTestLabels>;
 }
@@ -37,7 +40,9 @@ function codingResult(
 ): QuestionResult {
   const totalWeight = tests.reduce((sum, t) => sum + t.weight, 0);
   const passedWeight = tests.reduce((sum, t) => sum + (t.passed ? t.weight : 0), 0);
-  const earned = totalWeight === 0 ? 0 : Math.round((question.totalScore * passedWeight) / totalWeight);
+  // Score au dixième près (format X.X), comme le backend.
+  const earned =
+    totalWeight === 0 ? 0 : Math.round((question.totalScore * passedWeight) / totalWeight * 10) / 10;
   return { questionId: question.id, earned, max: question.totalScore, tests };
 }
 
@@ -55,6 +60,7 @@ export function QuestionTestBody({
   languages,
   onRequestLanguages,
   onEvaluateCode,
+  onRunCode,
   labels,
 }: QuestionTestBodyProps): React.ReactElement {
   const t = { ...defaultQuestionTestLabels, ...labels };
@@ -84,6 +90,7 @@ export function QuestionTestBody({
       setEvaluating(true);
       try {
         const tests = await onEvaluateCode({
+          language: question.language?.name,
           languageId: question.language?.id,
           code: answer.kind === 'coding' ? answer.code : '',
           testCases: question.testCases ?? [],
@@ -113,13 +120,14 @@ export function QuestionTestBody({
       <div className={styles.testArea}>
         <div className={styles.infoBanner}>{t.infoBanner}</div>
 
-        <QuestionCard question={question} index={0} result={result ?? undefined}>
+        <QuestionCard question={question} index={0} result={result ?? undefined} bare>
           <QuestionRenderer
             question={question}
             mode={reviewing ? 'review' : 'answer'}
             answer={answer}
             result={result ?? undefined}
             onChange={setAnswer}
+            onRunCode={onRunCode}
           />
         </QuestionCard>
       </div>

@@ -9,8 +9,10 @@ import {
   type QuestionAnswer,
   type QuizResult,
   type SubmitQuizHandler,
+  type SubscribeCodeGrading,
   initAnswers,
   mergeAnswers,
+  mergeCodeResults,
   toSubmission,
 } from './quizAttempt';
 import { gradeQuiz } from './grading';
@@ -37,6 +39,12 @@ interface UseQuizAttemptParams {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
+  /**
+   * Abonnement à la correction ASYNC des questions Code (WS, pré-lié à l'utilisateur courant).
+   * Quand les verdicts arrivent, le résultat courant est mis à jour en direct. Absent → pas de
+   * live-update (les verdicts apparaissent au rechargement de la tentative).
+   */
+  onSubscribeCodeGrading?: SubscribeCodeGrading;
   /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
   loadErrorMessage?: string;
   /** Message d'erreur affiché si la soumission échoue (label, surchargeable). */
@@ -77,6 +85,11 @@ export interface QuizAttemptApi {
   currentAttemptId: number | null;
   /** Le quiz autorise-t-il une nouvelle tentative ? */
   allowRetry: boolean;
+  /**
+   * L'étudiant a déjà consommé sa tentative unique (au moins une tentative ET reprise
+   * interdite) → la soumission doit être bloquée côté UI (miroir du 409 backend).
+   */
+  alreadySubmitted: boolean;
   /** Relance une nouvelle tentative (repasse en `taking`). */
   retry: () => void;
   /** Affiche le récap d'une tentative passée. */
@@ -112,6 +125,7 @@ export function useQuizAttempt({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  onSubscribeCodeGrading,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
 }: UseQuizAttemptParams): QuizAttemptApi {
@@ -132,6 +146,16 @@ export function useQuizAttempt({
 
   const mountedRef = useRef(true);
   const fetchRef = useRef(onFetchQuiz);
+
+  // Correction ASYNC des questions Code : à réception du verdict WS, on fusionne dans le résultat
+  // courant (verdicts + score recalculés) si la tentative correspond. Abonnement pour toute la vie
+  // de la vue ; le merge est un no-op tant qu'aucun résultat correspondant n'est affiché.
+  useEffect(() => {
+    if (!onSubscribeCodeGrading) return;
+    return onSubscribeCodeGrading((attemptId, questions) => {
+      setResult((prev) => mergeCodeResults(prev, attemptId, questions));
+    });
+  }, [onSubscribeCodeGrading]);
   const fetchAttemptsRef = useRef(onFetchAttempts);
   const fetchAttemptResultRef = useRef(onFetchAttemptResult);
   useEffect(() => {
@@ -303,6 +327,7 @@ export function useQuizAttempt({
   const backToSummary = useCallback(() => setPhase('summary'), []);
 
   const allowRetry = Boolean(quiz.allowRetry);
+  const alreadySubmitted = !allowRetry && attempts.length > 0;
 
   return useMemo<QuizAttemptApi>(
     () => ({
@@ -321,6 +346,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      alreadySubmitted,
       retry,
       selectAttempt: (attemptId: number) => void selectAttempt(attemptId),
       setAnswer,
@@ -347,6 +373,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      alreadySubmitted,
       retry,
       selectAttempt,
       setAnswer,

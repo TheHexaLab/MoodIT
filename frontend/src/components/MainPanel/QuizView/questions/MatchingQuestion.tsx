@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
@@ -9,6 +9,9 @@ import { defaultQuestionLabels } from './questionLabels';
 
 /** Réserve (éléments non classés). */
 const POOL = '__pool__';
+
+/** Hash déterministe d'un id (Knuth) : ordonne le pool de façon pseudo-aléatoire mais STABLE. */
+const shuffleKey = (id: number): number => Math.imul(id, 0x9e3779b1) >>> 0;
 
 /**
  * Association : l'étudiant glisse chaque étiquette depuis la réserve vers la
@@ -29,8 +32,21 @@ export function MatchingQuestion({
   const byId = new Map(items.map((d) => [d.id, d]));
   const placement = answer?.kind === 'matching' ? answer.placement : {};
 
-  // Catégories distinctes, dans l'ordre d'apparition.
-  const groups = [...new Set(items.map((d) => d.groupName).filter((g): g is string => !!g))];
+  // Ordre d'affichage du pool MÉLANGÉ (tri par hash des ids) : dé-corrèle l'ordre affiché de
+  // l'ordre en base (regroupement des items), pour ne donner aucun indice sur les catégories.
+  // Déterministe → stable entre les rendus ET les rechargements (les items ne sautent pas).
+  const displayItems = useMemo(
+    () => [...items].sort((a, b) => shuffleKey(a.id) - shuffleKey(b.id)),
+    [items]
+  );
+
+  // Catégories (zones de dépôt) : fournies par le backend (`question.groups`, exposées même en
+  // passation où le groupe correct de chaque item est masqué) ; à défaut, dérivées des items
+  // (éditeur / révision, où `groupName` est présent).
+  const groups =
+    question.groups && question.groups.length > 0
+      ? question.groups
+      : [...new Set(items.map((d) => d.groupName).filter((g): g is string => !!g))].sort();
 
   // Glissement par Pointer Events (souris + tactile) : `drag` porte l'étiquette
   // saisie et la position du pointeur (pour le fantôme) ; `overZone` la zone survolée.
@@ -75,7 +91,7 @@ export function MatchingQuestion({
   }
 
   const inZone = (zone: string) =>
-    items.filter((d) => (placement[d.id] ?? null) === (zone === POOL ? null : zone));
+    displayItems.filter((d) => (placement[d.id] ?? null) === (zone === POOL ? null : zone));
 
   /** Zone (`data-zone`) sous le point (x, y), ou null. */
   function zoneAt(x: number, y: number): string | null {

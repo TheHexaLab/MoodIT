@@ -45,6 +45,7 @@ services:
       - core-service
       - auth-service
       - permission-service
+      - mcp-service
 
   #Core service -------------------------------------------------
   core-service:
@@ -78,14 +79,139 @@ services:
     container_name: moodit_permission
     env_file:
       - .env.docker
+
+  #Ollama (LLM local, API compatible OpenAI) --------------------
+  # Sert le modèle sur le réseau interne : aucune donnée ne sort vers un tiers.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: moodit_ollama
+    volumes:
+      - ollama_data:/root/.ollama # modèles persistés : pas de re-téléchargement au redémarrage
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # GPU (NVIDIA) : indispensable pour une latence correcte sur un modèle 7B.
+    # Requiert le NVIDIA Container Toolkit (Docker Desktop + WSL2 sous Windows). Si absent,
+    # COMMENTER ce bloc « deploy » → repli CPU (beaucoup plus lent, timeout probable au 1er appel).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - internal
+
+  #Ollama-init : tire le modèle au démarrage puis s'arrête (one-shot) ----
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: moodit_ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434 # cible le conteneur ollama, pas soi-même
+    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:7b-instruct"]
+    restart: "no"
+    networks:
+      - internal
+
+  #MCP service (analyse de cours via LLM Ollama local) ------------------
+  mcp-service:
+    build: ./mcp-service
+    container_name: moodit_mcp
+    env_file:
+      - .env.docker
+    environment:
+      # Le WS vit dans core-service : mcp-service pousse ses résultats via l'endpoint interne.
+      CORE_SERVICE_HOST: core-service
+      # LLM = conteneur Ollama sur le réseau interne (aucune donnée ne sort vers un tiers).
+      # La clé LLM_API_KEY (placeholder "ollama") vient de .env.docker.
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_MODEL: qwen2.5:7b-instruct
+      # 1er appel après démarrage : chargement du modèle en VRAM → on élargit le timeout.
+      LLM_TIMEOUT_MS: "120000"
     networks:
       - internal
     depends_on:
       postgres:
         condition: service_healthy
+      # Ne démarre qu'une fois le modèle réellement tiré (sinon 1er appel → 404 model not found).
+      ollama-init:
+        condition: service_completed_successfully
+
+  #Piston (sandbox d'exécution du code étudiant NON FIABLE) --------------
+  # Moteur open-source multi-langages : isolation (isolate/nsjail), pas de réseau à l'exécution,
+  # limites CPU/mémoire/temps. `privileged` requis par isolate (cgroups/namespaces). Les paquets
+  # de langages sont installés dans le volume piston_data (persistés entre redémarrages). Exposé
+  # UNIQUEMENT sur le réseau interne — jamais au gateway.
+  piston:
+    # Image Piston patchée (limite body-parser relevée pour les bundles JS HTML/JSX/TSX). cf. piston/Dockerfile
+    build: ./piston
+    container_name: moodit_piston
+    privileged: true
+    volumes:
+      - piston_data:/piston/packages
+    networks:
+      - internal
+
+  #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
+  # Idempotent (paquets persistés dans piston_data). Les PAQUETS installés (à gauche) diffèrent
+  # parfois du nom de RUNTIME exposé par Piston (node→javascript, gcc→c/c++, mono→csharp) : on
+  # installe par paquet, on vérifie par runtime. Ajouter ici chaque langage supporté par
+  # l'assembleur de execution-service.
+  piston-init:
+    image: curlimages/curl:latest
+    container_name: moodit_piston_init
+    depends_on:
+      - piston
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |-
+        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do
+          echo "attente de piston..."; sleep 2;
+        done
+        for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
+                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2 sqlite3:3.36.0; do
+          lang=$${pkg%%:*}; ver=$${pkg##*:};
+          echo "installation $$lang $$ver...";
+          curl -sS -X POST http://piston:2000/api/v2/packages \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
+        done
+        rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
+        for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
+          echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
+        done
+        echo "piston pret (12 runtimes ; + JSON via node)";
+    restart: "no"
+    networks:
+      - internal
+
+  #Execution service (exécute le code étudiant via le sandbox Piston) ----
+  execution-service:
+    build: ./execution-service
+    container_name: moodit_execution
+    env_file:
+      - .env.docker
+    environment:
+      PISTON_URL: http://piston:2000 # sandbox sur le réseau interne
+    networks:
+      - internal
+    depends_on:
+      # Ne démarre qu'une fois les langages installés dans Piston.
+      piston-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
+  ollama_data:
+  piston_data:
 
 networks:
   internal:

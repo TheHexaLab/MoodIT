@@ -165,6 +165,11 @@ export interface Question {
   answers?: Answer[];
   /** Éléments à ordonner (`ordering`) ou à classer (`matching`). */
   dragItems?: DragItem[];
+  /**
+   * Catégories (zones de dépôt) d'une question `matching` = groupes distincts. Exposées à
+   * l'étudiant (il doit voir les zones), même quand le groupe correct de chaque item est masqué.
+   */
+  groups?: string[];
   /** Langage d'exécution (questions `coding`). */
   language?: Language;
   /** Squelette de code montré à l'étudiant (table Question.start_code). */
@@ -287,10 +292,24 @@ export interface McpResponse {
 export interface McpAnalysis {
   /** Score global du cours (0–100). */
   score: number;
+  /** Synthèse narrative (2–4 phrases). Optionnel (absent des analyses antérieures). */
+  summary?: string;
+  /**
+   * Sous-scores par dimension (0–100). Optionnel. `success`/`sentiment` peuvent être `null`
+   * (N/D) quand la donnée sous-jacente est absente (aucune note/code, aucun message).
+   */
+  dimensions?: {
+    content: number;
+    engagement: number;
+    success: number | null;
+    sentiment: number | null;
+  };
   /** Points forts identifiés. */
   strengths: string[];
   /** Points à améliorer. */
   improvements: string[];
+  /** Recommandations actionnables et priorisées. Optionnel. */
+  recommendations?: string[];
   /** Volumétrie ayant servi à l'analyse. */
   sources: {
     quizCount: number;
@@ -395,9 +414,15 @@ export interface QuestionResponse {
   qTypeId?: number;
   totalScore: number;
   orderIndex?: number;
+  /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
+  language?: Language;
   startCode?: string;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
+  /** Catégories (zones) d'une association : groupes distincts, exposés même en passation. */
+  groups?: string[];
+  /** Harnais de test (questions Code) : présent UNIQUEMENT côté éditeur (absent en passation). */
+  testCases?: TestCase[];
 }
 
 /** Détail d'un quiz renvoyé par le backend (QuizDetailDTO). */

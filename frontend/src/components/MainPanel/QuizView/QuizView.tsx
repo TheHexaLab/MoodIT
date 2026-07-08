@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import styles from './QuizView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { type Course } from '../../CourseMenu/CourseMenu';
@@ -12,7 +12,9 @@ import {
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
+  type RunCodeHandler,
   type SubmitQuizHandler,
+  type SubscribeCodeGrading,
   isAnswered,
 } from './quizAttempt';
 import { useQuizAttempt } from './useQuizAttempt';
@@ -41,6 +43,10 @@ interface QuizViewProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
+  /** Abonnement à la correction async des questions Code (WS) → live-update des verdicts. */
+  onSubscribeCodeGrading?: SubscribeCodeGrading;
+  /** Exécute le code d'une question Code dans le sandbox (bouton « play » de l'éditeur). */
+  onRunCode?: RunCodeHandler;
   /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
   staleNotice?: boolean;
   /** Efface la bannière « quiz modifié » (après rechargement ou rejet). */
@@ -62,6 +68,8 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  onSubscribeCodeGrading,
+  onRunCode,
   staleNotice = false,
   onReloadStale,
   labels,
@@ -76,6 +84,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchAttempts,
     onFetchAttemptResult,
     onSubmitQuiz,
+    onSubscribeCodeGrading,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
   });
@@ -104,6 +113,24 @@ const QuizView: React.FC<QuizViewProps> = ({
   // Barre de progression : fraction courante (100 % au résumé).
   const progress =
     phase === 'summary' ? 1 : total > 0 ? (currentIndex + 1) / total : 0;
+
+  // Menu de points défilable : on garde le point actif (marqué data-active) TOUJOURS visible, mais
+  // sans scroll superflu — on ne défile QUE s'il sort du cadre (avec une petite marge de contexte),
+  // sinon on ne bouge pas. Défile uniquement le conteneur (scrollLeft), pas le reste de la page.
+  const dotsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const container = dotsRef.current;
+    const active = container?.querySelector<HTMLElement>('[data-active]');
+    if (!container || !active) return;
+    const left = active.offsetLeft;
+    const right = left + active.offsetWidth;
+    const margin = active.offsetWidth; // garde un point de contexte de part et d'autre
+    if (left - margin < container.scrollLeft) {
+      container.scrollLeft = left - margin;
+    } else if (right + margin > container.scrollLeft + container.clientWidth) {
+      container.scrollLeft = right + margin - container.clientWidth;
+    }
+  }, [currentIndex, total, phase]);
 
   return (
     <div className={styles.view}>
@@ -195,6 +222,7 @@ const QuizView: React.FC<QuizViewProps> = ({
             result={qResult}
             onChange={(a) => attempt.setAnswer(question.id, a)}
             labels={labels?.question}
+            onRunCode={onRunCode}
           />
         </QuestionCard>
       </div>
@@ -239,11 +267,14 @@ const QuizView: React.FC<QuizViewProps> = ({
           {t.prev}
         </button>
 
-        <div className={styles.dots}>
+        {/* Rangée de points défilable (scrollbar masquée) : tous les points restent cliquables ;
+            le point actif est recentré en JS. S'adapte à n'importe quel nombre de questions. */}
+        <div className={styles.dots} ref={dotsRef}>
           {questions.map((q, i) => (
             <button
               type="button"
               key={q.id}
+              data-active={i === currentIndex ? '' : undefined}
               className={[
                 styles.dot,
                 i === currentIndex ? styles.dotActive : '',
@@ -287,12 +318,16 @@ const QuizView: React.FC<QuizViewProps> = ({
     }
 
     if (isLast) {
+      // Grisé pendant l'envoi ET si la tentative unique est déjà consommée (miroir du
+      // 409 backend : évite le double-clic / rejeu qui serait de toute façon rejeté).
+      const disabled = attempt.submitting || attempt.alreadySubmitted;
       return (
         <button
           type="button"
           className={styles.primaryButton}
           onClick={attempt.submit}
-          disabled={attempt.submitting}
+          disabled={disabled}
+          title={attempt.alreadySubmitted ? t.alreadySubmitted : undefined}
         >
           {attempt.submitting ? t.submitting : t.submit} <Check width={15} height={15} />
         </button>

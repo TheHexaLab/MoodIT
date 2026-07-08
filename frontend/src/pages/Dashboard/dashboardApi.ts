@@ -32,14 +32,6 @@ import type {
   QuizDetailResponse,
   QuizResponse,
 } from '../../types/domain.ts';
-import {
-  clearAnalysisPending,
-  generateMcpResponse,
-  getMcpResponse,
-  getMcpResponseSummaries,
-  isAnalysisPending,
-  markAnalysisPending,
-} from '../../mocks/mcpData.ts';
 //import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
 import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 //import { getDashboardPrograms } from './dashboardDataSource.ts';
@@ -55,8 +47,9 @@ import {
   type CodingTestResult,
   type QuizResult,
   type QuizSubmission,
+  type RunCodeInput,
+  type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
-import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
@@ -66,8 +59,6 @@ export type { DemoProgram };
 const SIMULATE_DELAY = 1000;
 const SIMULATE_SEND_FAILURE: boolean = false;
 const SIMULATE_FETCH_FAILURE: boolean = false;
-// Durée simulée d'un job MCP (génération) avant le push de complétion.
-const MOCK_MCP_JOB_MS = 2500;
 
 const wait = () => new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
 
@@ -81,15 +72,6 @@ async function simulateFetch(errorMessage: string): Promise<void> {
 async function simulateWrite(errorMessage: string): Promise<void> {
   await wait();
   if (SIMULATE_SEND_FAILURE) throw new Error(errorMessage);
-}
-
-/**
- * Id de l'utilisateur courant. MOCK : lu dans localStorage (comme fetchPrograms).
- * RÉEL : le backend le dérive du JWT — la signature des fonctions n'a donc pas besoin
- * de le porter (il n'apparaît pas dans le contrat public).
- */
-function currentUserId(): number {
-  return Number(localStorage.getItem('moodit_user_id')) || 0;
 }
 
 // ── Programmes / cours (chargement) ────────────────────────────────────────────
@@ -164,6 +146,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       qTypeId: q.qTypeId,
       totalScore: q.totalScore,
       orderIndex: q.orderIndex,
+      language: q.language,
       startCode: q.startCode,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
@@ -176,6 +159,11 @@ function toQuiz(data: QuizDetailResponse): Quiz {
         correctOrder: d.correctOrder,
         groupName: d.groupName,
       })),
+      // Catégories (zones) d'une association : exposées même en passation (le mapping item→groupe
+      // reste masqué). Fallback dérivé des items côté rendu si absent (anciens quiz / éditeur).
+      groups: q.groups,
+      // Harnais : présents seulement via /edit (éditeur) ; absents en passation étudiante.
+      testCases: q.testCases,
     })),
   };
 }
@@ -193,9 +181,23 @@ function toQuizMeta(q: QuizResponse): Quiz {
   };
 }
 
-/** Charger le détail d'un quiz (questions embarquées) pour la passation côté étudiant. */
+/**
+ * Charger le détail d'un quiz (questions embarquées) pour la PASSATION côté étudiant.
+ * Le backend n'inclut PAS la correction (isCorrect/correctOrder/groupName) sur cet
+ * endpoint : impossible de tricher via l'onglet réseau.
+ */
 export async function fetchQuiz(quizId: number): Promise<Quiz> {
   const res = await apiFetch(`/api/quizzes/${quizId}`);
+  if (!res.ok) throw new Error('Échec chargement du quiz');
+  return toQuiz(await res.json());
+}
+
+/**
+ * Charger le détail COMPLET d'un quiz pour l'ÉDITEUR enseignant : inclut la correction
+ * (isCorrect/correctOrder/groupName). Réservé aux admins côté backend (403 sinon).
+ */
+export async function fetchQuizForEdit(quizId: number): Promise<Quiz> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/edit`);
   if (!res.ok) throw new Error('Échec chargement du quiz');
   return toQuiz(await res.json());
 }
@@ -223,10 +225,6 @@ export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
 }
 
 /**
- * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
- * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
- */
-/**
  * Types de question disponibles (table Q_Type : id + name FR). Alimente le sélecteur
  * de type de l'éditeur de question.
  */
@@ -236,10 +234,14 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
   return await res.json();
 }
 
+/**
+ * Langages d'exécution disponibles (table Language) : alimente le sélecteur de langage de
+ * l'éditeur de code (templates de harnais / code de départ inclus).
+ */
 export async function fetchLanguages(): Promise<Language[]> {
-  await simulateFetch('Échec simulé (chargement des langages)');
-  console.log(DEFAULT_LANGUAGES);
-  return DEFAULT_LANGUAGES;
+  const res = await apiFetch('/api/languages');
+  if (!res.ok) throw new Error('Échec chargement des langages');
+  return await res.json();
 }
 
 /**
@@ -274,20 +276,40 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
- * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
- * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
- * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
+ * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * bouton « Tester » de l'éditeur (sans persistance).
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  await simulateWrite('Échec simulé (évaluation du code)');
-  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
-  const attempted = input.code.trim().length > 0;
-  return input.testCases.map((t, i) => ({
-    name: t.name,
-    passed: attempted && i % 2 === 0,
-    weight: t.weight,
-  }));
+  const res = await apiFetch('/exec/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      language: input.language,
+      code: input.code,
+      testCases: input.testCases.map((t) => ({
+        name: t.name,
+        harnessCode: t.harnessCode,
+        weight: t.weight,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Échec de l'évaluation du code");
+  return await res.json();
+}
+
+/**
+ * Exécute un code TEL QUEL (sans harnais) dans le sandbox et renvoie sa sortie brute
+ * (stdout/stderr/exit). Sert au bouton « play » des éditeurs de code (étudiant + onglet « Tester »).
+ */
+export async function runCode(input: RunCodeInput): Promise<RunResult> {
+  const res = await apiFetch('/exec/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: input.language, code: input.code }),
+  });
+  if (!res.ok) throw new Error("Échec de l'exécution du code");
+  return await res.json();
 }
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────
@@ -432,34 +454,34 @@ export async function fetchJoinedCourseIds(programId: number): Promise<number[]>
 }
 
 /**
- * TODO — Historique des analyses MCP d'un cours : RÉSUMÉS (sans contenu), tri récent →
- * ancien. Tout est renvoyé d'un coup. Le détail est chargé à la demande via
- * fetchCourseAnalysis(id).
+ * Historique des analyses MCP d'un cours : RÉSUMÉS (sans contenu), tri récent → ancien.
+ * Tout est renvoyé d'un coup. Le détail est chargé à la demande via fetchCourseAnalysis(id).
  */
 export async function fetchCourseAnalyses(courseId: number): Promise<McpResponseSummary[]> {
-  await simulateFetch('Échec simulé (historique des analyses MCP)');
-  return getMcpResponseSummaries(courseId);
+  const res = await apiFetch(`/mcp/courses/${courseId}/analyses`);
+  if (!res.ok) throw new Error('Échec chargement de l’historique des analyses');
+  return res.json();
 }
 
 /**
- * TODO — Détail complet d'une analyse MCP (table MCP_Response, avec `content`), chargé
- * au clic sur une entrée de l'historique.
+ * Détail complet d'une analyse MCP (table MCP_Response, avec `content`), chargé au clic
+ * sur une entrée de l'historique.
  */
 export async function fetchCourseAnalysis(id: number): Promise<McpResponse> {
-  await simulateFetch('Échec simulé (détail de l’analyse MCP)');
-  const response = getMcpResponse(id);
-  if (!response) throw new Error('Analyse introuvable');
-  return response;
+  const res = await apiFetch(`/mcp/analyses/${id}`);
+  if (!res.ok) throw new Error('Échec chargement du détail de l’analyse');
+  return res.json();
 }
 
 /**
- * TODO — L'utilisateur courant a-t-il une analyse MCP EN COURS pour ce cours ? Permet
- * de réhydrater l'état « en cours » du popup (survit à un rechargement de page). Le
- * lien est (cours, utilisateur) : côté réel, l'utilisateur vient du JWT.
+ * L'utilisateur courant a-t-il une analyse MCP EN COURS pour ce cours ? Réhydrate l'état
+ * « en cours » du popup (survit à un rechargement). Le lien (cours, utilisateur) est
+ * résolu côté serveur à partir du JWT (header X-User-Email).
  */
 export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
-  await simulateFetch('Échec simulé (statut de l’analyse MCP)');
-  return isAnalysisPending(courseId, currentUserId());
+  const res = await apiFetch(`/mcp/courses/${courseId}/pending`);
+  if (!res.ok) throw new Error('Échec chargement du statut de l’analyse');
+  return res.json();
 }
 
 // ── Programmes / cours (écriture) ──────────────────────────────────────────────
@@ -566,21 +588,15 @@ export async function leaveCourse(courseId: number): Promise<void> {
 }
 
 /**
- * TODO — Déclencher une analyse MCP d'un cours (« Analyser mon cours »). ASYNCHRONE : le
- * serveur ACCEPTE le job (202) et marque (cours, user) « en cours » ; il ne renvoie PAS
- * le résultat. Celui-ci arrive plus tard par WebSocket (cf. subscribeCourseAnalyses).
+ * Déclenche une analyse MCP d'un cours (« Analyser mon cours »). ASYNCHRONE : le serveur
+ * ACCEPTE le job (202, sans corps) et marque (cours, user) « en cours » ; il ne renvoie
+ * PAS le résultat. Celui-ci arrive plus tard par WebSocket (mcp:analysis-created /
+ * mcp:analysis-failed, cf. subscribeCompletion dans Dashboard). 409 si déjà en cours.
  */
 export async function requestCourseAnalysis(courseId: number): Promise<void> {
-  await simulateWrite('Échec simulé (analyse MCP)');
-  const userId = currentUserId();
-  markAnalysisPending(courseId, userId);
-  // Simulation du job serveur : après un délai, il persiste la réponse et libère le verrou.
-  // En prod, c'est le backend qui le fait PUIS pousse `mcp:analysis-created` par WebSocket
-  // (ws.mcp, cf. Dashboard) — le push live n'est PAS simulé ici (nécessite core-service).
-  setTimeout(() => {
-    generateMcpResponse(courseId, userId);
-    clearAnalysisPending(courseId, userId);
-  }, MOCK_MCP_JOB_MS);
+  const res = await apiFetch(`/mcp/courses/${courseId}/analyses`, { method: 'POST' });
+  if (!res.ok) throw new Error('Échec du déclenchement de l’analyse');
+  // 202 sans corps : rien à lire, le résultat viendra par WebSocket.
 }
 
 /**

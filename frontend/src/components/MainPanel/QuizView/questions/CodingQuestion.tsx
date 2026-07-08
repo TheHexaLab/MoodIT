@@ -3,9 +3,18 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { CodeEditor } from '../../../QuizEditor/CodeEditor';
+import { Spinner } from '../../../Spinner/Spinner';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
+
+/**
+ * Langages SANS exécution autonome utile → pas de bouton « play » :
+ *  - SQL : la requête a besoin des données de test (fournies par le harnais, secret côté étudiant) ;
+ *  - HTML / JSX / TSX : ne s'exécutent pas seuls (validés via un harnais JS).
+ * Ces langages restent testables via l'onglet « Tester » / la soumission (qui exécute les harnais).
+ */
+const NO_STANDALONE_RUN = new Set(['sql', 'html', 'jsx', 'tsx']);
 
 /**
  * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
@@ -21,22 +30,31 @@ export function CodingQuestion({
   result,
   onChange,
   labels,
+  onRunCode,
 }: QuestionViewProps): React.ReactElement {
   const t = { ...defaultQuestionLabels, ...labels };
   const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
   const language = question.language?.name;
   const review = mode === 'review';
+  // Le « play » n'a de sens que si le langage s'exécute seul (cf. NO_STANDALONE_RUN).
+  const runnable = !!language && !NO_STANDALONE_RUN.has(language.toLowerCase());
 
   return (
     <div>
       {review && <span className={styles.codeLabel}>{t.yourAnswer}</span>}
+      {/* Clé = id de la question : au changement de question, l'éditeur est remonté, ce qui
+          FERME la console d'exécution (et efface sa sortie) restée ouverte sur la précédente. */}
       <CodeEditor
+        key={question.id}
         value={code}
         onChange={(next) => onChange({ kind: 'coding', code: next })}
         language={language}
         readOnly={review}
         minRows={8}
         ariaLabel={t.codeAria(language ?? 'Code')}
+        // Bouton « play » : exécute le code courant dans le sandbox (hors révision, langage autonome).
+        onRun={onRunCode && !review && runnable ? (src) => onRunCode({ language, code: src }) : undefined}
+        runLabel={t.runCode}
       />
 
       {review && <TestResults tests={result?.tests} labels={t} />}
@@ -53,7 +71,13 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    return <p className={styles.testNote}>{labels.serverNote}</p>;
+    // Verdicts pas encore reçus : la correction du code tourne en async (sandbox). Le WS
+    // `quiz:code-graded` remplacera ce placeholder par les résultats dès qu'ils arrivent.
+    return (
+      <p className={styles.testNote}>
+        <Spinner tone="current" size={14} /> {labels.evaluating}
+      </p>
+    );
   }
   const totalWeight = tests.reduce((sum, test) => sum + test.weight, 0);
 

@@ -6,6 +6,7 @@ import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.ForumNotFoundException;
 import com.moodit.core_service.service.CourseService;
 import com.moodit.core_service.service.ForumService;
+import com.moodit.core_service.service.QuizService;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -32,6 +33,9 @@ class CourseControllerTest {
 
     @MockitoBean
     private ForumService forumService; // Présent dans le constructeur du contrôleur
+
+    @MockitoBean
+    private QuizService quizService; // Aussi injecté dans le constructeur du contrôleur (param 2)
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -97,7 +101,7 @@ class CourseControllerTest {
         @Test
         @DisplayName("Valide → retourne 200 avec la liste des forums du cours")
         void devrait_retourner_200_avec_liste_forums() throws Exception {
-            when(courseService.getForumsByCourseId(1)).thenReturn(List.of(forumDTO));
+            when(courseService.getForumsByCourseAndType(1, null)).thenReturn(List.of(forumDTO));
 
             mockMvc.perform(get("/api/courses/1/forums"))
                     .andExpect(status().isOk())
@@ -108,7 +112,7 @@ class CourseControllerTest {
         @Test
         @DisplayName("Cas limite → cours sans forum retourne liste vide")
         void devrait_retourner_200_avec_liste_vide() throws Exception {
-            when(courseService.getForumsByCourseId(1)).thenReturn(List.of());
+            when(courseService.getForumsByCourseAndType(1, null)).thenReturn(List.of());
 
             mockMvc.perform(get("/api/courses/1/forums"))
                     .andExpect(status().isOk())
@@ -118,7 +122,7 @@ class CourseControllerTest {
         @Test
         @DisplayName("Erroné → cours inexistant retourne 404")
         void devrait_retourner_404_si_cours_inexistant() throws Exception {
-            when(courseService.getForumsByCourseId(99)).thenThrow(new CourseNotFoundException());
+            when(courseService.getForumsByCourseAndType(99, null)).thenThrow(new CourseNotFoundException());
 
             mockMvc.perform(get("/api/courses/99/forums"))
                     .andExpect(status().isNotFound());
