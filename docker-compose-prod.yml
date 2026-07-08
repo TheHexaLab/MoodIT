@@ -79,6 +79,11 @@ services:
     container_name: moodit_permission
     env_file:
       - .env.docker
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   #Ollama (LLM local, API compatible OpenAI) --------------------
   # Sert le modèle sur le réseau interne : aucune donnée ne sort vers un tiers.
