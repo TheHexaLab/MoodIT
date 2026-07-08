@@ -264,26 +264,31 @@ public class AuthService {
   }
 
   public void logout(String token) {
+    // Entrée vide : rien à révoquer côté serveur.
     if (token == null || token.isBlank()) {
       return;
     }
 
     String email;
     try {
+      // JWT illisible/invalide : logout idempotent, on sort sans erreur.
       email = jwtService.extractEmail(token);
     } catch (Exception e) {
       return;
     }
 
+    // Email absent du token : aucun utilisateur à cibler.
     if (email == null || email.isBlank()) {
       return;
     }
 
     User user = userRepository.findByEmail(email).orElse(null);
+    // Token pointant vers un compte inexistant : on ignore silencieusement.
     if (user == null) {
       return;
     }
 
+    // Révocation de la session active : tout JWT précédemment émis devient invalide au validate().
     user.setActiveTokenHash(null);
     userRepository.save(user);
   }

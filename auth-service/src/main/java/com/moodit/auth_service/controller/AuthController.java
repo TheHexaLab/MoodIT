@@ -1,4 +1,5 @@
-// Contrôleur REST de l'authentification : register, login, validate, vérification email/2FA, renvoi de code.
+// Contrôleur REST de l'authentification : register, login, validate, vérification email/2FA, renvoi
+// de code.
 
 package com.moodit.auth_service.controller;
 
@@ -66,21 +67,26 @@ public class AuthController {
 
   @PostMapping("/logout")
   public ResponseEntity<Void> logout(HttpServletRequest request) {
+    // Lit le JWT depuis le cookie HttpOnly pour révoquer la session côté serveur.
     authService.logout(extractTokenFromCookie(request));
-    return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, authCookie.clear().toString()).build();
+    // Demande au navigateur de supprimer le cookie d'authentification.
+    return ResponseEntity.ok()
+        .header(HttpHeaders.SET_COOKIE, authCookie.clear().toString())
+        .build();
   }
 
   @PostMapping("/resend-code")
-  public ResponseEntity<Map<String, String>> resendCode(
-      @Valid @RequestBody ResendCodeRequest req) {
+  public ResponseEntity<Map<String, String>> resendCode(@Valid @RequestBody ResendCodeRequest req) {
     return ResponseEntity.ok(authService.resendCode(req.getEmail(), req.getMode()));
   }
 
   private String extractTokenFromCookie(HttpServletRequest request) {
+    // Peut être null si la requête ne contient aucun cookie.
     Cookie[] cookies = request.getCookies();
     if (cookies == null) {
       return null;
     }
+    // Recherche le cookie d'auth standard ; absent => logout idempotent côté service.
     for (Cookie cookie : cookies) {
       if (AuthCookie.NAME.equals(cookie.getName())) {
         return cookie.getValue();

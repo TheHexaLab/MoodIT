@@ -464,6 +464,7 @@ class AuthServiceTest {
 
   @Test
   void logout_validToken_clearsActiveTokenHash() {
+    // Vérifie qu'un logout avec token valide supprime le hash de session active et persiste l'utilisateur.
     User u = verifiedUser();
     u.setActiveTokenHash("token-hash");
     when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");

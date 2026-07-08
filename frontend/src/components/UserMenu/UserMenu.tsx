@@ -176,6 +176,7 @@ export default function UserMenu({
   }
 
   async function handleLogout() {
+    // Ferme le menu puis tente la déconnexion serveur ; quoi qu'il arrive, nettoie l'état client et redirige.
     requestClose();
 
     try {

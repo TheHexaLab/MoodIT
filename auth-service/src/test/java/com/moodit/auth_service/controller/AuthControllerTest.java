@@ -151,6 +151,7 @@ class AuthControllerTest {
 
   @Test
   void logout_readsCookie_clearsSession_andClearsCookie() throws Exception {
+    // Vérifie que logout lit le cookie JWT, invalide la session côté service et renvoie un cookie expiré.
     when(authCookie.clear())
         .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
 
