@@ -9,7 +9,9 @@ const PORT = parseInt(process.env.EXEC_PORT || '8084', 10);
 const MARK = "\n-" + "- @student\n"; // évite un littéral "-- @student" (fragile au collage shell)
 const RO = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n" +
            "INSERT INTO utilisateurs VALUES ('Alice',1),('Bob',0),('Carol',1);\n" +
-           "SELECT (SELECT count(*) FROM solution) = 2;\n";
+           "SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1\n" +
+           "   AND (SELECT name FROM pragma_table_info('solution')) = 'nom'\n" +
+           "   AND (SELECT count(*) FROM solution) = 2;\n";
 const MUT = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n" +
             "INSERT INTO utilisateurs VALUES ('Alice',1),('Bob',1),('Carol',1);" + MARK +
             "SELECT (SELECT count(*) FROM utilisateurs) = 3\n" +
