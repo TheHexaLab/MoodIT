@@ -1,3 +1,5 @@
+import { formatScore } from '../MainPanel/QuizView/formatScore';
+
 /**
  * Libellés du corps « Modifier le quiz / Nouveau quiz » (méta + liste de questions).
  * Passés via `labels` (en Partial) ; les champs omis prennent les défauts.
@@ -41,7 +43,7 @@ export const defaultQuizFormLabels: QuizFormLabels = {
   daily: 'Quiz du jour',
   allowRetry: 'Autoriser les reprises',
   questionsSection: 'Questions',
-  points: (value) => `${value} pts`,
+  points: (value) => `${formatScore(value)} pts`,
   addQuestion: 'Ajouter',
   editQuestionAria: 'Modifier la question',
   deleteQuestionAria: 'Supprimer la question',

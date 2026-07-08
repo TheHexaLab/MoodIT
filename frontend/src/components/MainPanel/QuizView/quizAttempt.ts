@@ -198,10 +198,38 @@ export interface CodingTestResult {
  * corriger une question Code à l'unité (ex. bouton « Tester » de l'éditeur).
  */
 export interface CodeEvaluationInput {
+  /** Nom du langage de la question (ex. « Python ») — le service d'exécution en a besoin. */
+  language?: string;
   languageId?: number;
   code: string;
   testCases: TestCase[];
 }
+
+/**
+ * Charge utile d'une EXÉCUTION SIMPLE (bouton « play ») : le code à lancer tel quel, sans harnais.
+ * Le langage choisit l'exécuteur du sandbox.
+ */
+export interface RunCodeInput {
+  language?: string;
+  code: string;
+}
+
+/**
+ * Sortie brute d'une exécution simple (miroir du `RunResult` backend). `stderr` porte la stack
+ * trace en cas d'exception ; `signal` non nul (ex. SIGKILL) = interrompu (dépassement temps/mémoire).
+ */
+export interface RunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: string | null;
+  /** Sortie de compilation (langages compilés) — null pour Python. */
+  compileOutput: string | null;
+  timedOut: boolean;
+}
+
+/** Lance un code dans le sandbox et renvoie sa sortie (bouton « play » des éditeurs). */
+export type RunCodeHandler = (input: RunCodeInput) => MaybePromise<RunResult>;
 
 /**
  * Résultat corrigé d'UNE question (vérité serveur). `earned`/`max` pilotent
@@ -318,3 +346,44 @@ export type FetchAttemptResultHandler = (
   quizId: number,
   attemptId: number
 ) => MaybePromise<QuizResult>;
+
+// ───────────────────── Correction ASYNC des questions Code (WS) ─────────────────
+
+/** Handlers d'abonnement au verdict de correction de code (event WS `quiz:code-graded`). */
+export interface IncomingQuizGradeHandlers {
+  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void;
+}
+
+/** Facade WS d'abonnement à la correction de code (scope utilisateur). */
+export interface QuizGradingSocket {
+  subscribe: (userId: number, handlers: IncomingQuizGradeHandlers) => () => void;
+}
+
+/**
+ * Abonnement PRÉ-LIÉ à l'utilisateur courant, fourni par le parent (Dashboard). Le consommateur
+ * (useQuizAttempt) passe un callback et récupère une fonction de désabonnement.
+ */
+export type SubscribeCodeGrading = (
+  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void
+) => () => void;
+
+/**
+ * Fusionne les verdicts de code fraîchement corrigés (reçus par WS) dans un résultat existant :
+ * remplace les questions concernées, recalcule earned/max. No-op si la tentative ne correspond
+ * pas (ou pas de résultat courant).
+ */
+export function mergeCodeResults(
+  previous: QuizResult | null,
+  attemptId: number,
+  graded: QuestionResult[]
+): QuizResult | null {
+  if (!previous || previous.attemptId !== attemptId) return previous;
+  const gradedById = new Map(graded.map((g) => [g.questionId, g]));
+  const questions = previous.questions.map((q) => gradedById.get(q.questionId) ?? q);
+  return {
+    ...previous,
+    questions,
+    earned: questions.reduce((sum, q) => sum + q.earned, 0),
+    max: questions.reduce((sum, q) => sum + q.max, 0),
+  };
+}

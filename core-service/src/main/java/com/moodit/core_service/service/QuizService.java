@@ -12,6 +12,7 @@ import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
@@ -28,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,11 +44,13 @@ public class QuizService {
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
     private final QTypeRepository qTypeRepository;
+    private final LanguageRepository languageRepository;
     private final SubmissionRepository submissionRepository;
     private final AttemptRepository attemptRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final RealtimeEventPublisher realtimePublisher;
+    private final CodeGradingRunner codeGradingRunner;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -71,6 +75,21 @@ public class QuizService {
         return qTypeRepository.findAll().stream()
                 .sorted(Comparator.comparing(QType::getId))
                 .map(t -> new QuestionTypeDTO(t.getId(), Q_TYPE_NAME_TO_SLUG.get(t.getName()), t.getName()))
+                .toList();
+    }
+
+    /** Langages d'exécution (table Language), COMPLETS (templates inclus) pour l'éditeur, triés par id. */
+    @Transactional(readOnly = true)
+    public List<LanguageDTO> getLanguages() {
+        return languageRepository.findAll().stream()
+                .sorted(Comparator.comparing(Language::getId))
+                .map(l -> LanguageDTO.builder()
+                        .id(l.getId())
+                        .name(l.getName())
+                        .harnessTemplate(l.getHarnessTemplate())
+                        .startCodeTemplate(l.getStartCodeTemplate())
+                        .harnessLanguageId(l.getHarnessLanguageId())
+                        .build())
                 .toList();
     }
 
@@ -293,7 +312,9 @@ public class QuizService {
         }
 
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
-        QuizResultDTO result = buildResult(quiz, byQuestion);
+        // Types « à réponses » corrigés tout de suite ; questions Code renvoyées « en cours »
+        // (tests = null), corrigées ensuite en async (cf. déclenchement plus bas).
+        QuizResultDTO result = buildResult(quiz, byQuestion, Map.of());
 
         // Nouvelle tentative (numéro = nb existant + 1). Aucun score n'est stocké : seules
         // les réponses brutes le sont (content) ; le score est recalculé à la lecture.
@@ -323,6 +344,11 @@ public class QuizService {
             s.setContent(serializeAnswer(byQuestion.get(q.getId())));
             submissionRepository.save(s);
         }
+
+        // Corrige les questions Code EN ASYNC (exécution sandbox lente), APRÈS commit pour que le
+        // job voie la tentative + les submissions persistées. Verdicts poussés ensuite par WS.
+        Integer attemptId = savedAttempt.getId();
+        afterCommit(() -> codeGradingRunner.gradeAttempt(attemptId));
 
         result.setAttemptId(savedAttempt.getId());
         result.setAttemptNo(savedAttempt.getAttemptNo());
@@ -380,8 +406,8 @@ public class QuizService {
                     .map(Question::getId)
                     .collect(Collectors.toSet());
             QuizResultDTO result = computeAttemptResult(attempt);
-            int earned = 0;
-            int max = 0;
+            double earned = 0;
+            double max = 0;
             for (QuestionResultDTO qr : result.getQuestions()) {
                 if (codeQuestionIds.contains(qr.getQuestionId())) continue;
                 earned += qr.getEarned();
@@ -411,8 +437,11 @@ public class QuizService {
                         s -> s.getQuestion().getId(),
                         s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
                         (a, b) -> a));
+        // Submissions par question → verdicts persistés lus pour les questions Code.
+        Map<Integer, Submission> submissionByQuestion = subs.stream()
+                .collect(Collectors.toMap(s -> s.getQuestion().getId(), s -> s, (a, b) -> a));
 
-        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion);
+        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion, submissionByQuestion);
         result.setAttemptId(attempt.getId());
         result.setAttemptNo(attempt.getAttemptNo());
         return result;
@@ -423,15 +452,19 @@ public class QuizService {
                 .collect(Collectors.toMap(SubmittedAnswerDTO::getQuestionId, a -> a, (a, b) -> a));
     }
 
-    /** Corrige toutes les questions du quiz à partir des réponses fournies (sans persister). */
-    private QuizResultDTO buildResult(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+    /**
+     * Corrige toutes les questions du quiz. {@code submissionByQuestion} porte les verdicts
+     * persistés des questions Code (vide à la soumission → Code « en cours »).
+     */
+    private QuizResultDTO buildResult(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion,
+            Map<Integer, Submission> submissionByQuestion) {
         List<QuestionResultDTO> results = sortedQuestions(quiz).stream()
-                .map(q -> gradeQuestion(q, byQuestion.get(q.getId())))
+                .map(q -> gradeQuestion(q, byQuestion.get(q.getId()), submissionByQuestion.get(q.getId())))
                 .toList();
         return QuizResultDTO.builder()
                 .quizId(quiz.getId())
-                .earned(results.stream().mapToInt(QuestionResultDTO::getEarned).sum())
-                .max(results.stream().mapToInt(QuestionResultDTO::getMax).sum())
+                .earned(round1(results.stream().mapToDouble(QuestionResultDTO::getEarned).sum()))
+                .max(round1(results.stream().mapToDouble(QuestionResultDTO::getMax).sum()))
                 .questions(results)
                 .build();
     }
@@ -472,21 +505,40 @@ public class QuizService {
 
     // ── Grading (porté de grading.ts côté front) ─────────────────────────────────
 
-    private QuestionResultDTO gradeQuestion(Question question, SubmittedAnswerDTO answer) {
+    private QuestionResultDTO gradeQuestion(
+            Question question, SubmittedAnswerDTO answer, Submission submission) {
         String slug = slugFor(question);
         if (slug == null) slug = "";
         return switch (slug) {
             case "true_false", "single_choice", "multiple_choice" -> gradeChoice(question, answer, slug);
             case "ordering" -> gradeOrdering(question, answer);
             case "matching" -> gradeMatching(question, answer);
-            default -> // coding : non corrigé côté serveur
-                    QuestionResultDTO.builder()
-                            .questionId(question.getId())
-                            .earned(0)
-                            .max(question.getTotalScore())
-                            .tests(null)
-                            .build();
+            case "coding" -> gradeCoding(question, submission);
+            default -> CodeGrading.pending(question);
         };
+    }
+
+    /**
+     * Note une question Code à partir des verdicts PERSISTÉS (Submission_Test_Case). Sans verdict
+     * (submission absente ou correction async pas encore terminée) → « en cours » (tests = null).
+     */
+    private QuestionResultDTO gradeCoding(Question question, Submission submission) {
+        List<TestCase> harnesses = orderedTestCases(question);
+        Map<Integer, Boolean> passedByTestCaseId = new HashMap<>();
+        if (submission != null && submission.getTestCaseResults() != null) {
+            for (SubmissionTestCase verdict : submission.getTestCaseResults()) {
+                passedByTestCaseId.put(
+                        verdict.getTestCase().getId(), Boolean.TRUE.equals(verdict.getPassed()));
+            }
+        }
+        return CodeGrading.build(question, harnesses, passedByTestCaseId);
+    }
+
+    private static List<TestCase> orderedTestCases(Question question) {
+        if (question.getTestCases() == null) return List.of();
+        return question.getTestCases().stream()
+                .sorted(Comparator.comparing(TestCase::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
     }
 
     private QuestionResultDTO gradeChoice(Question question, SubmittedAnswerDTO answer, String slug) {
@@ -498,8 +550,8 @@ public class QuizService {
                 ? answer.getAnswerIds() : List.of();
         Set<Integer> correctSet = new HashSet<>(correctIds);
 
-        int total = question.getTotalScore();
-        int earned;
+        double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;
+        double earned;
         if ("multiple_choice".equals(slug)) {
             long good = selectedIds.stream().filter(correctSet::contains).count();
             long bad = selectedIds.stream().filter(id -> !correctSet.contains(id)).count();
@@ -508,7 +560,7 @@ public class QuizService {
         } else {
             Set<Integer> selectedSet = new HashSet<>(selectedIds);
             boolean exact = selectedSet.equals(correctSet);
-            earned = exact ? total : 0;
+            earned = exact ? total : 0.0;
         }
 
         return QuestionResultDTO.builder()
@@ -566,9 +618,15 @@ public class QuizService {
                 .build();
     }
 
-    /** Score proportionnel borné, arrondi : total × clamp(ratio, 0, 1). */
-    private int scaled(int total, double ratio) {
-        return (int) Math.round(total * Math.max(0, Math.min(1, ratio)));
+    /** Score proportionnel borné, arrondi au DIXIÈME : total × clamp(ratio, 0, 1). Package-private
+     *  (au lieu de private) pour être testable directement. */
+    static double scaled(double total, double ratio) {
+        return round1(total * Math.max(0, Math.min(1, ratio)));
+    }
+
+    /** Arrondi au dixième (les scores de question sont au format X.X). */
+    static double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     // ── Construction d'entités (écriture) ────────────────────────────────────────
@@ -592,10 +650,12 @@ public class QuizService {
             q.setPrompt(qd.getPrompt());
             q.setStartCode(qd.getStartCode());
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
-            q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
+            q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
+            q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
+            q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
             index++;
         }
@@ -618,10 +678,20 @@ public class QuizService {
         q.setPrompt(qd.getPrompt());
         q.setStartCode(qd.getStartCode());
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
-        q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0);
+        q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));
+        q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
         applyDragItems(q, qd.getDragItems());
+        applyTestCases(q, qd.getTestCases());
+    }
+
+    /** Résout le langage d'une question Code depuis le DTO (id imbriqué). null si absent/non-code. */
+    private Language resolveLanguage(QuestionDTO qd) {
+        if (qd.getLanguage() == null || qd.getLanguage().getId() == null) return null;
+        return languageRepository.findById(qd.getLanguage().getId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Langage inconnu: " + qd.getLanguage().getId()));
     }
 
     /**
@@ -710,6 +780,48 @@ public class QuizService {
         return items;
     }
 
+    private List<TestCase> buildTestCases(List<TestCaseDTO> dtos, Question question) {
+        List<TestCase> testCases = new ArrayList<>();
+        if (dtos == null) return testCases;
+        for (TestCaseDTO td : dtos) {
+            TestCase tc = new TestCase();
+            tc.setName(td.getName());
+            tc.setHarnessCode(td.getHarnessCode());
+            tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
+            tc.setQuestion(question);
+            testCases.add(tc);
+        }
+        return testCases;
+    }
+
+    /** Idem pour les harnais : réutilise les Test_Case existants par id (ids stables). */
+    private void applyTestCases(Question q, List<TestCaseDTO> dtos) {
+        if (q.getTestCases() == null) q.setTestCases(new ArrayList<>());
+        List<TestCase> current = q.getTestCases();
+        Map<Integer, TestCase> existingById = current.stream()
+                .filter(tc -> tc.getId() != null)
+                .collect(Collectors.toMap(TestCase::getId, tc -> tc));
+        List<TestCaseDTO> list = dtos == null ? List.of() : dtos;
+        Set<Integer> keptIds = list.stream()
+                .map(TestCaseDTO::getId)
+                .filter(id -> id != null && existingById.containsKey(id))
+                .collect(Collectors.toSet());
+        current.removeIf(tc -> tc.getId() != null && !keptIds.contains(tc.getId()));
+        for (TestCaseDTO td : list) {
+            TestCase tc;
+            if (td.getId() != null && existingById.containsKey(td.getId())) {
+                tc = existingById.get(td.getId()); // réutilisé → id stable
+            } else {
+                tc = new TestCase();
+                tc.setQuestion(q);
+                current.add(tc);
+            }
+            tc.setName(td.getName());
+            tc.setHarnessCode(td.getHarnessCode());
+            tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
+        }
+    }
+
     // ── Mapping entité → DTO ─────────────────────────────────────────────────────
 
     private QuizDTO toQuizMetaDTO(Quiz quiz) {
@@ -754,6 +866,13 @@ public class QuizService {
                 .qTypeId(question.getQType() != null ? question.getQType().getId() : null)
                 .totalScore(question.getTotalScore())
                 .orderIndex(question.getOrderIndex())
+                // Langage LIGHT (id + name) : suffit à la coloration et à pré-sélectionner
+                // dans l'éditeur ; on n'expose pas les templates de harnais en passation.
+                .language(question.getLanguage() == null ? null
+                        : LanguageDTO.builder()
+                        .id(question.getLanguage().getId())
+                        .name(question.getLanguage().getName())
+                        .build())
                 .startCode(question.getStartCode())
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
@@ -761,6 +880,22 @@ public class QuizService {
                 .dragItems(question.getDragItems() == null ? List.of()
                         : question.getDragItems().stream()
                         .map(d -> toDragItemDTO(d, includeCorrection)).toList())
+                // Catégories (zones) d'une association : groupes DISTINCTS, exposés à l'étudiant
+                // (les zones de dépôt) — le groupe correct de chaque item reste, lui, masqué.
+                .groups(distinctGroups(question))
+                // Harnais : ÉDITEUR seulement. En passation → null (omis) : code des tests caché.
+                .testCases(includeCorrection && question.getTestCases() != null
+                        ? question.getTestCases().stream().map(this::toTestCaseDTO).toList()
+                        : null)
+                .build();
+    }
+
+    private TestCaseDTO toTestCaseDTO(TestCase testCase) {
+        return TestCaseDTO.builder()
+                .id(testCase.getId())
+                .name(testCase.getName())
+                .harnessCode(testCase.getHarnessCode())
+                .weight(testCase.getWeight())
                 .build();
     }
 
@@ -786,5 +921,22 @@ public class QuizService {
                 .correctOrder(includeCorrection ? dragItem.getCorrectOrder() : null)
                 .groupName(includeCorrection ? dragItem.getGroupName() : null)
                 .build();
+    }
+
+    /**
+     * Catégories DISTINCTES (zones de dépôt) d'une association. TRIÉES ALPHABÉTIQUEMENT à dessein :
+     * l'ordre d'apparition des items corrélerait avec l'ordre des items (non mélangés) et révélerait
+     * le mapping item→groupe. Le tri décorrèle l'ordre affiché de la solution.
+     */
+    static List<String> distinctGroups(Question question) {
+        if (question.getDragItems() == null) {
+            return List.of();
+        }
+        return question.getDragItems().stream()
+                .map(DragItem::getGroupName)
+                .filter(g -> g != null && !g.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
     }
 }

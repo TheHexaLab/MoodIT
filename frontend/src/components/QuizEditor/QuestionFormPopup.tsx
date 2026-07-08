@@ -129,8 +129,8 @@ export function QuestionFormBody({
   const t = { ...defaultQuestionFormLabels, ...labels };
   const [draft, setDraft] = useState<QuestionDraft>(initialDraft);
   // Saisie du barème en TEXTE local : permet un champ vide / intermédiaire pendant la
-  // frappe (sinon le forçage à ≥ 1 à chaque touche empêche de remplacer la valeur).
-  // Borné à un entier ≥ 1 au `blur`. `draft.totalScore` suit (0 tant que vide → bloque
+  // frappe (sinon le forçage à chaque touche empêche de remplacer la valeur). Arrondi au
+  // DIXIÈME (format X.X, ≥ 0.1) au `blur`. `draft.totalScore` suit (0 tant que vide → bloque
   // l'enregistrement via canSave).
   const [pointsText, setPointsText] = useState<string>(String(initialDraft.totalScore));
   /** Mobile (associations) : index de la ligne active dont la flèche devient poubelle. */
@@ -225,8 +225,8 @@ export function QuestionFormBody({
           <input
             className={styles.input}
             type="number"
-            min={1}
-            step={1}
+            min={0.1}
+            step={0.1}
             value={pointsText}
             onChange={(e) => {
               const raw = e.target.value;
@@ -234,8 +234,9 @@ export function QuestionFormBody({
               patch({ totalScore: raw === '' ? 0 : Number(raw) });
             }}
             onBlur={() => {
-              const n = Math.trunc(Number(pointsText));
-              const clamped = n >= 1 ? n : 1;
+              // Arrondi au dixième (format X.X), borné à ≥ 0.1.
+              const n = Math.round(Number(pointsText) * 10) / 10;
+              const clamped = n >= 0.1 ? n : 0.1;
               patch({ totalScore: clamped });
               setPointsText(String(clamped));
             }}
