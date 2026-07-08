@@ -557,4 +557,138 @@ class AuthServiceTest {
     assertThat(u.getFailedLoginAttempts()).isEqualTo(3);
     verify(userRepository, never()).save(any(User.class));
   }
+
+  // ----- forgotPassword -----
+
+  @Test
+  void forgotPassword_userFound_setsCode_andSendsEmail() {
+    User u = verifiedUser();
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    Map<String, String> res = authService.forgotPassword("Karine.Roussel@USHERBROOKE.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe");
+    assertThat(u.getResetCode()).hasSize(6);
+    assertThat(u.getResetCodeExpiresAt()).isAfter(LocalDateTime.now());
+    verify(userRepository).save(u);
+    verify(emailService).sendPasswordResetCode(eq("karine.roussel@usherbrooke.ca"), anyString());
+  }
+
+  @Test
+  void forgotPassword_userNotFound_genericResponse_noEmail() {
+    // Anti-énumération : réponse identique, aucun email, aucune écriture.
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+
+    Map<String, String> res = authService.forgotPassword("ghost@usherbrooke.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe");
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  @Test
+  void forgotPassword_withinCooldown_silent_noEmail() {
+    User u = verifiedUser();
+    u.setResetLastSentAt(LocalDateTime.now()); // vient d'être envoyé
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    Map<String, String> res = authService.forgotPassword("karine.roussel@usherbrooke.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe"); // pas de 429 (anti-énum)
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  @Test
+  void forgotPassword_whenLocked_silent_noEmail() {
+    User u = verifiedUser();
+    u.setResetLockedUntil(LocalDateTime.now().plusMinutes(10));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    authService.forgotPassword("karine.roussel@usherbrooke.ca");
+
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  // ----- resetPassword -----
+
+  private User userWithResetCode() {
+    User u = verifiedUser();
+    u.setResetCode("123456");
+    u.setResetCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
+    return u;
+  }
+
+  @Test
+  void resetPassword_success_setsNewHash_clearsReset_andInvalidatesSession() {
+    User u = userWithResetCode();
+    u.setActiveTokenHash("old-token-hash");
+    u.setFailedLoginAttempts(3);
+    u.setLoginLockedUntil(LocalDateTime.now().plusMinutes(5));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.encode(peppered("N0uveauPass!"))).thenReturn("new-hash");
+
+    Map<String, String> res =
+        authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!");
+
+    assertThat(res.get("message")).contains("réinitialisé");
+    assertThat(u.getPasswordHash()).isEqualTo("new-hash");
+    assertThat(u.getResetCode()).isNull();
+    assertThat(u.getResetLockedUntil()).isNull();
+    // Sessions invalidées + verrou de login levé.
+    assertThat(u.getActiveTokenHash()).isNull();
+    assertThat(u.getFailedLoginAttempts()).isZero();
+    assertThat(u.getLoginLockedUntil()).isNull();
+  }
+
+  @Test
+  void resetPassword_wrongCode_incrementsAttempts_andKeepsPassword() {
+    User u = userWithResetCode();
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "000000", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+    assertThat(u.getResetAttempts()).isEqualTo(1);
+    assertThat(u.getPasswordHash()).isEqualTo("storedHash"); // inchangé
+    verify(passwordEncoder, never()).encode(anyString());
+  }
+
+  @Test
+  void resetPassword_wrongCodeAtCap_locksAndInvalidatesCode() {
+    User u = userWithResetCode();
+    u.setResetAttempts(4); // la 5e tentative atteint le plafond
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "000000", "N0uveauPass!"))
+        .isInstanceOf(TooManyRequestsException.class);
+    assertThat(u.getResetLockedUntil()).isAfter(LocalDateTime.now());
+    assertThat(u.getResetCode()).isNull();
+  }
+
+  @Test
+  void resetPassword_expiredCode_throws() {
+    User u = userWithResetCode();
+    u.setResetCodeExpiresAt(LocalDateTime.now().minusMinutes(1));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+    verify(passwordEncoder, never()).encode(anyString());
+  }
+
+  @Test
+  void resetPassword_whenLocked_throws_withoutTouchingPassword() {
+    User u = userWithResetCode();
+    u.setResetLockedUntil(LocalDateTime.now().plusMinutes(10));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(TooManyRequestsException.class);
+    verify(passwordEncoder, never()).encode(anyString());
+  }
 }

@@ -36,6 +36,8 @@ public class SecurityConfig {
                         "/auth/verify-2fa",
                         "/auth/logout",
                         "/auth/resend-code",
+                        "/auth/forgot-password",
+                        "/auth/reset-password",
                         "/swagger-ui/**",
                         "/swagger-ui/index.html",
                         "/swagger-ui.html",

@@ -457,3 +457,45 @@ input[type="password"]::-ms-reveal {
 
 
 }
+
+/* Jauge de force du mot de passe (même logique/visuel que la page Register). */
+.strength {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+}
+.strength span {
+    flex: 1;
+    height: 0.25rem;
+    border-radius: 0.125rem;
+    background: var(--border);
+}
+.strength[data-level='1'] span:nth-child(1) {
+    background: var(--danger);
+}
+.strength[data-level='2'] span:nth-child(1),
+.strength[data-level='2'] span:nth-child(2) {
+    background: var(--warning);
+}
+.strength[data-level='3'] span:nth-child(1),
+.strength[data-level='3'] span:nth-child(2),
+.strength[data-level='3'] span:nth-child(3) {
+    background: var(--warning);
+}
+.strength[data-level='4'] span {
+    background: var(--success);
+}
+.strength-label {
+    font-size: 0.78rem;
+    margin: 0.3rem 0 0;
+}
+.strength-label[data-level='1'] {
+    color: var(--danger);
+}
+.strength-label[data-level='2'],
+.strength-label[data-level='3'] {
+    color: var(--warning);
+}
+.strength-label[data-level='4'] {
+    color: var(--success);
+}

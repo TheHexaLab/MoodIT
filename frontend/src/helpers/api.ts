@@ -148,6 +148,42 @@ export async function verify2FA(email: string, code: string): Promise<AuthRespon
   return res.json();
 }
 
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const res = await fetch('/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<{ message: string }> {
+  const res = await fetch('/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code, newPassword }),
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function resendCode(email: string, mode: string): Promise<{ message: string }> {
   const res = await fetch('/auth/resend-code', {
     method: 'POST',

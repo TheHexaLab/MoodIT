@@ -202,4 +202,54 @@ class AuthControllerTest {
         .perform(post("/auth/resend-code").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isTooManyRequests());
   }
+
+  @Test
+  void forgotPassword_valid_returns200() throws Exception {
+    when(authService.forgotPassword(anyString())).thenReturn(Map.of("message", "ok"));
+    String body = "{\"email\":\"karine@usherbrooke.ca\"}";
+
+    mockMvc
+        .perform(post("/auth/forgot-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void forgotPassword_invalidEmail_returns400() throws Exception {
+    String body = "{\"email\":\"pas-un-email\"}";
+
+    mockMvc
+        .perform(post("/auth/forgot-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void resetPassword_valid_returns200() throws Exception {
+    when(authService.resetPassword(anyString(), anyString(), anyString()))
+        .thenReturn(Map.of("message", "ok"));
+    String body =
+        "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\",\"newPassword\":\"N0uveauPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void resetPassword_malformedCode_returns400() throws Exception {
+    String body =
+        "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"12\",\"newPassword\":\"N0uveauPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void resetPassword_shortPassword_returns400() throws Exception {
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\",\"newPassword\":\"court\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
 }

@@ -67,6 +67,28 @@ public class EmailService {
   }
 
   @Async("emailExecutor")
+  public void sendPasswordResetCode(String to, String code) {
+    try {
+      SimpleMailMessage message = new SimpleMailMessage();
+      message.setFrom("noreply@moodit.ca");
+      message.setTo(to);
+      message.setSubject("MoodIT — Réinitialisation du mot de passe");
+      message.setText(
+          "Bonjour,\n\n"
+              + "Voici votre code de réinitialisation de mot de passe MoodIT : "
+              + code
+              + "\n\n"
+              + "Ce code expire dans 15 minutes.\n\n"
+              + "Si vous n'avez pas demandé à réinitialiser votre mot de passe, ignorez cet email : "
+              + "votre mot de passe actuel reste inchangé.\n\n"
+              + "L'équipe MoodIT");
+      mailSender.send(message);
+    } catch (Exception e) {
+      log.error("Échec d'envoi du code de réinitialisation à {}", to, e);
+    }
+  }
+
+  @Async("emailExecutor")
   public void send2FACode(String to, String code) {
     try {
       SimpleMailMessage message = new SimpleMailMessage();

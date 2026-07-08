@@ -53,6 +53,22 @@ public class User {
   @Column(name = "login_locked_until")
   private LocalDateTime loginLockedUntil;
 
+  // Réinitialisation de mot de passe : champs dédiés, distincts des verification_* (2FA).
+  @Column(name = "reset_code", length = 6)
+  private String resetCode;
+
+  @Column(name = "reset_code_expires_at")
+  private LocalDateTime resetCodeExpiresAt;
+
+  @Column(name = "reset_attempts", nullable = false)
+  private int resetAttempts = 0;
+
+  @Column(name = "reset_last_sent_at")
+  private LocalDateTime resetLastSentAt;
+
+  @Column(name = "reset_locked_until")
+  private LocalDateTime resetLockedUntil;
+
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 

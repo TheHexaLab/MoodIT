@@ -5,8 +5,10 @@ package com.moodit.auth_service.controller;
 
 import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.LoginRequest;
+import com.moodit.auth_service.dto.ForgotPasswordRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.dto.ResendCodeRequest;
+import com.moodit.auth_service.dto.ResetPasswordRequest;
 import com.moodit.auth_service.dto.VerifyCodeRequest;
 import com.moodit.auth_service.config.AuthCookie;
 import com.moodit.auth_service.service.AuthService;
@@ -93,5 +95,18 @@ public class AuthController {
       }
     }
     return null;
+  }
+  
+  @PostMapping("/forgot-password")
+  public ResponseEntity<Map<String, String>> forgotPassword(
+      @Valid @RequestBody ForgotPasswordRequest req) {
+    return ResponseEntity.ok(authService.forgotPassword(req.getEmail()));
+  }
+
+  @PostMapping("/reset-password")
+  public ResponseEntity<Map<String, String>> resetPassword(
+      @Valid @RequestBody ResetPasswordRequest req) {
+    return ResponseEntity.ok(
+        authService.resetPassword(req.getEmail(), req.getCode(), req.getNewPassword()));
   }
 }

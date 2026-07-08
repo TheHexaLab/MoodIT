@@ -1,22 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import '../LoginPage.css';
-import { useTheme } from '../../helpers/theme';
-import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
+import { EyeIcon } from '../../assets/eye';
 import { Lightanddark } from '../../assets/light-dark-btn';
 import logo from '../../assets/Logo.png';
+import { resetPassword, forgotPassword } from '../../helpers/api';
+import { useTheme } from '../../helpers/theme';
 
-type Mode = 'email' | '2fa';
-
-export default function VerifyCode() {
-  const { theme, toggleTheme } = useTheme();
+// Étape 2 du « mot de passe oublié » : saisie du code reçu par email + nouveau mot de passe.
+// L'email provient de location.state (posé par ForgotPassword). En accès direct (state vide),
+// on renvoie vers l'étape 1.
+export default function ResetPassword() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
 
   const email: string = location.state?.email || '';
-  const mode: Mode = location.state?.mode || 'email';
 
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -24,43 +27,49 @@ export default function VerifyCode() {
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
 
-  const isEmailVerification = mode === 'email';
-
-  // Accès direct / rafraîchissement : location.state est null, donc email est vide. On ne peut
-  // rien vérifier sans email -> on renvoie vers le login plutôt que d'envoyer une requête vide.
+  // Accès direct / rafraîchissement : sans email on ne peut rien réinitialiser.
   useEffect(() => {
-    if (!email) {
-      navigate('/login', { replace: true });
-    }
+    if (!email) navigate('/forgot-password', { replace: true });
   }, [email, navigate]);
 
-  // Compte à rebours du cooldown de renvoi (aligné sur le délai serveur de 60 s).
+  // Compte à rebours du renvoi (aligné sur le cooldown serveur de 60 s).
   useEffect(() => {
     if (cooldown <= 0) return;
     const id = setTimeout(() => setCooldown(cooldown - 1), 1000);
     return () => clearTimeout(id);
   }, [cooldown]);
 
+  // Même barème que la page Register (0 = vide → 4 = fort).
+  function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
+    if (pw.length === 0) return 0;
+    if (pw.length < 8) return 1;
+    const hasNumber = /[0-9]/.test(pw);
+    const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw);
+    if (hasNumber && hasSpecial) return 4;
+    if (hasNumber || hasSpecial) return 3;
+    return 2;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-
     if (code.length !== 6) {
       setError('Le code doit contenir 6 chiffres');
+      return;
+    }
+    if (!password) {
+      setError('Le mot de passe est requis');
+      return;
+    }
+    if (passwordStrength(password) < 2) {
+      setError('Mot de passe trop faible');
       return;
     }
 
     setSubmitting(true);
     try {
-      if (isEmailVerification) {
-        await verifyEmail(email, code);
-        setSuccess(true);
-      } else {
-        // 2FA — l'auth-service pose le cookie HttpOnly `moodit_token` dans la réponse
-        // (credentials:'include'). Rien à stocker côté JS : on redirige.
-        await verify2FA(email, code);
-        navigate('/');
-      }
+      await resetPassword(email, code, password);
+      setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {
@@ -74,8 +83,8 @@ export default function VerifyCode() {
     setResendMsg('');
     setResending(true);
     try {
-      await resendCode(email, mode);
-      setResendMsg('Un nouveau code a été envoyé.');
+      await forgotPassword(email);
+      setResendMsg('Si un compte existe, un nouveau code a été envoyé.');
       setCooldown(60);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
@@ -84,11 +93,7 @@ export default function VerifyCode() {
     }
   }
 
-  // Évite d'afficher un instant le formulaire cassé (email vide) avant que la redirection
-  // ci-dessus ne s'applique.
-  if (!email) {
-    return null;
-  }
+  if (!email) return null;
 
   return (
     <div className="page">
@@ -112,17 +117,17 @@ export default function VerifyCode() {
         <div className="form-card">
           {success ? (
             <>
-              <h2 className="form-title">Email vérifié ✅</h2>
-              <p className="form-subtitle">Votre compte est maintenant actif.</p>
+              <h2 className="form-title">Mot de passe réinitialisé ✅</h2>
+              <p className="form-subtitle">
+                Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.
+              </p>
               <Link to="/login" className="btn-primary">
                 Se connecter →
               </Link>
             </>
           ) : (
             <>
-              <h2 className="form-title">
-                {isEmailVerification ? 'Vérifiez votre email 📧' : 'Double authentification 🔒'}
-              </h2>
+              <h2 className="form-title">Réinitialiser le mot de passe</h2>
               <p className="form-subtitle">
                 Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
               </p>
@@ -144,8 +149,49 @@ export default function VerifyCode() {
                   />
                 </div>
 
+                <div className="field">
+                  <div className="label-row">
+                    <label className="label">Nouveau mot de passe</label>
+                    {password && (
+                      <span className="strength-label" data-level={passwordStrength(password)}>
+                        {passwordStrength(password) === 1 && 'Mot de passe trop court'}
+                        {passwordStrength(password) === 2 && 'Mot de passe faible'}
+                        {passwordStrength(password) === 3 && 'Mot de passe moyen'}
+                        {passwordStrength(password) === 4 && 'Mot de passe fort'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="input-wrapper">
+                    <input
+                      className="input"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="••••••••••"
+                      value={password}
+                      maxLength={128}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="eye-btn"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Masquer' : 'Afficher'}
+                    >
+                      <EyeIcon visible={showPassword} />
+                    </button>
+                  </div>
+                  {password && (
+                    <div className="strength" data-level={passwordStrength(password)}>
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
+                </div>
+
                 <button type="submit" className="btn-primary" disabled={submitting}>
-                  {submitting ? 'Vérification...' : 'Vérifier →'}
+                  {submitting ? 'Réinitialisation...' : 'Réinitialiser →'}
                 </button>
 
                 {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
@@ -158,16 +204,12 @@ export default function VerifyCode() {
                     disabled={cooldown > 0 || resending}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   >
-                    {cooldown > 0
-                      ? `Renvoyer (${cooldown}s)`
-                      : resending
-                        ? 'Envoi...'
-                        : 'Renvoyer le code'}
+                    {cooldown > 0 ? `Renvoyer (${cooldown}s)` : resending ? 'Envoi...' : 'Renvoyer'}
                   </button>
                 </p>
                 <p className="register-row">
-                  <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
-                    ← Retour
+                  <Link to="/login" className="register-link">
+                    ← Retour à la connexion
                   </Link>
                 </p>
               </form>
