@@ -68,11 +68,15 @@ public class ProgramController {
   // endregion
 
   // region POST
-  // Ajouter un cours dans des programmes
+  /**
+   * Ajouter un cours dans des programmes. Réservé (403 sinon) aux admins globaux / gardiens, ou aux
+   * Administrateurs/Enseignants de TOUS les programmes visés. `X-User-Email` injecté par la gateway.
+   */
   @PostMapping("/courses")
   public ResponseEntity<CourseDTO> addCourseToPrograms(
-      @RequestBody CourseCreateInProgramsDTO courseCreateDTO) {
-    return ResponseEntity.ok(programService.addCourseToPrograms(courseCreateDTO));
+      @RequestBody CourseCreateInProgramsDTO courseCreateDTO,
+      @RequestHeader("X-User-Email") String email) {
+    return ResponseEntity.ok(programService.addCourseToPrograms(courseCreateDTO, email));
   }
 
   // Ajouter un usager dans un programme

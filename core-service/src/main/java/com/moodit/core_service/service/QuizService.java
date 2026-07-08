@@ -95,7 +95,12 @@ public class QuizService {
 
     /** Quiz d'un cours (méta seule), triés par position. `publishedOnly` filtre les publiés. */
     @Transactional(readOnly = true)
-    public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly) {
+    public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly, String userEmail) {
+        // Vue ÉDITEUR (brouillons compris) → réservée à qui gère le contenu du cours (403 sinon).
+        // Vue ÉTUDIANT (publiés uniquement) → ouverte à tout membre : pas de contrôle.
+        if (!publishedOnly) {
+            requireCourseAccess(courseId, userEmail);
+        }
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
         return (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes()).stream()
@@ -121,31 +126,44 @@ public class QuizService {
 
     /**
      * Détail complet d'un quiz pour l'ÉDITEUR enseignant : inclut la correction
-     * (isCorrect, correctOrder, groupName). Réservé aux administrateurs — un étudiant
-     * qui appellerait cet endpoint reçoit 403.
+     * (isCorrect, correctOrder, groupName). Réservé à ceux qui gèrent le contenu du cours
+     * (cf. {@link #requireCourseAccess}) — un étudiant qui appellerait cet endpoint reçoit 403.
      */
     @Transactional(readOnly = true)
     public QuizDetailDTO getQuizForEdit(Integer quizId, String userEmail) {
-        requireAdmin(userEmail);
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
+        // Autorisation scopée au cours du quiz (le quiz donne le courseId à contrôler).
+        requireCourseAccess(quiz.getCourse().getId(), userEmail);
         return toQuizDetailDTO(quiz, true);
     }
 
-    /** Vérifie que l'utilisateur (mail du JWT) a le rôle « Administrateur », sinon 403. */
-    private void requireAdmin(String userEmail) {
+    /** Rôles GLOBAUX (User_Role) autorisés à gérer le contenu de N'IMPORTE quel cours. */
+    private static final Set<String> GLOBAL_CONTENT_ROLES = Set.of(RoleNames.ADMIN, RoleNames.GUARDIAN);
+
+    /**
+     * Autorise la gestion du CONTENU d'un cours (403 sinon). Deux voies :
+     *   1. rôle GLOBAL (User_Role) « Administrateur » ou « Gardien » → tous les cours ;
+     *   2. rôle PROGRAMME (User_Program_Role) « Administrateur » ou « Enseignant » dans un
+     *      programme CONTENANT ce cours (scope indispensable).
+     */
+    private void requireCourseAccess(Integer courseId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
-        boolean admin = user.getRoles() != null && user.getRoles().stream()
-                .anyMatch(r -> RoleNames.ADMIN.equals(r.getName()));
-        if (!admin) throw new ForbiddenException();
+        boolean allowed =
+                (user.getRoles() != null
+                        && user.getRoles().stream()
+                                .anyMatch(r -> GLOBAL_CONTENT_ROLES.contains(r.getName())))
+                || userRepository.hasProgramTeachingRoleForCourse(user.getId(), courseId);
+        if (!allowed) throw new ForbiddenException();
     }
 
     // ── Écriture (éditeur enseignant) ────────────────────────────────────────────
 
     /** Crée un quiz complet (méta + questions) dans un cours ; renvoie le quiz persisté. */
     @Transactional
-    public QuizDetailDTO createQuiz(Integer courseId, QuizDetailDTO dto) {
+    public QuizDetailDTO createQuiz(Integer courseId, QuizDetailDTO dto, String userEmail) {
+        requireCourseAccess(courseId, userEmail);
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
 
@@ -167,9 +185,10 @@ public class QuizService {
      * Seules les questions réellement retirées sont supprimées (orphanRemoval).
      */
     @Transactional
-    public QuizDetailDTO updateQuiz(Integer quizId, QuizDetailDTO dto) {
+    public QuizDetailDTO updateQuiz(Integer quizId, QuizDetailDTO dto, String userEmail) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
+        requireCourseAccess(quiz.getCourse().getId(), userEmail);
 
         applyQuizMeta(quiz, dto, quiz.getCourse());
 
@@ -212,9 +231,10 @@ public class QuizService {
 
     /** Supprime un quiz et tout son contenu (cascade). */
     @Transactional
-    public void deleteQuiz(Integer quizId) {
+    public void deleteQuiz(Integer quizId, String userEmail) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
+        requireCourseAccess(quiz.getCourse().getId(), userEmail);
         Course course = quiz.getCourse();
         // Capture les programmes AVANT delete (la collection lazy serait vidée après).
         List<Integer> programIds = course == null || course.getPrograms() == null ? List.of()
@@ -267,7 +287,8 @@ public class QuizService {
 
     /** Réordonne les quiz d'un cours : `quizIds` dans le nouvel ordre → position 0..n. */
     @Transactional
-    public void reorderQuizzes(Integer courseId, List<Integer> quizIds) {
+    public void reorderQuizzes(Integer courseId, List<Integer> quizIds, String userEmail) {
+        requireCourseAccess(courseId, userEmail);
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
         Map<Integer, Quiz> byId = (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes())

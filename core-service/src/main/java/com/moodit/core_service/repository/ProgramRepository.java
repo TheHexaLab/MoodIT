@@ -44,4 +44,25 @@ public interface ProgramRepository extends JpaRepository<Program, Integer> {
 
     /** Programmes d'un établissement (pour l'écho catalogue temps réel : liste à jour). */
     List<Program> findByEstablishment_Id(Integer establishmentId);
+
+    /**
+     * Programmes d'un établissement où l'utilisateur est « Administrateur » ou « Enseignant »
+     * (User_Program_Role) : ceux dans lesquels il peut ajouter un cours. (Un admin global / gardien
+     * bypasse ce filtre côté service et voit TOUS les programmes de l'établissement.)
+     */
+    @Query(
+        value =
+            """
+            SELECT DISTINCT p.*
+            FROM program p
+            JOIN user_program_role upr ON upr.program_id = p.id
+            JOIN role r                ON r.id = upr.role_id
+            WHERE p.establishment_id = :establishmentId
+              AND upr.user_id = :userId
+              AND r.name IN ('Administrateur', 'Enseignant')
+            ORDER BY p.id
+            """,
+        nativeQuery = true)
+    List<Program> findManageableInEstablishment(
+        @Param("userId") Integer userId, @Param("establishmentId") Integer establishmentId);
 }

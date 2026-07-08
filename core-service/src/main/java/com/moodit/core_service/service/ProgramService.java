@@ -11,9 +11,11 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.dto.*;
 
 // Exception
+import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.ProgramNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 
+import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.ProgramRepository;
@@ -202,11 +204,47 @@ public class ProgramService {
 
   // endregion
 
+  /** Rôles GLOBAUX (User_Role) qui autorisent la gestion de N'IMPORTE quel programme. */
+  private static final Set<String> GLOBAL_ADMIN_ROLES = Set.of(RoleNames.ADMIN, RoleNames.GUARDIAN);
+
+  /** L'utilisateur porte-t-il un rôle GLOBAL Administrateur/Gardien (accès plateforme) ? */
+  private boolean isGlobalAdmin(User user) {
+    return user.getRoles() != null
+        && user.getRoles().stream().anyMatch(r -> GLOBAL_ADMIN_ROLES.contains(r.getName()));
+  }
+
+  /**
+   * Programmes d'un établissement dans lesquels l'utilisateur peut AJOUTER un cours : ceux où il est
+   * Administrateur/Enseignant (User_Program_Role). Un admin global / gardien voit TOUS les
+   * programmes de l'établissement. Alimente le popup « Créer un cours ».
+   */
+  @Transactional(readOnly = true)
+  public List<ProgramDTO> getManageableProgramsInEstablishment(Integer establishmentId, String userEmail) {
+    User user = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
+    List<Program> programs =
+        isGlobalAdmin(user)
+            ? programRepository.findByEstablishment_Id(establishmentId)
+            : programRepository.findManageableInEstablishment(user.getId(), establishmentId);
+    return programs.stream().map(this::toProgramDTO).toList();
+  }
+
   // region POST
   @Transactional
-  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO) {
+  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO, String userEmail) {
     if (courseCreateDTO == null || courseCreateDTO.getProgramIds() == null) {
       throw new IllegalArgumentException();
+    }
+
+    // ── Autorisation : admin global / gardien → partout ; sinon l'utilisateur doit être
+    // Administrateur ou Enseignant de CHAQUE programme visé (User_Program_Role), sinon 403. ──
+    User requester = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
+    List<Integer> requestedProgramIds = courseCreateDTO.getProgramIds().stream().distinct().toList();
+    if (!isGlobalAdmin(requester) && !requestedProgramIds.isEmpty()) {
+      Set<Integer> managed =
+          new HashSet<>(userRepository.programIdsManagedAmong(requester.getId(), requestedProgramIds));
+      if (!managed.containsAll(requestedProgramIds)) {
+        throw new ForbiddenException();
+      }
     }
 
     List<Program> programs =
