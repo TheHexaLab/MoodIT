@@ -30,7 +30,7 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
 
   /** Scopes acceptés dans une commande `join` / `leave`. */
   private static final Set<String> ALLOWED_SCOPES =
-      Set.of("channel", "forum", "program", "user", "mcp", "establishment");
+      Set.of("channel", "forum", "program", "user", "mcp", "establishment", "adminRoles");
 
   /** Limites du décorateur concurrent : délai d'envoi (ms) et tampon (octets). */
   private static final int SEND_TIME_LIMIT_MS = 10_000;

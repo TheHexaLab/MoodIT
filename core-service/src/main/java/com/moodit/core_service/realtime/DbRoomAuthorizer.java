@@ -50,8 +50,28 @@ public class DbRoomAuthorizer implements RoomAuthorizer {
       // Catalogue d'établissements : room UNIQUE (id 0), plateforme → tout utilisateur
       // authentifié peut la rejoindre (aucune donnée sensible : nom/domaine/programmes publics).
       case "establishment" -> true;
+      // Gestion des administrateurs : room UNIQUE (id 0) qui diffuse la liste des utilisateurs
+      // ayant un rôle GLOBAL. Réservée à ceux qui peuvent ouvrir le popup, càd les porteurs d'un
+      // rôle global (Administrateur / Gardien) — sinon on divulguerait qui est admin.
+      case "adminRoles" -> hasGlobalRole(userId);
       default -> false;
     };
+  }
+
+  /** L'utilisateur porte-t-il au moins un rôle GLOBAL (User_Role → Role.global_assignable) ? */
+  private boolean hasGlobalRole(long userId) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS(
+              SELECT 1
+              FROM User_Role ur
+              JOIN Role r ON r.id = ur.role_id
+              WHERE ur.user_id = ? AND r.global_assignable = TRUE
+            )
+            """,
+            Boolean.class,
+            userId));
   }
 
   /** Renvoie l'id de l'utilisateur pour cet email, ou null s'il n'existe pas. */

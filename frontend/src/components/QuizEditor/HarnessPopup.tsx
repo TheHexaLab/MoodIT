@@ -4,16 +4,22 @@ import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
 import { TrashCan } from '../../assets/TrashCan';
 import { type TestCaseDraft } from './editorTypes';
+import { type Language } from '../../types/domain';
 import { defaultHarnessLabels, type HarnessLabels } from './harnessLabels';
 
 interface HarnessBodyProps {
   /** Harnais courants (édités en place ; renvoyés par `onSave`). */
   testCases: TestCaseDraft[];
   /**
-   * Langage des harnais (nom) pour la coloration syntaxique. Déterminé par le
-   * langage de la question (via Language.harness_language_id), pas par harnais.
+   * Langage DES HARNAIS (résolu via Language.harnessLanguageId) — pour la COLORATION
+   * (`.name`). Peut différer du langage de la question (ex. HTML → harnais JS).
    */
-  language?: string;
+  harnessLanguage?: Language;
+  /**
+   * Squelette d'un NOUVEAU harnais (gabarit du langage de la question, cf. defaultHarness).
+   * Précalculé par le parent car il dépend du langage de la question ET du langage de harnais.
+   */
+  defaultHarnessCode?: string;
   /** Demande le chargement (paresseux) des langages — le harnais est du Code. */
   onRequestLanguages?: () => void;
   /** Textes (surcharge partielle des défauts). */
@@ -23,8 +29,6 @@ interface HarnessBodyProps {
   /** Valide les harnais édités (le parent les réinjecte dans le brouillon de question). */
   onSave: (testCases: TestCaseDraft[]) => void;
 }
-
-const DEFAULT_HARNESS = 'def test():\n    return False\n';
 
 /**
  * Champ de poids : saisie en TEXTE local (champ vide / intermédiaire permis pendant
@@ -83,7 +87,8 @@ function WeightInput({
  */
 export function HarnessBody({
   testCases,
-  language,
+  harnessLanguage,
+  defaultHarnessCode,
   onRequestLanguages,
   labels,
   onCancel,
@@ -106,7 +111,8 @@ export function HarnessBody({
     setCases((prev) => prev.filter((_, i) => i !== index));
   }
   function add() {
-    setCases((prev) => [...prev, { name: '', harnessCode: DEFAULT_HARNESS, weight: 1 }]);
+    // Squelette du langage de la question (ex. HTML → harnais JS spécifique), pas un stub fixe.
+    setCases((prev) => [...prev, { name: '', harnessCode: defaultHarnessCode ?? '', weight: 1 }]);
   }
 
   // Enregistrement bloqué s'il n'y a aucun harnais, ou si l'un n'a pas de nom OU a un
@@ -151,7 +157,7 @@ export function HarnessBody({
             <CodeEditor
               value={c.harnessCode}
               onChange={(harnessCode) => update(i, { harnessCode })}
-              language={language}
+              language={harnessLanguage?.name}
               ariaLabel={t.codeAria(i + 1)}
             />
           </div>

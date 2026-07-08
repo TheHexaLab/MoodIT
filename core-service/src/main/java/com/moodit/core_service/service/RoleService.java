@@ -114,14 +114,22 @@ public class RoleService {
             throw new IllegalArgumentException("Type inconnu : " + req.getType());
         }
 
-        // ── Temps réel : l'utilisateur re-dérive ses droits plateforme LIVE (room user:<userId>).
-        // On capture la liste des rôles globaux À JOUR (détachée) avant l'écho after-commit. ──
+        // ── Temps réel (captures DÉTACHÉES avant l'écho after-commit, dans la tx : lazy OK) ──
+        //  1. room user:<userId> : l'utilisateur concerné re-dérive ses droits plateforme LIVE ;
+        //  2. room adminRoles:0  : les admins/gardiens qui ont le popup ouvert remplacent leur liste.
+        // getUsersWithGlobalRoles() tourne dans la tx (flush AUTO → voit le changement qu'on vient
+        // de sauver) et renvoie des DTO détachés, sûrs à émettre après commit.
         long userId = req.getUserId();
         List<RoleDto> updatedRoles =
                 user.getRoles().stream()
                         .map(r -> new RoleDto(r.getId(), r.getName()))
                         .collect(Collectors.toList());
-        afterCommit(() -> realtimePublisher.globalRolesChanged(userId, updatedRoles));
+        List<UserDTO> admins = getUsersWithGlobalRoles();
+        afterCommit(
+                () -> {
+                    realtimePublisher.globalRolesChanged(userId, updatedRoles);
+                    realtimePublisher.adminRolesChanged(admins);
+                });
     }
 
     /**

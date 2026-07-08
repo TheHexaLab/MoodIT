@@ -14,6 +14,11 @@ interface QuestionCardProps {
   result?: QuestionResult;
   /** Textes (surcharge partielle des défauts). */
   labels?: Partial<QuestionCardLabels>;
+  /**
+   * Variante « nue » : sans le rectangle (bordure, fond, ombre) ni le padding. Utilisée
+   * par l'aperçu « Tester » de l'éditeur, où la carte est déjà dans un cadre (le popup).
+   */
+  bare?: boolean;
   /** Le rendu de saisie / révision propre au type. */
   children: React.ReactNode;
 }
@@ -28,11 +33,12 @@ export function QuestionCard({
   index,
   result,
   labels,
+  bare = false,
   children,
 }: QuestionCardProps): React.ReactElement {
   const t = { ...defaultQuestionCardLabels, ...labels };
   return (
-    <article className={styles.card}>
+    <article className={[styles.card, bare ? styles.cardBare : ''].filter(Boolean).join(' ')}>
       <div className={styles.cardHeader}>
         <span className={styles.badge}>{QUESTION_TYPE_LABELS[question.qType]}</span>
         <span className={styles.questionLabel}>{t.questionLabel(index + 1)}</span>
@@ -61,9 +67,9 @@ function PointsPill({
     return <span className={styles.points}>{labels.points(question.totalScore)}</span>;
   }
   const toneClass = {
-    full: styles.pointsFull,
-    zero: styles.pointsZero,
-    partial: styles.pointsPartial,
+    good: styles.pointsFull,
+    warn: styles.pointsPartial,
+    bad: styles.pointsZero,
   }[scoreTone(result.earned, result.max)];
   return (
     <span className={[styles.points, toneClass].join(' ')}>

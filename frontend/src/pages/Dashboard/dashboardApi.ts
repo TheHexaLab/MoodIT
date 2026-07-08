@@ -41,31 +41,13 @@ import {
   type CodingTestResult,
   type QuizResult,
   type QuizSubmission,
+  type RunCodeInput,
+  type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
-import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
-
-// ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 1000;
-const SIMULATE_SEND_FAILURE: boolean = false;
-const SIMULATE_FETCH_FAILURE: boolean = false;
-
-const wait = () => new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-
-/** Latence + échec simulés d'une LECTURE (GET). */
-async function simulateFetch(errorMessage: string): Promise<void> {
-  await wait();
-  if (SIMULATE_FETCH_FAILURE) throw new Error(errorMessage);
-}
-
-/** Latence + échec simulés d'une ÉCRITURE (POST/PATCH/DELETE). */
-async function simulateWrite(errorMessage: string): Promise<void> {
-  await wait();
-  if (SIMULATE_SEND_FAILURE) throw new Error(errorMessage);
-}
 
 // ── Programmes / cours (chargement) ────────────────────────────────────────────
 
@@ -138,6 +120,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       qTypeId: q.qTypeId,
       totalScore: q.totalScore,
       orderIndex: q.orderIndex,
+      language: q.language,
       startCode: q.startCode,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
@@ -150,6 +133,11 @@ function toQuiz(data: QuizDetailResponse): Quiz {
         correctOrder: d.correctOrder,
         groupName: d.groupName,
       })),
+      // Catégories (zones) d'une association : exposées même en passation (le mapping item→groupe
+      // reste masqué). Fallback dérivé des items côté rendu si absent (anciens quiz / éditeur).
+      groups: q.groups,
+      // Harnais : présents seulement via /edit (éditeur) ; absents en passation étudiante.
+      testCases: q.testCases,
     })),
   };
 }
@@ -221,13 +209,13 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
 }
 
 /**
- * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
- * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
+ * Langages d'exécution disponibles (table Language) : alimente le sélecteur de langage de
+ * l'éditeur de code (templates de harnais / code de départ inclus).
  */
 export async function fetchLanguages(): Promise<Language[]> {
-  await simulateFetch('Échec simulé (chargement des langages)');
-  console.log(DEFAULT_LANGUAGES);
-  return DEFAULT_LANGUAGES;
+  const res = await apiFetch('/api/languages');
+  if (!res.ok) throw new Error('Échec chargement des langages');
+  return await res.json();
 }
 
 /**
@@ -262,20 +250,40 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
- * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
- * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
- * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
+ * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * bouton « Tester » de l'éditeur (sans persistance).
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  await simulateWrite('Échec simulé (évaluation du code)');
-  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
-  const attempted = input.code.trim().length > 0;
-  return input.testCases.map((t, i) => ({
-    name: t.name,
-    passed: attempted && i % 2 === 0,
-    weight: t.weight,
-  }));
+  const res = await apiFetch('/exec/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      language: input.language,
+      code: input.code,
+      testCases: input.testCases.map((t) => ({
+        name: t.name,
+        harnessCode: t.harnessCode,
+        weight: t.weight,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Échec de l'évaluation du code");
+  return await res.json();
+}
+
+/**
+ * Exécute un code TEL QUEL (sans harnais) dans le sandbox et renvoie sa sortie brute
+ * (stdout/stderr/exit). Sert au bouton « play » des éditeurs de code (étudiant + onglet « Tester »).
+ */
+export async function runCode(input: RunCodeInput): Promise<RunResult> {
+  const res = await apiFetch('/exec/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: input.language, code: input.code }),
+  });
+  if (!res.ok) throw new Error("Échec de l'exécution du code");
+  return await res.json();
 }
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────

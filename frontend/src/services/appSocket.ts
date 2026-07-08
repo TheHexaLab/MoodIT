@@ -26,6 +26,11 @@ import {
   type McpResponseSummary,
   type McpSocket,
 } from '../components/McpManagementPopup/types.ts';
+import {
+  type IncomingQuizGradeHandlers,
+  type QuizGradingSocket,
+} from '../components/MainPanel/QuizView/quizAttempt';
+import { type QuestionResult } from '../components/MainPanel/QuizView/quizAttempt';
 
 /**
  * SCAFFOLD du vrai client WebSocket (à finir le jour du branchement temps réel).
@@ -109,7 +114,13 @@ type ServerEvent =
       programCodes: string[];
     }
   // Établissement supprimé — scope GLOBAL.
-  | { type: 'establishment:deleted'; establishmentId: number };
+  | { type: 'establishment:deleted'; establishmentId: number }
+  // Rôles ADMINISTRATEURS (User_Role) modifiés — room dédiée `adminRoles:0`. Porte la LISTE À JOUR
+  // des utilisateurs ayant un rôle global ; le popup « Gérer les administrateurs » remplace sa liste.
+  | { type: 'adminRoles:changed'; users: GlobalRoleUser[] }
+  // Correction de code (scope = user) : verdicts + score recalculé d'une tentative dont les
+  // questions Code viennent d'être corrigées de façon asynchrone.
+  | { type: 'quiz:code-graded'; userId: number; attemptId: number; questions: QuestionResult[] };
 
 /** Évènement temps réel sur le catalogue d'établissements (scope GLOBAL). */
 export type EstablishmentEvent =
@@ -130,6 +141,26 @@ export interface EstablishmentsSocket {
   subscribe: (handler: (event: EstablishmentEvent) => void) => () => void;
 }
 
+/**
+ * Utilisateur avec ses rôles globaux, tel que sérialisé par le backend (UserDTO). Le champ `roles`
+ * = ids des rôles globaux ; le consommateur le mappe vers `role_ids` (cf. RoleEditorPopup).
+ */
+export interface GlobalRoleUser {
+  id: number;
+  username: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  avatarColor: string;
+  roles: number[];
+}
+
+/** Facade « administrateurs » : liste À JOUR des porteurs d'un rôle global (popup admins). */
+export interface AdminRolesSocket {
+  /** S'abonne ; chaque évènement porte la liste complète. Renvoie la fonction de désabonnement. */
+  subscribe: (handler: (users: GlobalRoleUser[]) => void) => () => void;
+}
+
 export interface AppSocket {
   channels: ChannelSocket;
   forums: ForumSocket;
@@ -137,6 +168,8 @@ export interface AppSocket {
   programs: ProgramsSocket;
   mcp: McpSocket;
   establishments: EstablishmentsSocket;
+  adminRoles: AdminRolesSocket;
+  quizGrading: QuizGradingSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -164,6 +197,10 @@ export function createAppSocket(
   /** Fermeture demandée par le client : empêche la reconnexion automatique. */
   let closedByClient = false;
   let reconnectTimer: number | null = null;
+  // Heartbeat : ping applicatif périodique pour garder la connexion active (le serveur ignore les
+  // types inconnus). Évite qu'un proxy/NAT ferme une WebSocket inactive → reconnexion + resync qui
+  // rechargerait la vue quiz toute seule.
+  let heartbeatTimer: number | null = null;
   /**
    * Passe à true au 1er `onopen`. Permet de distinguer la connexion INITIALE (les abonnés
    * viennent de fetcher au montage) d'une RECONNEXION (events potentiellement manqués →
@@ -176,8 +213,12 @@ export function createAppSocket(
   const courseSubs = new Map<number, IncomingCourseHandlers>();
   /** Abonnés aux évènements GLOBAUX du catalogue d'établissements (popup ouvert). */
   const establishmentSubs = new Set<(event: EstablishmentEvent) => void>();
+  const adminRoleSubs = new Set<(users: GlobalRoleUser[]) => void>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
+  // Correction de code (scope user, room "user:<id>") : Map SÉPARÉE de programSubs pour que
+  // QuizView et le menu Programmes puissent s'abonner au même scope sans se piétiner.
+  const quizGradeSubs = new Map<number, IncomingQuizGradeHandlers>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -194,6 +235,9 @@ export function createAppSocket(
       reconnectDelay = 1000;
       const reconnected = everConnected;
       everConnected = true;
+      // Ping toutes les 30 s tant que la socket est ouverte (garde la connexion vivante).
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+      heartbeatTimer = window.setInterval(() => send({ type: 'ping' }), 30_000);
       // (Re)joindre toutes les rooms actives — utile après une reconnexion.
       for (const channelId of channelSubs.keys()) send({ type: 'join', scope: 'channel', id: channelId });
       for (const forumId of forumSubs.keys()) send({ type: 'join', scope: 'forum', id: forumId });
@@ -202,6 +246,8 @@ export function createAppSocket(
       for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
       // Room UNIQUE du catalogue d'établissements (id 0), si le popup est ouvert.
       if (establishmentSubs.size > 0) send({ type: 'join', scope: 'establishment', id: 0 });
+      if (adminRoleSubs.size > 0) send({ type: 'join', scope: 'adminRoles', id: 0 });
+      for (const userId of quizGradeSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
       // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
@@ -315,10 +361,20 @@ export function createAppSocket(
           for (const handler of establishmentSubs)
             handler({ kind: 'deleted', establishmentId: data.establishmentId });
           break;
+        case 'adminRoles:changed':
+          for (const handler of adminRoleSubs) handler(data.users);
+          break;
+        case 'quiz:code-graded':
+          quizGradeSubs.get(data.userId)?.onCodeGraded(data.attemptId, data.questions);
+          break;
       }
     };
 
     socket.onclose = () => {
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       // Fermeture volontaire (logout / démontage), ou socket déjà remplacé par un
       // nouveau (StrictMode) : on ne reconnecte pas.
       if (closedByClient || ws !== socket) return;
@@ -394,6 +450,29 @@ export function createAppSocket(
         };
       },
     },
+    adminRoles: {
+      // Room UNIQUE `adminRoles:0` : rejointe au 1er abonné (popup admins ouvert), quittée au dernier.
+      subscribe(handler) {
+        const wasEmpty = adminRoleSubs.size === 0;
+        adminRoleSubs.add(handler);
+        if (wasEmpty) send({ type: 'join', scope: 'adminRoles', id: 0 });
+        return () => {
+          adminRoleSubs.delete(handler);
+          if (adminRoleSubs.size === 0) send({ type: 'leave', scope: 'adminRoles', id: 0 });
+        };
+      },
+    },
+    quizGrading: {
+      subscribe(userId, handlers) {
+        quizGradeSubs.set(userId, handlers);
+        send({ type: 'join', scope: 'user', id: userId });
+        return () => {
+          quizGradeSubs.delete(userId);
+          // Pas de 'leave' : la room "user" est aussi tenue par l'abonnement Programmes
+          // (toujours actif tant que connecté) — envoyer leave le couperait.
+        };
+      },
+    },
     open() {
       // Idempotent : ne rouvre pas si une connexion est déjà en cours / établie.
       if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
@@ -402,6 +481,10 @@ export function createAppSocket(
     close() {
       closedByClient = true;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
       const socket = ws;
       ws = null;
       if (!socket) return;

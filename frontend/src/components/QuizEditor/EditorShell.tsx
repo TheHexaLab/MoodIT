@@ -82,6 +82,10 @@ export function EditorShell({
 }: EditorShellProps): React.ReactElement {
   const [isClosing, setIsClosing] = useState(false);
   const pending = useRef<(() => void) | null>(null);
+  // Le clic de fond ne ferme que si le geste a COMMENCÉ sur le fond : sans ça, une sélection de
+  // texte démarrée DANS le popup et relâchée dehors déclenche un « click » sur l'overlay (ancêtre
+  // commun) et fermait le popup par erreur.
+  const backdropMouseDown = useRef(false);
 
   // Hauteur animée : somme des trois rangées (header + corps + pied), bornée au
   // viewport. Le corps (`contentRef`) garde sa hauteur naturelle même borné, donc
@@ -154,8 +158,14 @@ export function EditorShell({
   const overlay = (
     <div
       className={`${styles.overlay}${isClosing ? ` ${styles.closing}` : ''}`}
+      onMouseDown={(e) => {
+        backdropMouseDown.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) requestClose(onClose);
+        // Ferme uniquement si le pointeur s'est ABAISSÉ ET relâché sur le fond (vrai clic de fond),
+        // pas si une sélection démarrée dans le popup se termine ici.
+        if (e.target === e.currentTarget && backdropMouseDown.current) requestClose(onClose);
+        backdropMouseDown.current = false;
       }}
     >
       <div

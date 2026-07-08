@@ -27,7 +27,10 @@ import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
+import com.moodit.core_service.realtime.dto.AdminUserDto;
 import com.moodit.core_service.realtime.dto.RoleDto;
+import com.moodit.core_service.dto.QuestionResultDTO;
+import com.moodit.core_service.dto.UserDTO;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,6 +223,31 @@ public class RealtimeEventPublisher {
   }
 
   /**
+   * La liste des ADMINISTRATEURS (utilisateurs ayant au moins un rôle global) a changé : on diffuse
+   * la LISTE À JOUR à la room dédiée {@code adminRoles:0}, rejointe par les admins/gardiens dont le
+   * popup « Gérer les administrateurs » est ouvert. Chaque popup remplace sa liste. Complète l'écho
+   * {@link #globalRolesChanged} (room de l'utilisateur concerné, pour SES propres droits).
+   */
+  public void adminRolesChanged(List<UserDTO> admins) {
+    // Projection légère (sans createdAt/settings) : le front n'en a pas besoin et `createdAt`
+    // (LocalDateTime) ferait échouer la sérialisation de l'ObjectMapper temps réel (pas de JSR310).
+    List<AdminUserDto> users =
+        admins.stream()
+            .map(
+                u ->
+                    new AdminUserDto(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getFirstName(),
+                        u.getLastName(),
+                        u.getEmail(),
+                        u.getAvatarColor(),
+                        u.getRoles()))
+            .toList();
+    emit("adminRoles", 0, event("adminRoles:changed", "users", users));
+  }
+
+  /**
    * Le CATALOGUE d'un établissement a changé (programme ajouté / modifié / supprimé) : on diffuse
    * la LISTE À JOUR de ses programmes. Évènement GLOBAL (le catalogue est plateforme, tout
    * gardien/abonné peut le voir dans le popup « Ajouter un programme »). Chaque client met à jour
@@ -304,6 +332,17 @@ public class RealtimeEventPublisher {
 
   public void userUpdated(Author author) {
     emitAll(event("user:updated", "user", author));
+  }
+
+  // ─── Correction de code (scope = user) ───────────────────────────────────
+  // Poussé quand le job de correction des questions Code d'une tentative se termine. Room
+  // "user:<userId>" : seul l'étudiant qui a soumis reçoit ses verdicts + son score recalculé.
+
+  public void quizCodeGraded(long userId, long attemptId, List<QuestionResultDTO> questions) {
+    emit(
+        "user",
+        userId,
+        event("quiz:code-graded", "userId", userId, "attemptId", attemptId, "questions", questions));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

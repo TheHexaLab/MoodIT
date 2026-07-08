@@ -1,0 +1,7 @@
+# Override pour la CI : publie le port de Piston sur l'hôte afin que les tests d'intégration
+# (exécutés par ./gradlew sur le runner) puissent l'atteindre via http://localhost:2000.
+# En prod, Piston n'est PAS exposé (réseau interne uniquement) — cet override ne sert qu'à la CI.
+services:
+  piston:
+    ports:
+      - "2000:2000"

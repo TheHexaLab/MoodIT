@@ -44,6 +44,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
+import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -78,6 +79,7 @@ const quizEditorHandlers: QuizEditorHandlers = {
   onDeleteQuiz: api.deleteQuiz,
   onReorderQuizzes: api.reorderQuizzes,
   onEvaluateCode: api.evaluateCode,
+  onRunCode: api.runCode,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
@@ -207,6 +209,38 @@ export default function Dashboard() {
       onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
     });
   }, [ws, currentUser.id, applyGlobalRoles]);
+
+  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
+  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
+  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
+    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
+    [ws, currentUser.id]
+  );
+
+  // Abonnement temps réel de la liste des ADMINISTRATEURS (popup rôles globaux) : un autre admin
+  // modifie une assignation → le serveur diffuse la liste à jour. On mappe `roles` → `role_ids`
+  // (comme fetchGlobalRoles) avant de la livrer au RoleEditorPopup. Stable (dépend de `ws`).
+  const subscribeAdminRoles = useCallback(
+    (handler: (users: User[]) => void) =>
+      ws.adminRoles.subscribe((users) =>
+        handler(
+          // Mapping explicite vers la forme `User` du RoleEditorPopup (le champ backend `roles`
+          // porte des ids → `role_ids` ; on ne le recopie pas tel quel pour éviter le conflit de
+          // type avec User.roles: Role[]).
+          users.map((u) => ({
+            id: u.id,
+            username: u.username,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            email: u.email,
+            avatarColor: u.avatarColor,
+            role_ids: u.roles ?? [],
+          }))
+        )
+      ),
+    [ws]
+  );
+
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
   // le programme correspondant ; le loader pilote loading/erreur.
   const handleFetchCourses = useCallback(async (programId: number) => {
@@ -848,6 +882,8 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        onSubscribeCodeGrading={subscribeCodeGrading}
+        onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
@@ -1002,6 +1038,9 @@ export default function Dashboard() {
             loadCandidates={(roleId, search, page, size) =>
               api.fetchGlobalRoleCandidates(roleId, search, page, size)
             }
+            // Temps réel : la liste se met à jour LIVE si un autre admin/gardien modifie une
+            // assignation pendant que le popup est ouvert (room dédiée `adminRoles:0`).
+            subscribeUpdates={subscribeAdminRoles}
             labels={{
               title: 'Gérer les administrateurs',
               subtitle: 'Administrateurs généraux et gardiens de la plateforme.',

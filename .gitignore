@@ -54,6 +54,19 @@ gateway/*.ipr
 gateway/.run
 
 # ==============================
+# Execution Service — Java / Spring Boot / Gradle
+# ==============================
+execution-service/build/
+execution-service/.gradle/
+execution-service/out/
+execution-service/*.class
+execution-service/*.jar
+execution-service/*.war
+execution-service/.idea/*
+execution-service/*.iml
+execution-service/.run
+
+# ==============================
 # MCP Service — Java / Spring Boot / Gradle
 # ==============================
 mcp-service/build/

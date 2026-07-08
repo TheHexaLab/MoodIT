@@ -49,6 +49,13 @@ interface RoleEditorPopupProps {
     page: number,
     size: number
   ) => Promise<User[]>;
+  /**
+   * S'abonne aux mises à jour TEMPS RÉEL de la liste (serveur = source de vérité) : tant que le
+   * popup est monté, `users` est remplacé à chaque évènement reçu. Renvoie la fonction de
+   * désabonnement. Utilisé par le popup des administrateurs (rôles globaux) ; absent → popup
+   * statique (ex. rôles d'un programme).
+   */
+  subscribeUpdates?: (handler: (users: User[]) => void) => () => void;
 }
 
 /** Taille d'une page de candidats (mode serveur) : chargée par lot lors du scroll. */
@@ -75,6 +82,7 @@ export function RoleEditorPopup({
   canAssign = () => true,
   canUnassign = () => true,
   loadCandidates,
+  subscribeUpdates,
 }: RoleEditorPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
   const [users, setUsers] = useState<User[]>(initialUsers);
@@ -117,6 +125,14 @@ export function RoleEditorPopup({
       mountedRef.current = false;
     };
   }, []);
+
+  // Mises à jour temps réel (popup ouvert) : un autre administrateur modifie une assignation → le
+  // serveur diffuse la liste À JOUR, qu'on adopte telle quelle (source de vérité). Une éventuelle
+  // modification optimiste locale « en vol » est ré-affirmée par l'écho du serveur après son commit.
+  useEffect(() => {
+    if (!subscribeUpdates) return;
+    return subscribeUpdates((next) => setUsers(next));
+  }, [subscribeUpdates]);
 
   /**
    * Persiste une assignation optimiste : notifie `onChange`, et si l'appel échoue,
