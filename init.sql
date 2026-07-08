@@ -1538,20 +1538,20 @@ INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
 -- Ensemble EXACT : colonne « nom » seule, ET la liste triée des noms == noms actifs.
 SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
    AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
-   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
-     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
+   AND (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
    (21, 'données mixtes',        $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
 INSERT INTO utilisateurs VALUES ('Anna', 1), ('Ben', 1), ('Cleo', 1), ('Dan', 0);
 SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
    AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
-   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
-     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
+   AND (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
    (21, 'un seul actif',         $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
 INSERT INTO utilisateurs VALUES ('Zoe', 0), ('Yan', 1);
 SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
    AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
-   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
-     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1)
+   AND (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'

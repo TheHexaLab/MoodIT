@@ -214,8 +214,8 @@ public class CodeAssembler {
 
     /**
      * Bash : le script étudiant définit ses fonctions ; le harnais qui suit produit un CODE DE
-     * SORTIE (0 = réussi). On termine sur le statut du harnais. {@code set -e} laisse une erreur
-     * intermédiaire échouer.
+     * SORTIE (0 = réussi), capturé dans {@code $?}. Le nonce n'est émis que si ce code vaut 0, et on
+     * termine sur ce même code — le verdict ne dépend donc pas d'un {@code exit} anticipé de l'étudiant.
      */
     private Assembled assembleBash(String studentCode, String harnessCode, String nonce) {
         String program = studentCode
