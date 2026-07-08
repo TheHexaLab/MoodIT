@@ -18,6 +18,7 @@ import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.EnrollmentRepository;
 import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -46,6 +47,7 @@ public class ProgramService {
   private final CourseRepository courseRepository;
   private final UserRepository userRepository;
   private final UserProgramRoleRepository userProgramRoleRepository;
+  private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
   //private final UserService userService;
 
@@ -399,8 +401,17 @@ public class ProgramService {
   public void removeUserFromProgram(Integer programId, Integer userId) {
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
+    // 1. Quitte le programme (User_Program). saveAndFlush : les nettoyages suivants doivent VOIR le
+    //    retrait (le calcul « cours encore accessibles via un autre programme » en dépend).
     user.getPrograms().removeIf(p -> p.getId().equals(programId));
-    userRepository.save(user);
+    userRepository.saveAndFlush(user);
+
+    // 2. Retire ses rôles DANS ce programme (User_Program_Role).
+    userProgramRoleRepository.deleteByProgramIdAndUserId(programId, userId);
+
+    // 3. Retire ses inscriptions (Enrollment) aux cours de ce programme devenues inaccessibles
+    //    (un cours partagé avec un autre programme encore rejoint reste accessible → conservé).
+    enrollmentRepository.deleteForUserLeavingProgram(userId, programId);
 
     // ── Temps réel : l'utilisateur qui quitte (room user:<id>) retire le programme de sa liste. ──
     long uId = user.getId();

@@ -26,6 +26,7 @@ public class ProgramServiceTest {
     @Mock private CourseRepository courseRepository;
     @Mock private UserRepository userRepository;
     @Mock private UserProgramRoleRepository userProgramRoleRepository;
+    @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
 
     //@InjectMocks crée le service et injecte les @Mock dedans automatiquement
@@ -401,6 +402,26 @@ public class ProgramServiceTest {
             assertThrows(IllegalArgumentException.class, () -> programService.updateProgram(null, dto));
             assertThrows(IllegalArgumentException.class, () -> programService.updateProgram(1, null));
             verifyNoInteractions(programRepository);
+        }
+    }
+
+    @Nested
+    class removeUserFromProgram {
+        @Test
+        @DisplayName("Quitter un programme retire l'adhésion, les rôles ET les inscriptions du programme")
+        void removeUserFromProgram_retire_roles_et_inscriptions() {
+            User u = new User();
+            u.setId(5);
+            Program p = Program.builder().id(1).build();
+            u.setPrograms(new ArrayList<>(List.of(p)));
+            when(userRepository.findById(5)).thenReturn(Optional.of(u));
+
+            programService.removeUserFromProgram(1, 5);
+
+            assertEquals(0, u.getPrograms().size());               // User_Program retiré
+            verify(userRepository).saveAndFlush(u);                 // flush avant les nettoyages
+            verify(userProgramRoleRepository).deleteByProgramIdAndUserId(1, 5); // rôles retirés
+            verify(enrollmentRepository).deleteForUserLeavingProgram(5, 1);     // inscriptions retirées
         }
     }
 }

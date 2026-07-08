@@ -20,4 +20,7 @@ public interface UserProgramRoleRepository
   boolean existsByProgramIdAndUserIdAndRoleId(Integer programId, Integer userId, Integer roleId);
 
   void deleteByProgramIdAndUserIdAndRoleId(Integer programId, Integer userId, Integer roleId);
+
+  /** Retire TOUS les rôles d'un utilisateur dans un programme (quand il quitte le programme). */
+  void deleteByProgramIdAndUserId(Integer programId, Integer userId);
 }
