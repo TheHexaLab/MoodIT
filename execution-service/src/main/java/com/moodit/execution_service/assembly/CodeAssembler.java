@@ -62,10 +62,10 @@ public class CodeAssembler {
         String harness = harnessCode == null ? "" : harnessCode;
         return switch (canon(language)) {
             case "python" -> assemblePython(code, harness, nonce);
-            case "javascript" -> assembleJs("javascript", "main.js", code, harness, false, nonce);
-            case "typescript" -> assembleJs("typescript", "main.ts", code, harness, true, nonce);
-            case "php" -> assemblePhp(code, harness, nonce);
-            case "bash" -> assembleBash(code, harness, nonce);
+            case "javascript" -> assembleJsRpc(code, harness, nonce, false);
+            case "typescript" -> assembleJsRpc(code, harness, nonce, true);
+            case "php" -> assemblePhpRpc(code, harness, nonce);
+            case "bash" -> assembleBashRpc(code, harness, nonce);
             case "go" -> assembleGo(code, harness, nonce);
             case "rust" -> assembleRust(code, harness, nonce);
             case "c" -> assembleC(code, harness, nonce);
@@ -140,52 +140,186 @@ public class CodeAssembler {
 
     // ── Python ─────────────────────────────────────────────────────────────────
 
+    /** Noms de fonctions et classes de PREMIER NIVEAU définis par l'étudiant (pour créer les proxys). */
+    private static final Pattern PY_DEF = Pattern.compile("(?m)^(?:async\\s+)?def\\s+([A-Za-z_]\\w*)");
+    private static final Pattern PY_CLASS = Pattern.compile("(?m)^class\\s+([A-Za-z_]\\w*)");
+
     /**
-     * Python : code étudiant, puis harnais enveloppé dans une fonction appelée ; son booléen de
-     * retour → exit 0/1, toute exception → exit 1. Le harnais est un CORPS de fonction (indenté).
+     * Python : exécution ISOLÉE en deux processus (cf. proxy/RPC). Le harnais du prof tourne
+     * INCHANGÉ dans un NOTEUR (grader.py) qui ne contient AUCUN code étudiant ; les symboles de
+     * l'étudiant (fonctions/classes) y sont des PROXYS qui délèguent, par RPC (JSON sur stdin/stdout),
+     * à un SERVEUR (student_server.py) où vit le vrai code étudiant. Conséquences :
+     * <ul>
+     *   <li>le nonce est émis par le NOTEUR (aucun code étudiant → infalsifiable) — le résiduel de
+     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce) ;</li>
+     *   <li>les ATTENDUS du harnais restent dans le noteur, hors de portée de l'étudiant (mémoire
+     *       distincte, {@code grader.py} auto-supprimé) → passer = produire les bonnes sorties ;</li>
+     *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
+     * </ul>
      */
     private Assembled assemblePython(String studentCode, String harnessCode, String nonce) {
-        String program = studentCode
-                + "\n\n\ndef __moodit_harness():\n"
+        StringBuilder proxies = new StringBuilder();
+        for (String f : matchAll(PY_DEF, studentCode)) {
+            if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
+            proxies.append("def ").append(f).append("(*a):\n")
+                    .append("    return __moodit_rpc({\"op\": \"call\", \"name\": \"").append(f)
+                    .append("\", \"args\": list(a)})[\"value\"]\n");
+        }
+        for (String c : matchAll(PY_CLASS, studentCode)) {
+            if (c.startsWith("__moodit")) continue;
+            // NB : dans un corps de classe, un identifiant `__x` subit le name mangling Python
+            // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
+            proxies.append("class ").append(c).append(":\n")
+                    .append("    def __init__(self, *a):\n")
+                    .append("        object.__setattr__(self, \"_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
+                    .append(c).append("\", \"args\": list(a)})[\"handle\"])\n")
+                    .append("    def __getattr__(self, name):\n")
+                    .append("        h = object.__getattribute__(self, \"_h\")\n")
+                    .append("        def _call(*a):\n")
+                    .append("            return globals()[\"__moodit_rpc\"]({\"op\": \"method\", \"handle\": h, \"name\": name, \"args\": list(a)})[\"value\"]\n")
+                    .append("        return _call\n");
+        }
+        // Tous les identifiants internes sont préfixés __moodit_ → aucune collision avec un symbole étudiant.
+        String grader = "import os as __moodit_os\n"
+                + "try:\n    __moodit_os.remove('grader.py')\nexcept Exception:\n    pass\n"
+                + "import sys as __moodit_sys, subprocess as __moodit_subprocess, json as __moodit_json\n"
+                + "__moodit_p = __moodit_subprocess.Popen([__moodit_sys.executable, 'student_server.py'],"
+                + " stdin=__moodit_subprocess.PIPE, stdout=__moodit_subprocess.PIPE, text=True)\n"
+                + "def __moodit_rpc(payload):\n"
+                + "    print(__moodit_json.dumps(payload), file=__moodit_p.stdin, flush=True)\n"
+                + "    while True:\n"
+                + "        line = __moodit_p.stdout.readline()\n"
+                + "        if not line: raise RuntimeError('processus etudiant termine')\n"
+                + "        try: r = __moodit_json.loads(line)\n"
+                + "        except Exception: continue\n"
+                + "        if not r.get('ok'): raise RuntimeError(str(r.get('error')))\n"
+                + "        return r\n"
+                + proxies
+                + "def __moodit_harness():\n"
                 + indent(harnessCode, "    ")
-                + "\n\nimport sys as __moodit_sys\n"
-                + "try:\n"
-                + "    __moodit_result = __moodit_harness()\n"
-                + "    if __moodit_result:\n"
-                + "        __moodit_sys.stderr.write(\"" + nonce + "\")\n"
-                + "    __moodit_sys.exit(0 if __moodit_result else 1)\n"
-                + "except SystemExit:\n"
-                + "    raise\n"
-                + "except BaseException:\n"
-                + "    __moodit_sys.exit(1)\n";
-        return new Assembled("python", List.of(new PistonClient.File("main.py", program)));
+                + "\ntry:\n    __moodit_r = bool(__moodit_harness())\nexcept BaseException:\n    __moodit_r = False\n"
+                + "if __moodit_r:\n    __moodit_sys.stderr.write(\"" + nonce + "\")\n"
+                + "try:\n    __moodit_p.stdin.close()\nexcept Exception:\n    pass\n"
+                + "__moodit_sys.exit(0 if __moodit_r else 1)\n";
+        // Boucle RPC dans une FONCTION → ses variables ne polluent pas les globals (symboles étudiant).
+        String server = "import sys as __moodit_sys, json as __moodit_json\n"
+                + studentCode
+                + "\ndef __moodit_serve():\n"
+                + "    objs = {}\n"
+                + "    for line in __moodit_sys.stdin:\n"
+                + "        try: m = __moodit_json.loads(line)\n"
+                + "        except Exception: continue\n"
+                + "        try:\n"
+                + "            op = m.get('op')\n"
+                + "            if op == 'call':\n"
+                + "                r = {'ok': True, 'value': globals()[m['name']](*m['args'])}\n"
+                + "            elif op == 'new':\n"
+                + "                h = len(objs); objs[h] = globals()[m['class']](*m['args']); r = {'ok': True, 'handle': h}\n"
+                + "            elif op == 'method':\n"
+                + "                r = {'ok': True, 'value': getattr(objs[m['handle']], m['name'])(*m['args'])}\n"
+                + "            else:\n"
+                + "                r = {'ok': False, 'error': 'op inconnu'}\n"
+                + "        except Exception as e:\n"
+                + "            r = {'ok': False, 'error': str(e)}\n"
+                + "        print(__moodit_json.dumps(r), flush=True)\n"
+                + "__moodit_serve()\n";
+        return new Assembled("python", List.of(
+                new PistonClient.File("grader.py", grader),
+                new PistonClient.File("student_server.py", server)));
+    }
+
+    /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
+    private static List<String> matchAll(Pattern pattern, String text) {
+        List<String> out = new ArrayList<>();
+        Matcher m = pattern.matcher(text == null ? "" : text);
+        while (m.find()) {
+            out.add(m.group(1));
+        }
+        return out;
     }
 
     // ── JavaScript / TypeScript ─────────────────────────────────────────────────
 
+    /** Symboles JS de premier niveau : fonctions/const/let/var (appelables) et classes. */
+    private static final Pattern JS_CALLABLE = Pattern.compile(
+            "(?m)^(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
+                    + "|(?m)^(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
+    private static final Pattern JS_CLASS = Pattern.compile("(?m)^class\\s+([A-Za-z_$][\\w$]*)");
+
     /**
-     * JS/TS : code étudiant (fonctions au niveau module), puis harnais dans une fonction appelée.
-     * Retour booléen → exit 0/1 ; un throw → stderr + exit 1. En TypeScript, {@code // @ts-nocheck}
-     * garantit la compilation du wrapper (l'objectif est d'exécuter et de conclure, pas de
-     * typer) — une erreur de type se traduirait sinon en échec de compilation parasite.
+     * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
+     * Le NOTEUR (grader.js) exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.js)
+     * héberge le code étudiant. RPC SYNCHRONE (le harnais est synchrone) via {@code fs.readSync} sur le
+     * fd du sous-processus. Le nonce est émis par le noteur (aucun code étudiant → infalsifiable).
      */
-    private Assembled assembleJs(String pistonLanguage, String fileName, String studentCode,
-                                 String harnessCode, boolean typescript, String nonce) {
+    private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript) {
+        // TS : fichiers nommés SANS extension → Piston les écrit en .ts et compile en .js (student_server.js,
+        // grader.js). `// @ts-nocheck` neutralise les erreurs de type (on veut exécuter, pas typer).
         String header = typescript ? "// @ts-nocheck\n" : "";
-        String program = header
+        String pistonLang = typescript ? "typescript" : "javascript";
+        String graderName = typescript ? "grader" : "grader.js";
+        String serverName = typescript ? "student_server" : "student_server.js";
+        StringBuilder proxies = new StringBuilder();
+        java.util.LinkedHashSet<String> callables = new java.util.LinkedHashSet<>();
+        Matcher mc = JS_CALLABLE.matcher(studentCode);
+        while (mc.find()) {
+            callables.add(mc.group(1) != null ? mc.group(1) : mc.group(2));
+        }
+        java.util.LinkedHashSet<String> classes = new java.util.LinkedHashSet<>(matchAll(JS_CLASS, studentCode));
+        callables.removeAll(classes);
+        callables.removeIf(n -> n.startsWith("__moodit"));   // pas de collision avec l'infra du noteur
+        classes.removeIf(n -> n.startsWith("__moodit"));
+        for (String f : callables) {
+            proxies.append("function ").append(f).append("(...a){ return __moodit_rpc({op:'call',name:'")
+                    .append(f).append("',args:a}).value; }\n");
+        }
+        for (String c : classes) {
+            proxies.append("const ").append(c).append(" = new Proxy(function(){}, { construct(_t,args){")
+                    .append(" const h=__moodit_rpc({op:'new',cls:'").append(c).append("',args}).handle;")
+                    .append(" return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n");
+        }
+        // Tous les identifiants internes sont préfixés __moodit_ → aucune collision avec un symbole étudiant.
+        String grader = header
+                + "const __moodit_cp=require('child_process'), __moodit_fs=require('fs');\n"
+                + "try { __moodit_fs.unlinkSync('grader.js'); } catch(e) {}\n"    // hors de portée du serveur
+                + "try { __moodit_fs.unlinkSync('grader.ts'); } catch(e) {}\n"    // (source TS, si présente)
+                + "const __moodit_NL=String.fromCharCode(10);\n"
+                + "const __moodit_child=__moodit_cp.spawn(process.execPath,['student_server.js'],{stdio:['pipe','pipe','inherit']});\n"
+                + "__moodit_child.stdout.pause(); const __moodit_fd=__moodit_child.stdout._handle.fd;\n"
+                + "function __moodit_rpc(o){\n"
+                + "  __moodit_child.stdin.write(JSON.stringify(o)+__moodit_NL);\n"
+                + "  const b=Buffer.alloc(65536); let s='';\n"
+                + "  while(s.indexOf(__moodit_NL)<0){ let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
+                + "catch(e){ if(e.code==='EAGAIN') continue; throw e; } if(n===0) break; s+=b.toString('utf8',0,n); }\n"
+                + "  const r=JSON.parse(s.split(__moodit_NL)[0]); if(!r.ok) throw new Error(r.error); return r;\n"
+                + "}\n"
+                + proxies
+                + "function __moodit_harness(){\n" + harnessCode + "\n}\n"
+                + "let __moodit_r=false; try{ __moodit_r=!!__moodit_harness(); }catch(e){}\n"
+                + "if(__moodit_r) process.stderr.write(\"" + nonce + "\");\n"
+                + "try{ __moodit_child.stdin.end(); }catch(e){}\n"
+                + "process.exit(__moodit_r?0:1);\n";
+        // Boucle RPC dans une FONCTION → ses variables ne polluent pas la portée des symboles étudiant.
+        String server = header
+                + "const __moodit_NL=String.fromCharCode(10);\n"
+                + "console.log=function(){}; console.info=function(){};\n"
                 + studentCode
-                + "\n\nfunction __moodit_harness() {\n"
-                + harnessCode
-                + "\n}\n"
-                + "try {\n"
-                + "  const __moodit_result = __moodit_harness();\n"
-                + "  if (__moodit_result) process.stderr.write(\"" + nonce + "\");\n"
-                + "  process.exit(__moodit_result ? 0 : 1);\n"
-                + "} catch (__moodit_e) {\n"
-                + "  console.error(__moodit_e && __moodit_e.stack ? __moodit_e.stack : String(__moodit_e));\n"
-                + "  process.exit(1);\n"
-                + "}\n";
-        return new Assembled(pistonLanguage, List.of(new PistonClient.File(fileName, program)));
+                + "\nfunction __moodit_serve(){ const objs={}; let hid=0, buf='';\n"
+                + "process.stdin.on('data', d=>{ buf+=d; let i;\n"
+                + "  while((i=buf.indexOf(__moodit_NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
+                + "    let m; try{ m=JSON.parse(line); }catch(e){ continue; }\n"
+                + "    let r;\n"
+                + "    try {\n"
+                + "      if(m.op==='call') r={ok:true,value: eval(m.name)(...m.args)};\n"
+                + "      else if(m.op==='new'){ const h=hid++; objs[h]=new (eval(m.cls))(...m.args); r={ok:true,handle:h}; }\n"
+                + "      else if(m.op==='method') r={ok:true,value: objs[m.handle][m.name](...m.args)};\n"
+                + "      else r={ok:false,error:'op inconnu'};\n"
+                + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
+                + "    process.stdout.write(JSON.stringify(r)+__moodit_NL);\n"
+                + "  }}); }\n__moodit_serve();\n";
+        return new Assembled(pistonLang, List.of(
+                new PistonClient.File(graderName, grader),
+                new PistonClient.File(serverName, server)));
     }
 
     // ── PHP ──────────────────────────────────────────────────────────────────────
@@ -210,6 +344,73 @@ public class CodeAssembler {
         return new Assembled("php", List.of(new PistonClient.File("main.php", program)));
     }
 
+    /** Symboles PHP de premier niveau (colonne 0) : fonctions et classes. */
+    private static final Pattern PHP_FUNC = Pattern.compile("(?m)^function\\s+([A-Za-z_]\\w*)");
+    private static final Pattern PHP_CLASS = Pattern.compile("(?m)^(?:abstract\\s+|final\\s+)?class\\s+([A-Za-z_]\\w*)");
+
+    /**
+     * PHP : exécution ISOLÉE en deux processus (cf. {@link #assemblePython}). Le NOTEUR (grader.php)
+     * exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.php) héberge le code
+     * étudiant. RPC SYNCHRONE naturel via {@code proc_open} + {@code fgets} bloquant. Le nonce est
+     * émis par le noteur (aucun code étudiant → infalsifiable).
+     */
+    private Assembled assemblePhpRpc(String studentCode, String harnessCode, String nonce) {
+        StringBuilder proxies = new StringBuilder();
+        for (String f : matchAll(PHP_FUNC, studentCode)) {
+            if (f.startsWith("__moodit")) continue;
+            proxies.append("function ").append(f).append("(...$a){ return __moodit_rpc(['op'=>'call','name'=>'")
+                    .append(f).append("','args'=>$a])['value']; }\n");
+        }
+        for (String c : matchAll(PHP_CLASS, studentCode)) {
+            if (c.startsWith("__moodit")) continue;
+            proxies.append("class ").append(c).append(" { public $__moodit_h;\n")
+                    .append("  function __construct(...$a){ $this->__moodit_h = __moodit_rpc(['op'=>'new','cls'=>'")
+                    .append(c).append("','args'=>$a])['handle']; }\n")
+                    .append("  function __call($n, $a){ return __moodit_rpc(['op'=>'method','handle'=>$this->__moodit_h,'name'=>$n,'args'=>$a])['value']; }\n")
+                    .append("}\n");
+        }
+        String grader = "<?php\n"
+                + "@unlink('grader.php');\n"                       // hors de portée du serveur
+                + "$__moodit_pipes = [];\n"
+                + "$__moodit_proc = proc_open(escapeshellarg(PHP_BINARY).' student_server.php',"
+                + " [0=>['pipe','r'], 1=>['pipe','w'], 2=>STDERR], $__moodit_pipes);\n"
+                + "function __moodit_rpc($o){ global $__moodit_pipes;\n"
+                + "  fwrite($__moodit_pipes[0], json_encode($o).\"\\n\");\n"
+                + "  while (true) {\n"
+                + "    $line = fgets($__moodit_pipes[1]);\n"
+                + "    if ($line === false) throw new Exception('serveur termine');\n"
+                + "    $r = json_decode($line, true);\n"
+                + "    if ($r === null) continue;\n"
+                + "    if (empty($r['ok'])) throw new Exception($r['error']);\n"
+                + "    return $r;\n"
+                + "  }\n"
+                + "}\n"
+                + proxies
+                + "function __moodit_harness(){\n" + harnessCode + "\n}\n"
+                + "$__moodit_r = false;\n"
+                + "try { $__moodit_r = (bool) __moodit_harness(); } catch (\\Throwable $e) {}\n"
+                + "if ($__moodit_r) fwrite(STDERR, \"" + nonce + "\");\n"
+                + "@fclose($__moodit_pipes[0]);\n"
+                + "exit($__moodit_r ? 0 : 1);\n";
+        String server = studentCode      // ouvre <?php et définit fonctions/classes
+                + "\n$__moodit_objs = [];\n"
+                + "while (($__moodit_line = fgets(STDIN)) !== false) {\n"
+                + "  $__moodit_m = json_decode($__moodit_line, true);\n"
+                + "  if ($__moodit_m === null) continue;\n"
+                + "  try {\n"
+                + "    $__moodit_op = $__moodit_m['op'];\n"
+                + "    if ($__moodit_op === 'call') $__moodit_r = ['ok'=>true,'value'=>call_user_func_array($__moodit_m['name'], $__moodit_m['args'])];\n"
+                + "    elseif ($__moodit_op === 'new') { $__moodit_h = count($__moodit_objs); $__moodit_objs[$__moodit_h] = new $__moodit_m['cls'](...$__moodit_m['args']); $__moodit_r = ['ok'=>true,'handle'=>$__moodit_h]; }\n"
+                + "    elseif ($__moodit_op === 'method') $__moodit_r = ['ok'=>true,'value'=>call_user_func_array([$__moodit_objs[$__moodit_m['handle']], $__moodit_m['name']], $__moodit_m['args'])];\n"
+                + "    else $__moodit_r = ['ok'=>false,'error'=>'op inconnu'];\n"
+                + "  } catch (\\Throwable $__moodit_e) { $__moodit_r = ['ok'=>false,'error'=>$__moodit_e->getMessage()]; }\n"
+                + "  fwrite(STDOUT, json_encode($__moodit_r).\"\\n\");\n"
+                + "}\n";
+        return new Assembled("php", List.of(
+                new PistonClient.File("grader.php", grader),
+                new PistonClient.File("student_server.php", server)));
+    }
+
     // ── Bash ─────────────────────────────────────────────────────────────────────
 
     /**
@@ -225,6 +426,36 @@ public class CodeAssembler {
                 + "[ \"$__moodit_rc\" -eq 0 ] && printf '%s' '" + nonce + "' >&2\n"
                 + "exit \"$__moodit_rc\"\n";
         return new Assembled("bash", List.of(new PistonClient.File("main.sh", program)));
+    }
+
+    /** Fonctions bash de premier niveau : {@code nom()} ou {@code function nom}. */
+    private static final Pattern BASH_FUNC = Pattern.compile("(?m)^(?:function\\s+)?([A-Za-z_]\\w*)\\s*\\(\\s*\\)");
+
+    /**
+     * Bash : exécution ISOLÉE. Le NOTEUR (grader.sh) exécute le harnais INCHANGÉ avec des proxys ;
+     * chaque appel de fonction est délégué à un SOUS-PROCESSUS FRAIS ({@code bash student_server.sh})
+     * qui charge le code étudiant, lit « nom args », appelle la fonction et renvoie sa sortie. Les
+     * fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas d'objets). Le nonce est émis
+     * par le noteur (aucun code étudiant → infalsifiable) ; {@code grader.sh} est auto-supprimé.
+     */
+    private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
+        StringBuilder proxies = new StringBuilder();
+        for (String f : matchAll(BASH_FUNC, studentCode)) {
+            if (f.startsWith("__moodit")) continue;
+            proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
+        }
+        String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
+                + "__moodit_rpc() { local __n=\"$1\"; shift; printf '%s\\n' \"$__n $*\""
+                + " | bash student_server.sh 2>/dev/null; }\n"
+                + proxies
+                + "__moodit_harness() {\n" + harnessCode + "\n}\n"
+                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
+        String server = studentCode
+                + "\nread -r __moodit_name __moodit_rest\n"
+                + "$__moodit_name $__moodit_rest\n";
+        return new Assembled("bash", List.of(
+                new PistonClient.File("grader.sh", grader),
+                new PistonClient.File("student_server.sh", server)));
     }
 
     // ── Go ───────────────────────────────────────────────────────────────────────
@@ -711,15 +942,75 @@ public class CodeAssembler {
      * échoue (transpilation, composant manquant, exception au rendu) vaut échec.
      */
     private Assembled assembleJsx(String studentCode, String harnessCode, String nonce) {
-        // Le runner (jsx-main.js, fichier fixe embarqué) transpile le composant, monte un DOM
-        // (happy-dom) et exécute le harnais dans la même portée. Le harnais reçoit ainsi html,
-        // render/mount/click/fireEvent, document/window, React + hooks, et les fonctions étudiant.
-        // Le nonce anti-triche est fourni via un fichier voisin, émis sur stderr en cas de succès.
+        // Exécution ISOLÉE en deux processus (comme les autres langages interprétés) : le NOTEUR
+        // (main.js) exécute le harnais INCHANGÉ avec des proxys DOM ; le SERVEUR (jsx-server.js)
+        // transpile + rend/monte le composant étudiant et détient le DOM. `html`, `mount`, `click`,
+        // `fireEvent` et les nœuds DOM (querySelector, textContent…) sont proxifiés par RPC synchrone.
+        // Le nonce est émis par le noteur (aucun code étudiant → infalsifiable) — plus de fichier nonce.
+        String server = "const fs = require('fs');\n"
+                + "const rt = require('./react-runtime.js');\n"
+                + "const { React, ReactDOMServer, ReactDOMClient, act, HappyDOM, Babel } = rt;\n"
+                + "const win = new HappyDOM.Window({ url: 'http://localhost/' });\n"
+                + "global.window = win; global.document = win.document; global.navigator = win.navigator;\n"
+                + "globalThis.IS_REACT_ACT_ENVIRONMENT = true;\n"
+                + "['HTMLElement','Element','Node','Text','Event','MouseEvent','KeyboardEvent','InputEvent','CustomEvent','getComputedStyle','customElements','requestAnimationFrame','cancelAnimationFrame'].forEach(function(k){ if(win[k]!==undefined) global[k]=win[k]; });\n"
+                + "let Composant;\n"
+                + "try {\n"
+                + "  let src = fs.readFileSync(__dirname + '/component.tsx','utf8');\n"
+                + "  src = src.replace(/^\\s*import\\s.+$/gm,'').replace(/^\\s*export\\s+(default\\s+)?/gm,'');\n"
+                + "  const js = Babel.transform(src, {presets:['react','typescript'], filename:'component.tsx'}).code;\n"
+                + "  const useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useMemo=React.useMemo,useCallback=React.useCallback,useReducer=React.useReducer,useContext=React.useContext,Fragment=React.Fragment;\n"
+                + "  const factory = new Function('React','useState','useEffect','useRef','useMemo','useCallback','useReducer','useContext','Fragment', js + '\\n; return (typeof Composant!==\"undefined\")?Composant:undefined;');\n"
+                + "  Composant = factory(React,useState,useEffect,useRef,useMemo,useCallback,useReducer,useContext,React.Fragment);\n"
+                + "} catch(e) {}\n"
+                + "const reg = [];\n"
+                + "function store(v){ reg.push(v); return reg.length-1; }\n"
+                + "function isNode(v){ return v && typeof v==='object' && typeof v.nodeType==='number'; }\n"
+                + "function wrap(v){ if(isNode(v)) return {node:store(v)}; if(typeof v==='function') return {fn:true}; return {value:(v===undefined?null:v)}; }\n"
+                + "const NL=String.fromCharCode(10); let buf='';\n"
+                + "process.stdin.on('data', function(d){ buf+=d; let i;\n"
+                + "  while((i=buf.indexOf(NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
+                + "    let m; try{ m=JSON.parse(line);}catch(e){continue;}\n"
+                + "    let r;\n"
+                + "    try {\n"
+                + "      if(m.op==='render') r={ok:true, value: ReactDOMServer.renderToStaticMarkup(React.createElement(Composant, m.props||{}))};\n"
+                + "      else if(m.op==='mount'){ const ct=document.createElement('div'); document.body.appendChild(ct); const root=ReactDOMClient.createRoot(ct); act(function(){ root.render(React.createElement(Composant, m.props||{})); }); r={ok:true, node:store(ct)}; }\n"
+                + "      else if(m.op==='get') r=Object.assign({ok:true}, wrap(reg[m.handle][m.name]));\n"
+                + "      else if(m.op==='call'){ const el=reg[m.handle]; r=Object.assign({ok:true}, wrap(el[m.name].apply(el, m.args||[]))); }\n"
+                + "      else if(m.op==='click'){ act(function(){ reg[m.handle].dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true})); }); r={ok:true,value:null}; }\n"
+                + "      else if(m.op==='fireEvent'){ act(function(){ reg[m.handle].dispatchEvent(new window.Event(m.type, Object.assign({bubbles:true,cancelable:true}, m.init||{}))); }); r={ok:true,value:null}; }\n"
+                + "      else r={ok:false,error:'op inconnu'};\n"
+                + "    } catch(e){ r={ok:false,error:String(e&&e.message||e)}; }\n"
+                + "    process.stdout.write(JSON.stringify(r)+NL);\n"
+                + "  }});\n";
+        String grader = "const cp=require('child_process'), fs=require('fs');\n"
+                + "try{fs.unlinkSync('main.js');}catch(e){}\n"
+                + "const NL=String.fromCharCode(10);\n"
+                + "const child=cp.spawn(process.execPath,['jsx-server.js'],{stdio:['pipe','pipe','inherit']});\n"
+                + "child.stdout.pause(); const outFd=child.stdout._handle.fd;\n"
+                + "function rpc(o){ child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20); let s='';\n"
+                + "  while(s.indexOf(NL)<0){ let n; try{n=fs.readSync(outFd,b,0,b.length,null);}catch(e){if(e.code==='EAGAIN')continue;throw e;} if(n===0)break; s+=b.toString('utf8',0,n); }\n"
+                + "  const r=JSON.parse(s.split(NL)[0]); if(!r.ok) throw new Error(r.error); return r; }\n"
+                + "function uw(r){ if(r.node!==undefined) return elp(r.node); return r.value; }\n"
+                + "function elp(handle){ return new Proxy({__h:handle}, { get(t,p){ if(p==='__h')return handle;\n"
+                + "  const r=rpc({op:'get',handle,name:String(p)});\n"
+                + "  if(r.fn) return (...args)=>uw(rpc({op:'call',handle,name:String(p),args:args.map(a=>(a&&a.__h!==undefined)?a.__h:a)}));\n"
+                + "  return uw(r); } }); }\n"
+                + "function render(C,p){ return rpc({op:'render', props:p||{}}).value; }\n"
+                + "function mount(C,p){ return elp(rpc({op:'mount', props:p||{}}).node); }\n"
+                + "function click(el){ rpc({op:'click', handle:(el&&el.__h)}); }\n"
+                + "function fireEvent(el,type,init){ rpc({op:'fireEvent', handle:(el&&el.__h), type, init}); }\n"
+                + "const Composant = {__moodit_placeholder:true};\n"   // le harnais y référence « Composant » ; ignoré (le serveur détient le vrai)
+                + "let html; try{ html = rpc({op:'render', props:{}}).value; }catch(e){ html=undefined; }\n"
+                + "function __moodit_harness(){\n" + harnessCode + "\n}\n"
+                + "let __moodit_r=false; try{ __moodit_r=!!__moodit_harness(); }catch(e){}\n"
+                + "if(__moodit_r) process.stderr.write(\"" + nonce + "\");\n"
+                + "try{ child.stdin.end(); }catch(e){}\n"
+                + "process.exit(__moodit_r?0:1);\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", vendor("jsx-main.js")),
+                new PistonClient.File("main.js", grader),
+                new PistonClient.File("jsx-server.js", server),
                 new PistonClient.File("react-runtime.js", vendor("react-runtime.js")),
-                new PistonClient.File("component.tsx", studentCode),
-                new PistonClient.File("harness.js", harnessCode),
-                new PistonClient.File("moodit-nonce.txt", nonce)));
+                new PistonClient.File("component.tsx", studentCode)));
     }
 }

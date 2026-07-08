@@ -752,25 +752,25 @@ $hc$),
 -- (dans l'ordre d'écriture ; « solution » = « solution1 »).
 SELECT /* à compléter */;
 $sc$,
- $hc$-- HARNAIS (SQL) — deux modes.
--- LECTURE SEULE (par défaut) : chaque requête de l'étudiant est exposée comme une vue « solutionN »
---   (solution1, solution2… ; « solution » = solution1). Le harnais 1) crée le jeu de données de test
---   puis 2) TERMINE par UN SELECT booléen (1 = réussi) validant « solution1 »… contre l'attendu.
--- MODIFICATION (UPDATE/DELETE/INSERT/DDL) : mets une ligne « -- @student » là où le code de
---   l'étudiant doit s'exécuter. Il tourne alors dans un BAC À SABLE ISOLÉ (les tables de travail que
---   tu crées AVANT le marqueur), puis un NOTEUR séparé recharge son état final et lance ton verdict,
---   écrit APRÈS le marqueur. Le SQL de l'étudiant ne s'exécute JAMAIS dans le noteur : il ne peut ni
---   lire ni fausser ta correction. Verdict simple = comparaison à une valeur en dur. Exemple :
---     CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
---     INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 1);
---     -- @student
---     SELECT (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 2;
---   Si tu construis une table de RÉFÉRENCE, mets-la en TEMP (schéma séparé de l'état rechargé de
---   l'étudiant, pas de collision) : CREATE TEMP TABLE attendu(...); INSERT INTO attendu VALUES(...);
--- La DERNIÈRE valeur affichée fait foi ; une erreur SQL (table manquante, syntaxe…) vaut échec.
+ $hc$-- HARNAIS (SQL) — exemple prêt à adapter. Les requêtes de l'étudiant sont exposées comme des vues
+-- « solution1 », « solution2 »… (« solution » = solution1).
+
+-- Jeu de données de test (sur lequel porte la requête attendue) :
 CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
-INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0);
-SELECT (SELECT count(*) FROM solution1) = 1 AND (SELECT nom FROM solution1) = 'Alice';
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
+
+-- Verdict : TERMINE par UN SELECT booléen (dernière valeur = 1 → réussi ; une erreur SQL = échec).
+-- Ici on valide l'ensemble EXACT — la bonne COLONNE et les bonnes LIGNES :
+SELECT
+      (SELECT count(*) FROM pragma_table_info('solution1')) = 1     -- une seule colonne…
+  AND (SELECT name    FROM pragma_table_info('solution1')) = 'nom'  -- …nommée « nom »
+  -- exactement les noms actifs, ni plus ni moins (listes triées, séparateur newline non ambigu) :
+  AND (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM solution1 ORDER BY nom))
+    = (SELECT group_concat(nom, char(10)) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));
+
+-- Question de MODIFICATION (UPDATE/DELETE) ? Mets une ligne « -- @student » entre les tables de
+-- travail et le verdict : le code étudiant tourne alors ISOLÉ, ton verdict lit l'état final rechargé
+-- (il ne peut pas fausser ta correction). Table de référence éventuelle → « CREATE TEMP TABLE ».
 $hc$),
 ('Java',
  $sc$// Sandbox : bibliothèque standard Java (JDK, aucun réseau).

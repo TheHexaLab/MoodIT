@@ -2,6 +2,10 @@ package com.moodit.execution_service.assembly;
 
 import com.moodit.execution_service.piston.PistonClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,17 +27,133 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void python_contains_student_harness_and_nonce() {
+    void python_isolates_student_in_a_separate_process_via_rpc() {
         var a = assembler.assemble("Python", "def solution():\n    return 5",
                 "return solution() == 5", "MOODIT_OK_deadbeef");
         assertThat(a.pistonLanguage()).isEqualTo("python");
-        var file = a.files().get(0);
-        assertThat(file.name()).isEqualTo("main.py");
-        assertThat(file.content())
-                .contains("def solution()")            // code étudiant présent
-                .contains("return solution() == 5")     // harnais présent
-                .contains("__moodit_harness")           // enveloppe du harnais
-                .contains("MOODIT_OK_deadbeef");        // nonce anti-triche injecté
+        // Deux fichiers : le NOTEUR (grader.py, en 1er = point d'entrée) et le SERVEUR étudiant.
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("grader.py", "student_server.py");
+        String grader = a.files().get(0).content();
+        String server = a.files().get(1).content();
+        // Le harnais + le nonce sont dans le NOTEUR ; le code étudiant dans le SERVEUR (isolé).
+        assertThat(grader)
+                .contains("return solution() == 5")     // harnais du prof, inchangé
+                .contains("__moodit_harness")
+                .contains("MOODIT_OK_deadbeef")         // nonce émis par le noteur (sûr)
+                .contains("def solution(*a):")          // proxy RPC injecté pour « solution »
+                .contains("os.remove('grader.py')");    // auto-suppression (hors de portée du serveur)
+        assertThat(server)
+                .contains("def solution()")             // vrai code étudiant, côté serveur
+                .doesNotContain("MOODIT_OK_deadbeef");  // AUCUN nonce côté étudiant → plus de résiduel
+    }
+
+    /**
+     * Invariant de sécurité du modèle RPC (langages interprétés) : le NOTEUR (1er fichier) porte le
+     * harnais + le nonce ; le SERVEUR (2e fichier) porte le code étudiant SANS le nonce. C'est ce qui
+     * ferme le résiduel (le code étudiant, isolé, n'a aucun secret à extraire).
+     */
+    private void assertRpcIsolation(CodeAssembler.Assembled a, String harnessMarker,
+            String studentMarker, String nonce) {
+        assertThat(a.files().size()).isGreaterThanOrEqualTo(2);
+        String grader = a.files().get(0).content();
+        String server = a.files().get(1).content();
+        assertThat(grader).contains(harnessMarker).contains(nonce);       // harnais inchangé + nonce, côté noteur
+        assertThat(server).contains(studentMarker).doesNotContain(nonce); // code étudiant, AUCUN nonce
+    }
+
+    @Test
+    void javascript_isolates_student_via_rpc() {
+        var a = assembler.assemble("JavaScript", "function doubler(n){ return n*2; }",
+                "return doubler(5) === 10;", "MOODIT_OK_js");
+        assertThat(a.pistonLanguage()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("grader.js", "student_server.js");
+        assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n)", "MOODIT_OK_js");
+        assertThat(a.files().get(0).content())
+                .contains("function doubler(...a)")     // proxy RPC de la fonction
+                .contains("unlinkSync('grader.js')");   // auto-suppression du noteur
+    }
+
+    @Test
+    void typescript_uses_extensionless_names_and_ts_nocheck() {
+        var a = assembler.assemble("TypeScript", "function doubler(n: number): number { return n*2; }",
+                "return doubler(5) === 10;", "MOODIT_OK_ts");
+        assertThat(a.pistonLanguage()).isEqualTo("typescript");
+        // Fichiers SANS extension → Piston écrit du .ts et compile en .js (student_server.js).
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("grader", "student_server");
+        assertThat(a.files().get(0).content()).startsWith("// @ts-nocheck");
+        assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n: number)", "MOODIT_OK_ts");
+    }
+
+    @Test
+    void php_isolates_student_via_rpc() {
+        var a = assembler.assemble("PHP", "<?php\nfunction doubler($n){ return $n*2; }",
+                "return doubler(5) === 10;", "MOODIT_OK_php");
+        assertThat(a.pistonLanguage()).isEqualTo("php");
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("grader.php", "student_server.php");
+        assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler($n)", "MOODIT_OK_php");
+        assertThat(a.files().get(0).content())
+                .contains("function doubler(...$a)").contains("@unlink('grader.php')");
+    }
+
+    @Test
+    void bash_isolates_student_via_rpc() {
+        var a = assembler.assemble("Bash", "doubler() { echo $(( $1 * 2 )); }",
+                "[ \"$(doubler 5)\" = \"10\" ]", "MOODIT_OK_bash");
+        assertThat(a.pistonLanguage()).isEqualTo("bash");
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("grader.sh", "student_server.sh");
+        assertRpcIsolation(a, "$(doubler 5)", "doubler() {", "MOODIT_OK_bash");
+        assertThat(a.files().get(0).content())
+                .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");
+    }
+
+    @Test
+    void python_class_proxy_avoids_name_mangling() {
+        var a = assembler.assemble("Python", "class Rectangle:\n    def aire(self):\n        return 12",
+                "return Rectangle(3, 4).aire() == 12", "MOODIT_OK_r");
+        // Dans un corps de classe, `__moodit_rpc` serait manglé (→ _Rectangle__moodit_rpc). On passe
+        // donc par globals()[...] (clé string, non manglée).
+        assertThat(a.files().get(0).content())
+                .contains("class Rectangle:")
+                .contains("globals()[\"__moodit_rpc\"]");
+    }
+
+    @Test
+    void student_name_colliding_with_internals_is_not_proxied() {
+        // Un étudiant qui nomme un symbole « __moodit… » n'est PAS proxifié → pas de collision avec
+        // l'infrastructure du noteur (fs, _rpc…).
+        var a = assembler.assemble("JavaScript", "function __moodit_x(){}\nfunction doubler(n){ return n*2; }",
+                "return doubler(5) === 10;", "MOODIT_OK_x");
+        assertThat(a.files().get(0).content())
+                .contains("function doubler(...a)")
+                .doesNotContain("function __moodit_x(...a)");
+    }
+
+    @Test
+    void jsx_isolates_render_and_keeps_nonce_out_of_student_reach(@TempDir Path vendorDir) throws Exception {
+        Files.writeString(vendorDir.resolve("react-runtime.js"), "module.exports = {};");
+        var asm = new CodeAssembler(vendorDir.toString());
+        var a = asm.assemble("JSX", "function Composant(){ return React.createElement('h1', null, 'Bonjour'); }",
+                "return html.includes('<h1>Bonjour</h1>');", "MOODIT_OK_jsx");
+        assertThat(a.files()).extracting(PistonClient.File::name)
+                .containsExactly("main.js", "jsx-server.js", "react-runtime.js", "component.tsx")
+                .doesNotContain("moodit-nonce.txt", "harness.js");   // plus de fichier nonce ni harnais voisin
+        String grader = a.files().get(0).content();
+        assertThat(grader)
+                .contains("html.includes('<h1>Bonjour</h1>')")       // harnais du prof, inchangé
+                .contains("MOODIT_OK_jsx")                           // nonce dans le noteur
+                .contains("unlinkSync('main.js')")                  // auto-suppression du noteur
+                .contains("op:'mount'").contains("op:'click'");     // proxy DOM (interactif)
+        String server = a.files().stream().filter(f -> f.name().equals("jsx-server.js"))
+                .findFirst().orElseThrow().content();
+        String component = a.files().stream().filter(f -> f.name().equals("component.tsx"))
+                .findFirst().orElseThrow().content();
+        assertThat(server).doesNotContain("MOODIT_OK_jsx");         // serveur de rendu : aucun nonce
+        assertThat(component).contains("Composant").doesNotContain("MOODIT_OK_jsx");
     }
 
     @Test
@@ -222,6 +342,6 @@ class CodeAssemblerTest {
     @Test
     void null_code_and_harness_are_tolerated() {
         var a = assembler.assemble("Python", null, null, "N");
-        assertThat(a.files()).hasSize(1);
+        assertThat(a.files()).isNotEmpty();
     }
 }
