@@ -102,18 +102,45 @@ public class PermissionService {
   // ═══════════════════════════════════════════════════════════════════════════════════
   private List<Rule> buildRules() {
     return List.of(
-        // ── FIN (appartenance), id dans le BODY ──────────────────────────────────
-        // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
-        rule(
-            "POST",
-            "/forums/posts",
-            (user, vars, body) -> {
-              long forumId = longField(body, "forumId");
-              return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-            }),
+            // ── Establishment ───────────────────────────────────────────────────────────
+            /* Lister les établissements dans lesquels l'usager peut en crééer un programme
+            * FetchEstablishmentsForCreate*/
+            rule(
+                    "GET",
+                    "/users/{userId}/programs/{programId}/enrollments",
+                    (user, vars, body) -> verifyUserId(user, vars)
+            ),
+
+            // ── Program ─────────────────────────────────────────────────────────────────
+            // ── Course ──────────────────────────────────────────────────────────────────
+            //Afficher tous les cours de l'usager connecté auquel il est inscrit selon un programme spécifié
+            //FetchCourses, Frontend
+            rule(
+                    "GET",
+                    "/users/{userId}/programs/{programId}/enrollments",
+                    (user, vars, body) -> verifyUserId(user, vars)
+            ),
+
+            //Afficher tous les programmes de l'usager connecté
+            //FetchPrograms, Frontend
+            rule(
+                    "GET",
+                    "/users/${userId}/programs",
+                    (user, vars, body) -> verifyUserId(user, vars)
+            ),
+
+            // ── FIN (appartenance), id dans le BODY ──────────────────────────────────
+            // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
+            rule(
+                "POST",
+                "/forums/posts",
+                (user, vars, body) -> {
+                  long forumId = longField(body, "forumId");
+                  return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+                }),
 
         // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
-        rule(
+            rule(
             "POST",
             "/forums/posts/votes",
             (user, vars, body) -> {
@@ -123,21 +150,31 @@ public class PermissionService {
 
         // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
         // Creer un cours dans des programmes : reserve aux Administrateurs.
-        rule("POST", "/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur")),
+            rule(
+                "POST",
+                "/programs/courses",
+                (user, vars, body) -> hasRole(user, "Administrateur")),
 
         // ── QUIZ ─────────────────────────────────────────────────────────────────
         // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
-        // TODO affiner en role enseignant scope-programme (User_Program_Role) une fois
         // la resolution quiz -> programme disponible.
-        rule("PUT", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
-        rule("DELETE", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+            rule(
+                "PUT",
+                "/quizzes/{quizId}",
+                (user, vars, body) -> hasRole(user, "Administrateur")),
+            rule(
+            "DELETE", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
         // etre abonne a un programme du cours du quiz.
-        rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
-        rule("POST", "/quizzes/{quizId}/submissions", (user, vars, body) -> quizAccess(user, vars)),
-        rule("GET", "/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
-        rule(
+            rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
+            rule(
+            "POST",
+            "/quizzes/{quizId}/submissions",
+            (user, vars, body) -> quizAccess(user, vars)),
+            rule(
+            "GET", "/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
+            rule(
             "GET",
             "/quizzes/{quizId}/attempts/{attemptId}",
             (user, vars, body) -> quizAccess(user, vars))
@@ -233,6 +270,11 @@ public class PermissionService {
   private boolean quizAccess(User user, Map<String, String> vars) {
     long quizId = longVar(vars, "quizId");
     return quizId > 0 && membershipService.canAccessQuiz(user.getId(), quizId);
+  }
+
+  private boolean verifyUserId(User user, Map<String, String> vars) {
+    long requestUserId  = longVar(vars, "userId");
+    return requestUserId == user.getId();
   }
 
   // ── PREDICAT GENERIQUE : le cours fait partie du programme ────────────────────────
