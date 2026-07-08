@@ -66,4 +66,70 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeQuizViaProgram(@Param("userId") long userId, @Param("quizId") long quizId);
+
+  // Le cours appartient-il (structurellement) au programme ? (table de jointure program_course)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM program_course WHERE course_id = :courseId AND program_id = :programId)",
+      nativeQuery = true)
+  boolean isCourseInProgram(@Param("courseId") long courseId, @Param("programId") long programId);
+
+  // L'utilisateur est-il inscrit a ce cours ? (inscription directe, table Enrollment)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Enrollment WHERE user_id = :userId AND course_id = :courseId)",
+      nativeQuery = true)
+  boolean isEnrolledInCourse(@Param("userId") long userId, @Param("courseId") long courseId);
+
+  // L'utilisateur est-il le createur (auteur) de ce post ? (colonne Post.user_id)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Post WHERE id = :postId AND user_id = :userId)",
+      nativeQuery = true)
+  boolean isPostAuthor(@Param("userId") long userId, @Param("postId") long postId);
+
+  // Le vote appartient-il a cet utilisateur ? (colonne Vote.user_id)
+  @Query(
+      value =
+          "SELECT EXISTS(SELECT 1 FROM Vote WHERE id = :voteId AND user_id = :userId)",
+      nativeQuery = true)
+  boolean isVoteOwner(@Param("userId") long userId, @Param("voteId") long voteId);
+
+  // L'utilisateur a-t-il le role (nomme) DANS ce programme ? (table User_Program_Role)
+  // A distinguer du role GLOBAL (user_role) porte par l'entite User / hasRole.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r ON r.id = upr.role_id
+            WHERE upr.user_id = :userId AND upr.program_id = :programId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInProgram(
+      @Param("userId") long userId,
+      @Param("programId") long programId,
+      @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) SUR ce cours ? Combine role scope-programme
+  // (User_Program_Role) et appartenance du cours au programme (program_course). Ex. avec
+  // roleName = 'Enseignant' : "est-il prof du cours ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            WHERE upr.user_id = :userId AND pc.course_id = :courseId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInCourse(
+      @Param("userId") long userId,
+      @Param("courseId") long courseId,
+      @Param("roleName") String roleName);
 }
