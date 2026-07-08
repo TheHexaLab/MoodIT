@@ -57,18 +57,27 @@ public class QuizController {
         return ResponseEntity.ok(quizService.getAttemptResult(attemptId, email));
     }
 
-    /** Met à jour un quiz complet (méta + questions) en un appel. */
+    /**
+     * Met à jour un quiz complet (méta + questions) en un appel. Réservé à qui gère le contenu du
+     * cours (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     */
     @PutMapping("/{quizId}")
     public ResponseEntity<QuizDetailDTO> updateQuiz(
             @PathVariable Integer quizId,
-            @RequestBody QuizDetailDTO request) {
-        return ResponseEntity.ok(quizService.updateQuiz(quizId, request));
+            @RequestBody QuizDetailDTO request,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.updateQuiz(quizId, request, email));
     }
 
-    /** Supprime un quiz et tout son contenu (cascade). */
+    /**
+     * Supprime un quiz et tout son contenu (cascade). Réservé à qui gère le contenu du cours
+     * (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     */
     @DeleteMapping("/{quizId}")
-    public ResponseEntity<Void> deleteQuiz(@PathVariable Integer quizId) {
-        quizService.deleteQuiz(quizId);
+    public ResponseEntity<Void> deleteQuiz(
+            @PathVariable Integer quizId,
+            @RequestHeader("X-User-Email") String email) {
+        quizService.deleteQuiz(quizId, email);
         return ResponseEntity.noContent().build();
     }
 

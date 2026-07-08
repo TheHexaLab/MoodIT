@@ -139,10 +139,32 @@ class McpServiceTest {
 
     @Test
     void getAnalysis_missing_throwsNotFound() {
-        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Administrateur")));
+        // L'analyse est cherchée AVANT l'autorisation (elle donne le courseId à contrôler) :
+        // une analyse absente → 404 sans même résoudre l'utilisateur.
         when(mcpResponseRepository.findById(999)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getAnalysis(999, "a@a"))
                 .isInstanceOf(AnalysisNotFoundException.class);
+    }
+
+    @Test
+    void listAnalyses_globalGardien_isAllowed() {
+        // Rôle GLOBAL Gardien (User_Role) → accès à N'IMPORTE quel cours.
+        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Gardien")));
+        when(mcpResponseRepository.findByCourse_IdAndStatusOrderByCreatedAtDesc(10, McpStatus.DONE))
+                .thenReturn(List.of());
+
+        assertThat(service.listAnalyses(10, "a@a")).isEmpty();
+    }
+
+    @Test
+    void listAnalyses_programTeacher_isAllowed() {
+        // Aucun rôle GLOBAL admin, mais Enseignant (User_Program_Role) d'un programme du cours.
+        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Etudiant")));
+        when(userRepository.hasProgramTeachingRoleForCourse(5, 10)).thenReturn(true);
+        when(mcpResponseRepository.findByCourse_IdAndStatusOrderByCreatedAtDesc(10, McpStatus.DONE))
+                .thenReturn(List.of());
+
+        assertThat(service.listAnalyses(10, "a@a")).isEmpty();
     }
 }

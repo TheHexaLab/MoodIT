@@ -6,10 +6,16 @@ import { Chevron } from '../../assets/Chevron.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { CODE_MAX_LENGTH, NAME_MAX_LENGTH, defaultLabels } from './labels.ts';
-import type { AddCoursePopupLabels, MaybePromise, NewCourse, Program } from './types.ts';
+import type {
+  AddCoursePopupLabels,
+  Establishment,
+  MaybePromise,
+  NewCourse,
+  Program,
+} from './types.ts';
 
 // Ré-export de l'API publique : les consommateurs importent toujours ces types depuis ce module.
-export type { AddCoursePopupLabels, MaybePromise, NewCourse, Program } from './types.ts';
+export type { AddCoursePopupLabels, Establishment, MaybePromise, NewCourse, Program } from './types.ts';
 
 interface AddCoursePopupProps {
   onClose: (...args: unknown[]) => unknown;
@@ -19,10 +25,13 @@ interface AddCoursePopupProps {
    * et reste ouvert en affichant une erreur si elle rejette.
    */
   onSave: (course: NewCourse) => MaybePromise<unknown>;
-  /** Programmes sélectionnables, fournis par le parent. */
-  programs?: Program[];
-  /** Programmes préselectionnés à l'ouverture (ex. le programme courant). */
-  initialProgramIds?: number[];
+  /** Charge la liste des établissements (dropdown). Appelé une fois à l'ouverture. */
+  loadEstablishments: () => Promise<Establishment[]>;
+  /**
+   * Charge les programmes de l'établissement où l'utilisateur peut AJOUTER un cours (admin/prof, ou
+   * tous s'il est admin global/gardien). Rappelé à chaque changement d'établissement.
+   */
+  loadPrograms: (establishmentId: number) => Promise<Program[]>;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddCoursePopupLabels>;
 }
@@ -35,24 +44,36 @@ function Spinner(): React.ReactElement {
 export function AddCoursePopup({
   onClose,
   onSave,
-  programs = [],
-  initialProgramIds = [],
+  loadEstablishments,
+  loadPrograms,
   labels,
 }: AddCoursePopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
   const [code, setCode] = useState('');
   const [title, setTitle] = useState('');
-  /** Ids des programmes rattachés au cours (préremplis avec le programme courant). */
-  const [programIds, setProgramIds] = useState<number[]>(initialProgramIds);
-  /** Menu déroulant ouvert ? */
+  /** Ids des programmes rattachés au cours. */
+  const [programIds, setProgramIds] = useState<number[]>([]);
+  /** Menu déroulant (programmes) ouvert ? */
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+
+  /** Établissements chargés (dropdown) + celui qui est sélectionné. */
+  const [establishments, setEstablishments] = useState<Establishment[]>([]);
+  const [establishmentId, setEstablishmentId] = useState<number | null>(null);
+  /** Dropdown établissement (mono-choix, calqué sur celui des programmes) ouvert ? + recherche. */
+  const [estOpen, setEstOpen] = useState(false);
+  const [estSearch, setEstSearch] = useState('');
+  /** Programmes GÉRABLES de l'établissement sélectionné (chargés à la volée). */
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [loadingPrograms, setLoadingPrograms] = useState(false);
 
   const [isClosing, setIsClosing] = useState(false);
   const pendingAction = useRef<(() => void) | null>(null);
   /** Conteneur du champ programmes (pour le click-outside du menu). */
   const fieldRef = useRef<HTMLElement | null>(null);
+  /** Conteneur du champ établissement (pour le click-outside de son menu). */
+  const estFieldRef = useRef<HTMLElement | null>(null);
 
   /** Sauvegarde async en cours : pilote le spinner et empêche les doubles déclenchements. */
   const [pending, setPending] = useState(false);
@@ -71,7 +92,49 @@ export function AddCoursePopup({
     };
   }, []);
 
-  // Ferme le menu quand on clique en dehors du champ.
+  // Chargement des établissements (dropdown) à l'ouverture.
+  useEffect(() => {
+    let cancelled = false;
+    loadEstablishments()
+      .then((list) => {
+        if (!cancelled) setEstablishments(list);
+      })
+      .catch(() => {
+        if (!cancelled) setEstablishments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadEstablishments]);
+
+  // Chargement des programmes GÉRABLES à chaque changement d'établissement (réinitialise la
+  // sélection : les programmes disponibles dépendent de l'établissement).
+  useEffect(() => {
+    if (establishmentId === null) {
+      setPrograms([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingPrograms(true);
+    setPrograms([]);
+    setProgramIds([]);
+    setIsOpen(false);
+    loadPrograms(establishmentId)
+      .then((list) => {
+        if (!cancelled) setPrograms(list);
+      })
+      .catch(() => {
+        if (!cancelled) setPrograms([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrograms(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [establishmentId, loadPrograms]);
+
+  // Ferme le menu (programmes) quand on clique en dehors du champ.
   useEffect(() => {
     if (!isOpen) return;
     function onPointerDown(event: MouseEvent) {
@@ -83,6 +146,19 @@ export function AddCoursePopup({
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [isOpen]);
+
+  // Ferme le menu (établissement) quand on clique en dehors de son champ.
+  useEffect(() => {
+    if (!estOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (estFieldRef.current && !estFieldRef.current.contains(event.target as Node)) {
+        setEstOpen(false);
+        setEstSearch('');
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [estOpen]);
 
   /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
   function requestClose(action: () => void) {
@@ -119,6 +195,7 @@ export function AddCoursePopup({
   }
 
   function toggleOpen() {
+    if (establishmentId === null) return; // pas de programmes tant qu'aucun établissement n'est choisi
     setIsOpen((prev) => !prev);
     setSearch('');
   }
@@ -171,6 +248,80 @@ export function AddCoursePopup({
             <button onClick={() => requestClose(onClose)}>✕</button>
           </header>
 
+          <section className={styles.programs} ref={estFieldRef}>
+            <span className={styles['field-label']}>{t.establishmentLabel}</span>
+            <div className={styles['field-control']}>
+              <div
+                className={`${styles['tags-input']}${estOpen ? ` ${styles.open}` : ''}`}
+                onClick={() => {
+                  setEstOpen((prev) => !prev);
+                  setEstSearch('');
+                }}
+              >
+                {establishmentId === null ? (
+                  <span className={styles.placeholder}>{t.establishmentPlaceholder}</span>
+                ) : (
+                  <span className={styles['selected-value']}>
+                    {establishments.find((e) => e.id === establishmentId)?.name ?? ''}
+                  </span>
+                )}
+              </div>
+              <Chevron
+                className={`${styles.chevron}${estOpen ? ` ${styles['chevron-open']}` : ''}`}
+                width="1rem"
+                height="1rem"
+              />
+            </div>
+            {estOpen && (
+              <div className={styles.picker}>
+                <div className={styles['picker-search']}>
+                  <MagnifyingGlass width="1rem" height="1rem" />
+                  <input
+                    type="text"
+                    placeholder={t.establishmentSearchPlaceholder}
+                    autoFocus
+                    value={estSearch}
+                    onChange={(e) => setEstSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setEstOpen(false);
+                    }}
+                  />
+                </div>
+                <ul>
+                  {(() => {
+                    const q = estSearch.trim().toLowerCase();
+                    const list = establishments.filter(
+                      (e) => q === '' || e.name.toLowerCase().includes(q)
+                    );
+                    if (list.length === 0) {
+                      return (
+                        <li className={styles['picker-empty']}>
+                          {q === '' ? t.noEstablishments : t.noResults}
+                        </li>
+                      );
+                    }
+                    return list.map((est) => (
+                      <li key={est.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEstablishmentId(est.id);
+                            setEstOpen(false);
+                            setEstSearch('');
+                          }}
+                        >
+                          <div>
+                            <span>{est.name}</span>
+                          </div>
+                        </button>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </div>
+            )}
+          </section>
+
           <section className={styles.programs} ref={fieldRef}>
             <span className={styles['field-label']}>{t.programsLabel}</span>
             <div className={styles['field-control']}>
@@ -179,7 +330,9 @@ export function AddCoursePopup({
                 onClick={toggleOpen}
               >
                 {programIds.length === 0 ? (
-                  <span className={styles.placeholder}>{t.programsPlaceholder}</span>
+                  <span className={styles.placeholder}>
+                    {establishmentId === null ? t.programsPickEstablishment : t.programsPlaceholder}
+                  </span>
                 ) : (
                   attachedPrograms().map((program) => (
                     <span
@@ -234,7 +387,13 @@ export function AddCoursePopup({
                 <ul>
                   {candidatePrograms().length === 0 ? (
                     <li className={styles['picker-empty']}>
-                      {search.trim() === '' ? t.noCandidates : t.noResults}
+                      {loadingPrograms ? (
+                        <Spinner />
+                      ) : search.trim() === '' ? (
+                        t.noManageablePrograms
+                      ) : (
+                        t.noResults
+                      )}
                     </li>
                   ) : (
                     candidatePrograms().map((program) => (

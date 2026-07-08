@@ -8,7 +8,9 @@ import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
 import { LogIn } from '../../assets/LogIn.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
+import { TrashCan } from '../../assets/TrashCan.tsx';
 import { type Program } from '../../types/domain.ts';
+import { getProgramPermissions } from '../../helpers/permissions.ts';
 
 // Entité Program ré-exportée depuis le modèle de domaine (source unique).
 export type { Program };
@@ -43,17 +45,20 @@ interface ProgramMenuProps {
   /** Relance le chargement de la liste (bouton de l'état d'erreur). */
   onReload?: () => void;
   /**
-   * L'utilisateur est-il administrateur ? Conditionne les actions d'administration
-   * du menu contextuel (ajouter un cours, modifier le programme, gerer les roles).
-   * « Quitter le programme » reste accessible a tous.
+   * L'utilisateur est-il ADMINISTRATEUR GLOBAL (super-admin plateforme, User_Role) ?
+   * Les autres actions d'administration sont dérivées PAR PROGRAMME du rôle de l'utilisateur
+   * dans ce programme (Program.roleName, User_Program_Role) via getProgramPermissions.
+   * « Quitter le programme » reste accessible à tous.
    */
-  isAdmin?: boolean;
-  /** Menu contextuel (clic droit) — ajouter un cours au programme (admin). */
+  isGlobalAdmin?: boolean;
+  /** Menu contextuel (clic droit) — ajouter un cours au programme (gestion contenu). */
   onAddCourseToProgram?: (programId: number) => void;
-  /** Menu contextuel — modifier le programme (admin). */
+  /** Menu contextuel — modifier le programme (Administrateur programme / global). */
   onEditProgram?: (programId: number) => void;
-  /** Menu contextuel — gerer les roles du programme (admin). */
+  /** Menu contextuel — gerer les roles du programme (gestion contenu). */
   onManageRoles?: (programId: number) => void;
+  /** Menu contextuel — supprimer le programme (super-admin GLOBAL uniquement). */
+  onDeleteProgram?: (programId: number) => void;
   /** Menu contextuel — rejoindre des cours du programme (tous). */
   onJoinCourses?: (programId: number) => void;
   /** Menu contextuel — quitter le programme (tous). */
@@ -109,10 +114,11 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   loading = false,
   loadError = null,
   onReload,
-  isAdmin = false,
+  isGlobalAdmin = false,
   onAddCourseToProgram,
   onEditProgram,
   onManageRoles,
+  onDeleteProgram,
   onJoinCourses,
   onLeaveProgram,
 }) => {
@@ -147,8 +153,16 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     const gap = 8;
-    // Estimation de hauteur (3 actions admin + « quitter ») pour éviter le débordement bas.
-    const itemCount = (isAdmin ? 3 : 0) + (onJoinCourses ? 1 : 0) + 1; // +1 = « quitter »
+    // Estimation de hauteur (actions admin PAR PROGRAMME + « rejoindre » + « quitter ») pour
+    // éviter le débordement bas.
+    const target = programs.find((p) => p.id === programId);
+    const perms = getProgramPermissions(target, isGlobalAdmin);
+    const adminItemCount =
+      (perms.canManageContent ? 1 : 0) + // ajouter un cours
+      (perms.canEditProgram ? 1 : 0) + // modifier le programme
+      (perms.canManageRoles ? 1 : 0) + // gérer les rôles
+      (perms.canDeleteProgram && onDeleteProgram ? 1 : 0); // supprimer le programme
+    const itemCount = adminItemCount + (onJoinCourses ? 1 : 0) + 1;
     const estimatedHeight = itemCount * 40 + 16;
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
     setContextMenu({ programId, left: rect.right + gap, top });
@@ -271,7 +285,17 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
       {/* Menu contextuel (clic droit sur un programme). Porté vers <body> + position
           fixe : échappe au overflow du rail et au transform du tiroir mobile. */}
       {contextMenu &&
-        createPortal(
+        (() => {
+          // Permissions dérivées du rôle de l'utilisateur DANS ce programme précis.
+          const target = programs.find((p) => p.id === contextMenu.programId);
+          const perms = getProgramPermissions(target, isGlobalAdmin);
+          const showAdminSection =
+            perms.canManageContent ||
+            perms.canEditProgram ||
+            perms.canManageRoles ||
+            (perms.canDeleteProgram && !!onDeleteProgram);
+
+          return createPortal(
           <div
             className={styles.contextMenu}
             role="menu"
@@ -279,35 +303,52 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
             onClick={(event) => event.stopPropagation()}
             onContextMenu={(event) => event.preventDefault()}
           >
-            {isAdmin && (
+            {showAdminSection && (
               <>
-                <button
-                  type="button"
-                  className={styles.contextItem}
-                  role="menuitem"
-                  onClick={() => runContextAction(onAddCourseToProgram)}
-                >
-                  <Plus className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
-                  Ajouter un cours
-                </button>
-                <button
-                  type="button"
-                  className={styles.contextItem}
-                  role="menuitem"
-                  onClick={() => runContextAction(onEditProgram)}
-                >
-                  <Pencil className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
-                  Modifier le programme
-                </button>
-                <button
-                  type="button"
-                  className={styles.contextItem}
-                  role="menuitem"
-                  onClick={() => runContextAction(onManageRoles)}
-                >
-                  <Sliders className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
-                  Gérer les rôles
-                </button>
+                {perms.canManageContent && (
+                  <button
+                    type="button"
+                    className={styles.contextItem}
+                    role="menuitem"
+                    onClick={() => runContextAction(onAddCourseToProgram)}
+                  >
+                    <Plus className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                    Ajouter un cours
+                  </button>
+                )}
+                {perms.canEditProgram && (
+                  <button
+                    type="button"
+                    className={styles.contextItem}
+                    role="menuitem"
+                    onClick={() => runContextAction(onEditProgram)}
+                  >
+                    <Pencil className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                    Modifier le programme
+                  </button>
+                )}
+                {perms.canManageRoles && (
+                  <button
+                    type="button"
+                    className={styles.contextItem}
+                    role="menuitem"
+                    onClick={() => runContextAction(onManageRoles)}
+                  >
+                    <Sliders className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                    Gérer les rôles
+                  </button>
+                )}
+                {perms.canDeleteProgram && onDeleteProgram && (
+                  <button
+                    type="button"
+                    className={`${styles.contextItem} ${styles.contextItemDanger}`}
+                    role="menuitem"
+                    onClick={() => runContextAction(onDeleteProgram)}
+                  >
+                    <TrashCan className={styles.contextIcon} width="1rem" height="1rem" aria-hidden="true" />
+                    Supprimer le programme
+                  </button>
+                )}
                 <span className={styles.contextDivider} />
               </>
             )}
@@ -333,7 +374,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
             </button>
           </div>,
           document.body
-        )}
+          );
+        })()}
     </nav>
   );
 };

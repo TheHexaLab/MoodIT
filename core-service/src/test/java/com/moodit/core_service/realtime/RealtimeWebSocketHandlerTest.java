@@ -97,6 +97,34 @@ class RealtimeWebSocketHandlerTest {
   }
 
   @Test
+  void scopeAdminRoles_estAccepteEtRoute() throws Exception {
+    WebSocketSession session = openSession();
+    handler.afterConnectionEstablished(session);
+    handler.handleTextMessage(
+        session, new TextMessage("{\"type\":\"join\",\"scope\":\"adminRoles\",\"id\":0}"));
+
+    publisher.adminRolesChanged(java.util.List.of());
+
+    verify(session, atLeastOnce()).sendMessage(org.mockito.ArgumentMatchers.any(TextMessage.class));
+  }
+
+  @Test
+  void joinAdminRoles_refuseParLAutorizer_neRecoitRien() throws Exception {
+    // Autorizer qui REFUSE la room admins (simule un utilisateur SANS rôle global).
+    RealtimeWebSocketHandler strict =
+        new RealtimeWebSocketHandler(
+            registry, objectMapper, (email, scope, id) -> !"adminRoles".equals(scope));
+    WebSocketSession session = openSession();
+    strict.afterConnectionEstablished(session);
+    strict.handleTextMessage(
+        session, new TextMessage("{\"type\":\"join\",\"scope\":\"adminRoles\",\"id\":0}"));
+
+    publisher.adminRolesChanged(java.util.List.of());
+
+    verify(session, never()).sendMessage(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
   void commandeInvalide_estIgnoreeSansErreur() throws Exception {
     WebSocketSession session = openSession();
     handler.afterConnectionEstablished(session);

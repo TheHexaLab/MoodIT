@@ -7,6 +7,7 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.service.ForumService;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -37,43 +38,69 @@ public class ForumController {
     @GetMapping("/{forumId}/posts/{postId}")
     public ResponseEntity<PostDTO> getPostByForum(@PathVariable Integer forumId,
                                                   @PathVariable Integer postId,
-                                                  @RequestParam(defaultValue = "false") boolean loadChildren) {
-        return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren));
+                                                  @RequestParam(defaultValue = "false") boolean loadChildren,
+                                                  @RequestHeader(value = "X-User-Email", required = false) String email) {
+        return ResponseEntity.ok(forumService.getPostByForum(forumId, postId, loadChildren, email));
     }
 
+    @GetMapping("/{forumId}/posts/{postId}/replies")
+    public ResponseEntity<List<PostVoteUserDTO>> getRepliesByPost(@PathVariable Integer forumId,
+                                                  @PathVariable Integer postId,
+                                                  @RequestHeader(value = "X-User-Email", required = false) String email) {
+        return ResponseEntity.ok(forumService.getRepliesByPost(forumId, postId, email));
+    }
+
+    /**
+     * Messages d'un canal, paginés par CURSEUR (infinite scroll « charger plus ancien »).
+     * `before` = id du plus ancien message déjà chargé (absent = page la plus récente) ;
+     * `limit` = taille de page. Renvoyés du plus récent au plus ancien.
+     */
     @GetMapping("/{forumId}/messages")
-    public ResponseEntity<List<PostVoteUserDTO>> getAllMessagesByForum(@PathVariable Integer forumId) {
+    public ResponseEntity<List<PostVoteUserDTO>> getAllMessagesByForum(@PathVariable Integer forumId,
+                                                  @RequestParam(required = false) Integer before,
+                                                  @RequestParam(defaultValue = "30") int limit,
+                                                  @RequestHeader(value = "X-User-Email", required = false) String email) {
         return ResponseEntity.ok(
-                forumService.getAllMessagesByForum(forumId)
+                forumService.getMessagesPage(forumId, before, limit, email)
         );
     }
 
+    /**
+     * Sujets racines d'un forum, paginés par CURSEUR (infinite scroll « charger plus »).
+     * `before` = id du plus ancien sujet déjà affiché (absent = page la plus récente) ;
+     * `limit` = taille de page. Renvoyés du plus récent au plus ancien.
+     */
     @GetMapping("/{forumId}/posts")
     public ResponseEntity<List<PostVoteUserDTO>> getAllPostsByForum(
             @PathVariable Integer forumId,
-            @RequestParam(defaultValue = "false") boolean loadChildren) {
+            @RequestParam(defaultValue = "false") boolean loadChildren,
+            @RequestParam(required = false) Integer before,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestHeader(value = "X-User-Email", required = false) String email) {
 
         return ResponseEntity.ok(
-                forumService.getAllPostsByForum(forumId, loadChildren)
+                forumService.getRootPostsPage(forumId, before, limit, loadChildren, email)
         );
     }
     //endregion
 
     //region POST
     @PostMapping("/messages")
-    public ResponseEntity<Void> addMessageToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
+    public ResponseEntity<PostVoteUserDTO> addMessageToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
                                                @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
-        forumService.addPostToForum(postCreateInForumDTO, email);
+        // 201 + post persisté : le front réconcilie son affichage optimiste (remplace
+        // l'id temporaire négatif par l'id réel) sans attendre l'écho WebSocket.
+        PostVoteUserDTO created = forumService.addPostToForum(postCreateInForumDTO, email);
 
-        return ResponseEntity.noContent().build(); //code 204
+        return ResponseEntity.status(HttpStatus.CREATED).body(created); //code 201
     }
 
     @PostMapping("/posts")
-    public ResponseEntity<Void> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
+    public ResponseEntity<PostVoteUserDTO> addPostToForum(@RequestBody PostCreateInForumDTO postCreateInForumDTO,
                                                @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
-        forumService.addPostToForum(postCreateInForumDTO, email);
+        PostVoteUserDTO created = forumService.addPostToForum(postCreateInForumDTO, email);
 
-        return ResponseEntity.noContent().build(); //code 204
+        return ResponseEntity.status(HttpStatus.CREATED).body(created); //code 201
     }
 
     @PostMapping("/posts/votes")

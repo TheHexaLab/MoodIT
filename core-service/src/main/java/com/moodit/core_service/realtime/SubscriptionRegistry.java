@@ -87,4 +87,26 @@ public class SubscriptionRegistry {
       }
     }
   }
+
+  /**
+   * Diffuse à TOUTES les sessions abonnées (toutes rooms confondues, dédupliquées) : pour les
+   * évènements GLOBAUX comme la mise à jour de profil — l'auteur peut apparaître dans
+   * n'importe quel canal / forum, on ne peut donc pas cibler une room précise.
+   */
+  public void broadcastAll(String payload) {
+    TextMessage message = new TextMessage(payload);
+    Set<WebSocketSession> seen = ConcurrentHashMap.newKeySet();
+    for (Set<WebSocketSession> sessions : rooms.values()) {
+      for (WebSocketSession session : sessions) {
+        if (!seen.add(session) || !session.isOpen()) {
+          continue;
+        }
+        try {
+          session.sendMessage(message);
+        } catch (IOException e) {
+          log.warn("Échec d'envoi (broadcastAll) vers la session {}", session.getId(), e);
+        }
+      }
+    }
+  }
 }
