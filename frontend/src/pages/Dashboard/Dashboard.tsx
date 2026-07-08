@@ -121,6 +121,51 @@ export default function Dashboard() {
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
+  // ── Easter egg « kiwi » ──────────────────────────────────────────────────
+  // La séquence Konami (↑ ↑ ↓ ↓ ← → ← → B A) bascule un thème secret « kiwi »
+  // (fond en tranches de kiwi + palette verte, cf. index.css / *.module.css).
+  // Éphémère : on pose data-theme directement sur <html> SANS toucher au
+  // localStorage — un rafraîchissement revient donc au thème normal. Actif
+  // uniquement tant que le dashboard est monté ; on restaure au démontage.
+  const themeBeforeKiwi = useRef<string | null>(null);
+  useEffect(() => {
+    const KONAMI = [
+      'ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown',
+      'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a',
+    ];
+    const root = document.documentElement;
+    let progress = 0;
+
+    // Rétablit le thème d'avant l'activation kiwi (attribut absent = thème auto/OS).
+    const restoreTheme = () => {
+      if (themeBeforeKiwi.current === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', themeBeforeKiwi.current);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Lettres (B/A) comparées en minuscule ; les flèches gardent leur code exact.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      // Avance dans la séquence ; un faux pas repart de 0 — ou de 1 si la touche
+      // correspond au tout début, pour ne pas rater un nouveau départ immédiat.
+      progress = key === KONAMI[progress] ? progress + 1 : key === KONAMI[0] ? 1 : 0;
+      if (progress < KONAMI.length) return;
+      progress = 0;
+      // Séquence complète : on bascule kiwi ↔ thème courant.
+      if (root.getAttribute('data-theme') === 'kiwi') {
+        restoreTheme();
+      } else {
+        themeBeforeKiwi.current = root.getAttribute('data-theme');
+        root.setAttribute('data-theme', 'kiwi');
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      // En quittant le dashboard, on ne laisse pas fuiter le thème kiwi ailleurs.
+      if (root.getAttribute('data-theme') === 'kiwi') restoreTheme();
+    };
+  }, []);
 
   // UNE seule connexion WebSocket pour toute l'app (chat + forum + cours + programmes),
   // créée une fois au montage. L'authentification se fait au handshake via le cookie

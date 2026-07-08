@@ -190,6 +190,35 @@
     --syntax-variable: #f38ba8;
 }
 
+/* Thème secret « kiwi » (débloqué par la séquence Konami sur le dashboard, cf.
+   Dashboard.tsx). Éphémère : posé directement sur <html>, jamais persisté. On ne
+   redéfinit que les variables « vertes » ; le reste hérite de :root (thème clair).
+   Le motif de tranches de kiwi est appliqué au fond du dashboard/MainPanel. */
+:root[data-theme="kiwi"] {
+    --bg-rail: #cdcb9c;
+    --bg-main: #e6e3c1;
+    --bg-sidebar: #ddd9ac;
+    --bg-surface: #e6e3c1;
+    --bg-message-input: #ddd9ac;
+    --bg-user-panel: #d4d09b;
+    --bg-vote-pill: #ddd9ac;
+    --bg-active-channel: #cdd694;
+    --border: #b5b47b;
+    --border-strong: #99965c;
+    --text: #2a2711;
+    --text-body: #46421d;
+    --text-heading-alt: #3a3616;
+    --text-muted: #6e6942;
+    --icon-stroke: #6e6942;
+    --brand-teal: #4f9d2f;
+    --brand-teal-surface: rgba(79, 157, 47, 0.10);
+    --brand-teal-gradient: linear-gradient(101deg, #7bc23f 0%, #4f9d2f 83.33%);
+    --brand-gradient: linear-gradient(135deg, #7bc23f 0%, #3c6d1f 100%);
+    --text-active: #3c6d1f;
+    --bg-send-button: linear-gradient(135deg, #4f9d2f 14.29%, #7bc23f 85.71%);
+    --shadow-hover: rgba(60, 109, 31, 0.22);
+}
+
 body {
     margin: 0;
     background: var(--bg-main);

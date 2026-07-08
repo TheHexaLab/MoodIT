@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+  <!-- Tranche de kiwi vue de face, tuilée en fond du thème secret « kiwi ».
+       Opacité modérée pour rester discret derrière l'interface. -->
+  <g transform="translate(75 75)" opacity="0.5">
+    <circle r="48" fill="#7a5a2e"/>
+    <circle r="45" fill="#4f8f22"/>
+    <circle r="42" fill="#7bbb33"/>
+    <circle r="11" fill="#eef4cf"/>
+    <!-- Couronne externe de pépins (18 pépins, tous les 20°). -->
+    <g fill="#2a2016">
+      <g transform="rotate(0)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(20)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(40)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(60)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(80)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(100)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(120)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(140)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(160)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(180)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(200)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(220)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(240)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(260)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(280)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(300)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(320)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+      <g transform="rotate(340)"><ellipse cy="-30" rx="1.5" ry="3.4"/></g>
+    </g>
+    <!-- Couronne interne de pépins (9 pépins, tous les 40°, décalés). -->
+    <g fill="#2a2016">
+      <g transform="rotate(20)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(60)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(100)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(140)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(180)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(220)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(260)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(300)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+      <g transform="rotate(340)"><ellipse cy="-19" rx="1.3" ry="2.8"/></g>
+    </g>
+  </g>
+</svg>

@@ -19,7 +19,9 @@ export default function ResetPassword() {
 
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -63,6 +65,10 @@ export default function ResetPassword() {
     }
     if (passwordStrength(password) < 2) {
       setError('Mot de passe trop faible');
+      return;
+    }
+    if (confirmPassword !== password) {
+      setError('Les mots de passe ne correspondent pas');
       return;
     }
 
@@ -188,6 +194,36 @@ export default function ResetPassword() {
                       <span />
                     </div>
                   )}
+                </div>
+
+                <div className="field">
+                  <div className="label-row">
+                    <label className="label">Confirmer le mot de passe</label>
+                    {confirmPassword && confirmPassword !== password && (
+                      <span className="strength-label" data-level={1}>
+                        Les mots de passe ne correspondent pas
+                      </span>
+                    )}
+                  </div>
+                  <div className="input-wrapper">
+                    <input
+                      className="input"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      placeholder="••••••••••"
+                      value={confirmPassword}
+                      maxLength={128}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="eye-btn"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      aria-label={showConfirmPassword ? 'Masquer' : 'Afficher'}
+                    >
+                      <EyeIcon visible={showConfirmPassword} />
+                    </button>
+                  </div>
                 </div>
 
                 <button type="submit" className="btn-primary" disabled={submitting}>

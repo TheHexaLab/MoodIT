@@ -232,8 +232,7 @@ public class AuthService {
 
     emailService.send2FACode(email, code);
 
-    return new AuthResponse(
-        null, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+    return authResponseFor(user, null);
   }
 
   // Validate
@@ -294,7 +293,7 @@ public class AuthService {
     return Map.of("message", "Email vérifié pour " + username);
   }
 
-  public Map<String, String> verifyEmail(String email, String code) {
+  public AuthResponse verifyEmail(String email, String code) {
     email = normalizeEmail(email);
     PendingRegistration pending =
         pendingRepository
@@ -338,6 +337,11 @@ public class AuthService {
     user.setPasswordHash(pending.getPasswordHash());
     user.setCreatedAt(LocalDateTime.now());
 
+    // Auto-login : le code email prouve la possession de la boîte, il tient lieu de 2FA pour
+    // cette première session. On mémorise le token actif AVANT le save pour n'avoir qu'un
+    // seul aller-retour BD (même hash de session que verify2FA, via issueToken()).
+    String token = issueToken(user);
+
     // Même course possible ici (deux pendings au même username/email promus en même temps) :
     // User_.username et User_.email sont UNIQUE, on traduit la violation en 409 plutôt qu'un 500.
     try {
@@ -350,7 +354,7 @@ public class AuthService {
     }
     pendingRepository.delete(pending);
 
-    return Map.of("message", "Email vérifié avec succès!");
+    return authResponseFor(user, token);
   }
 
   // PAS @Transactional : le chemin "mauvais code" incrémente le compteur de tentatives puis
@@ -400,13 +404,10 @@ public class AuthService {
     user.setVerificationAttempts(0);
     user.setVerificationLockedUntil(null);
 
-    String token = jwtService.generateToken(user.getEmail());
-    String hashedToken = jwtService.hashToken(token, user.getEmail());
-    user.setActiveTokenHash(hashedToken);
+    String token = issueToken(user);
     userRepository.save(user);
 
-    return new AuthResponse(
-        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+    return authResponseFor(user, token);
   }
 
   // Renvoi d'un code (inscription ou 2FA), avec le même cooldown / plafond anti-bombing.
@@ -560,6 +561,22 @@ public class AuthService {
   }
 
   // Méthodes privées
+
+  // Émet un JWT pour l'utilisateur et mémorise son hash comme token actif (ce qui invalide toute
+  // session précédente). L'appelant persiste ensuite l'utilisateur. Partagé par verify2FA (login)
+  // et verifyEmail (auto-login après inscription).
+  private String issueToken(User user) {
+    String token = jwtService.generateToken(user.getEmail());
+    user.setActiveTokenHash(jwtService.hashToken(token, user.getEmail()));
+    return token;
+  }
+
+  // Construit la réponse d'authentification à partir de l'utilisateur (mapping d'identité
+  // mutualisé entre login, verify2FA et verifyEmail). token null tant que la session n'est pas émise.
+  private AuthResponse authResponseFor(User user, String token) {
+    return new AuthResponse(
+        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+  }
 
   // BCrypt ignore tout au-delà de 72 octets. On pré-hache donc le mot de passe avec le pepper
   // via HMAC-SHA256 (sortie de taille fixe, 44 caractères en Base64) : le pepper est entièrement

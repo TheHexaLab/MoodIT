@@ -116,12 +116,12 @@ export async function login(payload: { email: string; password: string }): Promi
   return res.json();
 }
 
-export async function verifyEmail(email: string, code: string): Promise<{ message: string }> {
+export async function verifyEmail(email: string, code: string): Promise<AuthResponse> {
   const res = await fetch('/auth/verify-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
-    credentials: 'include',
+    credentials: 'include', // stocke le Set-Cookie moodit_token renvoyé (auto-login)
   });
 
   if (!res.ok) {

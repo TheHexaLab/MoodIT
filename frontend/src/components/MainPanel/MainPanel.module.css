@@ -9,3 +9,51 @@
     background: var(--bg-main);
     overflow-y: auto;
 }
+
+/* Thème secret « kiwi » : 28 tranches de kiwi éparpillées de façon aléatoire dans
+   toute la couronne du panneau, SAUF une zone centrale d'environ 20rem laissée
+   dégagée pour la lecture. Certaines sont coupées par les bords avec une fraction
+   visible VARIÉE (de ~1/8 à ~7/8) ; d'autres sont à l'intérieur, ENTIÈREMENT visibles
+   (positionnées en %, donc jamais rognées) — dont les 2 dernières, ajoutées en
+   bas-gauche et haut-droite pour combler les derniers trous.
+   :global cible l'attribut data-theme posé sur <html> ; .mainPanel reste scopé
+   localement (CSS Modules). Chaque kiwi est une COUCHE de fond distincte. Toutes les
+   tailles et les décalages de rognage sont en VW (1vw = 1% de la largeur de la fenêtre) :
+   ainsi les kiwis S'AJUSTENT quand la taille de l'écran change (ce que px/rem ne font
+   pas). Valeurs calées sur une largeur de référence de 1600px (1vw ↔ 16px), pour rester
+   proche du rendu actuel. Tailles : 8.3 → 15.4vw. */
+:global(:root[data-theme="kiwi"]) .mainPanel {
+    background-color: var(--bg-main);
+    background-image:
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"),
+        url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg"), url("../../assets/kiwi-slice.svg");
+    background-position:
+        /* à cheval sur des bords variés (moitié hors écran) */
+        50% -5vw, -4.4vw 58%, left 78% bottom -5.2vw, right -5vw top 12%, 24% -4.4vw,
+        /* éparpillés dans l'intérieur (gros kiwis approchés du milieu) */
+        14% 16%, 30% 10%, 70% 10%, 24% 34%,
+        40% 24%, 60% 22%, 76% 40%, 92% 50%, 34% 72%,
+        44% 80%, 58% 76%, 72% 68%,
+        84% 90%, 52% 92%,
+        /* gros kiwis coupés par les bords, fraction visible variée (~1/8 à 5/8) */
+        88% -11vw, 6% -4.1vw, left 40% bottom -5.5vw, left 66% bottom -6.6vw, right -5.5vw top 32%, right -7.2vw top 92%,
+        /* légèrement rognés (~6/8 à 7/8 visibles) puis intérieur entièrement visible */
+        38% -1.65vw, left 92% bottom -1.65vw,
+        /* nouveau gros bas-gauche (en %, jamais rogné) */
+        8% 87%;
+    background-size:
+        9.9vw, 8.8vw, 10.5vw, 9.9vw, 8.8vw,
+        11vw, 8.3vw, 13.2vw, 14.3vw,
+        8.8vw, 11vw, 13.2vw, 8.3vw, 8.3vw,
+        13.2vw, 8.8vw, 12.7vw,
+        8.3vw, 8.8vw,
+        14.3vw, 11vw, 13.2vw, 14.3vw, 12.1vw, 15.4vw,
+        8.8vw, 9.9vw,
+        13.2vw;
+    background-repeat: no-repeat;
+}

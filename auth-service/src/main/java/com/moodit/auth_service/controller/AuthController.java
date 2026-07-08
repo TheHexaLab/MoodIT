@@ -49,16 +49,20 @@ public class AuthController {
   }
 
   @PostMapping("/verify-email")
-  public ResponseEntity<Map<String, String>> verifyEmail(
-      @Valid @RequestBody VerifyCodeRequest req) {
-    return ResponseEntity.ok(authService.verifyEmail(req.getEmail(), req.getCode()));
+  public ResponseEntity<AuthResponse> verifyEmail(@Valid @RequestBody VerifyCodeRequest req) {
+    // Auto-login après vérification de l'email : même réponse authentifiée que la 2FA.
+    return authResponse(authService.verifyEmail(req.getEmail(), req.getCode()));
   }
 
   @PostMapping("/verify-2fa")
   public ResponseEntity<AuthResponse> verify2FA(@Valid @RequestBody VerifyCodeRequest req) {
-    AuthResponse body = authService.verify2FA(req.getEmail(), req.getCode());
-    // Le token est posé UNIQUEMENT en cookie HttpOnly (invisible au JS). On le retire du
-    // corps après avoir construit le cookie : @JsonInclude(NON_NULL) l'exclut alors du JSON.
+    return authResponse(authService.verify2FA(req.getEmail(), req.getCode()));
+  }
+
+  // Réponse authentifiée : dépose le JWT en cookie HttpOnly (invisible au JS) et le retire du
+  // corps JSON après coup — @JsonInclude(NON_NULL) l'exclut alors. Partagé par verify-email et
+  // verify-2fa, les deux seuls points où une session naît.
+  private ResponseEntity<AuthResponse> authResponse(AuthResponse body) {
     ResponseCookie cookie = authCookie.build(body.getToken());
     body.setToken(null);
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body);

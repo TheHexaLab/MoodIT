@@ -16,6 +16,7 @@ type FieldErrors = {
   lastName?: string;
   email?: string;
   password?: string;
+  confirmPassword?: string;
   terms?: string;
 };
 
@@ -26,7 +27,9 @@ export default function Register() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
@@ -69,6 +72,9 @@ export default function Register() {
     else if (!EMAIL_REGEX.test(email)) errors.email = 'Format d’e-mail invalide';
     if (!password) errors.password = 'Requis';
     else if (passwordStrength(password) < 2) errors.password = 'Mot de passe trop faible';
+    if (!confirmPassword) errors.confirmPassword = 'Requis';
+    else if (confirmPassword !== password)
+      errors.confirmPassword = 'Les mots de passe ne correspondent pas';
     if (!acceptTerms) errors.terms = "Vous devez accepter les conditions d'utilisation";
 
     if (Object.keys(errors).length > 0) {
@@ -240,6 +246,45 @@ export default function Register() {
                     <span />
                   </div>
                 )}
+              </div>
+
+              <div className={styles.field}>
+                <div className={styles.labelRow}>
+                  <label className={styles.label}>Confirmer le mot de passe</label>
+                  {fieldErrors.confirmPassword ? (
+                    <span className={styles.error}>⚠ {fieldErrors.confirmPassword}</span>
+                  ) : (
+                    confirmPassword &&
+                    confirmPassword !== password && (
+                      <span className={styles.error}>⚠ Les mots de passe ne correspondent pas</span>
+                    )
+                  )}
+                </div>
+                <div
+                  className={`${styles.inputWrap}${
+                    fieldErrors.confirmPassword || (confirmPassword && confirmPassword !== password)
+                      ? ' ' + styles.invalid
+                      : ''
+                  }`}
+                >
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    placeholder="Retapez votre mot de passe"
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.eyeBtn}
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    aria-label={
+                      showConfirmPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'
+                    }
+                  >
+                    <EyeIcon visible={showConfirmPassword} />
+                  </button>
+                </div>
               </div>
 
               <label className={styles.terms}>

@@ -19,7 +19,6 @@ export default function VerifyCode() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
@@ -41,31 +40,40 @@ export default function VerifyCode() {
     return () => clearTimeout(id);
   }, [cooldown]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Soumission du code. Prend le code en argument (et non l'état `code`) pour permettre
+  // l'auto-validation dès la saisie du 6e chiffre, sans attendre la mise à jour du state.
+  async function submit(theCode: string) {
     setError('');
 
-    if (code.length !== 6) {
+    if (theCode.length !== 6) {
       setError('Le code doit contenir 6 chiffres');
       return;
     }
 
     setSubmitting(true);
     try {
-      if (isEmailVerification) {
-        await verifyEmail(email, code);
-        setSuccess(true);
-      } else {
-        // 2FA — l'auth-service pose le cookie HttpOnly `moodit_token` dans la réponse
-        // (credentials:'include'). Rien à stocker côté JS : on redirige.
-        await verify2FA(email, code);
-        navigate('/');
-      }
+      // email → auto-login (verifyEmail), 2fa → verify2FA : dans les deux cas l'auth-service
+      // pose le cookie HttpOnly `moodit_token` (credentials:'include'). Rien à stocker côté
+      // JS, on redirige directement vers le dashboard.
+      await (isEmailVerification ? verifyEmail : verify2FA)(email, theCode);
+      navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submit(code);
+  }
+
+  // Frappe / copier-coller : dès que les 6 chiffres sont présents, on valide automatiquement.
+  function handleCodeChange(raw: string) {
+    const next = raw.replace(/\D/g, '').slice(0, 6);
+    setCode(next);
+    if (next.length === 6 && !submitting) submit(next);
   }
 
   async function handleResend() {
@@ -110,69 +118,58 @@ export default function VerifyCode() {
 
       <main className="main">
         <div className="form-card">
-          {success ? (
-            <>
-              <h2 className="form-title">Email vérifié ✅</h2>
-              <p className="form-subtitle">Votre compte est maintenant actif.</p>
-              <Link to="/login" className="btn-primary">
-                Se connecter →
+          <h2 className="form-title">
+            {isEmailVerification ? 'Vérifiez votre email 📧' : 'Double authentification 🔒'}
+          </h2>
+          <p className="form-subtitle">
+            Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
+          </p>
+
+          <form className="form" onSubmit={handleSubmit}>
+            {error && <p className="server-error">⚠ {error}</p>}
+
+            <div className="field">
+              <label className="label">Code à 6 chiffres</label>
+              <input
+                className="input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                maxLength={6}
+                placeholder="123456"
+                autoFocus
+                onChange={(e) => handleCodeChange(e.target.value)}
+              />
+            </div>
+
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? 'Vérification...' : 'Vérifier →'}
+            </button>
+
+            {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
+            <p className="register-row">
+              Pas reçu le code ?{' '}
+              <button
+                type="button"
+                className="register-link"
+                onClick={handleResend}
+                disabled={cooldown > 0 || resending}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                {cooldown > 0
+                  ? `Renvoyer (${cooldown}s)`
+                  : resending
+                    ? 'Envoi...'
+                    : 'Renvoyer le code'}
+              </button>
+            </p>
+            <p className="register-row">
+              <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
+                ← Retour
               </Link>
-            </>
-          ) : (
-            <>
-              <h2 className="form-title">
-                {isEmailVerification ? 'Vérifiez votre email 📧' : 'Double authentification 🔒'}
-              </h2>
-              <p className="form-subtitle">
-                Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
-              </p>
-
-              <form className="form" onSubmit={handleSubmit}>
-                {error && <p className="server-error">⚠ {error}</p>}
-
-                <div className="field">
-                  <label className="label">Code à 6 chiffres</label>
-                  <input
-                    className="input"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={code}
-                    maxLength={6}
-                    placeholder="123456"
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  />
-                </div>
-
-                <button type="submit" className="btn-primary" disabled={submitting}>
-                  {submitting ? 'Vérification...' : 'Vérifier →'}
-                </button>
-
-                {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
-                <p className="register-row">
-                  Pas reçu le code ?{' '}
-                  <button
-                    type="button"
-                    className="register-link"
-                    onClick={handleResend}
-                    disabled={cooldown > 0 || resending}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                  >
-                    {cooldown > 0
-                      ? `Renvoyer (${cooldown}s)`
-                      : resending
-                        ? 'Envoi...'
-                        : 'Renvoyer le code'}
-                  </button>
-                </p>
-                <p className="register-row">
-                  <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
-                    ← Retour
-                  </Link>
-                </p>
-              </form>
-            </>
-          )}
+            </p>
+          </form>
         </div>
 
         <footer className="footer">© 2026 MoodIT · Confidentialité · Conditions d'utilisation</footer>

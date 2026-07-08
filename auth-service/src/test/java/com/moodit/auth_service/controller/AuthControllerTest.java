@@ -158,6 +158,24 @@ class AuthControllerTest {
   }
 
   @Test
+  void verifyEmail_success_setsCookie_andOmitsTokenFromBody() throws Exception {
+    // Auto-login : la vérification de l'email pose le cookie HttpOnly et retire le token du corps.
+    when(authService.verifyEmail("karine@usherbrooke.ca", "123456"))
+        .thenReturn(
+            new AuthResponse("jwt-token", "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
+    when(authCookie.build("jwt-token"))
+        .thenReturn(ResponseCookie.from("moodit_token", "jwt-token").httpOnly(true).build());
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
+        .andExpect(jsonPath("$.token").doesNotExist()) // token absent du corps
+        .andExpect(jsonPath("$.username").value("rkarine"));
+  }
+
+  @Test
   void verifyEmail_missingEmail_returns400() throws Exception {
     String body = "{\"code\":\"123456\"}"; // email manquant
 
