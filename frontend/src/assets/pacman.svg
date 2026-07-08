@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+  <!-- Pac-Man (cercle avec un coin/triangle manquant), tuilé dans le thème « pacman ».
+       Arc en grand-arc (large-arc=1) + sweep=0 pour dessiner le CORPS et non la bouche. -->
+  <g opacity="0.72">
+    <path d="M75 75 L124.8 51.8 A55 55 0 1 0 124.8 98.2 Z" fill="#ffce1f" stroke="#e0a800" stroke-width="1.5"/>
+  </g>
+</svg>

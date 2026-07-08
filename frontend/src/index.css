@@ -219,6 +219,84 @@
     --shadow-hover: rgba(60, 109, 31, 0.22);
 }
 
+/* Thème secret « twee » (débloqué en tapant 8339! sur le dashboard, cf. Dashboard.tsx).
+   Même mécanique que « kiwi » : éphémère, posé sur <html>, jamais persisté. Palette
+   Twisted Tea : fond BLEU MARINE + texte clair + accents dorés (les canettes jaunes
+   ressortent dessus). Fond = motif de canettes ailées « twee ». */
+:root[data-theme="twee"] {
+    --bg-rail: #0e1f45;
+    --bg-main: #16294e;
+    --bg-sidebar: #12234a;
+    --bg-surface: #1b3159;
+    --bg-input: #203760;
+    --bg-message-input: #203760;
+    --bg-send-button: linear-gradient(135deg, #e0a81e 14.29%, #ffdb4d 85.71%);
+    --bg-user-panel: #101f3d;
+    --bg-vote-pill: #203760;
+    --bg-active-channel: #26426f;
+    --send-button-stroke: #14224a;
+    --border: #2d4778;
+    --border-strong: #3c588f;
+    --text: #eaf0fb;
+    --text-body: #c4d0e8;
+    --text-heading-alt: #d6e0f0;
+    --text-muted: #93a5c6;
+    --text-on-brand: #14224a;
+    --icon-stroke: #a6b6d4;
+    --badge-success-bg: rgba(246, 200, 31, 0.18);
+    --badge-success-fg: #ffdb4d;
+    --badge-danger-bg: rgba(229, 72, 77, 0.18);
+    --badge-danger-fg: #ff8585;
+    --badge-warn-bg: rgba(245, 166, 35, 0.18);
+    --badge-warn-fg: #f5c87a;
+    --brand-teal: #ffd21a;
+    --brand-teal-hover: brightness(1.12);
+    --brand-teal-surface: rgba(255, 210, 26, 0.10);
+    --brand-teal-gradient: linear-gradient(101deg, #ffe14d 0%, #f5c000 83.33%);
+    --brand-gradient: linear-gradient(135deg, #ffe14d 0%, #e6a800 100%);
+    --text-active: #ffe14d;
+    --shadow-hover: rgba(255, 210, 26, 0.25);
+}
+
+/* Thème secret « pacman » (débloqué en tapant pacman! sur le dashboard, cf.
+   Dashboard.tsx). Même mécanique : éphémère, posé sur <html>, jamais persisté. Palette
+   arcade : fond quasi noir + bordures bleu « labyrinthe » + accents jaune Pac-Man.
+   Fond = motif de Pac-Man et de fantômes. */
+:root[data-theme="pacman"] {
+    --bg-rail: #05050e;
+    --bg-main: #0a0a18;
+    --bg-sidebar: #080814;
+    --bg-surface: #101026;
+    --bg-input: #16163a;
+    --bg-message-input: #16163a;
+    --bg-send-button: linear-gradient(135deg, #ffcc00 14.29%, #ffe14d 85.71%);
+    --bg-user-panel: #08081a;
+    --bg-vote-pill: #16163a;
+    --bg-active-channel: #1a1a4a;
+    --send-button-stroke: #0a0a18;
+    --border: #2121de;
+    --border-strong: #4a4aff;
+    --text: #fdfdff;
+    --text-body: #cfcfe6;
+    --text-heading-alt: #e6e6ff;
+    --text-muted: #9a9ac6;
+    --text-on-brand: #0a0a18;
+    --icon-stroke: #b0b0e0;
+    --badge-success-bg: rgba(255, 204, 0, 0.18);
+    --badge-success-fg: #ffe14d;
+    --badge-danger-bg: rgba(255, 59, 59, 0.20);
+    --badge-danger-fg: #ff7a7a;
+    --badge-warn-bg: rgba(255, 156, 34, 0.18);
+    --badge-warn-fg: #ffc266;
+    --brand-teal: #ffcc00;
+    --brand-teal-hover: brightness(1.12);
+    --brand-teal-surface: rgba(255, 204, 0, 0.10);
+    --brand-teal-gradient: linear-gradient(101deg, #ffe14d 0%, #ffcc00 83.33%);
+    --brand-gradient: linear-gradient(135deg, #ffe14d 0%, #ffcc00 100%);
+    --text-active: #ffcc00;
+    --shadow-hover: rgba(255, 204, 0, 0.25);
+}
+
 body {
     margin: 0;
     background: var(--bg-main);

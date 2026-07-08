@@ -57,3 +57,53 @@
         13.2vw;
     background-repeat: no-repeat;
 }
+
+/* Thème secret « twee » : l'illustration RÉELLE (PNG transparent de la canette ailée)
+   tuilée en fond. On reprend un sous-ensemble des positions % validées du kiwi
+   (uniquement les canettes ENTIÈREMENT visibles, pas de rognage — une canette coupée
+   rendrait mal), et des tailles réduites (~×0.7) pour que l'empreinte visible de la
+   canette corresponde à celle du kiwi → même espacement, sans chevauchement. */
+:global(:root[data-theme="twee"]) .mainPanel {
+    background-color: var(--bg-main);
+    background-image:
+        url("../../assets/twee-can.png"), url("../../assets/twee-can.png"), url("../../assets/twee-can.png"),
+        url("../../assets/twee-can.png"), url("../../assets/twee-can.png"), url("../../assets/twee-can.png"),
+        url("../../assets/twee-can.png"), url("../../assets/twee-can.png"), url("../../assets/twee-can.png"),
+        url("../../assets/twee-can.png"), url("../../assets/twee-can.png"), url("../../assets/twee-can.png"),
+        url("../../assets/twee-can.png"), url("../../assets/twee-can.png"), url("../../assets/twee-can.png");
+    background-position:
+        14% 16%, 30% 10%, 70% 10%, 24% 34%, 40% 24%,
+        60% 22%, 76% 40%, 92% 50%, 34% 72%, 44% 80%,
+        58% 76%, 72% 68%, 84% 90%, 52% 92%, 8% 87%;
+    background-size:
+        7.7vw, 5.8vw, 9.2vw, 10vw, 6.2vw,
+        7.7vw, 9.2vw, 5.8vw, 5.8vw, 9.2vw,
+        6.2vw, 8.9vw, 5.8vw, 6.2vw, 9.2vw;
+    background-repeat: no-repeat;
+}
+
+/* Thème secret « pacman » : Pac-Man et fantômes des 4 couleurs (rouge, rose, bleu ciel,
+   orange) alternés en fond. Base = les 15 positions validées de « twee » + 5 icônes
+   ajoutées dans les zones vides (surtout le milieu-gauche). Toujours sans chevauchement. */
+:global(:root[data-theme="pacman"]) .mainPanel {
+    background-color: var(--bg-main);
+    background-image:
+        url("../../assets/pacman.svg"), url("../../assets/pac-ghost-red.svg"), url("../../assets/pac-ghost-pink.svg"),
+        url("../../assets/pacman.svg"), url("../../assets/pac-ghost-cyan.svg"), url("../../assets/pac-ghost-orange.svg"),
+        url("../../assets/pacman.svg"), url("../../assets/pac-ghost-red.svg"), url("../../assets/pac-ghost-pink.svg"),
+        url("../../assets/pacman.svg"), url("../../assets/pac-ghost-cyan.svg"), url("../../assets/pac-ghost-orange.svg"),
+        url("../../assets/pacman.svg"), url("../../assets/pac-ghost-red.svg"), url("../../assets/pac-ghost-pink.svg"),
+        url("../../assets/pac-ghost-orange.svg"), url("../../assets/pac-ghost-cyan.svg"), url("../../assets/pacman.svg"),
+        url("../../assets/pac-ghost-red.svg"), url("../../assets/pac-ghost-pink.svg");
+    background-position:
+        14% 16%, 30% 10%, 70% 10%, 24% 34%, 40% 24%,
+        60% 22%, 76% 40%, 92% 50%, 34% 72%, 44% 80%,
+        58% 76%, 72% 68%, 84% 90%, 52% 92%, 8% 87%,
+        8% 32%, 4% 54%, 12% 70%, 94% 74%, 66% 90%;
+    background-size:
+        7.7vw, 5.8vw, 9.2vw, 10vw, 6.2vw,
+        7.7vw, 9.2vw, 5.8vw, 5.8vw, 9.2vw,
+        6.2vw, 8.9vw, 5.8vw, 6.2vw, 9.2vw,
+        8vw, 6.8vw, 7.5vw, 8vw, 6.5vw;
+    background-repeat: no-repeat;
+}

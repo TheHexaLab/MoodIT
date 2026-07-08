@@ -121,49 +121,71 @@ export default function Dashboard() {
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
-  // ── Easter egg « kiwi » ──────────────────────────────────────────────────
-  // La séquence Konami (↑ ↑ ↓ ↓ ← → ← → B A) bascule un thème secret « kiwi »
-  // (fond en tranches de kiwi + palette verte, cf. index.css / *.module.css).
-  // Éphémère : on pose data-theme directement sur <html> SANS toucher au
-  // localStorage — un rafraîchissement revient donc au thème normal. Actif
-  // uniquement tant que le dashboard est monté ; on restaure au démontage.
-  const themeBeforeKiwi = useRef<string | null>(null);
+  // ── Easter eggs « kiwi » / « twee » / « pacman » ─────────────────────────
+  // Trois séquences secrètes basculent chacune un thème éphémère :
+  //   ↑ ↑ ↓ ↓ ← → ← → B A  → « kiwi »   (tranches de kiwi + palette verte)
+  //   frappe de « 8339! »   → « twee »   (canettes ailées + palette bleu/jaune)
+  //   frappe de « pacman! »  → « pacman » (Pac-Man + fantômes + palette arcade)
+  // Éphémère : on pose data-theme directement sur <html> SANS toucher au localStorage
+  // — un rafraîchissement revient au thème normal. Actif uniquement tant que le
+  // dashboard est monté ; on restaure au démontage.
+  const themeBeforeEgg = useRef<string | null>(null);
   useEffect(() => {
     const KONAMI = [
       'ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown',
-      'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a',
+      'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight',
     ];
+    const CODES = [
+      { theme: 'kiwi', seq: [...KONAMI, 'b', 'a'] },
+      { theme: 'twee', seq: ['8', '3', '3', '9', '!'] },
+      { theme: 'pacman', seq: ['p', 'a', 'c', 'm', 'a', 'n', '!'] },
+    ];
+    const EGGS = CODES.map((c) => c.theme);
     const root = document.documentElement;
-    let progress = 0;
+    const progress = CODES.map(() => 0);
 
-    // Rétablit le thème d'avant l'activation kiwi (attribut absent = thème auto/OS).
+    // Rétablit le thème d'avant l'easter egg (attribut absent = thème auto/OS).
     const restoreTheme = () => {
-      if (themeBeforeKiwi.current === null) root.removeAttribute('data-theme');
-      else root.setAttribute('data-theme', themeBeforeKiwi.current);
+      if (themeBeforeEgg.current === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', themeBeforeEgg.current);
+    };
+
+    const toggle = (theme: string) => {
+      const current = root.getAttribute('data-theme');
+      if (current === theme) {
+        restoreTheme();
+      } else {
+        // On ne mémorise le thème sous-jacent que s'il n'est pas déjà un easter egg
+        // (ex. bascule directe kiwi → twee), pour pouvoir revenir au thème réel.
+        if (!EGGS.includes(current ?? '')) themeBeforeEgg.current = current;
+        root.setAttribute('data-theme', theme);
+      }
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      // Lettres (B/A) comparées en minuscule ; les flèches gardent leur code exact.
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      // Avance dans la séquence ; un faux pas repart de 0 — ou de 1 si la touche
-      // correspond au tout début, pour ne pas rater un nouveau départ immédiat.
-      progress = key === KONAMI[progress] ? progress + 1 : key === KONAMI[0] ? 1 : 0;
-      if (progress < KONAMI.length) return;
-      progress = 0;
-      // Séquence complète : on bascule kiwi ↔ thème courant.
-      if (root.getAttribute('data-theme') === 'kiwi') {
-        restoreTheme();
-      } else {
-        themeBeforeKiwi.current = root.getAttribute('data-theme');
-        root.setAttribute('data-theme', 'kiwi');
+      // On ignore les touches modificatrices seules : sinon le Shift tapé pour faire
+      // « ! » (dernier caractère de 8339!) s'intercalerait et casserait la séquence.
+      if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') {
+        return;
       }
+      // Lettres (A/B) comparées en minuscule ; les flèches gardent leur code exact.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      // Chaque séquence avance indépendamment ; un faux pas repart de 0 — ou de 1 si
+      // la touche correspond au tout début, pour ne pas rater un nouveau départ.
+      CODES.forEach((code, i) => {
+        progress[i] = key === code.seq[progress[i]] ? progress[i] + 1 : key === code.seq[0] ? 1 : 0;
+        if (progress[i] === code.seq.length) {
+          progress[i] = 0;
+          toggle(code.theme);
+        }
+      });
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      // En quittant le dashboard, on ne laisse pas fuiter le thème kiwi ailleurs.
-      if (root.getAttribute('data-theme') === 'kiwi') restoreTheme();
+      // En quittant le dashboard, on ne laisse pas fuiter un thème easter egg ailleurs.
+      if (EGGS.includes(root.getAttribute('data-theme') ?? '')) restoreTheme();
     };
   }, []);
 
