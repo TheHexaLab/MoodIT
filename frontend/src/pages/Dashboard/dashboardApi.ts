@@ -46,6 +46,7 @@ import {
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
+import type { Program as AddCourseProgram } from '../../components/AddCoursePopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
 
@@ -547,6 +548,19 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
     throw new Error('Échec chargement des programmes de l’établissement');
   }
 
+  return await res.json();
+}
+
+/**
+ * Programmes d'un établissement dans lesquels l'utilisateur peut AJOUTER un cours : ceux où il est
+ * Administrateur/Enseignant (User_Program_Role) ; un admin global / gardien les voit tous. Alimente
+ * le popup « Créer un cours » (la liste dépend de l'établissement choisi).
+ */
+export async function fetchManageableProgramsInEstablishment(
+  establishmentId: number
+): Promise<AddCourseProgram[]> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}/manageable-programs`);
+  if (!res.ok) throw new Error('Échec chargement des programmes gérables');
   return await res.json();
 }
 

@@ -85,7 +85,7 @@ const quizEditorHandlers: QuizEditorHandlers = {
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
   | { kind: 'addCourse'; programId: number } // programId = programme préselectionné
-  | { kind: 'addSubscription' }
+  | { kind: 'addSubscription'; view?: 'join' }
   | { kind: 'editCourse'; courseId: number }
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
@@ -331,6 +331,9 @@ export default function Dashboard() {
 
   // Ouvre le AddSubscriptionPopup (création / adhésion à un programme).
   const handleAddProgram = () => setPopup({ kind: 'addSubscription' });
+  // « Rejoindre un programme » (offert à tous depuis l'état « aucun programme ») : ouvre le même
+  // popup DIRECTEMENT sur la vue d'adhésion (la création reste gatée par canCreateProgram).
+  const handleJoinProgram = () => setPopup({ kind: 'addSubscription', view: 'join' });
 
   // Ouvre le AddCoursePopup avec le programme courant préselectionné (gestion contenu).
   const handleAddCourse = () => {
@@ -873,7 +876,11 @@ export default function Dashboard() {
         onVotePost={handleVotePost}
         forumSocket={ws.forums}
         onAddProgram={handleAddProgram}
+        // Rejoindre un programme — offert à tous depuis l'état « aucun programme ».
+        onJoinProgram={handleJoinProgram}
         onAddCourse={handleAddCourse}
+        // Rejoindre un cours du programme actif — offert à tous depuis l'état « aucun cours ».
+        onJoinCourse={() => handleJoinCourses(activeProgramId)}
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
@@ -912,8 +919,10 @@ export default function Dashboard() {
       {popup?.kind === 'addCourse' && (
         <AddCoursePopup
           onClose={() => setPopup(null)}
-          programs={programChoices}
-          initialProgramIds={popup.programId >= 0 ? [popup.programId] : []}
+          // Programmes chargés PAR ÉTABLISSEMENT, filtrés à ceux que l'utilisateur peut gérer
+          // (admin/prof, ou tous si admin global/gardien). Le backend applique la même règle.
+          loadEstablishments={api.fetchEstablishments}
+          loadPrograms={api.fetchManageableProgramsInEstablishment}
           onSave={handleSaveCourse}
         />
       )}
@@ -952,6 +961,7 @@ export default function Dashboard() {
           // Temps réel : le nombre de programmes d'un établissement se met à jour LIVE dans le
           // popup (création de programme par soi ou un autre gardien). `ws` est stable (useMemo).
           subscribeEstablishmentUpdates={ws.establishments.subscribe}
+          initialView={popup.view ?? 'menu'}
         />
       )}
 

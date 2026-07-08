@@ -106,6 +106,11 @@ interface AddSubscriptionPopupProps {
    * fonction de désabonnement.
    */
   subscribeEstablishmentUpdates?: (handler: (event: EstablishmentEvent) => void) => () => void;
+  /**
+   * Vue affichée à l'ouverture. Défaut `'menu'` (choix créer / rejoindre / gérer). Passer `'join'`
+   * pour ouvrir DIRECTEMENT l'adhésion (bouton « Rejoindre un programme » des états vides).
+   */
+  initialView?: 'menu' | 'join';
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
 }
@@ -131,12 +136,13 @@ export function AddSubscriptionPopup({
   onUpdateEstablishment,
   onDeleteEstablishment,
   subscribeEstablishmentUpdates,
+  initialView = 'menu',
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
   /** Vue affichée : menu, création, adhésion, ou gestion des établissements. */
-  const [view, setView] = useState<'menu' | 'create' | 'join' | 'manage'>('menu');
+  const [view, setView] = useState<'menu' | 'create' | 'join' | 'manage'>(initialView);
   /** Opération async en cours : pilote les spinners et empêche les doubles déclenchements. */
   const [pending, setPending] = useState<Pending | null>(null);
   /** Message d'erreur de la dernière opération async (null = aucune). */
