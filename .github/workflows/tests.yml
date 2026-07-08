@@ -64,3 +64,57 @@ jobs:
           name: test-results-${{ matrix.service }}
           path: ${{ matrix.service }}/build/reports/tests/test/
           if-no-files-found: ignore
+
+  # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
+  # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
+  # exécute le VRAI code (assemblage + verdict) contre un Piston réel — c'est le filet qui prouve
+  # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
+  # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
+  integration:
+    name: execution-service — intégration (Piston réel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Démarrer Piston + installer les runtimes
+        run: |
+          touch .env.docker   # les autres services y réfèrent ; vide suffit (on ne démarre que Piston)
+          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml up -d --build piston
+          # piston-init attend Piston puis installe les runtimes (langages) et s'arrête.
+          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml run --rm piston-init
+
+      - name: Bundle react-runtime.js (nécessaire aux cas JSX/TSX)
+        run: |
+          docker build --target jsvendor -t moodit-jsvendor execution-service
+          cid=$(docker create moodit-jsvendor)
+          mkdir -p vendor-ci
+          docker cp "$cid:/out/." vendor-ci/
+          docker rm "$cid"
+
+      - name: Tests d'intégration
+        working-directory: execution-service
+        env:
+          PISTON_URL: http://localhost:2000
+          APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
+          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent) doit FAIRE
+          # ÉCHOUER le job, pas l'ignorer : sinon un Piston qui ne démarre pas laisserait ce gate de
+          # sécurité passer au vert sans avoir rien exécuté. (En local, drapeau absent → tests ignorés.)
+          PISTON_REQUIRED: "true"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test --tests "*ExecutionIntegrationTest" --no-daemon --console=plain
+
+      - name: Publier le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results
+          path: execution-service/build/reports/tests/test/
+          if-no-files-found: ignore
