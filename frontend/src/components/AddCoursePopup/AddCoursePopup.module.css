@@ -288,6 +288,21 @@ div.add-course > div > section.programs > div.field-control > div.tags-input > s
     line-height: normal;
 }
 
+/* Valeur sélectionnée d'un dropdown MONO-choix (ex. établissement) : texte normal, pas muté. */
+div.add-course > div > section.programs > div.field-control > div.tags-input > span.selected-value {
+    flex: 1;
+    min-width: 0;
+    padding-left: 0.35rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: normal;
+}
+
 /* Conteneur relatif : ancre le chevron flottant par-dessus le champ. */
 div.add-course > div > section.programs > div.field-control {
     position: relative;
@@ -510,6 +525,11 @@ div.add-course > div > section.programs > div.picker > ul > li.picker-empty {
 
 div.add-course > div > section.programs > div.picker > ul > li > button {
     width: 100%;
+    /* Hauteur de ligne STANDARD (identique aux items avec pastille) : les items sans swatch
+       (ex. établissement) ne s'écrasent pas verticalement. border-box → n'affecte pas les
+       items déjà à cette hauteur. */
+    box-sizing: border-box;
+    min-height: var(--picker-row-height, 2.75rem);
     display: flex;
     align-items: center;
     gap: 0.625rem;

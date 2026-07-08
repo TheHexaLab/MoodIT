@@ -98,9 +98,13 @@ function getInitials(author: ForumAuthor): string {
   return (initials || author.username[0] || '?').toUpperCase();
 }
 
-/** Score d'un post : SUM(value_) de tous ses votes. */
+/**
+ * Score d'un post : votes des autres utilisateurs (agrégat serveur `othersVoteTotal`)
+ * + votes connus localement (`votes` = vote propre de l'utilisateur, éventuellement des
+ * votes live d'autres). Le vote propre étant dans `votes`, il n'est PAS dans othersVoteTotal.
+ */
 function scoreOf(post: ForumPost): number {
-  return post.votes.reduce((sum, vote) => sum + vote.value, 0);
+  return (post.othersVoteTotal ?? 0) + post.votes.reduce((sum, vote) => sum + vote.value, 0);
 }
 
 /** Vote de l'utilisateur `userId` sur un post (depuis la table Vote). */
@@ -166,6 +170,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     loading,
     loadError,
     reload,
+    hasMore,
+    loadingMore,
+    loadMore,
     loadingReplies,
     replyErrors,
     loadReplies,
@@ -181,6 +188,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     initialThreads: [],
     currentUser,
     onFetchThreads,
+    // Le hook appelle onFetchReplies(forumId, postId) — il fournit DÉJÀ le forumId
+    // (= channel.id). On passe donc le handler tel quel. Un wrapper (postId)=>... à un
+    // seul paramètre écraserait le postId avec le forumId (bug : fetch /posts/{forumId}).
     onFetchReplies,
     onCreatePost,
     onEditPost,
@@ -198,6 +208,8 @@ const ForumView: React.FC<ForumViewProps> = ({
   /** Post en cours d'edition inline (null = aucun) + brouillon courant. */
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  // Titre en cours d'édition (sujet racine uniquement ; vide pour une réponse).
+  const [editTitleDraft, setEditTitleDraft] = useState('');
   /** Post auquel on redige une reponse (null = aucun) + brouillon courant. */
   const [replyingTo, setReplyingTo] = useState<number | null>(null);
   const [replyDraft, setReplyDraft] = useState('');
@@ -251,6 +263,15 @@ const ForumView: React.FC<ForumViewProps> = ({
     reload();
   }
 
+  /** Infinite scroll : charge des sujets plus anciens quand on approche du bas de la liste. */
+  function handleBodyScroll() {
+    const body = bodyRef.current;
+    if (!body || !hasMore || loadingMore) return;
+    if (body.scrollHeight - body.scrollTop - body.clientHeight < 120) {
+      loadMore();
+    }
+  }
+
   /** L'utilisateur connecte est-il l'auteur du post ? (debloque modifier/supprimer). */
   function isOwn(post: ForumPost): boolean {
     return post.author.id === currentUser.id;
@@ -292,23 +313,31 @@ const ForumView: React.FC<ForumViewProps> = ({
     setConfirmDeleteId(null);
     setEditingId(post.id);
     setEditDraft(post.content);
+    setEditTitleDraft(post.title ?? '');
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditDraft('');
+    setEditTitleDraft('');
   }
 
-  /** Valide la modification inline (optimiste via le hook) ; rouvre l'editeur si echec. */
-  async function submitEdit(post: ForumPost) {
+  /**
+   * Valide la modification inline (optimiste via le hook) ; rouvre l'editeur si echec.
+   * `isThread` = sujet racine → le titre est editable et OBLIGATOIRE (comme le contenu).
+   */
+  async function submitEdit(post: ForumPost, isThread: boolean) {
     const content = editDraft.trim();
+    const title = editTitleDraft.trim();
+    // Rien de vide (le bouton est deja desactive, filet de securite).
+    if (!content || (isThread && !title)) return;
     cancelEdit();
-    if (!content || content === post.content) return;
-    const ok = await editPost(post.id, content);
+    const ok = await editPost(post.id, content, isThread ? title : undefined);
     if (!ok) {
       // Échec : on rouvre l'editeur avec la saisie pour pouvoir reessayer.
       setEditingId(post.id);
       setEditDraft(content);
+      if (isThread) setEditTitleDraft(title);
     }
   }
 
@@ -320,7 +349,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   /** Ouvre le formulaire de nouveau sujet (remplace la liste). */
   function startCompose() {
     if (composing) {
-      return
+      return;
     }
     setComposing(true);
     setNewTitle('');
@@ -423,7 +452,9 @@ const ForumView: React.FC<ForumViewProps> = ({
           <span>{getInitials(post.author)}</span>
         </span>
         <span role="author">{getAuthorName(post.author)}</span>
-        <span role="separator" aria-hidden="true">•</span>
+        <span role="separator" aria-hidden="true">
+          •
+        </span>
         <span role="time">{formatRelativeTime(post.createdAt)}</span>
         {post.isPinned && <span role="pin-indicator">{t.pinned}</span>}
       </div>
@@ -431,16 +462,31 @@ const ForumView: React.FC<ForumViewProps> = ({
   }
 
   /** Editeur Markdown inline (modification d'un post). */
-  function renderEditor(post: ForumPost) {
+  function renderEditor(post: ForumPost, isThread: boolean) {
     return (
-      <MarkdownEditor
-        value={editDraft}
-        onChange={setEditDraft}
-        onSubmit={() => submitEdit(post)}
-        onCancel={cancelEdit}
-        submitLabel={t.editSave}
-        placeholder={t.editPlaceholder}
-      />
+      <>
+        {/* Titre editable uniquement pour un sujet racine ; obligatoire (disableSubmit). */}
+        {isThread && (
+          <input
+            type="text"
+            role="edit-title"
+            value={editTitleDraft}
+            onChange={(event) => setEditTitleDraft(event.target.value)}
+            placeholder={t.newThreadTitle}
+            aria-label={t.newThreadTitle}
+            maxLength={128}
+          />
+        )}
+        <MarkdownEditor
+          value={editDraft}
+          onChange={setEditDraft}
+          onSubmit={() => submitEdit(post, isThread)}
+          onCancel={cancelEdit}
+          submitLabel={t.editSave}
+          placeholder={t.editPlaceholder}
+          disableSubmit={isThread && editTitleDraft.trim() === ''}
+        />
+      </>
     );
   }
 
@@ -458,7 +504,9 @@ const ForumView: React.FC<ForumViewProps> = ({
         aria-label={open ? t.collapseReplies : t.expandReplies}
       >
         <Chevron open={open} />
-        <span>{count} {count > 1 ? t.replyMany : t.replyOne}</span>
+        <span>
+          {count} {count > 1 ? t.replyMany : t.replyOne}
+        </span>
       </button>
     );
   }
@@ -482,12 +530,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (!isOwn(post)) return null;
     return (
       <>
-        <button
-          type="button"
-          role="edit"
-          aria-label={t.edit}
-          onClick={() => startEdit(post)}
-        >
+        <button type="button" role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
           <Pencil width={14} height={14} />
         </button>
         <button
@@ -513,7 +556,8 @@ const ForumView: React.FC<ForumViewProps> = ({
       <div role="comment-body">
         {renderByline(post)}
         {editing ? (
-          renderEditor(post)
+          // Une réponse n'a pas de titre → isThread=false.
+          renderEditor(post, false)
         ) : (
           // Une réponse prend aussi en charge le Markdown.
           <Markdown source={post.content} />
@@ -651,7 +695,8 @@ const ForumView: React.FC<ForumViewProps> = ({
           {renderByline(post)}
           {post.title && <h2 role="thread-title">{post.title}</h2>}
           {editing ? (
-            renderEditor(post)
+            // Sujet racine → titre editable (isThread=true).
+            renderEditor(post, true)
           ) : (
             // Un post parent (sujet) prend en charge le Markdown.
             <Markdown source={post.content} />
@@ -690,7 +735,9 @@ const ForumView: React.FC<ForumViewProps> = ({
     <div className={styles['forum-view']}>
       <header>
         <p>
-          <span><ChannelTypeIcon type={channel.type} /></span>
+          <span>
+            <ChannelTypeIcon type={channel.type} />
+          </span>
           {channel.name}
         </p>
         <span />
@@ -718,13 +765,17 @@ const ForumView: React.FC<ForumViewProps> = ({
               {t.sortRecent}
             </button>
           </div>
-          <button type="button" role={`new-post${composing ? '-composing' : ''}`} onClick={startCompose}>
+          <button
+            type="button"
+            role={`new-post${composing ? '-composing' : ''}`}
+            onClick={startCompose}
+          >
             +<span>{t.newThread}</span>
           </button>
         </div>
       )}
 
-      <div role="body" ref={bodyRef}>
+      <div role="body" ref={bodyRef} onScroll={handleBodyScroll}>
         {/* Formulaire « Nouveau sujet » : inline en tete de la liste (pas une autre page). */}
         {composing && (
           <div role="new-thread">
@@ -769,7 +820,14 @@ const ForumView: React.FC<ForumViewProps> = ({
             <p>{t.empty}</p>
           )
         ) : (
-          <ul>{visibleThreads.map(renderThreadCard)}</ul>
+          <>
+            <ul>{visibleThreads.map(renderThreadCard)}</ul>
+            {loadingMore && (
+              <div role="status" aria-live="polite">
+                <Spinner size={20} />
+              </div>
+            )}
+          </>
         )}
       </div>
 

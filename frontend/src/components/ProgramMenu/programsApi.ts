@@ -1,4 +1,6 @@
 import { type Program } from './ProgramMenu';
+import { type Role } from '../../types/domain.ts';
+import { type ProgramRoleName } from '../../helpers/roles.ts';
 
 /**
  * Contrat « API + temps réel » de ProgramMenu (miroir de CourseMenu).
@@ -32,6 +34,20 @@ export interface IncomingProgramHandlers {
   onProgramUpsert: (program: Program) => void;
   /** Un programme a été supprimé, ou l'utilisateur l'a quitté / en a été retiré. */
   onProgramRemove: (programId: number) => void;
+  /**
+   * Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) : ses menus
+   * d'actions administratives se re-gatent. `roleName` = rôle le plus élevé restant
+   * ('Administrateur' / 'Enseignant') ou null (plus aucun rôle dans ce programme).
+   */
+  onProgramRoleChange?: (
+    programId: number,
+    roleName: ProgramRoleName | null
+  ) => void;
+  /**
+   * Les rôles GLOBAUX de l'utilisateur (User_Role) ont changé : il re-dérive ses droits
+   * plateforme (admin général / gardien). `roles` = liste globale à jour.
+   */
+  onGlobalRolesChange?: (roles: Role[]) => void;
 }
 
 /**

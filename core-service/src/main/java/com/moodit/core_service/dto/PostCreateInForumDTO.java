@@ -15,4 +15,11 @@ public class PostCreateInForumDTO{
     private String title;
     private Integer forumId;
     private Integer parentPostId;
+    /**
+     * Nonce d'idempotence renvoyé TEL QUEL dans l'évènement WebSocket `*:created`, pour que
+     * le front déduplique l'écho de son propre message/post optimiste. Le front envoie
+     * `clientPostId` (forum 'Thread') ou `clientMessageId` (canal 'Discussion') selon le cas.
+     */
+    private String clientPostId;
+    private String clientMessageId;
 }

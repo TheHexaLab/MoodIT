@@ -18,6 +18,7 @@ import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.ItemDto;
+import com.moodit.core_service.dto.UserDTO;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import java.io.IOException;
@@ -195,6 +196,45 @@ class RealtimeEventPublisherTest {
     assertThat(event.get("courseId").asLong()).isEqualTo(8);
     assertThat(event.get("userId").asLong()).isEqualTo(4);
     assertThat(event.get("reason").asText()).isEqualTo("Service MCP indisponible");
+  }
+
+  @Test
+  void adminRolesChanged_diffuseLaListeAJourALaRoomAdminUniquement() throws IOException {
+    WebSocketSession inRoom = joinedSession("adminRoles", 0);
+    WebSocketSession autreRoom = joinedSession("user", 3);
+
+    UserDTO admin =
+        UserDTO.builder()
+            .id(2)
+            .username("rosie1234")
+            .firstName("Rosie")
+            .lastName("HG")
+            .email("rosie@test.ca")
+            .avatarColor("#0a5cc0")
+            .roles(List.of(1)) // ids des rôles globaux (mappés en role_ids côté front)
+            // createdAt NON-NULL exprès : la projection doit le RETIRER, sinon l'ObjectMapper sans
+            // module JSR310 échouerait sur LocalDateTime (ce que la validation live a révélé).
+            .createdAt(java.time.LocalDateTime.of(2026, 1, 1, 12, 0))
+            .build();
+
+    publisher.adminRolesChanged(List.of(admin));
+
+    JsonNode event = capturePayload(inRoom);
+    assertThat(event.get("type").asText()).isEqualTo("adminRoles:changed");
+    JsonNode users = event.get("users");
+    assertThat(users.isArray()).isTrue();
+    assertThat(users.size()).isEqualTo(1);
+    JsonNode u = users.get(0);
+    assertThat(u.get("id").asLong()).isEqualTo(2);
+    assertThat(u.get("firstName").asText()).isEqualTo("Rosie");
+    assertThat(u.get("email").asText()).isEqualTo("rosie@test.ca");
+    assertThat(u.get("avatarColor").asText()).isEqualTo("#0a5cc0");
+    assertThat(u.get("roles").get(0).asInt()).isEqualTo(1);
+    // La projection RETIRE createdAt/settings (sinon LocalDateTime casserait la sérialisation).
+    assertThat(u.has("createdAt")).isFalse();
+    assertThat(u.has("settings")).isFalse();
+    // Room DÉDIÉE : les autres rooms (ex. user:3) ne reçoivent rien.
+    verify(autreRoom, never()).sendMessage(org.mockito.ArgumentMatchers.any());
   }
 
   @Test

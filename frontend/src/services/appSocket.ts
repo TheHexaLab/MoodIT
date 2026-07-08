@@ -1,4 +1,5 @@
-import { type ChannelMessage } from '../types/domain.ts';
+import { type AuthorUpdate, type ChannelMessage, type Role } from '../types/domain.ts';
+import { type ProgramRoleName } from '../helpers/roles.ts';
 import {
   type ChannelSocket,
   type IncomingMessageHandlers,
@@ -57,7 +58,7 @@ type ServerEvent =
   | { type: 'message:deleted'; channelId: number; messageId: number }
   // Forum
   | { type: 'post:created'; forumId: number; post: ForumPost; parentId: number | null }
-  | { type: 'post:edited'; forumId: number; postId: number; content: string }
+  | { type: 'post:edited'; forumId: number; postId: number; content: string; title?: string | null }
   | { type: 'post:deleted'; forumId: number; postId: number }
   | { type: 'post:voted'; forumId: number; postId: number; userId: number; value: VoteValue }
   // Cours / sections (scope = programme)
@@ -79,13 +80,86 @@ type ServerEvent =
   | { type: 'program:created'; userId: number; program: Program }
   | { type: 'program:updated'; userId: number; program: Program }
   | { type: 'program:deleted'; userId: number; programId: number }
+  // Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) → ses menus
+  // d'actions administratives se re-gatent. `roleName` = rôle le plus élevé restant, ou null.
+  | {
+      type: 'program:roleChanged';
+      userId: number;
+      programId: number;
+      roleName: ProgramRoleName | null;
+    }
+  // Les rôles GLOBAUX de l'utilisateur (User_Role) ont changé → il re-dérive ses droits
+  // plateforme (admin général / Gardien). `roles` = liste globale à jour.
+  | { type: 'user:globalRolesChanged'; userId: number; roles: Role[] }
   | { type: 'subscription:added'; userId: number; program: Program }
   | { type: 'subscription:removed'; userId: number; programId: number }
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
   | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
   | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string }
   | { type: 'mcp:analysis-progress'; courseId: number; userId: number; step: string }
+  // Profil utilisateur mis à jour (scope GLOBAL) : l'auteur des messages/posts change
+  // partout. Appliqué à TOUS les canaux et forums abonnés (pas de room précise).
+  | { type: 'user:updated'; user: AuthorUpdate }
+  // Catalogue d'un établissement mis à jour (scope GLOBAL) : LISTE à jour de ses programmes.
+  // Le popup « Ajouter un programme » (s'il est ouvert) met à jour l'établissement par id
+  // (nombre, codes, et liste détaillée si elle est affichée).
+  | { type: 'establishment:updated'; establishmentId: number; programs: Program[] }
+  // Établissement créé / modifié (nom, domaine) — scope GLOBAL.
+  | {
+      type: 'establishment:upserted';
+      id: number;
+      name: string;
+      domainEmail: string;
+      programCount: number;
+      programCodes: string[];
+    }
+  // Établissement supprimé — scope GLOBAL.
+  | { type: 'establishment:deleted'; establishmentId: number }
+  // Rôles ADMINISTRATEURS (User_Role) modifiés — room dédiée `adminRoles:0`. Porte la LISTE À JOUR
+  // des utilisateurs ayant un rôle global ; le popup « Gérer les administrateurs » remplace sa liste.
+  | { type: 'adminRoles:changed'; users: GlobalRoleUser[] }
+  // Correction de code (scope = user) : verdicts + score recalculé d'une tentative dont les
+  // questions Code viennent d'être corrigées de façon asynchrone.
   | { type: 'quiz:code-graded'; userId: number; attemptId: number; questions: QuestionResult[] };
+
+/** Évènement temps réel sur le catalogue d'établissements (scope GLOBAL). */
+export type EstablishmentEvent =
+  | { kind: 'catalog'; establishmentId: number; programs: Program[] }
+  | {
+      kind: 'upserted';
+      id: number;
+      name: string;
+      domainEmail: string;
+      programCount: number;
+      programCodes: string[];
+    }
+  | { kind: 'deleted'; establishmentId: number };
+
+/** Facade « établissements » : s'abonner aux évènements GLOBAUX du catalogue. */
+export interface EstablishmentsSocket {
+  /** S'abonne ; renvoie la fonction de désabonnement. */
+  subscribe: (handler: (event: EstablishmentEvent) => void) => () => void;
+}
+
+/**
+ * Utilisateur avec ses rôles globaux, tel que sérialisé par le backend (UserDTO). Le champ `roles`
+ * = ids des rôles globaux ; le consommateur le mappe vers `role_ids` (cf. RoleEditorPopup).
+ */
+export interface GlobalRoleUser {
+  id: number;
+  username: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  avatarColor: string;
+  roles: number[];
+}
+
+/** Facade « administrateurs » : liste À JOUR des porteurs d'un rôle global (popup admins). */
+export interface AdminRolesSocket {
+  /** S'abonne ; chaque évènement porte la liste complète. Renvoie la fonction de désabonnement. */
+  subscribe: (handler: (users: GlobalRoleUser[]) => void) => () => void;
+}
 
 export interface AppSocket {
   channels: ChannelSocket;
@@ -93,6 +167,8 @@ export interface AppSocket {
   courses: CourseChannelsSocket;
   programs: ProgramsSocket;
   mcp: McpSocket;
+  establishments: EstablishmentsSocket;
+  adminRoles: AdminRolesSocket;
   quizGrading: QuizGradingSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
@@ -135,6 +211,9 @@ export function createAppSocket(
   const channelSubs = new Map<number, IncomingMessageHandlers>();
   const forumSubs = new Map<number, IncomingForumHandlers>();
   const courseSubs = new Map<number, IncomingCourseHandlers>();
+  /** Abonnés aux évènements GLOBAUX du catalogue d'établissements (popup ouvert). */
+  const establishmentSubs = new Set<(event: EstablishmentEvent) => void>();
+  const adminRoleSubs = new Set<(users: GlobalRoleUser[]) => void>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
   // Correction de code (scope user, room "user:<id>") : Map SÉPARÉE de programSubs pour que
@@ -165,6 +244,9 @@ export function createAppSocket(
       for (const programId of courseSubs.keys()) send({ type: 'join', scope: 'program', id: programId });
       for (const userId of programSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
       for (const courseId of mcpSubs.keys()) send({ type: 'join', scope: 'mcp', id: courseId });
+      // Room UNIQUE du catalogue d'établissements (id 0), si le popup est ouvert.
+      if (establishmentSubs.size > 0) send({ type: 'join', scope: 'establishment', id: 0 });
+      if (adminRoleSubs.size > 0) send({ type: 'join', scope: 'adminRoles', id: 0 });
       for (const userId of quizGradeSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
@@ -199,7 +281,7 @@ export function createAppSocket(
           forumSubs.get(data.forumId)?.onPost(data.post, data.parentId);
           break;
         case 'post:edited':
-          forumSubs.get(data.forumId)?.onEdit(data.postId, data.content);
+          forumSubs.get(data.forumId)?.onEdit(data.postId, data.content, data.title);
           break;
         case 'post:deleted':
           forumSubs.get(data.forumId)?.onDelete(data.postId);
@@ -238,6 +320,12 @@ export function createAppSocket(
         case 'subscription:removed':
           programSubs.get(data.userId)?.onProgramRemove(data.programId);
           break;
+        case 'program:roleChanged':
+          programSubs.get(data.userId)?.onProgramRoleChange?.(data.programId, data.roleName);
+          break;
+        case 'user:globalRolesChanged':
+          programSubs.get(data.userId)?.onGlobalRolesChange?.(data.roles);
+          break;
         case 'mcp:analysis-created':
           mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);
           break;
@@ -246,6 +334,35 @@ export function createAppSocket(
           break;
         case 'mcp:analysis-progress':
           mcpSubs.get(data.courseId)?.onAnalysisProgress?.(data.userId, data.step);
+          break;
+        case 'user:updated':
+          // Évènement GLOBAL : on ne connaît pas les rooms où l'auteur apparaît → on
+          // notifie TOUS les canaux et forums abonnés, qui mettent à jour l'auteur par id.
+          for (const handlers of channelSubs.values()) handlers.onUserUpdate?.(data.user);
+          for (const handlers of forumSubs.values()) handlers.onUserUpdate?.(data.user);
+          break;
+        case 'establishment:updated':
+          // Évènement GLOBAL : on notifie les abonnés (popup « Ajouter un programme » ouvert).
+          for (const handler of establishmentSubs)
+            handler({ kind: 'catalog', establishmentId: data.establishmentId, programs: data.programs });
+          break;
+        case 'establishment:upserted':
+          for (const handler of establishmentSubs)
+            handler({
+              kind: 'upserted',
+              id: data.id,
+              name: data.name,
+              domainEmail: data.domainEmail,
+              programCount: data.programCount,
+              programCodes: data.programCodes,
+            });
+          break;
+        case 'establishment:deleted':
+          for (const handler of establishmentSubs)
+            handler({ kind: 'deleted', establishmentId: data.establishmentId });
+          break;
+        case 'adminRoles:changed':
+          for (const handler of adminRoleSubs) handler(data.users);
           break;
         case 'quiz:code-graded':
           quizGradeSubs.get(data.userId)?.onCodeGraded(data.attemptId, data.questions);
@@ -317,6 +434,31 @@ export function createAppSocket(
         return () => {
           mcpSubs.delete(courseId);
           send({ type: 'leave', scope: 'mcp', id: courseId });
+        };
+      },
+    },
+    establishments: {
+      // Room UNIQUE « establishment » (id 0) : on la rejoint au 1er abonné, on la quitte au
+      // dernier (évite de diffuser à toutes les sessions inutilement).
+      subscribe(handler) {
+        const wasEmpty = establishmentSubs.size === 0;
+        establishmentSubs.add(handler);
+        if (wasEmpty) send({ type: 'join', scope: 'establishment', id: 0 });
+        return () => {
+          establishmentSubs.delete(handler);
+          if (establishmentSubs.size === 0) send({ type: 'leave', scope: 'establishment', id: 0 });
+        };
+      },
+    },
+    adminRoles: {
+      // Room UNIQUE `adminRoles:0` : rejointe au 1er abonné (popup admins ouvert), quittée au dernier.
+      subscribe(handler) {
+        const wasEmpty = adminRoleSubs.size === 0;
+        adminRoleSubs.add(handler);
+        if (wasEmpty) send({ type: 'join', scope: 'adminRoles', id: 0 });
+        return () => {
+          adminRoleSubs.delete(handler);
+          if (adminRoleSubs.size === 0) send({ type: 'leave', scope: 'adminRoles', id: 0 });
         };
       },
     },

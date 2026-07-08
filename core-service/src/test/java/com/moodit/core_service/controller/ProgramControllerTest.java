@@ -197,9 +197,10 @@ class ProgramControllerTest {
                     .programIds(List.of(1))
                     .build();
 
-            when(programService.addCourseToPrograms(any())).thenReturn(courseDTO);
+            when(programService.addCourseToPrograms(any(), any())).thenReturn(courseDTO);
 
             mockMvc.perform(post("/api/programs/courses")
+                            .header("X-User-Email", "admin@test")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
@@ -212,9 +213,10 @@ class ProgramControllerTest {
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder()
                     .title("Programmation").code("PROG101").programIds(List.of(99)).build();
 
-            when(programService.addCourseToPrograms(any())).thenThrow(new ProgramNotFoundException());
+            when(programService.addCourseToPrograms(any(), any())).thenThrow(new ProgramNotFoundException());
 
             mockMvc.perform(post("/api/programs/courses")
+                            .header("X-User-Email", "admin@test")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isNotFound());

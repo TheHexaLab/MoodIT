@@ -12,9 +12,13 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "content", "createdAt", "isPinned", "postParentId", "userId", "author", "voteTotalValue", "childrenCount", "children"})
+@JsonPropertyOrder({"id", "title", "content", "createdAt", "isPinned", "postParentId", "userId", "author", "voteTotalValue", "userVoteValue", "childrenCount", "children"})
 public class PostVoteUserDTO extends PostDTO{
     private Integer voteTotalValue;
+    /** Vote de l'UTILISATEUR COURANT sur ce post : 1, -1, ou null s'il n'a pas voté.
+     *  Distinct de voteTotalValue (somme de TOUS les votes) : sert au front à surligner
+     *  le bouton up/down que l'utilisateur a lui-même activé. */
+    private Integer userVoteValue;
     private Integer userId;
     /** Id du post parent (réponse) ; null pour un message/sujet racine. */
     private Integer postParentId;

@@ -19,5 +19,11 @@ public class ProgramDTO {
     private String code;
     private String cohort;
     private String color;
+    /**
+     * Rôle le plus élevé de l'utilisateur COURANT dans ce programme (User_Program_Role) :
+     * "Administrateur", "Enseignant", ou null. Renseigné par fetchPrograms pour piloter les
+     * permissions côté front ; null dans les autres contextes.
+     */
+    private String roleName;
 }
 

@@ -27,9 +27,12 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.Set;
 
 /**
- * Feedback MCP d'un cours (analyse LLM). Réservé aux administrateurs (403 sinon).
+ * Feedback MCP d'un cours (analyse LLM). Accès réservé (403 sinon) aux rôles GLOBAUX
+ * Administrateur/Gardien (User_Role) OU aux rôles PROGRAMME Administrateur/Enseignant
+ * (User_Program_Role) d'un programme contenant le cours — cf. {@link #requireCourseAccess}.
  * Déclenchement ASYNCHRONE : {@link #requestAnalysis} crée une ligne `pending` et rend la
  * main (le contrôleur répond 202) ; le job ({@link McpAnalysisRunner}) produit le résultat
  * et le POUSSE par WebSocket (via core-service). Le verrou « une analyse en cours par
@@ -48,7 +51,7 @@ public class McpService {
     /** Historique (résumés) des analyses TERMINÉES d'un cours, récent → ancien. */
     @Transactional(readOnly = true)
     public List<McpResponseSummaryDto> listAnalyses(Integer courseId, String userEmail) {
-        requireAdmin(userEmail);
+        requireCourseAccess(courseId, userEmail);
         return mcpResponseRepository
                 .findByCourse_IdAndStatusOrderByCreatedAtDesc(courseId, McpStatus.DONE)
                 .stream()
@@ -59,9 +62,10 @@ public class McpService {
     /** Détail complet d'une analyse (avec content + author). */
     @Transactional(readOnly = true)
     public McpResponseDto getAnalysis(Integer id, String userEmail) {
-        requireAdmin(userEmail);
         McpResponse response = mcpResponseRepository.findById(id)
                 .orElseThrow(AnalysisNotFoundException::new);
+        // Autorisation scopée au cours de CETTE analyse (403 avant de divulguer le contenu).
+        requireCourseAccess(response.getCourse().getId(), userEmail);
         User author = response.getUser();
         return new McpResponseDto(
                 response.getId(),
@@ -76,7 +80,7 @@ public class McpService {
     /** L'utilisateur courant a-t-il une analyse EN COURS sur ce cours ? (réhydratation) */
     @Transactional(readOnly = true)
     public boolean isPending(Integer courseId, String userEmail) {
-        User user = requireAdmin(userEmail);
+        User user = requireCourseAccess(courseId, userEmail);
         return mcpResponseRepository.existsByCourse_IdAndUser_IdAndStatus(
                 courseId, user.getId(), McpStatus.PENDING);
     }
@@ -88,7 +92,7 @@ public class McpService {
      */
     @Transactional
     public void requestAnalysis(Integer courseId, String userEmail) {
-        User user = requireAdmin(userEmail);
+        User user = requireCourseAccess(courseId, userEmail);
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
 
@@ -133,12 +137,24 @@ public class McpService {
     }
 
     /** Exige le rôle « Administrateur » ; renvoie l'utilisateur résolu. 403 sinon. */
-    private User requireAdmin(String userEmail) {
+    /** Rôles GLOBAUX (User_Role) autorisés à faire des demandes MCP sur N'IMPORTE quel cours. */
+    private static final Set<String> GLOBAL_MCP_ROLES = Set.of("Administrateur", "Gardien");
+
+    /**
+     * Autorise l'accès MCP à un COURS donné, sinon lève un 403. Deux voies :
+     *   1. rôle GLOBAL (User_Role) « Administrateur » ou « Gardien » → accès à tous les cours ;
+     *   2. rôle PROGRAMME (User_Program_Role) « Administrateur » ou « Enseignant » dans un
+     *      programme CONTENANT ce cours (scope indispensable).
+     */
+    private User requireCourseAccess(Integer courseId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
-        boolean admin = user.getRoles() != null && user.getRoles().stream()
-                .anyMatch(r -> "Administrateur".equals(r.getName()));
-        if (!admin) throw new ForbiddenException();
+        boolean allowed =
+                (user.getRoles() != null
+                        && user.getRoles().stream()
+                                .anyMatch(r -> GLOBAL_MCP_ROLES.contains(r.getName())))
+                || userRepository.hasProgramTeachingRoleForCourse(user.getId(), courseId);
+        if (!allowed) throw new ForbiddenException();
         return user;
     }
 
