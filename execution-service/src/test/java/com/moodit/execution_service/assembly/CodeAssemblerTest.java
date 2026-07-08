@@ -81,7 +81,129 @@ class CodeAssemblerTest {
     void sql_exposes_student_query_as_solution_view() {
         var a = assembler.assemble("SQL", "SELECT nom FROM t", "SELECT count(*) FROM solution = 1;", "N");
         assertThat(a.pistonLanguage()).isEqualTo("sqlite3");
-        assertThat(onlyFileContent(a)).contains("CREATE VIEW solution AS");
+        // Requête unique → solution1, et l'alias « solution » pour la compat mono-requête.
+        assertThat(onlyFileContent(a))
+                .contains("CREATE VIEW solution1 AS")
+                .contains("CREATE VIEW solution AS SELECT * FROM solution1;");
+    }
+
+    @Test
+    void sql_exposes_each_student_query_as_numbered_view() {
+        var a = assembler.assemble("SQL", "SELECT 1;\nSELECT 2", "SELECT 1;", "N");
+        String content = onlyFileContent(a);
+        assertThat(content)
+                .contains("CREATE VIEW solution1 AS")
+                .contains("CREATE VIEW solution2 AS");
+    }
+
+    @Test
+    void sql_wraps_every_statement_so_a_semicolon_cannot_inject() {
+        // Tentative d'injection : la 2e instruction ne doit JAMAIS être libre — elle est enfermée
+        // dans un CREATE VIEW (où « DROP TABLE » est une erreur de syntaxe, jamais exécutée).
+        var a = assembler.assemble("SQL", "SELECT 1;\nDROP TABLE utilisateurs", "SELECT 1;", "N");
+        String content = onlyFileContent(a);
+        assertThat(content).contains("CREATE VIEW solution2 AS\nDROP TABLE utilisateurs");
+        // Aucune instruction DROP au premier niveau (toujours précédée d'un « AS »).
+        assertThat(content).doesNotContain(";\nDROP TABLE");
+    }
+
+    @Test
+    void sql_semicolon_inside_a_string_literal_is_not_a_separator() {
+        var a = assembler.assemble("SQL", "SELECT ';' AS x", "SELECT 1;", "N");
+        String content = onlyFileContent(a);
+        assertThat(content).contains("CREATE VIEW solution1 AS");
+        assertThat(content).doesNotContain("CREATE VIEW solution2 AS"); // une seule instruction
+    }
+
+    @Test
+    void splitSqlStatements_ignores_comments_and_blank_segments() {
+        // Un commentaire de fin seul après le ; ne compte pas comme une instruction.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1; -- fini\n")).containsExactly("SELECT 1");
+        assertThat(CodeAssembler.splitSqlStatements("  ;;  ")).isEmpty();
+    }
+
+    @Test
+    void sql_readonly_fences_the_verdict_with_nonce_sentinels() {
+        // Lecture seule : la sortie du verdict est encadrée par les sentinelles au nonce.
+        String ro = onlyFileContent(assembler.assemble("SQL", "SELECT 1", "SELECT 1;", "N"));
+        assertThat(ro).contains("SELECT 'N_VERDICT_START'").contains("SELECT 'N_VERDICT_END'");
+    }
+
+    @Test
+    void sql_marker_is_detected() {
+        assertThat(CodeAssembler.sqlHasStudentMarker("CREATE TABLE t(n);\n-- @student\nSELECT 1;")).isTrue();
+        assertThat(CodeAssembler.sqlHasStudentMarker("SELECT count(*) FROM solution1;")).isFalse();
+    }
+
+    @Test
+    void sql_marker_in_student_code_is_ignored_in_readonly() {
+        // SÉCURITÉ : « -- @student » dans le CODE de l'étudiant reste un simple commentaire — le mode
+        // (et le découpage) ne dépend QUE du harnais. Ici pas de marqueur au harnais → lecture seule.
+        var a = assembler.assemble("SQL", "SELECT nom FROM t -- @student", "SELECT 1;", "N");
+        assertThat(onlyFileContent(a)).contains("CREATE VIEW solution1 AS");
+    }
+
+    @Test
+    void sql_phase1_sandboxes_student_between_setup_and_fenced_dump() {
+        String harness = "CREATE TABLE t (n INT);\nINSERT INTO t VALUES (1);\n"
+                + "-- @student\n"
+                + "SELECT (SELECT count(*) FROM t) = 0;";
+        String content = onlyFileContent(assembler.assembleSqlPhase1("DELETE FROM t", harness, "N"));
+        // Setup AVANT le code étudiant ; le verdict du prof (après marqueur) n'apparaît PAS en phase 1.
+        assertThat(content.indexOf("INSERT INTO t")).isLessThan(content.indexOf("DELETE FROM t"));
+        assertThat(content).doesNotContain("SELECT (SELECT count(*)");
+        // Le dump est encadré et vient APRÈS le code étudiant.
+        assertThat(content).contains(".dump");
+        assertThat(content.indexOf("DELETE FROM t")).isLessThan(content.indexOf("SELECT 'N_DUMP_START'"));
+    }
+
+    @Test
+    void sql_phase1_does_not_restrict_student_code() {
+        // Isolation : en phase 1 (bac à sable jetable) le DDL de l'étudiant est autorisé, pas filtré.
+        String harness = "CREATE TABLE t (n INT);\n-- @student\nSELECT 1;";
+        String content = onlyFileContent(assembler.assembleSqlPhase1("DROP TABLE t;\nCREATE TABLE t(n)", harness, "N"));
+        assertThat(content).contains("DROP TABLE t");
+    }
+
+    @Test
+    void sql_phase2_loads_data_then_fences_the_verdict() {
+        String harness = "CREATE TABLE t (n INT);\n-- @student\nSELECT (SELECT count(*) FROM t) = 0;";
+        String data = "CREATE TABLE t(n INT);\n;\nINSERT INTO t VALUES(1);\n;\n";
+        String content = onlyFileContent(assembler.assembleSqlPhase2(data, harness, "N"));
+        // Données d'abord, puis verdict encadré ; le code étudiant n'apparaît nulle part.
+        assertThat(content.indexOf("INSERT INTO t VALUES(1)"))
+                .isLessThan(content.indexOf("SELECT 'N_VERDICT_START'"));
+        assertThat(content).contains("SELECT (SELECT count(*) FROM t) = 0");
+    }
+
+    @Test
+    void sqlWorkingTables_lists_setup_tables_only() {
+        String harness = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n"
+                + "CREATE TABLE roles (id INT);\n-- @student\n"
+                + "CREATE TEMP TABLE attendu (n INT);\nSELECT 1;"; // après le marqueur → PAS listée
+        assertThat(CodeAssembler.sqlWorkingTables(harness)).containsExactlyInAnyOrder("utilisateurs", "roles");
+    }
+
+    @Test
+    void filterDumpToData_keeps_only_whitelisted_tables_and_inserts() {
+        // Dump réaliste du paquet Piston sqlite3 (contient la table de plomberie « argv »).
+        String dump = "PRAGMA foreign_keys=OFF;\n"
+                + "BEGIN TRANSACTION;\n"
+                + "CREATE TABLE argv (arg text);\n"
+                + "CREATE TABLE t(n INT);\n"
+                + "INSERT INTO t VALUES(1);\n"
+                + "CREATE TABLE triche(x INT);\n"       // table fabriquée par l'étudiant, hors liste
+                + "INSERT INTO triche VALUES(9);\n"
+                + "CREATE VIEW v AS SELECT * FROM t;\n"
+                + "CREATE TRIGGER trg AFTER INSERT ON t BEGIN SELECT 1; END;\n"
+                + "COMMIT;\n";
+        String data = CodeAssembler.filterDumpToData(dump, java.util.Set.of("t"));
+        assertThat(data).contains("CREATE TABLE t(n INT)").contains("INSERT INTO t VALUES(1)");
+        // Objets exécutables + transaction/PRAGMA : jetés.
+        assertThat(data).doesNotContain("CREATE VIEW").doesNotContain("CREATE TRIGGER")
+                .doesNotContain("PRAGMA").doesNotContain("BEGIN TRANSACTION").doesNotContain("COMMIT");
+        // Hors liste blanche : plomberie « argv » ET table fabriquée par l'étudiant « triche ».
+        assertThat(data).doesNotContain("argv").doesNotContain("triche");
     }
 
     @Test

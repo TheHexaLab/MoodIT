@@ -8,10 +8,15 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -24,7 +29,8 @@ import java.util.stream.Collectors;
  * Java, JSON, SQL, HTML, JSX, TSX. Les langages « données/vues » sont validés par un harnais JS via
  * des libs EMBARQUÉES injectées dans la soumission : HTML → parseur DOM ({@code htmlparser.js},
  * {@code doc}) ; JSX/TSX → Babel + React + ReactDOMServer ({@code react-runtime.js}, rendu en
- * {@code html}). SQL → vue {@code solution} + verdict sur la sortie (cf. ExecutionService).
+ * {@code html}). SQL → vues numérotées {@code solution1}, {@code solution2}… (une par requête) +
+ * verdict sur la sortie (cf. ExecutionService).
  */
 @Component
 public class CodeAssembler {
@@ -67,7 +73,7 @@ public class CodeAssembler {
             case "csharp" -> assembleCSharp(code, harness, nonce);
             case "java" -> assembleJava(code, harness, nonce);
             case "json" -> assembleJson(code, harness, nonce);
-            case "sql" -> assembleSql(code, harness);
+            case "sql" -> assembleSql(code, harness, nonce);
             case "html" -> assembleHtml(code, harness, nonce);
             case "jsx", "tsx" -> assembleJsx(code, harness, nonce);
             default -> throw new UnsupportedLanguageException(language);
@@ -100,6 +106,11 @@ public class CodeAssembler {
     }
 
     // ── Utilitaires ────────────────────────────────────────────────────────────
+
+    /** Vrai si le langage est SQL/SQLite (quelle que soit la casse ou l'alias). */
+    public static boolean isSql(String language) {
+        return "sql".equals(canon(language));
+    }
 
     /** Nom de langage normalisé (minuscules, alias unifiés) pour le switch d'assemblage. */
     private static String canon(String language) {
@@ -426,24 +437,233 @@ public class CodeAssembler {
 
     // ── SQL (SQLite) ─────────────────────────────────────────────────────────────
 
+    /** Marqueur, dans un harnais SQL, indiquant où insérer le code étudiant (mode « modification »). */
+    private static final Pattern SQL_STUDENT_MARKER = Pattern.compile("(?im)^[ \\t]*--[ \\t]*@student\\b.*$");
     /**
-     * SQL : la requête de l'étudiant est exposée comme la VUE {@code solution} (créée AVANT les
-     * tables — SQLite la résout paresseusement à la lecture). Le harnais qui suit crée le jeu de
-     * données de test puis TERMINE par un SELECT booléen (1 = réussi) comparant {@code solution} à
-     * l'attendu. Le verdict est lu sur la SORTIE (dernière ligne == 1), pas via l'exit code —
-     * SQLite ne met pas l'exit à non-zéro pour un booléen faux (cf. ExecutionService).
+     * Instruction d'un dump à CONSERVER en phase 2 : {@code CREATE TABLE …} / {@code INSERT INTO …},
+     * en capturant le NOM de la table ciblée (groupe 1) pour ne garder que les tables de travail.
      */
-    private Assembled assembleSql(String studentQuery, String harnessCode) {
-        String query = studentQuery.strip();
-        while (query.endsWith(";")) {
-            query = query.substring(0, query.length() - 1).stripTrailing();
+    private static final Pattern SQL_DUMP_TARGET = Pattern.compile(
+            "(?is)^\\s*(?:CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?|INSERT(?:\\s+OR\\s+\\w+)?\\s+INTO)"
+                    + "\\s+[\"'`\\[]?(\\w+)");
+    /** {@code CREATE TABLE <nom>} — pour lister les tables de travail déclarées par le prof (setup). */
+    private static final Pattern SQL_CREATE_TABLE = Pattern.compile(
+            "(?is)CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+[\"'`\\[]?(\\w+)");
+
+    /** Vrai si le harnais porte {@code -- @student} → mode modification (exécution ISOLÉE en 2 phases). */
+    public static boolean sqlHasStudentMarker(String harnessCode) {
+        return harnessCode != null && SQL_STUDENT_MARKER.matcher(harnessCode).find();
+    }
+
+    /**
+     * Noms (minuscules) des tables de TRAVAIL déclarées dans le SETUP du harnais (partie avant le
+     * marqueur). Sert de LISTE BLANCHE au filtrage du dump : la phase 2 ne recharge QUE ces tables.
+     * Découple le filtrage de la plomberie du paquet Piston (ex. table {@code argv}) : tout ce qui
+     * n'est pas déclaré par le prof — plomberie, {@code sqlite_*}, tables fabriquées par l'étudiant —
+     * est ignoré, quel que soit le paquet.
+     */
+    public static Set<String> sqlWorkingTables(String harnessCode) {
+        Set<String> tables = new HashSet<>();
+        if (harnessCode == null) {
+            return tables;
         }
-        String program = "CREATE VIEW solution AS\n"
-                + query
-                + ";\n\n"
-                + harnessCode
-                + "\n";
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program)));
+        Matcher marker = SQL_STUDENT_MARKER.matcher(harnessCode);
+        String setup = marker.find() ? harnessCode.substring(0, marker.start()) : harnessCode;
+        Matcher m = SQL_CREATE_TABLE.matcher(setup);
+        while (m.find()) {
+            tables.add(m.group(1).toLowerCase(Locale.ROOT));
+        }
+        return tables;
+    }
+
+    /** Sentinelles encadrant, dans la sortie, la zone du VERDICT (phase unique lecture seule, ou phase 2). */
+    public static String sqlVerdictStart(String nonce) { return nonce + "_VERDICT_START"; }
+    public static String sqlVerdictEnd(String nonce) { return nonce + "_VERDICT_END"; }
+    /** Sentinelles encadrant, dans la sortie de la phase 1, le DUMP de l'état de l'étudiant. */
+    public static String sqlDumpStart(String nonce) { return nonce + "_DUMP_START"; }
+    public static String sqlDumpEnd(String nonce) { return nonce + "_DUMP_END"; }
+
+    /**
+     * SQL — mode LECTURE SEULE (harnais SANS {@code -- @student}) : chaque requête de l'étudiant est
+     * exposée comme une VUE NUMÉROTÉE {@code solution1}, {@code solution2}, … ({@code solution} =
+     * {@code solution1} pour les questions mono-requête). Le SQL étudiant est ainsi confiné à un corps
+     * de {@code SELECT} — il ne peut ni écrire ni faire de DDL — donc l'exécution en un seul processus
+     * est sûre. Le verdict est encadré par les sentinelles au nonce (anti-forgerie de sortie).
+     *
+     * <p>Le mode MODIFICATION (avec marqueur) est traité HORS de cette méthode, en DEUX phases isolées
+     * (cf. {@link #assembleSqlPhase1}/{@link #assembleSqlPhase2}, pilotées par ExecutionService).
+     */
+    private Assembled assembleSql(String studentQuery, String harnessCode, String nonce) {
+        List<String> statements = splitSqlStatements(studentQuery);
+        StringBuilder program = new StringBuilder();
+        for (int i = 0; i < statements.size(); i++) {
+            // `\n;` sur sa propre ligne : un commentaire de fin de ligne (--) ne peut pas avaler le
+            // point-virgule terminateur (il s'arrête au saut de ligne qui précède le `;`).
+            program.append("CREATE VIEW solution").append(i + 1).append(" AS\n")
+                    .append(statements.get(i)).append("\n;\n");
+        }
+        if (!statements.isEmpty()) {
+            program.append("CREATE VIEW solution AS SELECT * FROM solution1;\n");
+        }
+        program.append('\n');
+        appendFenced(program, harnessCode, nonce);
+        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+    }
+
+    /**
+     * Phase 1 (mode modification) — BAC À SABLE JETABLE. Le harnais crée les tables de travail (partie
+     * AVANT le marqueur), puis le code étudiant s'exécute TEL QUEL (non filtré : il est isolé, sans
+     * données de référence ni verdict à atteindre — il ne peut donc rien casser d'utile). On DUMP
+     * enfin l'état final, encadré par les sentinelles au nonce : ExecutionService relit ce dump
+     * (entre sentinelles → la sortie de l'étudiant est ignorée, et il ne peut pas forger le nonce).
+     */
+    public Assembled assembleSqlPhase1(String studentCode, String harnessCode, String nonce) {
+        Matcher marker = SQL_STUDENT_MARKER.matcher(harnessCode == null ? "" : harnessCode);
+        String setup = marker.find() ? harnessCode.substring(0, marker.start()) : (harnessCode == null ? "" : harnessCode);
+        StringBuilder program = new StringBuilder(setup);
+        if (!setup.isEmpty() && setup.charAt(setup.length() - 1) != '\n') {
+            program.append('\n');
+        }
+        // `\n;` : termine la dernière instruction étudiant même sans `;` (un code malformé échoue
+        // proprement en phase 1 — sans risque, l'environnement est jetable).
+        program.append(studentCode == null ? "" : studentCode).append("\n;\n");
+        program.append("SELECT '").append(sqlDumpStart(nonce)).append("';\n");
+        program.append(".dump\n");
+        program.append("SELECT '").append(sqlDumpEnd(nonce)).append("';\n");
+        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+    }
+
+    /**
+     * Phase 2 (mode modification) — NOTEUR ISOLÉ. On recharge l'état final de l'étudiant réduit aux
+     * seules {@code CREATE TABLE}/{@code INSERT} (cf. {@link #filterDumpToData}) : AUCUN SQL étudiant
+     * n'est exécuté ici (ni vue, ni déclencheur), seulement des définitions de tables et des INSERT à
+     * littéraux échappés. Le prof crée ensuite sa référence (à mettre en {@code TEMP}) + son verdict,
+     * encadré par les sentinelles au nonce.
+     */
+    public Assembled assembleSqlPhase2(String studentData, String harnessCode, String nonce) {
+        Matcher marker = SQL_STUDENT_MARKER.matcher(harnessCode == null ? "" : harnessCode);
+        String verdict = marker.find() ? harnessCode.substring(marker.end()) : (harnessCode == null ? "" : harnessCode);
+        StringBuilder program = new StringBuilder(studentData == null ? "" : studentData);
+        if (program.length() > 0 && program.charAt(program.length() - 1) != '\n') {
+            program.append('\n');
+        }
+        appendFenced(program, verdict, nonce);
+        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+    }
+
+    /**
+     * Réduit un dump SQLite ({@code .dump}) aux seules instructions de DONNÉES ({@code CREATE TABLE},
+     * {@code INSERT}) portant sur une table de la LISTE BLANCHE {@code allowedTables} (les tables de
+     * travail déclarées par le prof, cf. {@link #sqlWorkingTables}). On jette donc TOUT le reste :
+     * {@code CREATE VIEW}/{@code TRIGGER}/{@code INDEX}, {@code PRAGMA}, {@code BEGIN}/{@code COMMIT},
+     * la plomberie du paquet Piston ({@code argv}), les tables {@code sqlite_*}, et toute table
+     * fabriquée par l'étudiant. La phase 2 ne rejoue ainsi que des tables ATTENDUES + des INSERT à
+     * littéraux échappés — aucun objet exécutable, aucun couplage aux internes du paquet.
+     */
+    public static String filterDumpToData(String dump, Set<String> allowedTables) {
+        StringBuilder out = new StringBuilder();
+        for (String statement : splitSqlStatements(dump)) {
+            Matcher m = SQL_DUMP_TARGET.matcher(statement);
+            if (!m.find()) {
+                continue; // ni CREATE TABLE ni INSERT (vue, déclencheur, PRAGMA, BEGIN/COMMIT…)
+            }
+            String table = m.group(1).toLowerCase(Locale.ROOT);
+            if (!allowedTables.contains(table)) {
+                continue; // hors des tables de travail du prof (plomberie, sqlite_*, table étudiant)
+            }
+            out.append(statement).append("\n;\n");
+        }
+        return out.toString();
+    }
+
+    /** Ajoute {@code <sentinelle début> <verdict prof> <sentinelle fin>} à la fin du programme. */
+    private static void appendFenced(StringBuilder program, String verdict, String nonce) {
+        program.append("SELECT '").append(sqlVerdictStart(nonce)).append("';\n");
+        program.append(verdict == null ? "" : verdict).append("\n;\n"); // termine le verdict même sans `;`
+        program.append("SELECT '").append(sqlVerdictEnd(nonce)).append("';\n");
+    }
+
+    /**
+     * Découpe un script SQL en instructions de PREMIER NIVEAU (séparées par {@code ;}), en
+     * ignorant les {@code ;} situés dans une chaîne ({@code '…'}), un identifiant délimité
+     * ({@code "…"}, {@code `…`}, {@code […]}) ou un commentaire ({@code -- …}, {@code /* … *}{@code /}).
+     * Le découpage suit la même lexique que SQLite pour le {@code ;} : c'est ce qui garantit qu'aucun
+     * fragment étudiant ne « déborde » de son {@code CREATE VIEW}. Les segments vides (blancs ou
+     * commentaires seuls) sont ignorés.
+     */
+    static List<String> splitSqlStatements(String sql) {
+        List<String> statements = new ArrayList<>();
+        if (sql == null) {
+            return statements;
+        }
+        StringBuilder current = new StringBuilder();
+        int i = 0;
+        int n = sql.length();
+        while (i < n) {
+            char c = sql.charAt(i);
+            char next = i + 1 < n ? sql.charAt(i + 1) : '\0';
+            if (c == '-' && next == '-') { // commentaire de ligne
+                int end = sql.indexOf('\n', i + 2);
+                end = end < 0 ? n : end + 1; // inclut le saut de ligne
+                current.append(sql, i, end);
+                i = end;
+            } else if (c == '/' && next == '*') { // commentaire de bloc
+                int end = sql.indexOf("*/", i + 2);
+                end = end < 0 ? n : end + 2;
+                current.append(sql, i, end);
+                i = end;
+            } else if (c == '\'' || c == '"' || c == '`') { // chaîne / identifiant (échappement par doublement)
+                int close = closeQuote(sql, i, c);
+                int end = close < 0 ? n : close; // non fermé : on prend jusqu'au bout
+                current.append(sql, i, end);
+                i = end;
+            } else if (c == '[') { // identifiant crocheté SQLite (pas d'échappement)
+                int end = sql.indexOf(']', i + 1);
+                end = end < 0 ? n : end + 1;
+                current.append(sql, i, end);
+                i = end;
+            } else if (c == ';') { // fin d'instruction
+                addStatement(statements, current);
+                current.setLength(0);
+                i++;
+            } else {
+                current.append(c);
+                i++;
+            }
+        }
+        addStatement(statements, current);
+        return statements;
+    }
+
+    /** Position APRÈS le délimiteur fermant d'un littéral ouvert en {@code start} par {@code quote}
+     *  (échappement par doublement), ou {@code -1} si le littéral n'est jamais fermé. */
+    private static int closeQuote(String sql, int start, char quote) {
+        int n = sql.length();
+        int i = start + 1;
+        while (i < n) {
+            char c = sql.charAt(i);
+            if (c == quote) {
+                if (i + 1 < n && sql.charAt(i + 1) == quote) { // délimiteur doublé = échappé
+                    i += 2;
+                    continue;
+                }
+                return i + 1;
+            }
+            i++;
+        }
+        return -1; // littéral non fermé
+    }
+
+    /** Ajoute le segment s'il porte du SQL réel (ni blanc ni commentaires seuls). */
+    private static void addStatement(List<String> statements, StringBuilder segment) {
+        String stmt = segment.toString().strip();
+        if (stmt.isEmpty()) {
+            return;
+        }
+        String code = stmt.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("--[^\\n]*", " ").strip();
+        if (!code.isEmpty()) {
+            statements.add(stmt);
+        }
     }
 
     // ── HTML ─────────────────────────────────────────────────────────────────────

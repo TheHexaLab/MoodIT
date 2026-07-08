@@ -747,17 +747,30 @@ $sc$,
 return solution() === ATTENDU;
 $hc$),
 ('SQL',
- $sc$-- Sandbox : SQLite 3 en mémoire (aucun réseau). Écris ta requête (SELECT) ci-dessous ;
--- elle est exposée au harnais comme la vue « solution ».
+ $sc$-- Sandbox : SQLite 3 en mémoire (aucun réseau). Écris une ou plusieurs requêtes (SELECT),
+-- séparées par « ; ». Chacune est exposée au harnais comme une vue « solution1 », « solution2 »…
+-- (dans l'ordre d'écriture ; « solution » = « solution1 »).
 SELECT /* à compléter */;
 $sc$,
- $hc$-- HARNAIS (SQL) — la requête de l'étudiant est exposée comme la vue « solution ».
--- 1) crée le jeu de données de test (CREATE TABLE + INSERT) sur lequel porte la requête ;
--- 2) TERMINE par UN SELECT booléen (1 = réussi) comparant « solution » à l'attendu.
+ $hc$-- HARNAIS (SQL) — deux modes.
+-- LECTURE SEULE (par défaut) : chaque requête de l'étudiant est exposée comme une vue « solutionN »
+--   (solution1, solution2… ; « solution » = solution1). Le harnais 1) crée le jeu de données de test
+--   puis 2) TERMINE par UN SELECT booléen (1 = réussi) validant « solution1 »… contre l'attendu.
+-- MODIFICATION (UPDATE/DELETE/INSERT/DDL) : mets une ligne « -- @student » là où le code de
+--   l'étudiant doit s'exécuter. Il tourne alors dans un BAC À SABLE ISOLÉ (les tables de travail que
+--   tu crées AVANT le marqueur), puis un NOTEUR séparé recharge son état final et lance ton verdict,
+--   écrit APRÈS le marqueur. Le SQL de l'étudiant ne s'exécute JAMAIS dans le noteur : il ne peut ni
+--   lire ni fausser ta correction. Verdict simple = comparaison à une valeur en dur. Exemple :
+--     CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+--     INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 1);
+--     -- @student
+--     SELECT (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 2;
+--   Si tu construis une table de RÉFÉRENCE, mets-la en TEMP (schéma séparé de l'état rechargé de
+--   l'étudiant, pas de collision) : CREATE TEMP TABLE attendu(...); INSERT INTO attendu VALUES(...);
 -- La DERNIÈRE valeur affichée fait foi ; une erreur SQL (table manquante, syntaxe…) vaut échec.
 CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
 INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0);
-SELECT (SELECT count(*) FROM solution) = 1 AND (SELECT nom FROM solution) = 'Alice';
+SELECT (SELECT count(*) FROM solution1) = 1 AND (SELECT nom FROM solution1) = 'Alice';
 $hc$),
 ('Java',
  $sc$// Sandbox : bibliothèque standard Java (JDK, aucun réseau).
@@ -1495,8 +1508,9 @@ JOIN Question qn ON qn.order_index = v.oidx
                                                        AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
 
 -- ── Questions données/requête (JSON, SQL) — ajoutées au même quiz démo (ordre 20-21). JSON :
--- validé par un harnais JS sur `data` (JSON parsé). SQL : requête exposée comme la vue `solution`,
--- le harnais fournit les données et termine par un SELECT booléen. Validé end-to-end.
+-- validé par un harnais JS sur `data` (JSON parsé). SQL (lecture seule) : requête exposée comme la
+-- vue `solution1` (alias `solution`), le harnais fournit les données et termine par un SELECT
+-- booléen. Validé end-to-end.
 INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
 SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
 FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
@@ -1519,16 +1533,25 @@ SELECT v.name, v.hc, v.w, qn.id
 FROM (VALUES
    (20, 'nom = chaîne non vide', $h$return typeof data.nom === 'string' && data.nom.length > 0;$h$, 1),
    (20, 'age = entier positif',  $h$return Number.isInteger(data.age) && data.age > 0;$h$, 1),
-   (21, 'deux actifs',           $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+   (21, 'actifs seulement',      $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
 INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
-SELECT (SELECT count(*) FROM solution) = 2;$h$, 1),
-   (21, 'exclut les inactifs',   $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
-INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
-SELECT NOT EXISTS (SELECT 1 FROM solution WHERE nom = 'Bob');$h$, 1),
-   (21, 'colonne nom uniquement', $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
-INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1);
+-- Ensemble EXACT : colonne « nom » seule, ET la liste triée des noms == noms actifs.
 SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
-   AND (SELECT name FROM pragma_table_info('solution')) = 'nom';$h$, 1)
+   AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
+   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
+   (21, 'données mixtes',        $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Anna', 1), ('Ben', 1), ('Cleo', 1), ('Dan', 0);
+SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
+   AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
+   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1),
+   (21, 'un seul actif',         $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Zoe', 0), ('Yan', 1);
+SELECT (SELECT count(*) FROM pragma_table_info('solution')) = 1
+   AND (SELECT name FROM pragma_table_info('solution')) = 'nom'
+   AND (SELECT group_concat(nom) FROM (SELECT nom FROM solution ORDER BY nom))
+     = (SELECT group_concat(nom) FROM (SELECT nom FROM utilisateurs WHERE actif = 1 ORDER BY nom));$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
@@ -1607,6 +1630,48 @@ click(btn);
 if (btn.textContent.trim() !== '1') return false;
 click(btn);
 return btn.textContent.trim() === '2';$h$, 1)
+) AS v(oidx, name, hc, w)
+JOIN Question qn ON qn.order_index = v.oidx
+                 AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                                                       AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ── Question SQL de MODIFICATION (UPDATE) — ordre 26. Exécution ISOLÉE en 2 phases : le code
+-- étudiant s'exécute dans un bac à sable jetable, puis un noteur séparé recharge l'état final et
+-- vérifie. Le harnais place « -- @student » entre les données de départ et le SELECT de verdict.
+INSERT INTO Question (prompt, language_id, start_code, order_index, total_score, q_type_id, quiz_id)
+SELECT v.prompt, (SELECT id FROM Language WHERE name = v.lang), v.start_code, v.oidx, 2, 6, q.id
+FROM (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
+                          AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')) q,
+(VALUES
+   ('SQL', 'Désactive tous les utilisateurs : mets actif = 0 pour toutes les lignes de la table utilisateurs.', 26,
+    $sc$-- La table utilisateurs(nom, actif) est fournie par le test (données de départ).
+-- Écris l'instruction UPDATE qui désactive tous les utilisateurs.
+UPDATE utilisateurs SET /* à compléter */;
+$sc$)
+) AS v(lang, prompt, oidx, start_code);
+
+-- Chaque harnais vérifie l'état COMPLET (nombre de lignes CONSERVÉ *et* TOUTES inactives), sur un
+-- jeu de données DIFFÉRENT : seule une vraie instruction UPDATE globale passe les trois. Un DELETE
+-- (lignes perdues), un SET actif = 1, un UPDATE partiel ou un SET actif = NULL échoue partout — plus
+-- de crédit partiel accidentel. Le code étudiant tourne isolé ; le verdict lit l'état final rechargé.
+INSERT INTO Test_Case (name, harness_code, weight, question_id)
+SELECT v.name, v.hc, v.w, qn.id
+FROM (VALUES
+   (26, 'trois utilisateurs',   $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 1), ('Carol', 1);
+-- @student
+SELECT (SELECT count(*) FROM utilisateurs) = 3
+   AND (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 3;$h$, 1),
+   (26, 'données mixtes',       $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Alice', 1), ('Bob', 0), ('Carol', 1), ('Dan', 1);
+-- @student
+SELECT (SELECT count(*) FROM utilisateurs) = 4
+   AND (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 4;$h$, 1),
+   (26, 'un seul utilisateur',  $h$CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);
+INSERT INTO utilisateurs VALUES ('Zoe', 1);
+-- @student
+SELECT (SELECT count(*) FROM utilisateurs) = 1
+   AND (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 1;$h$, 1)
 ) AS v(oidx, name, hc, w)
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
