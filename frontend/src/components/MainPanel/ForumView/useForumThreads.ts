@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ForumAuthor, type ForumPost } from './forumThreads';
+import { type AuthorUpdate } from '../../../types/domain.ts';
 
 /** Valeur synchrone ou asynchrone : un callback d'API peut retourner une Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -12,14 +13,21 @@ export type VoteValue = 1 | 0 | -1;
  * RACINES (sans leurs reponses) ; chaque racine porte `replyCount`. Les reponses
  * sont ensuite chargees paresseusement, branche par branche (voir `FetchRepliesHandler`).
  */
-export type FetchThreadsHandler = (forumId: number) => MaybePromise<ForumPost[]>;
+export type FetchThreadsHandler = (
+  forumId: number,
+  before?: number,
+  limit?: number
+) => MaybePromise<ForumPost[]>;
+
+/** Taille d'une page de sujets (chargement initial + « charger plus »). */
+const THREADS_PAGE_SIZE = 20;
 
 /**
  * Chargement des reponses DIRECTES (enfants immediats) d'un post (API-ready, GET).
  * Appele quand l'utilisateur deplie un fil : on ne descend qu'un seul niveau a la
  * fois. Chaque enfant renvoye porte a son tour `replyCount` pour ses propres reponses.
  */
-export type FetchRepliesHandler = (postId: number) => MaybePromise<ForumPost[]>;
+export type FetchRepliesHandler = (forumId: number, postId: number) => MaybePromise<ForumPost[]>;
 
 /**
  * Publication d'un post (API-ready, POST). Reçoit l'id du forum ('Thread') cible, le
@@ -35,8 +43,13 @@ export type CreatePostHandler = (
   title?: string
 ) => MaybePromise<ForumPost | void>;
 
-/** Modification d'un post (API-ready, PATCH). Peut renvoyer le post persiste. */
-export type EditPostHandler = (postId: number, content: string) => MaybePromise<ForumPost | void>;
+/** Modification d'un post (API-ready, PATCH). `title` = nouveau titre d'un sujet racine
+ *  (absent pour une réponse). Peut renvoyer le post persiste. */
+export type EditPostHandler = (
+  postId: number,
+  content: string,
+  title?: string
+) => MaybePromise<ForumPost | void>;
 
 /** Suppression d'un post (API-ready, DELETE). Cote BD : ON DELETE CASCADE du sous-fil. */
 export type DeletePostHandler = (postId: number) => MaybePromise<unknown>;
@@ -48,12 +61,14 @@ export type VotePostHandler = (postId: number, value: VoteValue) => MaybePromise
 export interface IncomingForumHandlers {
   /** Un post a ete cree (par soi ou un autre utilisateur), sous `parentId`. */
   onPost: (post: ForumPost, parentId: number | null) => void;
-  /** Un post a ete modifie. */
-  onEdit: (postId: number, content: string) => void;
+  /** Un post a ete modifie (contenu, et titre pour un sujet racine). */
+  onEdit: (postId: number, content: string, title?: string | null) => void;
   /** Un post a ete supprime (avec son sous-fil). */
   onDelete: (postId: number) => void;
   /** Un vote a change : `userId` met son vote a `value` sur `postId`. */
   onVote: (postId: number, userId: number, value: VoteValue) => void;
+  /** Un utilisateur a modifie son profil (GLOBAL) : maj de l'auteur des posts, par id. */
+  onUserUpdate?: (user: AuthorUpdate) => void;
 }
 
 /**
@@ -87,6 +102,12 @@ export interface ForumThreadsApi {
   loadError: string | null;
   /** Relance le chargement (bouton « Réessayer »). */
   reload: () => void;
+  /** Reste-t-il des sujets plus ANCIENS à charger ? (dernière page pleine). */
+  hasMore: boolean;
+  /** Chargement d'une page de sujets plus anciens en cours (infinite scroll). */
+  loadingMore: boolean;
+  /** Charge la page de sujets plus ANCIENS (avant le plus ancien déjà affiché). */
+  loadMore: () => void;
   /** Posts dont les reponses directes sont en cours de chargement (lazy). */
   loadingReplies: Set<number>;
   /** Posts dont le chargement des reponses a echoue (bouton « Réessayer » de branche). */
@@ -111,7 +132,7 @@ export interface ForumThreadsApi {
   /** Publie une reponse ; resout a `true` en cas de succes, `false` si echec. */
   addReply: (parentId: number, content: string) => Promise<boolean>;
   /** Modifie un post (optimiste) ; resout a `true` en cas de succes, `false` si echec. */
-  editPost: (postId: number, content: string) => Promise<boolean>;
+  editPost: (postId: number, content: string, title?: string) => Promise<boolean>;
   /** Supprime un post et son sous-fil (optimiste). */
   deletePost: (postId: number) => void;
 
@@ -125,7 +146,11 @@ export interface ForumThreadsApi {
 // ─── Helpers d'arbre (purs, immutables). ───
 
 /** Remplace (immutablement) le post `id` par `updater(post)`, partout dans l'arbre. */
-function mapPost(posts: ForumPost[], id: number, updater: (post: ForumPost) => ForumPost): ForumPost[] {
+function mapPost(
+  posts: ForumPost[],
+  id: number,
+  updater: (post: ForumPost) => ForumPost
+): ForumPost[] {
   return posts.map((post) => {
     if (post.id === id) return updater(post);
     if (post.replies?.length) return { ...post, replies: mapPost(post.replies, id, updater) };
@@ -137,7 +162,9 @@ function mapPost(posts: ForumPost[], id: number, updater: (post: ForumPost) => F
 function removeFromTree(posts: ForumPost[], id: number): ForumPost[] {
   return posts
     .filter((post) => post.id !== id)
-    .map((post) => (post.replies?.length ? { ...post, replies: removeFromTree(post.replies, id) } : post));
+    .map((post) =>
+      post.replies?.length ? { ...post, replies: removeFromTree(post.replies, id) } : post
+    );
 }
 
 /** Ajuste (de `delta`) le compteur de reponses directes du post `parentId`. */
@@ -150,11 +177,16 @@ function adjustReplyCount(posts: ForumPost[], parentId: number | null, delta: nu
 }
 
 /** Insere `reply` sous `parentId` (ou a la racine si null). */
-function insertIntoTree(posts: ForumPost[], parentId: number | null, reply: ForumPost): ForumPost[] {
+function insertIntoTree(
+  posts: ForumPost[],
+  parentId: number | null,
+  reply: ForumPost
+): ForumPost[] {
   if (parentId === null) return [...posts, reply];
   return posts.map((post) => {
     if (post.id === parentId) return { ...post, replies: [...(post.replies ?? []), reply] };
-    if (post.replies?.length) return { ...post, replies: insertIntoTree(post.replies, parentId, reply) };
+    if (post.replies?.length)
+      return { ...post, replies: insertIntoTree(post.replies, parentId, reply) };
     return post;
   });
 }
@@ -184,7 +216,11 @@ function findByClientId(posts: ForumPost[], clientId: string): ForumPost | undef
 }
 
 /** Id du parent du post `id` (null si racine, undefined si introuvable). */
-function findParentId(posts: ForumPost[], id: number, parent: number | null = null): number | null | undefined {
+function findParentId(
+  posts: ForumPost[],
+  id: number,
+  parent: number | null = null
+): number | null | undefined {
   for (const post of posts) {
     if (post.id === id) return parent;
     if (post.replies?.length) {
@@ -232,6 +268,12 @@ export function useForumThreads({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Reste-t-il des sujets plus anciens à charger ? (dernière page reçue pleine). */
+  const [hasMore, setHasMore] = useState(false);
+  /** Chargement d'une page de sujets plus anciens en cours (verrou anti double-déclenchement). */
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** Verrou synchrone du chargement « plus » (l'état est asynchrone). */
+  const loadingMoreRef = useRef(false);
   // Chargement paresseux des branches : suivi par post (id).
   const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
   const [replyErrors, setReplyErrors] = useState<Set<number>>(new Set());
@@ -243,6 +285,11 @@ export function useForumThreads({
   useEffect(() => {
     fetchRef.current = onFetchThreads;
     fetchRepliesRef.current = onFetchReplies;
+  });
+  /** Dernière liste de sujets (ref stable → loadMore lit sans se recréer). */
+  const threadsRef = useRef(threads);
+  useEffect(() => {
+    threadsRef.current = threads;
   });
 
   useEffect(() => {
@@ -262,14 +309,48 @@ export function useForumThreads({
     setLoadingReplies(new Set());
     setReplyErrors(new Set());
     try {
-      const fetched = await fetchThreads(forumId);
+      const fetched = await fetchThreads(forumId, undefined, THREADS_PAGE_SIZE);
       if (!mountedRef.current) return;
       setThreads(fetched);
+      // Page pleine → il reste probablement des sujets plus anciens.
+      setHasMore(fetched.length >= THREADS_PAGE_SIZE);
     } catch {
       if (!mountedRef.current) return;
       setLoadError('Impossible de charger les sujets. Réessayez.');
     } finally {
       if (mountedRef.current) setLoading(false);
+    }
+  }, [forumId]);
+
+  /**
+   * Charge la page de sujets PLUS ANCIENS (curseur = plus petit id RÉEL déjà affiché, en
+   * ignorant les optimistes à id négatif). Append sans doublon ; met à jour `hasMore`.
+   */
+  const loadMore = useCallback(async () => {
+    const fetchThreads = fetchRef.current;
+    // Verrou SYNCHRONE via ref : l'état loadingMore est asynchrone, pas fiable pour l'anti-doublon.
+    if (!fetchThreads || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    try {
+      const oldestId = threadsRef.current
+        .filter((t) => t.id > 0)
+        .reduce((min, t) => (t.id < min ? t.id : min), Number.POSITIVE_INFINITY);
+      const before = Number.isFinite(oldestId) ? oldestId : undefined;
+
+      const older = await fetchThreads(forumId, before, THREADS_PAGE_SIZE);
+      if (!mountedRef.current) return;
+      setThreads((prev) => {
+        const known = new Set(prev.map((t) => t.id));
+        return [...prev, ...older.filter((t) => !known.has(t.id))];
+      });
+      setHasMore(older.length >= THREADS_PAGE_SIZE);
+    } catch {
+      // Silencieux : chargement d'historique, pas d'erreur bloquante.
+    } finally {
+      loadingMoreRef.current = false;
+      if (mountedRef.current) setLoadingMore(false);
     }
   }, [forumId]);
 
@@ -285,6 +366,12 @@ export function useForumThreads({
    * chargera ses propres reponses a son tour quand on le depliera.
    */
   const loadReplies = useCallback(async (postId: number): Promise<boolean> => {
+    // Post pas encore persisté (id temporaire négatif) : il ne peut avoir aucune réponse
+    // côté serveur. On évite un GET /posts/-1 qui répondrait 404 ; ses réponses sont [].
+    if (postId < 0) {
+      setThreads((prev) => mapPost(prev, postId, (post) => ({ ...post, replies: [], replyCount: 0 })));
+      return true;
+    }
     const fetchReplies = fetchRepliesRef.current;
     setReplyErrors((prev) => {
       if (!prev.has(postId)) return prev;
@@ -294,10 +381,14 @@ export function useForumThreads({
     });
     setLoadingReplies((prev) => new Set(prev).add(postId));
     try {
-      const children = fetchReplies ? await fetchReplies(postId) : [];
+      const children = fetchReplies ? await fetchReplies(forumId, postId) : [];
       if (!mountedRef.current) return true;
       setThreads((prev) =>
-        mapPost(prev, postId, (post) => ({ ...post, replies: children, replyCount: children.length }))
+        mapPost(prev, postId, (post) => ({
+          ...post,
+          replies: children,
+          replyCount: children.length,
+        }))
       );
       return true;
     } catch {
@@ -332,15 +423,21 @@ export function useForumThreads({
   }
 
   function vote(postId: number, direction: 1 | -1) {
+    // Post pas encore persisté (id temporaire négatif) : aucune action serveur
+    // possible tant que la création n'est pas confirmée (cf. reconciliation).
+    if (postId < 0) return;
     const post = findInTree(threads, postId);
     if (!post) return;
     const current = post.votes.find((v) => v.userId === currentUser.id)?.value ?? 0;
     const nextValue: VoteValue = current === direction ? 0 : direction;
     const previousVotes = post.votes;
+    // Affichage optimiste : `nextValue` (0 = vote retiré localement).
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, currentUser.id, nextValue)));
 
     runMutation(
-      () => (onVotePost ? onVotePost(postId, nextValue) : undefined),
+      // API : on envoie la DIRECTION cliquée (±1), pas `nextValue`. Le backend applique
+      // le toggle (même direction re-cliquée → annule) et la table Vote interdit 0.
+      () => (onVotePost ? onVotePost(postId, direction) : undefined),
       () => setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, votes: previousVotes }))),
       "Votre vote n'a pas pu être enregistré. Réessayez."
     );
@@ -411,7 +508,9 @@ export function useForumThreads({
     setError(null);
     setPending(true);
     try {
-      const saved = onCreatePost ? await onCreatePost(forumId, trimmed, parentId, clientId) : undefined;
+      const saved = onCreatePost
+        ? await onCreatePost(forumId, trimmed, parentId, clientId)
+        : undefined;
       if (!mountedRef.current) return true;
       // Reconciliation : on remplace l'optimiste par la version persistante.
       if (saved) {
@@ -431,17 +530,32 @@ export function useForumThreads({
     }
   }
 
-  async function editPost(postId: number, content: string): Promise<boolean> {
+  async function editPost(postId: number, content: string, title?: string): Promise<boolean> {
     const trimmed = content.trim();
+    const trimmedTitle = title?.trim();
+    // id temporaire négatif = post pas encore confirmé côté serveur : on bloque.
+    if (postId < 0) return false;
     const target = findInTree(threads, postId);
-    if (!target || !trimmed || trimmed === target.content) return false;
+    // Contenu OBLIGATOIRE ; titre obligatoire s'il est fourni (sujet racine).
+    if (!target || !trimmed || (trimmedTitle !== undefined && !trimmedTitle)) return false;
+    // Rien à enregistrer si contenu ET titre sont inchangés.
+    const contentSame = trimmed === target.content;
+    const titleSame = trimmedTitle === undefined || trimmedTitle === (target.title ?? '');
+    if (contentSame && titleSame) return false;
 
     const previousContent = target.content;
-    setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content: trimmed })));
+    const previousTitle = target.title;
+    setThreads((prev) =>
+      mapPost(prev, postId, (p) => ({
+        ...p,
+        content: trimmed,
+        ...(trimmedTitle !== undefined ? { title: trimmedTitle } : {}),
+      }))
+    );
 
     setError(null);
     try {
-      const saved = onEditPost ? await onEditPost(postId, trimmed) : undefined;
+      const saved = onEditPost ? await onEditPost(postId, trimmed, trimmedTitle) : undefined;
       if (!mountedRef.current) return true;
       // Le serveur fait foi sur le contenu final, mais le PATCH ne renvoie pas le
       // sous-arbre : on fusionne ses champs en PRESERVANT les reponses deja chargees
@@ -459,13 +573,17 @@ export function useForumThreads({
       return true;
     } catch {
       if (!mountedRef.current) return false;
-      setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content: previousContent }))); // rollback
+      setThreads((prev) =>
+        mapPost(prev, postId, (p) => ({ ...p, content: previousContent, title: previousTitle }))
+      ); // rollback contenu + titre
       setError("La modification n'a pas pu être enregistrée. Réessayez.");
       return false;
     }
   }
 
   function deletePost(postId: number) {
+    // id temporaire négatif = post pas encore confirmé côté serveur : on bloque.
+    if (postId < 0) return;
     const target = findInTree(threads, postId);
     if (!target) return;
     const parentId = findParentId(threads, postId) ?? null;
@@ -474,7 +592,8 @@ export function useForumThreads({
 
     runMutation(
       () => (onDeletePost ? onDeletePost(postId) : undefined),
-      () => setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, target), parentId, 1)),
+      () =>
+        setThreads((prev) => adjustReplyCount(insertIntoTree(prev, parentId, target), parentId, 1)),
       "La suppression n'a pas pu être effectuée. Réessayez."
     );
   }
@@ -506,9 +625,19 @@ export function useForumThreads({
     });
   }, []);
 
-  const applyIncomingEdit = useCallback((postId: number, content: string) => {
-    setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, content })));
-  }, []);
+  const applyIncomingEdit = useCallback(
+    (postId: number, content: string, title?: string | null) => {
+      setThreads((prev) =>
+        mapPost(prev, postId, (p) => ({
+          ...p,
+          content,
+          // title fourni (sujet racine) → on l'applique ; null/undefined (réponse) → inchangé.
+          ...(title != null ? { title } : {}),
+        }))
+      );
+    },
+    []
+  );
 
   const applyIncomingDelete = useCallback((postId: number) => {
     setThreads((prev) => {
@@ -521,6 +650,27 @@ export function useForumThreads({
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, userId, value)));
   }, []);
 
+  // Profil modifie (GLOBAL) : on remplace prenom/nom/couleur/username de l'auteur sur
+  // tous les posts de cet utilisateur dans l'arbre (racines ET reponses imbriquees).
+  const applyIncomingUserUpdate = useCallback((user: AuthorUpdate) => {
+    const updateAuthors = (posts: ForumPost[]): ForumPost[] =>
+      posts.map((p) => ({
+        ...p,
+        author:
+          p.author.id === user.id
+            ? {
+                ...p.author,
+                username: user.username,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                avatarColor: user.avatarColor,
+              }
+            : p.author,
+        replies: p.replies ? updateAuthors(p.replies) : p.replies,
+      }));
+    setThreads((prev) => updateAuthors(prev));
+  }, []);
+
   useEffect(() => {
     if (!socket) return;
     return socket.subscribe(forumId, {
@@ -528,14 +678,26 @@ export function useForumThreads({
       onEdit: applyIncomingEdit,
       onDelete: applyIncomingDelete,
       onVote: applyIncomingVote,
+      onUserUpdate: applyIncomingUserUpdate,
     });
-  }, [socket, forumId, applyIncomingPost, applyIncomingEdit, applyIncomingDelete, applyIncomingVote]);
+  }, [
+    socket,
+    forumId,
+    applyIncomingPost,
+    applyIncomingEdit,
+    applyIncomingDelete,
+    applyIncomingVote,
+    applyIncomingUserUpdate,
+  ]);
 
   return {
     threads,
     loading,
     loadError,
     reload: () => void reload(),
+    hasMore,
+    loadingMore,
+    loadMore: () => void loadMore(),
     loadingReplies,
     replyErrors,
     loadReplies,

@@ -7,6 +7,12 @@ export type MaybePromise<T> = T | Promise<T>;
 // Entité Program ré-exportée depuis le modèle de domaine (source unique).
 export type { Program };
 
+/** Établissement sélectionnable dans le popup (dropdown). */
+export interface Establishment {
+  id: number;
+  name: string;
+}
+
 /**
  * DTO de création de cours (write) : colonnes saisissables de `Course` + les
  * liens `program_course`. Dérive de l'entité Course.
@@ -26,10 +32,22 @@ export interface AddCoursePopupLabels {
   title: string;
   /** Description sous le titre. */
   subtitle: string;
+  /** Libellé du champ « établissement ». */
+  establishmentLabel: string;
+  /** Invite du champ établissement tant qu'aucun n'est choisi. */
+  establishmentPlaceholder: string;
+  /** Invite du champ de recherche des établissements. */
+  establishmentSearchPlaceholder: string;
+  /** Message quand la recherche d'établissement ne renvoie rien. */
+  noEstablishments: string;
   /** Libellé du champ des programmes. */
   programsLabel: string;
   /** Invite affichée dans le champ quand aucun programme n'est sélectionné. */
   programsPlaceholder: string;
+  /** Invite du champ programmes tant qu'aucun établissement n'est choisi. */
+  programsPickEstablishment: string;
+  /** Message du menu quand l'établissement n'a aucun programme gérable par l'utilisateur. */
+  noManageablePrograms: string;
   /** Invite du champ de recherche du menu. */
   searchPlaceholder: string;
   /** Message du menu quand aucun programme n'est disponible. */

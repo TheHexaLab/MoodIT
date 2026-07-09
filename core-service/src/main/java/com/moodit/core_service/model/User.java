@@ -5,16 +5,20 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.BatchSize;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+// @BatchSize (niveau classe) : quand des User sont chargés comme association (ex. l'auteur
+// @ManyToOne de chaque post d'une page), Hibernate les initialise PAR LOTS au lieu d'1/élément.
 @Entity
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "user_")
+@BatchSize(size = 50)
 public class User {
 
   @Id
@@ -51,11 +55,14 @@ public class User {
   /*@Column(name = "verified_email")
   private Boolean verifiedEmail;*/
 
+  // @BatchSize : les rôles d'une page d'utilisateurs (popup admins) chargés par lots au lieu
+  // d'1 requête/utilisateur (N+1 de toUserDTO).
   @ManyToMany
   @JoinTable(
       name = "user_role",
       joinColumns = @JoinColumn(name = "user_id"),
       inverseJoinColumns = @JoinColumn(name = "role_id"))
+  @BatchSize(size = 50)
   private List<Role> roles;
 
   @ManyToMany

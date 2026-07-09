@@ -1,5 +1,6 @@
 package com.moodit.core_service.exception;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -93,5 +94,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN) //Code 403
                 .body(ex.getMessage());
+    }
+
+    //Violation d'une contrainte BD (UNIQUE, CHECK…) : ex. domaine d'établissement déjà utilisé.
+    //Renvoie 409 (au lieu de laisser l'exception non gérée finir en 404/500).
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<String> handleDataIntegrity(DataIntegrityViolationException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .body("Contrainte non respectée : cette valeur existe déjà ou est invalide.");
     }
 }

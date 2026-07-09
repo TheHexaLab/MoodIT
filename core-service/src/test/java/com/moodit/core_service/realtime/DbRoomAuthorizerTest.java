@@ -84,4 +84,18 @@ class DbRoomAuthorizerTest {
     stubUserId("a@b.ca", 5L);
     assertThat(auth.canJoin("a@b.ca", "galaxy", 1)).isFalse();
   }
+
+  @Test
+  void adminRoles_autoriseSiRoleGlobal() {
+    stubUserId("a@b.ca", 5L);
+    when(jdbc.queryForObject(contains("User_Role"), eq(Boolean.class), eq(5L))).thenReturn(true);
+    assertThat(auth.canJoin("a@b.ca", "adminRoles", 0)).isTrue();
+  }
+
+  @Test
+  void adminRoles_refuseSansRoleGlobal() {
+    stubUserId("a@b.ca", 5L);
+    when(jdbc.queryForObject(contains("User_Role"), eq(Boolean.class), eq(5L))).thenReturn(false);
+    assertThat(auth.canJoin("a@b.ca", "adminRoles", 0)).isFalse();
+  }
 }

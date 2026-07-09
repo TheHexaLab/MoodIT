@@ -343,7 +343,14 @@ export default function PopupTests() {
       {showAddCourse && (
         <AddCoursePopup
           onClose={() => setShowAddCourse(false)}
-          programs={programs}
+          loadEstablishments={async () => {
+            await new Promise((r) => setTimeout(r, 200));
+            return [{ id: 1, name: 'Université de Sherbrooke' }];
+          }}
+          loadPrograms={async () => {
+            await new Promise((r) => setTimeout(r, 300));
+            return programs;
+          }}
           onSave={async (course: NewCourse) => {
             await new Promise((r) => setTimeout(r, 400));
             if (failRequests) throw new Error('Échec simulé (AddCoursePopup)');

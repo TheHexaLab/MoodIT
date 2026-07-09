@@ -46,6 +46,15 @@
     max-width: 26rem;
 }
 
+/* Rangee d'actions : se replie sur plusieurs lignes quand la largeur manque. */
+.emptyCourseActions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.625rem;
+    max-width: 100%;
+}
+
 .emptyMainAction {
     display: inline-flex;
     align-items: center;
@@ -63,10 +72,33 @@
     transition: filter 0.15s ease, background 0.15s ease;
 }
 
+.emptyMainActionOutline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: transparent;
+    color: var(--brand-teal);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
 .emptyMainAction:hover {
     filter: brightness(1.08);
 }
 
-.emptyMainAction > span {
+.emptyMainActionOutline:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-vote-pill);
+}
+
+.emptyMainAction > span,
+.emptyMainActionOutline > span {
     font-size: 0.9375rem;
 }

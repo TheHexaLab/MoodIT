@@ -3,17 +3,22 @@ package com.moodit.core_service.service;
 // Model
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.UserNotFoundException;
-import com.moodit.core_service.model.Course;
-import com.moodit.core_service.model.Enrollment;
-import com.moodit.core_service.model.Program;
-import com.moodit.core_service.model.User;
+import com.moodit.core_service.model.*;
+// Import explicite : `Role` existe aussi dans dto.* → lève l'ambiguïté des wildcards
+// (user.getRoles() renvoie l'entité model.Role).
+import com.moodit.core_service.model.Role;
 import com.moodit.core_service.service.ProgramService;
 // Repository
+import com.moodit.core_service.repository.RoleRepository;
+import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 // Le pont entre le Controller et le Repository
 @Service
@@ -23,6 +28,8 @@ public class UserService {
   private final UserRepository userRepository;
   private final ProgramService programService;
   private final CourseService courseService;
+  private final UserProgramRoleRepository userProgramRoleRepository;
+  private final RoleRepository roleRepository;
 
   // region Transformations d'Entités (entité BD -> DTO)
   public UserDTO toUserDTO(User user) {
@@ -37,6 +44,13 @@ public class UserService {
     dto.setAvatarColor(user.getAvatarColor());
     dto.setCreatedAt(user.getCreatedAt());
     // dto.setVerifiedEmail(user.getVerifiedEmail());
+
+    dto.setRoles(
+            user.getRoles()
+                    .stream()
+                    .map(Role::getId)
+                    .toList()
+    );
 
     return dto;
   }
@@ -83,7 +97,47 @@ public class UserService {
 
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
-    return user.getPrograms().stream().map(programService::toProgramDTO).toList();
+    // Rôles PAR PROGRAMME de CET utilisateur (User_Program_Role) → programId -> {roleIds}.
+    Map<Integer, Set<Integer>> roleIdsByProgram =
+        userProgramRoleRepository.findByUserId(userId).stream()
+            .collect(
+                Collectors.groupingBy(
+                    UserProgramRole::getProgramId,
+                    Collectors.mapping(UserProgramRole::getRoleId, Collectors.toSet())));
+
+    // roleId -> nom (pour déterminer le rôle le plus élevé sans coder en dur les ids).
+    Map<Integer, String> roleNameById =
+        roleRepository.findAll().stream()
+            .collect(Collectors.toMap(Role::getId, Role::getName));
+
+    return user.getPrograms().stream()
+        .map(
+            p -> {
+              ProgramDTO dto = programService.toProgramDTO(p);
+              dto.setRoleName(
+                  highestRoleName(
+                      roleIdsByProgram.getOrDefault(p.getId(), Set.of()), roleNameById));
+              return dto;
+            })
+        .toList();
+  }
+
+  /**
+   * Rôle le plus élevé parmi les rôles de programme d'un utilisateur : "Administrateur" prime
+   * sur "Enseignant" ; null si aucun rôle de programme.
+   */
+  private String highestRoleName(Set<Integer> roleIds, Map<Integer, String> roleNameById) {
+    boolean isAdmin =
+        roleIds.stream().anyMatch(id -> RoleNames.ADMIN.equals(roleNameById.get(id)));
+    if (isAdmin) {
+      return RoleNames.ADMIN;
+    }
+    boolean isTeacher =
+        roleIds.stream().anyMatch(id -> RoleNames.TEACHER.equals(roleNameById.get(id)));
+    if (isTeacher) {
+      return RoleNames.TEACHER;
+    }
+    return null;
   }
 
   public UserDTO updateUser(Integer userId, UserUpdateDTO dto) {
