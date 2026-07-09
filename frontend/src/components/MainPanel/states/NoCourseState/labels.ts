@@ -4,8 +4,9 @@ import type { NoCourseStateLabels } from './types.ts';
 export const defaultLabels: NoCourseStateLabels = {
   title: 'Ce programme n\'a pas de cours',
   userSubtitle:
-    "Aucun cours n'est encore disponible dans ce programme. Reviens plus tard, un responsable en ajoutera.",
+    'Rejoins un cours de ce programme pour accéder à ses canaux, forums et quiz.',
   adminSubtitle:
-    'Crée un premier cours pour y organiser tes canaux, forum et quiz',
+    'Crée un premier cours pour y organiser tes canaux, forum et quiz, ou rejoins-en un.',
   addCourse: 'Créer un cours',
+  joinCourse: 'Rejoindre un cours',
 };

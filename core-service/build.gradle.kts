@@ -51,9 +51,13 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.springframework.security:spring-security-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+	// @DataJpaTest + TestEntityManager (Spring Boot 4 : module dédié).
+	testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
 	testCompileOnly("org.projectlombok:lombok")
 	testAnnotationProcessor("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+	// BD embarquée pour les tests JPA (@DataJpaTest) : schéma généré depuis les entités.
+	testRuntimeOnly("com.h2database:h2")
 }
 
 tasks.withType<Test> {

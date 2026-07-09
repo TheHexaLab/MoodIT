@@ -4,6 +4,7 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.*;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.*;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -24,6 +25,9 @@ public class ProgramServiceTest {
     @Mock private ProgramRepository programRepository;
     @Mock private CourseRepository courseRepository;
     @Mock private UserRepository userRepository;
+    @Mock private UserProgramRoleRepository userProgramRoleRepository;
+    @Mock private EnrollmentRepository enrollmentRepository;
+    @Mock private RealtimeEventPublisher realtimePublisher;
 
     //@InjectMocks crée le service et injecte les @Mock dedans automatiquement
     @InjectMocks private ProgramService programService;
@@ -31,6 +35,17 @@ public class ProgramServiceTest {
     private Program program;
     private Course course;
     private User user;
+
+    /** Utilisateur admin GLOBAL (Gardien) : bypasse le contrôle par programme de addCourseToPrograms. */
+    private static User globalAdmin() {
+        User u = new User();
+        u.setId(99);
+        u.setEmail("admin@test");
+        com.moodit.core_service.model.Role r = new com.moodit.core_service.model.Role();
+        r.setName("Gardien");
+        u.setRoles(List.of(r));
+        return u;
+    }
 
     @Nested
     class FindAll {
@@ -205,10 +220,16 @@ public class ProgramServiceTest {
             Program program2 = Program.builder().id(2).name("Réseaux").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Mathématique de l'ingénierie").code("MATH67").programIds(List.of(1, 2)).build();
 
+            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(1);
+                return c;
+            });
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(2)).thenReturn(Optional.of(program2));
 
-            CourseDTO result = programService.addCourseToPrograms(dto);
+            CourseDTO result = programService.addCourseToPrograms(dto, "admin@test");
 
             assertEquals("Mathématique de l'ingénierie", result.getTitle());
             assertEquals(1, program.getCourses().size());
@@ -224,16 +245,17 @@ public class ProgramServiceTest {
             program = Program.builder().id(1).name("Informatique").code("GI").cohort("71").color("FF0000").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Système distribués").code("SYST45").programIds(List.of(1, 99)).build();
 
+            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(99)).thenReturn(Optional.empty());
 
-            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto));
+            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto, "admin@test"));
             verify(programRepository, never()).saveAll(anyList());
         }
         @Test
         @DisplayName("Retourne IllegalArgumentException, si les id sont null")
         void addCourseToPrograms_avec_arguments_null_devrait_lancer_illegalArgumentException() {
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null, "admin@test"));
 
             CourseCreateInProgramsDTO dtoAvecListeNull = CourseCreateInProgramsDTO.builder()
                     .title("Chimie")
@@ -241,7 +263,7 @@ public class ProgramServiceTest {
                     .programIds(null)
                     .build();
 
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull, "admin@test"));
             verifyNoInteractions(programRepository, courseRepository);
         }
         @Test
@@ -254,9 +276,15 @@ public class ProgramServiceTest {
                     .programIds(List.of(1, 1)) // Doublon
                     .build();
 
+            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(1);
+                return c;
+            });
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
 
-            programService.addCourseToPrograms(dto);
+            programService.addCourseToPrograms(dto, "admin@test");
 
             assertEquals(1, program.getCourses().size());
         }
@@ -374,6 +402,26 @@ public class ProgramServiceTest {
             assertThrows(IllegalArgumentException.class, () -> programService.updateProgram(null, dto));
             assertThrows(IllegalArgumentException.class, () -> programService.updateProgram(1, null));
             verifyNoInteractions(programRepository);
+        }
+    }
+
+    @Nested
+    class removeUserFromProgram {
+        @Test
+        @DisplayName("Quitter un programme retire l'adhésion, les rôles ET les inscriptions du programme")
+        void removeUserFromProgram_retire_roles_et_inscriptions() {
+            User u = new User();
+            u.setId(5);
+            Program p = Program.builder().id(1).build();
+            u.setPrograms(new ArrayList<>(List.of(p)));
+            when(userRepository.findById(5)).thenReturn(Optional.of(u));
+
+            programService.removeUserFromProgram(1, 5);
+
+            assertEquals(0, u.getPrograms().size());               // User_Program retiré
+            verify(userRepository).saveAndFlush(u);                 // flush avant les nettoyages
+            verify(userProgramRoleRepository).deleteByProgramIdAndUserId(1, 5); // rôles retirés
+            verify(enrollmentRepository).deleteForUserLeavingProgram(5, 1);     // inscriptions retirées
         }
     }
 }

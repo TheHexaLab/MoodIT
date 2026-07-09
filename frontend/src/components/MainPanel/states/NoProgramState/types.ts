@@ -7,10 +7,12 @@
 export interface NoProgramStateLabels {
   /** Titre principal. */
   title: string;
-  /** Texte affiche a un utilisateur sans droits d'administration (aucune action). */
+  /** Texte affiche a un utilisateur sans droits d'administration. */
   userSubtitle: string;
-  /** Texte affiche a un administrateur (qui voit le bouton d'ajout). */
+  /** Texte affiche a un administrateur (qui voit aussi le bouton de creation). */
   adminSubtitle: string;
-  /** Libellé du bouton d'ajout / d'adhesion a un programme (affiche seulement pour l'admin). */
+  /** Libellé du bouton d'ajout d'un programme, ouvre le menu créer/gérer (admin seulement). */
   addProgram: string;
+  /** Libellé du bouton « rejoindre un programme » (affiche a tous). */
+  joinProgram: string;
 }

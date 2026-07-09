@@ -177,8 +177,9 @@ public class DevWsController {
   public String editPost(
       @RequestParam(defaultValue = "3") long forumId,
       @RequestParam(defaultValue = "102") long postId,
-      @RequestParam(defaultValue = "(dev) sujet modifié ✏️") String content) {
-    publisher.postEdited(forumId, postId, content);
+      @RequestParam(defaultValue = "(dev) sujet modifié ✏️") String content,
+      @RequestParam(required = false) String title) {
+    publisher.postEdited(forumId, postId, content, title);
     return "post #" + postId + " modifié sur forum:" + forumId;
   }
 

@@ -18,8 +18,9 @@ export type User = DomainUser & {
 };
 
 /**
- * Décrit une modification d'assignation rôle ↔ utilisateur (reflète un INSERT/DELETE dans User_Role).
- * Émise via onChange.
+ * Décrit une modification d'assignation rôle ↔ utilisateur DANS un programme
+ * (reflète un INSERT/DELETE dans User_Program_Role). Émise via onChange. Le popup ne connaît
+ * pas le programme : le Dashboard injecte le `programId` avant l'appel API (cf. api.changeRole).
  */
 export type RoleChange =
   | { type: 'assign'; roleId: number; userId: number }

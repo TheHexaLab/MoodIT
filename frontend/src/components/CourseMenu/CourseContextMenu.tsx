@@ -4,6 +4,7 @@ import styles from './CourseContextMenu.module.css';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sparkles } from '../../assets/Sparkles.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
+import { TrashCan } from '../../assets/TrashCan.tsx';
 import { defaultLabels } from './labels.ts';
 
 interface CourseContextMenuProps {
@@ -16,8 +17,10 @@ interface CourseContextMenuProps {
   onEditCourse?: () => void;
   /** Action « Gestion MCP — Feedback du cours » (absente → item masqué). */
   onOpenMcp?: () => void;
-  /** Action destructive « Quitter le cours » (absente → item + séparateur masqués). */
+  /** Action destructive « Quitter le cours » (absente → item masqué). */
   onLeaveCourse?: () => void;
+  /** Action destructive « Supprimer le cours » (admin ; absente → item masqué). */
+  onDeleteCourse?: () => void;
   /** Ferme le menu (clic extérieur, Échap, scroll, resize, après action). */
   onClose: () => void;
 }
@@ -34,6 +37,7 @@ export function CourseContextMenu({
   onEditCourse,
   onOpenMcp,
   onLeaveCourse,
+  onDeleteCourse,
   onClose,
 }: CourseContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -96,11 +100,26 @@ export function CourseContextMenu({
           <span>{defaultLabels.contextMcpManagement}</span>
         </button>
       )}
+      {/* « Supprimer le cours » : action ADMIN (avec Modifier / Feedback), stylée danger
+          car destructive. Distincte de « Quitter » (accessible à tous, sous le séparateur). */}
+      {onDeleteCourse && (
+        <button
+          type="button"
+          role="menuitem"
+          className={`${styles.item} ${styles.itemDanger}`}
+          onClick={onDeleteCourse}
+        >
+          <TrashCan className={styles.icon} width="16" height="16" aria-hidden="true" />
+          <span>{defaultLabels.contextDeleteCourse}</span>
+        </button>
+      )}
       {onLeaveCourse && (
         <>
-          {/* Séparateur seulement s'il y a des items au-dessus (pas pour un menu
+          {/* Séparateur seulement s'il y a des actions admin au-dessus (pas pour un menu
               « quitter » seul, cas d'un utilisateur non-administrateur). */}
-          {(onEditCourse || onOpenMcp) && <span className={styles.divider} role="separator" />}
+          {(onEditCourse || onOpenMcp || onDeleteCourse) && (
+            <span className={styles.divider} role="separator" />
+          )}
           <button
             type="button"
             role="menuitem"

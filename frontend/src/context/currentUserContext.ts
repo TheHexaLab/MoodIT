@@ -7,7 +7,7 @@
 // Refresh fonctionnel.
 
 import { createContext, useContext } from 'react';
-import type { User } from '../types/domain.ts';
+import type { Role, User } from '../types/domain.ts';
 import type { ProfileUpdate } from '../components/EditProfilePopup/types.ts';
 
 // 'checking' tant que la validation /api/me est en cours ; 'authed' si le token est
@@ -21,10 +21,23 @@ export interface CurrentUserApi {
   currentUser: User;
   /** Validation /api/me en cours : pilote le skeleton du UserMenu. */
   profileLoading: boolean;
-  /** Droits d'édition dérivés des rôles globaux (rôle « Administrateur »). */
+  /**
+   * Administrateur GLOBAL (plateforme) : rôle « Administrateur » OU « Gardien »
+   * dans User_Role (le gardien est un superset). Pilote les droits d'édition globaux.
+   */
   isAdmin: boolean;
+  /**
+   * Gardien (au-dessus d'Administrateur, User_Role) : peut gérer qui devient
+   * administrateur général ET gardien. Superset d'`isAdmin`.
+   */
+  isGuardian: boolean;
   /** PATCH /api/me (prénom, nom, couleur). Rejette si l'appel échoue. */
   saveProfile: (profile: ProfileUpdate) => Promise<void>;
+  /**
+   * Remplace les rôles GLOBAUX du profil connecté (User_Role) — appelé sur l'écho WS
+   * `user:globalRolesChanged` pour re-dériver `isAdmin`/`isGuardian` LIVE, sans recharger.
+   */
+  applyGlobalRoles: (roles: Role[]) => void;
 }
 
 export const CurrentUserContext = createContext<CurrentUserApi | null>(null);
