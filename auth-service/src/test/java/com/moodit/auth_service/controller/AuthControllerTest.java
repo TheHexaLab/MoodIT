@@ -30,6 +30,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import jakarta.servlet.http.Cookie;
 
 // Test d'intégration de la couche web : vérifie le mapping exception -> statut HTTP
 // par le GlobalExceptionHandler. Filtres de sécurité désactivés pour cibler le controller.
@@ -146,6 +147,22 @@ class AuthControllerTest {
         .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
         .andExpect(jsonPath("$.token").doesNotExist()) // token absent du corps
         .andExpect(jsonPath("$.username").value("rkarine"));
+  }
+
+  @Test
+  void logout_readsCookie_clearsSession_andClearsCookie() throws Exception {
+    // Vérifie que logout lit le cookie JWT, invalide la session côté service et renvoie un cookie expiré.
+    when(authCookie.clear())
+        .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
+
+    mockMvc
+        .perform(post("/auth/logout").cookie(new Cookie("moodit_token", "jwt-token")))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=")))
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("Max-Age=0")));
+
+    verify(authService).logout("jwt-token");
+    verify(authCookie).clear();
   }
 
   @Test
