@@ -433,9 +433,24 @@ public class ProgramService {
     List<Integer> subscriberIds =
         userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
 
-    // ON DELETE CASCADE en base : User_Program, program_course (les cours PARTAGÉS restent,
-    // seul le lien est retiré), User_Program_Role.
+    // Cours rattachés au programme, capturés AVANT le delete : on supprimera ensuite ceux devenus
+    // orphelins (plus rattachés à aucun programme). Les cours PARTAGÉS avec un autre programme restent.
+    List<Integer> courseIds =
+        program.getCourses() == null
+            ? List.of()
+            : program.getCourses().stream().map(Course::getId).toList();
+
+    // ON DELETE CASCADE en base : User_Program, program_course (seul le lien est retiré),
+    // User_Program_Role. flush() : le retrait des liens program_course doit être VISIBLE avant
+    // le calcul des cours orphelins ci-dessous.
     programRepository.delete(program);
+    programRepository.flush();
+
+    // Supprime les cours devenus orphelins (le ON DELETE CASCADE en base emporte forums, quiz,
+    // inscriptions et réponses MCP du cours supprimé). Garde IN () vide → pas de requête.
+    if (!courseIds.isEmpty()) {
+      courseRepository.deleteOrphanedAmong(courseIds);
+    }
 
     // ── Temps réel : chaque abonné (room user:<id>) retire le programme de sa liste. ──
     afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programDeleted(uid, programId)));
