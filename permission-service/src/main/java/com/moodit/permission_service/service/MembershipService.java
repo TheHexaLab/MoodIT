@@ -171,6 +171,17 @@ public class MembershipService {
     return membershipRepository.hasRoleInCourse(userId, courseId, roleName);
   }
 
+  /**
+   * L'utilisateur a-t-il le role (nomme) sur le COURS DU QUIZ ? Comme hasRoleInCourse mais a
+   * partir de l'id du QUIZ (routes REST /api/quizzes/{quizId} de gestion de contenu) : la
+   * resolution quiz -> cours se fait cote SQL. Avec roleName = "Enseignant" -> "est-il prof du
+   * cours de ce quiz ?".
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInQuizCourse(long userId, long quizId, String roleName) {
+    return membershipRepository.hasRoleInQuizCourse(userId, quizId, roleName);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

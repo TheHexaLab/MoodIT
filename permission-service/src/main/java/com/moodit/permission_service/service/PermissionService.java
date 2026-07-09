@@ -172,14 +172,33 @@ public class PermissionService {
                     }),
 
         // ── QUIZ ─────────────────────────────────────────────────────────────────
-        // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
-        // la resolution quiz -> programme disponible.
+        // GESTION DE CONTENU (creer / editer / supprimer / reordonner un quiz, voir le detail
+        // editeur) : reservee a qui gere le CONTENU du cours = Administrateur/Gardien GLOBAL,
+        // OU Administrateur/Enseignant DANS un programme contenant le cours. Aligne sur
+        // QuizService.requireCourseAccess du core (403 sinon).
+            // Creer un quiz dans un cours (courseId dans le PATH).
+            rule(
+                "POST",
+                "/courses/{courseId}/quizzes",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            // Reordonner les quiz d'un cours (courseId dans le PATH).
+            rule(
+                "PATCH",
+                "/courses/{courseId}/quizzes/reorder",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            // Detail EDITEUR d'un quiz (avec correction) : gestion de contenu (quizId dans le PATH).
+            rule(
+                "GET",
+                "/quizzes/{quizId}/edit",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
             rule(
                 "PUT",
                 "/quizzes/{quizId}",
-                (user, vars, body) -> hasRole(user, "Administrateur")),
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
             rule(
-            "DELETE", "/quizzes/{quizId}", (user, vars, body) -> hasRole(user, "Administrateur")),
+                "DELETE",
+                "/quizzes/{quizId}",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
         // etre abonne a un programme du cours du quiz.
@@ -315,6 +334,34 @@ public class PermissionService {
     return programId > 0
         && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
             || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant"));
+  }
+
+  // ── Gestion du CONTENU d'un cours (quiz, sections...) ─────────────────────────────────
+  // Administrateur/Gardien GLOBAL (user_role) -> tous les cours. Sinon, Administrateur ou
+  // Enseignant DANS un programme contenant le cours (User_Program_Role + program_course).
+  // Aligne sur QuizService.requireCourseAccess du core. courseId lu dans une variable de PATH.
+  private boolean canManageCourseContent(User user, Map<String, String> vars, String courseVar) {
+    long courseId = longVar(vars, courseVar);
+    if (courseId <= 0) {
+      return false;
+    }
+    return hasRole(user, "Administrateur")
+        || hasRole(user, "Gardien")
+        || membershipService.hasRoleInCourse(user.getId(), courseId, "Administrateur")
+        || membershipService.hasRoleInCourse(user.getId(), courseId, "Enseignant");
+  }
+
+  // Meme regle que canManageCourseContent, mais a partir de l'id d'un QUIZ (le cours est resolu
+  // cote SQL via Quiz.course_id). quizId lu dans une variable de PATH.
+  private boolean canManageQuizContent(User user, Map<String, String> vars, String quizVar) {
+    long quizId = longVar(vars, quizVar);
+    if (quizId <= 0) {
+      return false;
+    }
+    return hasRole(user, "Administrateur")
+        || hasRole(user, "Gardien")
+        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, "Administrateur")
+        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, "Enseignant");
   }
 
   // Acces a un quiz (quizId dans les variables de path) : abonne a un programme du cours.

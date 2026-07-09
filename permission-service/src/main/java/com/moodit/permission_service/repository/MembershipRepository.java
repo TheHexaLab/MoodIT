@@ -132,4 +132,26 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("userId") long userId,
       @Param("courseId") long courseId,
       @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DU QUIZ ? Comme hasRoleInCourse, mais
+  // l'id fourni est celui du QUIZ (routes /api/quizzes/{quizId} de gestion de contenu) : on
+  // resout quiz -> cours via Quiz.course_id. Ex. avec roleName = 'Enseignant' : "est-il prof
+  // du cours auquel appartient ce quiz ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN Quiz q            ON q.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND q.id = :quizId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInQuizCourse(
+      @Param("userId") long userId,
+      @Param("quizId") long quizId,
+      @Param("roleName") String roleName);
 }
