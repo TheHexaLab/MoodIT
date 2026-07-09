@@ -18,6 +18,7 @@ package com.moodit.permission_service.service;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.UserRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -121,9 +122,11 @@ public class PermissionService {
               return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
             }),
 
-        // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
-        // Creer un cours dans des programmes : reserve aux Administrateurs.
-        rule("POST", "/programs/courses", (user, vars, body) -> hasRole(user, "Administrateur")),
+        // ── Creer un cours dans des programmes (programIds dans le BODY) ─────────
+        // Autorise : Administrateur/Gardien GLOBAL (user_role), OU Administrateur/Enseignant
+        // DANS CHACUN des programmes vises (User_Program_Role). Aligne sur addCourseToPrograms
+        // du core, qui exige de gerer TOUS les programmes demandes.
+        rule("POST", "/programs/courses", (user, vars, body) -> canCreateCourse(user, body)),
 
         // ── QUIZ ─────────────────────────────────────────────────────────────────
         // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
@@ -227,6 +230,41 @@ public class PermissionService {
   private static long longField(JsonNode body, String field) {
     JsonNode node = body.path(field);
     return node.canConvertToLong() ? node.longValue() : -1;
+  }
+
+  // Lit un champ TABLEAU d'entiers (long) du body JSON ; liste vide si absent / non tableau.
+  // Les elements non numeriques sont ignores.
+  private static List<Long> longArrayField(JsonNode body, String field) {
+    JsonNode node = body.path(field);
+    if (!node.isArray()) {
+      return List.of();
+    }
+    List<Long> ids = new ArrayList<>();
+    for (JsonNode element : node) {
+      if (element.canConvertToLong()) {
+        ids.add(element.longValue());
+      }
+    }
+    return ids;
+  }
+
+  // ── Creer un cours dans des programmes (programIds dans le BODY) ────────────────────
+  // Administrateur/Gardien GLOBAL (user_role) -> partout. Sinon, il faut etre Administrateur
+  // ou Enseignant DANS CHACUN des programmes vises (User_Program_Role) : meme exigence que
+  // addCourseToPrograms du core (gerer TOUS les programmes demandes, sinon 403).
+  private boolean canCreateCourse(User user, JsonNode body) {
+    if (hasRole(user, "Administrateur") || hasRole(user, "Gardien")) {
+      return true;
+    }
+    List<Long> programIds = longArrayField(body, "programIds");
+    return !programIds.isEmpty() && programIds.stream().allMatch(pid -> managesProgram(user, pid));
+  }
+
+  // L'utilisateur est-il Administrateur ou Enseignant DANS ce programme (User_Program_Role) ?
+  private boolean managesProgram(User user, long programId) {
+    return programId > 0
+        && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
+            || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant"));
   }
 
   // Acces a un quiz (quizId dans les variables de path) : abonne a un programme du cours.
