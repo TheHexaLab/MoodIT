@@ -18,6 +18,7 @@ package com.moodit.permission_service.service;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.UserRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -131,26 +132,15 @@ public class PermissionService {
                     "/users/{userId}/programs",
                     (user, vars, body) -> verifyUserId(user, vars)
             ),
-            /*TODO: Ajouter Administrateur global de l'établissement*/
-            /*
-            Creer un cours dans des programmes
-            createCourse, Frontend*/
+            // ── Creer un cours dans des programmes (programIds dans le BODY) ──────────────
+            // Administrateur/Gardien GLOBAL (user_role), OU Administrateur/Enseignant DANS
+            // CHACUN des programmes vises (User_Program_Role). Aligne sur addCourseToPrograms
+            // du core (gerer TOUS les programmes demandes, sinon 403).
+            //createCourse, Frontend
             rule(
                     "POST",
                     "/programs/courses",
-                    (user, vars, body) -> {
-                      List<Long> programIds = longListField(body, "programIds");
-                      if (hasRole(user, "Gardien")) {
-                        return true;
-                      }
-                      // Sinon, il faut le rôle (Admin ou Enseignant) sur CHAQUE programme visé.
-                      return programIds.stream()
-                              .allMatch(
-                                      programId ->
-                                              programId > 0
-                                                      && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
-                                                      || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant")));
-                    }),
+                    (user, vars, body) -> canCreateCourse(user, body)),
 
             // ── Course ──────────────────────────────────────────────────────────────────
             //Afficher tous les cours de l'usager connecté auquel il est inscrit selon un programme spécifié
@@ -163,7 +153,7 @@ public class PermissionService {
 
 
             // ── Forum ───────────────────────────────────────────────────────────────────
-            //hbyugvtyfvtygv
+            // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
             rule(
                     "POST",
                     "/forums/posts",
@@ -290,6 +280,41 @@ public class PermissionService {
   private static long longField(JsonNode body, String field) {
     JsonNode node = body.path(field);
     return node.canConvertToLong() ? node.longValue() : -1;
+  }
+
+  // Lit un champ TABLEAU d'entiers (long) du body JSON ; liste vide si absent / non tableau.
+  // Les elements non numeriques sont ignores.
+  private static List<Long> longArrayField(JsonNode body, String field) {
+    JsonNode node = body.path(field);
+    if (!node.isArray()) {
+      return List.of();
+    }
+    List<Long> ids = new ArrayList<>();
+    for (JsonNode element : node) {
+      if (element.canConvertToLong()) {
+        ids.add(element.longValue());
+      }
+    }
+    return ids;
+  }
+
+  // ── Creer un cours dans des programmes (programIds dans le BODY) ────────────────────
+  // Administrateur/Gardien GLOBAL (user_role) -> partout. Sinon, il faut etre Administrateur
+  // ou Enseignant DANS CHACUN des programmes vises (User_Program_Role) : meme exigence que
+  // addCourseToPrograms du core (gerer TOUS les programmes demandes, sinon 403).
+  private boolean canCreateCourse(User user, JsonNode body) {
+    if (hasRole(user, "Administrateur") || hasRole(user, "Gardien")) {
+      return true;
+    }
+    List<Long> programIds = longArrayField(body, "programIds");
+    return !programIds.isEmpty() && programIds.stream().allMatch(pid -> managesProgram(user, pid));
+  }
+
+  // L'utilisateur est-il Administrateur ou Enseignant DANS ce programme (User_Program_Role) ?
+  private boolean managesProgram(User user, long programId) {
+    return programId > 0
+        && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
+            || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant"));
   }
 
   // Acces a un quiz (quizId dans les variables de path) : abonne a un programme du cours.
@@ -425,20 +450,5 @@ public class PermissionService {
       User user, Map<String, String> vars, String roleName, String courseVar) {
     long courseId = longVar(vars, courseVar);
     return courseId > 0 && membershipService.hasRoleInCourse(user.getId(), courseId, roleName);
-  }
-
-  //Lit une list du body JSON. Exemple, liste des programmes
-  private static List<Long> longListField(JsonNode body, String field) {
-    JsonNode node = body.path(field);
-    if (!node.isArray()) {
-      return List.of();
-    }
-    List<Long> ids = new java.util.ArrayList<>();
-    for (JsonNode element : node) {
-      if (element.canConvertToLong()) {
-        ids.add(element.longValue());
-      }
-    }
-    return ids;
   }
 }
