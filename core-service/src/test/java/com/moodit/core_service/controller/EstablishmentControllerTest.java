@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.EstablishmentNotFoundException;
 import com.moodit.core_service.service.EstablishmentService;
+import com.moodit.core_service.service.ProgramService;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -27,6 +28,9 @@ class EstablishmentControllerTest {
 
     @MockitoBean
     private EstablishmentService establishmentService;
+
+    @MockitoBean
+    private ProgramService programService;
 
     @Autowired
     private ObjectMapper objectMapper;
