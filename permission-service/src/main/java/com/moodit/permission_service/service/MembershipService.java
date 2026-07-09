@@ -73,6 +73,12 @@ public class MembershipService {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
   }
 
+  /** Le programme est-il visible? Être abonné au programme. */
+  @Transactional(readOnly = true)
+  public boolean canAccessProgram(long userId, long programId) {
+    return membershipRepository.canSeeCourseViaProgram(userId, programId);
+  }
+
   /** Le cours (scope MCP) est-il visible ? Meme regle : etre abonne a un programme du cours. */
   @Transactional(readOnly = true)
   public boolean canAccessCourse(long userId, long courseId) {

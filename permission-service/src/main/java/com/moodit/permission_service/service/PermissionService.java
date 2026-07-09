@@ -36,7 +36,7 @@ public class PermissionService {
   private final AntPathMatcher matcher = new AntPathMatcher();
   private final List<Rule> rules;
 
-  public PermissionService(
+  public PermissionService (
       UserRepository userRepository,
       MembershipService membershipService,
       ObjectMapper objectMapper) {
@@ -112,6 +112,46 @@ public class PermissionService {
             ),
 
             // ── Program ─────────────────────────────────────────────────────────────────
+            /*TODO: Ajouter Administrateur global de l'établissement*/
+            //Afficher tous les users abonnés à un programme
+            //FetchProgramsRoles, Frontend
+            rule(
+                    "GET",
+                    "/programs/{programId}/users",
+                    (user, vars, body) -> {
+                      long programId = longVar(vars, "programId");
+                      return hasRole(user, "Gardien")
+                              || (programId > 0
+                              && membershipService.hasRoleInProgram(user.getId(), programId, "Administration"));
+                    }),
+            //La liste des roles et la liste des membres avec le role de chacun
+            //FetchProgram, Frontend
+            rule(
+                    "GET",
+                    "/users/{userId}/programs",
+                    (user, vars, body) -> verifyUserId(user, vars)
+            ),
+            /*TODO: Ajouter Administrateur global de l'établissement*/
+            /*
+            Creer un cours dans des programmes
+            createCourse, Frontend*/
+            rule(
+                    "POST",
+                    "/programs/courses",
+                    (user, vars, body) -> {
+                      List<Long> programIds = longListField(body, "programIds");
+                      if (hasRole(user, "Gardien")) {
+                        return true;
+                      }
+                      // Sinon, il faut le rôle (Admin ou Enseignant) sur CHAQUE programme visé.
+                      return programIds.stream()
+                              .allMatch(
+                                      programId ->
+                                              programId > 0
+                                                      && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
+                                                      || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant")));
+                    }),
+
             // ── Course ──────────────────────────────────────────────────────────────────
             //Afficher tous les cours de l'usager connecté auquel il est inscrit selon un programme spécifié
             //FetchCourses, Frontend
@@ -121,39 +161,25 @@ public class PermissionService {
                     (user, vars, body) -> verifyUserId(user, vars)
             ),
 
-            //Afficher tous les programmes de l'usager connecté
-            //FetchPrograms, Frontend
-            rule(
-                    "GET",
-                    "/users/${userId}/programs",
-                    (user, vars, body) -> verifyUserId(user, vars)
-            ),
 
-            // ── FIN (appartenance), id dans le BODY ──────────────────────────────────
-            // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
+            // ── Forum ───────────────────────────────────────────────────────────────────
+            //hbyugvtyfvtygv
             rule(
-                "POST",
-                "/forums/posts",
-                (user, vars, body) -> {
-                  long forumId = longField(body, "forumId");
-                  return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-                }),
+                    "POST",
+                    "/forums/posts",
+                    (user, vars, body) -> {
+                      long forumId = longField(body, "forumId");
+                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+                    }),
 
-        // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
+            // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
             rule(
-            "POST",
-            "/forums/posts/votes",
-            (user, vars, body) -> {
-              long forumId = longField(body, "forumId");
-              return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-            }),
-
-        // ── GROSSIER (role), aucun id de ressource ───────────────────────────────
-        // Creer un cours dans des programmes : reserve aux Administrateurs.
-            rule(
-                "POST",
-                "/programs/courses",
-                (user, vars, body) -> hasRole(user, "Administrateur")),
+                    "POST",
+                    "/forums/posts/votes",
+                    (user, vars, body) -> {
+                      long forumId = longField(body, "forumId");
+                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+                    }),
 
         // ── QUIZ ─────────────────────────────────────────────────────────────────
         // Editer / supprimer un quiz : reserve aux Administrateurs. Regle grossiere ;
@@ -386,21 +412,6 @@ public class PermissionService {
     return roles.contains(roleName);
   }
 
-  // ── PREDICAT GENERIQUE : role SCOPE A UN PROGRAMME ────────────────────────────────
-  // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme DANS le programme vise
-  // (table User_Program_Role) — ex. "enseignant du programme {programId}". A distinguer
-  // de hasRole, qui verifie un role GLOBAL (user_role). programId lu dans une variable
-  // de PATH.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("POST", "/programs/{programId}/courses",
-  //       (user, vars, body) -> hasRoleInProgram(user, vars, "Enseignant", "programId")),
-  private boolean hasRoleInProgram(
-      User user, Map<String, String> vars, String roleName, String programVar) {
-    long programId = longVar(vars, programVar);
-    return programId > 0 && membershipService.hasRoleInProgram(user.getId(), programId, roleName);
-  }
-
   // ── PREDICAT GENERIQUE : role SUR UN COURS (ex. "prof du cours") ───────────────────
   // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme sur le cours vise : role
   // scope-programme (User_Program_Role) ET cours rattache a ce programme (program_course).
@@ -414,5 +425,20 @@ public class PermissionService {
       User user, Map<String, String> vars, String roleName, String courseVar) {
     long courseId = longVar(vars, courseVar);
     return courseId > 0 && membershipService.hasRoleInCourse(user.getId(), courseId, roleName);
+  }
+
+  //Lit une list du body JSON. Exemple, liste des programmes
+  private static List<Long> longListField(JsonNode body, String field) {
+    JsonNode node = body.path(field);
+    if (!node.isArray()) {
+      return List.of();
+    }
+    List<Long> ids = new java.util.ArrayList<>();
+    for (JsonNode element : node) {
+      if (element.canConvertToLong()) {
+        ids.add(element.longValue());
+      }
+    }
+    return ids;
   }
 }

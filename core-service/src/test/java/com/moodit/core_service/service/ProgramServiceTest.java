@@ -267,6 +267,18 @@ public class ProgramServiceTest {
             verifyNoInteractions(programRepository, courseRepository);
         }
         @Test
+        @DisplayName("Retourne IllegalArgumentException et ne crée aucun cours, si la liste de programmes est vide")
+        void addCourseToPrograms_avec_liste_vide_ne_devrait_pas_creer_de_cours() {
+            CourseCreateInProgramsDTO dtoAvecListeVide = CourseCreateInProgramsDTO.builder()
+                    .title("Chimie")
+                    .code("CHM10")
+                    .programIds(List.of())
+                    .build();
+
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeVide, "admin@test"));
+            verifyNoInteractions(programRepository, courseRepository);
+        }
+        @Test
         @DisplayName("Gère correctement les doublons d'IDs dans la requête sans dupliquer l'association")
         void addCourseToPrograms_avec_id_doublon_ne_devrait_pas_creer_de_doublon() {
             program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();

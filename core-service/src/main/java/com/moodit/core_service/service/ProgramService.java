@@ -233,12 +233,12 @@ public class ProgramService {
   // region POST
   @Transactional
   public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO, String userEmail) {
-    if (courseCreateDTO == null || courseCreateDTO.getProgramIds() == null) {
+    if (courseCreateDTO == null
+            || courseCreateDTO.getProgramIds() == null
+            || courseCreateDTO.getProgramIds().isEmpty() ) {
       throw new IllegalArgumentException();
     }
 
-    // ── Autorisation : admin global / gardien → partout ; sinon l'utilisateur doit être
-    // Administrateur ou Enseignant de CHAQUE programme visé (User_Program_Role), sinon 403. ──
     User requester = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
     List<Integer> requestedProgramIds = courseCreateDTO.getProgramIds().stream().distinct().toList();
     if (!isGlobalAdmin(requester) && !requestedProgramIds.isEmpty()) {
