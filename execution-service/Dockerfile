@@ -3,7 +3,11 @@
 # ces bundles dans l'image et l'assembleur les joint à la soumission.
 FROM node:20-alpine AS jsvendor
 WORKDIR /vendor
-RUN npm install node-html-parser@6.1.13 react@18.3.1 react-dom@18.3.1 @babel/standalone@7.24.7 happy-dom@14.12.3 esbuild@0.21.5
+# Réseau CI instable (ECONNRESET) : on force npm à réessayer plutôt qu'abandonner au 1er échec.
+RUN npm install --no-audit --no-fund \
+      --fetch-retries=5 --fetch-retry-factor=2 \
+      --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 --fetch-timeout=600000 \
+      node-html-parser@6.1.13 react@18.3.1 react-dom@18.3.1 @babel/standalone@7.24.7 happy-dom@14.12.3 esbuild@0.21.5
 # HTML : node-html-parser expose parse()/querySelector()/textContent/getAttribute (API façon DOM).
 RUN printf "module.exports = require('node-html-parser');" > html-entry.js \
  && npx esbuild html-entry.js --bundle --minify --platform=node --format=cjs --outfile=/out/htmlparser.js
