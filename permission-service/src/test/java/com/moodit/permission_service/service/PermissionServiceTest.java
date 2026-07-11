@@ -134,6 +134,61 @@ class PermissionServiceTest {
     assertThat(service().isAllowed(EMAIL, "/api/roles/global/change", "POST", "{}")).isFalse();
   }
 
+  // ── Gestion des établissements : Gardien uniquement ─────────────────────────────────
+
+  @Test
+  void createEstablishment_guardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/establishments", "POST", "{}")).isTrue();
+  }
+
+  @Test
+  void createEstablishment_generalAdmin_denied() {
+    loggedIn(user(5, RoleNames.ADMIN)); // admin général ≠ gardien
+    assertThat(service().isAllowed(EMAIL, "/api/establishments", "POST", "{}")).isFalse();
+  }
+
+  @Test
+  void updateEstablishment_nonGuardian_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/establishments/3", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void deleteEstablishment_guardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/establishments/3", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void listEstablishments_openToAnyAuthenticated() {
+    // La LECTURE reste ouverte (default-allow) : aucun chargement de user requis.
+    assertThat(service().isAllowed(EMAIL, "/api/establishments", "GET", null)).isTrue();
+  }
+
+  // ── Modifier un programme (PATCH /programs/{id}) : admin/gardien global OU admin du programme ──
+
+  @Test
+  void updateProgram_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void updateProgram_programAdmin_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void updateProgram_programTeacher_denied() {
+    // Enseignant du programme : PAS autorisé à modifier le programme.
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "PATCH", "{}")).isFalse();
+  }
+
   // ── Régression du bug "Administration" : membres d'un programme (GET /programs/{id}/users) ──
 
   @Test

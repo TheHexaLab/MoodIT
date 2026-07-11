@@ -156,6 +156,37 @@ public class PermissionService {
                     "/users/{userId}/programs",
                     (user, vars, body) -> verifyUserId(user, vars)
             ),
+
+            // ── Establishment (GESTION) ───────────────────────────────────────────────────
+            // Créer / modifier / supprimer un ÉTABLISSEMENT : réservé au Gardien (gestionnaire des
+            // établissements). Les LECTURES (GET /establishments, .../programs, .../manageable-programs)
+            // restent ouvertes : elles alimentent aussi les flux création/adhésion (non-gardien).
+            rule("POST", "/establishments", (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
+            rule(
+                    "PATCH",
+                    "/establishments/{establishmentId}",
+                    (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
+            rule(
+                    "DELETE",
+                    "/establishments/{establishmentId}",
+                    (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
+
+            // ── Modifier un PROGRAMME (PATCH /programs/{programId}) ────────────────────────
+            // Réservé à : Administrateur/Gardien GLOBAL (User_Role), OU Administrateur DU
+            // programme (User_Program_Role) — PAS l'Enseignant. programId dans le PATH.
+            rule(
+                    "PATCH",
+                    "/programs/{programId}",
+                    (user, vars, body) -> {
+                      if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+                        return true;
+                      }
+                      long programId = longVar(vars, "programId");
+                      return programId > 0
+                          && membershipService.hasRoleInProgram(
+                              user.getId(), programId, RoleNames.ADMIN);
+                    }),
+
             // ── Creer un cours dans des programmes (programIds dans le BODY) ──────────────
             // Administrateur/Gardien GLOBAL (user_role), OU Administrateur/Enseignant DANS
             // CHACUN des programmes vises (User_Program_Role). Aligne sur addCourseToPrograms
