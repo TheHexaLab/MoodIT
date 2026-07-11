@@ -378,10 +378,17 @@ export function useQuizAttempt({
       }
       if (pending) clearPending(initialQuiz.id);
 
+      // Une soumission était en vol ET l'historique a grandi (sinon on serait passé par la branche
+      // de réconciliation ci-dessus) : elle a ABOUTI pendant le refresh. La tentative est enregistrée
+      // → le brouillon est obsolète, et on doit ouvrir le RÉSUMÉ, pas rouvrir le brouillon (bug
+      // observé sur les quiz avec reprise, où `consumed` reste faux).
+      const submissionLanded = pending != null;
+      if (submissionLanded) clearDraft(initialQuiz.id);
+
       // Brouillon de passation restauré (réponses + position) : l'étudiant était en train de
       // répondre avant le rechargement. On le rétablit et on reste en passation — SAUF si la
-      // tentative unique est déjà consommée (brouillon obsolète → on le jette).
-      const draft = readDraft(initialQuiz.id);
+      // tentative unique est déjà consommée OU si une soumission vient d'aboutir (brouillon obsolète).
+      const draft = submissionLanded ? null : readDraft(initialQuiz.id);
       const consumed = !fetched.allowRetry && history.length > 0;
       if (draft && !consumed) {
         setAnswers(mergeAnswers(fetched, draft.answers));

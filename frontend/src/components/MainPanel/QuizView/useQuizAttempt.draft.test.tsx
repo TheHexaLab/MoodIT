@@ -62,3 +62,42 @@ describe('brouillon de passation — clé cohérente', () => {
     expect(second.result.current.currentIndex).toBe(1);
   });
 });
+
+describe('refresh après une soumission ABOUTIE (quiz avec reprise)', () => {
+  const retryQuiz = { ...fetchedQuiz, id: REQUEST_ID, allowRetry: true } as Quiz;
+
+  it('ouvre le RÉSUMÉ (pas le brouillon) et jette le brouillon', async () => {
+    // Brouillon + marqueur « en vol » présents (soumission lancée puis refresh), MAIS l'historique
+    // contient déjà la tentative → elle a abouti pendant le refresh.
+    localStorage.setItem(
+      `moodit:quiz-draft:${REQUEST_ID}`,
+      JSON.stringify({ answers: { 101: { kind: 'choice', answerIds: [2] } }, touched: [101], currentIndex: 1 })
+    );
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${REQUEST_ID}`,
+      JSON.stringify({ answers: { 101: { kind: 'choice', answerIds: [2] } }, attemptsBefore: 0, attemptId: 7 })
+    );
+    const fetchRetry = vi.fn(async () => retryQuiz);
+    const attemptsGrown = vi.fn(async () => [{ id: 7, attemptNo: 1, earned: 1, max: 2 }]);
+    const attemptResult = vi.fn(async () => ({
+      quizId: REQUEST_ID, attemptId: 7, attemptNo: 1, earned: 1, max: 2, questions: [],
+    }));
+
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz: retryQuiz,
+        onFetchQuiz: fetchRetry,
+        onFetchAttempts: attemptsGrown,
+        onFetchAttemptResult: attemptResult,
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await Promise.resolve(); });
+
+    // Résumé de la tentative aboutie — surtout PAS la passation avec le brouillon restauré.
+    expect(result.current.phase).toBe('summary');
+    expect(result.current.result?.attemptId).toBe(7);
+    // Le brouillon obsolète a été jeté.
+    expect(localStorage.getItem(`moodit:quiz-draft:${REQUEST_ID}`)).toBeNull();
+  });
+});
