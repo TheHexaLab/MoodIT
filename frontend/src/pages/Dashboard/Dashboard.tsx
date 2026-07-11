@@ -46,6 +46,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import { createAppSocket } from '../../services/appSocket.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
+import type { SavedLocation } from '../../helpers/userSettings.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
 import * as api from './dashboardApi.ts';
@@ -103,8 +104,16 @@ export default function Dashboard() {
   // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
   const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
   // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
-  const { currentUser, profileLoading, isAdmin, isGuardian, saveProfile, applyGlobalRoles } =
-    useCurrentUser();
+  const {
+    currentUser,
+    profileLoading,
+    isAdmin,
+    isGuardian,
+    saveProfile,
+    applyGlobalRoles,
+    settings,
+    saveSettings,
+  } = useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
@@ -715,6 +724,91 @@ export default function Dashboard() {
     openQuizIdRef.current = openQuizId;
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
+
+  // ── Persistance de la localisation (settings utilisateur) ──────────────────────
+  // But : replacer l'utilisateur là où il était (programme → cours → canal) à la
+  // session précédente. La restauration se fait en DEUX TEMPS car le chargement des
+  // cours d'un programme est asynchrone : on sélectionne d'abord le programme, puis
+  // le cours + le canal une fois ses cours chargés. Repli gracieux à chaque niveau
+  // (le programme/cours/canal peut avoir disparu depuis — désinscription, suppression).
+  const restoreStartedRef = useRef(false); // programme traité
+  const restoreDoneRef = useRef(false); // cours + canal traités (débloque la sauvegarde)
+  const restoreTargetRef = useRef<SavedLocation | null>(null);
+
+  // Programme dont le chargement des cours s'est EFFECTIVEMENT terminé (transition
+  // coursesLoading true→false). Indispensable pour l'étape 2 : juste après avoir posé le
+  // programme, `coursesLoading` est encore `false` (le loader n'a pas encore basculé) alors
+  // que la liste de cours est vide (fetchPrograms renvoie `courses: []`). Sans ce repère,
+  // l'étape 2 verrait une liste vide et abandonnerait la restauration du cours/canal.
+  const coursesLoadedForRef = useRef<number | null>(null);
+  const prevCoursesLoadingRef = useRef(false);
+  useEffect(() => {
+    if (prevCoursesLoadingRef.current && !coursesLoading) {
+      coursesLoadedForRef.current = activeProgramId;
+    }
+    prevCoursesLoadingRef.current = coursesLoading;
+  }, [coursesLoading, activeProgramId]);
+
+  // Étape 1 : sélectionner le programme sauvegardé, une fois la liste chargée.
+  useEffect(() => {
+    if (restoreStartedRef.current) return;
+    if (profileLoading || currentUser.id < 0) return; // profil (donc settings) pas prêt
+    if (programsLoading) return; // liste des programmes pas prête
+    restoreStartedRef.current = true;
+
+    const loc = settings.location;
+    const programExists =
+      loc?.programId != null && dashboardPrograms.some((p) => p.id === loc.programId);
+    if (programExists) {
+      restoreTargetRef.current = loc ?? null;
+      // Synchronisation légitime d'un état PERSISTÉ (settings BD) → état React, une seule
+      // fois après chargement asynchrone : pas dérivable au rendu.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveProgramId(loc!.programId!);
+      // Le cours + le canal sont restaurés par l'étape 2 (après chargement des cours).
+    } else {
+      restoreDoneRef.current = true; // rien à restaurer → la sauvegarde peut démarrer
+    }
+  }, [profileLoading, currentUser.id, programsLoading, dashboardPrograms, settings]);
+
+  // Étape 2 : sélectionner le cours + le canal une fois les cours du programme chargés.
+  useEffect(() => {
+    if (restoreDoneRef.current || !restoreStartedRef.current) return;
+    const target = restoreTargetRef.current;
+    if (!target || activeProgramId !== target.programId) return;
+    // Attendre la FIN effective du chargement des cours de ce programme. On ne se fie PAS
+    // au seul instantané `coursesLoading` (false pendant la fenêtre initiale) : on exige
+    // qu'un chargement se soit terminé pour CE programme (coursesLoadedForRef).
+    if (coursesLoading || coursesLoadedForRef.current !== activeProgramId) return;
+
+    const courseList = dashboardPrograms.find((p) => p.id === activeProgramId)?.courses ?? [];
+    if (target.courseId != null && courseList.some((c) => c.id === target.courseId)) {
+      // Restauration one-shot d'un état persisté (cf. étape 1) : setState en effet assumé.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedCourseId(target.courseId);
+      // Canal restauré tel quel : la dérivation `selectedChannel` retombe sur `null`
+      // si le canal n'existe plus (repli gracieux), sans casser l'affichage.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (target.channel) setSelectedChannelRef(target.channel);
+    }
+    restoreDoneRef.current = true;
+  }, [activeProgramId, coursesLoading, dashboardPrograms]);
+
+  // Sauvegarde debouncée à chaque changement de position (une fois la restauration
+  // terminée, pour ne pas écraser la localisation sauvegardée par l'état par défaut).
+  // On enregistre le cours EFFECTIVEMENT affiché (repli inclus) plutôt que la sélection
+  // brute, pour restaurer exactement ce que l'utilisateur voyait.
+  useEffect(() => {
+    if (!restoreDoneRef.current) return;
+    if (activeProgramId < 0) return; // pas de position réelle à mémoriser
+    saveSettings({
+      location: {
+        programId: activeProgramId,
+        courseId: effectiveSelectedCourseId,
+        channel: selectedChannelRef,
+      },
+    });
+  }, [activeProgramId, effectiveSelectedCourseId, selectedChannelRef, saveSettings]);
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>

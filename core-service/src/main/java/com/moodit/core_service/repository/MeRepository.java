@@ -33,7 +33,8 @@ public class MeRepository {
               rs.getString("last_name"),
               rs.getString("email"),
               rs.getString("avatar_color"),
-              List.of());
+              List.of(),
+              rs.getString("settings"));
 
   private static final RowMapper<Role> ROLE_MAPPER =
       (rs, rowNum) -> new Role(rs.getLong("id"), rs.getString("name"));
@@ -43,7 +44,7 @@ public class MeRepository {
     return jdbc
         .query(
             """
-            SELECT id, username, first_name, last_name, email, avatar_color
+            SELECT id, username, first_name, last_name, email, avatar_color, settings
             FROM User_
             WHERE email = ?
             """,
@@ -67,12 +68,34 @@ public class MeRepository {
             UPDATE User_
             SET first_name = ?, last_name = ?, avatar_color = ?
             WHERE email = ?
-            RETURNING id, username, first_name, last_name, email, avatar_color
+            RETURNING id, username, first_name, last_name, email, avatar_color, settings
             """,
             ME_MAPPER,
             firstName,
             lastName,
             avatarColor,
+            email)
+        .stream()
+        .findFirst()
+        .map(this::withRoles);
+  }
+
+  /**
+   * Écrase le blob de préférences (colonne TEXT `settings`) de l'utilisateur et renvoie le profil à
+   * jour (rôles inclus). Vide si aucun utilisateur ne correspond à cet email. Le contenu est un JSON
+   * opaque validé côté contrôleur — le repository ne l'interprète pas.
+   */
+  public Optional<MeDto> updateSettingsByEmail(String email, String settingsJson) {
+    return jdbc
+        .query(
+            """
+            UPDATE User_
+            SET settings = ?
+            WHERE email = ?
+            RETURNING id, username, first_name, last_name, email, avatar_color, settings
+            """,
+            ME_MAPPER,
+            settingsJson,
             email)
         .stream()
         .findFirst()
@@ -88,7 +111,8 @@ public class MeRepository {
         base.lastName(),
         base.email(),
         base.avatarColor(),
-        rolesByUserId(base.id()));
+        rolesByUserId(base.id()),
+        base.settings());
   }
 
   /** Rôles globaux de l'utilisateur (User_Role → Role), triés par id. */

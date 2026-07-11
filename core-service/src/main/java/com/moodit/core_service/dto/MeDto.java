@@ -5,6 +5,10 @@
 //
 // `roles` = rôles GLOBAUX (User_Role). Le front en dérive `isAdmin` (rôle
 // « Administrateur »). Les rôles par programme (User_Program_Role) ne sont pas ici.
+//
+// `settings` = blob JSON OPAQUE (colonne TEXT) appartenant au front : préférences
+// utilisateur (thème, dernière localisation dans l'app). Le backend ne fait que le
+// persister tel quel (cf. PUT /api/me/settings) ; `null` pour un compte neuf.
 
 package com.moodit.core_service.dto;
 
@@ -17,4 +21,5 @@ public record MeDto(
     String lastName,
     String email,
     String avatarColor,
-    List<Role> roles) {}
+    List<Role> roles,
+    String settings) {}

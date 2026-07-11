@@ -57,6 +57,13 @@ export interface User {
    * d'auteur minimales ne les portent pas. Le front en dérive `isAdmin`.
    */
   roles?: Role[];
+  /**
+   * Blob JSON OPAQUE des préférences (colonne User_.settings), renvoyé par GET/PATCH
+   * /api/me et écrit par PUT /api/me/settings. Le front en est propriétaire : thème,
+   * dernière localisation. `undefined`/`null` pour un compte neuf. Voir
+   * `helpers/userSettings.ts` (parse/serialize).
+   */
+  settings?: string | null;
 }
 
 /**

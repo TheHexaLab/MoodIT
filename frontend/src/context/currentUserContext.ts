@@ -9,6 +9,7 @@
 import { createContext, useContext } from 'react';
 import type { Role, User } from '../types/domain.ts';
 import type { ProfileUpdate } from '../components/EditProfilePopup/types.ts';
+import type { UserSettings } from '../helpers/userSettings.ts';
 
 // 'checking' tant que la validation /api/me est en cours ; 'authed' si le token est
 // valide en BD (profil chargé) ; 'unauthed' si absent/refusé.
@@ -33,6 +34,17 @@ export interface CurrentUserApi {
   isGuardian: boolean;
   /** PATCH /api/me (prénom, nom, couleur). Rejette si l'appel échoue. */
   saveProfile: (profile: ProfileUpdate) => Promise<void>;
+  /**
+   * Préférences persistées de l'utilisateur (blob `User_.settings` parsé) : thème et
+   * dernière localisation dans l'app. Objet vide pour un compte neuf.
+   */
+  settings: UserSettings;
+  /**
+   * Fusionne `patch` dans les settings courants et persiste (PUT /api/me/settings)
+   * de façon DEBOUNCÉE : appelé fréquemment (à chaque navigation pour la localisation),
+   * on ne veut qu'un seul appel réseau après la rafale. Mise à jour optimiste locale.
+   */
+  saveSettings: (patch: Partial<UserSettings>) => void;
   /**
    * Remplace les rôles GLOBAUX du profil connecté (User_Role) — appelé sur l'écho WS
    * `user:globalRolesChanged` pour re-dériver `isAdmin`/`isGuardian` LIVE, sans recharger.
