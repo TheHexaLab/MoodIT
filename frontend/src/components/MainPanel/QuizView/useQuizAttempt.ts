@@ -57,6 +57,45 @@ function clearPending(quizId: number): void {
   }
 }
 
+/**
+ * Brouillon de PASSATION persisté en localStorage : réponses en cours, questions déjà touchées
+ * et position (index de la question affichée). Sauvegardé à chaque changement tant que la
+ * tentative n'est pas soumise, il permet de RETROUVER où l'étudiant en était après un simple
+ * rechargement de l'onglet (l'état React est perdu au refresh). Distinct de `PendingSubmission`,
+ * qui ne couvre QUE l'instant de l'envoi.
+ */
+type DraftState = { answers: AttemptAnswers; touched: number[]; currentIndex: number };
+
+const DRAFT_KEY = (quizId: number) => `moodit:quiz-draft:${quizId}`;
+
+function readDraft(quizId: number): DraftState | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(quizId));
+    return raw ? (JSON.parse(raw) as DraftState) : null;
+  } catch {
+    return null;
+  }
+}
+function writeDraft(quizId: number, draft: DraftState): void {
+  try {
+    localStorage.setItem(DRAFT_KEY(quizId), JSON.stringify(draft));
+  } catch {
+    // quota / mode privé : la persistance est un bonus, on ignore l'échec.
+  }
+}
+function clearDraft(quizId: number): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY(quizId));
+  } catch {
+    // ignore
+  }
+}
+
+/** Ramène un index de question dans les bornes valides du quiz (0..n-1, ou 0 si vide). */
+function clampIndex(index: number, quiz: Quiz): number {
+  return Math.max(0, Math.min(index, Math.max((quiz.questions?.length ?? 0) - 1, 0)));
+}
+
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Sonde le serveur au plus ~30 s (toutes les 1,5 s) après un refresh mid-envoi. */
@@ -196,6 +235,9 @@ export function useQuizAttempt({
   const [currentAttemptId, setCurrentAttemptId] = useState<number | null>(null);
 
   const mountedRef = useRef(true);
+  // Passe à `true` une fois le brouillon éventuel restauré (fin du premier `reload`) : évite que
+  // l'effet de persistance n'ÉCRASE le brouillon stocké avec l'état pristine du montage.
+  const hydratedRef = useRef(false);
   const fetchRef = useRef(onFetchQuiz);
   const fetchAttemptsRef = useRef(onFetchAttempts);
   const fetchAttemptResultRef = useRef(onFetchAttemptResult);
@@ -231,6 +273,7 @@ export function useQuizAttempt({
           if (!mountedRef.current) return;
           if (history.length > pending.attemptsBefore) {
             clearPending(quizId);
+            clearDraft(quizId);
             const last = history[history.length - 1];
             const lastResult = fetchAttemptResultRef.current
               ? await fetchAttemptResultRef.current(quizId, last.id)
@@ -264,6 +307,8 @@ export function useQuizAttempt({
   /** Charge le détail du quiz + l'historique ; ouvre sur la dernière tentative s'il y en a. */
   const reload = useCallback(async () => {
     const fetchQuiz = fetchRef.current;
+    // Sans GET (mode purement local, chemin défensif), la persistance du brouillon reste inactive
+    // (`hydratedRef` jamais posé) : rien à restaurer, on ne clobbere pas non plus l'existant.
     if (!fetchQuiz) return;
     setLoading(true);
     setLoadError(null);
@@ -290,6 +335,24 @@ export function useQuizAttempt({
       }
       if (pending) clearPending(initialQuiz.id);
 
+      // Brouillon de passation restauré (réponses + position) : l'étudiant était en train de
+      // répondre avant le rechargement. On le rétablit et on reste en passation — SAUF si la
+      // tentative unique est déjà consommée (brouillon obsolète → on le jette).
+      const draft = readDraft(initialQuiz.id);
+      const consumed = !fetched.allowRetry && history.length > 0;
+      if (draft && !consumed) {
+        setAnswers(mergeAnswers(fetched, draft.answers));
+        const ids = new Set((fetched.questions ?? []).map((q) => q.id));
+        setTouched(new Set(draft.touched.filter((id) => ids.has(id))));
+        setCurrentIndex(clampIndex(draft.currentIndex, fetched));
+        setAttempts(history);
+        setResult(null);
+        setCurrentAttemptId(null);
+        setPhase('taking');
+        return;
+      }
+      if (draft) clearDraft(initialQuiz.id);
+
       setAnswers(initAnswers(fetched));
       setAttempts(history);
       const last = history.length > 0 ? history[history.length - 1] : null;
@@ -312,6 +375,9 @@ export function useQuizAttempt({
       if (!mountedRef.current) return;
       setLoadError(loadErrorMessage);
     } finally {
+      // Hydratation terminée (y compris via un `return` anticipé de la branche pending/brouillon) :
+      // l'effet de persistance peut désormais sauvegarder sans écraser le brouillon restauré.
+      hydratedRef.current = true;
       if (mountedRef.current) setLoading(false);
     }
   }, [initialQuiz.id, loadErrorMessage, reconcilePending]);
@@ -319,6 +385,18 @@ export function useQuizAttempt({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Persiste le brouillon de passation (réponses + touched + position) à chaque changement, tant
+  // qu'on est en train de répondre. Gardé par `hydratedRef` pour ne pas écraser un brouillon stocké
+  // avec l'état pristine du montage (avant restauration). En dehors de `taking` (résumé/révision),
+  // rien n'est écrit : le brouillon d'une tentative en cours reste intact jusqu'à sa soumission.
+  useEffect(() => {
+    if (!hydratedRef.current || phase !== 'taking') return;
+    // Clé = `initialQuiz.id` (l'id de la REQUÊTE, stable et identique à celui lu par `reload`).
+    // NE PAS utiliser `quiz.id` (l'id du quiz FETCHÉ) : il peut différer (quiz du jour /
+    // normalisation de canal), et on écrirait alors sous une clé que la restauration ne relit pas.
+    writeDraft(initialQuiz.id, { answers, touched: [...touched], currentIndex });
+  }, [initialQuiz.id, phase, answers, touched, currentIndex]);
 
   /** Recharge le détail du quiz en CONSERVANT les réponses en cours (fusion). Reste en passation. */
   const reloadKeepingAnswers = useCallback(async () => {
@@ -376,13 +454,16 @@ export function useQuizAttempt({
     // potentiellement long), le remontage la réconciliera avec le serveur. Uniquement en mode
     // serveur (le grader local est instantané).
     const usingServer = Boolean(onSubmitQuiz);
-    if (usingServer) writePending(quiz.id, { answers, attemptsBefore: attempts.length });
+    // Clés localStorage TOUJOURS sur `initialQuiz.id` (cf. l'effet de persistance) : cohérence
+    // écriture/lecture même quand l'id du quiz fetché diffère de l'id de la requête.
+    if (usingServer) writePending(initialQuiz.id, { answers, attemptsBefore: attempts.length });
     try {
       const graded = onSubmitQuiz
         ? await onSubmitQuiz(toSubmission(quiz, answers))
         : gradeQuiz(quiz, answers); // repli : correction locale (mode mock)
-      // La requête a répondu (succès) : envoi terminé, plus rien « en vol ».
-      if (usingServer) clearPending(quiz.id);
+      // La requête a répondu (succès) : envoi terminé, plus rien « en vol » ni de brouillon à garder.
+      if (usingServer) clearPending(initialQuiz.id);
+      clearDraft(initialQuiz.id);
       if (!mountedRef.current) return;
       setResult(graded);
       setCurrentAttemptId(graded.attemptId ?? null);
@@ -395,7 +476,7 @@ export function useQuizAttempt({
       }
     } catch (err) {
       // Échec DÉFINITIF (réponse d'erreur reçue, ex. 503) : rien « en vol », on invite à renvoyer.
-      if (usingServer) clearPending(quiz.id);
+      if (usingServer) clearPending(initialQuiz.id);
       if (!mountedRef.current) return;
       // 503 : la vérification du code a échoué → tentative NON enregistrée. La phase reste « taking »
       // (on ne passe en résumé qu'en cas de succès), donc l'étudiant peut resoumettre directement.
@@ -407,10 +488,12 @@ export function useQuizAttempt({
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-  }, [quiz, answers, attempts.length, onSubmitQuiz, submitErrorMessage, codeVerificationUnavailableMessage]);
+  }, [quiz, initialQuiz.id, answers, attempts.length, onSubmitQuiz, submitErrorMessage, codeVerificationUnavailableMessage]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */
   const retry = useCallback(() => {
+    // Jette le brouillon de la tentative précédente ; l'effet de persistance en réécrira un neuf.
+    clearDraft(initialQuiz.id);
     setAnswers(initAnswers(quiz));
     setTouched(new Set());
     setCurrentIndex(0);
@@ -418,7 +501,7 @@ export function useQuizAttempt({
     setCurrentAttemptId(null);
     setSubmitError(null);
     setPhase('taking');
-  }, [quiz]);
+  }, [quiz, initialQuiz.id]);
 
   /** Affiche le récap d'une tentative passée (charge son détail corrigé). */
   const selectAttempt = useCallback(async (attemptId: number) => {
