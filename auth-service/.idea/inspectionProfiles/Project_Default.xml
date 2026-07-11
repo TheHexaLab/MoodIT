@@ -8,6 +8,7 @@
       <option name="m_regex" value="[A-Z][A-Z_\d]*" />
     </inspection_tool>
     <inspection_tool class="FieldNamingConvention" enabled="true" level="ERROR" enabled_by_default="true" />
+    <inspection_tool class="JavaCollectionWithNullableTypeArgument" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="LocalVariableNamingConvention" enabled="true" level="ERROR" enabled_by_default="true">
       <option name="m_ignoreForLoopParameters" value="false" />
       <option name="m_ignoreCatchParameters" value="false" />

@@ -7,8 +7,11 @@ CREATE TABLE Establishment(
 );
 
 -- Établissements autorisés à s'inscrire (domaine email).
+-- Les sous-domaines d'un domaine listé sont aussi acceptés (cf. AuthService.isAllowedDomain).
 INSERT INTO Establishment (name, domain_email)
-VALUES ('Université de Sherbrooke', 'usherbrooke.ca')
+VALUES
+   ('Université de Sherbrooke', 'usherbrooke.ca'),
+   ('Cégep de Victoriaville', 'cegepvicto.ca')
 ON CONFLICT (domain_email) DO NOTHING;
 
 CREATE TABLE Program(
