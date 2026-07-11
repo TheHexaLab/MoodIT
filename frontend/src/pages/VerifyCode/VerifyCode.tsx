@@ -164,6 +164,17 @@ export default function VerifyCode() {
                     : 'Renvoyer le code'}
               </button>
             </p>
+            {/* En mode email, un utilisateur qui a DÉJÀ un compte reçoit l'email « déjà un
+                compte » (réponse neutre anti-énumération) et atterrit ici sans code à saisir :
+                on lui offre un chemin clair vers la connexion. */}
+            {isEmailVerification && (
+              <p className="register-row">
+                Déjà un compte ?{' '}
+                <Link to="/login" className="register-link">
+                  Se connecter
+                </Link>
+              </p>
+            )}
             <p className="register-row">
               <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
                 ← Retour
