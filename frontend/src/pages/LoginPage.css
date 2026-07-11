@@ -67,6 +67,10 @@ input[type="password"]::-ms-reveal {
     align-items: center;
     gap: 0;
     text-align: center;
+    /* Même padding interne que le .brandInner de Register : la hauteur de la bannière
+       colorée (et donc la séparation couleur/blanc en mode stacked phone/iPad) est
+       identique sur toutes les pages. */
+    padding: 2rem;
 }
 
 .logo-wrapper img {
@@ -113,15 +117,16 @@ input[type="password"]::-ms-reveal {
 
 .form-card {
     width: 100%;
-    max-width: 27.5rem;
-    max-height: 33.75rem;
+    max-width: 26rem;
     margin: 0 auto;
     box-sizing: border-box;
     background: var(--bg-surface);
-    box-shadow: 0 2px 8px 0 var(--shadow-login-box-modal), 0 16px 48px 0 var(--shadow-login-box-hover);
-    border-radius: 1.25rem;
-    padding: 3rem 5.5% 2.13rem 5.5%;
-
+    /* Apparence alignée sur la carte de Register (.card) : bordure, rayon et ombre
+       identiques. Le max-height est retiré (il pouvait rogner les formulaires longs). */
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    border-radius: 1rem;
+    padding: 2rem;
 }
 
 .form-title {
@@ -426,9 +431,8 @@ input[type="password"]::-ms-reveal {
         position: relative;
         z-index: 1;
         width: 100%;
-        max-height: unset;
         margin-top: -2.5rem;
-        border-radius: 1.25rem;
+        border-radius: 1rem;
         padding: 1.5rem;
     }
 
@@ -455,7 +459,13 @@ input[type="password"]::-ms-reveal {
         margin: 3.85% 0 0;
     }
 
-
+    /* Footer en flux normal (sous le formulaire) au lieu d'absolute : évite le
+       chevauchement / la position « trop basse » en mobile. Aligné sur Register. */
+    .footer {
+        position: static;
+        margin-top: 1.5rem;
+        text-align: center;
+    }
 }
 
 /* Jauge de force du mot de passe (même logique/visuel que la page Register). */

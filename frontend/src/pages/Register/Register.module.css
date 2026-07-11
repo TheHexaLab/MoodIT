@@ -236,10 +236,16 @@
 @media (max-width: 768px) {
     .page { flex-direction: column; }
     .brand { flex: none; padding: 2rem 1rem 3rem; }
-    .brandTitle { font-size: 1.5rem; }
+    /* Bannière mobile alignée sur les autres pages (LoginPage.css) : même taille de
+       logo/titre et mêmes positions de bulles → hauteur de zone colorée cohérente. */
+    .brandTitle { font-size: 1.75rem; }
+    .logoWrapper img { max-width: 4.75rem; border-radius: 1rem; }
+    .bubble1 { top: -4.38rem; right: -2.5rem; background: var(--bubble-mobile); width: 11.25rem; }
+    .bubble2 { left: -3.12rem; bottom: -3.75rem; background: var(--bubble-spec-mobile); width: 8.75rem; }
+    .bubble3 { bottom: -0.6rem; right: -0.6rem; background: var(--bubble-spec-mobile); width: 4.375rem; }
     .formSide { flex: 1; padding: 0 1rem 2rem; justify-content: flex-start; }
     .card { position: relative; z-index: 1; margin-top: -2.5rem; padding: 1.5rem; }
-    .pageFooter { position: static; margin-top: 1.5rem; }
+    .pageFooter { position: static; margin-top: 1.5rem; text-align: center; }
 }
 
 .successBox {

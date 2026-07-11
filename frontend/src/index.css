@@ -328,7 +328,11 @@ body {
         position: fixed;
         top: 1rem;
         right: 1rem;
-        background: var(--bubble);
-        color: var(--button-light-dark-mobile);
+        /* Fond contrasté (au lieu d'un blanc quasi transparent) : le bouton fixe peut se
+           retrouver sur la bannière colorée OU sur la zone blanche selon la page/hauteur
+           de bannière ; ce cercle sombre garde l'icône lisible dans tous les cas. */
+        background: rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        z-index: 20;
     }
 }
