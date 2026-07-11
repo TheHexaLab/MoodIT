@@ -183,7 +183,8 @@ export async function fetchQuizForEdit(quizId: number): Promise<Quiz> {
  * Sert à la sidebar / vue étudiant. Tri par `position` (backend).
  */
 export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
-  const res = await apiFetch(`/api/courses/${courseId}/quizzes?published=true`);
+  // Route « vue étudiant » : ne renvoie que les publiés, ouverte à tout membre.
+  const res = await apiFetch(`/api/courses/${courseId}/quizzes`);
   if (!res.ok) throw new Error('Échec chargement des quiz publiés');
   const data: QuizResponse[] = await res.json();
   return data.map(toQuizMeta);
@@ -192,9 +193,10 @@ export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
 /**
  * TOUS les quiz d'un cours, BROUILLONS COMPRIS (méta seules). Réservé à
  * l'enseignant/admin (éditeur « Modifier les quiz »). Tri par `position` (backend).
+ * Route DÉDIÉE `/manage` gatée par le permission-service (gestion de contenu).
  */
 export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
-  const res = await apiFetch(`/api/courses/${courseId}/quizzes`);
+  const res = await apiFetch(`/api/courses/${courseId}/quizzes/manage`);
   if (!res.ok) throw new Error('Échec chargement des quiz');
   const data: QuizResponse[] = await res.json();
   return data.map(toQuizMeta);

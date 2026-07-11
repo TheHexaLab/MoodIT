@@ -40,6 +40,13 @@ public class MembershipService {
       case "program" -> membershipRepository.isSubscribedToProgram(userId, id);
       case "channel", "forum" -> canAccessForum(userId, id);
       case "mcp" -> canAccessCourse(userId, id);
+      // Catalogue d'établissements : room UNIQUE (id 0), données plateforme publiques
+      // (nom/domaine/programmes) → tout utilisateur authentifié peut la rejoindre.
+      case "establishment" -> true;
+      // Gestion des administrateurs : room UNIQUE (id 0) diffusant la liste des porteurs
+      // d'un rôle GLOBAL. Réservée à ceux qui peuvent ouvrir le popup = porteurs d'un rôle
+      // global (Administrateur / Gardien) — sinon on divulguerait qui est admin.
+      case "adminRoles" -> hasGlobalRole(userId);
 
       // ── EXEMPLE COMMENTE (pour le collegue) : ajouter un nouveau scope de room ──
       //
@@ -180,6 +187,27 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean hasRoleInQuizCourse(long userId, long quizId, String roleName) {
     return membershipRepository.hasRoleInQuizCourse(userId, quizId, roleName);
+  }
+
+  /**
+   * L'utilisateur a-t-il le role (nomme) sur le COURS DE CETTE ANALYSE MCP ? Comme
+   * hasRoleInQuizCourse mais a partir de l'id d'une ligne MCP_Response (route REST
+   * GET /mcp/analyses/{id}) : la resolution analyse -> cours se fait cote SQL. Avec
+   * roleName = "Enseignant" -> "est-il prof du cours de cette analyse ?".
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInAnalysisCourse(long userId, long analysisId, String roleName) {
+    return membershipRepository.hasRoleInAnalysisCourse(userId, analysisId, roleName);
+  }
+
+  /**
+   * L'utilisateur porte-t-il au moins un rôle GLOBAL (User_Role → Role.global_assignable) ?
+   * Autorise la room WebSocket "adminRoles" (liste des administrateurs). À distinguer d'un rôle
+   * global NOMMÉ (hasRole côté PermissionService) : ici c'est « un quelconque rôle plateforme ».
+   */
+  @Transactional(readOnly = true)
+  public boolean hasGlobalRole(long userId) {
+    return membershipRepository.hasGlobalRole(userId);
   }
 
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */

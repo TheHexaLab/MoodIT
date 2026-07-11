@@ -1,7 +1,6 @@
 // Lecture de l'utilisateur via JdbcTemplate sur le schéma d'init.sql (table User_).
-// Même approche que DbRoomAuthorizer : SQL direct, sans dépendre des entités JPA à
-// venir. Les collègues pourront remplacer cette impl par un repository JPA sans
-// toucher au contrôleur.
+// SQL direct, sans dépendre des entités JPA : les collègues pourront remplacer cette
+// impl par un repository JPA sans toucher au contrôleur.
 
 package com.moodit.core_service.repository;
 

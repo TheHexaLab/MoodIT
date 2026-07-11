@@ -1,12 +1,9 @@
 package com.moodit.core_service.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
-import com.moodit.core_service.dto.CourseCreateInProgramsDTO;
 import com.moodit.core_service.dto.ProgramDTO;
-import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
@@ -26,11 +23,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * Autorisation de l'ajout d'un cours dans des programmes ({@link ProgramService}) :
- *  - un utilisateur SANS rôle global doit être Administrateur/Enseignant de CHAQUE programme visé,
- *    sinon 403 ;
- *  - la liste des programmes « gérables » d'un établissement = tous (admin global/gardien) ou
- *    seulement ceux où l'utilisateur est admin/enseignant.
+ * Filtrage PAR RÔLE de la liste des programmes « gérables » d'un établissement
+ * ({@link ProgramService#getManageableProgramsInEstablishment}) : tous (admin global/gardien)
+ * ou seulement ceux où l'utilisateur est admin/enseignant.
+ *
+ * NB : l'autorisation de l'AJOUT d'un cours (403 si on ne gère pas tous les programmes visés)
+ * n'est plus testée ici — elle est déléguée au permission-service (règle POST /programs/courses).
  */
 @ExtendWith(MockitoExtension.class)
 class ProgramServiceCourseAuthTest {
@@ -68,24 +66,6 @@ class ProgramServiceCourseAuthTest {
         p.setId(id);
         p.setName(name);
         return p;
-    }
-
-    private static CourseCreateInProgramsDTO courseIn(List<Integer> programIds) {
-        CourseCreateInProgramsDTO dto = new CourseCreateInProgramsDTO();
-        dto.setCode("INF101");
-        dto.setTitle("Intro");
-        dto.setProgramIds(programIds);
-        return dto;
-    }
-
-    @Test
-    void addCourse_notManagerOfEveryTargetProgram_isForbidden() {
-        // Aucun rôle global ; gère le programme 1 mais PAS le 2 → refus (il faut TOUS les programmes).
-        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(userWith(5)));
-        when(userRepository.programIdsManagedAmong(5, List.of(1, 2))).thenReturn(List.of(1));
-
-        assertThatThrownBy(() -> service.addCourseToPrograms(courseIn(List.of(1, 2)), "a@a"))
-                .isInstanceOf(ForbiddenException.class);
     }
 
     @Test

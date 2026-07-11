@@ -153,7 +153,10 @@ export default function CurrentUserProvider({ children }: { children: ReactNode 
       lastName: profile.lastName,
       avatarColor: profile.avatarColor,
     });
-    setCurrentUser(updated);
+    // On PRÉSERVE les settings locaux : PATCH /me ne les modifie pas, et sa réponse porte
+    // un instantané BD qui pourrait être plus ancien qu'une sauvegarde de settings encore
+    // debouncée (sinon on écraserait le thème/la localisation en attente d'envoi).
+    setCurrentUser((prev) => ({ ...updated, settings: prev.settings }));
   };
 
   // Écho WS `user:globalRolesChanged` : remplace les rôles globaux → isAdmin/isGuardian

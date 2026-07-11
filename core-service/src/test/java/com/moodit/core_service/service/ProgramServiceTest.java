@@ -36,16 +36,8 @@ public class ProgramServiceTest {
     private Course course;
     private User user;
 
-    /** Utilisateur admin GLOBAL (Gardien) : bypasse le contrôle par programme de addCourseToPrograms. */
-    private static User globalAdmin() {
-        User u = new User();
-        u.setId(99);
-        u.setEmail("admin@test");
-        com.moodit.core_service.model.Role r = new com.moodit.core_service.model.Role();
-        r.setName("Gardien");
-        u.setRoles(List.of(r));
-        return u;
-    }
+    // NB : addCourseToPrograms ne fait plus de contrôle de rôle (délégué au permission-service) :
+    // les tests ci-dessous n'ont donc plus besoin de simuler un utilisateur admin.
 
     @Nested
     class FindAll {
@@ -220,7 +212,6 @@ public class ProgramServiceTest {
             Program program2 = Program.builder().id(2).name("Réseaux").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Mathématique de l'ingénierie").code("MATH67").programIds(List.of(1, 2)).build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
                 Course c = inv.getArgument(0);
                 c.setId(1);
@@ -229,7 +220,7 @@ public class ProgramServiceTest {
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(2)).thenReturn(Optional.of(program2));
 
-            CourseDTO result = programService.addCourseToPrograms(dto, "admin@test");
+            CourseDTO result = programService.addCourseToPrograms(dto);
 
             assertEquals("Mathématique de l'ingénierie", result.getTitle());
             assertEquals(1, program.getCourses().size());
@@ -245,17 +236,16 @@ public class ProgramServiceTest {
             program = Program.builder().id(1).name("Informatique").code("GI").cohort("71").color("FF0000").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Système distribués").code("SYST45").programIds(List.of(1, 99)).build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(99)).thenReturn(Optional.empty());
 
-            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto, "admin@test"));
+            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto));
             verify(programRepository, never()).saveAll(anyList());
         }
         @Test
         @DisplayName("Retourne IllegalArgumentException, si les id sont null")
         void addCourseToPrograms_avec_arguments_null_devrait_lancer_illegalArgumentException() {
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null, "admin@test"));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null));
 
             CourseCreateInProgramsDTO dtoAvecListeNull = CourseCreateInProgramsDTO.builder()
                     .title("Chimie")
@@ -263,7 +253,7 @@ public class ProgramServiceTest {
                     .programIds(null)
                     .build();
 
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull, "admin@test"));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull));
             verifyNoInteractions(programRepository, courseRepository);
         }
         @Test
@@ -275,7 +265,7 @@ public class ProgramServiceTest {
                     .programIds(List.of())
                     .build();
 
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeVide, "admin@test"));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeVide));
             verifyNoInteractions(programRepository, courseRepository);
         }
         @Test
@@ -288,7 +278,6 @@ public class ProgramServiceTest {
                     .programIds(List.of(1, 1)) // Doublon
                     .build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
                 Course c = inv.getArgument(0);
                 c.setId(1);
@@ -296,7 +285,7 @@ public class ProgramServiceTest {
             });
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
 
-            programService.addCourseToPrograms(dto, "admin@test");
+            programService.addCourseToPrograms(dto);
 
             assertEquals(1, program.getCourses().size());
         }

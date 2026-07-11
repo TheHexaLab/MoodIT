@@ -154,4 +154,42 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("userId") long userId,
       @Param("quizId") long quizId,
       @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DE CETTE ANALYSE MCP ? Comme
+  // hasRoleInQuizCourse, mais l'id fourni est celui d'une ligne MCP_Response (route REST
+  // GET /mcp/analyses/{id}) : on resout analyse -> cours via MCP_Response.course_id. Ex.
+  // avec roleName = 'Enseignant' : "est-il prof du cours auquel se rattache cette analyse ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN MCP_Response m    ON m.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND m.id = :analysisId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInAnalysisCourse(
+      @Param("userId") long userId,
+      @Param("analysisId") long analysisId,
+      @Param("roleName") String roleName);
+
+  // L'utilisateur porte-t-il au moins un rôle GLOBAL (User_Role → Role.global_assignable) ?
+  // Sert à autoriser la room WebSocket "adminRoles" (liste des administrateurs) : réservée aux
+  // porteurs d'un rôle global (Administrateur / Gardien). Calqué sur core DbRoomAuthorizer.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Role ur
+            JOIN Role r ON r.id = ur.role_id
+            WHERE ur.user_id = :userId AND r.global_assignable = TRUE
+          )
+          """,
+      nativeQuery = true)
+  boolean hasGlobalRole(@Param("userId") long userId);
 }

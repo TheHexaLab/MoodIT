@@ -1,9 +1,23 @@
-// Point de decision pour les requetes REST (consulte par le gateway, JwtAuthFilter).
+// Point de decision (PDP) pour les requetes REST (consulte par le gateway, JwtAuthFilter).
 //
 // Moteur de regles : une regle = (methode, motif de route avec {variables}, predicat).
 // La 1re regle qui matche tranche. Aucune regle ne matche => acces autorise
 // (default-allow) : on ne restreint QUE les routes explicitement listees ; l'identite
 // est deja garantie par le gateway (JWT) + l'auth-service.
+//
+// ⚠️ HYPOTHESE DE CONFIANCE (IMPORTANTE) : depuis la centralisation de l'autorisation ici,
+// les services aval (core, mcp) ne re-verifient PLUS les roles ; ils font confiance au header
+// X-User-Email injecte par le gateway. La securite repose donc ENTIEREMENT sur le fait que le
+// gateway est l'UNIQUE porte d'entree : les services ne doivent PAS etre joignables directement
+// (isolation reseau / NetworkPolicy — seul le gateway les atteint). Un service expose hors
+// gateway serait sans controle d'acces. Les appels service-a-service internes passent, eux, par
+// le header partage X-Internal-Token (endpoints /internal/**), hors de ce moteur.
+//
+// NB (403 vs 404) : le default-allow-sur-absence-de-regle implique qu'une regle qui refuse
+// renvoie un 403 AVANT que le service n'ait pu constater une eventuelle absence de ressource
+// (404). Un non-gestionnaire recoit donc 403 meme pour une ressource inexistante (on ne divulgue
+// pas son existence), la ou un admin global atteint le service et obtient le 404. Asymetrie
+// assumee (pas de fuite d'existence cote non-autorise).
 //
 // Les ids de ressource peuvent etre dans l'URL (variables de path) OU dans le body
 // JSON (convention REST de l'equipe : ex. forumId dans PostCreateInForumDTO). Le
@@ -16,6 +30,7 @@
 package com.moodit.permission_service.service;
 
 import com.moodit.permission_service.model.Role;
+import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.UserRepository;
 import java.util.ArrayList;
@@ -69,6 +84,15 @@ public class PermissionService {
     return new Rule(method, API_PREFIX + path, check);
   }
 
+  // Prefixe des routes du mcp-service. Contrairement au core, elles ne portent PAS "/api"
+  // (gateway route[2] : Path=/mcp/**). On les enregistre donc avec leur propre fabrique
+  // pour garder les motifs sans "/mcp" dans le registre (ex. "/courses/{id}/analyses").
+  private static final String MCP_PREFIX = "/mcp";
+
+  private static Rule mcpRule(String method, String path, AccessCheck check) {
+    return new Rule(method, MCP_PREFIX + path, check);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════════════
   //  REGISTRE DES REGLES — c'est ICI qu'on ajoute une regle, route par route.
   // ═══════════════════════════════════════════════════════════════════════════════════
@@ -85,7 +109,7 @@ public class PermissionService {
   //    3. Choisir le predicat d'autorisation :
   //         - APPARTENANCE (fin) : membershipService.canAccessForum / canAccessCourse /
   //           canAccessQuiz (delegue au MembershipRepository, SQL sur init.sql).
-  //         - ROLE (grossier)    : hasRole(user, "Administrateur").
+  //         - ROLE (grossier)    : hasRole(user, RoleNames.ADMIN).
   //    4. Ajouter `rule(methode, motif, (user, vars, body) -> <predicat>)` a la liste.
   //       ⚠️ Ecrire le motif SANS "/api" : la fabrique rule(...) l'ajoute automatiquement
   //          (ex. "/forums/posts", pas "/api/forums/posts").
@@ -121,9 +145,9 @@ public class PermissionService {
                     "/programs/{programId}/users",
                     (user, vars, body) -> {
                       long programId = longVar(vars, "programId");
-                      return hasRole(user, "Gardien")
+                      return hasRole(user, RoleNames.GUARDIAN)
                               || (programId > 0
-                              && membershipService.hasRoleInProgram(user.getId(), programId, "Administration"));
+                              && membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.ADMIN));
                     }),
             //La liste des roles et la liste des membres avec le role de chacun
             //FetchProgram, Frontend
@@ -143,14 +167,9 @@ public class PermissionService {
                     (user, vars, body) -> canCreateCourse(user, body)),
 
             // ── Course ──────────────────────────────────────────────────────────────────
-            //Afficher tous les cours de l'usager connecté auquel il est inscrit selon un programme spécifié
-            //FetchCourses, Frontend
-            rule(
-                    "GET",
-                    "/users/{userId}/programs/{programId}/enrollments",
-                    (user, vars, body) -> verifyUserId(user, vars)
-            ),
-
+            // NB : la route GET /users/{userId}/programs/{programId}/enrollments (cours de
+            // l'utilisateur dans un programme) est déjà déclarée plus haut (section Establishment).
+            // On ne la re-déclare PAS ici : first-match-wins → un doublon serait mort.
 
             // ── Forum ───────────────────────────────────────────────────────────────────
             // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
@@ -186,6 +205,23 @@ public class PermissionService {
                 "PATCH",
                 "/courses/{courseId}/quizzes/reorder",
                 (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            // Lister les quiz pour la GESTION (vue editeur : brouillons compris). Route DEDIEE
+            // (distincte de GET /courses/{id}/quizzes, vue etudiant publiee) pour etre gatee ici :
+            // la vue etudiant/editeur ne se distinguait que par un query param, invisible du path.
+            rule(
+                "GET",
+                "/courses/{courseId}/quizzes/manage",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            // Lister les quiz PUBLIES d'un cours (vue etudiant) : etre abonne a un programme
+            // du cours (meme appartenance que la lecture d'un quiz). Evite qu'un authentifie
+            // enumere les quiz d'un cours ou il n'est pas inscrit (sinon default-allow).
+            rule(
+                "GET",
+                "/courses/{courseId}/quizzes",
+                (user, vars, body) -> {
+                  long courseId = longVar(vars, "courseId");
+                  return courseId > 0 && membershipService.canAccessCourse(user.getId(), courseId);
+                }),
             // Detail EDITEUR d'un quiz (avec correction) : gestion de contenu (quizId dans le PATH).
             rule(
                 "GET",
@@ -212,7 +248,53 @@ public class PermissionService {
             rule(
             "GET",
             "/quizzes/{quizId}/attempts/{attemptId}",
-            (user, vars, body) -> quizAccess(user, vars))
+            (user, vars, body) -> quizAccess(user, vars)),
+
+            // ── MCP (feedback de cours) ───────────────────────────────────────────────
+            // GESTION DE CONTENU du cours : Administrateur/Gardien GLOBAL, OU
+            // Administrateur/Enseignant DANS un programme contenant le cours. Aligne sur
+            // l'ancien McpService.requireCourseAccess (desormais retire : permission-service
+            // est l'unique autorite). ⚠️ Routes SANS "/api" -> fabrique mcpRule.
+            //
+            // courseId dans le PATH -> reutilise canManageCourseContent.
+            mcpRule(
+                "GET",
+                "/courses/{courseId}/analyses",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            mcpRule(
+                "POST",
+                "/courses/{courseId}/analyses",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            mcpRule(
+                "GET",
+                "/courses/{courseId}/pending",
+                (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+            // id de l'ANALYSE dans le PATH -> resolution analyse -> cours cote SQL.
+            mcpRule(
+                "GET",
+                "/analyses/{id}",
+                (user, vars, body) -> canManageAnalysisContent(user, vars, "id")),
+
+            // ── Roles (attribution / retrait) ─────────────────────────────────────────
+            // Changer un role PROGRAMME (User_Program_Role) : Administrateur/Gardien GLOBAL,
+            // OU Administrateur DANS le programme vise. programId dans le BODY (ChangeRoleRequest).
+            rule(
+                "POST",
+                "/roles/change",
+                (user, vars, body) -> {
+                  if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+                    return true;
+                  }
+                  long programId = longField(body, "programId");
+                  return programId > 0
+                      && membershipService.hasRoleInProgram(
+                          user.getId(), programId, RoleNames.ADMIN);
+                }),
+            // Changer un role GLOBAL (User_Role) : reserve au Gardien (gere les administrateurs).
+            rule(
+                "POST",
+                "/roles/global/change",
+                (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN))
 
         // ── EXEMPLE COMMENTE : a decommenter + adapter ────────
         //
@@ -239,7 +321,7 @@ public class PermissionService {
         //  rule(
         //      "DELETE",
         //      "/forums/{forumId}/posts/{postId}",
-        //      (user, vars, body) -> hasRole(user, "Administrateur")),
+        //      (user, vars, body) -> hasRole(user, RoleNames.ADMIN)),
         //
         //  Variante « id dans le BODY » (POST de creation, cf. regles forums plus haut) :
         //  rule(
@@ -322,7 +404,7 @@ public class PermissionService {
   // ou Enseignant DANS CHACUN des programmes vises (User_Program_Role) : meme exigence que
   // addCourseToPrograms du core (gerer TOUS les programmes demandes, sinon 403).
   private boolean canCreateCourse(User user, JsonNode body) {
-    if (hasRole(user, "Administrateur") || hasRole(user, "Gardien")) {
+    if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
       return true;
     }
     List<Long> programIds = longArrayField(body, "programIds");
@@ -332,8 +414,8 @@ public class PermissionService {
   // L'utilisateur est-il Administrateur ou Enseignant DANS ce programme (User_Program_Role) ?
   private boolean managesProgram(User user, long programId) {
     return programId > 0
-        && (membershipService.hasRoleInProgram(user.getId(), programId, "Administrateur")
-            || membershipService.hasRoleInProgram(user.getId(), programId, "Enseignant"));
+        && (membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.ADMIN)
+            || membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.TEACHER));
   }
 
   // ── Gestion du CONTENU d'un cours (quiz, sections...) ─────────────────────────────────
@@ -345,10 +427,10 @@ public class PermissionService {
     if (courseId <= 0) {
       return false;
     }
-    return hasRole(user, "Administrateur")
-        || hasRole(user, "Gardien")
-        || membershipService.hasRoleInCourse(user.getId(), courseId, "Administrateur")
-        || membershipService.hasRoleInCourse(user.getId(), courseId, "Enseignant");
+    return hasRole(user, RoleNames.ADMIN)
+        || hasRole(user, RoleNames.GUARDIAN)
+        || membershipService.hasRoleInCourse(user.getId(), courseId, RoleNames.ADMIN)
+        || membershipService.hasRoleInCourse(user.getId(), courseId, RoleNames.TEACHER);
   }
 
   // Meme regle que canManageCourseContent, mais a partir de l'id d'un QUIZ (le cours est resolu
@@ -358,10 +440,23 @@ public class PermissionService {
     if (quizId <= 0) {
       return false;
     }
-    return hasRole(user, "Administrateur")
-        || hasRole(user, "Gardien")
-        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, "Administrateur")
-        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, "Enseignant");
+    return hasRole(user, RoleNames.ADMIN)
+        || hasRole(user, RoleNames.GUARDIAN)
+        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, RoleNames.ADMIN)
+        || membershipService.hasRoleInQuizCourse(user.getId(), quizId, RoleNames.TEACHER);
+  }
+
+  // Meme regle que canManageCourseContent, mais a partir de l'id d'une ANALYSE MCP (le cours
+  // est resolu cote SQL via MCP_Response.course_id). id lu dans une variable de PATH.
+  private boolean canManageAnalysisContent(User user, Map<String, String> vars, String analysisVar) {
+    long analysisId = longVar(vars, analysisVar);
+    if (analysisId <= 0) {
+      return false;
+    }
+    return hasRole(user, RoleNames.ADMIN)
+        || hasRole(user, RoleNames.GUARDIAN)
+        || membershipService.hasRoleInAnalysisCourse(user.getId(), analysisId, RoleNames.ADMIN)
+        || membershipService.hasRoleInAnalysisCourse(user.getId(), analysisId, RoleNames.TEACHER);
   }
 
   // Acces a un quiz (quizId dans les variables de path) : abonne a un programme du cours.
@@ -487,12 +582,12 @@ public class PermissionService {
   // ── PREDICAT GENERIQUE : role SUR UN COURS (ex. "prof du cours") ───────────────────
   // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme sur le cours vise : role
   // scope-programme (User_Program_Role) ET cours rattache a ce programme (program_course).
-  // Avec roleName = "Enseignant" -> "est-ce le prof du cours ?". courseId lu dans une
+  // Avec roleName = RoleNames.TEACHER -> "est-ce le prof du cours ?". courseId lu dans une
   // variable de PATH.
   //
   // EXEMPLE dans buildRules() :
   //   rule("PUT", "/courses/{courseId}",
-  //       (user, vars, body) -> hasRoleInCourse(user, vars, "Enseignant", "courseId")),
+  //       (user, vars, body) -> hasRoleInCourse(user, vars, RoleNames.TEACHER, "courseId")),
   private boolean hasRoleInCourse(
       User user, Map<String, String> vars, String roleName, String courseVar) {
     long courseId = longVar(vars, courseVar);

@@ -11,7 +11,6 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.dto.*;
 
 // Exception
-import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.ProgramNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 
@@ -232,22 +231,16 @@ public class ProgramService {
 
   // region POST
   @Transactional
-  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO, String userEmail) {
+  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO) {
     if (courseCreateDTO == null
             || courseCreateDTO.getProgramIds() == null
             || courseCreateDTO.getProgramIds().isEmpty() ) {
       throw new IllegalArgumentException();
     }
 
-    User requester = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
-    List<Integer> requestedProgramIds = courseCreateDTO.getProgramIds().stream().distinct().toList();
-    if (!isGlobalAdmin(requester) && !requestedProgramIds.isEmpty()) {
-      Set<Integer> managed =
-          new HashSet<>(userRepository.programIdsManagedAmong(requester.getId(), requestedProgramIds));
-      if (!managed.containsAll(requestedProgramIds)) {
-        throw new ForbiddenException();
-      }
-    }
+    // Autorisation PAR RÔLE déléguée au permission-service (règle POST /programs/courses,
+    // predicat canCreateCourse) : Administrateur/Gardien GLOBAL, ou Administrateur/Enseignant
+    // dans CHACUN des programmes visés — 403 rendu par le gateway sinon.
 
     List<Program> programs =
         courseCreateDTO.getProgramIds().stream()

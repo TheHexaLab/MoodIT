@@ -8,7 +8,6 @@ import com.moodit.mcp_service.dto.McpResponseSummaryDto;
 import com.moodit.mcp_service.exception.AnalysisAlreadyRunningException;
 import com.moodit.mcp_service.exception.AnalysisNotFoundException;
 import com.moodit.mcp_service.exception.CourseNotFoundException;
-import com.moodit.mcp_service.exception.ForbiddenException;
 import com.moodit.mcp_service.exception.UserNotFoundException;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
@@ -27,7 +26,6 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
-import java.util.Set;
 
 /**
  * Feedback MCP d'un cours (analyse LLM). Accès réservé (403 sinon) aux rôles GLOBAUX
@@ -50,8 +48,8 @@ public class McpService {
 
     /** Historique (résumés) des analyses TERMINÉES d'un cours, récent → ancien. */
     @Transactional(readOnly = true)
-    public List<McpResponseSummaryDto> listAnalyses(Integer courseId, String userEmail) {
-        requireCourseAccess(courseId, userEmail);
+    public List<McpResponseSummaryDto> listAnalyses(Integer courseId) {
+        // Autorisation (role) deleguee au permission-service (regle /mcp/courses/{id}/analyses).
         return mcpResponseRepository
                 .findByCourse_IdAndStatusOrderByCreatedAtDesc(courseId, McpStatus.DONE)
                 .stream()
@@ -61,11 +59,11 @@ public class McpService {
 
     /** Détail complet d'une analyse (avec content + author). */
     @Transactional(readOnly = true)
-    public McpResponseDto getAnalysis(Integer id, String userEmail) {
+    public McpResponseDto getAnalysis(Integer id) {
         McpResponse response = mcpResponseRepository.findById(id)
                 .orElseThrow(AnalysisNotFoundException::new);
-        // Autorisation scopée au cours de CETTE analyse (403 avant de divulguer le contenu).
-        requireCourseAccess(response.getCourse().getId(), userEmail);
+        // Autorisation (role, scopee au cours de l'analyse) deleguee au permission-service
+        // (regle GET /mcp/analyses/{id} : resolution analyse -> cours cote SQL).
         User author = response.getUser();
         return new McpResponseDto(
                 response.getId(),
@@ -80,7 +78,9 @@ public class McpService {
     /** L'utilisateur courant a-t-il une analyse EN COURS sur ce cours ? (réhydratation) */
     @Transactional(readOnly = true)
     public boolean isPending(Integer courseId, String userEmail) {
-        User user = requireCourseAccess(courseId, userEmail);
+        // Autorisation (role) deleguee au permission-service ; ici on ne fait que resoudre
+        // l'utilisateur pour scoper la recherche a SES analyses.
+        User user = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
         return mcpResponseRepository.existsByCourse_IdAndUser_IdAndStatus(
                 courseId, user.getId(), McpStatus.PENDING);
     }
@@ -92,7 +92,8 @@ public class McpService {
      */
     @Transactional
     public void requestAnalysis(Integer courseId, String userEmail) {
-        User user = requireCourseAccess(courseId, userEmail);
+        // Autorisation (role) deleguee au permission-service (regle POST /mcp/courses/{id}/analyses).
+        User user = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
 
@@ -134,28 +135,6 @@ public class McpService {
         }
         return new McpResponseSummaryDto(
                 response.getId(), Timestamps.isoUtc(response.getCreatedAt()), strengths, improvements);
-    }
-
-    /** Exige le rôle « Administrateur » ; renvoie l'utilisateur résolu. 403 sinon. */
-    /** Rôles GLOBAUX (User_Role) autorisés à faire des demandes MCP sur N'IMPORTE quel cours. */
-    private static final Set<String> GLOBAL_MCP_ROLES = Set.of("Administrateur", "Gardien");
-
-    /**
-     * Autorise l'accès MCP à un COURS donné, sinon lève un 403. Deux voies :
-     *   1. rôle GLOBAL (User_Role) « Administrateur » ou « Gardien » → accès à tous les cours ;
-     *   2. rôle PROGRAMME (User_Program_Role) « Administrateur » ou « Enseignant » dans un
-     *      programme CONTENANT ce cours (scope indispensable).
-     */
-    private User requireCourseAccess(Integer courseId, String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(UserNotFoundException::new);
-        boolean allowed =
-                (user.getRoles() != null
-                        && user.getRoles().stream()
-                                .anyMatch(r -> GLOBAL_MCP_ROLES.contains(r.getName())))
-                || userRepository.hasProgramTeachingRoleForCourse(user.getId(), courseId);
-        if (!allowed) throw new ForbiddenException();
-        return user;
     }
 
     /** Exécute l'action APRÈS commit (ou tout de suite hors transaction). */

@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import com.moodit.mcp_service.exception.AnalysisAlreadyRunningException;
 import com.moodit.mcp_service.exception.AnalysisNotFoundException;
-import com.moodit.mcp_service.exception.ForbiddenException;
 import com.moodit.mcp_service.exception.UserNotFoundException;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
@@ -31,8 +30,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Autorisation (rôle admin) et garde de concurrence (une analyse en cours par cours/user).
- * Repositories mockés — on vérifie les exceptions métier et le déclenchement du job.
+ * Logique MÉTIER du feedback MCP (garde de concurrence : une analyse en cours par cours/user,
+ * 404 analyse absente, déclenchement du job). L'AUTORISATION PAR RÔLE n'est plus ici : elle est
+ * déléguée au permission-service (règles /mcp/**) — d'où l'absence de test de 403.
+ * Repositories mockés.
  */
 @ExtendWith(MockitoExtension.class)
 class McpServiceTest {
@@ -59,14 +60,6 @@ class McpServiceTest {
         r.setName(roleName);
         u.setRoles(List.of(r));
         return u;
-    }
-
-    @Test
-    void listAnalyses_nonAdmin_isForbidden() {
-        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Etudiant")));
-
-        assertThatThrownBy(() -> service.listAnalyses(10, "a@a"))
-                .isInstanceOf(ForbiddenException.class);
     }
 
     @Test
@@ -139,32 +132,19 @@ class McpServiceTest {
 
     @Test
     void getAnalysis_missing_throwsNotFound() {
-        // L'analyse est cherchée AVANT l'autorisation (elle donne le courseId à contrôler) :
-        // une analyse absente → 404 sans même résoudre l'utilisateur.
+        // Analyse absente → 404 (l'autorisation par rôle est faite en amont par le gateway).
         when(mcpResponseRepository.findById(999)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getAnalysis(999, "a@a"))
+        assertThatThrownBy(() -> service.getAnalysis(999))
                 .isInstanceOf(AnalysisNotFoundException.class);
     }
 
     @Test
-    void listAnalyses_globalGardien_isAllowed() {
-        // Rôle GLOBAL Gardien (User_Role) → accès à N'IMPORTE quel cours.
-        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Gardien")));
+    void listAnalyses_returnsSummaries() {
+        // L'autorisation n'est plus dans le service : listAnalyses se contente de projeter.
         when(mcpResponseRepository.findByCourse_IdAndStatusOrderByCreatedAtDesc(10, McpStatus.DONE))
                 .thenReturn(List.of());
 
-        assertThat(service.listAnalyses(10, "a@a")).isEmpty();
-    }
-
-    @Test
-    void listAnalyses_programTeacher_isAllowed() {
-        // Aucun rôle GLOBAL admin, mais Enseignant (User_Program_Role) d'un programme du cours.
-        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Etudiant")));
-        when(userRepository.hasProgramTeachingRoleForCourse(5, 10)).thenReturn(true);
-        when(mcpResponseRepository.findByCourse_IdAndStatusOrderByCreatedAtDesc(10, McpStatus.DONE))
-                .thenReturn(List.of());
-
-        assertThat(service.listAnalyses(10, "a@a")).isEmpty();
+        assertThat(service.listAnalyses(10)).isEmpty();
     }
 }

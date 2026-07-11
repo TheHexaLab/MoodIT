@@ -30,14 +30,12 @@ public class QuizController {
     }
 
     /**
-     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : AVEC la correction. Réservé
-     * aux administrateurs (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : AVEC la correction. Autorisation par
+     * rôle assurée en amont par le permission-service (règle GET /quizzes/{quizId}/edit).
      */
     @GetMapping("/{quizId}/edit")
-    public ResponseEntity<QuizDetailDTO> getQuizForEdit(
-            @PathVariable Integer quizId,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.getQuizForEdit(quizId, email));
+    public ResponseEntity<QuizDetailDTO> getQuizForEdit(@PathVariable Integer quizId) {
+        return ResponseEntity.ok(quizService.getQuizForEdit(quizId));
     }
 
     /** Historique des tentatives de l'utilisateur courant sur ce quiz (résumés). */
@@ -58,26 +56,23 @@ public class QuizController {
     }
 
     /**
-     * Met à jour un quiz complet (méta + questions) en un appel. Réservé à qui gère le contenu du
-     * cours (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Met à jour un quiz complet (méta + questions) en un appel. Autorisation par rôle assurée en
+     * amont par le permission-service (règle PUT /quizzes/{quizId}).
      */
     @PutMapping("/{quizId}")
     public ResponseEntity<QuizDetailDTO> updateQuiz(
             @PathVariable Integer quizId,
-            @RequestBody QuizDetailDTO request,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.updateQuiz(quizId, request, email));
+            @RequestBody QuizDetailDTO request) {
+        return ResponseEntity.ok(quizService.updateQuiz(quizId, request));
     }
 
     /**
-     * Supprime un quiz et tout son contenu (cascade). Réservé à qui gère le contenu du cours
-     * (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Supprime un quiz et tout son contenu (cascade). Autorisation par rôle assurée en amont par
+     * le permission-service (règle DELETE /quizzes/{quizId}).
      */
     @DeleteMapping("/{quizId}")
-    public ResponseEntity<Void> deleteQuiz(
-            @PathVariable Integer quizId,
-            @RequestHeader("X-User-Email") String email) {
-        quizService.deleteQuiz(quizId, email);
+    public ResponseEntity<Void> deleteQuiz(@PathVariable Integer quizId) {
+        quizService.deleteQuiz(quizId);
         return ResponseEntity.noContent().build();
     }
 
