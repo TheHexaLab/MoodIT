@@ -29,7 +29,6 @@ import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import com.moodit.core_service.realtime.dto.AdminUserDto;
 import com.moodit.core_service.realtime.dto.RoleDto;
-import com.moodit.core_service.dto.QuestionResultDTO;
 import com.moodit.core_service.dto.UserDTO;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -332,17 +331,6 @@ public class RealtimeEventPublisher {
 
   public void userUpdated(Author author) {
     emitAll(event("user:updated", "user", author));
-  }
-
-  // ─── Correction de code (scope = user) ───────────────────────────────────
-  // Poussé quand le job de correction des questions Code d'une tentative se termine. Room
-  // "user:<userId>" : seul l'étudiant qui a soumis reçoit ses verdicts + son score recalculé.
-
-  public void quizCodeGraded(long userId, long attemptId, List<QuestionResultDTO> questions) {
-    emit(
-        "user",
-        userId,
-        event("quiz:code-graded", "userId", userId, "attemptId", attemptId, "questions", questions));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

@@ -18,7 +18,9 @@ import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
+import com.moodit.core_service.repository.SubmissionTestCaseRepository;
 import com.moodit.core_service.repository.UserRepository;
+import org.springframework.transaction.PlatformTransactionManager;
 import java.util.Arrays;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,10 +43,12 @@ class QuizServiceEditAuthTest {
     @Mock private QTypeRepository qTypeRepository;
     @Mock private LanguageRepository languageRepository;
     @Mock private SubmissionRepository submissionRepository;
+    @Mock private SubmissionTestCaseRepository submissionTestCaseRepository;
     @Mock private AttemptRepository attemptRepository;
     @Mock private UserRepository userRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
-    @Mock private CodeGradingRunner codeGradingRunner;
+    @Mock private ExecutionClient executionClient;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private QuizService service;
 
@@ -52,8 +56,8 @@ class QuizServiceEditAuthTest {
     void setUp() {
         service = new QuizService(
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
-                submissionRepository, attemptRepository, userRepository,
-                new ObjectMapper(), realtimePublisher, codeGradingRunner);
+                submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
+                new ObjectMapper(), realtimePublisher, executionClient, transactionManager);
     }
 
     private static User userWith(String... roleNames) {

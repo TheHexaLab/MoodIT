@@ -4,10 +4,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -29,10 +31,18 @@ public class ExecutionClient {
 
     public ExecutionClient(
             @Value("${app.execution-service.internal-url:http://localhost:8084}") String baseUrl,
-            @Value("${app.internal.token:}") String internalToken) {
+            @Value("${app.internal.token:}") String internalToken,
+            @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
+            @Value("${app.execution-service.read-timeout-ms:30000}") long readTimeoutMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
-        this.restClient = RestClient.create();
+        // Timeouts explicites : la vérification est SYNCHRONE à la soumission (bloque la requête).
+        // Un sandbox injoignable / bloqué doit échouer proprement (→ null → 503) plutôt que de
+        // faire traîner le thread indéfiniment.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+        this.restClient = RestClient.builder().requestFactory(factory).build();
     }
 
     /** Un harnais à exécuter (nom + code + poids). */
