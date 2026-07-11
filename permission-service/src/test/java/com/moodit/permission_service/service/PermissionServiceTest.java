@@ -87,9 +87,20 @@ class PermissionServiceTest {
   }
 
   @Test
-  void studentQuizList_notSubscribed_denied() {
-    loggedIn(user(5));
+  void studentQuizList_notSubscribedButGlobalAdmin_allowed() {
+    // Gestionnaire (admin global) NON abonné : garde l'accès à la liste publiée (garde-fou
+    // canAccessCourse || canManageCourseContent).
+    loggedIn(user(5, RoleNames.ADMIN));
     when(membershipService.canAccessCourse(5, 1)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes", "GET", null)).isTrue();
+  }
+
+  @Test
+  void studentQuizList_notSubscribedNorManager_denied() {
+    loggedIn(user(5)); // ni abonné, ni gestionnaire
+    when(membershipService.canAccessCourse(5, 1)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(false);
     assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes", "GET", null)).isFalse();
   }
 

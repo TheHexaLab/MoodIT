@@ -212,15 +212,19 @@ public class PermissionService {
                 "GET",
                 "/courses/{courseId}/quizzes/manage",
                 (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
-            // Lister les quiz PUBLIES d'un cours (vue etudiant) : etre abonne a un programme
-            // du cours (meme appartenance que la lecture d'un quiz). Evite qu'un authentifie
-            // enumere les quiz d'un cours ou il n'est pas inscrit (sinon default-allow).
+            // Lister les quiz PUBLIES d'un cours (vue etudiant) : etre abonne a un programme du
+            // cours (meme appartenance que la lecture d'un quiz) OU gerer le contenu du cours
+            // (Admin/Gardien global, ou Admin/Enseignant du programme) — un enseignant non abonne
+            // doit garder acces a la liste publiee. Evite qu'un authentifie quelconque enumere les
+            // quiz d'un cours ou il n'a rien a faire (sinon default-allow).
             rule(
                 "GET",
                 "/courses/{courseId}/quizzes",
                 (user, vars, body) -> {
                   long courseId = longVar(vars, "courseId");
-                  return courseId > 0 && membershipService.canAccessCourse(user.getId(), courseId);
+                  return courseId > 0
+                      && (membershipService.canAccessCourse(user.getId(), courseId)
+                          || canManageCourseContent(user, vars, "courseId"));
                 }),
             // Detail EDITEUR d'un quiz (avec correction) : gestion de contenu (quizId dans le PATH).
             rule(
