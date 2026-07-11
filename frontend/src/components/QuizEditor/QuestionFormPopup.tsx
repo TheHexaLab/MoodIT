@@ -32,7 +32,6 @@ interface QuestionFormBodyProps {
   draft: QuestionDraft;
   isNew?: boolean;
   saving?: boolean;
-  error?: string | null;
   /** Langages disponibles pour les questions Code. */
   languages?: Language[];
   /** Demande le chargement (paresseux) des langages — appelé quand le type est Code. */
@@ -115,7 +114,6 @@ export function QuestionFormBody({
   draft: initialDraft,
   isNew,
   saving,
-  error,
   languages = FALLBACK_LANGUAGES,
   onRequestLanguages,
   questionTypes = FALLBACK_QUESTION_TYPES,
@@ -246,7 +244,6 @@ export function QuestionFormBody({
 
       {renderBody()}
 
-      {error && <span className={styles.errorText}>{error}</span>}
 
       <EditorFooter>
         <div className={styles.footer}>

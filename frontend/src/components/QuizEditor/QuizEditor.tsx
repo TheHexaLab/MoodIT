@@ -473,7 +473,6 @@ export function QuizEditor({
             quiz={activeQuiz}
             isNew={view.isNew}
             saving={saving}
-            error={error}
             labels={labels?.form}
             onCancel={cancelForm}
             onSaveMeta={(meta) => saveQuizMeta(view.quizId, view.isNew, meta)}
@@ -489,7 +488,6 @@ export function QuizEditor({
             draft={view.draft}
             isNew={view.isNew}
             saving={saving}
-            error={error}
             languages={effectiveLanguages}
             onRequestLanguages={requestLanguages}
             questionTypes={questionTypes ?? undefined}
@@ -587,6 +585,14 @@ export function QuizEditor({
               void openEdit(quiz);
             }}
           />
+        </Portal>
+      )}
+
+      {/* Erreurs de sauvegarde / suppression (quiz ou question) : en POPUP, pas en inline dans
+          le formulaire. Le formulaire reste ouvert dessous → l'utilisateur peut réessayer. */}
+      {error && (
+        <Portal>
+          <ErrorPopup content={error} onClose={() => setError(null)} />
         </Portal>
       )}
     </>

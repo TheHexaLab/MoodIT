@@ -16,7 +16,6 @@ interface QuizFormBodyProps {
   /** Quiz en cours de création (libellé du bouton « Créer le quiz »). */
   isNew?: boolean;
   saving?: boolean;
-  error?: string | null;
   /** Textes (surcharge partielle des défauts). */
   labels?: Partial<QuizFormLabels>;
   /** Annule (bouton « Annuler ») : retour à la liste — pas de fermeture. */
@@ -64,7 +63,6 @@ export function QuizFormBody({
   quiz,
   isNew,
   saving,
-  error,
   labels,
   onCancel,
   onSaveMeta,
@@ -191,8 +189,6 @@ export function QuizFormBody({
           </div>
         ))}
       </div>
-
-      {error && <span className={styles.errorText}>{error}</span>}
 
       <EditorFooter>
         <div className={styles.footer}>
