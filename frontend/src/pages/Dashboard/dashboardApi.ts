@@ -36,6 +36,7 @@ import type {
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
+  type AttemptAccepted,
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
@@ -43,7 +44,6 @@ import {
   type QuizSubmission,
   type RunCodeInput,
   type RunResult,
-  CodeVerificationUnavailableError,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
@@ -223,20 +223,18 @@ export async function fetchLanguages(): Promise<Language[]> {
 }
 
 /**
- * Soumettre une tentative ; le backend corrige toutes les questions (y compris le CODE,
- * exécuté en sandbox de façon synchrone) et renvoie le QuizResult. Si l'exécution est
- * indisponible, il répond 503 sans enregistrer la tentative → {@link CodeVerificationUnavailableError}.
+ * Soumettre une tentative de façon ASYNCHRONE : le backend enregistre la tentative et répond
+ * 202 + son id ({@link AttemptAccepted}) ; la correction du code tourne ensuite en tâche de fond.
+ * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
+ * via {@link fetchAttemptResult}. 409 si déjà soumise ou déjà en cours de correction.
  */
-export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult> {
+export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(submission),
   });
-  if (!res.ok) {
-    if (res.status === 503) throw new CodeVerificationUnavailableError();
-    throw new Error('Échec de la soumission du quiz');
-  }
+  if (!res.ok) throw new Error('Échec de la soumission du quiz');
   return await res.json();
 }
 

@@ -48,6 +48,16 @@ export interface IncomingProgramHandlers {
    * plateforme (admin général / gardien). `roles` = liste globale à jour.
    */
   onGlobalRolesChange?: (roles: Role[]) => void;
+  /**
+   * La correction ASYNCHRONE d'une tentative de quiz est TERMINÉE (résultat consultable). Poussé
+   * sur la room `user:<id>` de l'auteur : la vue de quiz ouverte charge alors le résultat corrigé.
+   */
+  onQuizAttemptGraded?: (quizId: number, attemptId: number) => void;
+  /**
+   * La correction ASYNCHRONE d'une tentative a ÉCHOUÉ (sandbox indisponible / code inévaluable) :
+   * la tentative a été supprimée, l'auteur peut renvoyer sans consommer sa tentative unique.
+   */
+  onQuizAttemptFailed?: (quizId: number, attemptId: number, reason?: string) => void;
 }
 
 /**

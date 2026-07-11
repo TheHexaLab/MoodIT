@@ -9,6 +9,7 @@ import { Chevron } from '../../../assets/Chevron';
 import { Check } from '../../../assets/Check';
 import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
+  type AttemptOutcome,
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
@@ -43,6 +44,8 @@ interface QuizViewProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
+  /** Verdict PUSH (WebSocket) de la correction async, remonté par le Dashboard (room user). */
+  attemptOutcome?: AttemptOutcome | null;
   /** Exécute le code d'une question Code dans le sandbox (bouton « play » de l'éditeur). */
   onRunCode?: RunCodeHandler;
   /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
@@ -66,6 +69,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  attemptOutcome,
   onRunCode,
   staleNotice = false,
   onReloadStale,
@@ -81,6 +85,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchAttempts,
     onFetchAttemptResult,
     onSubmitQuiz,
+    attemptOutcome,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,

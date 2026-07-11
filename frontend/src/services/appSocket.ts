@@ -88,6 +88,10 @@ type ServerEvent =
   | { type: 'user:globalRolesChanged'; userId: number; roles: Role[] }
   | { type: 'subscription:added'; userId: number; program: Program }
   | { type: 'subscription:removed'; userId: number; programId: number }
+  // Correction ASYNCHRONE d'une tentative de quiz (scope = utilisateur) : poussé à l'auteur quand
+  // le job de correction se termine (succès → résultat consultable ; échec → tentative supprimée).
+  | { type: 'quiz:attempt-graded'; userId: number; quizId: number; attemptId: number }
+  | { type: 'quiz:attempt-failed'; userId: number; quizId: number; attemptId: number; reason?: string }
   // Analyses MCP (scope = cours) : poussé quand un job d'analyse se termine (succès / échec).
   | { type: 'mcp:analysis-created'; courseId: number; analysis: McpResponseSummary }
   | { type: 'mcp:analysis-failed'; courseId: number; userId: number; reason?: string }
@@ -312,6 +316,12 @@ export function createAppSocket(
           break;
         case 'user:globalRolesChanged':
           programSubs.get(data.userId)?.onGlobalRolesChange?.(data.roles);
+          break;
+        case 'quiz:attempt-graded':
+          programSubs.get(data.userId)?.onQuizAttemptGraded?.(data.quizId, data.attemptId);
+          break;
+        case 'quiz:attempt-failed':
+          programSubs.get(data.userId)?.onQuizAttemptFailed?.(data.quizId, data.attemptId, data.reason);
           break;
         case 'mcp:analysis-created':
           mcpSubs.get(data.courseId)?.onAnalysisCreated(data.analysis);

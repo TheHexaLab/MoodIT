@@ -61,6 +61,7 @@ import {
 } from '../../components/CourseChannelList/courseChannelSources.ts';
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
 import { type DemoProgram } from './dashboardApi.ts';
+import { type AttemptOutcome } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import styles from './Dashboard.module.css';
 
 /**
@@ -129,6 +130,8 @@ export default function Dashboard() {
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
   const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
+  // Dernier verdict PUSH (WS) d'une correction async de tentative → remonté à la vue de quiz.
+  const [attemptOutcome, setAttemptOutcome] = useState<AttemptOutcome | null>(null);
   // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
   const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
@@ -215,6 +218,12 @@ export default function Dashboard() {
       // Mes rôles GLOBAUX ont changé → on remplace ceux du profil ; isAdmin/isGuardian
       // se recalculent (bouton « Gérer les administrateurs », droits de suppression…).
       onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
+      // Correction ASYNCHRONE d'une de MES tentatives terminée / échouée (room user) : on remonte
+      // le verdict à la vue de quiz ouverte, qui résout l'attente (résumé) ou invite à renvoyer.
+      onQuizAttemptGraded: (quizId, attemptId) =>
+        setAttemptOutcome({ quizId, attemptId, ok: true }),
+      onQuizAttemptFailed: (quizId, attemptId, reason) =>
+        setAttemptOutcome({ quizId, attemptId, ok: false, reason }),
     });
   }, [ws, currentUser.id, applyGlobalRoles]);
 
@@ -975,6 +984,7 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        attemptOutcome={attemptOutcome}
         onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
