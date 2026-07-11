@@ -3,6 +3,7 @@ package com.moodit.core_service.repository;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 //Model
@@ -49,4 +50,14 @@ public interface PostRepository extends JpaRepository<Post, Integer> {
         "SELECT p.parent.id, COUNT(p) FROM Post p WHERE p.parent.id IN :parentIds"
             + " GROUP BY p.parent.id")
     List<Object[]> countChildrenByParentIds(@Param("parentIds") List<Integer> parentIds);
+
+    /**
+     * Détache (parent → NULL) les réponses DIRECTES d'un post, EN MASSE (contourne le contexte de
+     * persistance et donc la cascade JPA `children` REMOVE/orphanRemoval). Utilisé avant de
+     * supprimer un message de DISCUSSION : ses réponses SURVIVENT (une réponse ne disparaît pas
+     * avec le message auquel elle répond). Ne concerne PAS les Threads (cascade conservée).
+     */
+    @Modifying
+    @Query("UPDATE Post p SET p.parent = null WHERE p.parent.id = :parentId")
+    void detachDirectChildren(@Param("parentId") Integer parentId);
 }
