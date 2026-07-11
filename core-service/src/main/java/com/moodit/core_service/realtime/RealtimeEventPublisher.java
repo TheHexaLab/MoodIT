@@ -173,6 +173,35 @@ public class RealtimeEventPublisher {
         event("quiz:deleted", "programId", programId, "courseId", courseId, "quizId", quizId));
   }
 
+  /**
+   * La correction ASYNCHRONE d'une tentative de quiz est TERMINÉE : le résultat est consultable.
+   * Scope {@code user:<userId>} — seul l'auteur de la tentative attend ce résultat (il fetch le
+   * détail corrigé au reçu de l'event, cf. {@code getAttemptResult}).
+   */
+  public void quizAttemptGraded(long userId, long quizId, long attemptId) {
+    emit(
+        "user",
+        userId,
+        event("quiz:attempt-graded", "userId", userId, "quizId", quizId, "attemptId", attemptId));
+  }
+
+  /**
+   * La correction ASYNCHRONE d'une tentative a ÉCHOUÉ (sandbox indisponible / code inévaluable) :
+   * la tentative a été supprimée, l'auteur peut renvoyer sans consommer sa tentative unique.
+   * Scope {@code user:<userId>}. `reason` optionnel (null → libellé générique côté front).
+   */
+  public void quizAttemptFailed(long userId, long quizId, long attemptId, String reason) {
+    emit(
+        "user",
+        userId,
+        event(
+            "quiz:attempt-failed",
+            "userId", userId,
+            "quizId", quizId,
+            "attemptId", attemptId,
+            "reason", reason));
+  }
+
   // ─── Programmes / abonnements (scope = user) ──────────────────────────────
 
   public void programCreated(long userId, ProgramDto program) {

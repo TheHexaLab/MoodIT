@@ -7,10 +7,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.exception.AlreadySubmittedException;
-import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.service.QuizService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,9 +20,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Mapping HTTP de {@code POST /api/quizzes/{id}/submissions} (cf. {@code GlobalExceptionHandler}) :
- * une {@link CodeVerificationUnavailableException} du service (sandbox indisponible) doit ressortir
- * en 503, distincte du 409 « déjà soumis » et du 200 nominal.
+ * Mapping HTTP de {@code POST /api/quizzes/{id}/submissions}. La soumission est ASYNCHRONE :
+ * elle enregistre la tentative et répond <b>202 Accepted</b> avec son id ; la correction du code
+ * (et donc l'éventuelle indisponibilité du sandbox) se fait en tâche de fond et remonte par
+ * WebSocket, PLUS via HTTP. Reste le 409 « déjà soumis / déjà en cours » (cf. GlobalExceptionHandler).
  */
 @WebMvcTest(controllers = QuizController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)
@@ -37,20 +36,7 @@ class QuizControllerSubmitTest {
     private static final String BODY = "{\"quizId\":1,\"answers\":[]}";
 
     @Test
-    @DisplayName("Vérification du code indisponible → 503 (tentative non enregistrée)")
-    void submit_whenCodeVerificationUnavailable_returns503() throws Exception {
-        when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
-                .thenThrow(new CodeVerificationUnavailableException());
-
-        mockMvc.perform(post("/api/quizzes/1/submissions")
-                        .header("X-User-Email", "eva@test.ca")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(BODY))
-                .andExpect(status().isServiceUnavailable()); // 503
-    }
-
-    @Test
-    @DisplayName("Tentative déjà soumise → 409 (inchangé)")
+    @DisplayName("Tentative déjà soumise (ou déjà en cours de correction) → 409")
     void submit_whenAlreadySubmitted_returns409() throws Exception {
         when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
                 .thenThrow(new AlreadySubmittedException());
@@ -63,18 +49,16 @@ class QuizControllerSubmitTest {
     }
 
     @Test
-    @DisplayName("Soumission valide → 200 avec le résultat corrigé")
-    void submit_whenValid_returns200() throws Exception {
-        QuizResultDTO result = QuizResultDTO.builder().quizId(1).earned(10.0).max(10.0).build();
+    @DisplayName("Soumission acceptée → 202 avec l'id de la tentative")
+    void submit_whenAccepted_returns202WithAttemptId() throws Exception {
         when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
-                .thenReturn(result);
+                .thenReturn(42);
 
         mockMvc.perform(post("/api/quizzes/1/submissions")
                         .header("X-User-Email", "eva@test.ca")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BODY))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.quizId").value(1))
-                .andExpect(jsonPath("$.earned").value(10.0));
+                .andExpect(status().isAccepted()) // 202
+                .andExpect(jsonPath("$.attemptId").value(42));
     }
 }

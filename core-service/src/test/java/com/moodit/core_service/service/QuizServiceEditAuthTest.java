@@ -16,6 +16,7 @@ import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
 import com.moodit.core_service.repository.SubmissionTestCaseRepository;
 import com.moodit.core_service.repository.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,7 @@ class QuizServiceEditAuthTest {
     @Mock private RealtimeEventPublisher realtimePublisher;
     @Mock private ExecutionClient executionClient;
     @Mock private PlatformTransactionManager transactionManager;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private QuizService service;
 
@@ -52,7 +54,7 @@ class QuizServiceEditAuthTest {
         service = new QuizService(
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
-                new ObjectMapper(), realtimePublisher, executionClient, transactionManager);
+                new ObjectMapper(), realtimePublisher, executionClient, transactionManager, eventPublisher);
     }
 
     @Test

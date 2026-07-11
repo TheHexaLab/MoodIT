@@ -1,7 +1,6 @@
 package com.moodit.core_service.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -10,7 +9,6 @@ import com.moodit.core_service.dto.QuestionResultDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.dto.SubmittedAnswerDTO;
-import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Language;
 import com.moodit.core_service.model.QType;
@@ -35,11 +33,13 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * Test d'intégration de {@link QuizService#submitQuiz} sur H2 (schéma généré depuis les entités),
- * ciblant la vérification SYNCHRONE des questions Code au moment de la soumission :
- *   1. exécution indisponible → 503 ({@link CodeVerificationUnavailableException}) et AUCUNE
- *      tentative/soumission enregistrée (l'étudiant peut renvoyer sans consommer sa tentative) ;
- *   2. exécution réussie → tentative + verdicts persistés et question Code notée.
+ * Test d'intégration de la soumission ASYNCHRONE sur H2 (schéma généré depuis les entités).
+ * {@link QuizService#submitQuiz} persiste la tentative en {@code "pending"} (+ réponses brutes) et
+ * rend un id ; {@link QuizService#gradeAttempt} — déclenché ici MANUELLEMENT (le listener async
+ * n'est pas chargé dans ce slice) — corrige le code :
+ *   1. exécution indisponible → la tentative pending est SUPPRIMÉE (rien ne subsiste, l'étudiant
+ *      peut renvoyer sans consommer sa tentative) ;
+ *   2. exécution réussie → verdicts persistés, tentative {@code "done"}, question Code notée.
  * {@link ExecutionClient} est mocké (pas de sandbox Piston dans un test).
  */
 @DataJpaTest
@@ -121,32 +121,49 @@ class QuizServiceSubmitIT {
   }
 
   @Test
-  @DisplayName("Exécution indisponible → 503 et AUCUNE tentative persistée (renvoi possible)")
-  void submit_whenExecutionUnavailable_throwsAndPersistsNothing() {
+  @DisplayName("Correction indisponible → tentative pending SUPPRIMÉE (rien ne subsiste, renvoi possible)")
+  void grade_whenExecutionUnavailable_deletesAttempt() {
     // Sandbox injoignable → l'ExecutionClient renvoie null.
     when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
 
-    assertThatThrownBy(
-            () -> quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL))
-        .isInstanceOf(CodeVerificationUnavailableException.class);
+    // Soumission : persiste la tentative 'pending' + la réponse (async, rend l'id).
+    Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+    assertThat(attemptId).isNotNull();
+
+    // Vide le contexte : le job async relit la tentative dans une NOUVELLE transaction (contexte
+    // frais). Sans ça, le test partagerait le contexte de submit (collections non initialisées).
+    em.flush();
+    em.clear();
+
+    // Correction (déclenchée manuellement) : code inévaluable → la tentative est supprimée.
+    quizService.gradeAttempt(attemptId);
 
     em.flush();
     em.clear();
-    // Rien n'a été écrit : la tentative unique n'est pas consommée.
+    // Rien ne subsiste : la tentative unique n'est pas consommée.
     assertThat(count("SELECT count(*) FROM attempt")).isZero();
     assertThat(count("SELECT count(*) FROM submission")).isZero();
     assertThat(count("SELECT count(*) FROM submission_test_case")).isZero();
   }
 
   @Test
-  @DisplayName("Exécution réussie → tentative + verdicts persistés et question Code notée")
-  void submit_whenExecutionSucceeds_persistsAttemptAndVerdicts() {
+  @DisplayName("Correction réussie → verdicts persistés, tentative 'done' et question Code notée")
+  void grade_whenExecutionSucceeds_persistsVerdictsAndGrades() {
     // Le harnais unique passe.
     when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true));
 
-    QuizResultDTO result = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+    Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+    // Contexte frais : le job async relit la tentative dans une nouvelle transaction.
+    em.flush();
+    em.clear();
 
-    assertThat(result.getAttemptId()).isNotNull();
+    quizService.gradeAttempt(attemptId);
+
+    // Relit depuis la base (contexte vidé) : verdicts et statut 'done' bien persistés.
+    em.flush();
+    em.clear();
+
+    QuizResultDTO result = quizService.getAttemptResult(attemptId, USER_EMAIL);
     QuestionResultDTO codeResult = result.getQuestions().stream()
         .filter(q -> q.getQuestionId().equals(questionId))
         .findFirst()
@@ -155,9 +172,7 @@ class QuizServiceSubmitIT {
     assertThat(codeResult.getTests()).isNotNull().hasSize(1);
     assertThat(codeResult.getEarned()).isEqualTo(10.0);
 
-    em.flush();
-    em.clear();
-    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'done'")).isEqualTo(1L);
     assertThat(count("SELECT count(*) FROM submission")).isEqualTo(1L);
     assertThat(count("SELECT count(*) FROM submission_test_case WHERE passed = TRUE")).isEqualTo(1L);
   }

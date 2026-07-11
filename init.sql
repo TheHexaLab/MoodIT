@@ -226,17 +226,28 @@ CREATE TABLE Drag_Item(
 -- Une TENTATIVE de quiz par un utilisateur (regroupe les soumissions de la tentative).
 -- `attempt_no` = 1, 2, … par (quiz, user). Les tentatives multiples ne sont possibles
 -- que si Quiz.allow_retry = TRUE (contrôlé côté service).
+-- status : 'pending' (correction du code en cours, soumission async) → 'done' (corrigée).
+-- Une tentative dont l'évaluation code échoue est SUPPRIMÉE (la tentative unique n'est
+-- donc pas consommée) ; 'failed' ne persiste pas en base.
 CREATE TABLE Attempt(
    id SERIAL,
    quiz_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    attempt_no INTEGER NOT NULL,
+   -- Défaut 'done' : un INSERT manuel / de démo est une tentative DÉJÀ corrigée. La
+   -- soumission async pose explicitement 'pending' puis 'done'.
+   status VARCHAR(16) NOT NULL DEFAULT 'done',
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
    PRIMARY KEY(id),
    UNIQUE(quiz_id, user_id, attempt_no),
    FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
+
+-- Verrou « une seule correction en cours par (quiz, utilisateur) » : rend l'anti-double-
+-- soumission ATOMIQUE (deux POST concurrents → le 2e viole l'index → 409). Miroir de
+-- uq_mcp_response_pending.
+CREATE UNIQUE INDEX uq_attempt_pending ON Attempt(quiz_id, user_id) WHERE status = 'pending';
 
 -- La réponse soumise est conservée (content) ; le score n'est PAS stocké : il est
 -- recalculé dynamiquement à partir du quiz courant (cf. QuizService).
@@ -948,8 +959,10 @@ VALUES ('Écris une fonction somme(a, b) qui renvoie la somme de deux entiers.',
         (SELECT id FROM Quiz WHERE title = 'Quiz noté — exercice de code'
                              AND course_id = (SELECT id FROM Course WHERE code = 'MCP100')));
 
+-- Le harnais Python doit RENVOYER un booléen (contrat : verdict = bool(harnais())) ; un `assert`
+-- renverrait None → toujours faux même sur une bonne réponse. Cf. CodeAssembler.assemblePython.
 INSERT INTO Test_Case (name, harness_code, weight, question_id)
-SELECT 'Test ' || g, 'assert somme(1, 2) == 3', 1,
+SELECT 'Test ' || g, 'return somme(1, 2) == 3', 1,
        (SELECT id FROM Question
         WHERE q_type_id = 6
           AND quiz_id = (SELECT id FROM Quiz WHERE title = 'Quiz noté — exercice de code'

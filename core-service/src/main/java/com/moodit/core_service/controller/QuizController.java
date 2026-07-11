@@ -1,5 +1,6 @@
 package com.moodit.core_service.controller;
 
+import com.moodit.core_service.dto.AttemptAcceptedDTO;
 import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
@@ -77,15 +78,18 @@ public class QuizController {
     }
 
     /**
-     * Soumet une tentative ; le serveur corrige (sauf code), persiste les soumissions et
-     * renvoie le résultat. Tentative unique → 409 si déjà soumis. `X-User-Email` injecté
-     * par la gateway (issu du JWT).
+     * Soumet une tentative de façon ASYNCHRONE : le serveur enregistre la tentative et répond
+     * <b>202 Accepted</b> avec son id, puis corrige le code en tâche de fond. Le résultat arrive
+     * par WebSocket ({@code quiz:attempt-graded} / {@code quiz:attempt-failed}) ; le client le
+     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. Tentative unique →
+     * 409 si déjà soumis ou déjà en cours de correction. `X-User-Email` injecté par la gateway.
      */
     @PostMapping("/{quizId}/submissions")
-    public ResponseEntity<QuizResultDTO> submitQuiz(
+    public ResponseEntity<AttemptAcceptedDTO> submitQuiz(
             @PathVariable Integer quizId,
             @RequestBody QuizSubmissionDTO submission,
             @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.submitQuiz(quizId, submission, email));
+        Integer attemptId = quizService.submitQuiz(quizId, submission, email);
+        return ResponseEntity.accepted().body(new AttemptAcceptedDTO(attemptId));
     }
 }
