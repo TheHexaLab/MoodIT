@@ -462,6 +462,27 @@ class AuthServiceTest {
     verify(userRepository, never()).findByEmail(anyString());
   }
 
+  @Test
+  void logout_validToken_clearsActiveTokenHash() {
+    // Vérifie qu'un logout avec token valide supprime le hash de session active et persiste l'utilisateur.
+    User u = verifiedUser();
+    u.setActiveTokenHash("token-hash");
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    authService.logout("jwt-token");
+
+    assertThat(u.getActiveTokenHash()).isNull();
+    verify(userRepository).save(u);
+  }
+
+  @Test
+  void logout_invalidToken_doesNothing() {
+    authService.logout("not-a-token");
+
+    verify(userRepository, never()).save(any());
+  }
+
   // ----- verifyDev -----
 
   @Test
