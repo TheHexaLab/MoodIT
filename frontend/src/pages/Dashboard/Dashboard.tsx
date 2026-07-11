@@ -44,7 +44,6 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
-import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -209,13 +208,6 @@ export default function Dashboard() {
       onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
     });
   }, [ws, currentUser.id, applyGlobalRoles]);
-
-  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
-  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
-  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
-    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
-    [ws, currentUser.id]
-  );
 
   // Abonnement temps réel de la liste des ADMINISTRATEURS (popup rôles globaux) : un autre admin
   // modifie une assignation → le serveur diffuse la liste à jour. On mappe `roles` → `role_ids`
@@ -889,7 +881,6 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
-        onSubscribeCodeGrading={subscribeCodeGrading}
         onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}

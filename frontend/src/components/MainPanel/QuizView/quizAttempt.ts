@@ -347,43 +347,14 @@ export type FetchAttemptResultHandler = (
   attemptId: number
 ) => MaybePromise<QuizResult>;
 
-// ───────────────────── Correction ASYNC des questions Code (WS) ─────────────────
-
-/** Handlers d'abonnement au verdict de correction de code (event WS `quiz:code-graded`). */
-export interface IncomingQuizGradeHandlers {
-  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void;
-}
-
-/** Facade WS d'abonnement à la correction de code (scope utilisateur). */
-export interface QuizGradingSocket {
-  subscribe: (userId: number, handlers: IncomingQuizGradeHandlers) => () => void;
-}
-
 /**
- * Abonnement PRÉ-LIÉ à l'utilisateur courant, fourni par le parent (Dashboard). Le consommateur
- * (useQuizAttempt) passe un callback et récupère une fonction de désabonnement.
+ * Erreur du contrat de soumission : le backend n'a pas pu vérifier les questions de code
+ * (service d'exécution indisponible, HTTP 503). La tentative n'a PAS été enregistrée →
+ * l'étudiant peut renvoyer. Distincte d'un échec générique pour afficher un message adapté.
  */
-export type SubscribeCodeGrading = (
-  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void
-) => () => void;
-
-/**
- * Fusionne les verdicts de code fraîchement corrigés (reçus par WS) dans un résultat existant :
- * remplace les questions concernées, recalcule earned/max. No-op si la tentative ne correspond
- * pas (ou pas de résultat courant).
- */
-export function mergeCodeResults(
-  previous: QuizResult | null,
-  attemptId: number,
-  graded: QuestionResult[]
-): QuizResult | null {
-  if (!previous || previous.attemptId !== attemptId) return previous;
-  const gradedById = new Map(graded.map((g) => [g.questionId, g]));
-  const questions = previous.questions.map((q) => gradedById.get(q.questionId) ?? q);
-  return {
-    ...previous,
-    questions,
-    earned: questions.reduce((sum, q) => sum + q.earned, 0),
-    max: questions.reduce((sum, q) => sum + q.max, 0),
-  };
+export class CodeVerificationUnavailableError extends Error {
+  constructor() {
+    super('Code verification unavailable');
+    this.name = 'CodeVerificationUnavailableError';
+  }
 }

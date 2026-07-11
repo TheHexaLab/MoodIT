@@ -26,11 +26,6 @@ import {
   type McpResponseSummary,
   type McpSocket,
 } from '../components/McpManagementPopup/types.ts';
-import {
-  type IncomingQuizGradeHandlers,
-  type QuizGradingSocket,
-} from '../components/MainPanel/QuizView/quizAttempt';
-import { type QuestionResult } from '../components/MainPanel/QuizView/quizAttempt';
 
 /**
  * SCAFFOLD du vrai client WebSocket (à finir le jour du branchement temps réel).
@@ -117,10 +112,7 @@ type ServerEvent =
   | { type: 'establishment:deleted'; establishmentId: number }
   // Rôles ADMINISTRATEURS (User_Role) modifiés — room dédiée `adminRoles:0`. Porte la LISTE À JOUR
   // des utilisateurs ayant un rôle global ; le popup « Gérer les administrateurs » remplace sa liste.
-  | { type: 'adminRoles:changed'; users: GlobalRoleUser[] }
-  // Correction de code (scope = user) : verdicts + score recalculé d'une tentative dont les
-  // questions Code viennent d'être corrigées de façon asynchrone.
-  | { type: 'quiz:code-graded'; userId: number; attemptId: number; questions: QuestionResult[] };
+  | { type: 'adminRoles:changed'; users: GlobalRoleUser[] };
 
 /** Évènement temps réel sur le catalogue d'établissements (scope GLOBAL). */
 export type EstablishmentEvent =
@@ -169,7 +161,6 @@ export interface AppSocket {
   mcp: McpSocket;
   establishments: EstablishmentsSocket;
   adminRoles: AdminRolesSocket;
-  quizGrading: QuizGradingSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -216,9 +207,6 @@ export function createAppSocket(
   const adminRoleSubs = new Set<(users: GlobalRoleUser[]) => void>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
-  // Correction de code (scope user, room "user:<id>") : Map SÉPARÉE de programSubs pour que
-  // QuizView et le menu Programmes puissent s'abonner au même scope sans se piétiner.
-  const quizGradeSubs = new Map<number, IncomingQuizGradeHandlers>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -247,7 +235,6 @@ export function createAppSocket(
       // Room UNIQUE du catalogue d'établissements (id 0), si le popup est ouvert.
       if (establishmentSubs.size > 0) send({ type: 'join', scope: 'establishment', id: 0 });
       if (adminRoleSubs.size > 0) send({ type: 'join', scope: 'adminRoles', id: 0 });
-      for (const userId of quizGradeSubs.keys()) send({ type: 'join', scope: 'user', id: userId });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
       // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
@@ -364,9 +351,6 @@ export function createAppSocket(
         case 'adminRoles:changed':
           for (const handler of adminRoleSubs) handler(data.users);
           break;
-        case 'quiz:code-graded':
-          quizGradeSubs.get(data.userId)?.onCodeGraded(data.attemptId, data.questions);
-          break;
       }
     };
 
@@ -459,17 +443,6 @@ export function createAppSocket(
         return () => {
           adminRoleSubs.delete(handler);
           if (adminRoleSubs.size === 0) send({ type: 'leave', scope: 'adminRoles', id: 0 });
-        };
-      },
-    },
-    quizGrading: {
-      subscribe(userId, handlers) {
-        quizGradeSubs.set(userId, handlers);
-        send({ type: 'join', scope: 'user', id: userId });
-        return () => {
-          quizGradeSubs.delete(userId);
-          // Pas de 'leave' : la room "user" est aussi tenue par l'abonnement Programmes
-          // (toujours actif tant que connecté) — envoyer leave le couperait.
         };
       },
     },

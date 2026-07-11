@@ -43,6 +43,7 @@ import {
   type QuizSubmission,
   type RunCodeInput,
   type RunResult,
+  CodeVerificationUnavailableError,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
@@ -220,8 +221,9 @@ export async function fetchLanguages(): Promise<Language[]> {
 }
 
 /**
- * Soumettre une tentative ; le backend corrige (types « à réponses ») et renvoie le
- * QuizResult. Le CODE n'est pas exécuté côté serveur (tests = null).
+ * Soumettre une tentative ; le backend corrige toutes les questions (y compris le CODE,
+ * exécuté en sandbox de façon synchrone) et renvoie le QuizResult. Si l'exécution est
+ * indisponible, il répond 503 sans enregistrer la tentative → {@link CodeVerificationUnavailableError}.
  */
 export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
@@ -229,7 +231,10 @@ export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(submission),
   });
-  if (!res.ok) throw new Error('Échec de la soumission du quiz');
+  if (!res.ok) {
+    if (res.status === 503) throw new CodeVerificationUnavailableError();
+    throw new Error('Échec de la soumission du quiz');
+  }
   return await res.json();
 }
 

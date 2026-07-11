@@ -9,10 +9,9 @@ import {
   type QuestionAnswer,
   type QuizResult,
   type SubmitQuizHandler,
-  type SubscribeCodeGrading,
+  CodeVerificationUnavailableError,
   initAnswers,
   mergeAnswers,
-  mergeCodeResults,
   toSubmission,
 } from './quizAttempt';
 import { gradeQuiz } from './grading';
@@ -24,6 +23,45 @@ import { gradeQuiz } from './grading';
  * - `review`  : relecture d'une question donnée avec sa correction.
  */
 export type QuizPhase = 'taking' | 'summary' | 'review';
+
+/**
+ * Soumission « en vol » persistée en localStorage : permet de survivre à un RECHARGEMENT de
+ * l'onglet pendant l'envoi (l'état React est perdu, mais le serveur finit souvent d'enregistrer
+ * la tentative). `attemptsBefore` = nb de tentatives avant l'envoi → au remontage, une tentative
+ * en plus signale que l'envoi a abouti côté serveur.
+ */
+type PendingSubmission = { answers: AttemptAnswers; attemptsBefore: number };
+
+const PENDING_KEY = (quizId: number) => `moodit:quiz-pending-submission:${quizId}`;
+
+function readPending(quizId: number): PendingSubmission | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY(quizId));
+    return raw ? (JSON.parse(raw) as PendingSubmission) : null;
+  } catch {
+    return null;
+  }
+}
+function writePending(quizId: number, pending: PendingSubmission): void {
+  try {
+    localStorage.setItem(PENDING_KEY(quizId), JSON.stringify(pending));
+  } catch {
+    // quota / mode privé : la persistance est un bonus, on ignore l'échec.
+  }
+}
+function clearPending(quizId: number): void {
+  try {
+    localStorage.removeItem(PENDING_KEY(quizId));
+  } catch {
+    // ignore
+  }
+}
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Sonde le serveur au plus ~30 s (toutes les 1,5 s) après un refresh mid-envoi. */
+const RECONCILE_TIMEOUT_MS = 30_000;
+const RECONCILE_INTERVAL_MS = 1_500;
 
 interface UseQuizAttemptParams {
   /** Quiz de départ (mock / cache) : affiché immédiatement, sert aussi de repli. */
@@ -39,16 +77,20 @@ interface UseQuizAttemptParams {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
-  /**
-   * Abonnement à la correction ASYNC des questions Code (WS, pré-lié à l'utilisateur courant).
-   * Quand les verdicts arrivent, le résultat courant est mis à jour en direct. Absent → pas de
-   * live-update (les verdicts apparaissent au rechargement de la tentative).
-   */
-  onSubscribeCodeGrading?: SubscribeCodeGrading;
   /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
   loadErrorMessage?: string;
   /** Message d'erreur affiché si la soumission échoue (label, surchargeable). */
   submitErrorMessage?: string;
+  /**
+   * Message affiché si la vérification du code est indisponible (503) : la tentative n'a pas été
+   * enregistrée, l'étudiant peut renvoyer (label, surchargeable).
+   */
+  codeVerificationUnavailableMessage?: string;
+  /**
+   * Message affiché quand une soumission interrompue par un refresh n'a pas pu être confirmée
+   * côté serveur après réconciliation (label, surchargeable).
+   */
+  submissionNotConfirmedMessage?: string;
 }
 
 export interface QuizAttemptApi {
@@ -77,6 +119,13 @@ export interface QuizAttemptApi {
 
   submitting: boolean;
   submitError: string | null;
+  /** Efface l'erreur de soumission (fermeture du popup). */
+  dismissSubmitError: () => void;
+  /**
+   * Réconciliation en cours : une soumission avait été lancée puis l'onglet a été rechargé ;
+   * on sonde le serveur pour retrouver la tentative. Pilote le spinner plein quiz.
+   */
+  reconciling: boolean;
 
   // ── Tentatives ──
   /** Historique des tentatives (résumés), ordre croissant. */
@@ -125,9 +174,10 @@ export function useQuizAttempt({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
-  onSubscribeCodeGrading,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
+  codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
+  submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
 }: UseQuizAttemptParams): QuizAttemptApi {
   const [quiz, setQuiz] = useState<Quiz>(initialQuiz);
   const [loading, setLoading] = useState<boolean>(Boolean(onFetchQuiz));
@@ -140,22 +190,13 @@ export function useQuizAttempt({
   const [result, setResult] = useState<QuizResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [reconciling, setReconciling] = useState(false);
 
   const [attempts, setAttempts] = useState<AttemptSummary[]>([]);
   const [currentAttemptId, setCurrentAttemptId] = useState<number | null>(null);
 
   const mountedRef = useRef(true);
   const fetchRef = useRef(onFetchQuiz);
-
-  // Correction ASYNC des questions Code : à réception du verdict WS, on fusionne dans le résultat
-  // courant (verdicts + score recalculés) si la tentative correspond. Abonnement pour toute la vie
-  // de la vue ; le merge est un no-op tant qu'aucun résultat correspondant n'est affiché.
-  useEffect(() => {
-    if (!onSubscribeCodeGrading) return;
-    return onSubscribeCodeGrading((attemptId, questions) => {
-      setResult((prev) => mergeCodeResults(prev, attemptId, questions));
-    });
-  }, [onSubscribeCodeGrading]);
   const fetchAttemptsRef = useRef(onFetchAttempts);
   const fetchAttemptResultRef = useRef(onFetchAttemptResult);
   useEffect(() => {
@@ -172,6 +213,54 @@ export function useQuizAttempt({
 
   const questionCount = quiz.questions?.length ?? 0;
 
+  /**
+   * Réconcilie une soumission interrompue par un refresh : sonde l'historique jusqu'à ce qu'une
+   * NOUVELLE tentative apparaisse (l'envoi a abouti côté serveur → ouvre le résumé) ou jusqu'au
+   * timeout (non confirmée → reste en passation, réponses restaurées, + message d'erreur).
+   */
+  const reconcilePending = useCallback(
+    async (quizId: number, pending: PendingSubmission) => {
+      setReconciling(true);
+      const refresh = fetchAttemptsRef.current;
+      const deadline = Date.now() + RECONCILE_TIMEOUT_MS;
+      try {
+        while (Date.now() < deadline) {
+          await delay(RECONCILE_INTERVAL_MS);
+          if (!mountedRef.current) return;
+          const history = refresh ? await refresh(quizId) : [];
+          if (!mountedRef.current) return;
+          if (history.length > pending.attemptsBefore) {
+            clearPending(quizId);
+            const last = history[history.length - 1];
+            const lastResult = fetchAttemptResultRef.current
+              ? await fetchAttemptResultRef.current(quizId, last.id)
+              : null;
+            if (!mountedRef.current) return;
+            setAttempts(history);
+            if (lastResult) {
+              setResult(lastResult);
+              setCurrentAttemptId(last.id);
+              setPhase('summary');
+            }
+            setReconciling(false);
+            return;
+          }
+        }
+        // Timeout : la tentative n'a pas été confirmée. On garde les réponses restaurées.
+        clearPending(quizId);
+        if (!mountedRef.current) return;
+        setReconciling(false);
+        setSubmitError(submissionNotConfirmedMessage);
+      } catch {
+        clearPending(quizId);
+        if (!mountedRef.current) return;
+        setReconciling(false);
+        setSubmitError(submissionNotConfirmedMessage);
+      }
+    },
+    [submissionNotConfirmedMessage]
+  );
+
   /** Charge le détail du quiz + l'historique ; ouvre sur la dernière tentative s'il y en a. */
   const reload = useCallback(async () => {
     const fetchQuiz = fetchRef.current;
@@ -181,6 +270,28 @@ export function useQuizAttempt({
     try {
       const fetched = await fetchQuiz(initialQuiz.id);
       const history = fetchAttemptsRef.current ? await fetchAttemptsRef.current(initialQuiz.id) : [];
+      if (!mountedRef.current) return;
+      setQuiz(fetched);
+      setTouched(new Set());
+      setCurrentIndex(0);
+
+      // Une soumission était-elle en vol lors d'un refresh ? (marqueur localStorage, pas encore
+      // reflété par une nouvelle tentative) → restaure les réponses et réconcilie avec le serveur.
+      const pending = readPending(initialQuiz.id);
+      if (pending && history.length <= pending.attemptsBefore) {
+        setAnswers(mergeAnswers(fetched, pending.answers));
+        setAttempts(history);
+        setResult(null);
+        setCurrentAttemptId(null);
+        setPhase('taking');
+        setLoading(false);
+        await reconcilePending(initialQuiz.id, pending);
+        return;
+      }
+      if (pending) clearPending(initialQuiz.id);
+
+      setAnswers(initAnswers(fetched));
+      setAttempts(history);
       const last = history.length > 0 ? history[history.length - 1] : null;
       // Récap de la dernière tentative si elle existe (et qu'on sait la charger).
       const lastResult =
@@ -188,11 +299,6 @@ export function useQuizAttempt({
           ? await fetchAttemptResultRef.current(initialQuiz.id, last.id)
           : null;
       if (!mountedRef.current) return;
-      setQuiz(fetched);
-      setAnswers(initAnswers(fetched));
-      setTouched(new Set());
-      setCurrentIndex(0);
-      setAttempts(history);
       if (lastResult) {
         setResult(lastResult);
         setCurrentAttemptId(last ? last.id : null);
@@ -208,7 +314,7 @@ export function useQuizAttempt({
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [initialQuiz.id, loadErrorMessage]);
+  }, [initialQuiz.id, loadErrorMessage, reconcilePending]);
 
   useEffect(() => {
     void reload();
@@ -266,10 +372,17 @@ export function useQuizAttempt({
   const submit = useCallback(async () => {
     setSubmitError(null);
     setSubmitting(true);
+    // Persiste la soumission « en vol » : si l'onglet est rechargé pendant l'envoi (synchrone,
+    // potentiellement long), le remontage la réconciliera avec le serveur. Uniquement en mode
+    // serveur (le grader local est instantané).
+    const usingServer = Boolean(onSubmitQuiz);
+    if (usingServer) writePending(quiz.id, { answers, attemptsBefore: attempts.length });
     try {
       const graded = onSubmitQuiz
         ? await onSubmitQuiz(toSubmission(quiz, answers))
         : gradeQuiz(quiz, answers); // repli : correction locale (mode mock)
+      // La requête a répondu (succès) : envoi terminé, plus rien « en vol ».
+      if (usingServer) clearPending(quiz.id);
       if (!mountedRef.current) return;
       setResult(graded);
       setCurrentAttemptId(graded.attemptId ?? null);
@@ -280,13 +393,21 @@ export function useQuizAttempt({
         const history = await refresh(quiz.id);
         if (mountedRef.current) setAttempts(history);
       }
-    } catch {
+    } catch (err) {
+      // Échec DÉFINITIF (réponse d'erreur reçue, ex. 503) : rien « en vol », on invite à renvoyer.
+      if (usingServer) clearPending(quiz.id);
       if (!mountedRef.current) return;
-      setSubmitError(submitErrorMessage);
+      // 503 : la vérification du code a échoué → tentative NON enregistrée. La phase reste « taking »
+      // (on ne passe en résumé qu'en cas de succès), donc l'étudiant peut resoumettre directement.
+      setSubmitError(
+        err instanceof CodeVerificationUnavailableError
+          ? codeVerificationUnavailableMessage
+          : submitErrorMessage
+      );
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-  }, [quiz, answers, onSubmitQuiz, submitErrorMessage]);
+  }, [quiz, answers, attempts.length, onSubmitQuiz, submitErrorMessage, codeVerificationUnavailableMessage]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */
   const retry = useCallback(() => {
@@ -343,6 +464,8 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
+      dismissSubmitError: () => setSubmitError(null),
+      reconciling,
       attempts,
       currentAttemptId,
       allowRetry,
@@ -370,6 +493,7 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
+      reconciling,
       attempts,
       currentAttemptId,
       allowRetry,

@@ -71,8 +71,9 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    // Verdicts pas encore reçus : la correction du code tourne en async (sandbox). Le WS
-    // `quiz:code-graded` remplacera ce placeholder par les résultats dès qu'ils arrivent.
+    // Pas de verdicts (question Code sans harnais, ou résultat « en cours ») : placeholder.
+    // La soumission vérifie désormais le code de façon SYNCHRONE, donc une tentative
+    // enregistrée porte normalement déjà ses verdicts.
     return (
       <p className={styles.testNote}>
         <Spinner tone="current" size={14} /> {labels.evaluating}
