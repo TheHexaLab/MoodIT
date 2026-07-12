@@ -410,6 +410,17 @@ export function AddSubscriptionPopup({
     };
   }, []);
 
+  // Ouverture directe sur la vue « rejoindre » (bouton « Rejoindre un programme » des états
+  // vides) : le menu est court-circuité, donc enterJoin() n'est jamais cliqué et la liste des
+  // établissements resterait vide. On lance ici le chargement au montage.
+  useEffect(() => {
+    // Chargement légitime au montage (synchronisation avec la source de données distante).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (initialView === 'join') enterJoin();
+    // Montage uniquement : la vue initiale est fixée une fois à l'ouverture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Ref de l'établissement dont on consulte les programmes (lue par le handler WS, stable).
   const joinEstablishmentIdRef = useRef(joinEstablishmentId);
   useEffect(() => {
