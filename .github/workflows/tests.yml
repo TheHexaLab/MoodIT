@@ -65,6 +65,39 @@ jobs:
           path: ${{ matrix.service }}/build/reports/tests/test/
           if-no-files-found: ignore
 
+  # ── Frontend : typecheck + tests unitaires (Vitest) ───────────────────────────
+  # Le Dockerfile frontend fait `tsc -b && vite build` (typecheck au build) mais NE lance NI les
+  # tests NI le lint : ce job est le filet qui empêche un test frontend cassé d'être fusionné.
+  frontend:
+    name: frontend — tsc + vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Typecheck (tsc)
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Tests unitaires (Vitest)
+        run: npm run test
+
+      # Lint BLOQUANT et strict (`--max-warnings 0` via le script) : la dette ESLint a été résorbée,
+      # ce gate empêche toute nouvelle erreur OU warning d'être fusionnée.
+      - name: Lint
+        run: npm run lint
+
   # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
   # exécute le VRAI code (assemblage + verdict) contre un Piston réel — c'est le filet qui prouve

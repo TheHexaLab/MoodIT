@@ -95,13 +95,17 @@ const QuizView: React.FC<QuizViewProps> = ({
 
   // Quiz modifié à distance (WS) : on RECHARGE immédiatement (sans toast). En passation,
   // on conserve les réponses déjà saisies (fusion) ; sinon rechargement complet.
-  // Refs pour ne déclencher qu'au front montant de `staleNotice` (pas de double-reload).
+  // Refs pour ne déclencher qu'au front montant de `staleNotice` (pas de double-reload) : elles
+  // sont mises à jour dans un effet (jamais pendant le rendu) et lues paresseusement par l'effet
+  // `staleNotice` ci-dessous, qui ne dépend donc pas de attempt/phase.
   const attemptRef = useRef(attempt);
-  attemptRef.current = attempt;
   const phaseRef = useRef(phase);
-  phaseRef.current = phase;
   const onReloadStaleRef = useRef(onReloadStale);
-  onReloadStaleRef.current = onReloadStale;
+  useEffect(() => {
+    attemptRef.current = attempt;
+    phaseRef.current = phase;
+    onReloadStaleRef.current = onReloadStale;
+  });
   useEffect(() => {
     if (!staleNotice) return;
     if (phaseRef.current === 'taking') attemptRef.current.reloadKeepingAnswers();

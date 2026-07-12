@@ -113,6 +113,8 @@ export function QuizEditor({
   useEffect(() => {
     if (!fetchQuizzes || !showingList) return;
     let cancelled = false;
+    // État de chargement posé avant le fetch asynchrone (pattern fetch-in-effect assumé).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingQuizzes(true);
     Promise.resolve(fetchQuizzes(courseId))
       .then((all) => {
