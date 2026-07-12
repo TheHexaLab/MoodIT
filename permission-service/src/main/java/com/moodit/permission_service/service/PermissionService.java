@@ -157,18 +157,12 @@ public class PermissionService {
             ),
 
             // ── Program ─────────────────────────────────────────────────────────────────
-            /*TODO: Ajouter Administrateur global de l'établissement*/
             //Afficher tous les users abonnés à un programme
             //FetchProgramsRoles, Frontend
             rule(
                     "GET",
                     "/programs/{programId}/users",
-                    (user, vars, body) -> {
-                      long programId = longVar(vars, "programId");
-                      return hasRole(user, RoleNames.GUARDIAN)
-                              || (programId > 0
-                              && membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.ADMIN));
-                    }),
+                    (user, vars, body) -> canViewProgramUsers(user, vars)),
             //La liste des roles et la liste des membres avec le role de chacun
             //FetchProgram, Frontend
             rule(
@@ -221,7 +215,10 @@ public class PermissionService {
             // NB : la route GET /users/{userId}/programs/{programId}/enrollments (cours de
             // l'utilisateur dans un programme) est déjà déclarée plus haut (section Establishment).
             // On ne la re-déclare PAS ici : first-match-wins → un doublon serait mort.
-
+            rule(
+                    "DELETE",
+                    "/courses/{courseId}/users/{userId}",
+                    (user, vars, body) -> verifyUserId(user, vars)),
             // ── Forum ───────────────────────────────────────────────────────────────────
             // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
             rule(
@@ -434,7 +431,39 @@ public class PermissionService {
             rule(
                 "POST",
                 "/roles/global/change",
-                (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
+                (user, vars, body) -> {
+                  // Modifier un role GLOBAL (type + roleId dans le body) :
+                  //   RETRAIT (type=unassign) -> Gardien UNIQUEMENT (peu importe le role retire) ;
+                  //   AJOUT   (type=assign)   -> selon le role CIBLE : Gardien pour assigner un
+                  //     Gardien ; Gardien OU Admin pour assigner un Admin ;
+                  //   type absent / inconnu, ou role non global -> refus (fail-closed).
+                  String type = stringField(body, "type");
+                  if ("unassign".equals(type)) {
+                    return hasRole(user, RoleNames.GUARDIAN);
+                  }
+                  if (!"assign".equals(type)) {
+                    return false;
+                  }
+                  long roleId = longField(body, "roleId");
+                  if (roleId <= 0) {
+                    return false;
+                  }
+                  String target = membershipService.roleName(roleId);
+                  if (RoleNames.GUARDIAN.equals(target)) {
+                    return hasRole(user, RoleNames.GUARDIAN);
+                  }
+                  if (RoleNames.ADMIN.equals(target)) {
+                    return hasRole(user, RoleNames.GUARDIAN) || hasRole(user, RoleNames.ADMIN);
+                  }
+                  return false;
+                }),
+            // Lister les usagers a role GLOBAL (popup admins) : Gardien OU Admin (meme portee de
+            // lecture que GET /roles?scope=global). Le core l'expose en GET (RoleController).
+            rule(
+                "GET",
+                "/roles/global/users",
+                (user, vars, body) ->
+                    hasRole(user, RoleNames.GUARDIAN) || hasRole(user, RoleNames.ADMIN)),
             // Lister les roles attribuables — permissions DIFFERENTES selon ?scope (dans la QUERY,
             // transmise par le gateway) :
             //   scope=global  (popup admins plateforme) -> porteur d'un role GLOBAL (Admin/Gardien).
@@ -574,6 +603,12 @@ public class PermissionService {
     return node.canConvertToLong() ? node.longValue() : -1;
   }
 
+  // Lit un champ CHAINE du body JSON ; "" si absent / non textuel.
+  private static String stringField(JsonNode body, String field) {
+    JsonNode node = body.path(field);
+    return node.isString() ? node.stringValue() : "";
+  }
+
   // Lit un champ TABLEAU d'entiers (long) du body JSON ; liste vide si absent / non tableau.
   // Les elements non numeriques sont ignores.
   private static List<Long> longArrayField(JsonNode body, String field) {
@@ -588,6 +623,15 @@ public class PermissionService {
       }
     }
     return ids;
+  }
+
+  private boolean canViewProgramUsers(User user, Map<String, String> vars) {
+    if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+      return true;
+    }
+    long programId = longVar(vars, "programId");
+    return programId > 0
+            && membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.ADMIN);
   }
 
   // ── Creer un cours dans des programmes (programIds dans le BODY) ────────────────────

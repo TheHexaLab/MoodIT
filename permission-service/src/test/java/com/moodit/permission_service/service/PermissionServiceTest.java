@@ -120,18 +120,158 @@ class PermissionServiceTest {
     assertThat(service().isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7}")).isFalse();
   }
 
-  // ── Changement de rôle GLOBAL (POST /roles/global/change) : Gardien uniquement ──────
+  // ── Changement de rôle GLOBAL (POST /roles/global/change) ───────────────────────────
+  // AJOUT (type=assign) selon le rôle ciblé : Gardien → Gardien ET Admin ; Admin → Admin seul.
+  // RETRAIT (type=unassign) : Gardien UNIQUEMENT, quel que soit le rôle. Body : type + roleId ;
+  // le prédicat résout le nom du rôle via membershipService.roleName.
 
   @Test
-  void rolesGlobalChange_guardian_allowed() {
+  void rolesGlobalChange_guardianAssignsGuardian_allowed() {
     loggedIn(user(5, RoleNames.GUARDIAN));
-    assertThat(service().isAllowed(EMAIL, "/api/roles/global/change", "POST", "{}")).isTrue();
+    when(membershipService.roleName(1)).thenReturn(RoleNames.GUARDIAN);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":1}"))
+        .isTrue();
   }
 
   @Test
-  void rolesGlobalChange_generalAdmin_denied() {
-    loggedIn(user(5, RoleNames.ADMIN)); // admin général mais PAS gardien
-    assertThat(service().isAllowed(EMAIL, "/api/roles/global/change", "POST", "{}")).isFalse();
+  void rolesGlobalChange_guardianAssignsAdmin_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    when(membershipService.roleName(2)).thenReturn(RoleNames.ADMIN);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":2}"))
+        .isTrue();
+  }
+
+  @Test
+  void rolesGlobalChange_adminAssignsAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.roleName(2)).thenReturn(RoleNames.ADMIN);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":2}"))
+        .isTrue();
+  }
+
+  @Test
+  void rolesGlobalChange_adminAssignsGuardian_denied() {
+    // Un Admin ne peut PAS assigner un Gardien.
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.roleName(1)).thenReturn(RoleNames.GUARDIAN);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":1}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesGlobalChange_student_denied() {
+    loggedIn(user(5)); // aucun rôle global
+    when(membershipService.roleName(2)).thenReturn(RoleNames.ADMIN);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":2}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesGlobalChange_assignMissingRoleId_denied() {
+    loggedIn(user(5, RoleNames.GUARDIAN)); // même un gardien : sans roleId, refus (fail-closed)
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/change", "POST", "{\"type\":\"assign\"}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesGlobalChange_assignUnknownRole_denied() {
+    // roleId inexistant (roleName null) → ni Gardien ni Admin → refus.
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    when(membershipService.roleName(99)).thenReturn(null);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"assign\",\"roleId\":99}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesGlobalChange_unassignByGuardian_allowed() {
+    // Retrait d'un rôle global : Gardien autorisé (le roleName n'est même pas consulté).
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"unassign\",\"roleId\":2}"))
+        .isTrue();
+  }
+
+  @Test
+  void rolesGlobalChange_unassignByAdmin_denied() {
+    // Un Admin ne peut PAS retirer un rôle global (même un rôle Admin) : Gardien seul.
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/roles/global/change",
+                    "POST",
+                    "{\"type\":\"unassign\",\"roleId\":2}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesGlobalChange_unknownType_denied() {
+    // type absent/inconnu → refus (fail-closed), même pour un gardien.
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/change", "POST", "{\"roleId\":2}"))
+        .isFalse();
+  }
+
+  // ── Liste des usagers à rôle global (GET /roles/global/users) : Gardien OU Admin ─────
+
+  @Test
+  void rolesGlobalUsers_guardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/users", "GET", null)).isTrue();
+  }
+
+  @Test
+  void rolesGlobalUsers_admin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/users", "GET", null)).isTrue();
+  }
+
+  @Test
+  void rolesGlobalUsers_student_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/users", "GET", null)).isFalse();
   }
 
   // ── Liste des rôles attribuables (GET /roles?scope=...) : permission SELON le scope ─────

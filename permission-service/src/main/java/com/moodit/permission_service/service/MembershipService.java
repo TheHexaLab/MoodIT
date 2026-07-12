@@ -231,6 +231,16 @@ public class MembershipService {
     return membershipRepository.hasGlobalRole(userId);
   }
 
+  /**
+   * Nom (Role.name) du rôle d'id donné, ou null s'il n'existe pas. Sert à décider selon le rôle
+   * CIBLÉ (ex. POST /roles/global/change : seul le Gardien peut assigner un Gardien, un Admin ne
+   * peut assigner qu'un Admin). Le body ne transmet que `roleId` (numérique) : on résout le nom ici.
+   */
+  @Transactional(readOnly = true)
+  public String roleName(long roleId) {
+    return membershipRepository.findRoleNameById(roleId);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

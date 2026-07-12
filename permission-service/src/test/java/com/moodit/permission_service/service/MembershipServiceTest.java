@@ -132,4 +132,16 @@ class MembershipServiceTest {
     when(membershipRepository.hasRoleInAnyProgram(5, "Administrateur")).thenReturn(false);
     assertThat(service.hasRoleInAnyProgram(5, "Administrateur")).isFalse();
   }
+
+  @Test
+  void roleName_delegatesName() {
+    when(membershipRepository.findRoleNameById(2)).thenReturn("Administrateur");
+    assertThat(service.roleName(2)).isEqualTo("Administrateur");
+  }
+
+  @Test
+  void roleName_unknownId_null() {
+    when(membershipRepository.findRoleNameById(99)).thenReturn(null);
+    assertThat(service.roleName(99)).isNull();
+  }
 }

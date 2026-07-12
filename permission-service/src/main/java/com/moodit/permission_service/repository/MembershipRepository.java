@@ -208,4 +208,10 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean hasGlobalRole(@Param("userId") long userId);
+
+  // Nom (Role.name) du role d'id donne, ou null s'il n'existe pas. Sert a decider selon le role
+  // CIBLE d'une modification (POST /roles/global/change : Gardien pour assigner un Gardien, Admin
+  // pour assigner un Admin) : le body ne porte que roleId, on resout le nom cote SQL.
+  @Query(value = "SELECT r.name FROM Role r WHERE r.id = :roleId", nativeQuery = true)
+  String findRoleNameById(@Param("roleId") long roleId);
 }
