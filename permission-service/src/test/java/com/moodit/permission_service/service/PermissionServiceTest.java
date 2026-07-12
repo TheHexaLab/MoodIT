@@ -436,6 +436,22 @@ class PermissionServiceTest {
   }
 
   @Test
+  void joinCourses_selfAsString_allowed() {
+    // RÉGRESSION : id envoyé en chaîne "5" par le front (localStorage).
+    loggedIn(user(5));
+    when(membershipService.isSubscribedToProgram(5, 3)).thenReturn(true);
+    when(membershipService.isCourseInProgram(10, 3)).thenReturn(true);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/courses/users",
+                    "POST",
+                    "{\"id\":\"5\",\"courseIds\":[10],\"programId\":3}"))
+        .isTrue();
+  }
+
+  @Test
   void joinCourses_courseNotInProgram_denied() {
     loggedIn(user(5));
     when(membershipService.isSubscribedToProgram(5, 3)).thenReturn(true);
@@ -989,9 +1005,18 @@ class PermissionServiceTest {
   }
 
   @Test
+  void addUserToPrograms_selfAsString_allowed() {
+    // RÉGRESSION : le front envoie id depuis localStorage → chaîne "5" (pas 5). Le self-check
+    // doit tolérer une chaîne numérique, sinon join programme = 403 pour tout le monde.
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/programs/users", "POST", "{\"id\":\"5\"}")).isTrue();
+  }
+
+  @Test
   void addUserToPrograms_other_denied() {
     loggedIn(user(5)); // tente d'abonner l'usager 9
     assertThat(service().isAllowed(EMAIL, "/api/programs/users", "POST", "{\"id\":9}")).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/programs/users", "POST", "{\"id\":\"9\"}")).isFalse();
   }
 
   // ── Lectures de données d'usager (hors /me) ─────────────────────────────────────────

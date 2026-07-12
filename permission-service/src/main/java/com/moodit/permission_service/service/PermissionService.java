@@ -765,10 +765,23 @@ public class PermissionService {
     return objectMapper.createObjectNode();
   }
 
-  // Lit un champ entier (long) du body JSON ; -1 si absent / non numerique.
+  // Lit un champ entier (long) du body JSON ; -1 si absent / illisible. Tolere une CHAINE
+  // numerique ("5") : le front envoie souvent des ids issus de localStorage (donc en string) et
+  // le core l'accepte deja (Jackson coerce vers Integer). Sans ca, un self-check body.id==user
+  // echouerait a tort (-1) et renverrait un 403 sur une action legitime (join programme/cours).
   private static long longField(JsonNode body, String field) {
     JsonNode node = body.path(field);
-    return node.canConvertToLong() ? node.longValue() : -1;
+    if (node.canConvertToLong()) {
+      return node.longValue();
+    }
+    if (node.isString()) {
+      try {
+        return Long.parseLong(node.stringValue().trim());
+      } catch (NumberFormatException e) {
+        return -1;
+      }
+    }
+    return -1;
   }
 
   // Lit un champ CHAINE du body JSON ; "" si absent / non textuel.
