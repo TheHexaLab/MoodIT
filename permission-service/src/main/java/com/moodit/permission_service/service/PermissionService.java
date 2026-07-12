@@ -113,6 +113,13 @@ public class PermissionService {
     return new Rule(method, MCP_PREFIX + path, (user, vars, body, query) -> check.allow(user, vars, body));
   }
 
+  // Prefixe des routes de l'execution-service (gateway route[3] : Path=/exec/**, PAS de "/api").
+  private static final String EXEC_PREFIX = "/exec";
+
+  private static Rule execRule(String method, String path, AccessCheck check) {
+    return new Rule(method, EXEC_PREFIX + path, (user, vars, body, query) -> check.allow(user, vars, body));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════════════
   //  REGISTRE DES REGLES — c'est ICI qu'on ajoute une regle, route par route.
   // ═══════════════════════════════════════════════════════════════════════════════════
@@ -147,6 +154,17 @@ public class PermissionService {
   // ═══════════════════════════════════════════════════════════════════════════════════
   private List<Rule> buildRules() {
     return List.of(
+            // ── Mutations VOLONTAIREMENT ouvertes (tout authentifie) ──────────────────────
+            // Depuis le default-DENY sur les ecritures, ces mutations « self / sans ressource
+            // d'autrui » doivent porter une regle explicite renvoyant true (l'identite est deja
+            // prouvee par le gateway ; le user est charge donc doit exister).
+            //   - /me, /me/settings : l'usager modifie SON propre profil (identite du token).
+            //   - /exec/*           : execution de code en sandbox (ouverte a tout authentifie).
+            rule("PATCH", "/me", (user, vars, body) -> true),
+            rule("PUT", "/me/settings", (user, vars, body) -> true),
+            execRule("POST", "/evaluate", (user, vars, body) -> true),
+            execRule("POST", "/run", (user, vars, body) -> true),
+
             // ── Establishment ───────────────────────────────────────────────────────────
             /* Lister les établissements dans lesquels l'usager peut en crééer un programme
             * FetchEstablishmentsForCreate*/
@@ -501,12 +519,14 @@ public class PermissionService {
             //  d'insertion ici est sans effet sur le first-match-wins.
             // ═══════════════════════════════════════════════════════════════════════════
 
-            // Supprimer un PROGRAMME (destructif, cascade) : meme regle que le PATCH programme
-            // (Admin/Gardien global OU Admin du programme). programId dans le PATH.
+            // Supprimer un PROGRAMME (destructif, cascade -> tous les abonnes) : reserve a
+            // l'Administrateur/Gardien GLOBAL. Un Admin DE programme peut le MODIFIER (PATCH) mais
+            // PAS le supprimer.
             rule(
                     "DELETE",
                     "/programs/{programId}",
-                    (user, vars, body) -> canManageProgram(user, vars, "programId")),
+                    (user, vars, body) ->
+                        hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)),
 
             // Supprimer un COURS (destructif, cascade) : gestion de contenu du cours.
             rule(
@@ -683,8 +703,22 @@ public class PermissionService {
       }
     }
 
-    // 3) Aucune regle ne restreint cette route : approbation directe, ZERO requete BD.
-    return true;
+    // 3) Aucune regle ne matche. On distingue lecture et ecriture (fail-safe) :
+    //    - LECTURE (GET/HEAD/OPTIONS) : default-ALLOW — les GET non listes (catalogue, reference,
+    //      /me...) restent ouverts sans avoir a tout enumerer. ZERO requete BD.
+    //    - ECRITURE (POST/PUT/PATCH/DELETE) : default-DENY. Une route MUTANTE non explicitement
+    //      autorisee est REFUSEE : un nouvel endpoint d'ecriture oublie echoue en fail-closed
+    //      (403) au lieu d'etre silencieusement ouvert. Les mutations volontairement ouvertes
+    //      (ex. PATCH /me, POST /exec/*) portent une regle explicite renvoyant true.
+    return isSafeMethod(method);
+  }
+
+  // Methodes HTTP "sures" (lecture, sans effet de bord) : seules elles beneficient du
+  // default-allow quand aucune regle ne matche. Tout le reste est refuse par defaut.
+  private static boolean isSafeMethod(String method) {
+    return "GET".equalsIgnoreCase(method)
+        || "HEAD".equalsIgnoreCase(method)
+        || "OPTIONS".equalsIgnoreCase(method);
   }
 
   // Parse une query string brute ("a=1&b=2") en map parametre -> valeur (decodage %xx). Renvoie

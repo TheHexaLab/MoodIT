@@ -631,9 +631,9 @@ class PermissionServiceTest {
   }
 
   @Test
-  void rolesPost_noRule_defaultAllow() {
-    // Seul GET /roles est gardé : un autre verbe ne matche aucune règle → default-allow.
-    assertThat(service().isAllowed(EMAIL, "/api/roles", "POST", "{}", "scope=global")).isTrue();
+  void writeNoRule_defaultDeny() {
+    // Écriture (POST) sans règle → default-DENY (fail-closed), sans charger le user.
+    assertThat(service().isAllowed(EMAIL, "/api/roles", "POST", "{}", "scope=global")).isFalse();
     verifyNoInteractions(userRepository);
   }
 
@@ -661,10 +661,50 @@ class PermissionServiceTest {
   }
 
   @Test
-  void forumPosts_wrongMethod_defaultAllow() {
-    // PUT /forums/{id}/posts n'est gardé par aucune règle → default-allow (sans charger le user).
-    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts", "PUT", null)).isTrue();
+  void writeWrongMethod_defaultDeny() {
+    // PUT /forums/{id}/posts n'est gardé par aucune règle → default-DENY (écriture, sans user).
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts", "PUT", null)).isFalse();
     verifyNoInteractions(userRepository);
+  }
+
+  @Test
+  void readNoRule_defaultAllow() {
+    // Lecture (GET) sans règle → default-ALLOW (catalogue/référence), sans charger le user.
+    assertThat(service().isAllowed(EMAIL, "/api/whatever/catalog", "GET", null)).isTrue();
+    verifyNoInteractions(userRepository);
+  }
+
+  // ── Mutations volontairement ouvertes (règle explicite depuis le default-deny) ───────
+
+  @Test
+  void updateMe_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/me", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void updateMeSettings_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/me/settings", "PUT", "{}")).isTrue();
+  }
+
+  @Test
+  void execRun_anyAuthenticated_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/exec/run", "POST", "{}")).isTrue();
+  }
+
+  @Test
+  void execEvaluate_anyAuthenticated_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isTrue();
+  }
+
+  @Test
+  void execRun_unknownUser_denied() {
+    // Même une mutation « ouverte » exige une identité connue (fail-closed).
+    when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+    assertThat(service().isAllowed(EMAIL, "/exec/run", "POST", "{}")).isFalse();
   }
 
   // ── Forums : envoi de message (forumId dans le body) ────────────────────────────────
@@ -784,16 +824,15 @@ class PermissionServiceTest {
   }
 
   @Test
-  void deleteProgram_programAdmin_allowed() {
-    loggedIn(user(5));
-    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+  void deleteProgram_guardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
     assertThat(service().isAllowed(EMAIL, "/api/programs/7", "DELETE", null)).isTrue();
   }
 
   @Test
-  void deleteProgram_student_denied() {
-    loggedIn(user(5));
-    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
+  void deleteProgram_programAdmin_denied() {
+    // Admin DE programme (rôle programme) : peut MODIFIER (PATCH) mais PAS supprimer.
+    loggedIn(user(5)); // aucun rôle global
     assertThat(service().isAllowed(EMAIL, "/api/programs/7", "DELETE", null)).isFalse();
   }
 

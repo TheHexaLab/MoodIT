@@ -80,16 +80,10 @@ public class MembershipService {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
   }
 
-  /** Le programme est-il visible? Être abonné au programme. */
-  @Transactional(readOnly = true)
-  public boolean canAccessProgram(long userId, long programId) {
-    return membershipRepository.canSeeCourseViaProgram(userId, programId);
-  }
-
   /**
    * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
-   * l'abonnement (a distinguer de canAccessProgram). Sert a autoriser l'inscription a des cours
-   * d'un programme (POST /courses/users) : on ne s'inscrit qu'aux cours d'un programme rejoint.
+   * l'abonnement. Sert a autoriser l'inscription a des cours d'un programme (POST /courses/users) :
+   * on ne s'inscrit qu'aux cours d'un programme rejoint.
    */
   @Transactional(readOnly = true)
   public boolean isSubscribedToProgram(long userId, long programId) {
