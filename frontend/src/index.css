@@ -307,32 +307,26 @@ body {
 /* Bouton bascule thème clair/sombre — défini globalement pour être IDENTIQUE sur
    les pages login et register (sinon non-stylé là où LoginPage.css n'est pas chargé). */
 .light-dark-btn {
-    position: absolute;
-    right: 3%;
-    top: 3%;
+    /* fixed + offsets EN REM identiques à toutes les tailles (pas de bascule 3%/1rem qui
+       plaçait le bouton dans le coin coupé sur certaines largeurs). Ancré au viewport →
+       position stable, entièrement visible, strictement identique sur toutes les pages. */
+    position: fixed;
+    right: 1rem;
+    top: 1rem;
     z-index: 10;
-    border: none;
     cursor: pointer;
     width: 2.25rem;
     height: 2.25rem;
     border-radius: 50%;
-    background: var(--button-light-dark);
     display: flex;
     justify-content: center;
     align-items: center;
-    color: var(--button-light-dark-ordinateur);
-}
-
-@media (max-width: 768px) {
-    .light-dark-btn {
-        position: fixed;
-        top: 1rem;
-        right: 1rem;
-        /* Fond contrasté (au lieu d'un blanc quasi transparent) : le bouton fixe peut se
-           retrouver sur la bannière colorée OU sur la zone blanche selon la page/hauteur
-           de bannière ; ce cercle sombre garde l'icône lisible dans tous les cas. */
-        background: rgba(0, 0, 0, 0.32);
-        color: #ffffff;
-        z-index: 20;
-    }
+    /* Style « surface » cohérent avec le thème et TOUJOURS lisible, même en scrollant :
+       cercle de la couleur de surface (blanc en clair / foncé en sombre) + bordure + ombre,
+       icône en teal de la marque → ressort aussi bien sur la bannière verte que sur le
+       formulaire blanc, en clair comme en sombre. */
+    background: var(--bg-surface);
+    color: var(--brand-teal);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
