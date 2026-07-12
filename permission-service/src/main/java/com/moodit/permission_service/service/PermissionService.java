@@ -171,6 +171,17 @@ public class PermissionService {
                     "/establishments/{establishmentId}",
                     (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
 
+            // Créer un PROGRAMME dans un établissement : action d'administration plateforme,
+            // réservée à l'Administrateur/Gardien GLOBAL (pas de rôle « admin d'établissement »
+            // dans le modèle actuel — cf. TODO). establishmentId est dans le body, mais le
+            // prédicat est purement rôle-global donc on ne le lit pas ici.
+            //createProgram, Frontend
+            rule(
+                    "POST",
+                    "/establishments/programs",
+                    (user, vars, body) ->
+                        hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)),
+
             // ── Modifier un PROGRAMME (PATCH /programs/{programId}) ────────────────────────
             // Réservé à : Administrateur/Gardien GLOBAL (User_Role), OU Administrateur DU
             // programme (User_Program_Role) — PAS l'Enseignant. programId dans le PATH.
@@ -201,6 +212,15 @@ public class PermissionService {
             // NB : la route GET /users/{userId}/programs/{programId}/enrollments (cours de
             // l'utilisateur dans un programme) est déjà déclarée plus haut (section Establishment).
             // On ne la re-déclare PAS ici : first-match-wins → un doublon serait mort.
+
+            // Modifier un COURS (titre / code / programmes) : gestion de contenu du cours =
+            // Administrateur/Gardien GLOBAL, OU Administrateur/Enseignant DANS un programme
+            // contenant le cours. courseId dans le PATH. Aligné sur updateProgram / quizzes.
+            //updateCourse, Frontend
+            rule(
+                    "PATCH",
+                    "/courses/{courseId}",
+                    (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
 
             // ── Forum ───────────────────────────────────────────────────────────────────
             // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
