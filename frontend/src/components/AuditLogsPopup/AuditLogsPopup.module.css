@@ -1,0 +1,339 @@
+div.audit-logs-popup {
+    position: fixed;
+    z-index: 90;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    animation: audit-logs-popup-fade-in 0.2s ease-out;
+}
+
+div.audit-logs-popup > div {
+    display: flex;
+    box-sizing: border-box;
+    width: min(34rem, 100% - 2rem);
+    max-height: min(80vh, 44rem);
+    padding: 1rem;
+    margin: 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.88rem;
+    border-radius: 1rem;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    animation: audit-logs-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+    div.audit-logs-popup > div {
+        padding: 1.25rem;
+        margin: 2.13rem;
+    }
+}
+
+@keyframes audit-logs-popup-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes audit-logs-popup-pop-in {
+    from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes audit-logs-popup-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes audit-logs-popup-pop-out {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+}
+
+div.audit-logs-popup.closing {
+    animation: audit-logs-popup-fade-out 0.2s ease-in forwards;
+}
+
+div.audit-logs-popup.closing > div {
+    animation: audit-logs-popup-pop-out 0.2s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div.audit-logs-popup,
+    div.audit-logs-popup > div {
+        animation: none;
+    }
+}
+
+/* ── En-tête ─────────────────────────────────────────────── */
+.header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.header > div { display: flex; flex-direction: column; gap: 0.25rem; }
+.header h1 {
+    margin: 0;
+    font-family: Inter, sans-serif;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.header p {
+    margin: 0;
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+    color: var(--text-muted);
+}
+.closeButton {
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 1.125rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+.closeButton:hover { color: var(--text); }
+.closeButton:active { opacity: 0.55; }
+
+/* ── Barre d'outils (recherche + filtres) ────────────────── */
+.toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.search {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.search:focus-within {
+    border-color: var(--brand-teal);
+    box-shadow: 0 0 0 3px var(--brand-teal-surface);
+}
+.searchIcon { flex: none; color: var(--text-muted); }
+.searchInput {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+}
+.searchInput::placeholder { color: var(--text-muted); }
+.clearBtn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.clearBtn:hover { color: var(--text); background: var(--border); }
+
+/* ── Filtres (types d'entité, colorés) ───────────────────── */
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.78125rem;
+    font-weight: 500;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0.72;
+    transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease,
+        box-shadow 0.15s ease;
+}
+.chip:hover { opacity: 1; }
+.chipActive {
+    opacity: 1;
+    box-shadow: 0 0 0 1px currentColor inset;
+}
+
+/* ── Liste ───────────────────────────────────────────────── */
+.list {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--border);
+}
+
+/* Scrollbar cohérente avec le reste de l'app (fine, discrète). */
+@supports not selector(::-webkit-scrollbar) {
+    .list {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+.list::-webkit-scrollbar {
+    width: 4px;
+}
+.list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+.list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.list::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+.entry {
+    border-bottom: 1px solid var(--border);
+}
+.entry:last-child { border-bottom: none; }
+.entryButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.625rem 0.5rem;
+    margin: 0 -0.25rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    cursor: pointer;
+}
+.entryMain {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.caret {
+    flex: none;
+    color: var(--text-muted);
+    /* Chevron pointe vers le HAUT par défaut : replié → bas (rotate 180), ouvert → haut. */
+    transform: rotate(180deg);
+    transition: transform 0.15s ease;
+}
+.caretOpen { transform: rotate(0deg); }
+
+/* ── Panneau détails (déplié) ────────────────────────────── */
+.details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.15rem 0.5rem 0.65rem;
+    animation: audit-details-in 0.15s ease-out;
+}
+@keyframes audit-details-in {
+    from { opacity: 0; transform: translateY(-0.15rem); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .details { animation: none; }
+}
+.detailPart {
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    color: var(--text);
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.4rem;
+    background: var(--border);
+}
+.badge {
+    /* La pastille est SEULE sur la 1re ligne : align-self flex-start = largeur du contenu. */
+    align-self: flex-start;
+    font-family: Inter, sans-serif;
+    font-size: 0.71875rem;
+    font-weight: 600;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.summary {
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+    color: var(--text);
+    word-break: break-word;
+}
+.meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+.metaDot { color: var(--border-strong); }
+.action {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.6875rem;
+    letter-spacing: 0.02em;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.35rem;
+    background: var(--border);
+    color: var(--text-muted);
+}
+
+/* Ligne « chargement de la page suivante » (pagination on-scroll). */
+.loadingMore {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 0;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+}
+
+.centered {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    min-height: 8rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.84375rem;
+}

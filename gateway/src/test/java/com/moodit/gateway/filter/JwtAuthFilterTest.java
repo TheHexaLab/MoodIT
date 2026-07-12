@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.jsonwebtoken.Jwts;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestClient;
 
@@ -32,6 +34,7 @@ class JwtAuthFilterTest {
 
   private JwtAuthFilter filter;
   private RestClient restClient;
+  private RestClient.RequestBodySpec bodySpec;
   private RestClient.ResponseSpec responseSpec;
 
   @BeforeEach
@@ -61,7 +64,7 @@ class JwtAuthFilterTest {
   private void stubValidate(Boolean active, boolean throwError) {
     restClient = mock(RestClient.class);
     RestClient.RequestBodyUriSpec uriSpec = mock(RestClient.RequestBodyUriSpec.class);
-    RestClient.RequestBodySpec bodySpec = mock(RestClient.RequestBodySpec.class);
+    bodySpec = mock(RestClient.RequestBodySpec.class);
     responseSpec = mock(RestClient.ResponseSpec.class);
     when(restClient.post()).thenReturn(uriSpec);
     when(uriSpec.uri(anyString())).thenReturn(bodySpec);
@@ -300,6 +303,41 @@ class JwtAuthFilterTest {
 
     assertThat(res.getStatus()).isEqualTo(503);
     assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void permissionCall_forwardsPathMethodEtQueryString() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/roles");
+    req.setQueryString("scope=global"); // getRequestURI() l'exclut : doit être transmis à part
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    run(req, chain);
+
+    ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+    verify(bodySpec).body(captor.capture());
+    Map<?, ?> payload = (Map<?, ?>) captor.getValue();
+    assertThat(payload.get("email")).isEqualTo("user@usherbrooke.ca");
+    assertThat(payload.get("path")).isEqualTo("/api/roles");
+    assertThat(payload.get("method")).isEqualTo("GET");
+    assertThat(payload.get("query")).isEqualTo("scope=global");
+  }
+
+  @Test
+  void permissionCall_absenceDeQueryString_transmetChaineVide() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    // Pas de query string → le filtre doit envoyer "" (jamais null : Map.of interdit null).
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    run(req, chain);
+
+    ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+    verify(bodySpec).body(captor.capture());
+    Map<?, ?> payload = (Map<?, ?>) captor.getValue();
+    assertThat(payload.get("query")).isEqualTo("");
   }
 
   @Test

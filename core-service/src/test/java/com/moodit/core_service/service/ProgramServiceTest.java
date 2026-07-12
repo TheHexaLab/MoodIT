@@ -28,6 +28,7 @@ public class ProgramServiceTest {
     @Mock private UserProgramRoleRepository userProgramRoleRepository;
     @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
+    @Mock private AuditLogService auditLogService;
 
     //@InjectMocks crée le service et injecte les @Mock dedans automatiquement
     @InjectMocks private ProgramService programService;
@@ -36,16 +37,8 @@ public class ProgramServiceTest {
     private Course course;
     private User user;
 
-    /** Utilisateur admin GLOBAL (Gardien) : bypasse le contrôle par programme de addCourseToPrograms. */
-    private static User globalAdmin() {
-        User u = new User();
-        u.setId(99);
-        u.setEmail("admin@test");
-        com.moodit.core_service.model.Role r = new com.moodit.core_service.model.Role();
-        r.setName("Gardien");
-        u.setRoles(List.of(r));
-        return u;
-    }
+    // NB : addCourseToPrograms ne fait plus de contrôle de rôle (délégué au permission-service) :
+    // les tests ci-dessous n'ont donc plus besoin de simuler un utilisateur admin.
 
     @Nested
     class FindAll {
@@ -220,7 +213,6 @@ public class ProgramServiceTest {
             Program program2 = Program.builder().id(2).name("Réseaux").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Mathématique de l'ingénierie").code("MATH67").programIds(List.of(1, 2)).build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
                 Course c = inv.getArgument(0);
                 c.setId(1);
@@ -229,7 +221,7 @@ public class ProgramServiceTest {
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(2)).thenReturn(Optional.of(program2));
 
-            CourseDTO result = programService.addCourseToPrograms(dto, "admin@test");
+            CourseDTO result = programService.addCourseToPrograms(dto);
 
             assertEquals("Mathématique de l'ingénierie", result.getTitle());
             assertEquals(1, program.getCourses().size());
@@ -240,22 +232,71 @@ public class ProgramServiceTest {
             verify(programRepository, times(1)).saveAll(anyList());
         }
         @Test
+        @DisplayName("Inscrit automatiquement le créateur au cours créé + journalise (ENROLLMENT_JOIN)")
+        void addCourseToPrograms_inscrit_le_createur() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder()
+                    .title("Algo").code("GIF201").programIds(List.of(1)).build();
+
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(42);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            // Acteur (créateur) résolu via le SecurityContext (exposé par AuditLogService).
+            when(auditLogService.currentActor()).thenReturn("prof@moodit.ca");
+            User creator = User.builder().id(7).username("prof").build();
+            when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(creator));
+            when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.empty());
+
+            programService.addCourseToPrograms(dto);
+
+            verify(enrollmentRepository, times(1)).save(any(Enrollment.class));
+            verify(auditLogService, times(1))
+                    .record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(), anyString());
+        }
+        @Test
+        @DisplayName("N'inscrit PAS deux fois le créateur (idempotent) si déjà inscrit")
+        void addCourseToPrograms_createur_deja_inscrit_ne_reinscrit_pas() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder()
+                    .title("Algo").code("GIF201").programIds(List.of(1)).build();
+
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(42);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            when(auditLogService.currentActor()).thenReturn("prof@moodit.ca");
+            User creator = User.builder().id(7).username("prof").build();
+            when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(creator));
+            Enrollment existing = new Enrollment();
+            when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.of(existing));
+
+            programService.addCourseToPrograms(dto);
+
+            verify(enrollmentRepository, never()).save(any(Enrollment.class));
+            verify(auditLogService, never())
+                    .record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(), anyString());
+        }
+        @Test
         @DisplayName("Retourne ProgramNotFoundException, si au moins un des programmes n'existe pas")
         void addCourseToPrograms_avec_un_id_inexistant_devrait_lancer_exception() {
             program = Program.builder().id(1).name("Informatique").code("GI").cohort("71").color("FF0000").courses(new ArrayList<>()).build();
             CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder().title("Système distribués").code("SYST45").programIds(List.of(1, 99)).build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
             when(programRepository.findById(99)).thenReturn(Optional.empty());
 
-            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto, "admin@test"));
+            assertThrows(ProgramNotFoundException.class, () -> programService.addCourseToPrograms(dto));
             verify(programRepository, never()).saveAll(anyList());
         }
         @Test
         @DisplayName("Retourne IllegalArgumentException, si les id sont null")
         void addCourseToPrograms_avec_arguments_null_devrait_lancer_illegalArgumentException() {
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null, "admin@test"));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(null));
 
             CourseCreateInProgramsDTO dtoAvecListeNull = CourseCreateInProgramsDTO.builder()
                     .title("Chimie")
@@ -263,7 +304,19 @@ public class ProgramServiceTest {
                     .programIds(null)
                     .build();
 
-            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull, "admin@test"));
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeNull));
+            verifyNoInteractions(programRepository, courseRepository);
+        }
+        @Test
+        @DisplayName("Retourne IllegalArgumentException et ne crée aucun cours, si la liste de programmes est vide")
+        void addCourseToPrograms_avec_liste_vide_ne_devrait_pas_creer_de_cours() {
+            CourseCreateInProgramsDTO dtoAvecListeVide = CourseCreateInProgramsDTO.builder()
+                    .title("Chimie")
+                    .code("CHM10")
+                    .programIds(List.of())
+                    .build();
+
+            assertThrows(IllegalArgumentException.class, () -> programService.addCourseToPrograms(dtoAvecListeVide));
             verifyNoInteractions(programRepository, courseRepository);
         }
         @Test
@@ -276,7 +329,6 @@ public class ProgramServiceTest {
                     .programIds(List.of(1, 1)) // Doublon
                     .build();
 
-            when(userRepository.findByEmail("admin@test")).thenReturn(Optional.of(globalAdmin()));
             when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
                 Course c = inv.getArgument(0);
                 c.setId(1);
@@ -284,7 +336,7 @@ public class ProgramServiceTest {
             });
             when(programRepository.findById(1)).thenReturn(Optional.of(program));
 
-            programService.addCourseToPrograms(dto, "admin@test");
+            programService.addCourseToPrograms(dto);
 
             assertEquals(1, program.getCourses().size());
         }

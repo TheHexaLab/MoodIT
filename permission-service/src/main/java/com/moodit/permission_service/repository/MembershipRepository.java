@@ -113,6 +113,22 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("programId") long programId,
       @Param("roleName") String roleName);
 
+  // L'utilisateur a-t-il le role (nomme) dans AU MOINS UN programme (User_Program_Role), sans
+  // cibler un programme precis ? Sert a gater GET /api/roles?scope=program (liste des roles
+  // attribuables en programme) : etre gestionnaire d'un programme quelconque suffit.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r ON r.id = upr.role_id
+            WHERE upr.user_id = :userId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInAnyProgram(@Param("userId") long userId, @Param("roleName") String roleName);
+
   // L'utilisateur a-t-il le role (nomme) SUR ce cours ? Combine role scope-programme
   // (User_Program_Role) et appartenance du cours au programme (program_course). Ex. avec
   // roleName = 'Enseignant' : "est-il prof du cours ?".
@@ -131,5 +147,93 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
   boolean hasRoleInCourse(
       @Param("userId") long userId,
       @Param("courseId") long courseId,
+      @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DU QUIZ ? Comme hasRoleInCourse, mais
+  // l'id fourni est celui du QUIZ (routes /api/quizzes/{quizId} de gestion de contenu) : on
+  // resout quiz -> cours via Quiz.course_id. Ex. avec roleName = 'Enseignant' : "est-il prof
+  // du cours auquel appartient ce quiz ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN Quiz q            ON q.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND q.id = :quizId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInQuizCourse(
+      @Param("userId") long userId,
+      @Param("quizId") long quizId,
+      @Param("roleName") String roleName);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DE CETTE ANALYSE MCP ? Comme
+  // hasRoleInQuizCourse, mais l'id fourni est celui d'une ligne MCP_Response (route REST
+  // GET /mcp/analyses/{id}) : on resout analyse -> cours via MCP_Response.course_id. Ex.
+  // avec roleName = 'Enseignant' : "est-il prof du cours auquel se rattache cette analyse ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN MCP_Response m    ON m.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND m.id = :analysisId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInAnalysisCourse(
+      @Param("userId") long userId,
+      @Param("analysisId") long analysisId,
+      @Param("roleName") String roleName);
+
+  // L'utilisateur porte-t-il au moins un rôle GLOBAL (User_Role → Role.global_assignable) ?
+  // Sert à autoriser la room WebSocket "adminRoles" (liste des administrateurs) : réservée aux
+  // porteurs d'un rôle global (Administrateur / Gardien). Calqué sur core DbRoomAuthorizer.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Role ur
+            JOIN Role r ON r.id = ur.role_id
+            WHERE ur.user_id = :userId AND r.global_assignable = TRUE
+          )
+          """,
+      nativeQuery = true)
+  boolean hasGlobalRole(@Param("userId") long userId);
+
+  // Nom (Role.name) du role d'id donne, ou null s'il n'existe pas. Sert a decider selon le role
+  // CIBLE d'une modification (POST /roles/global/change : Gardien pour assigner un Gardien, Admin
+  // pour assigner un Admin) : le body ne porte que roleId, on resout le nom cote SQL.
+  @Query(value = "SELECT r.name FROM Role r WHERE r.id = :roleId", nativeQuery = true)
+  String findRoleNameById(@Param("roleId") long roleId);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DU FORUM ? Comme hasRoleInCourse, mais
+  // l'id fourni est celui d'un FORUM (routes /api/forums/{forumId} de gestion : renommer /
+  // supprimer un forum) : on resout forum -> cours via Forum.course_id. Ex. roleName =
+  // 'Enseignant' -> "est-il prof du cours auquel appartient ce forum ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN Forum f           ON f.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND f.id = :forumId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInForumCourse(
+      @Param("userId") long userId,
+      @Param("forumId") long forumId,
       @Param("roleName") String roleName);
 }

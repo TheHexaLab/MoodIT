@@ -20,7 +20,12 @@ export interface ChannelRef {
   type: string;
 }
 
-/** Deux references designent-elles le meme canal ? */
+/**
+ * Deux references designent-elles le meme canal ? Petit helper co-localise avec le type
+ * `ChannelRef`. L'export d'une fonction depuis un fichier de composant degrade seulement le
+ * fast-refresh en DEV (aucun impact prod) — assume.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
 export function isSameChannel(
   a: ChannelRef | null | undefined,
   b: ChannelRef | null | undefined

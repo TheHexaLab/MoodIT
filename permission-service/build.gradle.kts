@@ -28,6 +28,11 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     annotationProcessor("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Slice @DataJpaTest + TestEntityManager (module dédié en Spring Boot 4).
+    testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
+    // Base en mémoire (mode PostgreSQL) pour tester les requêtes SQL natives du
+    // MembershipRepository sans Docker/Postgres (MembershipRepositoryTest).
+    testRuntimeOnly("com.h2database:h2")
     testCompileOnly("org.projectlombok:lombok")
     testAnnotationProcessor("org.projectlombok:lombok")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

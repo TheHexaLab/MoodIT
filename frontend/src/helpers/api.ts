@@ -1,5 +1,6 @@
 import { clearToken } from './auth';
 import { type User } from '../types/domain';
+import { serializeUserSettings, type UserSettings } from './userSettings';
 
 export interface RegisterPayload {
   username: string;
@@ -72,6 +73,33 @@ export async function updateMe(payload: UpdateMePayload): Promise<User> {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Écrase les préférences de l'utilisateur connecté (PUT /api/me/settings) et renvoie le
+ * profil à jour. Blob JSON opaque (thème + dernière localisation) dont le front est
+ * propriétaire — le backend valide et persiste. Un 401 est géré par apiFetch.
+ *
+ * `keepalive` : permet à la requête de SURVIVRE au déchargement de la page (refresh /
+ * fermeture d'onglet) — utilisé pour flusher une sauvegarde en attente avant de partir.
+ */
+export async function updateMeSettings(
+  settings: UserSettings,
+  options: { keepalive?: boolean } = {}
+): Promise<User> {
+  const res = await apiFetch('/api/me/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: serializeUserSettings(settings),
+    keepalive: options.keepalive,
   });
 
   if (!res.ok) {

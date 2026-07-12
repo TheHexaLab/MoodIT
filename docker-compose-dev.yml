@@ -34,26 +34,6 @@ services:
       - pgadmin_data:/var/lib/pgadmin
       - ./servers.json:/pgadmin4/servers.json
 
-  # Permission-service : PDP central. En dev, les autres services Spring tournent
-  # sur l'hote ; on conteneurise seulement le permission-service pour qu'il soit
-  # toujours dispo (le gateway et le core en dependent en fail-closed). Il joint
-  # postgres par le nom de conteneur `postgres`, et publie 8084 pour le gateway (hote).
-  permission-service:
-    build: ./permission-service
-    container_name: moodit_permission
-    environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${PERMISSION_SERVICE_PORT:-8084}:8084"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   postgres_data:
   pgadmin_data:

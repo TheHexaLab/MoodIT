@@ -98,40 +98,46 @@ public class CourseController {
   // ── Quiz d'un cours ──────────────────────────────────────────────────────────
 
   /**
-   * Quiz d'un cours (méta seule). `published=true` → seulement les publiés (vue étudiant, ouverte).
-   * `published=false` (défaut) → TOUS, brouillons compris → réservé à la gestion de contenu (403
-   * sinon). `X-User-Email` injecté par la gateway (JWT).
+   * Quiz PUBLIÉS d'un cours (méta seule) — vue ÉTUDIANT, ouverte à tout membre. N'expose JAMAIS
+   * les brouillons : la vue ÉDITEUR passe par la route dédiée {@code /{courseId}/quizzes/manage}
+   * (gatée par le permission-service).
    */
   @GetMapping("/{courseId}/quizzes")
-  public ResponseEntity<List<QuizDTO>> getQuizzesByCourse(
-      @PathVariable Integer courseId,
-      @RequestParam(defaultValue = "false") boolean published,
-      @RequestHeader("X-User-Email") String email) {
-    return ResponseEntity.ok(quizService.listQuizzes(courseId, published, email));
+  public ResponseEntity<List<QuizDTO>> getQuizzesByCourse(@PathVariable Integer courseId) {
+    return ResponseEntity.ok(quizService.listQuizzes(courseId, true));
   }
 
   /**
-   * Crée un quiz complet (méta + questions) dans le cours. Réservé à qui gère le contenu du cours
-   * (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+   * Quiz d'un cours pour la GESTION DE CONTENU (vue éditeur) : TOUS, brouillons compris. Route
+   * DÉDIÉE (distincte de la vue étudiant) pour que le permission-service puisse la gater par rôle
+   * (Administrateur/Gardien global, ou Administrateur/Enseignant du programme du cours) — le path,
+   * lui, est visible du permission-service (contrairement à un query param).
+   */
+  @GetMapping("/{courseId}/quizzes/manage")
+  public ResponseEntity<List<QuizDTO>> getManagedQuizzesByCourse(@PathVariable Integer courseId) {
+    return ResponseEntity.ok(quizService.listQuizzes(courseId, false));
+  }
+
+  /**
+   * Crée un quiz complet (méta + questions) dans le cours. Autorisation par rôle assurée en amont
+   * par le permission-service (règle POST /courses/{courseId}/quizzes).
    */
   @PostMapping("/{courseId}/quizzes")
   public ResponseEntity<QuizDetailDTO> createQuiz(
       @PathVariable Integer courseId,
-      @RequestBody QuizDetailDTO request,
-      @RequestHeader("X-User-Email") String email) {
-    return ResponseEntity.ok(quizService.createQuiz(courseId, request, email));
+      @RequestBody QuizDetailDTO request) {
+    return ResponseEntity.ok(quizService.createQuiz(courseId, request));
   }
 
   /**
-   * Réordonne les quiz du cours (ids dans le nouvel ordre). Réservé à qui gère le contenu du cours
-   * (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+   * Réordonne les quiz du cours (ids dans le nouvel ordre). Autorisation par rôle assurée en amont
+   * par le permission-service (règle PATCH /courses/{courseId}/quizzes/reorder).
    */
   @PatchMapping("/{courseId}/quizzes/reorder")
   public ResponseEntity<Void> reorderQuizzes(
       @PathVariable Integer courseId,
-      @RequestBody List<Integer> quizIds,
-      @RequestHeader("X-User-Email") String email) {
-    quizService.reorderQuizzes(courseId, quizIds, email);
+      @RequestBody List<Integer> quizIds) {
+    quizService.reorderQuizzes(courseId, quizIds);
     return ResponseEntity.noContent().build();
   }
 }

@@ -1,0 +1,35 @@
+# Routes mutantes (POST/PUT/PATCH/DELETE) exposées via le gateway. GÉNÉRÉ par
+# MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.
+# Lu par le RouteCoverageTest du permission-service (couverture des règles).
+DELETE /api/courses/{courseId}
+DELETE /api/courses/{courseId}/users/{userId}
+DELETE /api/establishments/{establishmentId}
+DELETE /api/forums/{forumId}
+DELETE /api/forums/{forumId}/posts/{postId}
+DELETE /api/programs/{programId}
+DELETE /api/programs/{programId}/users/{userId}
+DELETE /api/quizzes/{quizId}
+PATCH /api/courses/{courseId}
+PATCH /api/courses/{courseId}/quizzes/reorder
+PATCH /api/courses/{courseId}/sections
+PATCH /api/establishments/{establishmentId}
+PATCH /api/forums/{forumId}
+PATCH /api/forums/{forumId}/posts/{postId}
+PATCH /api/me
+PATCH /api/programs/{programId}
+PATCH /api/users/{userId}
+POST /api/courses/forums
+POST /api/courses/users
+POST /api/courses/{courseId}/quizzes
+POST /api/establishments
+POST /api/establishments/programs
+POST /api/forums/messages
+POST /api/forums/posts
+POST /api/forums/posts/votes
+POST /api/programs/courses
+POST /api/programs/users
+POST /api/quizzes/{quizId}/submissions
+POST /api/roles/change
+POST /api/roles/global/change
+PUT /api/me/settings
+PUT /api/quizzes/{quizId}

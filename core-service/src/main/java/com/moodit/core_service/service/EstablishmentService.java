@@ -28,6 +28,7 @@ public class EstablishmentService {
     private final ProgramRepository programRepository;
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
+    private final AuditLogService auditLogService;
 
     /** Exécute l'action après le commit (ou tout de suite hors transaction). */
     private void afterCommit(Runnable action) {
@@ -103,6 +104,9 @@ public class EstablishmentService {
 
         Establishment saved = establishmentRepository.save(est);
 
+        auditLogService.record("ESTABLISHMENT_CREATE", "ESTABLISHMENT", saved.getId(),
+                "Établissement « " + saved.getName() + " » créé");
+
         // ── Temps réel (GLOBAL) : le nouvel établissement apparaît LIVE dans le popup. Émis APRÈS
         // le commit (afterCommit) pour ne pas diffuser un état non persisté. ──
         long id = saved.getId();
@@ -128,6 +132,10 @@ public class EstablishmentService {
 
         Program saved = programRepository.saveAndFlush(program); // flush : catalogue à jour
 
+        auditLogService.record("PROGRAM_CREATE", "PROGRAM", saved.getId(),
+                "Programme « " + saved.getName() + " » créé",
+                "Établissement : " + est.getName());
+
         // ── Temps réel (GLOBAL) : le catalogue de l'établissement change → le popup « Ajouter un
         // programme » met à jour la liste des programmes LIVE (nombre, codes, liste détaillée). ──
         programService.publishEstablishmentCatalog(dto.getEstablishmentId());
@@ -152,6 +160,9 @@ public class EstablishmentService {
         }
 
         Establishment saved = establishmentRepository.save(establishment);
+
+        auditLogService.record("ESTABLISHMENT_UPDATE", "ESTABLISHMENT", establishmentId,
+                "Établissement « " + saved.getName() + " » mis à jour");
 
         EstablishmentDTO result = establishmentToDTO(saved);
 
@@ -193,7 +204,11 @@ public class EstablishmentService {
                     .forEach(uid -> deletions.add(Map.entry(uid, programId)));
         }
 
+        String deletedName = establishment.getName();
         establishmentRepository.delete(establishment);
+
+        auditLogService.record("ESTABLISHMENT_DELETE", "ESTABLISHMENT", establishmentId,
+                "Établissement « " + deletedName + " » supprimé (#" + establishmentId + ")");
 
         long estId = establishmentId;
         // Écho WS NON-BLOQUANT : un échec de diffusion ne doit jamais faire échouer la suppression

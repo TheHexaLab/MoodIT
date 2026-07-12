@@ -9,12 +9,12 @@ import { Chevron } from '../../../assets/Chevron';
 import { Check } from '../../../assets/Check';
 import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
+  type AttemptOutcome,
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type RunCodeHandler,
   type SubmitQuizHandler,
-  type SubscribeCodeGrading,
   isAnswered,
 } from './quizAttempt';
 import { useQuizAttempt } from './useQuizAttempt';
@@ -22,6 +22,7 @@ import { QuestionCard } from './QuestionCard';
 import { QuestionRenderer } from './questions/QuestionRenderer';
 import { QuizSummary } from './QuizSummary';
 import { Spinner } from '../../Spinner/Spinner';
+import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { defaultQuizViewLabels, type QuizViewLabelsBundle } from './quizViewLabels';
 
 interface QuizViewProps {
@@ -43,8 +44,8 @@ interface QuizViewProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
-  /** Abonnement à la correction async des questions Code (WS) → live-update des verdicts. */
-  onSubscribeCodeGrading?: SubscribeCodeGrading;
+  /** Verdict PUSH (WebSocket) de la correction async, remonté par le Dashboard (room user). */
+  attemptOutcome?: AttemptOutcome | null;
   /** Exécute le code d'une question Code dans le sandbox (bouton « play » de l'éditeur). */
   onRunCode?: RunCodeHandler;
   /** Le quiz a été modifié à distance (WS) → affiche une bannière de rechargement. */
@@ -68,7 +69,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
-  onSubscribeCodeGrading,
+  attemptOutcome,
   onRunCode,
   staleNotice = false,
   onReloadStale,
@@ -84,21 +85,27 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchAttempts,
     onFetchAttemptResult,
     onSubmitQuiz,
-    onSubscribeCodeGrading,
+    attemptOutcome,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
+    codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
+    submissionNotConfirmedMessage: t.submissionNotConfirmed,
   });
   const { quiz, phase, currentIndex, answers, result } = attempt;
 
   // Quiz modifié à distance (WS) : on RECHARGE immédiatement (sans toast). En passation,
   // on conserve les réponses déjà saisies (fusion) ; sinon rechargement complet.
-  // Refs pour ne déclencher qu'au front montant de `staleNotice` (pas de double-reload).
+  // Refs pour ne déclencher qu'au front montant de `staleNotice` (pas de double-reload) : elles
+  // sont mises à jour dans un effet (jamais pendant le rendu) et lues paresseusement par l'effet
+  // `staleNotice` ci-dessous, qui ne dépend donc pas de attempt/phase.
   const attemptRef = useRef(attempt);
-  attemptRef.current = attempt;
   const phaseRef = useRef(phase);
-  phaseRef.current = phase;
   const onReloadStaleRef = useRef(onReloadStale);
-  onReloadStaleRef.current = onReloadStale;
+  useEffect(() => {
+    attemptRef.current = attempt;
+    phaseRef.current = phase;
+    onReloadStaleRef.current = onReloadStale;
+  });
   useEffect(() => {
     if (!staleNotice) return;
     if (phaseRef.current === 'taking') attemptRef.current.reloadKeepingAnswers();
@@ -132,8 +139,26 @@ const QuizView: React.FC<QuizViewProps> = ({
     }
   }, [currentIndex, total, phase]);
 
+  // Spinner PLEIN QUIZ : chargement initial, envoi en cours, ou réconciliation post-refresh.
+  const busy = attempt.loading || attempt.submitting || attempt.reconciling;
+
   return (
     <div className={styles.view}>
+      {busy && (
+        <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={44} />
+        </div>
+      )}
+
+      {attempt.submitError && (
+        <ErrorPopup
+          content={attempt.submitError}
+          onClose={attempt.dismissSubmitError}
+          onRetry={attempt.submit}
+          labels={{ title: t.errorTitle }}
+        />
+      )}
+
       <header className={styles.header}>
         <div className={styles.headerTitle}>
           <span className={styles.bolt}>
@@ -169,13 +194,9 @@ const QuizView: React.FC<QuizViewProps> = ({
   // ───────────────────────────────── Corps ─────────────────────────────────
 
   function renderBody(): React.ReactElement {
+    // Le chargement est couvert par l'overlay plein quiz (cf. `busy`) ; on ne rend rien derrière.
     if (attempt.loading) {
-      return (
-        <div className={styles.centeredState} role="status" aria-live="polite" aria-busy="true">
-          <Spinner size={40} />
-          <p>{t.loading}</p>
-        </div>
-      );
+      return <div className={styles.body} />;
     }
     if (attempt.loadError) {
       return (

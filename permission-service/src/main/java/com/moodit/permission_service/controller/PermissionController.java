@@ -33,7 +33,11 @@ public class PermissionController {
   public ResponseEntity<ValidateResponse> validate(@Valid @RequestBody ValidateRequest request) {
     boolean allowed =
         permissionService.isAllowed(
-            request.getEmail(), request.getPath(), request.getMethod(), request.getBody());
+            request.getEmail(),
+            request.getPath(),
+            request.getMethod(),
+            request.getBody(),
+            request.getQuery());
     return ResponseEntity.ok(new ValidateResponse(allowed));
   }
 

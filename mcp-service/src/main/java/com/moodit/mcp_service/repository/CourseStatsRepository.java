@@ -31,9 +31,25 @@ public class CourseStatsRepository {
                 courseId);
     }
 
-    /** Nombre d'étudiants inscrits à un cours. */
+    /**
+     * Nombre de VRAIS étudiants inscrits : inscriptions dont l'utilisateur n'a AUCUN rôle programme
+     * (Enseignant/Administrateur, via User_Program_Role) dans un programme contenant le cours. Exclut
+     * donc le personnel enseignant — dont le créateur du cours, désormais auto-inscrit pour visibilité.
+     */
     public int countStudents(int courseId) {
-        return count("SELECT COUNT(*) FROM enrollment WHERE course_id = ?", courseId);
+        // NOT EXISTS (et non NOT IN) : évite le piège des NULL et laisse le planificateur court-circuiter.
+        Integer n =
+                jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM enrollment e "
+                                + "WHERE e.course_id = ? "
+                                + "AND NOT EXISTS ("
+                                + "  SELECT 1 FROM user_program_role upr "
+                                + "  JOIN program_course pc ON pc.program_id = upr.program_id "
+                                + "  WHERE pc.course_id = ? AND upr.user_id = e.user_id)",
+                        Integer.class,
+                        courseId,
+                        courseId);
+        return n == null ? 0 : n;
     }
 
     /**

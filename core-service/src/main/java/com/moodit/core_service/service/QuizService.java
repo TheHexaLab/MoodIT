@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.exception.CourseNotFoundException;
-import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
@@ -16,14 +16,19 @@ import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
 import com.moodit.core_service.repository.SubmissionRepository;
+import com.moodit.core_service.repository.SubmissionTestCaseRepository;
 import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -39,6 +44,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class QuizService {
 
     private final QuizRepository quizRepository;
@@ -46,11 +52,15 @@ public class QuizService {
     private final QTypeRepository qTypeRepository;
     private final LanguageRepository languageRepository;
     private final SubmissionRepository submissionRepository;
+    private final SubmissionTestCaseRepository submissionTestCaseRepository;
     private final AttemptRepository attemptRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final RealtimeEventPublisher realtimePublisher;
-    private final CodeGradingRunner codeGradingRunner;
+    private final ExecutionClient executionClient;
+    private final PlatformTransactionManager transactionManager;
+    private final ApplicationEventPublisher eventPublisher;
+    private final AuditLogService auditLogService;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -93,14 +103,14 @@ public class QuizService {
                 .toList();
     }
 
-    /** Quiz d'un cours (méta seule), triés par position. `publishedOnly` filtre les publiés. */
+    /**
+     * Quiz d'un cours (méta seule), triés par position. `publishedOnly` filtre les publiés.
+     * L'autorisation de la vue ÉDITEUR (brouillons compris, publishedOnly=false) est déléguée au
+     * permission-service via une ROUTE DÉDIÉE (GET /courses/{id}/quizzes/manage) — la vue publiée
+     * (publishedOnly=true) est ouverte à tout membre. Ce service ne fait donc plus de contrôle.
+     */
     @Transactional(readOnly = true)
-    public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly, String userEmail) {
-        // Vue ÉDITEUR (brouillons compris) → réservée à qui gère le contenu du cours (403 sinon).
-        // Vue ÉTUDIANT (publiés uniquement) → ouverte à tout membre : pas de contrôle.
-        if (!publishedOnly) {
-            requireCourseAccess(courseId, userEmail);
-        }
+    public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
         return (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes()).stream()
@@ -130,40 +140,19 @@ public class QuizService {
      * (cf. {@link #requireCourseAccess}) — un étudiant qui appellerait cet endpoint reçoit 403.
      */
     @Transactional(readOnly = true)
-    public QuizDetailDTO getQuizForEdit(Integer quizId, String userEmail) {
+    public QuizDetailDTO getQuizForEdit(Integer quizId) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
-        // Autorisation scopée au cours du quiz (le quiz donne le courseId à contrôler).
-        requireCourseAccess(quiz.getCourse().getId(), userEmail);
+        // Autorisation PAR RÔLE déléguée au permission-service (règle GET /quizzes/{quizId}/edit).
         return toQuizDetailDTO(quiz, true);
-    }
-
-    /** Rôles GLOBAUX (User_Role) autorisés à gérer le contenu de N'IMPORTE quel cours. */
-    private static final Set<String> GLOBAL_CONTENT_ROLES = Set.of(RoleNames.ADMIN, RoleNames.GUARDIAN);
-
-    /**
-     * Autorise la gestion du CONTENU d'un cours (403 sinon). Deux voies :
-     *   1. rôle GLOBAL (User_Role) « Administrateur » ou « Gardien » → tous les cours ;
-     *   2. rôle PROGRAMME (User_Program_Role) « Administrateur » ou « Enseignant » dans un
-     *      programme CONTENANT ce cours (scope indispensable).
-     */
-    private void requireCourseAccess(Integer courseId, String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(UserNotFoundException::new);
-        boolean allowed =
-                (user.getRoles() != null
-                        && user.getRoles().stream()
-                                .anyMatch(r -> GLOBAL_CONTENT_ROLES.contains(r.getName())))
-                || userRepository.hasProgramTeachingRoleForCourse(user.getId(), courseId);
-        if (!allowed) throw new ForbiddenException();
     }
 
     // ── Écriture (éditeur enseignant) ────────────────────────────────────────────
 
     /** Crée un quiz complet (méta + questions) dans un cours ; renvoie le quiz persisté. */
     @Transactional
-    public QuizDetailDTO createQuiz(Integer courseId, QuizDetailDTO dto, String userEmail) {
-        requireCourseAccess(courseId, userEmail);
+    public QuizDetailDTO createQuiz(Integer courseId, QuizDetailDTO dto) {
+        // Autorisation PAR RÔLE déléguée au permission-service (règle POST /courses/{id}/quizzes).
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
 
@@ -174,6 +163,9 @@ public class QuizService {
         quiz.setQuestions(buildQuestions(dto.getQuestions(), quiz));
 
         Quiz saved = quizRepository.save(quiz);
+        String details = AuditContext.ofChildOfCourse(course);
+        auditLogService.record("QUIZ_CREATE", "QUIZ", saved.getId(),
+                "Quiz « " + saved.getTitle() + " » créé", details);
         broadcastQuiz(course, saved.getId(), false); // created
         return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
@@ -185,10 +177,10 @@ public class QuizService {
      * Seules les questions réellement retirées sont supprimées (orphanRemoval).
      */
     @Transactional
-    public QuizDetailDTO updateQuiz(Integer quizId, QuizDetailDTO dto, String userEmail) {
+    public QuizDetailDTO updateQuiz(Integer quizId, QuizDetailDTO dto) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
-        requireCourseAccess(quiz.getCourse().getId(), userEmail);
+        // Autorisation PAR RÔLE déléguée au permission-service (règle PUT /quizzes/{quizId}).
 
         applyQuizMeta(quiz, dto, quiz.getCourse());
 
@@ -225,22 +217,30 @@ public class QuizService {
         }
 
         Quiz saved = quizRepository.save(quiz);
+        Course course = quiz.getCourse();
+        String details = AuditContext.ofChildOfCourse(course);
+        auditLogService.record("QUIZ_UPDATE", "QUIZ", quizId,
+                "Quiz « " + quiz.getTitle() + " » mis à jour", details);
         broadcastQuiz(saved.getCourse(), saved.getId(), true); // updated
         return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
 
     /** Supprime un quiz et tout son contenu (cascade). */
     @Transactional
-    public void deleteQuiz(Integer quizId, String userEmail) {
+    public void deleteQuiz(Integer quizId) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
-        requireCourseAccess(quiz.getCourse().getId(), userEmail);
+        // Autorisation PAR RÔLE déléguée au permission-service (règle DELETE /quizzes/{quizId}).
         Course course = quiz.getCourse();
         // Capture les programmes AVANT delete (la collection lazy serait vidée après).
         List<Integer> programIds = course == null || course.getPrograms() == null ? List.of()
                 : course.getPrograms().stream().map(Program::getId).toList();
         Integer courseId = course == null ? null : course.getId();
+        String title = quiz.getTitle(); // capturé avant delete
+        String details = AuditContext.ofChildOfCourse(course); // capturé avant delete
         quizRepository.delete(quiz);
+        auditLogService.record("QUIZ_DELETE", "QUIZ", quizId,
+                title != null ? "Quiz « " + title + " » supprimé" : "Quiz #" + quizId + " supprimé", details);
         if (courseId != null) {
             afterCommit(() -> {
                 for (Integer programId : programIds) {
@@ -287,8 +287,8 @@ public class QuizService {
 
     /** Réordonne les quiz d'un cours : `quizIds` dans le nouvel ordre → position 0..n. */
     @Transactional
-    public void reorderQuizzes(Integer courseId, List<Integer> quizIds, String userEmail) {
-        requireCourseAccess(courseId, userEmail);
+    public void reorderQuizzes(Integer courseId, List<Integer> quizIds) {
+        // Autorisation PAR RÔLE déléguée au permission-service (règle PATCH /courses/{id}/quizzes/reorder).
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
         Map<Integer, Quiz> byId = (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes())
@@ -315,65 +315,241 @@ public class QuizService {
     // ── Soumission / correction ──────────────────────────────────────────────────
 
     /**
-     * Corrige une tentative côté serveur (types « à réponses ») et PERSISTE les
-     * soumissions (une par question). Tentative unique : 409 si déjà soumis. Le CODE
-     * n'est pas exécuté ici (tests = null). `userEmail` vient du JWT (header gateway).
+     * Soumet une tentative de façon ASYNCHRONE. Cette méthode ne fait que PERSISTER la tentative en
+     * statut {@code "pending"} avec les réponses brutes (tx courte écriture) puis rend la main : le
+     * contrôleur répond 202 + l'id de tentative. La correction du code — lente (sandbox) — se fait
+     * ensuite en tâche de fond ({@link #gradeAttempt}), déclenchée APRÈS commit via un évènement, et
+     * le résultat est poussé par WebSocket ({@code quiz:attempt-graded} / {@code -failed}).
+     *
+     * <p>Pourquoi async : le sandbox prend plusieurs secondes et ne doit tenir NI la requête HTTP
+     * (risque de timeout proxy) NI une connexion BD (pool partagé). Tentative unique : 409 si déjà
+     * soumise (quiz sans reprise) ou si une correction est déjà en cours (index partiel
+     * {@code uq_attempt_pending}). `userEmail` vient du JWT (header gateway).
      */
-    @Transactional
-    public QuizResultDTO submitQuiz(Integer quizId, QuizSubmissionDTO submission, String userEmail) {
+    public Integer submitQuiz(Integer quizId, QuizSubmissionDTO submission, String userEmail) {
+        Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
+        TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
+        return writeTx.execute(status -> persistPendingAttempt(quizId, userEmail, byQuestion));
+    }
+
+    /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
+    private record CodeVerificationTask(
+            Integer questionId, String language, String code,
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses) {}
+
+    /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
+    private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
+
+    /**
+     * (tx écriture) Crée la tentative {@code "pending"} + une {@link Submission} brute par question
+     * (réponses, SANS verdicts encore) et déclenche la correction async après commit.
+     *
+     * <p>Anti-double-soumission ATOMIQUE : la contrainte {@code UNIQUE(quiz,user,attempt_no)} ET
+     * l'index partiel {@code uq_attempt_pending} garantissent qu'un seul pending existe à la fois —
+     * un 2e insert concurrent viole l'un d'eux → {@link AlreadySubmittedException} (409).
+     */
+    private Integer persistPendingAttempt(Integer quizId, String userEmail,
+            Map<Integer, SubmittedAnswerDTO> byQuestion) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
 
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
-        // Tentative unique si le quiz n'autorise pas la reprise.
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
         }
 
-        Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
-        // Types « à réponses » corrigés tout de suite ; questions Code renvoyées « en cours »
-        // (tests = null), corrigées ensuite en async (cf. déclenchement plus bas).
-        QuizResultDTO result = buildResult(quiz, byQuestion, Map.of());
-
-        // Nouvelle tentative (numéro = nb existant + 1). Aucun score n'est stocké : seules
-        // les réponses brutes le sont (content) ; le score est recalculé à la lecture.
-        //
-        // Le pré-check `existing`/allowRetry ci-dessus n'est PAS atomique : deux POST
-        // concurrents (double-clic, rejeu) peuvent tous deux lire existing == 0. La
-        // garantie réelle vient de la contrainte UNIQUE (quiz_id, user_id, attempt_no)
-        // en base : le 2e insert du même attempt_no lève une DataIntegrityViolation,
-        // qu'on traduit en 409 (tentative déjà soumise).
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
         attempt.setAttemptNo((int) existing + 1);
-        Attempt savedAttempt;
+        attempt.setStatus("pending");
+        Attempt saved;
         try {
-            savedAttempt = attemptRepository.saveAndFlush(attempt);
+            saved = attemptRepository.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException e) {
+            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending (correction déjà en cours) → 409.
             throw new AlreadySubmittedException();
         }
 
-        // Une Submission par question, rattachée à la tentative (réponse brute uniquement).
+        // Réponses brutes ; les verdicts de code seront ajoutés par la correction async.
         for (Question q : sortedQuestions(quiz)) {
             Submission s = new Submission();
-            s.setAttempt(savedAttempt);
+            s.setAttempt(saved);
             s.setUser(user);
             s.setQuestion(q);
             s.setContent(serializeAnswer(byQuestion.get(q.getId())));
             submissionRepository.save(s);
         }
 
-        // Corrige les questions Code EN ASYNC (exécution sandbox lente), APRÈS commit pour que le
-        // job voie la tentative + les submissions persistées. Verdicts poussés ensuite par WS.
-        Integer attemptId = savedAttempt.getId();
-        afterCommit(() -> codeGradingRunner.gradeAttempt(attemptId));
+        // Correction lancée APRÈS commit (l'entité pending doit être visible du job) : évènement
+        // transactionnel @AfterCommit + @Async (cf. QuizGradingListener).
+        eventPublisher.publishEvent(new AttemptSubmittedEvent(saved.getId()));
+        return saved.getId();
+    }
 
-        result.setAttemptId(savedAttempt.getId());
-        result.setAttemptNo(savedAttempt.getAttemptNo());
-        return result;
+    /**
+     * Corrige une tentative {@code "pending"} : exécute les harnais de code HORS transaction (lent),
+     * puis FINALISE en {@code "done"} + pousse {@code quiz:attempt-graded}.
+     *
+     * <p><b>TOUTE défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
+     * SUPPRIME la tentative pending et pousse {@code quiz:attempt-failed} : on ne laisse JAMAIS un
+     * {@code "pending"} coincé, sinon l'index {@code uq_attempt_pending} verrouillerait tout renvoi.
+     * La tentative unique n'est donc pas consommée. Appelée en async après commit (cf.
+     * QuizGradingListener) ; publique pour passer par le proxy Spring (l'@Async ne marche pas en
+     * self-invocation).
+     */
+    public void gradeAttempt(Integer attemptId) {
+        GradingContext ctx;
+        Map<Integer, Map<Integer, Boolean>> verdicts;
+        try {
+            // (1) tx courte lecture : contexte détaché (à qui pousser + quoi exécuter).
+            TransactionTemplate readOnlyTx = new TransactionTemplate(transactionManager);
+            readOnlyTx.setReadOnly(true);
+            ctx = readOnlyTx.execute(status -> loadGradingContext(attemptId));
+            if (ctx == null) return; // tentative disparue entre-temps
+
+            // (2) sandbox HORS transaction : aucune connexion BD tenue pendant cette I/O lente.
+            verdicts = runCodeVerification(ctx.tasks());
+
+            // (3) persiste les verdicts + passe en "done" (transactionnel : un échec ici annule tout
+            // et laisse la tentative en "pending" → traité comme une défaillance ci-dessous).
+            TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
+            writeTx.executeWithoutResult(status -> finalizeAttempt(attemptId, verdicts));
+        } catch (RuntimeException e) {
+            failGrading(attemptId, e);
+            return;
+        }
+
+        // Tentative "done" COMMITTÉE : le push est best-effort — une erreur WS ne doit PAS supprimer
+        // une tentative valide déjà corrigée.
+        try {
+            realtimePublisher.quizAttemptGraded(ctx.userId(), ctx.quizId(), attemptId);
+        } catch (RuntimeException e) {
+            log.error("Push quiz:attempt-graded échoué pour la tentative {} (déjà corrigée)", attemptId, e);
+        }
+    }
+
+    /**
+     * Défaillance de correction : SUPPRIME la tentative pending (jamais de pending coincé) et notifie
+     * l'auteur ({@code quiz:attempt-failed}). Seule la suppression est CRITIQUE ; le lookup du
+     * destinataire et le push sont best-effort (à défaut, le front retombe sur son polling). Une
+     * {@link CodeVerificationUnavailableException} est attendue (sandbox indisponible) ; toute autre
+     * exception est un incident, journalisé.
+     */
+    private void failGrading(Integer attemptId, RuntimeException cause) {
+        if (!(cause instanceof CodeVerificationUnavailableException)) {
+            log.error("Correction de la tentative {} en échec inattendu : suppression du pending",
+                    attemptId, cause);
+        }
+        long[] who = null;
+        try {
+            TransactionTemplate readTx = new TransactionTemplate(transactionManager);
+            readTx.setReadOnly(true);
+            who = readTx.execute(status -> {
+                Attempt a = attemptRepository.findById(attemptId).orElse(null);
+                return a == null ? null : new long[] {a.getUser().getId(), a.getQuiz().getId()};
+            });
+        } catch (RuntimeException ignore) {
+            // Destinataire introuvable : on pousse pas d'event, le front récupère par polling.
+        }
+        TransactionTemplate delTx = new TransactionTemplate(transactionManager);
+        delTx.executeWithoutResult(status -> attemptRepository.deleteById(attemptId));
+        if (who != null) {
+            realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, null);
+        }
+    }
+
+    /**
+     * (tx lecture) Reconstruit le contexte de correction depuis la tentative PERSISTÉE : le code de
+     * chaque question vient de sa {@link Submission}. {@code null} si la tentative n'existe plus.
+     */
+    private GradingContext loadGradingContext(Integer attemptId) {
+        Attempt attempt = attemptRepository.findById(attemptId).orElse(null);
+        if (attempt == null) return null;
+        Quiz quiz = attempt.getQuiz();
+        Map<Integer, SubmittedAnswerDTO> byQuestion = new HashMap<>();
+        for (Submission s : attempt.getSubmissions()) {
+            byQuestion.put(s.getQuestion().getId(),
+                    deserializeAnswer(s.getContent(), s.getQuestion().getId()));
+        }
+        return new GradingContext(attempt.getUser().getId(), quiz.getId(), buildCodeTasks(quiz, byQuestion));
+    }
+
+    /**
+     * Prépare la liste des questions Code à exécuter, en capturant tout ce dont le sandbox a besoin
+     * (langage, harnais, code soumis) dans des records DÉTACHÉS — exécutables hors transaction.
+     */
+    private List<CodeVerificationTask> buildCodeTasks(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        List<CodeVerificationTask> tasks = new ArrayList<>();
+        for (Question question : sortedQuestions(quiz)) {
+            if (!"coding".equals(slugFor(question))) continue;
+            List<TestCase> harnesses = orderedTestCases(question);
+            if (harnesses.isEmpty()) continue;
+
+            String language = question.getLanguage() != null ? question.getLanguage().getName() : null;
+            SubmittedAnswerDTO answer = byQuestion.get(question.getId());
+            String code = answer != null ? answer.getCode() : null;
+            List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
+            List<ExecutionClient.Harness> inputs = harnesses.stream()
+                    .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
+                    .toList();
+            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs));
+        }
+        return tasks;
+    }
+
+    /**
+     * Exécute SYNCHRONEMENT (mais HORS transaction) les harnais de chaque question Code et renvoie
+     * les verdicts par question ({@code questionId → (testCaseId → réussi)}). Lève
+     * {@link CodeVerificationUnavailableException} dès qu'une question ne peut pas être évaluée
+     * (service injoignable, réponse incohérente) : la soumission est alors refusée sans rien persister.
+     */
+    private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
+        Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
+        for (CodeVerificationTask task : tasks) {
+            List<Boolean> verdicts = executionClient.evaluate(task.language(), task.code(), task.harnesses());
+            if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
+                throw new CodeVerificationUnavailableException();
+            }
+            Map<Integer, Boolean> byTestCase = new HashMap<>();
+            for (int i = 0; i < task.testCaseIds().size(); i++) {
+                byTestCase.put(task.testCaseIds().get(i), Boolean.TRUE.equals(verdicts.get(i)));
+            }
+            verdictsByQuestion.put(task.questionId(), byTestCase);
+        }
+        return verdictsByQuestion;
+    }
+
+    /**
+     * (tx écriture) Finalise une tentative corrigée : persiste les verdicts de code
+     * ({@code Submission_Test_Case}) à partir des soumissions déjà enregistrées, puis passe la
+     * tentative en {@code "done"}. Aucun score n'est stocké : il est recalculé à la lecture
+     * ({@link #computeAttemptResult}).
+     */
+    private void finalizeAttempt(Integer attemptId, Map<Integer, Map<Integer, Boolean>> codeVerdicts) {
+        Attempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(AttemptNotFoundException::new);
+        for (Submission s : attempt.getSubmissions()) {
+            Map<Integer, Boolean> verdicts = codeVerdicts.get(s.getQuestion().getId());
+            if (verdicts == null) continue;
+            for (TestCase testCase : orderedTestCases(s.getQuestion())) {
+                Boolean passed = verdicts.get(testCase.getId());
+                if (passed == null) continue;
+                SubmissionTestCase verdict = new SubmissionTestCase();
+                verdict.setSubmission(s);
+                verdict.setTestCase(testCase);
+                verdict.setPassed(passed);
+                submissionTestCaseRepository.save(verdict);
+            }
+        }
+        attempt.setStatus("done");
+        attemptRepository.save(attempt);
+    }
+
+    private static int weightOf(TestCase testCase) {
+        return testCase.getWeight() != null && testCase.getWeight() > 0 ? testCase.getWeight() : 1;
     }
 
     /**
@@ -388,6 +564,8 @@ public class QuizService {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
         return attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(quizId, user.getId()).stream()
+                // Les tentatives en cours de correction ("pending") ne font pas partie de l'historique.
+                .filter(a -> "done".equals(a.getStatus()))
                 .map(a -> {
                     QuizResultDTO r = computeAttemptResult(a);
                     return new AttemptSummaryDTO(
@@ -422,6 +600,8 @@ public class QuizService {
         List<Double> percentages = new ArrayList<>();
         Set<Integer> students = new HashSet<>();
         for (Attempt attempt : attempts) {
+            // Ignore les tentatives en cours de correction ("pending", verdicts pas encore écrits).
+            if (!"done".equals(attempt.getStatus())) continue;
             Set<Integer> codeQuestionIds = sortedQuestions(attempt.getQuiz()).stream()
                     .filter(q -> "coding".equals(slugFor(q)))
                     .map(Question::getId)
@@ -458,11 +638,19 @@ public class QuizService {
                         s -> s.getQuestion().getId(),
                         s -> deserializeAnswer(s.getContent(), s.getQuestion().getId()),
                         (a, b) -> a));
-        // Submissions par question → verdicts persistés lus pour les questions Code.
-        Map<Integer, Submission> submissionByQuestion = subs.stream()
-                .collect(Collectors.toMap(s -> s.getQuestion().getId(), s -> s, (a, b) -> a));
+        // Verdicts Code PERSISTÉS (Submission_Test_Case) relus par question, même forme que la
+        // map fraîche produite à la soumission.
+        Map<Integer, Map<Integer, Boolean>> codeVerdicts = new HashMap<>();
+        for (Submission s : subs) {
+            if (s.getTestCaseResults() == null || s.getTestCaseResults().isEmpty()) continue;
+            Map<Integer, Boolean> byTestCase = new HashMap<>();
+            for (SubmissionTestCase verdict : s.getTestCaseResults()) {
+                byTestCase.put(verdict.getTestCase().getId(), Boolean.TRUE.equals(verdict.getPassed()));
+            }
+            codeVerdicts.put(s.getQuestion().getId(), byTestCase);
+        }
 
-        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion, submissionByQuestion);
+        QuizResultDTO result = buildResult(attempt.getQuiz(), byQuestion, codeVerdicts);
         result.setAttemptId(attempt.getId());
         result.setAttemptNo(attempt.getAttemptNo());
         return result;
@@ -474,13 +662,14 @@ public class QuizService {
     }
 
     /**
-     * Corrige toutes les questions du quiz. {@code submissionByQuestion} porte les verdicts
-     * persistés des questions Code (vide à la soumission → Code « en cours »).
+     * Corrige toutes les questions du quiz. {@code codeVerdictsByQuestion} porte les verdicts
+     * des questions Code ({@code testCaseId → réussi}), qu'ils soient frais (soumission) ou
+     * persistés (lecture). Absent pour une question Code → « en cours » (tests = null).
      */
     private QuizResultDTO buildResult(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion,
-            Map<Integer, Submission> submissionByQuestion) {
+            Map<Integer, Map<Integer, Boolean>> codeVerdictsByQuestion) {
         List<QuestionResultDTO> results = sortedQuestions(quiz).stream()
-                .map(q -> gradeQuestion(q, byQuestion.get(q.getId()), submissionByQuestion.get(q.getId())))
+                .map(q -> gradeQuestion(q, byQuestion.get(q.getId()), codeVerdictsByQuestion.get(q.getId())))
                 .toList();
         return QuizResultDTO.builder()
                 .quizId(quiz.getId())
@@ -527,32 +716,25 @@ public class QuizService {
     // ── Grading (porté de grading.ts côté front) ─────────────────────────────────
 
     private QuestionResultDTO gradeQuestion(
-            Question question, SubmittedAnswerDTO answer, Submission submission) {
+            Question question, SubmittedAnswerDTO answer, Map<Integer, Boolean> codeVerdicts) {
         String slug = slugFor(question);
         if (slug == null) slug = "";
         return switch (slug) {
             case "true_false", "single_choice", "multiple_choice" -> gradeChoice(question, answer, slug);
             case "ordering" -> gradeOrdering(question, answer);
             case "matching" -> gradeMatching(question, answer);
-            case "coding" -> gradeCoding(question, submission);
+            case "coding" -> gradeCoding(question, codeVerdicts);
             default -> CodeGrading.pending(question);
         };
     }
 
     /**
-     * Note une question Code à partir des verdicts PERSISTÉS (Submission_Test_Case). Sans verdict
-     * (submission absente ou correction async pas encore terminée) → « en cours » (tests = null).
+     * Note une question Code à partir de ses verdicts ({@code testCaseId → réussi}). Sans verdict
+     * (question Code jamais évaluée) → « en cours » (tests = null).
      */
-    private QuestionResultDTO gradeCoding(Question question, Submission submission) {
+    private QuestionResultDTO gradeCoding(Question question, Map<Integer, Boolean> codeVerdicts) {
         List<TestCase> harnesses = orderedTestCases(question);
-        Map<Integer, Boolean> passedByTestCaseId = new HashMap<>();
-        if (submission != null && submission.getTestCaseResults() != null) {
-            for (SubmissionTestCase verdict : submission.getTestCaseResults()) {
-                passedByTestCaseId.put(
-                        verdict.getTestCase().getId(), Boolean.TRUE.equals(verdict.getPassed()));
-            }
-        }
-        return CodeGrading.build(question, harnesses, passedByTestCaseId);
+        return CodeGrading.build(question, harnesses, codeVerdicts == null ? Map.of() : codeVerdicts);
     }
 
     private static List<TestCase> orderedTestCases(Question question) {

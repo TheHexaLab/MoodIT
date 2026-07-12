@@ -58,7 +58,8 @@ class ForumServiceN1Test {
             postRepository,
             voteRepository,
             userRepository,
-            mock(RealtimeEventPublisher.class));
+            mock(RealtimeEventPublisher.class),
+            mock(AuditLogService.class));
 
     FType fType = new FType();
     fType.setName("Discussion");

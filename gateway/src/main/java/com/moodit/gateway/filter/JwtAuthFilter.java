@@ -129,6 +129,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     //    cette route (rôles + appartenance). L'identité vient du JWT, pas du client. Pour
     //    les routes dont l'id de ressource est dans le body, on transmet le body (en cache).
     String requestBody = (base instanceof CachedBodyRequest cached) ? cached.getBodyAsString() : "";
+    // Query string brute (?scope=...) : getRequestURI() l'exclut, mais certaines regles en
+    // dependent (ex. GET /roles?scope=global|program). On la transmet a part (jamais null).
+    String queryString = request.getQueryString() == null ? "" : request.getQueryString();
     boolean allowed;
     try {
       Map<?, ?> body =
@@ -140,7 +143,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                       "email", claims.getSubject(),
                       "path", path,
                       "method", request.getMethod(),
-                      "body", requestBody))
+                      "body", requestBody,
+                      "query", queryString))
               .retrieve()
               .body(Map.class);
       allowed = body != null && Boolean.TRUE.equals(body.get("allowed"));

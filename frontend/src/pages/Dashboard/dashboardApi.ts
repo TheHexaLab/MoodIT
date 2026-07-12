@@ -36,6 +36,7 @@ import type {
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
+  type AttemptAccepted,
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
@@ -58,7 +59,6 @@ export type { DemoProgram };
  * les programmes SANS leurs cours.
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
-  console.log('fetchPrograms');
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/users/${userId}/programs`);
   if (!res.ok) throw new Error('Échec chargement des programmes');
@@ -182,7 +182,8 @@ export async function fetchQuizForEdit(quizId: number): Promise<Quiz> {
  * Sert à la sidebar / vue étudiant. Tri par `position` (backend).
  */
 export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
-  const res = await apiFetch(`/api/courses/${courseId}/quizzes?published=true`);
+  // Route « vue étudiant » : ne renvoie que les publiés, ouverte à tout membre.
+  const res = await apiFetch(`/api/courses/${courseId}/quizzes`);
   if (!res.ok) throw new Error('Échec chargement des quiz publiés');
   const data: QuizResponse[] = await res.json();
   return data.map(toQuizMeta);
@@ -191,9 +192,10 @@ export async function fetchPublishedQuizzes(courseId: number): Promise<Quiz[]> {
 /**
  * TOUS les quiz d'un cours, BROUILLONS COMPRIS (méta seules). Réservé à
  * l'enseignant/admin (éditeur « Modifier les quiz »). Tri par `position` (backend).
+ * Route DÉDIÉE `/manage` gatée par le permission-service (gestion de contenu).
  */
 export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
-  const res = await apiFetch(`/api/courses/${courseId}/quizzes`);
+  const res = await apiFetch(`/api/courses/${courseId}/quizzes/manage`);
   if (!res.ok) throw new Error('Échec chargement des quiz');
   const data: QuizResponse[] = await res.json();
   return data.map(toQuizMeta);
@@ -220,10 +222,12 @@ export async function fetchLanguages(): Promise<Language[]> {
 }
 
 /**
- * Soumettre une tentative ; le backend corrige (types « à réponses ») et renvoie le
- * QuizResult. Le CODE n'est pas exécuté côté serveur (tests = null).
+ * Soumettre une tentative de façon ASYNCHRONE : le backend enregistre la tentative et répond
+ * 202 + son id ({@link AttemptAccepted}) ; la correction du code tourne ensuite en tâche de fond.
+ * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
+ * via {@link fetchAttemptResult}. 409 si déjà soumise ou déjà en cours de correction.
  */
-export async function submitQuiz(submission: QuizSubmission): Promise<QuizResult> {
+export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -388,6 +392,49 @@ export async function fetchGlobalRoles() {
   };
 }
 
+/** Une entrée du journal d'audit (actions de gestion), telle qu'exposée par le core. */
+export interface AuditLogEntry {
+  id: number;
+  createdAt: string;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  summary: string;
+  details: string | null;
+}
+
+/** Critères d'une page du journal (pagination par curseur + recherche/filtre côté serveur). */
+export interface AuditLogQuery {
+  /** Curseur : ne renvoyer que les entrées d'id inférieur (page suivante). Absent = 1re page. */
+  beforeId?: number | null;
+  /** Recherche plein-texte (résumé, auteur, action, type, contexte) — appliquée côté base. */
+  q?: string;
+  /** Filtre par type d'entité (code backend, ex. 'COURSE'). */
+  type?: string | null;
+  /** Taille de page. */
+  limit?: number;
+}
+
+/**
+ * Journal d'audit — une PAGE d'actions de gestion (les plus récentes d'abord). Pagination par
+ * curseur, recherche et filtre appliqués CÔTÉ SERVEUR. Réservé au Gardien (autorisation
+ * permission-service ; 403 sinon).
+ */
+export async function fetchAuditLogs(query: AuditLogQuery = {}): Promise<AuditLogEntry[]> {
+  const params = new URLSearchParams();
+  params.set('limit', String(query.limit ?? 30));
+  if (query.beforeId != null) params.set('beforeId', String(query.beforeId));
+  const q = query.q?.trim();
+  if (q) params.set('q', q);
+  if (query.type) params.set('type', query.type);
+  const res = await apiFetch(`/api/audit-logs?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error('fetch audit logs failed');
+  }
+  return res.json();
+}
+
 /**
  * Candidats paginés à l'attribution d'un rôle GLOBAL (utilisateurs n'ayant pas `roleId`),
  * filtrés côté serveur par `search`. Alimente le sélecteur d'ajout du popup admins (infinite
@@ -471,7 +518,6 @@ export async function fetchEstablishmentsForCreate() {
  * (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
-  console.log('fetchEstablishmentsForJoin');
   const res = await apiFetch('/api/establishments');
 
   if (!res.ok) {
@@ -541,7 +587,6 @@ export async function deleteEstablishment(establishmentId: number): Promise<void
  * choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
-  console.log('fetchEstablishmentPrograms');
   const res = await apiFetch(`/api/establishments/${establishmentId}/programs`);
 
   if (!res.ok) {
@@ -569,7 +614,6 @@ export async function fetchManageableProgramsInEstablishment(
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
-  console.log('fetchProgramCourses');
   const res = await apiFetch(`/api/programs/${programId}/courses`);
 
   if (!res.ok) {
@@ -590,8 +634,6 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  * pré-cocher le JoinCoursesPopup, indépendamment de l'état (lazy-loaded) du Dashboard.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
-  console.log('fetchJoinedCourseIds');
-
   const userId = localStorage.getItem('moodit_user_id');
 
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
@@ -785,7 +827,6 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
  * `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
  */
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
-  console.log('joinCourses', programId);
   const userId = localStorage.getItem('moodit_user_id');
   const response = await apiFetch('/api/courses/users', {
     method: 'POST',
@@ -896,7 +937,6 @@ export async function sendMessage(
   parentId: number | null,
   clientMessageId: string
 ): Promise<ChannelMessage> {
-  console.log('sendMessage');
   const res = await apiFetch('/api/forums/messages', {
     method: 'POST',
     headers: {
@@ -946,8 +986,6 @@ export async function editMessage(
   if (!res.ok) {
     throw new Error('Échec de la modification du message');
   }
-
-  console.log('[api] Modification du message', messageId, ':', content);
 }
 
 /** Supprimer un message. */
@@ -959,8 +997,6 @@ export async function deleteMessage(forumID: number, messageId: number): Promise
   if (!res.ok) {
     throw new Error('Échec de la suppression du message');
   }
-
-  console.log('[api] Suppression du message', messageId);
 }
 
 // ── Forum ('Thread') ───────────────────────────────────────────────────────────
@@ -1036,7 +1072,6 @@ export async function createPost(
   clientPostId: string,
   title?: string
 ): Promise<ForumPost> {
-  console.log('createPost');
   const email = localStorage.getItem('moodit_user_email');
 
   const res = await apiFetch('/api/forums/posts', {
@@ -1082,8 +1117,6 @@ export async function editPost(
   if (!res.ok) {
     throw new Error('Échec de la modification du post');
   }
-
-  console.log('[api] Modification du post', postId, ':', content);
 }
 
 /** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
@@ -1095,8 +1128,6 @@ export async function deletePost(forumId: number, postId: number): Promise<void>
   if (!res.ok) {
     throw new Error('Échec de la suppression du post');
   }
-
-  console.log('[api] Suppression du post', postId);
 }
 
 /**

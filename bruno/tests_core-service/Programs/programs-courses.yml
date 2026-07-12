@@ -15,7 +15,9 @@ http:
         "description": "Espérons que ça fonctionne.",
         "programIds":[1, 2]
       }
-  auth: inherit
+  auth:
+    type: bearer
+    token: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJkdWZsODYwNUB1c2hlcmJyb29rZS5jYSIsImlhdCI6MTc4Mzg3NjQ0NSwiZXhwIjoxNzgzOTYyODQ1fQ.NXwnXhVLDuH2hcjkTG4jJl6-SNFVgAxSjYn-7w2l7Q0xogpecLumFV1NBRYR9oWf658iThJQJpHWoFSjrsKRzw
 
 settings:
   encodeUrl: true

@@ -58,9 +58,34 @@ dependencies {
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	// BD embarquée pour les tests JPA (@DataJpaTest) : schéma généré depuis les entités.
 	testRuntimeOnly("com.h2database:h2")
+	// Testcontainers : IT sur un VRAI Postgres (garde de non-régression du plan de recherche trgm).
+	testImplementation("org.testcontainers:junit-jupiter:1.20.4")
+	testImplementation("org.testcontainers:postgresql:1.20.4")
+	testRuntimeOnly("org.postgresql:postgresql")
 }
 
 tasks.withType<Test> {
-	useJUnitPlatform()
 	jvmArgs("-XX:+EnableDynamicAgentLoading")
+}
+
+// Test par défaut : unitaires + @DataJpaTest (H2). On EXCLUT les IT Testcontainers (tag "integration",
+// Docker requis) → `./gradlew test` reste rapide et sans Docker. Ils sont lancés par `integrationTest`.
+tasks.test {
+	useJUnitPlatform {
+		excludeTags("integration")
+	}
+}
+
+// Tests d'intégration (Testcontainers : vrai Postgres). Nécessite Docker.  ./gradlew integrationTest
+tasks.register<Test>("integrationTest") {
+	description = "Tests d'intégration Testcontainers (vrai Postgres, Docker requis)."
+	group = "verification"
+	useJUnitPlatform {
+		includeTags("integration")
+	}
+	// Réutilise les classes et le classpath du source set `test`.
+	val testSs = sourceSets.test.get()
+	testClassesDirs = testSs.output.classesDirs
+	classpath = testSs.runtimeClasspath
+	shouldRunAfter(tasks.test)
 }

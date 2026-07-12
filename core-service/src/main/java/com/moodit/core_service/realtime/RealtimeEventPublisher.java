@@ -29,7 +29,6 @@ import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import com.moodit.core_service.realtime.dto.AdminUserDto;
 import com.moodit.core_service.realtime.dto.RoleDto;
-import com.moodit.core_service.dto.QuestionResultDTO;
 import com.moodit.core_service.dto.UserDTO;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -172,6 +171,35 @@ public class RealtimeEventPublisher {
         "program",
         programId,
         event("quiz:deleted", "programId", programId, "courseId", courseId, "quizId", quizId));
+  }
+
+  /**
+   * La correction ASYNCHRONE d'une tentative de quiz est TERMINÉE : le résultat est consultable.
+   * Scope {@code user:<userId>} — seul l'auteur de la tentative attend ce résultat (il fetch le
+   * détail corrigé au reçu de l'event, cf. {@code getAttemptResult}).
+   */
+  public void quizAttemptGraded(long userId, long quizId, long attemptId) {
+    emit(
+        "user",
+        userId,
+        event("quiz:attempt-graded", "userId", userId, "quizId", quizId, "attemptId", attemptId));
+  }
+
+  /**
+   * La correction ASYNCHRONE d'une tentative a ÉCHOUÉ (sandbox indisponible / code inévaluable) :
+   * la tentative a été supprimée, l'auteur peut renvoyer sans consommer sa tentative unique.
+   * Scope {@code user:<userId>}. `reason` optionnel (null → libellé générique côté front).
+   */
+  public void quizAttemptFailed(long userId, long quizId, long attemptId, String reason) {
+    emit(
+        "user",
+        userId,
+        event(
+            "quiz:attempt-failed",
+            "userId", userId,
+            "quizId", quizId,
+            "attemptId", attemptId,
+            "reason", reason));
   }
 
   // ─── Programmes / abonnements (scope = user) ──────────────────────────────
@@ -332,17 +360,6 @@ public class RealtimeEventPublisher {
 
   public void userUpdated(Author author) {
     emitAll(event("user:updated", "user", author));
-  }
-
-  // ─── Correction de code (scope = user) ───────────────────────────────────
-  // Poussé quand le job de correction des questions Code d'une tentative se termine. Room
-  // "user:<userId>" : seul l'étudiant qui a soumis reçoit ses verdicts + son score recalculé.
-
-  public void quizCodeGraded(long userId, long attemptId, List<QuestionResultDTO> questions) {
-    emit(
-        "user",
-        userId,
-        event("quiz:code-graded", "userId", userId, "attemptId", attemptId, "questions", questions));
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

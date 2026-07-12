@@ -10,7 +10,6 @@ http:
     - name: typeId
       value: "2"
       type: query
-  auth: inherit
 
 settings:
   encodeUrl: true

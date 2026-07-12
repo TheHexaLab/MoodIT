@@ -444,7 +444,7 @@ div.role-editor-popup > div > section > ul {
     gap: var(--row-gap);
     margin: 0;
     /* padding-right = espace entre le contenu et la scrollbar. */
-    padding: 0 0.25rem 0 0;
+    padding: 0 0.5rem 0 0;
     /* Affiche au plus 2 lignes ; au-delà, scroll vertical (jamais horizontal). */
     max-height: calc(
         var(--visible-rows) * var(--row-height) +
