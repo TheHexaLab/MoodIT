@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
-import styles from './VerifyCode.module.css';
+import '../LoginPage.css';
 import { useTheme } from '../../helpers/theme';
-import { saveToken } from '../../helpers/auth';
+import { CodeInput } from '../../components/CodeInput/CodeInput';
 import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
+import logo from '../../assets/Logo.png';
 
 type Mode = 'email' | '2fa';
 
@@ -19,7 +20,6 @@ export default function VerifyCode() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
@@ -41,30 +41,40 @@ export default function VerifyCode() {
     return () => clearTimeout(id);
   }, [cooldown]);
 
-  async function handleSubmit() {
+  // Soumission du code. Prend le code en argument (et non l'état `code`) pour permettre
+  // l'auto-validation dès la saisie du 6e chiffre, sans attendre la mise à jour du state.
+  async function submit(theCode: string) {
     setError('');
 
-    if (code.length !== 6) {
+    if (theCode.length !== 6) {
       setError('Le code doit contenir 6 chiffres');
       return;
     }
 
     setSubmitting(true);
     try {
-      if (isEmailVerification) {
-        await verifyEmail(email, code);
-        setSuccess(true);
-      } else {
-        // 2FA — stocker le token (via le helper, source unique de la clé) et rediriger
-        const data = await verify2FA(email, code);
-        saveToken(data.token);
-        navigate('/');
-      }
+      // email → auto-login (verifyEmail), 2fa → verify2FA : dans les deux cas l'auth-service
+      // pose le cookie HttpOnly `moodit_token` (credentials:'include'). Rien à stocker côté
+      // JS, on redirige directement vers le dashboard.
+      await (isEmailVerification ? verifyEmail : verify2FA)(email, theCode);
+      navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submit(code);
+  }
+
+  // Frappe / copier-coller : dès que les 6 chiffres sont présents, on valide automatiquement.
+  function handleCodeChange(raw: string) {
+    const next = raw.replace(/\D/g, '').slice(0, 6);
+    setCode(next);
+    if (next.length === 6 && !submitting) submit(next);
   }
 
   async function handleResend() {
@@ -90,98 +100,91 @@ export default function VerifyCode() {
   }
 
   return (
-    <div className={styles.page}>
-      <aside className={styles.brand}>
-        <div className={styles.brandInner}>
-          <h1 className={styles.brandTitle}>MoodIT</h1>
-          <p className={styles.brandTagline}>Parce que Moodle, c'était pas assez chaotique.</p>
+    <div className="page">
+      <aside className="aside">
+        <div className="bubble-1" />
+        <div className="bubble-2" />
+        <div className="bubble-3" />
+        <div className="aside-content">
+          <div className="logo-wrapper">
+            <img src={logo} alt="Logo MoodIT" />
+          </div>
+          <h1 className="app-name">MoodIT</h1>
+          <p className="app-tagline">
+            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp;</span>
+            <span className={'app-tagline-text'}>c'était pas assez chaotique.</span>
+          </p>
         </div>
       </aside>
 
-      <main className={styles.formSide}>
-        <button
-          type="button"
-          className="light-dark-btn"
-          onClick={toggleTheme}
-          aria-label="Changer de thème"
-        >
-          <Lightanddark isDark={theme === 'dark'} />
-        </button>
+      <main className="main">
+        <div className="form-card">
+          <h2 className="form-title">
+            {isEmailVerification ? 'Vérifiez votre email' : 'Double authentification'}
+          </h2>
+          <p className="form-subtitle">
+            Un code a été envoyé à votre email. Il expire dans 15 minutes.
+          </p>
 
-        <div className={styles.card}>
-          {success ? (
-            <div className={styles.successBox}>
-              <h2>Email vérifié! ✅</h2>
-              <p>Votre compte est maintenant actif.</p>
-              <Link to="/login" className={styles.submitLink}>
-                Se connecter →
-              </Link>
+          <form className="form codeForm" onSubmit={handleSubmit}>
+            {error && <p className="server-error">⚠ {error}</p>}
+
+            <div className="field">
+              <label className="label">Code à 6 chiffres</label>
+              <CodeInput
+                value={code}
+                onChange={handleCodeChange}
+                autoFocus
+                disabled={submitting}
+                invalid={!!error}
+              />
             </div>
-          ) : (
-            <>
-              <header className={styles.cardHeader}>
-                <h2>{isEmailVerification ? 'Vérifiez votre email' : 'Double authentification'}</h2>
-                <p>
-                  Un code a été envoyé à <strong>{email}</strong>.
-                  Il expire dans 15 minutes.
-                </p>
-              </header>
 
-              {error && <p className={styles.serverError}>⚠ {error}</p>}
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? 'Vérification...' : 'Vérifier →'}
+            </button>
 
-              <div className={styles.field}>
-                <label className={styles.label}>Code à 6 chiffres</label>
-                <div className={styles.inputWrap}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={code}
-                    maxLength={6}
-                    placeholder="123456"
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  />
-                </div>
-              </div>
-
+            {resendMsg && <p className="form-subtitle">{resendMsg}</p>}
+            <p className="register-row">
+              Pas reçu le code ?{' '}
               <button
                 type="button"
-                className={styles.submit}
-                onClick={handleSubmit}
-                disabled={submitting}
+                className="register-link"
+                onClick={handleResend}
+                disabled={cooldown > 0 || resending}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
               >
-                {submitting ? 'Vérification...' : 'Vérifier →'}
+                {cooldown > 0
+                  ? `Renvoyer (${cooldown}s)`
+                  : resending
+                    ? 'Envoi...'
+                    : 'Renvoyer le code'}
               </button>
-
-              <div className={styles.resendRow}>
-                {resendMsg && <p className={styles.resendMsg}>{resendMsg}</p>}
-                <button
-                  type="button"
-                  className={styles.resendBtn}
-                  onClick={handleResend}
-                  disabled={cooldown > 0 || resending}
-                >
-                  {cooldown > 0
-                    ? `Renvoyer le code (${cooldown}s)`
-                    : resending
-                      ? 'Envoi...'
-                      : 'Renvoyer le code'}
-                </button>
-              </div>
-
-              <p className={styles.backLink}>
-                <Link to={isEmailVerification ? '/register' : '/login'}>
-                  ← Retour
+            </p>
+            {/* En mode email, un utilisateur qui a DÉJÀ un compte reçoit l'email « déjà un
+                compte » (réponse neutre anti-énumération) et atterrit ici sans code à saisir :
+                on lui offre un chemin clair vers la connexion. */}
+            {isEmailVerification && (
+              <p className="register-row">
+                Déjà un compte ?{' '}
+                <Link to="/login" className="register-link">
+                  Se connecter
                 </Link>
               </p>
-            </>
-          )}
+            )}
+            <p className="register-row">
+              <Link to={isEmailVerification ? '/register' : '/login'} className="register-link">
+                ← Retour
+              </Link>
+            </p>
+          </form>
         </div>
 
-        <footer className={styles.pageFooter}>
-          © 2026 MoodIT · Confidentialité · Conditions d'utilisation
-        </footer>
+        <footer className="footer">© 2026 MoodIT · Confidentialité · Conditions d'utilisation</footer>
       </main>
+      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+        <Lightanddark isDark={theme === 'dark'} />
+      </button>
     </div>
   );
 }

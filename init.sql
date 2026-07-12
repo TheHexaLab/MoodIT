@@ -7,8 +7,11 @@ CREATE TABLE Establishment(
 );
 
 -- Établissements autorisés à s'inscrire (domaine email).
+-- Les sous-domaines d'un domaine listé sont aussi acceptés (cf. AuthService.isAllowedDomain).
 INSERT INTO Establishment (name, domain_email)
-VALUES ('Université de Sherbrooke', 'usherbrooke.ca')
+VALUES
+   ('Université de Sherbrooke', 'usherbrooke.ca'),
+   ('Cégep de Victoriaville', 'cegepvicto.ca')
 ON CONFLICT (domain_email) DO NOTHING;
 
 CREATE TABLE Program(
@@ -41,6 +44,13 @@ CREATE TABLE User_(
    verification_locked_until TIMESTAMP,
    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
    login_locked_until TIMESTAMP,
+   -- Réinitialisation de mot de passe : champs dédiés (séparés de verification_*, qui
+   -- servent à la 2FA) pour éviter toute collision entre un code 2FA et un code de reset.
+   reset_code VARCHAR(6),
+   reset_code_expires_at TIMESTAMP,
+   reset_attempts INTEGER NOT NULL DEFAULT 0,
+   reset_last_sent_at TIMESTAMP,
+   reset_locked_until TIMESTAMP,
    PRIMARY KEY(id)
 );
 

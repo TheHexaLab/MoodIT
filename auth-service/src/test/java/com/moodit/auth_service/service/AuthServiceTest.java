@@ -425,6 +425,64 @@ class AuthServiceTest {
         .isInstanceOf(InvalidVerificationCodeException.class);
   }
 
+  // ----- validate -----
+
+  @Test
+  void validate_nullActiveTokenHash_returnsFalse_withoutHashing() {
+    // Fix B4 : aucun token actif (jamais connecté / après logout) -> false, sans comparer
+    // contre la chaîne littérale "null".
+    User u = verifiedUser();
+    u.setActiveTokenHash(null);
+    when(jwtService.isTokenValid("jwt-token")).thenReturn(true);
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    assertThat(authService.validate("jwt-token")).isFalse();
+    verify(jwtService, never()).hashToken(anyString(), anyString());
+  }
+
+  @Test
+  void validate_matchingHash_returnsTrue() {
+    User u = verifiedUser();
+    u.setActiveTokenHash("token-hash");
+    when(jwtService.isTokenValid("jwt-token")).thenReturn(true);
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+    when(jwtService.hashToken("jwt-token", "karine.roussel@usherbrooke.ca"))
+        .thenReturn("token-hash");
+
+    assertThat(authService.validate("jwt-token")).isTrue();
+  }
+
+  @Test
+  void validate_invalidSignature_returnsFalse() {
+    when(jwtService.isTokenValid("bad")).thenReturn(false);
+
+    assertThat(authService.validate("bad")).isFalse();
+    verify(userRepository, never()).findByEmail(anyString());
+  }
+
+  @Test
+  void logout_validToken_clearsActiveTokenHash() {
+    // Vérifie qu'un logout avec token valide supprime le hash de session active et persiste l'utilisateur.
+    User u = verifiedUser();
+    u.setActiveTokenHash("token-hash");
+    when(jwtService.extractEmail("jwt-token")).thenReturn("karine.roussel@usherbrooke.ca");
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    authService.logout("jwt-token");
+
+    assertThat(u.getActiveTokenHash()).isNull();
+    verify(userRepository).save(u);
+  }
+
+  @Test
+  void logout_invalidToken_doesNothing() {
+    authService.logout("not-a-token");
+
+    verify(userRepository, never()).save(any());
+  }
+
   // ----- verifyDev -----
 
   @Test
@@ -498,5 +556,171 @@ class AuthServiceTest {
     // Le verrou 2FA est testé AVANT toute mutation : aucun reset incohérent / non persisté.
     assertThat(u.getFailedLoginAttempts()).isEqualTo(3);
     verify(userRepository, never()).save(any(User.class));
+  }
+
+  // ----- forgotPassword -----
+
+  @Test
+  void forgotPassword_userFound_setsCode_andSendsEmail() {
+    User u = verifiedUser();
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(u));
+
+    Map<String, String> res = authService.forgotPassword("Karine.Roussel@USHERBROOKE.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe");
+    assertThat(u.getResetCode()).hasSize(6);
+    assertThat(u.getResetCodeExpiresAt()).isAfter(LocalDateTime.now());
+    verify(userRepository).save(u);
+    verify(emailService).sendPasswordResetCode(eq("karine.roussel@usherbrooke.ca"), anyString());
+  }
+
+  @Test
+  void forgotPassword_userNotFound_genericResponse_noEmail() {
+    // Anti-énumération : réponse identique, aucun email, aucune écriture.
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+
+    Map<String, String> res = authService.forgotPassword("ghost@usherbrooke.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe");
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  @Test
+  void forgotPassword_withinCooldown_silent_noEmail() {
+    User u = verifiedUser();
+    u.setResetLastSentAt(LocalDateTime.now()); // vient d'être envoyé
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    Map<String, String> res = authService.forgotPassword("karine.roussel@usherbrooke.ca");
+
+    assertThat(res.get("message")).contains("Si un compte existe"); // pas de 429 (anti-énum)
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  @Test
+  void forgotPassword_whenLocked_silent_noEmail() {
+    User u = verifiedUser();
+    u.setResetLockedUntil(LocalDateTime.now().plusMinutes(10));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    authService.forgotPassword("karine.roussel@usherbrooke.ca");
+
+    verify(emailService, never()).sendPasswordResetCode(anyString(), anyString());
+    verify(userRepository, never()).save(any());
+  }
+
+  // ----- resetPassword -----
+
+  private User userWithResetCode() {
+    User u = verifiedUser();
+    u.setResetCode("123456");
+    u.setResetCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
+    return u;
+  }
+
+  @Test
+  void resetPassword_success_setsNewHash_clearsReset_andInvalidatesSession() {
+    User u = userWithResetCode();
+    u.setActiveTokenHash("old-token-hash");
+    u.setFailedLoginAttempts(3);
+    u.setLoginLockedUntil(LocalDateTime.now().plusMinutes(5));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.encode(peppered("N0uveauPass!"))).thenReturn("new-hash");
+
+    Map<String, String> res =
+        authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!");
+
+    assertThat(res.get("message")).contains("réinitialisé");
+    assertThat(u.getPasswordHash()).isEqualTo("new-hash");
+    assertThat(u.getResetCode()).isNull();
+    assertThat(u.getResetLockedUntil()).isNull();
+    // Sessions invalidées + verrou de login levé.
+    assertThat(u.getActiveTokenHash()).isNull();
+    assertThat(u.getFailedLoginAttempts()).isZero();
+    assertThat(u.getLoginLockedUntil()).isNull();
+  }
+
+  @Test
+  void resetPassword_codeIsSingleUse_secondUseFails() {
+    User u = userWithResetCode();
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.encode(peppered("N0uveauPass!"))).thenReturn("new-hash");
+
+    // 1er usage : succès → le code est CONSOMMÉ (resetCode remis à null).
+    authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!");
+    assertThat(u.getResetCode()).isNull();
+
+    // 2e usage du MÊME code : refusé (plus de code actif) → pas de replay.
+    assertThatThrownBy(
+            () ->
+                authService.resetPassword(
+                    "karine.roussel@usherbrooke.ca", "123456", "Encore1Pass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+  }
+
+  @Test
+  void resetPassword_codeWithoutExpiry_treatedAsNoValidCode_noNpe() {
+    // État incohérent (code présent mais expiry null) : on refuse proprement (pas de NPE 500).
+    User u = userWithResetCode();
+    u.setResetCodeExpiresAt(null);
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () ->
+                authService.resetPassword(
+                    "karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+  }
+
+  @Test
+  void resetPassword_wrongCode_incrementsAttempts_andKeepsPassword() {
+    User u = userWithResetCode();
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "000000", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+    assertThat(u.getResetAttempts()).isEqualTo(1);
+    assertThat(u.getPasswordHash()).isEqualTo("storedHash"); // inchangé
+    verify(passwordEncoder, never()).encode(anyString());
+  }
+
+  @Test
+  void resetPassword_wrongCodeAtCap_locksAndInvalidatesCode() {
+    User u = userWithResetCode();
+    u.setResetAttempts(4); // la 5e tentative atteint le plafond
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "000000", "N0uveauPass!"))
+        .isInstanceOf(TooManyRequestsException.class);
+    assertThat(u.getResetLockedUntil()).isAfter(LocalDateTime.now());
+    assertThat(u.getResetCode()).isNull();
+  }
+
+  @Test
+  void resetPassword_expiredCode_throws() {
+    User u = userWithResetCode();
+    u.setResetCodeExpiresAt(LocalDateTime.now().minusMinutes(1));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+    verify(passwordEncoder, never()).encode(anyString());
+  }
+
+  @Test
+  void resetPassword_whenLocked_throws_withoutTouchingPassword() {
+    User u = userWithResetCode();
+    u.setResetLockedUntil(LocalDateTime.now().plusMinutes(10));
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(TooManyRequestsException.class);
+    verify(passwordEncoder, never()).encode(anyString());
   }
 }

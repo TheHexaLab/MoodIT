@@ -3,6 +3,8 @@ import LoginPage from './pages/LoginPage';
 import Register from './pages/Register/Register';
 import Dashboard from './pages/Dashboard/Dashboard';
 import VerifyCode from './pages/VerifyCode/VerifyCode';
+import ForgotPassword from './pages/ForgotPassword/ForgotPassword';
+import ResetPassword from './pages/ResetPassword/ResetPassword';
 import ProtectedRoute from './components/ProtectedRoute';
 import CurrentUserProvider from './context/CurrentUserProvider';
 import './pages/LoginPage.css';
@@ -23,6 +25,8 @@ export default function App() {
         }
       />
       <Route path="/verify-code" element={<VerifyCode />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/" element={<Navigate to="/home" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

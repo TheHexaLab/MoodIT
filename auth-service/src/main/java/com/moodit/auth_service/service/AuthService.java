@@ -65,6 +65,10 @@ public class AuthService {
   // de comptes via le statut/message de retour.
   private static final String REGISTER_OK_MESSAGE =
       "Compte créé! Vérifiez votre email pour activer votre compte.";
+  // Réponse unique du "mot de passe oublié" (email existant OU non) : empêche l'énumération
+  // de comptes via le statut/message de retour.
+  private static final String RESET_REQUESTED_MESSAGE =
+      "Si un compte existe pour cet email, un code de réinitialisation vient d'être envoyé.";
   // Générateur cryptographique réutilisé (thread-safe) plutôt qu'instancié à chaque code.
   private static final SecureRandom RANDOM = new SecureRandom();
   // Hash BCrypt bidon (valide, même cost que les vrais) pour égaliser le temps de réponse du
@@ -228,8 +232,7 @@ public class AuthService {
 
     emailService.send2FACode(email, code);
 
-    return new AuthResponse(
-        null, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+    return authResponseFor(user, null);
   }
 
   // Validate
@@ -248,12 +251,49 @@ public class AuthService {
       return false;
     }
 
+    // Aucun token actif (jamais connecté, ou révoqué au logout) : rien à comparer.
+    // On rejette explicitement plutôt que de comparer contre la chaîne littérale "null".
+    String activeTokenHash = user.getActiveTokenHash();
+    if (activeTokenHash == null) {
+      return false;
+    }
+
     // Vérifier le hash du token. Comparaison à temps constant pour ne pas révéler,
     // par le temps de réponse, à quel préfixe deux hash diffèrent.
     String hashedToken = jwtService.hashToken(token, email);
     return MessageDigest.isEqual(
         hashedToken.getBytes(StandardCharsets.UTF_8),
-        String.valueOf(user.getActiveTokenHash()).getBytes(StandardCharsets.UTF_8));
+        activeTokenHash.getBytes(StandardCharsets.UTF_8));
+  }
+
+  public void logout(String token) {
+    // Entrée vide : rien à révoquer côté serveur.
+    if (token == null || token.isBlank()) {
+      return;
+    }
+
+    String email;
+    try {
+      // JWT illisible/invalide : logout idempotent, on sort sans erreur.
+      email = jwtService.extractEmail(token);
+    } catch (Exception e) {
+      return;
+    }
+
+    // Email absent du token : aucun utilisateur à cibler.
+    if (email == null || email.isBlank()) {
+      return;
+    }
+
+    User user = userRepository.findByEmail(email).orElse(null);
+    // Token pointant vers un compte inexistant : on ignore silencieusement.
+    if (user == null) {
+      return;
+    }
+
+    // Révocation de la session active : tout JWT précédemment émis devient invalide au validate().
+    user.setActiveTokenHash(null);
+    userRepository.save(user);
   }
 
   // Vérification manuelle pour le dev : promeut l'inscription en attente vers un vrai compte
@@ -283,7 +323,7 @@ public class AuthService {
     return Map.of("message", "Email vérifié pour " + username);
   }
 
-  public Map<String, String> verifyEmail(String email, String code) {
+  public AuthResponse verifyEmail(String email, String code) {
     email = normalizeEmail(email);
     PendingRegistration pending =
         pendingRepository
@@ -327,6 +367,11 @@ public class AuthService {
     user.setPasswordHash(pending.getPasswordHash());
     user.setCreatedAt(LocalDateTime.now());
 
+    // Auto-login : le code email prouve la possession de la boîte, il tient lieu de 2FA pour
+    // cette première session. On mémorise le token actif AVANT le save pour n'avoir qu'un
+    // seul aller-retour BD (même hash de session que verify2FA, via issueToken()).
+    String token = issueToken(user);
+
     // Même course possible ici (deux pendings au même username/email promus en même temps) :
     // User_.username et User_.email sont UNIQUE, on traduit la violation en 409 plutôt qu'un 500.
     try {
@@ -339,7 +384,7 @@ public class AuthService {
     }
     pendingRepository.delete(pending);
 
-    return Map.of("message", "Email vérifié avec succès!");
+    return authResponseFor(user, token);
   }
 
   // PAS @Transactional : le chemin "mauvais code" incrémente le compteur de tentatives puis
@@ -389,13 +434,10 @@ public class AuthService {
     user.setVerificationAttempts(0);
     user.setVerificationLockedUntil(null);
 
-    String token = jwtService.generateToken(user.getEmail());
-    String hashedToken = jwtService.hashToken(token, user.getEmail());
-    user.setActiveTokenHash(hashedToken);
+    String token = issueToken(user);
     userRepository.save(user);
 
-    return new AuthResponse(
-        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+    return authResponseFor(user, token);
   }
 
   // Renvoi d'un code (inscription ou 2FA), avec le même cooldown / plafond anti-bombing.
@@ -450,7 +492,127 @@ public class AuthService {
     return Map.of("message", "Code renvoyé.");
   }
 
+  // Mot de passe oublié : envoi d'un code de réinitialisation.
+  //
+  // Anti-énumération : la réponse est TOUJOURS générique (jamais de 429/404 qui révélerait
+  // l'existence de l'email). Le cooldown et le verrou sont appliqués en silence (on n'envoie
+  // simplement pas de courriel), sans jamais lever d'exception qui trahirait un compte.
+  public Map<String, String> forgotPassword(String email) {
+    email = normalizeEmail(email);
+    // Anti-énumération (timing) : on paie le coût CPU de génération du code de façon UNIFORME,
+    // que le compte existe ou non, pour ne pas exposer d'écart mesurable au chemin "not found".
+    // Résidu accepté : le save() indexé + l'envoi d'email ASYNC (non bloquant) du chemin
+    // "compte existant", dominés par la latence réseau/mail.
+    String code = generateCode();
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      return Map.of("message", RESET_REQUESTED_MESSAGE);
+    }
+
+    LocalDateTime now = LocalDateTime.now();
+
+    // Verrou actif (trop de codes erronés) : on n'émet pas de nouveau code, sinon le
+    // plafond serait contournable — mais en silence (pas de 429, anti-énumération).
+    if (user.getResetLockedUntil() != null && user.getResetLockedUntil().isAfter(now)) {
+      return Map.of("message", RESET_REQUESTED_MESSAGE);
+    }
+
+    // Anti-bombing : un seul courriel par fenêtre de cooldown, en silence.
+    if (user.getResetLastSentAt() != null
+        && user.getResetLastSentAt().plusSeconds(RESEND_COOLDOWN_SECONDS).isAfter(now)) {
+      return Map.of("message", RESET_REQUESTED_MESSAGE);
+    }
+
+    user.setResetCode(code);
+    user.setResetCodeExpiresAt(now.plusMinutes(15));
+    user.setResetAttempts(0);
+    user.setResetLastSentAt(now);
+    userRepository.save(user);
+
+    emailService.sendPasswordResetCode(email, code);
+    return Map.of("message", RESET_REQUESTED_MESSAGE);
+  }
+
+  // Réinitialisation effective. PAS @Transactional : comme verify2FA, le chemin "mauvais
+  // code" incrémente le compteur puis `throw` — chaque save() doit committer indépendamment,
+  // sinon le rollback annulerait l'incrément et l'anti-brute-force ne se déclencherait jamais.
+  public Map<String, String> resetPassword(String email, String code, String newPassword) {
+    email = normalizeEmail(email);
+    // Compte introuvable : même message générique que "mauvais code" (pas d'oracle).
+    User user =
+        userRepository
+            .findByEmail(email)
+            .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
+
+    LocalDateTime now = LocalDateTime.now();
+
+    if (user.getResetLockedUntil() != null && user.getResetLockedUntil().isAfter(now)) {
+      throw new TooManyRequestsException(
+          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+    }
+
+    // Pas de code actif : on groupe l'expiry null avec le code null (état incohérent = pas de
+    // code valide) pour éviter un NPE 500 qui serait un oracle (500 vs 4xx générique).
+    if (user.getResetCode() == null || user.getResetCodeExpiresAt() == null) {
+      throw new InvalidVerificationCodeException("Code invalide. Demandez un nouveau code.");
+    }
+
+    if (user.getResetCodeExpiresAt().isBefore(now)) {
+      throw new InvalidVerificationCodeException("Code expiré");
+    }
+
+    if (!user.getResetCode().equals(code)) {
+      // Mauvais code : on compte la tentative et, au plafond, on invalide le code et on pose
+      // un verrou temporel (anti brute-force des 6 chiffres).
+      user.setResetAttempts(user.getResetAttempts() + 1);
+      if (user.getResetAttempts() >= MAX_VERIFY_ATTEMPTS) {
+        user.setResetCode(null);
+        user.setResetLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
+        userRepository.save(user);
+        throw new TooManyRequestsException(
+            "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+      }
+      userRepository.save(user);
+      throw new InvalidVerificationCodeException("Code invalide");
+    }
+
+    // Code valide : on pose le nouveau mot de passe (peppered + BCrypt, comme au register).
+    user.setPasswordHash(passwordEncoder.encode(peppered(newPassword)));
+
+    // Nettoyage des champs de reset.
+    user.setResetCode(null);
+    user.setResetCodeExpiresAt(null);
+    user.setResetAttempts(0);
+    user.setResetLockedUntil(null);
+
+    // Sécurité : un changement de mot de passe invalide les sessions existantes (le token
+    // actif cesse d'être reconnu par /auth/validate) et lève le verrou de login — la personne
+    // a prouvé qu'elle contrôle l'email, on la laisse se reconnecter immédiatement.
+    user.setActiveTokenHash(null);
+    user.setFailedLoginAttempts(0);
+    user.setLoginLockedUntil(null);
+    userRepository.save(user);
+
+    return Map.of("message", "Mot de passe réinitialisé avec succès.");
+  }
+
   // Méthodes privées
+
+  // Émet un JWT pour l'utilisateur et mémorise son hash comme token actif (ce qui invalide toute
+  // session précédente). L'appelant persiste ensuite l'utilisateur. Partagé par verify2FA (login)
+  // et verifyEmail (auto-login après inscription).
+  private String issueToken(User user) {
+    String token = jwtService.generateToken(user.getEmail());
+    user.setActiveTokenHash(jwtService.hashToken(token, user.getEmail()));
+    return token;
+  }
+
+  // Construit la réponse d'authentification à partir de l'utilisateur (mapping d'identité
+  // mutualisé entre login, verify2FA et verifyEmail). token null tant que la session n'est pas émise.
+  private AuthResponse authResponseFor(User user, String token) {
+    return new AuthResponse(
+        token, user.getUsername(), user.getEmail(), user.getFirstName(), user.getLastName());
+  }
 
   // BCrypt ignore tout au-delà de 72 octets. On pré-hache donc le mot de passe avec le pepper
   // via HMAC-SHA256 (sortie de taille fixe, 44 caractères en Base64) : le pepper est entièrement

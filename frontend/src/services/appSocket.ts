@@ -35,8 +35,11 @@ import {
  *   - `channels` : `ChannelSocket` attendu par `useChannelMessages`
  *   - `forums`   : `ForumSocket`   attendu par `useForumThreads`
  *
+ * Authentification : le handshake s'appuie sur le cookie HttpOnly `moodit_token`, envoyé
+ * automatiquement par le navigateur (même origine). Aucun token n'est passé côté JS.
+ *
  * Pour l'activer : dans Dashboard, remplacer les mocks par
- *   const ws = useMemo(() => createAppSocket(import.meta.env.VITE_WS_URL, getAuthToken), []);
+ *   const ws = useMemo(() => createAppSocket(), []);
  *   …
  *   <MainPanel socket={ws.channels} forumSocket={ws.forums} … />
  *   <CourseMenu … />  // via Dashboard : ws.courses (liste des cours + sections)
@@ -183,10 +186,7 @@ export function defaultWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-export function createAppSocket(
-  url: string = defaultWebSocketUrl(),
-  getToken: () => string = () => ''
-): AppSocket {
+export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket {
   let ws: WebSocket | null = null;
   let reconnectDelay = 1000;
   /** Fermeture demandée par le client : empêche la reconnexion automatique. */
@@ -220,7 +220,9 @@ export function createAppSocket(
     closedByClient = false;
     // Référence locale : permet d'ignorer les évènements d'un socket périmé (ex. un
     // ancien socket fermé par le double-montage StrictMode pendant qu'un nouveau s'ouvre).
-    const socket = new WebSocket(`${url}?token=${encodeURIComponent(getToken())}`);
+    // Le cookie HttpOnly `moodit_token` est envoyé automatiquement au handshake (même
+    // origine) ; le gateway l'y valide. Plus de token en query string.
+    const socket = new WebSocket(url);
     ws = socket;
 
     socket.onopen = () => {

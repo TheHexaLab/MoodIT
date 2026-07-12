@@ -1,4 +1,4 @@
-import { getToken, clearToken } from './auth';
+import { clearToken } from './auth';
 import { type User } from '../types/domain';
 import { serializeUserSettings, type UserSettings } from './userSettings';
 
@@ -11,7 +11,9 @@ export interface RegisterPayload {
 }
 
 export interface AuthResponse {
-  token: string;
+  // Le token n'est plus renvoyé dans le corps : il est posé en cookie HttpOnly par
+  // l'auth-service. Champ conservé optionnel par compatibilité, mais non utilisé.
+  token?: string;
   username: string;
   email: string;
   firstName: string;
@@ -23,15 +25,13 @@ export interface RegisterResponse {
 }
 
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-  const headers = new Headers(init.headers as HeadersInit);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const res = await fetch(input, { ...init, headers });
+  // L'authentification passe par le cookie HttpOnly `moodit_token`, envoyé automatiquement
+  // grâce à credentials:'include'. Le front ne manipule plus le token (invisible au JS).
+  const res = await fetch(input, { ...init, credentials: 'include' });
 
   if (res.status === 401) {
+    // Session invalide/expirée : le cookie HttpOnly ne peut pas être effacé ici (seul le
+    // serveur le peut) ; on purge un éventuel résidu localStorage et on renvoie au login.
     clearToken();
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
@@ -115,6 +115,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterRespon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -130,6 +131,7 @@ export async function login(payload: { email: string; password: string }): Promi
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'include',
   });
 
   if (!res.ok) {
@@ -142,11 +144,12 @@ export async function login(payload: { email: string; password: string }): Promi
   return res.json();
 }
 
-export async function verifyEmail(email: string, code: string): Promise<{ message: string }> {
+export async function verifyEmail(email: string, code: string): Promise<AuthResponse> {
   const res = await fetch('/auth/verify-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
+    credentials: 'include', // stocke le Set-Cookie moodit_token renvoyé (auto-login)
   });
 
   if (!res.ok) {
@@ -162,6 +165,7 @@ export async function verify2FA(email: string, code: string): Promise<AuthRespon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
+    credentials: 'include', // stocke le Set-Cookie moodit_token renvoyé par l'auth-service
   });
 
   if (!res.ok) {
@@ -172,11 +176,48 @@ export async function verify2FA(email: string, code: string): Promise<AuthRespon
   return res.json();
 }
 
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const res = await fetch('/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<{ message: string }> {
+  const res = await fetch('/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code, newPassword }),
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: `Erreur ${res.status}` }));
+    throw new Error(data.message || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function resendCode(email: string, mode: string): Promise<{ message: string }> {
   const res = await fetch('/auth/resend-code', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, mode }),
+    credentials: 'include',
   });
 
   if (!res.ok) {

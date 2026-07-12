@@ -26,6 +26,9 @@ input[type="password"]::-ms-reveal {
     align-items: center;
     overflow: hidden;
     flex-shrink: 0;
+    /* border-box : sinon en mobile `width: 100%` + padding horizontal déborde de l'écran
+       (bannière verte plus large que le viewport → décalage/scroll horizontal). */
+    box-sizing: border-box;
 }
 
 .bubble-1 {
@@ -67,6 +70,10 @@ input[type="password"]::-ms-reveal {
     align-items: center;
     gap: 0;
     text-align: center;
+    /* Même padding interne que le .brandInner de Register : la hauteur de la bannière
+       colorée (et donc la séparation couleur/blanc en mode stacked phone/iPad) est
+       identique sur toutes les pages. */
+    padding: 2rem;
 }
 
 .logo-wrapper img {
@@ -109,19 +116,22 @@ input[type="password"]::-ms-reveal {
     position: relative;
     padding: 2rem 1.25rem;
     background-color: var(--bg-right-login-page);
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .form-card {
     width: 100%;
-    max-width: 27.5rem;
-    max-height: 33.75rem;
+    max-width: 26rem;
     margin: 0 auto;
     box-sizing: border-box;
     background: var(--bg-surface);
-    box-shadow: 0 2px 8px 0 var(--shadow-login-box-modal), 0 16px 48px 0 var(--shadow-login-box-hover);
-    border-radius: 1.25rem;
-    padding: 3rem 5.5% 2.13rem 5.5%;
-
+    /* Apparence alignée sur la carte de Register (.card) : bordure, rayon et ombre
+       identiques. Le max-height est retiré (il pouvait rogner les formulaires longs). */
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    border-radius: 1rem;
+    padding: 2rem;
 }
 
 .form-title {
@@ -348,6 +358,41 @@ input[type="password"]::-ms-reveal {
     text-decoration: underline;
 }
 
+/* Page de saisie de code (verify-code) : le formulaire est court, donc le grand margin-top
+   de .register-row (calibré pour la page login) étale les liens du bas et donne une
+   impression de vide. On resserre l'espacement sur cette page. */
+.codeForm .register-row {
+    margin-top: 0.75rem;
+}
+
+/* Sur mobile, on rouvre l'espacement entre les liens : ce sont des cibles tactiles, il faut
+   plus de séparation pour éviter les missclics (ex. « Se connecter » vs « ← Retour »). */
+@media (max-width: 768px) {
+    .codeForm .register-row {
+        margin-top: 1.5rem;
+    }
+}
+
+/* Petit téléphone : « Mot de passe oublié » passe sur 2 lignes et l'emoji se retrouve seul
+   sur la 2e ligne → on le masque à ces largeurs. */
+@media (max-width: 400px) {
+    .titleIcon {
+        display: none;
+    }
+}
+
+/* Page de réinitialisation, en mobile uniquement. */
+@media (max-width: 768px) {
+    /* Rapproche le champ « Nouveau mot de passe » du code (l'écart paraît trop grand). */
+    .resetForm .field:nth-of-type(2) .label {
+        margin-top: 0;
+    }
+    /* Plus d'air entre les deux liens du bas (cibles tactiles). */
+    .resetForm .register-row {
+        margin-top: 1.75rem;
+    }
+}
+
 .footer {
     position: absolute;
     bottom: 1.69rem;
@@ -426,9 +471,8 @@ input[type="password"]::-ms-reveal {
         position: relative;
         z-index: 1;
         width: 100%;
-        max-height: unset;
         margin-top: -2.5rem;
-        border-radius: 1.25rem;
+        border-radius: 1rem;
         padding: 1.5rem;
     }
 
@@ -455,5 +499,53 @@ input[type="password"]::-ms-reveal {
         margin: 3.85% 0 0;
     }
 
+    /* Footer en flux normal (sous le formulaire) au lieu d'absolute : évite le
+       chevauchement / la position « trop basse » en mobile. Aligné sur Register. */
+    .footer {
+        position: static;
+        margin-top: 1.5rem;
+        text-align: center;
+    }
+}
 
+/* Jauge de force du mot de passe (même logique/visuel que la page Register). */
+.strength {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+}
+.strength span {
+    flex: 1;
+    height: 0.25rem;
+    border-radius: 0.125rem;
+    background: var(--border);
+}
+.strength[data-level='1'] span:nth-child(1) {
+    background: var(--danger);
+}
+.strength[data-level='2'] span:nth-child(1),
+.strength[data-level='2'] span:nth-child(2) {
+    background: var(--warning);
+}
+.strength[data-level='3'] span:nth-child(1),
+.strength[data-level='3'] span:nth-child(2),
+.strength[data-level='3'] span:nth-child(3) {
+    background: var(--warning);
+}
+.strength[data-level='4'] span {
+    background: var(--success);
+}
+.strength-label {
+    font-size: 0.78rem;
+    margin: 0.3rem 0 0;
+}
+.strength-label[data-level='1'] {
+    color: var(--danger);
+}
+.strength-label[data-level='2'],
+.strength-label[data-level='3'] {
+    color: var(--warning);
+}
+.strength-label[data-level='4'] {
+    color: var(--success);
 }

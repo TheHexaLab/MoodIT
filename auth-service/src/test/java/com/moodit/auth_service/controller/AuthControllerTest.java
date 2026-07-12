@@ -5,10 +5,15 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.moodit.auth_service.config.AuthCookie;
+import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import com.moodit.auth_service.exception.EmailAlreadyUsedException;
@@ -20,9 +25,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import jakarta.servlet.http.Cookie;
 
 // Test d'intégration de la couche web : vérifie le mapping exception -> statut HTTP
 // par le GlobalExceptionHandler. Filtres de sécurité désactivés pour cibler le controller.
@@ -33,6 +41,8 @@ class AuthControllerTest {
   @Autowired private MockMvc mockMvc;
 
   @MockitoBean private AuthService authService;
+
+  @MockitoBean private AuthCookie authCookie;
 
   private static final String VALID_BODY =
       """
@@ -122,12 +132,64 @@ class AuthControllerTest {
   }
 
   @Test
+  void verify2FA_success_setsCookie_andOmitsTokenFromBody() throws Exception {
+    // Nettoyage : le token est posé en cookie HttpOnly et RETIRÉ du corps JSON.
+    when(authService.verify2FA("karine@usherbrooke.ca", "123456"))
+        .thenReturn(
+            new AuthResponse("jwt-token", "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
+    when(authCookie.build("jwt-token"))
+        .thenReturn(ResponseCookie.from("moodit_token", "jwt-token").httpOnly(true).build());
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
+        .andExpect(jsonPath("$.token").doesNotExist()) // token absent du corps
+        .andExpect(jsonPath("$.username").value("rkarine"));
+  }
+
+  @Test
+  void logout_readsCookie_clearsSession_andClearsCookie() throws Exception {
+    // Vérifie que logout lit le cookie JWT, invalide la session côté service et renvoie un cookie expiré.
+    when(authCookie.clear())
+        .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
+
+    mockMvc
+        .perform(post("/auth/logout").cookie(new Cookie("moodit_token", "jwt-token")))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=")))
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("Max-Age=0")));
+
+    verify(authService).logout("jwt-token");
+    verify(authCookie).clear();
+  }
+
+  @Test
   void verify2FA_malformedCode_returns400() throws Exception {
     String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"12\"}"; // pas 6 chiffres
 
     mockMvc
         .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void verifyEmail_success_setsCookie_andOmitsTokenFromBody() throws Exception {
+    // Auto-login : la vérification de l'email pose le cookie HttpOnly et retire le token du corps.
+    when(authService.verifyEmail("karine@usherbrooke.ca", "123456"))
+        .thenReturn(
+            new AuthResponse("jwt-token", "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
+    when(authCookie.build("jwt-token"))
+        .thenReturn(ResponseCookie.from("moodit_token", "jwt-token").httpOnly(true).build());
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-email").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("moodit_token=jwt-token")))
+        .andExpect(jsonPath("$.token").doesNotExist()) // token absent du corps
+        .andExpect(jsonPath("$.username").value("rkarine"));
   }
 
   @Test
@@ -157,5 +219,55 @@ class AuthControllerTest {
     mockMvc
         .perform(post("/auth/resend-code").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isTooManyRequests());
+  }
+
+  @Test
+  void forgotPassword_valid_returns200() throws Exception {
+    when(authService.forgotPassword(anyString())).thenReturn(Map.of("message", "ok"));
+    String body = "{\"email\":\"karine@usherbrooke.ca\"}";
+
+    mockMvc
+        .perform(post("/auth/forgot-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void forgotPassword_invalidEmail_returns400() throws Exception {
+    String body = "{\"email\":\"pas-un-email\"}";
+
+    mockMvc
+        .perform(post("/auth/forgot-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void resetPassword_valid_returns200() throws Exception {
+    when(authService.resetPassword(anyString(), anyString(), anyString()))
+        .thenReturn(Map.of("message", "ok"));
+    String body =
+        "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\",\"newPassword\":\"N0uveauPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void resetPassword_malformedCode_returns400() throws Exception {
+    String body =
+        "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"12\",\"newPassword\":\"N0uveauPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void resetPassword_shortPassword_returns400() throws Exception {
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\",\"newPassword\":\"court\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest());
   }
 }

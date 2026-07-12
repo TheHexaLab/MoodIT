@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import styles from './UserMenu.module.css';
 import { useTheme } from '../../helpers/theme.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
@@ -63,6 +64,7 @@ export default function UserMenu({
   onLogout,
   variant = 'footer',
 }: UserMenuProps): React.ReactElement {
+  const navigate = useNavigate();
   const displayName = getDisplayName(user);
   const username = user?.username?.trim() ?? '';
   const handle = username ? `@${username}` : '@utilisateur';
@@ -207,9 +209,19 @@ export default function UserMenu({
     onViewAuditLogs?.();
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    // Ferme le menu puis tente la déconnexion serveur ; quoi qu'il arrive, nettoie l'état client et redirige.
     requestClose();
-    onLogout?.();
+
+    try {
+      await fetch('/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } finally {
+      onLogout?.();
+      navigate('/login');
+    }
   }
 
   return (

@@ -1,0 +1,64 @@
+.wrapper {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin: 0.25rem 0 0.5rem;
+}
+
+.box {
+    width: 3rem;
+    height: 3.5rem;
+    padding: 0;
+    text-align: center;
+    font-family: Inter, sans-serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-right-login-page);
+    border: 1.5px solid var(--border);
+    border-radius: 0.7rem;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    -moz-appearance: textfield;
+}
+
+/* Case remplie : bordure un peu plus marquée pour un retour visuel. */
+.box[data-filled='true'] {
+    border-color: var(--border-strong);
+    background: var(--bg-input);
+}
+
+.box:focus {
+    border: 2px solid var(--brand-teal);
+    box-shadow: 0 0 0 3px var(--brand-teal-surface);
+    background: var(--bg-input);
+}
+
+.box.invalid {
+    border-color: var(--danger);
+}
+
+.box.invalid:focus {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(219, 46, 46, 0.18);
+}
+
+@media (max-width: 768px) {
+    .wrapper {
+        gap: 0.4rem;
+    }
+    .box {
+        width: 2.6rem;
+        height: 3.1rem;
+        font-size: 1.3rem;
+        border-radius: 0.6rem;
+    }
+}
+
+@media (max-width: 360px) {
+    .box {
+        width: 2.25rem;
+        height: 2.85rem;
+    }
+}

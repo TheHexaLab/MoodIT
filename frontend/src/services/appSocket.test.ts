@@ -132,11 +132,11 @@ function openAndConnect(app: AppSocket): FakeWebSocket {
 // ── open() ────────────────────────────────────────────────────────────────────
 
 describe('createAppSocket · open()', () => {
-  it('ouvre une connexion WebSocket avec le token en query', () => {
-    const app = createAppSocket('ws://test/ws', () => 'tok en&');
+  it("ouvre une connexion WebSocket sur l'URL fournie (auth par cookie, pas de token en query)", () => {
+    const app = createAppSocket('ws://test/ws');
     app.open();
     expect(sockets).toHaveLength(1);
-    expect(last().url).toBe('ws://test/ws?token=tok%20en%26');
+    expect(last().url).toBe('ws://test/ws');
   });
 
   it("est idempotent : n'ouvre pas de 2e socket si CONNECTING", () => {
@@ -153,10 +153,11 @@ describe('createAppSocket · open()', () => {
     expect(sockets).toHaveLength(1);
   });
 
-  it('utilise un token vide par défaut', () => {
+  it("n'ajoute jamais de query string à l'URL (aucune fuite de token)", () => {
     const app = createAppSocket('ws://test/ws');
     app.open();
-    expect(last().url).toBe('ws://test/ws?token=');
+    expect(last().url).not.toContain('token=');
+    expect(last().url).not.toContain('?');
   });
 });
 
