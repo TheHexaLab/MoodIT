@@ -770,4 +770,246 @@ class PermissionServiceTest {
     loggedIn(user(5));
     assertThat(service().isAllowed(EMAIL, "/api/programs/3/users/abc", "DELETE", null)).isFalse();
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════
+  //  AUDIT — routes auparavant en default-allow, désormais gardées.
+  // ═══════════════════════════════════════════════════════════════════════════════════
+
+  // ── Supprimer un programme / un cours (destructif) ──────────────────────────────────
+
+  @Test
+  void deleteProgram_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deleteProgram_programAdmin_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deleteProgram_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7", "DELETE", null)).isFalse();
+  }
+
+  @Test
+  void deleteCourse_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deleteCourse_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1", "DELETE", null)).isFalse();
+  }
+
+  // ── Modifier le profil d'un usager par id (PATCH /users/{userId}) ───────────────────
+
+  @Test
+  void updateUser_self_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/5", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void updateUser_otherByNonAdmin_denied() {
+    loggedIn(user(5)); // édite l'usager 9 sans être admin
+    assertThat(service().isAllowed(EMAIL, "/api/users/9", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void updateUser_otherByGuardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/users/9", "PATCH", "{}")).isTrue();
+  }
+
+  // ── Créer / gérer un forum (contenu de cours) ───────────────────────────────────────
+
+  @Test
+  void addForumToCourse_teacher_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/forums", "POST", "{\"courseId\":1}"))
+        .isTrue();
+  }
+
+  @Test
+  void addForumToCourse_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/forums", "POST", "{\"courseId\":1}"))
+        .isFalse();
+  }
+
+  @Test
+  void addForumToCourse_missingCourseId_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/courses/forums", "POST", "{}")).isFalse();
+  }
+
+  @Test
+  void updateForum_teacher_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void deleteForum_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deleteForum_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.TEACHER)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9", "DELETE", null)).isFalse();
+  }
+
+  // ── Lectures de forum ciblées (appartenance) ────────────────────────────────────────
+
+  @Test
+  void getForumById_subscribed_allowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getForumById_notSubscribed_denied() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9", "GET", null)).isFalse();
+  }
+
+  @Test
+  void getSinglePost_notSubscribed_denied() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "GET", null)).isFalse();
+  }
+
+  @Test
+  void getForumOfCourse_subscribed_allowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/forums/9", "GET", null)).isTrue();
+  }
+
+  // ── Candidats à un rôle (listes d'usagers) ──────────────────────────────────────────
+
+  @Test
+  void globalRoleCandidates_admin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/roles/global/candidates", "GET", null, "roleId=2"))
+        .isTrue();
+  }
+
+  @Test
+  void globalRoleCandidates_student_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/roles/global/candidates", "GET", null)).isFalse();
+  }
+
+  @Test
+  void programRoleCandidates_programAdmin_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7/role-candidates", "GET", null)).isTrue();
+  }
+
+  @Test
+  void programRoleCandidates_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/programs/7/role-candidates", "GET", null))
+        .isFalse();
+  }
+
+  // ── Abonnement à des programmes (POST /programs/users) : self only ──────────────────
+
+  @Test
+  void addUserToPrograms_self_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/programs/users", "POST", "{\"id\":5}")).isTrue();
+  }
+
+  @Test
+  void addUserToPrograms_other_denied() {
+    loggedIn(user(5)); // tente d'abonner l'usager 9
+    assertThat(service().isAllowed(EMAIL, "/api/programs/users", "POST", "{\"id\":9}")).isFalse();
+  }
+
+  // ── Lectures de données d'usager (hors /me) ─────────────────────────────────────────
+
+  @Test
+  void getUser_self_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/5", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getUser_otherByNonAdmin_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/9", "GET", null)).isFalse();
+  }
+
+  @Test
+  void getUser_otherByAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/users/9", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getUserEnrollments_self_allowed() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/5/enrollments", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getUserEnrollments_other_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/9/enrollments", "GET", null)).isFalse();
+  }
+
+  @Test
+  void getUserByUsername_admin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    assertThat(service().isAllowed(EMAIL, "/api/users/username/rosie", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getUserByUsername_student_denied() {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/api/users/username/rosie", "GET", null)).isFalse();
+  }
+
+  @Test
+  void getUsersByRoleInProgram_programAdmin_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/users/role/1/programs/7", "GET", null)).isTrue();
+  }
+
+  @Test
+  void getUsersByRoleInProgram_student_denied() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/users/role/1/programs/7", "GET", null)).isFalse();
+  }
 }

@@ -214,4 +214,26 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
   // pour assigner un Admin) : le body ne porte que roleId, on resout le nom cote SQL.
   @Query(value = "SELECT r.name FROM Role r WHERE r.id = :roleId", nativeQuery = true)
   String findRoleNameById(@Param("roleId") long roleId);
+
+  // L'utilisateur a-t-il le role (nomme) sur le COURS DU FORUM ? Comme hasRoleInCourse, mais
+  // l'id fourni est celui d'un FORUM (routes /api/forums/{forumId} de gestion : renommer /
+  // supprimer un forum) : on resout forum -> cours via Forum.course_id. Ex. roleName =
+  // 'Enseignant' -> "est-il prof du cours auquel appartient ce forum ?".
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r            ON r.id = upr.role_id
+            JOIN program_course pc ON pc.program_id = upr.program_id
+            JOIN Forum f           ON f.course_id = pc.course_id
+            WHERE upr.user_id = :userId AND f.id = :forumId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInForumCourse(
+      @Param("userId") long userId,
+      @Param("forumId") long forumId,
+      @Param("roleName") String roleName);
 }

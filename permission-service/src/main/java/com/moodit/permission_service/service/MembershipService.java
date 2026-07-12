@@ -241,6 +241,16 @@ public class MembershipService {
     return membershipRepository.findRoleNameById(roleId);
   }
 
+  /**
+   * L'utilisateur a-t-il le rôle (nommé) sur le COURS DU FORUM ? Résolution forum → cours via
+   * Forum.course_id (comme hasRoleInQuizCourse pour un quiz). Sert à gérer un forum (renommer /
+   * supprimer via /api/forums/{forumId}). Ex. roleName = "Enseignant" → "prof du cours du forum ?".
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInForumCourse(long userId, long forumId, String roleName) {
+    return membershipRepository.hasRoleInForumCourse(userId, forumId, roleName);
+  }
+
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
   private Long resolveUserId(String email) {
     if (email == null || email.isBlank()) {

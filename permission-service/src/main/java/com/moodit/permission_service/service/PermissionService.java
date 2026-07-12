@@ -202,15 +202,7 @@ public class PermissionService {
             rule(
                     "PATCH",
                     "/programs/{programId}",
-                    (user, vars, body) -> {
-                      if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
-                        return true;
-                      }
-                      long programId = longVar(vars, "programId");
-                      return programId > 0
-                          && membershipService.hasRoleInProgram(
-                              user.getId(), programId, RoleNames.ADMIN);
-                    }),
+                    (user, vars, body) -> canManageProgram(user, vars, "programId")),
 
             // ── Creer un cours dans des programmes (programIds dans le BODY) ──────────────
             // Administrateur/Gardien GLOBAL (user_role), OU Administrateur/Enseignant DANS
@@ -503,6 +495,117 @@ public class PermissionService {
                                   user.getId(), RoleNames.ADMIN);
                       default -> false;
                     }),
+            // ═══════════════════════════════════════════════════════════════════════════
+            //  AUDIT PERMISSIONS — trous comblés (routes sensibles avant en default-allow).
+            //  Motifs disjoints (methode + nb de segments) des regles ci-dessus : l'ordre
+            //  d'insertion ici est sans effet sur le first-match-wins.
+            // ═══════════════════════════════════════════════════════════════════════════
+
+            // Supprimer un PROGRAMME (destructif, cascade) : meme regle que le PATCH programme
+            // (Admin/Gardien global OU Admin du programme). programId dans le PATH.
+            rule(
+                    "DELETE",
+                    "/programs/{programId}",
+                    (user, vars, body) -> canManageProgram(user, vars, "programId")),
+
+            // Supprimer un COURS (destructif, cascade) : gestion de contenu du cours.
+            rule(
+                    "DELETE",
+                    "/courses/{courseId}",
+                    (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+
+            // Modifier le profil d'un usager (par id) : soi-meme (userId dans le PATH) OU
+            // Admin/Gardien global. (L'edition de SON profil passe par /me, non gate ici.)
+            rule(
+                    "PATCH",
+                    "/users/{userId}",
+                    (user, vars, body) ->
+                        isSelfFromPath(user, vars, "userId")
+                            || hasRole(user, RoleNames.ADMIN)
+                            || hasRole(user, RoleNames.GUARDIAN)),
+
+            // Creer un forum/canal dans un cours : gestion de contenu. courseId dans le BODY (ForumDTO).
+            rule(
+                    "POST",
+                    "/courses/forums",
+                    (user, vars, body) ->
+                        canManageCourseContentById(user, longField(body, "courseId"))),
+
+            // Renommer / supprimer un forum : gestion de contenu du cours du forum (forumId PATH).
+            rule(
+                    "PATCH",
+                    "/forums/{forumId}",
+                    (user, vars, body) -> canManageForumContent(user, vars, "forumId")),
+            rule(
+                    "DELETE",
+                    "/forums/{forumId}",
+                    (user, vars, body) -> canManageForumContent(user, vars, "forumId")),
+
+            // Lire un forum precis / son type / un post precis / un forum d'un cours : etre abonne
+            // au programme du cours du forum (meme appartenance que lire les sujets). forumId PATH.
+            rule(
+                    "GET",
+                    "/forums/{forumId}",
+                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+            rule(
+                    "GET",
+                    "/forums/{forumId}/f_type",
+                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+            rule(
+                    "GET",
+                    "/forums/{forumId}/posts/{postId}",
+                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+            rule(
+                    "GET",
+                    "/courses/{courseId}/forums/{forumId}",
+                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+
+            // Candidats a un role GLOBAL (popup admins) : liste d'usagers -> Gardien OU Admin.
+            rule(
+                    "GET",
+                    "/roles/global/candidates",
+                    (user, vars, body) ->
+                        hasRole(user, RoleNames.GUARDIAN) || hasRole(user, RoleNames.ADMIN)),
+
+            // Candidats a un role dans un PROGRAMME : liste d'usagers du programme -> meme regle
+            // que voir les membres (Admin/Gardien global OU Admin du programme). programId PATH.
+            rule(
+                    "GET",
+                    "/programs/{programId}/role-candidates",
+                    (user, vars, body) -> canViewProgramUsers(user, vars)),
+
+            // Abonner un usager a des programmes (join) : uniquement POUR SOI (body.id == user).
+            // L'abonnement au catalogue est self-service ; on empeche d'abonner autrui.
+            rule(
+                    "POST",
+                    "/programs/users",
+                    (user, vars, body) -> isSelfFromBody(user, body, "id")),
+
+            // Lire des donnees d'un usager (hors /me) : soi-meme OU Admin/Gardien global.
+            rule(
+                    "GET",
+                    "/users/{userId}",
+                    (user, vars, body) ->
+                        isSelfFromPath(user, vars, "userId")
+                            || hasRole(user, RoleNames.ADMIN)
+                            || hasRole(user, RoleNames.GUARDIAN)),
+            // Ses inscriptions (cours) : soi-meme uniquement (aligne sur les autres /users/{id}/*).
+            rule(
+                    "GET",
+                    "/users/{userId}/enrollments",
+                    (user, vars, body) -> verifyUserId(user, vars)),
+            // Recherche d'un usager par username : action de gestion -> Admin/Gardien global.
+            rule(
+                    "GET",
+                    "/users/username/{username}",
+                    (user, vars, body) ->
+                        hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)),
+            // Lister les usagers d'un role dans un programme : meme regle que voir les membres.
+            rule(
+                    "GET",
+                    "/users/role/{role}/programs/{programId}",
+                    (user, vars, body) -> canViewProgramUsers(user, vars)),
+
             // Consulter le JOURNAL D'AUDIT : reserve au Gardien.
             rule(
                 "GET",
@@ -674,12 +777,29 @@ public class PermissionService {
             || membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.TEACHER));
   }
 
+  // ── Gestion d'un PROGRAMME (modifier / supprimer) ─────────────────────────────────────
+  // Administrateur/Gardien GLOBAL (user_role) -> partout. Sinon, Administrateur DU programme
+  // (User_Program_Role) — PAS l'Enseignant. programId lu dans une variable de PATH.
+  private boolean canManageProgram(User user, Map<String, String> vars, String programVar) {
+    if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+      return true;
+    }
+    long programId = longVar(vars, programVar);
+    return programId > 0
+        && membershipService.hasRoleInProgram(user.getId(), programId, RoleNames.ADMIN);
+  }
+
   // ── Gestion du CONTENU d'un cours (quiz, sections...) ─────────────────────────────────
   // Administrateur/Gardien GLOBAL (user_role) -> tous les cours. Sinon, Administrateur ou
   // Enseignant DANS un programme contenant le cours (User_Program_Role + program_course).
   // Aligne sur QuizService.requireCourseAccess du core. courseId lu dans une variable de PATH.
   private boolean canManageCourseContent(User user, Map<String, String> vars, String courseVar) {
-    long courseId = longVar(vars, courseVar);
+    return canManageCourseContentById(user, longVar(vars, courseVar));
+  }
+
+  // Meme regle que canManageCourseContent, mais a partir d'un courseId deja resolu (ex. lu dans
+  // le BODY : POST /courses/forums -> ForumDTO.courseId).
+  private boolean canManageCourseContentById(User user, long courseId) {
     if (courseId <= 0) {
       return false;
     }
@@ -687,6 +807,20 @@ public class PermissionService {
         || hasRole(user, RoleNames.GUARDIAN)
         || membershipService.hasRoleInCourse(user.getId(), courseId, RoleNames.ADMIN)
         || membershipService.hasRoleInCourse(user.getId(), courseId, RoleNames.TEACHER);
+  }
+
+  // Meme regle que canManageCourseContent, mais a partir de l'id d'un FORUM (le cours est resolu
+  // cote SQL via Forum.course_id). Sert a gerer un forum (renommer / supprimer). forumId lu dans
+  // une variable de PATH.
+  private boolean canManageForumContent(User user, Map<String, String> vars, String forumVar) {
+    long forumId = longVar(vars, forumVar);
+    if (forumId <= 0) {
+      return false;
+    }
+    return hasRole(user, RoleNames.ADMIN)
+        || hasRole(user, RoleNames.GUARDIAN)
+        || membershipService.hasRoleInForumCourse(user.getId(), forumId, RoleNames.ADMIN)
+        || membershipService.hasRoleInForumCourse(user.getId(), forumId, RoleNames.TEACHER);
   }
 
   // Meme regle que canManageCourseContent, mais a partir de l'id d'un QUIZ (le cours est resolu

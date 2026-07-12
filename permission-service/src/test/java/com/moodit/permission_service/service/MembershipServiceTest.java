@@ -144,4 +144,16 @@ class MembershipServiceTest {
     when(membershipRepository.findRoleNameById(99)).thenReturn(null);
     assertThat(service.roleName(99)).isNull();
   }
+
+  @Test
+  void hasRoleInForumCourse_delegatesTrue() {
+    when(membershipRepository.hasRoleInForumCourse(5, 9, "Enseignant")).thenReturn(true);
+    assertThat(service.hasRoleInForumCourse(5, 9, "Enseignant")).isTrue();
+  }
+
+  @Test
+  void hasRoleInForumCourse_delegatesFalse() {
+    when(membershipRepository.hasRoleInForumCourse(5, 9, "Enseignant")).thenReturn(false);
+    assertThat(service.hasRoleInForumCourse(5, 9, "Enseignant")).isFalse();
+  }
 }
