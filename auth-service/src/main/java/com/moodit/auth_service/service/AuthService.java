@@ -499,6 +499,11 @@ public class AuthService {
   // simplement pas de courriel), sans jamais lever d'exception qui trahirait un compte.
   public Map<String, String> forgotPassword(String email) {
     email = normalizeEmail(email);
+    // Anti-énumération (timing) : on paie le coût CPU de génération du code de façon UNIFORME,
+    // que le compte existe ou non, pour ne pas exposer d'écart mesurable au chemin "not found".
+    // Résidu accepté : le save() indexé + l'envoi d'email ASYNC (non bloquant) du chemin
+    // "compte existant", dominés par la latence réseau/mail.
+    String code = generateCode();
     User user = userRepository.findByEmail(email).orElse(null);
     if (user == null) {
       return Map.of("message", RESET_REQUESTED_MESSAGE);
@@ -518,7 +523,6 @@ public class AuthService {
       return Map.of("message", RESET_REQUESTED_MESSAGE);
     }
 
-    String code = generateCode();
     user.setResetCode(code);
     user.setResetCodeExpiresAt(now.plusMinutes(15));
     user.setResetAttempts(0);
@@ -547,7 +551,9 @@ public class AuthService {
           "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
     }
 
-    if (user.getResetCode() == null) {
+    // Pas de code actif : on groupe l'expiry null avec le code null (état incohérent = pas de
+    // code valide) pour éviter un NPE 500 qui serait un oracle (500 vs 4xx générique).
+    if (user.getResetCode() == null || user.getResetCodeExpiresAt() == null) {
       throw new InvalidVerificationCodeException("Code invalide. Demandez un nouveau code.");
     }
 

@@ -6,6 +6,7 @@
 
 package com.moodit.gateway.ws;
 
+import java.util.Arrays;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -30,9 +31,16 @@ public class WebSocketProxyConfig implements WebSocketConfigurer {
 
   @Override
   public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+    // Trim de chaque origine : une liste "a, b" (espace après la virgule) ne doit pas
+    // produire une origine " b" qui ne matcherait jamais. On ignore les entrées vides.
+    String[] origins =
+        Arrays.stream(allowedOrigins.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .toArray(String[]::new);
     registry
         .addHandler(proxyHandler, "/ws")
         .addInterceptors(authHandshakeInterceptor)
-        .setAllowedOrigins(allowedOrigins.split(","));
+        .setAllowedOrigins(origins);
   }
 }

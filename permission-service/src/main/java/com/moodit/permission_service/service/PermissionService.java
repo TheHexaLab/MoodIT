@@ -801,6 +801,13 @@ public class PermissionService {
     for (JsonNode element : node) {
       if (element.canConvertToLong()) {
         ids.add(element.longValue());
+      } else if (element.isString()) {
+        // Meme tolerance que longField : le front peut envoyer des ids en chaine ("10").
+        try {
+          ids.add(Long.parseLong(element.stringValue().trim()));
+        } catch (NumberFormatException ignored) {
+          // element non numerique : ignore (comme un element non convertible).
+        }
       }
     }
     return ids;

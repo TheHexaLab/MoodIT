@@ -643,6 +643,38 @@ class AuthServiceTest {
   }
 
   @Test
+  void resetPassword_codeIsSingleUse_secondUseFails() {
+    User u = userWithResetCode();
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.encode(peppered("N0uveauPass!"))).thenReturn("new-hash");
+
+    // 1er usage : succès → le code est CONSOMMÉ (resetCode remis à null).
+    authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!");
+    assertThat(u.getResetCode()).isNull();
+
+    // 2e usage du MÊME code : refusé (plus de code actif) → pas de replay.
+    assertThatThrownBy(
+            () ->
+                authService.resetPassword(
+                    "karine.roussel@usherbrooke.ca", "123456", "Encore1Pass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+  }
+
+  @Test
+  void resetPassword_codeWithoutExpiry_treatedAsNoValidCode_noNpe() {
+    // État incohérent (code présent mais expiry null) : on refuse proprement (pas de NPE 500).
+    User u = userWithResetCode();
+    u.setResetCodeExpiresAt(null);
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    assertThatThrownBy(
+            () ->
+                authService.resetPassword(
+                    "karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class);
+  }
+
+  @Test
   void resetPassword_wrongCode_incrementsAttempts_andKeepsPassword() {
     User u = userWithResetCode();
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
