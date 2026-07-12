@@ -113,6 +113,22 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("programId") long programId,
       @Param("roleName") String roleName);
 
+  // L'utilisateur a-t-il le role (nomme) dans AU MOINS UN programme (User_Program_Role), sans
+  // cibler un programme precis ? Sert a gater GET /api/roles?scope=program (liste des roles
+  // attribuables en programme) : etre gestionnaire d'un programme quelconque suffit.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM User_Program_Role upr
+            JOIN Role r ON r.id = upr.role_id
+            WHERE upr.user_id = :userId AND r.name = :roleName
+          )
+          """,
+      nativeQuery = true)
+  boolean hasRoleInAnyProgram(@Param("userId") long userId, @Param("roleName") String roleName);
+
   // L'utilisateur a-t-il le role (nomme) SUR ce cours ? Combine role scope-programme
   // (User_Program_Role) et appartenance du cours au programme (program_course). Ex. avec
   // roleName = 'Enseignant' : "est-il prof du cours ?".
@@ -192,4 +208,10 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean hasGlobalRole(@Param("userId") long userId);
+
+  // Nom (Role.name) du role d'id donne, ou null s'il n'existe pas. Sert a decider selon le role
+  // CIBLE d'une modification (POST /roles/global/change : Gardien pour assigner un Gardien, Admin
+  // pour assigner un Admin) : le body ne porte que roleId, on resout le nom cote SQL.
+  @Query(value = "SELECT r.name FROM Role r WHERE r.id = :roleId", nativeQuery = true)
+  String findRoleNameById(@Param("roleId") long roleId);
 }

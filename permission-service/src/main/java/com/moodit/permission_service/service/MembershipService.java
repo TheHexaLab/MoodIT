@@ -86,6 +86,16 @@ public class MembershipService {
     return membershipRepository.canSeeCourseViaProgram(userId, programId);
   }
 
+  /**
+   * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
+   * l'abonnement (a distinguer de canAccessProgram). Sert a autoriser l'inscription a des cours
+   * d'un programme (POST /courses/users) : on ne s'inscrit qu'aux cours d'un programme rejoint.
+   */
+  @Transactional(readOnly = true)
+  public boolean isSubscribedToProgram(long userId, long programId) {
+    return membershipRepository.isSubscribedToProgram(userId, programId);
+  }
+
   /** Le cours (scope MCP) est-il visible ? Meme regle : etre abonne a un programme du cours. */
   @Transactional(readOnly = true)
   public boolean canAccessCourse(long userId, long courseId) {
@@ -149,6 +159,17 @@ public class MembershipService {
   }
 
   /**
+   * L'utilisateur porte-t-il le role (nomme) dans AU MOINS UN programme (User_Program_Role), sans
+   * cibler un programme precis ? Ex. roleName = "Administrateur" -> "gere-t-il un programme
+   * quelconque ?". Sert a gater la liste des roles attribuables en programme
+   * (GET /api/roles?scope=program), qui ne porte pas d'id de programme.
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInAnyProgram(long userId, String roleName) {
+    return membershipRepository.hasRoleInAnyProgram(userId, roleName);
+  }
+
+  /**
    * L'utilisateur est-il le CREATEUR de la ressource visee ? Point d'entree GENERIQUE de la
    * verification de propriete : chaque ressource stocke son createur dans une table/colonne
    * differente, et un nom de table ne peut pas etre un parametre SQL — on aiguille donc par
@@ -208,6 +229,16 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean hasGlobalRole(long userId) {
     return membershipRepository.hasGlobalRole(userId);
+  }
+
+  /**
+   * Nom (Role.name) du rôle d'id donné, ou null s'il n'existe pas. Sert à décider selon le rôle
+   * CIBLÉ (ex. POST /roles/global/change : seul le Gardien peut assigner un Gardien, un Admin ne
+   * peut assigner qu'un Admin). Le body ne transmet que `roleId` (numérique) : on résout le nom ici.
+   */
+  @Transactional(readOnly = true)
+  public String roleName(long roleId) {
+    return membershipRepository.findRoleNameById(roleId);
   }
 
   /** Resout l'id interne a partir de l'email (subject du JWT), ou null si inconnu. */
