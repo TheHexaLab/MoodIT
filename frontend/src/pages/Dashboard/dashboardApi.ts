@@ -733,7 +733,7 @@ export async function joinPrograms(selection: JoinSelection): Promise<DemoProgra
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      id: userId,
+      id: Number(userId),
       programIds: selection.programIds,
       establishmentId: selection.establishmentId,
     }),
@@ -834,7 +834,7 @@ export async function joinCourses(programId: number, courseIds: number[]): Promi
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      id: userId,
+      id: Number(userId),
       courseIds,
       programId,
     }),
