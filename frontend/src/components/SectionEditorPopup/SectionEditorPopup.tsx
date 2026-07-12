@@ -139,11 +139,17 @@ export function SectionEditorPopup({
     // On garde le formulaire ouvert (avec spinner) jusqu'à la résolution : la liste
     // n'est mise à jour qu'après un succès, et l'erreur laisse la saisie intacte.
     let change: ItemChange;
-    let apply: () => void;
+    // `apply` reçoit le changement RENVOYÉ par onChange (le backend y met l'id réel du
+    // forum créé) : on l'utilise pour poser le bon id, sinon un renommage/suppression
+    // enchaîné dans ce popup enverrait l'id temporaire (crypto.randomUUID) au serveur.
+    let apply: (result?: ItemChange | void) => void;
     if (isAdding) {
       const item: Item = { id: crypto.randomUUID(), name: trimmed };
       change = { type: 'create', item };
-      apply = () => setItems((prev) => [...prev, item]);
+      apply = (result) => {
+        const realId = result && result.type === 'create' ? result.item.id : undefined;
+        setItems((prev) => [...prev, realId ? { ...item, id: realId } : item]);
+      };
     } else if (editingId !== null) {
       const id = editingId;
       change = { type: 'rename', id, name: trimmed };
@@ -159,9 +165,9 @@ export function SectionEditorPopup({
     setError(null);
     setPending(true);
     try {
-      if (onChange) await onChange(change);
+      const result = onChange ? await onChange(change) : undefined;
       if (!mountedRef.current || requestRef.current !== reqId) return;
-      apply();
+      apply(result as ItemChange | void);
       cancelEdit();
     } catch {
       if (!mountedRef.current || requestRef.current !== reqId) return;

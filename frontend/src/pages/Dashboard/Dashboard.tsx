@@ -44,7 +44,10 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
+import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
+import { getProgramPermissions } from '../../helpers/permissions.ts';
+import { ROLE } from '../../helpers/roles.ts';
 import * as api from './dashboardApi.ts';
 import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
@@ -75,18 +78,22 @@ const quizEditorHandlers: QuizEditorHandlers = {
   onDeleteQuiz: api.deleteQuiz,
   onReorderQuizzes: api.reorderQuizzes,
   onEvaluateCode: api.evaluateCode,
+  onRunCode: api.runCode,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
   | { kind: 'addCourse'; programId: number } // programId = programme préselectionné
-  | { kind: 'addSubscription' }
+  | { kind: 'addSubscription'; view?: 'join' }
   | { kind: 'editCourse'; courseId: number }
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
+  | { kind: 'manageGlobalRoles' } // gestion des administrateurs (rôles globaux / plateforme)
   | { kind: 'leaveProgram'; programId: number }
+  | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
+  | { kind: 'deleteCourse'; courseId: number }
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
 
@@ -96,11 +103,19 @@ export default function Dashboard() {
   // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
   const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
   // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
-  const { currentUser, profileLoading, isAdmin, saveProfile } = useCurrentUser();
+  const { currentUser, profileLoading, isAdmin, isGuardian, saveProfile, applyGlobalRoles } =
+    useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
+  // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
+  // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
+  const permsForProgram = (programId: number) =>
+    getProgramPermissions(
+      dashboardPrograms.find((program) => program.id === programId) ?? null,
+      isAdmin
+    );
   // Incrémenté à chaque mise à jour de quiz → remonte la vue de quiz ouverte (rechargement).
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
@@ -117,6 +132,12 @@ export default function Dashboard() {
   const [roleData, setRoleData] = useState<{ roles: Role[]; users: User[] } | null>(null);
   const [roleLoading, setRoleLoading] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
+  // Données du gestionnaire des administrateurs (rôles GLOBAUX), chargées à l'ouverture.
+  const [globalRoleData, setGlobalRoleData] = useState<{ roles: Role[]; users: User[] } | null>(
+    null
+  );
+  const [globalRoleLoading, setGlobalRoleLoading] = useState(false);
+  const [globalRoleError, setGlobalRoleError] = useState<string | null>(null);
   // Sortie d'un programme (async : overlay de chargement + ErrorPopup en cas d'échec).
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
@@ -245,8 +266,49 @@ export default function Dashboard() {
           setSelectedChannelRef(undefined);
         }
       },
+      // Mon rôle DANS ce programme a changé → on met à jour son roleName ; les menus
+      // d'actions administratives (permsForProgram) se re-gatent automatiquement.
+      onProgramRoleChange: (programId, roleName) =>
+        setDashboardPrograms((programs) =>
+          programs.map((p) => (p.id === programId ? { ...p, roleName } : p))
+        ),
+      // Mes rôles GLOBAUX ont changé → on remplace ceux du profil ; isAdmin/isGuardian
+      // se recalculent (bouton « Gérer les administrateurs », droits de suppression…).
+      onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
     });
-  }, [ws, currentUser.id]);
+  }, [ws, currentUser.id, applyGlobalRoles]);
+
+  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
+  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
+  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
+    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
+    [ws, currentUser.id]
+  );
+
+  // Abonnement temps réel de la liste des ADMINISTRATEURS (popup rôles globaux) : un autre admin
+  // modifie une assignation → le serveur diffuse la liste à jour. On mappe `roles` → `role_ids`
+  // (comme fetchGlobalRoles) avant de la livrer au RoleEditorPopup. Stable (dépend de `ws`).
+  const subscribeAdminRoles = useCallback(
+    (handler: (users: User[]) => void) =>
+      ws.adminRoles.subscribe((users) =>
+        handler(
+          // Mapping explicite vers la forme `User` du RoleEditorPopup (le champ backend `roles`
+          // porte des ids → `role_ids` ; on ne le recopie pas tel quel pour éviter le conflit de
+          // type avec User.roles: Role[]).
+          users.map((u) => ({
+            id: u.id,
+            username: u.username,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            email: u.email,
+            avatarColor: u.avatarColor,
+            role_ids: u.roles ?? [],
+          }))
+        )
+      ),
+    [ws]
+  );
+
   // Cours du programme actif : api.fetchCourses renvoie les cours, on les pose dans
   // le programme correspondant ; le loader pilote loading/erreur.
   const handleFetchCourses = useCallback(async (programId: number) => {
@@ -294,8 +356,11 @@ export default function Dashboard() {
             course.id === courseId ? applySectionChange(course, sectionType, change) : course
           )
         ),
+      // WS course:created/edited → mise à jour MÉTA d'un cours déjà présent uniquement.
+      // On n'AJOUTE pas : un cours neuf (ou édité) auquel l'utilisateur n'est pas inscrit
+      // ne doit pas apparaître dans sa sidebar (il l'ajoutera en le rejoignant).
       onCourseUpsert: (course) =>
-        setDashboardPrograms((programs) => upsertCourse(programs, activeProgramId, course)),
+        setDashboardPrograms((programs) => updateCourseMeta(programs, activeProgramId, course)),
       onCourseDelete: (courseId) =>
         setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId)),
       // Un quiz a été ajouté : il apparaît dans la liste (s'il est publié).
@@ -334,35 +399,69 @@ export default function Dashboard() {
 
   // Ouvre le AddSubscriptionPopup (création / adhésion à un programme).
   const handleAddProgram = () => setPopup({ kind: 'addSubscription' });
+  // « Rejoindre un programme » (offert à tous depuis l'état « aucun programme ») : ouvre le même
+  // popup DIRECTEMENT sur la vue d'adhésion (la création reste gatée par canCreateProgram).
+  const handleJoinProgram = () => setPopup({ kind: 'addSubscription', view: 'join' });
 
-  // Ouvre le AddCoursePopup avec le programme courant préselectionné (admin).
+  // Ouvre le AddCoursePopup avec le programme courant préselectionné (gestion contenu).
   const handleAddCourse = () => {
-    if (isAdmin) setPopup({ kind: 'addCourse', programId: activeProgramId });
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'addCourse', programId: activeProgramId });
   };
-  // Ouvre le UpdateCoursePopup pour le cours du crayon (admin ; crayon déjà admin-only).
+  // Ouvre le UpdateCoursePopup pour le cours du crayon (gestion contenu du programme actif).
   const handleEditCourse = (courseId: number) => {
-    if (isAdmin) setPopup({ kind: 'editCourse', courseId });
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'editCourse', courseId });
   };
-  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur,
-  // admin) : ouvre la modale de gestion des analyses MCP du cours.
+  // « Gestion MCP — Feedback du cours » (menu contextuel, clic droit sur le sélecteur) :
+  // ouvre la modale de gestion des analyses MCP du cours (gestion contenu).
   const handleOpenMcpManagement = (courseId: number) => {
-    if (isAdmin) setPopup({ kind: 'mcp', courseId });
+    if (permsForProgram(activeProgramId).canManageContent) setPopup({ kind: 'mcp', courseId });
   };
   // « Quitter le cours » (menu contextuel) : ouvre la confirmation. La sortie réelle
   // est faite par handleConfirmLeaveCourse (via api.leaveCourse).
   const handleLeaveCourse = (courseId: number) => setPopup({ kind: 'leaveCourse', courseId });
+  // « Supprimer le cours » (menu contextuel, gestion contenu) : ouvre la confirmation. La
+  // suppression réelle est faite par handleConfirmDeleteCourse (via api.deleteCourse).
+  const handleDeleteCourse = (courseId: number) => {
+    if (permsForProgram(activeProgramId).canManageContent)
+      setPopup({ kind: 'deleteCourse', courseId });
+  };
   // Ouvre le EditProfilePopup (menu du compte).
   const handleEditProfile = () => setPopup({ kind: 'editProfile' });
   // Déconnexion (clear session + redirection login à implémenter).
   const handleLogout = () => console.log('[Dashboard] Déconnexion demandée.');
 
+  // ── Gestion des administrateurs (rôles GLOBAUX / plateforme) ──
+  // Charge rôles globaux + utilisateurs (via api.fetchGlobalRoles) et alimente le popup.
+  const fetchGlobalRoles = async () => {
+    setGlobalRoleData(null);
+    setGlobalRoleError(null);
+    setGlobalRoleLoading(true);
+    try {
+      setGlobalRoleData(await api.fetchGlobalRoles());
+    } catch {
+      setGlobalRoleError('Impossible de charger les administrateurs. Réessaie.');
+    } finally {
+      setGlobalRoleLoading(false);
+    }
+  };
+  // Ouvre le gestionnaire des administrateurs (réservé aux admins globaux / gardiens).
+  const handleManageAdmins = () => {
+    if (!isAdmin) return;
+    setPopup({ kind: 'manageGlobalRoles' });
+    void fetchGlobalRoles();
+  };
+  // Persiste un changement de rôle GLOBAL (User_Role) via api.changeGlobalRole.
+  const handleGlobalRoleChange = (change: RoleChange) => api.changeGlobalRole(change);
+
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
   const handleAddCourseToProgram = (programId: number) => {
-    if (isAdmin) setPopup({ kind: 'addCourse', programId });
+    if (permsForProgram(programId).canManageContent) setPopup({ kind: 'addCourse', programId });
   };
   const handleEditProgram = (programId: number) => {
-    if (isAdmin) setPopup({ kind: 'editProgram', programId });
+    if (permsForProgram(programId).canEditProgram) setPopup({ kind: 'editProgram', programId });
   };
   // Charge rôles + membres d'un programme (via api.fetchProgramRoles) et alimente le popup.
   const fetchProgramRoles = async (programId: number) => {
@@ -379,11 +478,16 @@ export default function Dashboard() {
   };
 
   const handleManageRoles = (programId: number) => {
-    if (!isAdmin) return;
+    if (!permsForProgram(programId).canManageRoles) return;
     setPopup({ kind: 'manageRoles', programId });
     void fetchProgramRoles(programId);
   };
   const handleLeaveProgram = (programId: number) => setPopup({ kind: 'leaveProgram', programId });
+  // « Supprimer le programme » (menu contextuel, super-admin GLOBAL uniquement) : ouvre la
+  // confirmation. La suppression réelle est faite par handleConfirmDeleteProgram (via api.deleteProgram).
+  const handleDeleteProgram = (programId: number) => {
+    if (permsForProgram(programId).canDeleteProgram) setPopup({ kind: 'deleteProgram', programId });
+  };
   // Rejoindre des cours d'un programme (menu contextuel, TOUS les utilisateurs) : ouvre
   // le JoinCoursesPopup. L'adhésion réelle est faite par handleConfirmJoinCourses.
   const handleJoinCourses = (programId: number) => setPopup({ kind: 'joinCourses', programId });
@@ -402,31 +506,32 @@ export default function Dashboard() {
   // Création de canal / quiz / forum via le SectionEditorPopup du type concerné
   // (mêmes actions que l'édition d'une section). Réservé à l'administrateur.
   const handleCreateChannel = () => {
-    if (isAdmin) setCreatingSectionType('text');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('text');
   };
   const handleCreateQuiz = () => {
-    if (isAdmin) setCreatingSectionType('quiz');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('quiz');
   };
   const handleCreateForum = () => {
-    if (isAdmin) setCreatingSectionType('forum');
+    if (permsForProgram(activeProgramId).canManageContent) setCreatingSectionType('forum');
   };
   // Persiste une modification de section (réordre/renommage/suppression/ajout) via
   // api.changeSection. Le state n'est appliqué qu'APRÈS succès (le rejet laisse la
   // sidebar inchangée) : on exerce ainsi spinner / rollback / ErrorPopup du popup.
-  const handleSectionChange = async (
-    courseId: number,
-    sectionType: string,
-    change: ItemChange
-  ) => {
-    await api.changeSection(courseId, sectionType, change);
+  const handleSectionChange = async (courseId: number, sectionType: string, change: ItemChange) => {
+    // Le backend renvoie le changement APPLIQUÉ (create → id RÉEL du forum) : on l'applique
+    // lui, pas l'optimiste, pour que l'écho WS `section:changed` (même id) soit idempotent.
+    const applied = await api.changeSection(courseId, sectionType, change);
     setDashboardPrograms((programs) =>
       programs.map((program) => ({
         ...program,
         courses: program.courses.map((course) =>
-          course.id === courseId ? applySectionChange(course, sectionType, change) : course
+          course.id === courseId ? applySectionChange(course, sectionType, applied) : course
         ),
       }))
     );
+    // Renvoyé au SectionEditorPopup : il réconcilie l'id RÉEL du forum créé dans son état
+    // interne (sinon un renommage/suppression enchaîné enverrait l'id temporaire au backend).
+    return applied;
   };
 
   // Synchronise la sidebar après un changement définitif dans l'éditeur de quiz
@@ -450,19 +555,19 @@ export default function Dashboard() {
   // Le AddCoursePopup attend la résolution : reste ouvert + erreur si rejet, ferme si succès.
   const handleSaveCourse = async (course: NewCourse) => {
     const created = await api.createCourse(course);
+    // upsert (pas append) : idempotent face à l'écho WS `course:created` de sa PROPRE
+    // création (sinon le créateur verrait le cours en double si l'écho arrive pendant l'await).
     setDashboardPrograms((programs) =>
-      programs.map((program) =>
-        course.programIds.includes(program.id)
-          ? { ...program, courses: [...program.courses, created] }
-          : program
-      )
+      course.programIds.reduce((acc, pid) => upsertCourse(acc, pid, created), programs)
     );
   };
 
   // Création d'un programme → ajouté à la liste (abonné d'office) via api.createProgram.
   const handleCreateProgram = async (program: NewProgram) => {
     const created = await api.createProgram(program);
-    setDashboardPrograms((programs) => [...programs, created]);
+    // upsert (pas append) : idempotent face à l'écho WS `subscription:added` de sa PROPRE
+    // création (sinon le créateur verrait le programme en double).
+    setDashboardPrograms((programs) => upsertProgram(programs, created));
   };
 
   // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
@@ -508,9 +613,11 @@ export default function Dashboard() {
     );
   };
 
-  // Assignation/retrait d'un rôle ↔ utilisateur (admin) via api.changeRole. Le
-  // RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister.
-  const handleRoleChange = (change: RoleChange) => api.changeRole(change);
+  // Assignation/retrait d'un rôle ↔ utilisateur DANS un programme via api.changeRole. Le
+  // RoleEditorPopup ignore le programme : le Dashboard injecte le `programId` (celui du popup
+  // « Gérer les rôles »). Le popup gère l'optimisme + rollback ; on ne fait que persister.
+  const handleRoleChange = (programId: number, change: RoleChange) =>
+    api.changeRole(programId, change);
 
   // Quitter un programme (via api.leaveProgram). On ferme la confirmation puis on
   // affiche un overlay de chargement ; en cas d'échec, un ErrorPopup (sans retrait).
@@ -530,6 +637,30 @@ export default function Dashboard() {
       setDashboardPrograms((programs) => programs.filter((program) => program.id !== programId));
     } catch {
       setLeaveError('Impossible de quitter le programme. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  // Supprimer un programme (admin, via api.deleteProgram) — le retire pour TOUS. Même flux
+  // que « quitter » : overlay de chargement, ErrorPopup en cas d'échec. Au succès : retrait
+  // de la liste + bascule du programme actif s'il disparaît. Les autres clients le retirent
+  // via l'écho WS `program:deleted` (onProgramRemove).
+  const handleConfirmDeleteProgram = async (programId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.deleteProgram(programId);
+      if (programId === activeProgramId) {
+        const fallback = dashboardPrograms.find((program) => program.id !== programId);
+        setActiveProgramId(fallback?.id ?? -1);
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => programs.filter((program) => program.id !== programId));
+    } catch {
+      setLeaveError('Impossible de supprimer le programme. Réessaie.');
     } finally {
       setLeaveLoading(false);
     }
@@ -556,6 +687,28 @@ export default function Dashboard() {
     }
   };
 
+  // Supprimer un cours (admin, via api.deleteCourse) — le retire pour TOUS. Même flux que
+  // « quitter » : overlay de chargement, ErrorPopup en cas d'échec. Au succès : retrait du
+  // cours du programme actif + reset de la sélection si c'était le cours ouvert. Les autres
+  // clients le retirent via l'écho WS `course:deleted` (onCourseDelete).
+  const handleConfirmDeleteCourse = async (courseId: number) => {
+    setPopup(null);
+    setLeaveError(null);
+    setLeaveLoading(true);
+    try {
+      await api.deleteCourse(courseId);
+      if (courseId === effectiveSelectedCourseId) {
+        setSelectedCourseId(undefined);
+        setSelectedChannelRef(undefined);
+      }
+      setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
+    } catch {
+      setLeaveError('Impossible de supprimer le cours. Réessaie.');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   // Auteur des messages envoyés = utilisateur connecte (colonnes utiles de User_).
   const currentUserAuthor: ChannelMessageAuthor = {
     id: currentUser.id,
@@ -575,10 +728,13 @@ export default function Dashboard() {
     clientMessageId: string
   ) => api.sendMessage(channelId, content, parentId, clientMessageId);
 
+  // L'édition/suppression porte sur un message du canal ACTUELLEMENT ouvert : l'API
+  // route via /api/forums/{forumID}/posts/{id}, où forumID = l'id du canal sélectionné.
   const handleEditMessage = (messageId: number, content: string) =>
-    api.editMessage(messageId, content);
+    api.editMessage(selectedChannelRef?.id ?? -1, messageId, content);
 
-  const handleDeleteMessage = (messageId: number) => api.deleteMessage(messageId);
+  const handleDeleteMessage = (messageId: number) =>
+    api.deleteMessage(selectedChannelRef?.id ?? -1, messageId);
 
   /* ───────────────────────────────────────────────────────────────────────────
    * FORUM ('Thread') — meme architecture API + temps reel que le chat.
@@ -587,8 +743,9 @@ export default function Dashboard() {
    * désabonnement au changement de forum. Scaffold WS : src/services/appSocket.ts.
    * ─────────────────────────────────────────────────────────────────────────── */
 
-  const handleFetchThreads = (forumId: number) => api.fetchThreads(forumId);
-  const handleFetchReplies = (postId: number) => api.fetchReplies(postId);
+  const handleFetchThreads = (forumId: number, before?: number, limit?: number) =>
+    api.fetchThreads(forumId, before, limit);
+  const handleFetchReplies = (forumId: number, postId: number) => api.fetchReplies(forumId, postId);
   const handleCreatePost = (
     forumId: number,
     content: string,
@@ -596,12 +753,15 @@ export default function Dashboard() {
     clientPostId: string,
     title?: string
   ) => api.createPost(forumId, content, parentId, clientPostId, title);
-  const handleEditPost = (postId: number, content: string) => api.editPost(postId, content);
-  const handleDeletePost = (postId: number) => api.deletePost(postId);
-  const handleVotePost = (postId: number, value: number) => api.votePost(postId, value);
+  const handleEditPost = (postId: number, content: string, title?: string) =>
+    api.editPost(selectedChannelRef?.id ?? -1, postId, content, title);
+  const handleDeletePost = (postId: number) => api.deletePost(selectedChannelRef?.id ?? -1, postId);
+  // Le vote porte sur un post du forum ACTUELLEMENT ouvert. `value` est la direction
+  // cliquée (±1) fournie par useForumThreads — le backend gère l'annulation (toggle).
+  const handleVotePost = (postId: number, value: number) =>
+    api.votePost(selectedChannelRef?.id ?? -1, postId, value as 1 | -1);
 
-  const activeProgram =
-    dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
+  const activeProgram = dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
   // Programme passé à MainPanel selon l'avancement des fetchs (chaînage programmes → cours) :
   // - programmes pas prêts (chargement / erreur)            → null            → NoProgramState
   // - programme prêt mais cours en cours de chargement      → sans ses cours  → NoCourseState
@@ -625,11 +785,16 @@ export default function Dashboard() {
     selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
   // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
   const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
-  openQuizIdRef.current = openQuizId;
+  // La ref (lue depuis les closures WS, ex. resync) est synchronisée hors rendu :
+  // muter une ref pendant le rendu est interdit (React 19 / react-hooks/refs).
+  useEffect(() => {
+    openQuizIdRef.current = openQuizId;
+  }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
-  const handleFetchMessages = (channelId: number) => api.fetchMessages(channelId);
+  const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>
+    api.fetchMessages(channelId, before, limit);
 
   const mobileUserInitial = getUserInitial(currentUser);
 
@@ -658,6 +823,11 @@ export default function Dashboard() {
     popup?.kind === 'leaveCourse'
       ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
       : null;
+  // Cours ciblé par la confirmation « Supprimer le cours » (dans le programme actif).
+  const deletingCourse =
+    popup?.kind === 'deleteCourse'
+      ? (activeProgram?.courses.find((course) => course.id === popup.courseId) ?? null)
+      : null;
   // Cours ciblé par la modale « Gestion MCP » (dans le programme actif).
   const mcpCourse =
     popup?.kind === 'mcp'
@@ -672,7 +842,9 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        mobileTitlePrefix={selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined}
+        mobileTitlePrefix={
+          selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
+        }
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
@@ -681,6 +853,7 @@ export default function Dashboard() {
             user={currentUser}
             loading={profileLoading}
             onEditProfile={handleEditProfile}
+            onManageAdmins={isAdmin ? handleManageAdmins : undefined}
             onLogout={handleLogout}
           />
         }
@@ -694,16 +867,19 @@ export default function Dashboard() {
 
               const nextProgram = dashboardPrograms.find((program) => program.id === nextProgramId);
 
-              setSelectedCourseId(getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined));
+              setSelectedCourseId(
+                getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined)
+              );
             }}
             onAddProgram={handleAddProgram}
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
-            isAdmin={isAdmin}
+            isGlobalAdmin={isAdmin}
             onAddCourseToProgram={handleAddCourseToProgram}
             onEditProgram={handleEditProgram}
             onManageRoles={handleManageRoles}
+            onDeleteProgram={handleDeleteProgram}
             onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
@@ -725,7 +901,8 @@ export default function Dashboard() {
             onSelectChannel={setSelectedChannelRef}
             onOpenChannel={handleOpenChannel}
             onSectionChange={handleSectionChange}
-            isAdmin={isAdmin}
+            // Gestion du contenu du programme actif (Enseignant / Administrateur / super-admin).
+            isAdmin={permsForProgram(activeProgramId).canManageContent}
             // CourseMenu ne reflète QUE le fetch des cours (qui n'a lieu qu'après
             // le succès du fetch programmes) → pas d'illusion de fetch parallèle.
             loading={coursesLoading}
@@ -735,7 +912,9 @@ export default function Dashboard() {
             onEditCourse={handleEditCourse}
             onOpenMcpManagement={handleOpenMcpManagement}
             onLeaveCourse={handleLeaveCourse}
+            onDeleteCourse={handleDeleteCourse}
             onEditProfile={handleEditProfile}
+            onManageAdmins={isAdmin ? handleManageAdmins : undefined}
             onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
             quizHandlers={quizEditorHandlers}
@@ -745,7 +924,7 @@ export default function Dashboard() {
       />
 
       <MainPanel
-        isAdmin={isAdmin}
+        isAdmin={permsForProgram(activeProgramId).canManageContent}
         program={mainPanelProgram}
         selectedCourse={effectiveSelectedCourseId ?? null}
         selectedChannel={selectedChannelRef ?? null}
@@ -765,7 +944,11 @@ export default function Dashboard() {
         onVotePost={handleVotePost}
         forumSocket={ws.forums}
         onAddProgram={handleAddProgram}
+        // Rejoindre un programme — offert à tous depuis l'état « aucun programme ».
+        onJoinProgram={handleJoinProgram}
         onAddCourse={handleAddCourse}
+        // Rejoindre un cours du programme actif — offert à tous depuis l'état « aucun cours ».
+        onJoinCourse={() => handleJoinCourses(activeProgramId)}
         onCreateChannel={handleCreateChannel}
         onCreateQuiz={handleCreateQuiz}
         onCreateForum={handleCreateForum}
@@ -774,6 +957,8 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
+        onSubscribeCodeGrading={subscribeCodeGrading}
+        onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
@@ -786,7 +971,9 @@ export default function Dashboard() {
         <CourseSectionEditor
           section={creatingSection}
           channels={selectedCourseChannels}
-          onChange={(change) => handleSectionChange(selectedCourse.id, creatingSection.type, change)}
+          onChange={(change) =>
+            handleSectionChange(selectedCourse.id, creatingSection.type, change)
+          }
           onClose={() => setCreatingSectionType(null)}
           courseId={selectedCourse.id}
           quizzes={selectedCourse.quizzes ?? []}
@@ -800,8 +987,10 @@ export default function Dashboard() {
       {popup?.kind === 'addCourse' && (
         <AddCoursePopup
           onClose={() => setPopup(null)}
-          programs={programChoices}
-          initialProgramIds={popup.programId >= 0 ? [popup.programId] : []}
+          // Programmes chargés PAR ÉTABLISSEMENT, filtrés à ceux que l'utilisateur peut gérer
+          // (admin/prof, ou tous si admin global/gardien). Le backend applique la même règle.
+          loadEstablishments={api.fetchEstablishments}
+          loadPrograms={api.fetchManageableProgramsInEstablishment}
           onSave={handleSaveCourse}
         />
       )}
@@ -831,6 +1020,16 @@ export default function Dashboard() {
           loadEstablishmentPrograms={loadEstablishmentPrograms}
           subscribedProgramIds={subscribedProgramIds}
           canCreateProgram={isAdmin}
+          // 3e option du menu (gardien uniquement) : étape de gestion des établissements.
+          canManageEstablishments={isGuardian}
+          loadEstablishments={api.fetchEstablishments}
+          onCreateEstablishment={api.createEstablishment}
+          onUpdateEstablishment={api.updateEstablishment}
+          onDeleteEstablishment={api.deleteEstablishment}
+          // Temps réel : le nombre de programmes d'un établissement se met à jour LIVE dans le
+          // popup (création de programme par soi ou un autre gardien). `ws` est stable (useMemo).
+          subscribeEstablishmentUpdates={ws.establishments.subscribe}
+          initialView={popup.view ?? 'menu'}
         />
       )}
 
@@ -874,27 +1073,76 @@ export default function Dashboard() {
         </div>
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && roleError && (
-        <ErrorPopup
-          content={roleError}
-          onClose={() => setPopup(null)}
-        />
+        <ErrorPopup content={roleError} onClose={() => setPopup(null)} />
       )}
       {popup?.kind === 'manageRoles' && popupProgram && !roleLoading && !roleError && roleData && (
         <RoleEditorPopup
           onClose={() => setPopup(null)}
           roles={roleData.roles}
           users={roleData.users}
-          onChange={handleRoleChange}
+          onChange={(change) => handleRoleChange(popupProgram.id, change)}
+          // Candidats chargés côté SERVEUR (pagination 10 par 10 + recherche BD) parmi les
+          // MEMBRES du programme (User_Program) n'ayant pas encore le rôle.
+          loadCandidates={(roleId, search, page, size) =>
+            api.fetchProgramRoleCandidates(popupProgram.id, roleId, search, page, size)
+          }
         />
       )}
+
+      {/* Gestion des ADMINISTRATEURS (rôles globaux / plateforme) — accès depuis le profil.
+          Gating par rôle :
+            - gardien : ajoute/retire admins généraux ET gardiens, sauf SON PROPRE
+              rôle gardien (anti-lockout) ;
+            - admin général : ajoute seulement des admins généraux, ne retire rien. */}
+      {popup?.kind === 'manageGlobalRoles' && globalRoleLoading && (
+        <div className={styles.loadingOverlay} role="status" aria-live="polite" aria-busy="true">
+          <Spinner size={36} />
+        </div>
+      )}
+      {popup?.kind === 'manageGlobalRoles' && !globalRoleLoading && globalRoleError && (
+        <ErrorPopup content={globalRoleError} onClose={() => setPopup(null)} />
+      )}
+      {popup?.kind === 'manageGlobalRoles' &&
+        !globalRoleLoading &&
+        !globalRoleError &&
+        globalRoleData && (
+          <RoleEditorPopup
+            onClose={() => setPopup(null)}
+            roles={globalRoleData.roles}
+            users={globalRoleData.users}
+            onChange={handleGlobalRoleChange}
+            // Candidats chargés côté SERVEUR (pagination 10 par 10 + recherche BD) : la liste
+            // « tous les utilisateurs » peut être grande, on ne la charge pas d'un coup.
+            loadCandidates={(roleId, search, page, size) =>
+              api.fetchGlobalRoleCandidates(roleId, search, page, size)
+            }
+            // Temps réel : la liste se met à jour LIVE si un autre admin/gardien modifie une
+            // assignation pendant que le popup est ouvert (room dédiée `adminRoles:0`).
+            subscribeUpdates={subscribeAdminRoles}
+            labels={{
+              title: 'Gérer les administrateurs',
+              subtitle: 'Administrateurs généraux et gardiens de la plateforme.',
+            }}
+            canAssign={(roleId) => {
+              const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
+              // Gardien : peut tout attribuer. Admin général : uniquement « Administrateur ».
+              return isGuardian || name === ROLE.ADMIN;
+            }}
+            canUnassign={(roleId, userId) => {
+              if (!isGuardian) return false; // l'admin général ne retire personne
+              const name = globalRoleData.roles.find((r) => r.id === roleId)?.name;
+              // Anti-lockout : un gardien ne peut pas retirer SON PROPRE rôle gardien.
+              if (name === ROLE.GUARDIAN && userId === currentUser.id) return false;
+              return true;
+            }}
+          />
+        )}
 
       {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
       {popup?.kind === 'mcp' && mcpCourse && (
         <McpManagementPopup
           courseId={mcpCourse.id}
-          courseLabel={
-            mcpCourse.code || mcpCourse.name || 'Cours'
-          }
+          courseLabel={mcpCourse.code || mcpCourse.name || 'Cours'}
           loadAnalyses={() => api.fetchCourseAnalyses(mcpCourse.id)}
           loadAnalysis={(id) => api.fetchCourseAnalysis(id)}
           loadPending={() => api.fetchPendingAnalysis(mcpCourse.id)}
@@ -941,6 +1189,18 @@ export default function Dashboard() {
         />
       )}
 
+      {/* Supprimer un programme — confirmation (menu contextuel, admin). Action DÉFINITIVE
+          et pour TOUS : suppression en cascade (abonnements, liens cours, rôles). */}
+      {popup?.kind === 'deleteProgram' && popupProgram && (
+        <DeleteConfirmationPopup
+          title="Supprimer le programme ?"
+          content={`Le programme « ${popupProgram.name} » sera supprimé définitivement pour tous ses membres (abonnements et accès retirés). Les cours partagés avec d'autres programmes sont conservés. Cette action est irréversible.`}
+          labels={{ confirm: 'Supprimer' }}
+          onDeleteConfirmation={() => handleConfirmDeleteProgram(popupProgram.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
       {/* Quitter un cours — confirmation (menu contextuel). */}
       {popup?.kind === 'leaveCourse' && leavingCourse && (
         <DeleteConfirmationPopup
@@ -948,6 +1208,18 @@ export default function Dashboard() {
           content={`Tu ne verras plus les canaux, quiz et forums de « ${leavingCourse.code ?? leavingCourse.title ?? 'ce cours'} ». Tu pourras le rejoindre à nouveau plus tard.`}
           labels={{ confirm: 'Quitter' }}
           onDeleteConfirmation={() => handleConfirmLeaveCourse(leavingCourse.id)}
+          onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* Supprimer un cours — confirmation (menu contextuel, admin). Action DÉFINITIVE et
+          pour TOUS : suppression en cascade (sections, quiz, forums, inscriptions). */}
+      {popup?.kind === 'deleteCourse' && deletingCourse && (
+        <DeleteConfirmationPopup
+          title="Supprimer le cours ?"
+          content={`Le cours « ${deletingCourse.code ?? deletingCourse.title ?? 'ce cours'} » et tout son contenu (canaux, quiz, forums) seront supprimés définitivement pour tous les inscrits. Cette action est irréversible.`}
+          labels={{ confirm: 'Supprimer' }}
+          onDeleteConfirmation={() => handleConfirmDeleteCourse(deletingCourse.id)}
           onClose={() => setPopup(null)}
         />
       )}
@@ -996,9 +1268,7 @@ function mapProgramCourses(
   mapCourse: (course: Course) => Course
 ): DemoProgram[] {
   return programs.map((program) =>
-    program.id === programId
-      ? { ...program, courses: program.courses.map(mapCourse) }
-      : program
+    program.id === programId ? { ...program, courses: program.courses.map(mapCourse) } : program
   );
 }
 
@@ -1042,10 +1312,35 @@ function upsertCourse(programs: DemoProgram[], programId: number, course: Course
     return {
       ...program,
       courses: exists
-        ? program.courses.map((c) => (c.id === course.id ? course : c))
+        ? // Cours existant → fusion META seulement (titre/code). Ses sections (quiz, canaux,
+          // forums) ont leurs PROPRES events WS (quiz:*, section:changed) : un `course:edited`
+          // ne doit PAS les écraser (son DTO ne les porte pas), sinon elles disparaîtraient.
+          program.courses.map((c) =>
+            c.id === course.id ? { ...c, title: course.title, code: course.code } : c
+          )
         : [...program.courses, course],
     };
   });
+}
+
+/**
+ * Met à jour la MÉTA (titre/code) d'un cours DÉJÀ présent dans un programme. N'AJOUTE
+ * jamais de cours : les events WS `course:created`/`course:edited` sont diffusés à TOUS les
+ * abonnés du programme, mais la sidebar ne liste que les cours où l'utilisateur est INSCRIT
+ * (on n'y entre que par une inscription). Un cours absent (= non inscrit) → no-op, sinon un
+ * cours fraîchement créé apparaîtrait comme « rejoint » chez des non-inscrits.
+ */
+function updateCourseMeta(programs: DemoProgram[], programId: number, course: Course): DemoProgram[] {
+  return programs.map((program) =>
+    program.id === programId
+      ? {
+          ...program,
+          courses: program.courses.map((c) =>
+            c.id === course.id ? { ...c, title: course.title, code: course.code } : c
+          ),
+        }
+      : program
+  );
 }
 
 /** Retire un cours d'un programme. */
@@ -1095,11 +1390,17 @@ function applyToForums(
       );
     case 'delete':
       return reposition(forums.filter((f) => !(inSection(f) && String(f.id) === change.id)));
-    case 'create':
-      return reposition([
-        ...forums,
-        { id: nextNumericId(forums), title: change.item.name, fType: fType },
-      ]);
+    case 'create': {
+      // id RÉEL fourni par le backend (via handleSectionChange / écho WS) → on l'utilise ;
+      // à défaut un id temporaire. Dédup par id : l'écho WS de sa propre création (ou une
+      // double réception) ne crée pas de doublon.
+      const id =
+        change.item.id != null && change.item.id !== ''
+          ? Number(change.item.id)
+          : nextNumericId(forums);
+      if (forums.some((f) => f.id === id)) return reposition(forums);
+      return reposition([...forums, { id, title: change.item.name, fType: fType }]);
+    }
     case 'reorder': {
       // On réordonne uniquement le sous-ensemble du fType ; les autres forums
       // gardent leur ordre relatif (les sections sont affichées séparément).

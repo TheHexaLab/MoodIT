@@ -8,18 +8,26 @@ import type { NoCourseStateLabels } from './types.ts';
 export type { NoCourseStateLabels } from './types.ts';
 
 interface NoCourseStateProps {
-  /** Utilisateur administrateur : affiche le sous-titre admin et le bouton d'ajout. */
+  /** Utilisateur administrateur : affiche le sous-titre admin et le bouton de creation. */
   isAdmin?: boolean;
   /** Ouvre le formulaire d'ajout de cours (action reservee a l'admin). */
   onAddCourse?: () => void;
+  /** Ouvre le popup « rejoindre un cours » (action offerte a TOUS : admin et utilisateur). */
+  onJoinCourse?: () => void;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<NoCourseStateLabels>;
 }
 
 /**
- * Etat 2 — le programme selectionne ne contient aucun cours.
+ * Etat 2 — le programme selectionne ne contient aucun cours. Tout le monde peut « rejoindre un
+ * cours » ; l'admin peut en plus en « creer » un.
  */
-const NoCourseState: React.FC<NoCourseStateProps> = ({ isAdmin = false, onAddCourse, labels }) => {
+const NoCourseState: React.FC<NoCourseStateProps> = ({
+  isAdmin = false,
+  onAddCourse,
+  onJoinCourse,
+  labels,
+}) => {
   const t = { ...defaultLabels, ...labels };
 
   return (
@@ -31,11 +39,20 @@ const NoCourseState: React.FC<NoCourseStateProps> = ({ isAdmin = false, onAddCou
       <h1 className={styles.emptyMainTitle}>{t.title}</h1>
       <p className={styles.emptyMainSubtitle}>{isAdmin ? t.adminSubtitle : t.userSubtitle}</p>
 
-      {isAdmin && (
-        <button type="button" className={styles.emptyMainAction} onClick={onAddCourse}>
-          +<span>{t.addCourse}</span>
+      <div className={styles.emptyCourseActions}>
+        <button type="button" className={styles.emptyMainAction} onClick={onJoinCourse}>
+          +<span>{t.joinCourse}</span>
         </button>
-      )}
+        {isAdmin && (
+          <button
+            type="button"
+            className={styles.emptyMainActionOutline}
+            onClick={onAddCourse}
+          >
+            +<span>{t.addCourse}</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 };

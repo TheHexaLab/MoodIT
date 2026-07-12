@@ -149,9 +149,74 @@ services:
       ollama-init:
         condition: service_completed_successfully
 
+  #Piston (sandbox d'exécution du code étudiant NON FIABLE) --------------
+  # Moteur open-source multi-langages : isolation (isolate/nsjail), pas de réseau à l'exécution,
+  # limites CPU/mémoire/temps. `privileged` requis par isolate (cgroups/namespaces). Les paquets
+  # de langages sont installés dans le volume piston_data (persistés entre redémarrages). Exposé
+  # UNIQUEMENT sur le réseau interne — jamais au gateway.
+  piston:
+    # Image Piston patchée (limite body-parser relevée pour les bundles JS HTML/JSX/TSX). cf. piston/Dockerfile
+    build: ./piston
+    container_name: moodit_piston
+    privileged: true
+    volumes:
+      - piston_data:/piston/packages
+    networks:
+      - internal
+
+  #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
+  # Idempotent (paquets persistés dans piston_data). Les PAQUETS installés (à gauche) diffèrent
+  # parfois du nom de RUNTIME exposé par Piston (node→javascript, gcc→c/c++, mono→csharp) : on
+  # installe par paquet, on vérifie par runtime. Ajouter ici chaque langage supporté par
+  # l'assembleur de execution-service.
+  piston-init:
+    image: curlimages/curl:latest
+    container_name: moodit_piston_init
+    depends_on:
+      - piston
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |-
+        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do
+          echo "attente de piston..."; sleep 2;
+        done
+        for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
+                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2 sqlite3:3.36.0; do
+          lang=$${pkg%%:*}; ver=$${pkg##*:};
+          echo "installation $$lang $$ver...";
+          curl -sS -X POST http://piston:2000/api/v2/packages \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
+        done
+        rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
+        for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
+          echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
+        done
+        echo "piston pret (12 runtimes ; + JSON via node)";
+    restart: "no"
+    networks:
+      - internal
+
+  #Execution service (exécute le code étudiant via le sandbox Piston) ----
+  execution-service:
+    build: ./execution-service
+    container_name: moodit_execution
+    env_file:
+      - .env.docker
+    environment:
+      PISTON_URL: http://piston:2000   # sandbox sur le réseau interne
+    networks:
+      - internal
+    depends_on:
+      # Ne démarre qu'une fois les langages installés dans Piston.
+      piston-init:
+        condition: service_completed_successfully
+
 volumes:
   postgres_data:
   ollama_data:
+  piston_data:
 
 networks:
   internal:

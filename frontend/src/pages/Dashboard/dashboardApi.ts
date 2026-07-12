@@ -1,85 +1,61 @@
 // Couche « API » du Dashboard, regroupée ici pour un seul point de bascule vers le
-// vrai backend. POUR L'INSTANT chaque fonction simule l'appel réseau (latence +
-// échec optionnel) et renvoie des données mock — mais la signature est déjà celle
-// attendue. Le Dashboard se contente d'orchestrer l'état autour.
+// vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
+// Dashboard se contente d'orchestrer l'état autour.
 //
-// TODO (global) : remplacer le corps de chaque fonction `simulate*` ci-dessous
-// par un vrai apiFetch(...) (cf. src/helpers/api.ts), sans toucher au Dashboard.
+// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE) et evaluateCode
+// (service d'exécution). Elles utilisent encore les helpers simulate* ci-dessous.
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
 import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
-import type { RoleChange } from '../../components/RoleEditorPopup/types.ts';
+import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import type {
   AnswerResponse,
   ChannelMessage,
   DragItemResponse,
+  ForumPost,
   ForumResponse,
+  PostVoteUserDTO,
   QuestionResponse,
 } from '../../types/domain.ts';
-import {
-  getMockForumReplies,
-  getMockForumThreads,
-} from '../../components/MainPanel/ForumView/forumThreads.ts';
 //import { normalizeCourseChannelsFromSources } from '../../components/CourseChannelList/courseChannelSources.ts';
 import type {
   Course,
   CourseForumsResponse,
+  ManagedEstablishment,
   McpResponse,
   McpResponseSummary,
   QuizDetailResponse,
   QuizResponse,
 } from '../../types/domain.ts';
 //import { getEstablishmentPrograms } from '../../mocks/subscriptionData.ts';
-import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
+//import { getProgramRoles, getProgramUsers } from '../../mocks/roleData.ts';
 //import { getDashboardPrograms } from './dashboardDataSource.ts';
 import type { DemoProgram } from '../../mocks/dashboardData.ts';
-import {
-  type Language,
-  type QuestionTypeOption,
-  type Quiz,
-} from '../../types/domain.ts';
+import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
   type QuizResult,
   type QuizSubmission,
+  type RunCodeInput,
+  type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
-import { DEFAULT_LANGUAGES } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
+import type { Program as AddCourseProgram } from '../../components/AddCoursePopup/types.ts';
 // Ré-exporté pour que le Dashboard n'ait pas à dépendre du dossier mock.
 export type { DemoProgram };
-
-// ── Simulation réseau (à retirer au branchement réel) ──────────────────────────
-const SIMULATE_DELAY = 1000;
-const SIMULATE_SEND_FAILURE: boolean = false;
-const SIMULATE_FETCH_FAILURE: boolean = false;
-
-const wait = () => new Promise((resolve) => setTimeout(resolve, SIMULATE_DELAY));
-
-/** Latence + échec simulés d'une LECTURE (GET). */
-async function simulateFetch(errorMessage: string): Promise<void> {
-  await wait();
-  if (SIMULATE_FETCH_FAILURE) throw new Error(errorMessage);
-}
-
-/** Latence + échec simulés d'une ÉCRITURE (POST/PATCH/DELETE). */
-async function simulateWrite(errorMessage: string): Promise<void> {
-  await wait();
-  if (SIMULATE_SEND_FAILURE) throw new Error(errorMessage);
-}
 
 // ── Programmes / cours (chargement) ────────────────────────────────────────────
 
 /**
- * TODO — Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les
- * cours sont chargés séparément (fetchCourses) à l'entrée dans un programme : on
- * renvoie donc ici les programmes SANS leurs cours.
- * DONE
+ * Récupérer la liste des programmes auxquels l'utilisateur est abonné. Les cours sont
+ * chargés séparément (fetchCourses) à l'entrée dans un programme : on renvoie donc ici
+ * les programmes SANS leurs cours.
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
   console.log('fetchPrograms');
@@ -90,7 +66,7 @@ export async function fetchPrograms(): Promise<DemoProgram[]> {
   return data.map((p: DemoProgram) => ({ ...p, courses: [] }));
 }
 
-/** TODO — Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
+/** Récupérer les cours d'un programme (avec leurs canaux/quiz/forums). */
 export async function fetchCourses(programId: number): Promise<Course[]> {
   const userId = localStorage.getItem('moodit_user_id');
 
@@ -145,6 +121,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       qTypeId: q.qTypeId,
       totalScore: q.totalScore,
       orderIndex: q.orderIndex,
+      language: q.language,
       startCode: q.startCode,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
@@ -157,6 +134,11 @@ function toQuiz(data: QuizDetailResponse): Quiz {
         correctOrder: d.correctOrder,
         groupName: d.groupName,
       })),
+      // Catégories (zones) d'une association : exposées même en passation (le mapping item→groupe
+      // reste masqué). Fallback dérivé des items côté rendu si absent (anciens quiz / éditeur).
+      groups: q.groups,
+      // Harnais : présents seulement via /edit (éditeur) ; absents en passation étudiante.
+      testCases: q.testCases,
     })),
   };
 }
@@ -218,10 +200,6 @@ export async function fetchQuizzes(courseId: number): Promise<Quiz[]> {
 }
 
 /**
- * TODO — Langages d'exécution disponibles (table Language). Alimente le sélecteur de
- * langage de l'éditeur de quiz. MOCK : liste par défaut (côté CODE, non branché ici).
- */
-/**
  * Types de question disponibles (table Q_Type : id + name FR). Alimente le sélecteur
  * de type de l'éditeur de question.
  */
@@ -231,10 +209,14 @@ export async function fetchQuestionTypes(): Promise<QuestionTypeOption[]> {
   return await res.json();
 }
 
+/**
+ * Langages d'exécution disponibles (table Language) : alimente le sélecteur de langage de
+ * l'éditeur de code (templates de harnais / code de départ inclus).
+ */
 export async function fetchLanguages(): Promise<Language[]> {
-  await simulateFetch('Échec simulé (chargement des langages)');
-  console.log(DEFAULT_LANGUAGES);
-  return DEFAULT_LANGUAGES;
+  const res = await apiFetch('/api/languages');
+  if (!res.ok) throw new Error('Échec chargement des langages');
+  return await res.json();
 }
 
 /**
@@ -269,20 +251,40 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * TODO — Évaluer une question Code : EXÉCUTE chaque harnais contre le `code` soumis
- * (côté serveur, dans le langage `languageId`) et renvoie le verdict par test. MOCK :
- * le code ne tourne pas au navigateur → verdict illustratif (1 test sur 2 passe si le
- * code a été modifié). À remplacer par un apiFetch vers le service d'exécution.
+ * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
+ * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * bouton « Tester » de l'éditeur (sans persistance).
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  await simulateWrite('Échec simulé (évaluation du code)');
-  console.log('[api] Évaluation du code (langage', input.languageId, ') :', input);
-  const attempted = input.code.trim().length > 0;
-  return input.testCases.map((t, i) => ({
-    name: t.name,
-    passed: attempted && i % 2 === 0,
-    weight: t.weight,
-  }));
+  const res = await apiFetch('/exec/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      language: input.language,
+      code: input.code,
+      testCases: input.testCases.map((t) => ({
+        name: t.name,
+        harnessCode: t.harnessCode,
+        weight: t.weight,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Échec de l'évaluation du code");
+  return await res.json();
+}
+
+/**
+ * Exécute un code TEL QUEL (sans harnais) dans le sandbox et renvoie sa sortie brute
+ * (stdout/stderr/exit). Sert au bouton « play » des éditeurs de code (étudiant + onglet « Tester »).
+ */
+export async function runCode(input: RunCodeInput): Promise<RunResult> {
+  const res = await apiFetch('/exec/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: input.language, code: input.code }),
+  });
+  if (!res.ok) throw new Error("Échec de l'exécution du code");
+  return await res.json();
 }
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────
@@ -335,20 +337,128 @@ export async function reorderQuizzes(courseId: number, quizIds: number[]): Promi
 }
 
 /**
- * TODO — Charger les données du gestionnaire de rôles d'un programme :
- * la liste des rôles attribuables ET la liste des membres avec le rôle de chacun. Alimente le
- * RoleEditorPopup.
+ * Charger les données du gestionnaire de rôles d'un programme : la liste des rôles
+ * attribuables ET la liste des membres avec le rôle de chacun. Alimente le RoleEditorPopup.
  */
 export async function fetchProgramRoles(programId: number) {
-  await simulateFetch('fetch roles failed');
-  return { roles: getProgramRoles(), users: getProgramUsers(programId) };
+  const [rolesRes, usersRes] = await Promise.all([
+    // scope=program → seuls les rôles attribuables dans un programme (pas Gardien).
+    apiFetch('/api/roles?scope=program'),
+    apiFetch(`/api/programs/${programId}/users`),
+  ]);
+
+  if (!rolesRes.ok || !usersRes.ok) {
+    throw new Error('fetch roles failed');
+  }
+
+  const users = (await usersRes.json()).map((u: User) => ({
+    ...u,
+    role_ids: u.roles ?? [],
+  }));
+
+  return {
+    roles: await rolesRes.json(),
+    users: users,
+  };
+}
+
+/**
+ * Charger les données du gestionnaire des ADMINISTRATEURS (rôles globaux, plateforme) : les
+ * rôles attribuables globalement (Administrateur, Gardien) ET tous les utilisateurs
+ * avec leurs rôles globaux (User_Role). Alimente le popup accessible depuis le profil.
+ */
+export async function fetchGlobalRoles() {
+  const [rolesRes, usersRes] = await Promise.all([
+    apiFetch('/api/roles?scope=global'),
+    apiFetch('/api/roles/global/users'),
+  ]);
+
+  if (!rolesRes.ok || !usersRes.ok) {
+    throw new Error('fetch global roles failed');
+  }
+
+  const users = (await usersRes.json()).map((u: User) => ({
+    ...u,
+    role_ids: u.roles ?? [],
+  }));
+
+  return {
+    roles: await rolesRes.json(),
+    users: users,
+  };
+}
+
+/**
+ * Candidats paginés à l'attribution d'un rôle GLOBAL (utilisateurs n'ayant pas `roleId`),
+ * filtrés côté serveur par `search`. Alimente le sélecteur d'ajout du popup admins (infinite
+ * scroll + recherche BD). Renvoie une page de `size` utilisateurs au plus.
+ */
+export async function fetchGlobalRoleCandidates(
+  roleId: number,
+  search: string,
+  page: number,
+  size: number
+): Promise<User[]> {
+  const params = new URLSearchParams({
+    roleId: String(roleId),
+    search,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await apiFetch(`/api/roles/global/candidates?${params.toString()}`);
+  if (!res.ok) throw new Error('Échec chargement des candidats');
+  return (await res.json()).map((u: User) => ({ ...u, role_ids: u.roles ?? [] }));
+}
+
+/**
+ * Candidats paginés à l'attribution d'un rôle DANS un programme : MEMBRES du programme
+ * (User_Program) n'ayant pas `roleId`, filtrés côté serveur par `search`. Alimente le sélecteur
+ * d'ajout du popup « Gérer les rôles » (infinite scroll + recherche BD).
+ */
+export async function fetchProgramRoleCandidates(
+  programId: number,
+  roleId: number,
+  search: string,
+  page: number,
+  size: number
+): Promise<User[]> {
+  const params = new URLSearchParams({
+    roleId: String(roleId),
+    search,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await apiFetch(
+    `/api/programs/${programId}/role-candidates?${params.toString()}`
+  );
+  if (!res.ok) throw new Error('Échec chargement des candidats');
+  return (await res.json()).map((u: User) => ({ ...u, role_ids: u.roles ?? [] }));
+}
+
+/**
+ * Assigner ou retirer un rôle GLOBAL (plateforme) à un utilisateur (User_Role). Le popup gère
+ * l'optimisme + rollback ; on ne fait que persister. Enforcement front (le backend n'y re-vérifie
+ * pas les droits de l'appelant).
+ */
+export async function changeGlobalRole(change: RoleChange): Promise<void> {
+  const res = await apiFetch(`/api/roles/global/change`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(change),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec assignation de rôle global');
+  }
 }
 
 // ── Établissements / catalogue (AddSubscriptionPopup) ──────────────────────────
 
 /**
- * TODO — Lister les établissements dans lesquels l'utilisateur peut CRÉER un
- * programme (1re étape du AddSubscriptionPopup en mode création).
+ * Lister les établissements dans lesquels l'utilisateur peut CRÉER un programme
+ * (1re étape du AddSubscriptionPopup en mode création).
  */
 export async function fetchEstablishmentsForCreate() {
   const res = await apiFetch('/api/establishments');
@@ -357,8 +467,8 @@ export async function fetchEstablishmentsForCreate() {
 }
 
 /**
- * TODO — Lister les établissements dont l'utilisateur peut REJOINDRE des programmes
- * existants (1re étape du AddSubscriptionPopup en mode adhésion).
+ * Lister les établissements dont l'utilisateur peut REJOINDRE des programmes existants
+ * (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
   console.log('fetchEstablishmentsForJoin');
@@ -372,8 +482,63 @@ export async function fetchEstablishmentsForJoin() {
 }
 
 /**
- * TODO — Lister le catalogue des programmes existants d'un établissement
- * pour que l'utilisateur choisisse ceux qu'il veut rejoindre.
+ * Lister TOUS les établissements pour le gestionnaire des établissements (gardien) : id, nom,
+ * domaine courriel, nombre de programmes. Réutilise GET /api/establishments.
+ */
+export async function fetchEstablishments(): Promise<ManagedEstablishment[]> {
+  const res = await apiFetch('/api/establishments');
+  if (!res.ok) throw new Error('Échec chargement des établissements');
+  return res.json();
+}
+
+/**
+ * Sentinelle levée quand le domaine courriel est déjà pris (409 : contrainte UNIQUE côté BD).
+ * Le popup l'intercepte pour afficher un message inline plutôt qu'une erreur générique.
+ */
+export const DUPLICATE_DOMAIN = 'duplicate-domain';
+
+/** Créer un établissement (gardien). Renvoie l'établissement persisté. */
+export async function createEstablishment(
+  name: string,
+  domainEmail: string
+): Promise<ManagedEstablishment> {
+  const res = await apiFetch('/api/establishments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, domainEmail }),
+  });
+  if (res.status === 409) throw new Error(DUPLICATE_DOMAIN);
+  if (!res.ok) throw new Error("Échec de la création de l'établissement");
+  return res.json();
+}
+
+/** Modifier un établissement (gardien). Renvoie l'établissement à jour. */
+export async function updateEstablishment(
+  establishmentId: number,
+  update: { name?: string; domainEmail?: string }
+): Promise<ManagedEstablishment> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (res.status === 409) throw new Error(DUPLICATE_DOMAIN);
+  if (!res.ok) throw new Error("Échec de la modification de l'établissement");
+  return res.json();
+}
+
+/**
+ * Supprimer un établissement (gardien). DESTRUCTIF : supprime en cascade ses programmes
+ * (et leurs cours/membres) côté BD. À confirmer avant appel.
+ */
+export async function deleteEstablishment(establishmentId: number): Promise<void> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error("Échec de la suppression de l'établissement");
+}
+
+/**
+ * Lister le catalogue des programmes existants d'un établissement pour que l'utilisateur
+ * choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
   console.log('fetchEstablishmentPrograms');
@@ -387,7 +552,20 @@ export async function fetchEstablishmentPrograms(establishmentId: number) {
 }
 
 /**
- * TODO — Lister les cours rejoignables d'un programme.
+ * Programmes d'un établissement dans lesquels l'utilisateur peut AJOUTER un cours : ceux où il est
+ * Administrateur/Enseignant (User_Program_Role) ; un admin global / gardien les voit tous. Alimente
+ * le popup « Créer un cours » (la liste dépend de l'établissement choisi).
+ */
+export async function fetchManageableProgramsInEstablishment(
+  establishmentId: number
+): Promise<AddCourseProgram[]> {
+  const res = await apiFetch(`/api/establishments/${establishmentId}/manageable-programs`);
+  if (!res.ok) throw new Error('Échec chargement des programmes gérables');
+  return await res.json();
+}
+
+/**
+ * Lister les cours rejoignables d'un programme.
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
@@ -408,9 +586,8 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
 }
 
 /**
- * TODO — Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ rattaché (ses inscriptions).
- * Sert à pré-cocher le JoinCoursesPopup, indépendamment
- * de l'état (lazy-loaded) du Dashboard. Mock : tous les cours du programme.
+ * Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ inscrit. Sert à
+ * pré-cocher le JoinCoursesPopup, indépendamment de l'état (lazy-loaded) du Dashboard.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
   console.log('fetchJoinedCourseIds');
@@ -460,9 +637,8 @@ export async function fetchPendingAnalysis(courseId: number): Promise<boolean> {
 // ── Programmes / cours (écriture) ──────────────────────────────────────────────
 
 /**
- * TODO — Créer un cours (titre, code) et le rattacher aux programmes choisis
- * (`programIds`). Renvoie le cours persisté (id attribué par le « serveur ») pour
- * que le Dashboard l'insère dans sa liste.
+ * Créer un cours (titre, code) et le rattacher aux programmes choisis (`programIds`).
+ * Renvoie le cours persisté (id attribué par le serveur) pour que le Dashboard l'insère.
  */
 export async function createCourse(course: NewCourse): Promise<Course> {
   const res = await apiFetch('/api/programs/courses', {
@@ -480,8 +656,8 @@ export async function createCourse(course: NewCourse): Promise<Course> {
 }
 
 /**
- * TODO — Créer un nouveau programme et y abonner l'utilisateur d'office. Renvoie le
- * programme persisté (id attribué par le « serveur ») pour l'ajouter à la liste.
+ * Créer un nouveau programme et y abonner l'utilisateur d'office. Renvoie le programme
+ * persisté (id attribué par le serveur) pour l'ajouter à la liste.
  */
 export async function createProgram(program: NewProgram): Promise<DemoProgram> {
   const res = await apiFetch('/api/establishments/programs', {
@@ -503,8 +679,8 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
 }
 
 /**
- * TODO — Abonner l'utilisateur aux programmes sélectionnés du catalogue. Renvoie les
- * programmes ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
+ * Abonner l'utilisateur aux programmes sélectionnés du catalogue. Renvoie les programmes
+ * ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
  */
 export async function joinPrograms(selection: JoinSelection): Promise<DemoProgram[]> {
   const userId = localStorage.getItem('moodit_user_id');
@@ -532,32 +708,63 @@ export async function joinPrograms(selection: JoinSelection): Promise<DemoProgra
 }
 
 /**
- * TODO — Mettre à jour un cours (code, titre) et, le cas échéant, son rattachement
- * aux programmes (relation many-to-many program_course).
+ * Mettre à jour un cours (code, titre) et, le cas échéant, son rattachement aux
+ * programmes (relation many-to-many program_course).
  */
 export async function updateCourse(courseId: number, update: CourseUpdate): Promise<void> {
-  console.log('updateCourse');
-  await simulateWrite('Échec simulé (modification de cours)');
-  console.log(courseId, update);
+  const res = await apiFetch(`/api/courses/${courseId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error('Échec modification du cours');
 }
 
-/** TODO — Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */
+/** Mettre à jour les champs d'un programme : nom, code, cohorte, couleur. */
 export async function updateProgram(programId: number, update: ProgramUpdate): Promise<void> {
-  await simulateWrite('Échec simulé (modification de programme)');
-  console.log(programId, update);
+  const res = await apiFetch(`/api/programs/${programId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) throw new Error('Échec modification du programme');
 }
 
-/** TODO — Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
+/** Désabonner l'utilisateur d'un programme (le retirer de sa liste). */
 export async function leaveProgram(programId: number): Promise<void> {
-  await simulateWrite('Échec simulé (quitter le programme)');
-  console.log(programId);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/programs/${programId}/users/${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Échec quitter le programme');
 }
 
-/** TODO — Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
+/**
+ * Supprimer un programme (admin) — le retire pour TOUS ses abonnés (cascade BD :
+ * abonnements, liens cours, rôles ; les cours partagés restent). Le backend diffuse
+ * `program:deleted` sur la room de chaque abonné.
+ */
+export async function deleteProgram(programId: number): Promise<void> {
+  const res = await apiFetch(`/api/programs/${programId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Échec suppression du programme');
+}
+
+/** Retirer l'utilisateur d'un cours (le retirer de sa liste de cours). */
 export async function leaveCourse(courseId: number): Promise<void> {
-  console.log('leaveCourse');
-  await simulateWrite('Échec simulé (quitter le cours)');
-  console.log(courseId);
+  const userId = localStorage.getItem('moodit_user_id');
+  const res = await apiFetch(`/api/courses/${courseId}/users/${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Échec quitter le cours');
+}
+
+/**
+ * Supprimer un cours (admin) — le retire pour TOUS ses programmes (cascade BD : sections,
+ * quiz, forums, inscriptions). Le backend diffuse `course:deleted` sur chaque programme.
+ */
+export async function deleteCourse(courseId: number): Promise<void> {
+  const res = await apiFetch(`/api/courses/${courseId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Échec suppression du cours');
 }
 
 /**
@@ -573,9 +780,9 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
 }
 
 /**
- * TODO — Inscrire l'utilisateur aux cours choisis d'un programme. Renvoie les cours
- * rejoints (forme `Course`, sans canaux) pour que le Dashboard les fusionne dans le
- * programme. `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
+ * Inscrire l'utilisateur aux cours choisis d'un programme. Renvoie les cours rejoints
+ * (forme `Course`, sans canaux) pour que le Dashboard les fusionne dans le programme.
+ * `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
  */
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
   console.log('joinCourses', programId);
@@ -608,16 +815,18 @@ export async function joinCourses(programId: number, courseIds: number[]): Promi
 }
 
 /**
- * TODO — Persister une modification de la structure d'un cours : ajout, renommage,
- * suppression ou réordonnancement d'une section (canal, quiz ou forum). `change`
- * décrit l'opération exacte ; `sectionType` indique la famille de section visée.
+ * Persiste une modification de structure d'un cours (canal 'text' / forum) : ajout,
+ * renommage, suppression ou réordonnancement. `change` décrit l'opération. Endpoint DÉDIÉ
+ * `/sections` (distinct de PATCH /courses/{id} qui édite titre/code). Renvoie le changement
+ * APPLIQUÉ — pour un `create`, avec l'id RÉEL du forum (réconciliation de l'optimiste). Le
+ * backend diffuse `section:changed` en WS. (Les quiz passent par leurs propres handlers.)
  */
 export async function changeSection(
   courseId: number,
   sectionType: string,
   change: ItemChange
-): Promise<void> {
-  const res = await apiFetch(`/api/courses/${courseId}`, {
+): Promise<ItemChange> {
+  const res = await apiFetch(`/api/courses/${courseId}/sections`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -631,19 +840,21 @@ export async function changeSection(
   if (!res.ok) {
     throw new Error('Échec modification de section');
   }
+  return (await res.json()) as ItemChange;
 }
 
 /**
- * TODO — Attribuer ou retirer un rôle à un membre dans un programme (le RoleEditorPopup
- * gère l'optimisme + rollback : on ne fait que persister le changement).
+ * Attribuer ou retirer un rôle à un membre DANS un programme (INSERT/DELETE User_Program_Role).
+ * Le RoleEditorPopup gère l'optimisme + rollback ; on ne fait que persister. Le popup ignore
+ * le programme : le Dashboard fournit le `programId` (les rôles sont scopés au programme).
  */
-export async function changeRole(change: RoleChange): Promise<void> {
+export async function changeRole(programId: number, change: RoleChange): Promise<void> {
   const res = await apiFetch(`/api/roles/change`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(change),
+    body: JSON.stringify({ ...change, programId }),
   });
 
   if (!res.ok) {
@@ -654,35 +865,37 @@ export async function changeRole(change: RoleChange): Promise<void> {
 // ── Chat ('Discussion') ────────────────────────────────────────────────────────
 
 /**
- * TODO — Charger l'historique des messages d'un canal de chat. Le mock recherche le
- * canal dans les programmes mock (par id) et renvoie ses messages.
+ * Charger une PAGE de messages d'un canal (infinite scroll « plus ancien »). `before` = id du
+ * plus ancien message déjà chargé (absent = page la plus récente) ; `limit` = taille de page.
+ * Le backend renvoie du plus récent au plus ancien ; le hook re-trie chronologiquement.
  */
-export async function fetchMessages(channelId: number): Promise<ChannelMessage[]> {
-  console.log('fetchMessages');
-  const res = await apiFetch(`/api/forums/${channelId}/messages`);
+export async function fetchMessages(
+  channelId: number,
+  before?: number,
+  limit = 30
+): Promise<ChannelMessage[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before != null) params.set('before', String(before));
+  const res = await apiFetch(`/api/forums/${channelId}/messages?${params.toString()}`);
 
   if (!res.ok) {
     throw new Error('Échec chargement des messages');
   }
 
-  const messages = await res.json();
-
-  console.log('Messages: ', messages);
-
-  return messages;
+  return res.json();
 }
 
 /**
- * TODO — Publier un message dans le canal `channelId` (réponse à un autre si `parentId`).
- * Devra RENVOYER le message persisté (id réel) en conservant le `clientMessageId`, afin
- * de réconcilier l'affichage optimiste et de dédupliquer l'écho reçu par WebSocket.
+ * Publier un message dans le canal `channelId` (réponse à un autre si `parentId`). Renvoie
+ * le message persisté (id réel) en conservant le `clientMessageId`, pour réconcilier
+ * l'affichage optimiste et dédupliquer l'écho reçu par WebSocket.
  */
 export async function sendMessage(
   channelId: number,
   content: string,
   parentId: number | null,
   clientMessageId: string
-): Promise<void> {
+): Promise<ChannelMessage> {
   console.log('sendMessage');
   const res = await apiFetch('/api/forums/messages', {
     method: 'POST',
@@ -700,45 +913,121 @@ export async function sendMessage(
   if (!res.ok) {
     throw new Error("Échec de l'envoi du message");
   }
+
+  // 201 → message persisté : on le renvoie pour remplacer l'optimiste (id réel). On
+  // reporte `clientMessageId` (absent du DTO serveur) pour la dédup de l'écho WS.
+  const saved: PostVoteUserDTO = await res.json();
+  return {
+    id: saved.id,
+    content: saved.content,
+    createdAt: saved.createdAt,
+    author: saved.author,
+    postParentId: saved.postParentId,
+    clientMsgId: clientMessageId,
+  };
 }
 
-/** TODO — Modifier le contenu d'un message existant. */
-export async function editMessage(messageId: number, content: string): Promise<void> {
-  await simulateWrite('Échec simulé (modification de message)');
+/** Modifier le contenu d'un message existant. */
+export async function editMessage(
+  forumID: number,
+  messageId: number,
+  content: string
+): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumID}/posts/${messageId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la modification du message');
+  }
+
   console.log('[api] Modification du message', messageId, ':', content);
 }
 
-/** TODO — Supprimer un message. */
-export async function deleteMessage(messageId: number): Promise<void> {
-  await simulateWrite('Échec simulé (suppression de message)');
+/** Supprimer un message. */
+export async function deleteMessage(forumID: number, messageId: number): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumID}/posts/${messageId}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la suppression du message');
+  }
+
   console.log('[api] Suppression du message', messageId);
 }
 
 // ── Forum ('Thread') ───────────────────────────────────────────────────────────
 
-/**
- * TODO — Charger les sujets RACINES d'un forum, SANS leurs réponses (chargement
- * paresseux : les réponses sont récupérées à la demande via fetchReplies).
- */
-export async function fetchThreads(forumId: number) {
-  await simulateFetch('Échec simulé (chargement des sujets)');
-  return getMockForumThreads(forumId);
+/** Id numérique de l'utilisateur courant (lu du localStorage, comme le reste du fichier). */
+function currentUserId(): number {
+  return Number(localStorage.getItem('moodit_user_id')) || 0;
 }
 
 /**
- * TODO — Charger les réponses DIRECTES (enfants immédiats) d'un post, au moment où
- * l'utilisateur déplie le fil.
+ * PostVoteUserDTO (backend) → ForumPost (modèle). Le vote PROPRE de l'utilisateur
+ * (`userVoteValue`) va dans `votes` — attribué à SON id, pour que le front surligne le
+ * bon bouton. Le reste du score va dans `othersVoteTotal` (le backend n'envoie qu'un
+ * agrégat, pas la liste complète des votes). Score affiché = othersVoteTotal + vote propre.
  */
-export async function fetchReplies(postId: number) {
-  console.log('fetchReplies');
-  await simulateFetch('Échec simulé (chargement des réponses)');
-  return getMockForumReplies(postId);
+function toForumPost(p: PostVoteUserDTO): ForumPost {
+  const myVote = p.userVoteValue ?? 0;
+  return {
+    id: p.id,
+    content: p.content,
+    createdAt: p.createdAt,
+    title: p.title,
+    isPinned: p.isPinned,
+    author: p.author,
+    votes: myVote ? [{ userId: currentUserId(), value: myVote as 1 | -1 }] : [],
+    othersVoteTotal: (p.voteTotalValue ?? 0) - myVote,
+    replyCount: p.childrenCount,
+    replies: undefined,
+  };
 }
 
 /**
- * TODO — Publier un sujet ou une réponse dans le forum `forumId` (réponse si `parentId`,
- * avec un `title` pour un sujet racine). Devra RENVOYER le post persisté (id réel) en
- * conservant le `clientPostId` pour la réconciliation optimiste ↔ écho WebSocket.
+ * Charger une PAGE de sujets RACINES d'un forum (infinite scroll « charger plus »), SANS leurs
+ * réponses (chargement paresseux via fetchReplies). `before` = id du plus ancien sujet déjà
+ * affiché (absent = page la plus récente) ; `limit` = taille de page. Renvoyés du plus récent
+ * au plus ancien.
+ */
+export async function fetchThreads(
+  forumId: number,
+  before?: number,
+  limit = 20
+): Promise<ForumPost[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before != null) params.set('before', String(before));
+  const res = await apiFetch(`/api/forums/${forumId}/posts?${params.toString()}`);
+  if (!res.ok) throw new Error('Échec chargement des sujets');
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map(toForumPost);
+}
+
+/**
+ * Charger les réponses DIRECTES (enfants immédiats) d'un post, au moment où l'utilisateur
+ * déplie le fil.
+ */
+export async function fetchReplies(forumId: number, postId: number): Promise<ForumPost[]> {
+  // Endpoint dédié : renvoie DIRECTEMENT la liste des réponses immédiates (enfants),
+  // sans query param fragile. Robuste au passage gateway/proxy.
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}/replies`);
+  if (!res.ok) throw new Error('Échec chargement des réponses');
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map(toForumPost);
+}
+
+/**
+ * Publier un sujet ou une réponse dans le forum `forumId` (réponse si `parentId`, avec un
+ * `title` pour un sujet racine). Renvoie le post persisté (id réel) en conservant le
+ * `clientPostId` pour la réconciliation optimiste ↔ écho WebSocket.
  */
 export async function createPost(
   forumId: number,
@@ -746,7 +1035,7 @@ export async function createPost(
   parentId: number | null,
   clientPostId: string,
   title?: string
-): Promise<void> {
+): Promise<ForumPost> {
   console.log('createPost');
   const email = localStorage.getItem('moodit_user_email');
 
@@ -768,25 +1057,66 @@ export async function createPost(
   if (!res.ok) {
     throw new Error('Échec de la publication du post');
   }
+
+  // 201 → post persisté : on le renvoie pour remplacer l'optimiste (id réel), même
+  // forme que fetchThreads. `clientPostId` reporté pour la dédup de l'écho WS.
+  const saved: PostVoteUserDTO = await res.json();
+  return { ...toForumPost(saved), clientPostId };
 }
 
-/** TODO — Modifier le contenu d'un post. */
-export async function editPost(postId: number, content: string): Promise<void> {
-  await simulateWrite('Échec simulé (modification de post)');
+/** Modifier le contenu d'un post ; `title` (sujet racine 'Thread') envoyé s'il est fourni. */
+export async function editPost(
+  forumId: number,
+  postId: number,
+  content: string,
+  title?: string
+): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(title !== undefined ? { content, title } : { content }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la modification du post');
+  }
+
   console.log('[api] Modification du post', postId, ':', content);
 }
 
-/** TODO — Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
-export async function deletePost(postId: number): Promise<void> {
-  await simulateWrite('Échec simulé (suppression de post)');
+/** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
+export async function deletePost(forumId: number, postId: number): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    throw new Error('Échec de la suppression du post');
+  }
+
   console.log('[api] Suppression du post', postId);
 }
 
 /**
- * TODO — Enregistrer le vote de l'utilisateur sur un post. `value` ∈ {-1, 0, 1} où
- * 0 = retrait du vote (un seul vote par utilisateur et par post).
+ * Enregistrer le vote de l'utilisateur sur un post. `value` = DIRECTION cliquée
+ * (+1 ou -1) — jamais 0. Le backend applique un modèle « toggle » (cf.
+ * ForumService.addVoteToPost) : pas de vote → crée ; même valeur re-envoyée →
+ * supprime (annulation) ; valeur opposée → bascule. La table Vote impose
+ * CHECK(value_ IN (-1, 1)) : envoyer 0 déclencherait une erreur BD, d'où la
+ * direction brute. `forumId` est requis (le DTO cible le post PAR son forum).
+ * L'utilisateur vient du JWT (X-User-Email injecté par le gateway).
  */
-export async function votePost(postId: number, value: number): Promise<void> {
-  await simulateWrite('Échec simulé (vote)');
-  console.log('[api] Vote sur le post', postId, ':', value);
+export async function votePost(
+  forumId: number,
+  postId: number,
+  value: 1 | -1
+): Promise<void> {
+  const res = await apiFetch('/api/forums/posts/votes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forumId, postId, voteValue: value }),
+  });
+  if (!res.ok) throw new Error('Échec du vote');
 }

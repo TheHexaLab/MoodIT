@@ -388,6 +388,8 @@
 .testName {
     flex: 1 1 auto;
     min-width: 0;
+    /* Un nom long (surtout sans espace) s'enroule au lieu de déborder horizontalement. */
+    overflow-wrap: anywhere;
 }
 
 .testScore {

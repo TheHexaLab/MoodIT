@@ -4,6 +4,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -14,4 +16,6 @@ public class EstablishmentDTO {
     private String domainEmail;
     /** Nombre de programmes de l'établissement (catalogue d'adhésion). */
     private Integer programCount;
+    /** Codes des programmes existants : le front valide l'unicité du code à la création. */
+    private List<String> programCodes;
 }

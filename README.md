@@ -233,19 +233,13 @@ vibe-coded
 # 📌 Roadmap
 
 ## Développement primaire
-- [ ] Design des maquettes de conception
-- [ ] Design de la base de données
-- [ ] Authentification
-- [ ] Forums de cours
-- [ ] Agent MCP
-- [ ] Notifications temps réel
-
-## Développement secondaires
-- [ ] Classements
-- [ ] Compétitions live
-- [ ] Profils étudiants
-- [ ] Quiz interactifs
-- [ ] Défis journaliers
+- [x] Design des maquettes de conception
+- [x] Design de la base de données
+- [x] Authentification
+- [x] Forums de cours
+- [x] Agent MCP
+- [x] Notifications temps réel
+- [x] Quiz interactifs
 
 ---
 

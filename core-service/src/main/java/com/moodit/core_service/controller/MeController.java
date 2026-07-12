@@ -10,6 +10,8 @@ package com.moodit.core_service.controller;
 
 import com.moodit.core_service.dto.MeDto;
 import com.moodit.core_service.dto.UpdateMeRequest;
+import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.repository.MeRepository;
 import jakarta.validation.Valid;
 import java.security.Principal;
@@ -28,9 +30,11 @@ import org.springframework.http.HttpStatus;
 public class MeController {
 
   private final MeRepository users;
+  private final RealtimeEventPublisher realtimePublisher;
 
-  public MeController(MeRepository users) {
+  public MeController(MeRepository users, RealtimeEventPublisher realtimePublisher) {
     this.users = users;
+    this.realtimePublisher = realtimePublisher;
   }
 
   @GetMapping("/me")
@@ -57,6 +61,17 @@ public class MeController {
             .updateByEmail(email, body.firstName(), body.lastName(), body.avatarColor())
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilisateur introuvable"));
+
+    // Diffusion GLOBALE : chaque client met à jour l'auteur (prénom/nom/couleur) des
+    // messages et posts de cet utilisateur déjà chargés (le profil peut apparaître partout).
+    realtimePublisher.userUpdated(
+        new Author(
+            updated.id(),
+            updated.username(),
+            updated.firstName(),
+            updated.lastName(),
+            updated.avatarColor()));
+
     return ResponseEntity.ok(updated);
   }
 }

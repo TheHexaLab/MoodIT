@@ -1,0 +1,15 @@
+info:
+  name: Get/roles
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/roles"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -16,9 +16,9 @@ import {
   type QuizResult,
 } from './quizAttempt';
 
-/** Score proportionnel borné, arrondi : `total × ratio` avec `ratio ∈ [0, 1]`. */
+/** Score proportionnel borné, arrondi au DIXIÈME (format X.X) : `total × ratio`, `ratio ∈ [0, 1]`. */
 function scaled(total: number, ratio: number): number {
-  return Math.round(total * Math.max(0, Math.min(1, ratio)));
+  return Math.round(total * Math.max(0, Math.min(1, ratio)) * 10) / 10;
 }
 
 function gradeChoice(question: Question, answer: QuestionAnswer | undefined): QuestionResult {
@@ -145,10 +145,12 @@ export function gradeQuestion(
 /** Corrige une tentative complète (prévisualisation locale). */
 export function gradeQuiz(quiz: Quiz, answers: AttemptAnswers): QuizResult {
   const questions = (quiz.questions ?? []).map((q) => gradeQuestion(q, answers[q.id]));
+  // Arrondi au dixième des sommes (évite les artefacts de flottants type 0.1 + 0.2).
+  const round1 = (n: number) => Math.round(n * 10) / 10;
   return {
     quizId: quiz.id,
-    earned: questions.reduce((sum, q) => sum + q.earned, 0),
-    max: questions.reduce((sum, q) => sum + q.max, 0),
+    earned: round1(questions.reduce((sum, q) => sum + q.earned, 0)),
+    max: round1(questions.reduce((sum, q) => sum + q.max, 0)),
     questions,
   };
 }

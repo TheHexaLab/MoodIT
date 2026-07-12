@@ -14,8 +14,8 @@ import java.util.List;
 @AllArgsConstructor
 public class QuestionResultDTO {
     private Integer questionId;
-    private Integer earned;
-    private Integer max;
+    private Double earned;
+    private Double max;
     /** Choix : ids corrects / ids choisis. */
     private List<Integer> correctAnswerIds;
     private List<Integer> selectedAnswerIds;

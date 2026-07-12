@@ -18,6 +18,8 @@ import {
 import {
   type CodeEvaluationInput,
   type CodingTestResult,
+  type RunCodeInput,
+  type RunResult,
 } from '../MainPanel/QuizView/quizAttempt';
 
 /** Valeur synchrone ou asynchrone. */
@@ -100,24 +102,31 @@ export interface QuizEditorHandlers {
    * harnais, renvoie le verdict par test. Sert au bouton « Tester » d'une question Code.
    */
   onEvaluateCode?: (input: CodeEvaluationInput) => MaybePromise<CodingTestResult[]>;
+  /**
+   * Exécute un code TEL QUEL (sans harnais) dans le sandbox : sert au bouton « play » de
+   * l'onglet « Tester » d'une question Code. Renvoie la sortie brute (stdout/stderr/exit).
+   */
+  onRunCode?: (input: RunCodeInput) => MaybePromise<RunResult>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */
 export const DEFAULT_LANGUAGES: Language[] = [
   { id: 1, name: 'Python' },
   { id: 2, name: 'JavaScript' },
-  { id: 3, name: 'SQL' },
-  { id: 4, name: 'Java' },
-  { id: 5, name: 'C' },
-  { id: 6, name: 'C++' },
-  { id: 7, name: 'C#' },
-  { id: 8, name: 'HTML' },
-  { id: 9, name: 'JSON' },
-  { id: 10, name: 'Ruby' },
+  { id: 3, name: 'TypeScript' },
+  { id: 4, name: 'SQL' },
+  { id: 5, name: 'Java' },
+  { id: 6, name: 'C' },
+  { id: 7, name: 'C++' },
+  { id: 8, name: 'C#' },
+  { id: 9, name: 'Bash' },
+  { id: 10, name: 'HTML' },
   { id: 11, name: 'Rust' },
-  { id: 12, name: 'TypeScript' },
-  { id: 13, name: 'Bash' },
-  { id: 14, name: 'YAML' },
+  { id: 12, name: 'PHP' },
+  { id: 13, name: 'JSX' },
+  { id: 14, name: 'TSX' },
+  { id: 15, name: 'JSON' },
+  { id: 16, name: 'Go' },
 ];
 
 /**
@@ -130,20 +139,24 @@ export const FALLBACK_LANGUAGES: Language[] = DEFAULT_LANGUAGES.filter(
 
 /** Squelette de code de départ proposé par langage (par nom, insensible à la casse). */
 const START_CODE_BY_LANGUAGE: Record<string, string> = {
-  python: 'def solution():\n    # à compléter\n    pass\n',
+  python:
+    '# Sandbox : bibliothèque standard complète + numpy, pandas, scipy, sympy (aucun réseau).\n' +
+    'def solution():\n    # à compléter\n    pass\n',
   javascript: 'function solution() {\n  // à compléter\n}\n',
+  typescript: 'function solution(): void {\n  // à compléter\n}\n',
   sql: '-- Écris ta requête ici\n',
   java: 'public class Solution {\n    public static void main(String[] args) {\n        // à compléter\n    }\n}\n',
   c: '#include <stdio.h>\n\nint main(void) {\n    // à compléter\n    return 0;\n}\n',
   'c++': '#include <iostream>\n\nint main() {\n    // à compléter\n    return 0;\n}\n',
   'c#': 'using System;\n\nclass Solution\n{\n    static void Main()\n    {\n        // à compléter\n    }\n}\n',
-  html: '<!DOCTYPE html>\n<html lang="fr">\n  <head>\n    <meta charset="utf-8" />\n    <title></title>\n  </head>\n  <body>\n    <!-- à compléter -->\n  </body>\n</html>\n',
-  json: '{\n  \n}\n',
-  ruby: 'def solution\n  # à compléter\nend\n',
-  rust: 'fn solution() {\n    // à compléter\n}\n',
-  typescript: 'function solution(): void {\n  // à compléter\n}\n',
   bash: '#!/usr/bin/env bash\n# à compléter\n',
-  yaml: '# à compléter\n',
+  html: '<!DOCTYPE html>\n<html lang="fr">\n  <head>\n    <meta charset="utf-8" />\n    <title></title>\n  </head>\n  <body>\n    <!-- à compléter -->\n  </body>\n</html>\n',
+  rust: 'fn solution() {\n    // à compléter\n}\n',
+  php: '<?php\n// à compléter\n',
+  jsx: 'function Composant() {\n  return (\n    <div>{/* à compléter */}</div>\n  );\n}\n',
+  tsx: 'function Composant(): JSX.Element {\n  return (\n    <div>{/* à compléter */}</div>\n  );\n}\n',
+  json: '{\n  "_commentaire": "à compléter — remplace ce contenu par ta réponse JSON"\n}\n',
+  go: 'package main\n\nimport "fmt"\n\nfunc main() {\n    // à compléter\n}\n',
 };
 
 /**
@@ -154,6 +167,44 @@ const START_CODE_BY_LANGUAGE: Record<string, string> = {
 export function defaultStartCode(language?: Language): string {
   if (!language) return '';
   return language.startCodeTemplate ?? START_CODE_BY_LANGUAGE[language.name.toLowerCase()] ?? '';
+}
+
+/**
+ * Squelette de harnais par langage DU HARNAIS (par nom, insensible à la casse). Commentaire
+ * idiomatique du langage → au moins « dans le bon langage » tant qu'aucun gabarit backend n'est
+ * fourni. Le langage passé est celui du harnais (résolu via Language.harnessLanguageId).
+ */
+const HARNESS_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
+  python: '# Harnais : lève une exception (ou renvoie False) si la réponse est incorrecte.\n',
+  javascript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  typescript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  jsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  tsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  java: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  c: '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
+  'c++': '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
+  'c#': '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  go: '// Harnais : lève une erreur (ou renvoie false) si la réponse est incorrecte.\n',
+  rust: '// Harnais : panique (ou renvoie false) si la réponse est incorrecte.\n',
+  php: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  sql: '-- Harnais : requête de vérification renvoyant vrai/faux.\n',
+  bash: '# Harnais : sortie 0 si la réponse est correcte, non-zéro sinon.\n',
+};
+
+/**
+ * Code de harnais par défaut d'un NOUVEAU harnais. Le gabarit vient du LANGAGE DE LA QUESTION
+ * (`questionLanguage.harnessTemplate`) — ainsi HTML/JSON ont un harnais JS AVEC le guidage de
+ * parsing propre à leur contenu, distinct l'un de l'autre. À défaut de gabarit backend, replie
+ * sur un squelette générique par nom du langage DU HARNAIS (celui dans lequel il s'écrit,
+ * résolu via harnessLanguageId). Chaîne vide si rien de connu.
+ */
+export function defaultHarness(questionLanguage?: Language, harnessLanguage?: Language): string {
+  const fallbackKey = (harnessLanguage ?? questionLanguage)?.name.toLowerCase();
+  return (
+    questionLanguage?.harnessTemplate ??
+    (fallbackKey ? HARNESS_TEMPLATE_BY_LANGUAGE[fallbackKey] : undefined) ??
+    ''
+  );
 }
 
 /** Construit le brouillon initial d'une question d'un type donné (valeurs par défaut). */

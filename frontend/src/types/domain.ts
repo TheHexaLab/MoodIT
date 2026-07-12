@@ -12,6 +12,8 @@
  * « programme + cours » embarque `courses`).
  */
 
+import type { ProgramRoleName } from '../helpers/roles.ts';
+
 /** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses. */
 export type ForumType = 'Discussion' | 'Thread';
 
@@ -20,6 +22,15 @@ export interface Establishment {
   id: number;
   name: string;
   domainEmail?: string;
+}
+
+/**
+ * Établissement enrichi (EstablishmentDTO) pour le gestionnaire des établissements (gardien) :
+ * ajoute le nombre de programmes et les codes existants.
+ */
+export interface ManagedEstablishment extends Establishment {
+  programCount?: number;
+  programCodes?: string[];
 }
 
 /** Rôle (table Role) : Étudiant / Enseignant / Auxiliaire / Administrateur. */
@@ -49,6 +60,18 @@ export interface User {
 }
 
 /**
+ * Champs d'auteur mis à jour en temps réel (WS `user:updated`) quand un utilisateur modifie
+ * son profil : le front remplace ces champs sur tous ses messages/posts chargés (par `id`).
+ */
+export interface AuthorUpdate {
+  id: number;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatarColor?: string;
+}
+
+/**
  * Programme (table Program). `courses` / `label` sont des commodités côté front :
  * `courses` est embarqué par l'API au chargement d'un programme ; `label` est un
  * override d'affichage optionnel.
@@ -62,6 +85,12 @@ export interface Program {
   establishmentId?: number;
   label?: string;
   courses?: Course[];
+  /**
+   * Rôle le plus élevé de l'utilisateur COURANT dans ce programme (User_Program_Role) :
+   * Administrateur, Enseignant ou null/absent (aucun). Pilote les permissions front
+   * (cf. permissions.ts). Renseigné par fetchPrograms via le champ `roleName` du ProgramDTO.
+   */
+  roleName?: ProgramRoleName | null;
 }
 
 /**
@@ -165,6 +194,11 @@ export interface Question {
   answers?: Answer[];
   /** Éléments à ordonner (`ordering`) ou à classer (`matching`). */
   dragItems?: DragItem[];
+  /**
+   * Catégories (zones de dépôt) d'une question `matching` = groupes distincts. Exposées à
+   * l'étudiant (il doit voir les zones), même quand le groupe correct de chaque item est masqué.
+   */
+  groups?: string[];
   /** Langage d'exécution (questions `coding`). */
   language?: Language;
   /** Squelette de code montré à l'étudiant (table Question.start_code). */
@@ -342,7 +376,16 @@ export interface ForumPost {
   isPinned?: boolean;
   /** Titre du sujet (les posts racines d'un Thread en ont un). */
   title?: string;
+  /**
+   * Votes CONNUS localement : le vote de l'utilisateur courant (0 ou 1 entrée) plus,
+   * transitoirement, les votes live d'autres utilisateurs reçus par WebSocket. Le total
+   * serveur (hors utilisateur courant) est porté à part par `othersVoteTotal` — le backend
+   * n'envoie qu'un agrégat, pas la liste complète des votes.
+   */
   votes: PostVote[];
+  /** Somme des votes des AUTRES utilisateurs (= voteTotalValue serveur − vote propre).
+   *  Base du score affiché, à laquelle s'ajoute le vote (optimiste) de l'utilisateur. */
+  othersVoteTotal?: number;
   /** Réponses directes ; `undefined` = pas encore chargées, `[]` = chargées et vides. */
   replies?: ForumPost[];
   /** Nombre de réponses directes, connu dès le chargement (avant dépliage). */
@@ -409,9 +452,15 @@ export interface QuestionResponse {
   qTypeId?: number;
   totalScore: number;
   orderIndex?: number;
+  /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
+  language?: Language;
   startCode?: string;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
+  /** Catégories (zones) d'une association : groupes distincts, exposés même en passation. */
+  groups?: string[];
+  /** Harnais de test (questions Code) : présent UNIQUEMENT côté éditeur (absent en passation). */
+  testCases?: TestCase[];
 }
 
 /** Détail d'un quiz renvoyé par le backend (QuizDetailDTO). */
@@ -423,4 +472,20 @@ export interface QuizDetailResponse {
   isDaily?: boolean;
   allowRetry?: boolean;
   questions?: QuestionResponse[];
+}
+
+/** Post renvoyé par le backend (PostVoteUserDTO). */
+export interface PostVoteUserDTO {
+  id: number;
+  content: string;
+  createdAt: string;
+  title?: string;
+  isPinned?: boolean;
+  postParentId?: number | null;
+  author: User;
+  voteTotalValue?: number;
+  /** Vote de l'utilisateur COURANT sur ce post (1 / -1 / null s'il n'a pas voté). */
+  userVoteValue?: number | null;
+  childrenCount?: number;
+  children?: PostVoteUserDTO[];
 }

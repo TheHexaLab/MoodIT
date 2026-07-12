@@ -35,7 +35,7 @@ class CourseControllerTest {
     private ForumService forumService; // Présent dans le constructeur du contrôleur
 
     @MockitoBean
-    private QuizService quizService; // Dépendance ajoutée au contrôleur par le merge Quiz
+    private QuizService quizService; // Injecté dans le constructeur du contrôleur
 
     @Autowired
     private ObjectMapper objectMapper;

@@ -11,5 +11,7 @@ import lombok.experimental.SuperBuilder;
 @AllArgsConstructor
 public class ForumUpdatePostDTO {
     private String content;
+    /** Titre d'un sujet racine de forum 'Thread' (null pour une réponse / un message). */
+    private String title;
     private Boolean isPinned;
 }

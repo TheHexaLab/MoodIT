@@ -27,6 +27,6 @@ public class UserDTO {
     //private String passwordHash;
     private LocalDateTime createdAt;
     //private Boolean verifiedEmail;
-    //private List<Role> roles;
+    private List<Integer> roles;
 }
 

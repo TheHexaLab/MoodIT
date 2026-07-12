@@ -29,7 +29,9 @@ import {
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
+  type RunCodeHandler,
   type SubmitQuizHandler,
+  type SubscribeCodeGrading,
 } from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
@@ -47,8 +49,12 @@ interface MainPanelProps {
   selectedChannel: ChannelRef | null;
   /** Utilisateur connecte (auteur des messages envoyes dans un canal). */
   currentUser: ChannelMessageAuthor;
-  /** Chargement de l'historique d'un canal (API-ready ; voir ChannelView). */
-  onFetchMessages?: (channelId: number) => MaybePromise<ChannelMessage[]>;
+  /** Chargement paginé des messages d'un canal (API-ready ; voir ChannelView). */
+  onFetchMessages?: (
+    channelId: number,
+    before?: number,
+    limit?: number
+  ) => MaybePromise<ChannelMessage[]>;
   /** Envoi d'un message dans le canal actif (API-ready ; voir ChannelView). */
   onSendMessage?: SendMessageHandler;
   /** Modification d'un de ses messages (API-ready ; voir ChannelView). */
@@ -73,8 +79,12 @@ interface MainPanelProps {
   forumSocket?: ForumSocket;
   /** Ouvre le formulaire d'ajout / d'adhésion a un programme (admin). */
   onAddProgram?: () => void;
+  /** Ouvre le popup « rejoindre un programme » (offert a TOUS : admin et utilisateur). */
+  onJoinProgram?: () => void;
   /** Ouvre le formulaire d'ajout de cours (admin). */
   onAddCourse?: () => void;
+  /** Ouvre le popup « rejoindre un cours » (offert a TOUS : admin et utilisateur). */
+  onJoinCourse?: () => void;
   /** Ouvre le formulaire de creation de canal (admin). */
   onCreateChannel?: () => void;
   /** Ouvre le formulaire de creation de quiz (admin). */
@@ -87,6 +97,9 @@ interface MainPanelProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
+  onSubscribeCodeGrading?: SubscribeCodeGrading;
+  /** Exécute le code d'une question Code dans le sandbox (bouton « play » ; voir QuizView). */
+  onRunCode?: RunCodeHandler;
   /** Bump à chaque mise à jour de quiz : remonte la vue de quiz ouverte (rechargement). */
   quizRefreshKey?: number;
   /** Le quiz ouvert a été modifié à distance → bannière de rechargement. */
@@ -122,7 +135,9 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onVotePost,
   forumSocket,
   onAddProgram,
+  onJoinProgram,
   onAddCourse,
+  onJoinCourse,
   onCreateChannel,
   onCreateQuiz,
   onCreateForum,
@@ -130,6 +145,8 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
+  onSubscribeCodeGrading,
+  onRunCode,
   quizRefreshKey = 0,
   quizStale = false,
   onReloadStale,
@@ -137,12 +154,20 @@ const MainPanel: React.FC<MainPanelProps> = ({
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
     if (!program) {
-      return <NoProgramState isAdmin={isAdmin} onAddProgram={onAddProgram} />;
+      return (
+        <NoProgramState
+          isAdmin={isAdmin}
+          onAddProgram={onAddProgram}
+          onJoinProgram={onJoinProgram}
+        />
+      );
     }
     // 2 — le programme n'a aucun cours.
     const courses = program.courses ?? [];
     if (courses.length === 0) {
-      return <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} />;
+      return (
+        <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} onJoinCourse={onJoinCourse} />
+      );
     }
     // 3 — le cours sélectionné est vide (aucun canal/forum/quiz).
     const course = courses.find((c) => c.id === selectedCourse) ?? null;
@@ -196,6 +221,8 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onFetchAttempts={onFetchAttempts}
             onFetchAttemptResult={onFetchAttemptResult}
             onSubmitQuiz={onSubmitQuiz}
+            onSubscribeCodeGrading={onSubscribeCodeGrading}
+            onRunCode={onRunCode}
             staleNotice={quizStale}
             onReloadStale={onReloadStale}
           />

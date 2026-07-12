@@ -1,8 +1,12 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Highlight } from 'prism-react-renderer';
 import { codeTheme } from '../MainPanel/ForumView/codeTheme';
 import '../MainPanel/ForumView/prismLanguages'; // effet de bord : enregistre les grammaires Prism
 import styles from './CodeEditor.module.css';
+import { Play } from '../../assets/Play';
+import { X } from '../../assets/X';
+import { Spinner } from '../Spinner/Spinner';
+import { type RunResult } from '../MainPanel/QuizView/quizAttempt';
 
 /** Noms de langage dont la grammaire Prism diffère du nom affiché (minuscule). */
 const PRISM_ALIASES: Record<string, string> = {
@@ -36,6 +40,13 @@ interface CodeEditorProps {
   minRows?: number;
   /** Lecture seule : pas d'édition (utilisé pour la révision d'une réponse). */
   readOnly?: boolean;
+  /**
+   * Si fourni, affiche un bouton « play » qui exécute le code courant dans le sandbox et affiche
+   * sa sortie (stdout/stderr) dans une console intégrée. Absent → pas de bouton (éditeur simple).
+   */
+  onRun?: (code: string) => Promise<RunResult> | RunResult;
+  /** Libellé du bouton d'exécution (défaut « Exécuter »). */
+  runLabel?: string;
 }
 
 /**
@@ -53,8 +64,14 @@ export function CodeEditor({
   ariaLabel,
   minRows = 4,
   readOnly = false,
+  onRun,
+  runLabel = 'Exécuter',
 }: CodeEditorProps): React.ReactElement {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // Exécution (bouton « play ») : sortie du sandbox affichée dans la console intégrée.
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
   // Barre de défilement horizontale « proxy » : pleine largeur de l'éditeur (sous la
   // gouttière comprise), synchronisée avec le textarea (dont la scrollbar native est
@@ -323,8 +340,51 @@ export function CodeEditor({
     }
   }
 
+  async function run() {
+    if (!onRun || running) return;
+    setRunning(true);
+    setRunError(null);
+    try {
+      setRunResult(await onRun(value));
+    } catch {
+      setRunResult(null);
+      setRunError('Exécution impossible pour le moment. Réessaie dans un instant.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const showConsole = running || runResult != null || runError != null;
+
   return (
     <div className={styles.editor}>
+      {/* Barre d'outils : affichée dès qu'il y a un langage À MONTRER ou un bouton « play ».
+          L'étiquette de langage reste visible en lecture seule (révision d'un quiz) et pour
+          les langages sans exécution autonome (SQL/HTML/JSX/TSX : pas de `onRun`). Le bouton
+          « play », lui, n'apparaît qu'en saisie (hors lecture seule). */}
+      {(language || (onRun && !readOnly)) && (
+        <div className={styles.toolbar}>
+          {language && <span className={styles.langLabel}>{language}</span>}
+          {onRun && !readOnly && (
+            <button
+              type="button"
+              className={styles.runButton}
+              onClick={run}
+              disabled={running}
+              aria-label={runLabel}
+              title={runLabel}
+            >
+              {running ? (
+                <span className={styles.spinnerNeutral}>
+                  <Spinner tone="current" size={14} />
+                </span>
+              ) : (
+                <Play width={14} height={14} />
+              )}
+            </button>
+          )}
+        </div>
+      )}
       <div className={styles.body}>
         <div className={styles.gutter} aria-hidden>
           {gutter}
@@ -374,6 +434,87 @@ export function CodeEditor({
       <div className={styles.hscroll} ref={hscrollRef} aria-hidden onScroll={onProxyScroll}>
         <div className={styles.hscrollInner} ref={hscrollInnerRef} />
       </div>
+
+      {showConsole && (
+        <RunConsole
+          running={running}
+          result={runResult}
+          error={runError}
+          onClose={() => {
+            setRunResult(null);
+            setRunError(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Console d'exécution intégrée : montre l'issue du « play » (statut + stdout + stderr/stack trace,
+ * ou message d'erreur réseau). `stderr` porte la trace d'exception ; un signal (SIGKILL) = timeout.
+ */
+function RunConsole({
+  running,
+  result,
+  error,
+  onClose,
+}: {
+  running: boolean;
+  result: RunResult | null;
+  error: string | null;
+  onClose: () => void;
+}): React.ReactElement {
+  const ok = result != null && !result.timedOut && result.exitCode === 0;
+  // Aucun libellé de statut : pendant l'exécution, seul le spinner (pas de « Exécution… ») ; une
+  // fois finie, la sortie / stack trace / message d'erreur parle d'elle-même. Seul le timeout
+  // garde un libellé explicite (sinon rien ne le signalerait).
+  const status = result != null && result.timedOut ? 'Interrompu (dépassement de temps ou de mémoire)' : '';
+  const noOutput =
+    result != null && !result.stdout && !result.stderr && !result.compileOutput && !result.timedOut;
+
+  return (
+    <div className={styles.console}>
+      <div className={styles.consoleHead}>
+        <span className={styles.consoleTitle}>Console</span>
+        {(running || status) && (
+          <span
+            className={[styles.consoleStatus, ok ? styles.statusOk : running ? '' : styles.statusBad]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {running && (
+              <span className={styles.spinnerNeutral}>
+                <Spinner tone="current" size={12} />
+              </span>
+            )}
+            {status}
+          </span>
+        )}
+        <button type="button" className={styles.consoleClose} aria-label="Fermer la console" onClick={onClose}>
+          <X width={12} height={12} />
+        </button>
+      </div>
+
+      {!running && (
+        <div className={styles.consoleBody}>
+          {error != null && <pre className={[styles.outBlock, styles.errBlock].join(' ')}>{error}</pre>}
+          {result?.compileOutput && (
+            <>
+              <span className={styles.blockLabel}>Compilation</span>
+              <pre className={styles.outBlock}>{result.compileOutput}</pre>
+            </>
+          )}
+          {result?.stdout && <pre className={styles.outBlock}>{result.stdout}</pre>}
+          {result?.stderr && (
+            <>
+              {result.stdout && <span className={styles.blockLabel}>Erreurs</span>}
+              <pre className={[styles.outBlock, styles.errBlock].join(' ')}>{result.stderr}</pre>
+            </>
+          )}
+          {noOutput && <pre className={[styles.outBlock, styles.emptyOut].join(' ')}>(aucune sortie)</pre>}
+        </div>
+      )}
     </div>
   );
 }

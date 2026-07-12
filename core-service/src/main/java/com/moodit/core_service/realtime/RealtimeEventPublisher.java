@@ -20,13 +20,19 @@ package com.moodit.core_service.realtime;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.CourseDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
+import com.moodit.core_service.realtime.dto.AdminUserDto;
+import com.moodit.core_service.realtime.dto.RoleDto;
+import com.moodit.core_service.dto.QuestionResultDTO;
+import com.moodit.core_service.dto.UserDTO;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,11 +83,13 @@ public class RealtimeEventPublisher {
         event("post:created", "forumId", forumId, "post", post, "parentId", parentId));
   }
 
-  public void postEdited(long forumId, long postId, String content) {
+  /** `title` = nouveau titre d'un sujet racine ('Thread'), ou null pour une réponse. */
+  public void postEdited(long forumId, long postId, String content, String title) {
     emit(
         "forum",
         forumId,
-        event("post:edited", "forumId", forumId, "postId", postId, "content", content));
+        event(
+            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title));
   }
 
   public void postDeleted(long forumId, long postId) {
@@ -188,6 +196,100 @@ public class RealtimeEventPublisher {
     emit("user", userId, event("subscription:removed", "userId", userId, "programId", programId));
   }
 
+  /**
+   * Le rôle de l'utilisateur DANS un programme a changé (User_Program_Role) : ses menus
+   * d'actions administratives se re-calculent LIVE. Scope user:&lt;userId&gt; (le rôle est
+   * propre à cet utilisateur). `roleName` = rôle le plus élevé restant ("Administrateur",
+   * "Enseignant") ou null (plus aucun rôle dans ce programme).
+   */
+  public void programRoleChanged(long userId, long programId, String roleName) {
+    emit(
+        "user",
+        userId,
+        event(
+            "program:roleChanged",
+            "userId", userId,
+            "programId", programId,
+            "roleName", roleName));
+  }
+
+  /**
+   * Les rôles GLOBAUX de l'utilisateur ont changé (User_Role) : il re-dérive ses droits
+   * plateforme LIVE (admin général / superadministrateur → bouton « Gérer les administrateurs »,
+   * suppression de programme…). Scope user:&lt;userId&gt;. `roles` = liste à jour de ses rôles globaux.
+   */
+  public void globalRolesChanged(long userId, List<RoleDto> roles) {
+    emit("user", userId, event("user:globalRolesChanged", "userId", userId, "roles", roles));
+  }
+
+  /**
+   * La liste des ADMINISTRATEURS (utilisateurs ayant au moins un rôle global) a changé : on diffuse
+   * la LISTE À JOUR à la room dédiée {@code adminRoles:0}, rejointe par les admins/gardiens dont le
+   * popup « Gérer les administrateurs » est ouvert. Chaque popup remplace sa liste. Complète l'écho
+   * {@link #globalRolesChanged} (room de l'utilisateur concerné, pour SES propres droits).
+   */
+  public void adminRolesChanged(List<UserDTO> admins) {
+    // Projection légère (sans createdAt/settings) : le front n'en a pas besoin et `createdAt`
+    // (LocalDateTime) ferait échouer la sérialisation de l'ObjectMapper temps réel (pas de JSR310).
+    List<AdminUserDto> users =
+        admins.stream()
+            .map(
+                u ->
+                    new AdminUserDto(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getFirstName(),
+                        u.getLastName(),
+                        u.getEmail(),
+                        u.getAvatarColor(),
+                        u.getRoles()))
+            .toList();
+    emit("adminRoles", 0, event("adminRoles:changed", "users", users));
+  }
+
+  /**
+   * Le CATALOGUE d'un établissement a changé (programme ajouté / modifié / supprimé) : on diffuse
+   * la LISTE À JOUR de ses programmes. Évènement GLOBAL (le catalogue est plateforme, tout
+   * gardien/abonné peut le voir dans le popup « Ajouter un programme »). Chaque client met à jour
+   * l'établissement par id : nombre de programmes, codes, ET la liste détaillée si elle est ouverte.
+   */
+  /** Room UNIQUE du catalogue d'établissements (plateforme) : scope "establishment", id fixe. */
+  private static final long ESTABLISHMENT_ROOM = 0L;
+
+  public void establishmentUpdated(long establishmentId, List<ProgramDto> programs) {
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
+        event("establishment:updated", "establishmentId", establishmentId, "programs", programs));
+  }
+
+  /**
+   * Un établissement a été CRÉÉ ou MODIFIÉ (nom / domaine). Évènement GLOBAL : le popup
+   * « Ajouter un programme » ajoute l'établissement (s'il est nouveau) ou met à jour son
+   * nom/domaine, par id.
+   */
+  public void establishmentUpserted(
+      long id, String name, String domainEmail, int programCount, List<String> programCodes) {
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
+        event(
+            "establishment:upserted",
+            "id", id,
+            "name", name,
+            "domainEmail", domainEmail,
+            "programCount", programCount,
+            "programCodes", programCodes));
+  }
+
+  /** Un établissement a été SUPPRIMÉ : le popup le retire de ses listes (room establishment). */
+  public void establishmentDeleted(long id) {
+    emit(
+        "establishment",
+        ESTABLISHMENT_ROOM,
+        event("establishment:deleted", "establishmentId", id));
+  }
+
   // ─── Analyses MCP (scope = course) ────────────────────────────────────────
   // Poussé quand un job d'analyse MCP se termine. Room "mcp:<courseId>" : tous les
   // abonnés au feedback de ce cours reçoivent le RÉSUMÉ (le détail se fetch au clic).
@@ -223,6 +325,26 @@ public class RealtimeEventPublisher {
         event("mcp:analysis-progress", "courseId", courseId, "userId", userId, "step", step));
   }
 
+  // ─── Utilisateur (scope = GLOBAL) ─────────────────────────────────────────
+  // Un utilisateur a modifié son profil (prénom / nom / couleur d'avatar). L'auteur peut
+  // apparaître dans n'importe quel canal ou forum : on diffuse donc à TOUTES les sessions,
+  // et chaque client met à jour l'auteur des messages/posts déjà chargés (par id).
+
+  public void userUpdated(Author author) {
+    emitAll(event("user:updated", "user", author));
+  }
+
+  // ─── Correction de code (scope = user) ───────────────────────────────────
+  // Poussé quand le job de correction des questions Code d'une tentative se termine. Room
+  // "user:<userId>" : seul l'étudiant qui a soumis reçoit ses verdicts + son score recalculé.
+
+  public void quizCodeGraded(long userId, long attemptId, List<QuestionResultDTO> questions) {
+    emit(
+        "user",
+        userId,
+        event("quiz:code-graded", "userId", userId, "attemptId", attemptId, "questions", questions));
+  }
+
   // ─── Interne ──────────────────────────────────────────────────────────────
 
   /** Sérialise l'évènement et le diffuse à la room (scope:id). */
@@ -231,6 +353,15 @@ public class RealtimeEventPublisher {
       registry.broadcast(scope, id, objectMapper.writeValueAsString(payload));
     } catch (JsonProcessingException e) {
       log.error("Échec de sérialisation de l'évènement {} ({}:{})", payload.get("type"), scope, id, e);
+    }
+  }
+
+  /** Sérialise l'évènement et le diffuse à TOUTES les sessions (évènement global). */
+  private void emitAll(Map<String, Object> payload) {
+    try {
+      registry.broadcastAll(objectMapper.writeValueAsString(payload));
+    } catch (JsonProcessingException e) {
+      log.error("Échec de sérialisation de l'évènement global {}", payload.get("type"), e);
     }
   }
 

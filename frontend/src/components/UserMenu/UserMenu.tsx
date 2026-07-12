@@ -5,6 +5,7 @@ import styles from './UserMenu.module.css';
 import { useTheme } from '../../helpers/theme.ts';
 import { Moon } from '../../assets/Moon.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
+import { Sliders } from '../../assets/Sliders.tsx';
 import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
@@ -25,6 +26,11 @@ interface UserMenuProps {
   loading?: boolean;
   /** Ouvre le formulaire de modification du profil. */
   onEditProfile?: () => void;
+  /**
+   * Ouvre le gestionnaire des administrateurs (rôles GLOBAUX). Fourni UNIQUEMENT si
+   * l'utilisateur y a droit (admin général / gardien) : sinon l'entrée est masquée.
+   */
+  onManageAdmins?: () => void;
   /** Déconnecte l'utilisateur. */
   onLogout?: () => void;
   /**
@@ -46,6 +52,7 @@ export default function UserMenu({
   user,
   loading = false,
   onEditProfile,
+  onManageAdmins,
   onLogout,
   variant = 'footer',
 }: UserMenuProps): React.ReactElement {
@@ -175,6 +182,11 @@ export default function UserMenu({
     onEditProfile?.();
   }
 
+  function handleManageAdmins() {
+    requestClose();
+    onManageAdmins?.();
+  }
+
   async function handleLogout() {
     // Ferme le menu puis tente la déconnexion serveur ; quoi qu'il arrive, nettoie l'état client et redirige.
     requestClose();
@@ -271,6 +283,25 @@ export default function UserMenu({
                     Modifier le profil
                   </span>
                 </button>
+
+                {onManageAdmins && (
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    role="menuitem"
+                    onClick={handleManageAdmins}
+                  >
+                    <span className={styles.actionLabel}>
+                      <Sliders
+                        className={styles.actionIcon}
+                        width="1rem"
+                        height="1rem"
+                        aria-hidden="true"
+                      />
+                      Gérer les administrateurs
+                    </span>
+                  </button>
+                )}
 
                 <button
                   type="button"

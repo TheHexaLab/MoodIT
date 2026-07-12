@@ -43,8 +43,12 @@ interface ChannelViewProps {
   /** Utilisateur connecte : auteur des messages envoyés, et seul à pouvoir
    *  modifier/supprimer ses propres messages. */
   currentUser: ChannelMessageAuthor;
-  /** Chargement de l'historique du canal (API-ready, GET). Voir useChannelMessages. */
-  onFetchMessages?: (channelId: number) => MaybePromise<ChannelMessage[]>;
+  /** Chargement paginé des messages (API-ready, GET). Voir useChannelMessages. */
+  onFetchMessages?: (
+    channelId: number,
+    before?: number,
+    limit?: number
+  ) => MaybePromise<ChannelMessage[]>;
   /**
    * Émise à l'envoi d'un message. Async : le message s'affiche de manière
    * optimiste ; si l'appel rejette, il est retiré et le brouillon restaure.
@@ -143,6 +147,12 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const composerRef = useRef<HTMLInputElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
+  /**
+   * Métrique de scroll capturée AVANT un chargement de messages plus anciens : sert à
+   * restaurer la position (le viewport reste stable quand on prépend en haut). Null si aucun
+   * prepend en attente.
+   */
+  const pendingRestoreRef = useRef<{ height: number; top: number } | null>(null);
 
   // ─── Source de vérité des messages : optimiste + API + WebSocket-ready. ───
   // (Les événements WebSocket entrants se branchent sur applyIncoming* du hook.)
@@ -151,6 +161,9 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     loading,
     loadError,
     reload,
+    hasMore,
+    loadingOlder,
+    loadOlder,
     pending,
     error,
     clearError,
@@ -183,17 +196,35 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     if (list) list.scrollTop = list.scrollHeight;
   }
 
-  /** A chaque scroll : memorise si on est (proche du) bas (seuil 80px). */
+  /**
+   * A chaque scroll : mémorise si on est (proche du) bas (seuil 80px), et déclenche le
+   * chargement des messages plus ANCIENS quand on approche du HAUT (seuil 80px).
+   */
   function handleListScroll() {
     const list = listRef.current;
     if (!list) return;
     atBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    if (list.scrollTop < 80 && hasMore && !loadingOlder) {
+      // Capture la métrique AVANT le prepend : restaurée dans le useLayoutEffect ci-dessous.
+      pendingRestoreRef.current = { height: list.scrollHeight, top: list.scrollTop };
+      loadOlder();
+    }
   }
 
-  // Auto-scroll « stick to bottom » : on descend en bas a l'arrivee de messages
-  // SEULEMENT si l'utilisateur y etait deja (sinon on ne l'arrache pas a sa lecture).
-  // Au chargement initial, atBottomRef vaut true → on part bien en bas.
+  // Auto-scroll après changement de la liste :
+  //  1) un prepend de messages plus anciens est en attente → on RESTAURE la position (le
+  //     viewport ne saute pas), en ajoutant la hauteur nouvellement insérée en haut ;
+  //  2) sinon, « stick to bottom » : on descend en bas SEULEMENT si l'utilisateur y était
+  //     déjà (sinon on ne l'arrache pas à sa lecture). Au montage, atBottomRef = true.
   useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const restore = pendingRestoreRef.current;
+    if (restore) {
+      list.scrollTop = list.scrollHeight - restore.height + restore.top;
+      pendingRestoreRef.current = null;
+      return;
+    }
     if (atBottomRef.current) scrollToBottom();
   }, [messages, loading]);
 
@@ -274,6 +305,11 @@ const ChannelView: React.FC<ChannelViewProps> = ({
             </div>
           ) : (
             <ul ref={listRef} onScroll={handleListScroll}>
+              {loadingOlder && (
+                <li role="separator" aria-live="polite">
+                  <Spinner size={18} />
+                </li>
+              )}
               {messages.map((message, index) => {
                 const avatarColor = message.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
                 const authorName = getAuthorName(message.author);

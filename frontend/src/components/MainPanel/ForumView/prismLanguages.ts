@@ -81,6 +81,21 @@ addClassNamePatterns('javascript', [
   /\b[A-Z][\w$]*[a-z][\w$]*\b/,
 ]);
 
+// TypeScript / TSX : leur grammaire est figée au moment du `extend('javascript')` (imports
+// ci-dessus), AVANT l'ajout runtime des motifs à `javascript` — elle n'en hérite donc pas. On
+// les rajoute explicitement pour colorer aussi les ANNOTATIONS DE TYPE (ex. `: Rectangle`), les
+// génériques et `implements`/`interface`, en plus de `new`/`extends`.
+for (const lang of ['typescript', 'tsx']) {
+  addClassNamePatterns(lang, [
+    {
+      pattern:
+        /(\b(?:class|extends|implements|interface|new|instanceof|:|<|,)\s*)[A-Z][\w$]*/,
+      lookbehind: true,
+    },
+    /\b[A-Z][\w$]*[a-z][\w$]*\b/,
+  ]);
+}
+
 // Python : Prism ne colore que la DEFINITION de fonction (apres `def`). On ajoute
 // les APPELS (nom suivi de `(`), methodes `obj.methode()` comprises. Initiale
 // minuscule/underscore exigee pour ne pas empieter sur les classes (PascalCase,

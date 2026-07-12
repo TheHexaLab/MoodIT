@@ -17,7 +17,7 @@ public class QuizResultDTO {
     /** Tentative correspondant à ce résultat (null avant persistance, sinon renseigné). */
     private Integer attemptId;
     private Integer attemptNo;
-    private Integer earned;
-    private Integer max;
+    private Double earned;
+    private Double max;
     private List<QuestionResultDTO> questions;
 }
