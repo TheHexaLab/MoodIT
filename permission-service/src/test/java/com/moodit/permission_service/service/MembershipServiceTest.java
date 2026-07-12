@@ -85,4 +85,51 @@ class MembershipServiceTest {
     when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
     assertThat(service.canJoin(EMAIL, "user", 5)).isFalse();
   }
+
+  @Test
+  void channelRoom_subscribed_allowed() {
+    loggedIn(5);
+    when(membershipRepository.canSeeForumViaProgram(5, 7)).thenReturn(true);
+    assertThat(service.canJoin(EMAIL, "channel", 7)).isTrue();
+  }
+
+  @Test
+  void forumRoom_notSubscribed_denied() {
+    loggedIn(5);
+    when(membershipRepository.canSeeForumViaProgram(5, 7)).thenReturn(false);
+    assertThat(service.canJoin(EMAIL, "forum", 7)).isFalse();
+  }
+
+  @Test
+  void programRoom_subscribed_allowed() {
+    loggedIn(5);
+    when(membershipRepository.isSubscribedToProgram(5, 3)).thenReturn(true);
+    assertThat(service.canJoin(EMAIL, "program", 3)).isTrue();
+  }
+
+  // ── Wrappers ajoutés (délégation directe au repository) ──────────────────────────────
+
+  @Test
+  void isSubscribedToProgram_delegatesTrue() {
+    when(membershipRepository.isSubscribedToProgram(5, 3)).thenReturn(true);
+    assertThat(service.isSubscribedToProgram(5, 3)).isTrue();
+  }
+
+  @Test
+  void isSubscribedToProgram_delegatesFalse() {
+    when(membershipRepository.isSubscribedToProgram(5, 3)).thenReturn(false);
+    assertThat(service.isSubscribedToProgram(5, 3)).isFalse();
+  }
+
+  @Test
+  void hasRoleInAnyProgram_delegatesTrue() {
+    when(membershipRepository.hasRoleInAnyProgram(5, "Administrateur")).thenReturn(true);
+    assertThat(service.hasRoleInAnyProgram(5, "Administrateur")).isTrue();
+  }
+
+  @Test
+  void hasRoleInAnyProgram_delegatesFalse() {
+    when(membershipRepository.hasRoleInAnyProgram(5, "Administrateur")).thenReturn(false);
+    assertThat(service.hasRoleInAnyProgram(5, "Administrateur")).isFalse();
+  }
 }

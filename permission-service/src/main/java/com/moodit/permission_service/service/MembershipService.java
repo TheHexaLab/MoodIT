@@ -86,6 +86,16 @@ public class MembershipService {
     return membershipRepository.canSeeCourseViaProgram(userId, programId);
   }
 
+  /**
+   * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
+   * l'abonnement (a distinguer de canAccessProgram). Sert a autoriser l'inscription a des cours
+   * d'un programme (POST /courses/users) : on ne s'inscrit qu'aux cours d'un programme rejoint.
+   */
+  @Transactional(readOnly = true)
+  public boolean isSubscribedToProgram(long userId, long programId) {
+    return membershipRepository.isSubscribedToProgram(userId, programId);
+  }
+
   /** Le cours (scope MCP) est-il visible ? Meme regle : etre abonne a un programme du cours. */
   @Transactional(readOnly = true)
   public boolean canAccessCourse(long userId, long courseId) {
@@ -146,6 +156,17 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean hasRoleInProgram(long userId, long programId, String roleName) {
     return membershipRepository.hasRoleInProgram(userId, programId, roleName);
+  }
+
+  /**
+   * L'utilisateur porte-t-il le role (nomme) dans AU MOINS UN programme (User_Program_Role), sans
+   * cibler un programme precis ? Ex. roleName = "Administrateur" -> "gere-t-il un programme
+   * quelconque ?". Sert a gater la liste des roles attribuables en programme
+   * (GET /api/roles?scope=program), qui ne porte pas d'id de programme.
+   */
+  @Transactional(readOnly = true)
+  public boolean hasRoleInAnyProgram(long userId, String roleName) {
+    return membershipRepository.hasRoleInAnyProgram(userId, roleName);
   }
 
   /**

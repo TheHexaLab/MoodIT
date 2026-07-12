@@ -59,7 +59,6 @@ export type { DemoProgram };
  * les programmes SANS leurs cours.
  */
 export async function fetchPrograms(): Promise<DemoProgram[]> {
-  console.log('fetchPrograms');
   const userId = localStorage.getItem('moodit_user_id');
   const res = await apiFetch(`/api/users/${userId}/programs`);
   if (!res.ok) throw new Error('Échec chargement des programmes');
@@ -519,7 +518,6 @@ export async function fetchEstablishmentsForCreate() {
  * (1re étape du AddSubscriptionPopup en mode adhésion).
  */
 export async function fetchEstablishmentsForJoin() {
-  console.log('fetchEstablishmentsForJoin');
   const res = await apiFetch('/api/establishments');
 
   if (!res.ok) {
@@ -589,7 +587,6 @@ export async function deleteEstablishment(establishmentId: number): Promise<void
  * choisisse ceux qu'il veut rejoindre.
  */
 export async function fetchEstablishmentPrograms(establishmentId: number) {
-  console.log('fetchEstablishmentPrograms');
   const res = await apiFetch(`/api/establishments/${establishmentId}/programs`);
 
   if (!res.ok) {
@@ -617,7 +614,6 @@ export async function fetchManageableProgramsInEstablishment(
  * Alimente le JoinCoursesPopup (menu contextuel d'un programme).
  */
 export async function fetchProgramCourses(programId: number): Promise<JoinableCourse[]> {
-  console.log('fetchProgramCourses');
   const res = await apiFetch(`/api/programs/${programId}/courses`);
 
   if (!res.ok) {
@@ -638,8 +634,6 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
  * pré-cocher le JoinCoursesPopup, indépendamment de l'état (lazy-loaded) du Dashboard.
  */
 export async function fetchJoinedCourseIds(programId: number): Promise<number[]> {
-  console.log('fetchJoinedCourseIds');
-
   const userId = localStorage.getItem('moodit_user_id');
 
   const res = await apiFetch(`/api/users/${userId}/programs/${programId}/enrollments`);
@@ -833,7 +827,6 @@ export async function requestCourseAnalysis(courseId: number): Promise<void> {
  * `courseIds` ⊆ des ids renvoyés par fetchProgramCourses(programId).
  */
 export async function joinCourses(programId: number, courseIds: number[]): Promise<Course[]> {
-  console.log('joinCourses', programId);
   const userId = localStorage.getItem('moodit_user_id');
   const response = await apiFetch('/api/courses/users', {
     method: 'POST',
@@ -944,7 +937,6 @@ export async function sendMessage(
   parentId: number | null,
   clientMessageId: string
 ): Promise<ChannelMessage> {
-  console.log('sendMessage');
   const res = await apiFetch('/api/forums/messages', {
     method: 'POST',
     headers: {
@@ -994,8 +986,6 @@ export async function editMessage(
   if (!res.ok) {
     throw new Error('Échec de la modification du message');
   }
-
-  console.log('[api] Modification du message', messageId, ':', content);
 }
 
 /** Supprimer un message. */
@@ -1007,8 +997,6 @@ export async function deleteMessage(forumID: number, messageId: number): Promise
   if (!res.ok) {
     throw new Error('Échec de la suppression du message');
   }
-
-  console.log('[api] Suppression du message', messageId);
 }
 
 // ── Forum ('Thread') ───────────────────────────────────────────────────────────
@@ -1084,7 +1072,6 @@ export async function createPost(
   clientPostId: string,
   title?: string
 ): Promise<ForumPost> {
-  console.log('createPost');
   const email = localStorage.getItem('moodit_user_email');
 
   const res = await apiFetch('/api/forums/posts', {
@@ -1130,8 +1117,6 @@ export async function editPost(
   if (!res.ok) {
     throw new Error('Échec de la modification du post');
   }
-
-  console.log('[api] Modification du post', postId, ':', content);
 }
 
 /** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
@@ -1143,8 +1128,6 @@ export async function deletePost(forumId: number, postId: number): Promise<void>
   if (!res.ok) {
     throw new Error('Échec de la suppression du post');
   }
-
-  console.log('[api] Suppression du post', postId);
 }
 
 /**
