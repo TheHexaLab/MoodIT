@@ -1,0 +1,5 @@
+# Routes mutantes (POST/PUT/PATCH/DELETE) exposées via le gateway. GÉNÉRÉ par
+# MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.
+# Lu par le RouteCoverageTest du permission-service (couverture des règles).
+POST /exec/evaluate
+POST /exec/run

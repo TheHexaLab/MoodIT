@@ -6,6 +6,8 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    /* Référentiel de l'overlay plein quiz (.busyOverlay, position: absolute). */
+    position: relative;
     /* La vue vit dans un panneau REDIMENSIONNABLE (la sidebar peut le rétrécir) : on
        adapte donc la mise en page à la largeur du PANNEAU via des container queries,
        et non au viewport (sinon panneau étroit + fenêtre large = pas d'adaptation). */
@@ -132,6 +134,32 @@
     justify-content: center;
 }
 
+/* Scrollbar fine, conforme au reste de l'application (cf. ChannelView / ForumView). */
+@supports not selector(::-webkit-scrollbar) {
+    .body {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+.body::-webkit-scrollbar {
+    width: 4px;
+}
+.body::-webkit-scrollbar-track {
+    background: transparent;
+}
+.body::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+.body::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.body::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
 /* Carte centrée (question / résumé). */
 .card {
     width: 100%;
@@ -233,6 +261,19 @@
 }
 
 /* ─────────────────────────────── Pied de page ─────────────────────────────── */
+
+/* Overlay PLEIN QUIZ : voile translucide (on devine le quiz derrière) + spinner centré. PAS de
+   flou : le flou en direct (filter / backdrop-filter) sature le compositeur et rend le spinner
+   saccadé. Affiché au chargement initial, pendant l'envoi (synchrone) et la réconciliation. */
+.busyOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5; /* au-dessus du contenu, sous l'ErrorPopup (z-index 1200) */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+}
 
 .footer {
     display: flex;

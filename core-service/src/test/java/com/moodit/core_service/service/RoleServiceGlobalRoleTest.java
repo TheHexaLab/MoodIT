@@ -9,6 +9,7 @@ import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.RoleRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -45,8 +46,10 @@ class RoleServiceGlobalRoleTest {
             roleRepository,
             userProgramRoleRepository,
             userRepository,
+            mock(ProgramRepository.class),
             mock(UserService.class),
-            mock(RealtimeEventPublisher.class));
+            mock(RealtimeEventPublisher.class),
+            mock(AuditLogService.class));
 
     adminRoleId = newRole(RoleNames.ADMIN, true, true).getId();
     teacherRoleId = newRole(RoleNames.TEACHER, true, false).getId();

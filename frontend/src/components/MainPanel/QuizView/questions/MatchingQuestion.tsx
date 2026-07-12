@@ -28,7 +28,9 @@ export function MatchingQuestion({
   labels,
 }: QuestionViewProps): React.ReactElement {
   const t = { ...defaultQuestionLabels, ...labels };
-  const items = question.dragItems ?? [];
+  // Enveloppé pour STABILISER l'identité (sinon `?? []` recrée un tableau à chaque rendu, ce qui
+  // ferait recalculer les useMemo qui en dépendent à chaque fois).
+  const items = useMemo(() => question.dragItems ?? [], [question.dragItems]);
   const byId = new Map(items.map((d) => [d.id, d]));
   const placement = answer?.kind === 'matching' ? answer.placement : {};
 

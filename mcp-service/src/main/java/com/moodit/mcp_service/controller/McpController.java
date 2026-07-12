@@ -12,8 +12,9 @@ import java.util.List;
 
 /**
  * Feedback MCP d'un cours (analyse LLM). Servi sous /mcp (le gateway route /mcp/** vers ce
- * service, sans stripping). Réservé aux administrateurs (403 sinon, géré dans le service).
- * `X-User-Email` injecté par le gateway (issu du JWT).
+ * service, sans stripping). L'autorisation PAR RÔLE est assurée en amont par le permission-service
+ * (règles /mcp/**) ; `X-User-Email` (injecté par le gateway) ne sert plus qu'à scoper les analyses
+ * de l'utilisateur courant (isPending / requestAnalysis).
  */
 @RestController
 @RequestMapping("/mcp")
@@ -24,18 +25,14 @@ public class McpController {
 
     /** Historique (résumés) des analyses terminées d'un cours, récent → ancien. */
     @GetMapping("/courses/{courseId}/analyses")
-    public ResponseEntity<List<McpResponseSummaryDto>> listAnalyses(
-            @PathVariable Integer courseId,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(mcpService.listAnalyses(courseId, email));
+    public ResponseEntity<List<McpResponseSummaryDto>> listAnalyses(@PathVariable Integer courseId) {
+        return ResponseEntity.ok(mcpService.listAnalyses(courseId));
     }
 
     /** Détail complet d'une analyse (content + author), chargé au clic. */
     @GetMapping("/analyses/{id}")
-    public ResponseEntity<McpResponseDto> getAnalysis(
-            @PathVariable Integer id,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(mcpService.getAnalysis(id, email));
+    public ResponseEntity<McpResponseDto> getAnalysis(@PathVariable Integer id) {
+        return ResponseEntity.ok(mcpService.getAnalysis(id));
     }
 
     /** L'utilisateur courant a-t-il une analyse en cours pour ce cours ? (réhydratation) */

@@ -1,5 +1,6 @@
 package com.moodit.core_service.controller;
 
+import com.moodit.core_service.dto.AttemptAcceptedDTO;
 import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
@@ -30,14 +31,12 @@ public class QuizController {
     }
 
     /**
-     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : AVEC la correction. Réservé
-     * aux administrateurs (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Détail complet d'un quiz pour l'ÉDITEUR enseignant : AVEC la correction. Autorisation par
+     * rôle assurée en amont par le permission-service (règle GET /quizzes/{quizId}/edit).
      */
     @GetMapping("/{quizId}/edit")
-    public ResponseEntity<QuizDetailDTO> getQuizForEdit(
-            @PathVariable Integer quizId,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.getQuizForEdit(quizId, email));
+    public ResponseEntity<QuizDetailDTO> getQuizForEdit(@PathVariable Integer quizId) {
+        return ResponseEntity.ok(quizService.getQuizForEdit(quizId));
     }
 
     /** Historique des tentatives de l'utilisateur courant sur ce quiz (résumés). */
@@ -58,39 +57,39 @@ public class QuizController {
     }
 
     /**
-     * Met à jour un quiz complet (méta + questions) en un appel. Réservé à qui gère le contenu du
-     * cours (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Met à jour un quiz complet (méta + questions) en un appel. Autorisation par rôle assurée en
+     * amont par le permission-service (règle PUT /quizzes/{quizId}).
      */
     @PutMapping("/{quizId}")
     public ResponseEntity<QuizDetailDTO> updateQuiz(
             @PathVariable Integer quizId,
-            @RequestBody QuizDetailDTO request,
-            @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.updateQuiz(quizId, request, email));
+            @RequestBody QuizDetailDTO request) {
+        return ResponseEntity.ok(quizService.updateQuiz(quizId, request));
     }
 
     /**
-     * Supprime un quiz et tout son contenu (cascade). Réservé à qui gère le contenu du cours
-     * (403 sinon). `X-User-Email` injecté par la gateway (JWT).
+     * Supprime un quiz et tout son contenu (cascade). Autorisation par rôle assurée en amont par
+     * le permission-service (règle DELETE /quizzes/{quizId}).
      */
     @DeleteMapping("/{quizId}")
-    public ResponseEntity<Void> deleteQuiz(
-            @PathVariable Integer quizId,
-            @RequestHeader("X-User-Email") String email) {
-        quizService.deleteQuiz(quizId, email);
+    public ResponseEntity<Void> deleteQuiz(@PathVariable Integer quizId) {
+        quizService.deleteQuiz(quizId);
         return ResponseEntity.noContent().build();
     }
 
     /**
-     * Soumet une tentative ; le serveur corrige (sauf code), persiste les soumissions et
-     * renvoie le résultat. Tentative unique → 409 si déjà soumis. `X-User-Email` injecté
-     * par la gateway (issu du JWT).
+     * Soumet une tentative de façon ASYNCHRONE : le serveur enregistre la tentative et répond
+     * <b>202 Accepted</b> avec son id, puis corrige le code en tâche de fond. Le résultat arrive
+     * par WebSocket ({@code quiz:attempt-graded} / {@code quiz:attempt-failed}) ; le client le
+     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. Tentative unique →
+     * 409 si déjà soumis ou déjà en cours de correction. `X-User-Email` injecté par la gateway.
      */
     @PostMapping("/{quizId}/submissions")
-    public ResponseEntity<QuizResultDTO> submitQuiz(
+    public ResponseEntity<AttemptAcceptedDTO> submitQuiz(
             @PathVariable Integer quizId,
             @RequestBody QuizSubmissionDTO submission,
             @RequestHeader("X-User-Email") String email) {
-        return ResponseEntity.ok(quizService.submitQuiz(quizId, submission, email));
+        Integer attemptId = quizService.submitQuiz(quizId, submission, email);
+        return ResponseEntity.accepted().body(new AttemptAcceptedDTO(attemptId));
     }
 }

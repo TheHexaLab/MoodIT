@@ -26,12 +26,12 @@ import ForumView, {
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
 import {
+  type AttemptOutcome,
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type RunCodeHandler,
   type SubmitQuizHandler,
-  type SubscribeCodeGrading,
 } from './QuizView/quizAttempt.ts';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
@@ -97,7 +97,8 @@ interface MainPanelProps {
   onFetchAttemptResult?: FetchAttemptResultHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
-  onSubscribeCodeGrading?: SubscribeCodeGrading;
+  /** Verdict PUSH (WebSocket) de la correction async d'une tentative ; voir QuizView. */
+  attemptOutcome?: AttemptOutcome | null;
   /** Exécute le code d'une question Code dans le sandbox (bouton « play » ; voir QuizView). */
   onRunCode?: RunCodeHandler;
   /** Bump à chaque mise à jour de quiz : remonte la vue de quiz ouverte (rechargement). */
@@ -145,7 +146,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onFetchAttempts,
   onFetchAttemptResult,
   onSubmitQuiz,
-  onSubscribeCodeGrading,
+  attemptOutcome,
   onRunCode,
   quizRefreshKey = 0,
   quizStale = false,
@@ -221,7 +222,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onFetchAttempts={onFetchAttempts}
             onFetchAttemptResult={onFetchAttemptResult}
             onSubmitQuiz={onSubmitQuiz}
-            onSubscribeCodeGrading={onSubscribeCodeGrading}
+            attemptOutcome={attemptOutcome}
             onRunCode={onRunCode}
             staleNotice={quizStale}
             onReloadStale={onReloadStale}

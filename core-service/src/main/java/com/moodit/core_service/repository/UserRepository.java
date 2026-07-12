@@ -66,44 +66,7 @@ public interface UserRepository extends JpaRepository<User, Integer> {
         @Param("q") String q,
         Pageable pageable);
 
-    /**
-     * L'utilisateur a-t-il un rôle PROGRAMME (User_Program_Role) « Administrateur » ou
-     * « Enseignant » dans un programme QUI CONTIENT ce cours ? Scope indispensable : un
-     * enseignant d'un autre programme ne doit pas gérer le contenu de ce cours.
-     */
-    @Query(
-        value =
-            """
-            SELECT EXISTS(
-              SELECT 1
-              FROM user_program_role upr
-              JOIN role r            ON r.id = upr.role_id
-              JOIN program_course pc ON pc.program_id = upr.program_id
-              WHERE upr.user_id = :userId
-                AND pc.course_id = :courseId
-                AND r.name IN ('Administrateur', 'Enseignant')
-            )
-            """,
-        nativeQuery = true)
-    boolean hasProgramTeachingRoleForCourse(
-        @Param("userId") Integer userId, @Param("courseId") Integer courseId);
-
-    /**
-     * Parmi les programmes fournis, ceux où l'utilisateur est « Administrateur » ou « Enseignant »
-     * (User_Program_Role). Sert à autoriser l'ajout d'un cours : l'utilisateur doit gérer TOUS les
-     * programmes visés (sinon le set renvoyé ne les couvre pas → refus).
-     */
-    @Query(
-        value =
-            """
-            SELECT DISTINCT upr.program_id
-            FROM user_program_role upr
-            JOIN role r ON r.id = upr.role_id
-            WHERE upr.user_id = :userId
-              AND upr.program_id IN (:programIds)
-              AND r.name IN ('Administrateur', 'Enseignant')
-            """,
-        nativeQuery = true)
-    List<Integer> programIdsManagedAmong(
-        @Param("userId") Integer userId, @Param("programIds") java.util.Collection<Integer> programIds);
+    // NB : les vérifications de rôle par cours/programme (`hasProgramTeachingRoleForCourse`,
+    // `programIdsManagedAmong`) ont été RETIRÉES — toute l'autorisation par rôle est désormais
+    // centralisée dans le permission-service (règles quiz/mcp/cours & /roles/*).
 }

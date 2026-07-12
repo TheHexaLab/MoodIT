@@ -10,7 +10,7 @@ import { Lightanddark } from '../assets/light-dark-btn.tsx';
 import logo from '../assets/Logo.png';
 import { login } from '../helpers/api';
 import { useTheme } from '../helpers/theme';
-import { classifyServerError } from '../helpers/serverError';
+import { classifyServerError, publicServerError } from '../helpers/serverError';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -35,7 +35,7 @@ export default function LoginPage() {
       setFieldErrors({ password: message });
     } else {
       // 'username' (pas de champ ici) ou message général -> erreur globale.
-      setError(message);
+      setError(publicServerError(message));
     }
   }
 
@@ -77,8 +77,8 @@ export default function LoginPage() {
           </div>
           <h1 className="app-name">MoodIT</h1>
           <p className="app-tagline">
-            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp; </span>
-            <span className={'app-tagline-text'}>c'est pas assez chaotique.</span>
+            <span className={'app-tagline-text'}>Parce que Moodle,&nbsp;</span>
+            <span className={'app-tagline-text'}>c'était pas assez chaotique.</span>
           </p>
         </div>
       </aside>
@@ -151,7 +151,22 @@ export default function LoginPage() {
         </div>
 
         <footer className="footer">
-          © 2026 MoodIT · <a href="#">Confidentialité</a> · <a href="#">Conditions d'utilisation</a>
+          © 2026 MoodIT ·{' '}
+          <a
+            href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Confidentialité
+          </a>{' '}
+          ·{' '}
+          <a
+            href="https://www.youtube.com/watch?v=Aq5WXmQQooo"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Conditions d'utilisation
+          </a>
         </footer>
       </main>
       <button type="button" className="light-dark-btn" onClick={toggleTheme}>

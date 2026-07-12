@@ -17,6 +17,8 @@ import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.realtime.dto.ChannelMessageDto;
 import com.moodit.core_service.realtime.dto.ForumPostDto;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +47,11 @@ public class ForumService {
     private final VoteRepository voteRepository;
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
+    private final AuditLogService auditLogService;
+
+    // Non-final (hors constructeur @RequiredArgsConstructor) : sert à recharger un post après
+    // détachement en masse de ses réponses (cf. deletePost, cas Discussion).
+    @PersistenceContext private EntityManager entityManager;
 
     // ── Temps réel ───────────────────────────────────────────────────────────────
     /** Un canal 'Discussion' (chat) ⇒ room `channel:` ; sinon 'Thread' ⇒ room `forum:`. */
@@ -401,6 +408,7 @@ public class ForumService {
     //endregion
 
     //region PATCH
+    @Transactional
     public ForumDTO updateForum(Integer forumId, ForumUpdateDTO forumUpdateDTO) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
@@ -409,6 +417,9 @@ public class ForumService {
         }
 
         forumRepository.save(forum);
+        String details = AuditContext.ofChildOfCourse(forum.getCourse());
+        auditLogService.record("FORUM_UPDATE", "FORUM", forumId,
+                "Forum « " + forum.getTitle() + " » mis à jour", details);
         return toForumDTO(forum);
     }
     @Transactional
@@ -450,11 +461,16 @@ public class ForumService {
     //endregion
 
     //region DELETE
+    @Transactional
     public void deleteForum(Integer forumId) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
 
+        // Contexte parent capturé AVANT la suppression (course encore accessible).
+        String details = AuditContext.ofChildOfCourse(forum.getCourse());
         forumRepository.delete(forum); //ON DELETE CASCADE
+        auditLogService.record("FORUM_DELETE", "FORUM", forumId,
+                "Forum #" + forumId + " supprimé", details);
     }
     @Transactional
     public void deletePost(Integer forumId, Integer postId) {
@@ -471,7 +487,23 @@ public class ForumService {
         long pId = post.getId();
         boolean discussion = isDiscussion(forum);
 
-        postRepository.delete(post); //ON DELETE CASCADE
+        if (discussion) {
+            // DISCUSSION (chat) : une réponse ne doit PAS disparaître avec le message auquel elle
+            // répond. On détache d'abord ses réponses DIRECTES (parent → NULL, en masse). Puis on
+            // VIDE le contexte de persistance et on recharge le post seul : sinon les réponses,
+            // encore liées au parent EN MÉMOIRE, feraient échouer le flush (ou seraient reprises par
+            // la cascade JPA `children` REMOVE/orphanRemoval). Le post rechargé a une collection
+            // `children` vide → seuls le message et ses votes partent, les réponses survivent (le
+            // front affiche « Message original supprimé »).
+            postRepository.detachDirectChildren(postId);
+            entityManager.clear();
+            Post toDelete = postRepository.findById(postId)
+                    .orElseThrow(() -> new RuntimeException("Post not found"));
+            postRepository.delete(toDelete);
+        } else {
+            // Thread : supprimer le post supprime tout son sous-fil (cascade JPA + BD conservée).
+            postRepository.delete(post);
+        }
 
         afterCommit(() -> {
             if (discussion) realtimePublisher.messageDeleted(fId, pId);

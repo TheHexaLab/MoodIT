@@ -8,6 +8,8 @@
 
 package com.moodit.core_service.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.MeDto;
 import com.moodit.core_service.dto.UpdateMeRequest;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
@@ -18,6 +20,7 @@ import java.security.Principal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,12 +32,19 @@ import org.springframework.http.HttpStatus;
 @RestController
 public class MeController {
 
+  // Garde-fou de taille du blob de préférences : au-delà on refuse (protège la colonne
+  // TEXT d'un payload aberrant). Les settings réels (thème + localisation) font < 1 Ko.
+  private static final int MAX_SETTINGS_BYTES = 8 * 1024;
+
   private final MeRepository users;
   private final RealtimeEventPublisher realtimePublisher;
+  private final ObjectMapper objectMapper;
 
-  public MeController(MeRepository users, RealtimeEventPublisher realtimePublisher) {
+  public MeController(
+      MeRepository users, RealtimeEventPublisher realtimePublisher, ObjectMapper objectMapper) {
     this.users = users;
     this.realtimePublisher = realtimePublisher;
+    this.objectMapper = objectMapper;
   }
 
   @GetMapping("/me")
@@ -71,6 +81,42 @@ public class MeController {
             updated.firstName(),
             updated.lastName(),
             updated.avatarColor()));
+
+    return ResponseEntity.ok(updated);
+  }
+
+  // PUT /api/me/settings — l'utilisateur écrase son blob de préférences (thème, dernière
+  // localisation dans l'app). Le corps est un JSON OPAQUE dont le front est propriétaire :
+  // le backend le valide (JSON bien formé, taille bornée) et le persiste tel quel.
+  //
+  // Endpoint DÉDIÉ (pas d'extension de PATCH /me) : la localisation se sauvegarde à chaque
+  // navigation, et on ne veut PAS déclencher le broadcast global `userUpdated` de PATCH /me
+  // à cette fréquence. Les settings sont privés → aucune diffusion WebSocket ici.
+  @PutMapping("/me/settings")
+  public ResponseEntity<MeDto> updateSettings(
+      Principal principal, @RequestBody(required = false) String settingsJson) {
+    if (settingsJson == null || settingsJson.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Corps JSON requis");
+    }
+    if (settingsJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+        > MAX_SETTINGS_BYTES) {
+      throw new ResponseStatusException(
+          HttpStatus.CONTENT_TOO_LARGE, "Préférences trop volumineuses");
+    }
+    // Normalise en re-sérialisant : garantit un JSON valide et compact en BD.
+    String normalized;
+    try {
+      normalized = objectMapper.writeValueAsString(objectMapper.readTree(settingsJson));
+    } catch (JsonProcessingException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "JSON invalide");
+    }
+
+    String email = principal.getName();
+    MeDto updated =
+        users
+            .updateSettingsByEmail(email, normalized)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilisateur introuvable"));
 
     return ResponseEntity.ok(updated);
   }

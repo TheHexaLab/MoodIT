@@ -36,6 +36,15 @@ public class Attempt {
     @Column(name = "attempt_no", nullable = false)
     private Integer attemptNo;
 
+    /**
+     * Cycle de vie de la correction (soumission asynchrone) : {@code "pending"} pendant que le
+     * sandbox corrige le code, {@code "done"} une fois la tentative corrigée et consultable. Une
+     * tentative dont l'évaluation code échoue est SUPPRIMÉE (jamais persistée en {@code "failed"}).
+     * Défaut {@code "done"} : une tentative créée hors du flux async (seed) est déjà corrigée.
+     */
+    @Column(name = "status", nullable = false, length = 16)
+    private String status = "done";
+
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "submitted_at", updatable = false)
     private LocalDateTime submittedAt;

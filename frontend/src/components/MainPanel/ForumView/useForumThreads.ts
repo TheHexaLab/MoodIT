@@ -404,7 +404,7 @@ export function useForumThreads({
         });
       }
     }
-  }, []);
+  }, [forumId]);
 
   /** Joue une mutation async avec garde anti-demontage ; rollback + erreur si echec. */
   async function runMutation(

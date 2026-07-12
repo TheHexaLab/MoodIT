@@ -24,3 +24,14 @@ export function classifyServerError(message: string): ServerErrorField | null {
   }
   return null;
 }
+
+// Message d'erreur GLOBALE (bandeau en haut du formulaire) destiné à l'utilisateur.
+// En production, on masque les détails techniques (codes HTTP type « Erreur 403 »,
+// messages réseau bruts) derrière un message générique ; en développement on garde
+// le message réel pour faciliter le débogage.
+export function publicServerError(message: string): string {
+  if (import.meta.env.PROD) {
+    return 'Une erreur est survenue. Veuillez réessayer plus tard.';
+  }
+  return message;
+}

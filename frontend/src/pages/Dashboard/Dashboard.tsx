@@ -37,6 +37,7 @@ import {
   type User,
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
+import { AuditLogsPopup } from '../../components/AuditLogsPopup/AuditLogsPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
 import { ChannelTypeIcon } from '../../components/CourseChannelList/ChannelTypeIcon.tsx';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
@@ -44,9 +45,9 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
-import { type SubscribeCodeGrading } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import { getToken } from '../../helpers/auth.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
+import type { SavedLocation } from '../../helpers/userSettings.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
 import * as api from './dashboardApi.ts';
@@ -61,6 +62,7 @@ import {
 } from '../../components/CourseChannelList/courseChannelSources.ts';
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
 import { type DemoProgram } from './dashboardApi.ts';
+import { type AttemptOutcome } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import styles from './Dashboard.module.css';
 
 /**
@@ -91,6 +93,7 @@ type PopupState =
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
   | { kind: 'manageGlobalRoles' } // gestion des administrateurs (rôles globaux / plateforme)
+  | { kind: 'viewAuditLogs' } // journal d'audit (actions de gestion) — Gardien uniquement
   | { kind: 'leaveProgram'; programId: number }
   | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
@@ -104,8 +107,16 @@ export default function Dashboard() {
   // dans l'UI. La liste démarre vide et est remplie par api.fetchPrograms au montage.
   const [dashboardPrograms, setDashboardPrograms] = useState<DemoProgram[]>([]);
   // Profil connecté (GET/PATCH /api/me) : logique « API » extraite dans un hook dédié.
-  const { currentUser, profileLoading, isAdmin, isGuardian, saveProfile, applyGlobalRoles } =
-    useCurrentUser();
+  const {
+    currentUser,
+    profileLoading,
+    isAdmin,
+    isGuardian,
+    saveProfile,
+    applyGlobalRoles,
+    settings,
+    saveSettings,
+  } = useCurrentUser();
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
@@ -121,6 +132,8 @@ export default function Dashboard() {
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
   const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
+  // Dernier verdict PUSH (WS) d'une correction async de tentative → remonté à la vue de quiz.
+  const [attemptOutcome, setAttemptOutcome] = useState<AttemptOutcome | null>(null);
   // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
   const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
@@ -207,15 +220,14 @@ export default function Dashboard() {
       // Mes rôles GLOBAUX ont changé → on remplace ceux du profil ; isAdmin/isGuardian
       // se recalculent (bouton « Gérer les administrateurs », droits de suppression…).
       onGlobalRolesChange: (roles) => applyGlobalRoles(roles),
+      // Correction ASYNCHRONE d'une de MES tentatives terminée / échouée (room user) : on remonte
+      // le verdict à la vue de quiz ouverte, qui résout l'attente (résumé) ou invite à renvoyer.
+      onQuizAttemptGraded: (quizId, attemptId) =>
+        setAttemptOutcome({ quizId, attemptId, ok: true }),
+      onQuizAttemptFailed: (quizId, attemptId, reason) =>
+        setAttemptOutcome({ quizId, attemptId, ok: false, reason }),
     });
   }, [ws, currentUser.id, applyGlobalRoles]);
-
-  // Abonnement à la correction ASYNC des questions Code (WS, room utilisateur), pré-lié à
-  // l'utilisateur courant. QuizView s'en sert pour rafraîchir verdicts + score en direct.
-  const subscribeCodeGrading = useCallback<SubscribeCodeGrading>(
-    (onCodeGraded) => ws.quizGrading.subscribe(currentUser.id, { onCodeGraded }),
-    [ws, currentUser.id]
-  );
 
   // Abonnement temps réel de la liste des ADMINISTRATEURS (popup rôles globaux) : un autre admin
   // modifie une assignation → le serveur diffuse la liste à jour. On mappe `roles` → `role_ids`
@@ -322,6 +334,9 @@ export default function Dashboard() {
         setStaleQuizId((prev) => (prev === quizId ? null : prev));
       },
     });
+    // `handleFetchCourses` volontairement HORS deps : l'abonnement WS ne doit se refaire qu'au
+    // changement de programme (l'inclure re-souscrirait à chaque rendu).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProgramId, ws]);
 
   // Ouverture d'un canal (navigation / rendu de vue à implémenter côté canaux).
@@ -386,6 +401,12 @@ export default function Dashboard() {
   };
   // Persiste un changement de rôle GLOBAL (User_Role) via api.changeGlobalRole.
   const handleGlobalRoleChange = (change: RoleChange) => api.changeGlobalRole(change);
+
+  // Ouvre le journal d'audit (réservé au Gardien ; le popup charge lui-même les entrées).
+  const handleViewAuditLogs = () => {
+    if (!isGuardian) return;
+    setPopup({ kind: 'viewAuditLogs' });
+  };
 
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
@@ -724,6 +745,89 @@ export default function Dashboard() {
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
+  // ── Persistance de la localisation (settings utilisateur) ──────────────────────
+  // But : replacer l'utilisateur là où il était (programme → cours → canal) à la
+  // session précédente. La restauration se fait en DEUX TEMPS car le chargement des
+  // cours d'un programme est asynchrone : on sélectionne d'abord le programme, puis
+  // le cours + le canal une fois ses cours chargés. Repli gracieux à chaque niveau
+  // (le programme/cours/canal peut avoir disparu depuis — désinscription, suppression).
+  const restoreStartedRef = useRef(false); // programme traité
+  const restoreDoneRef = useRef(false); // cours + canal traités (débloque la sauvegarde)
+  const restoreTargetRef = useRef<SavedLocation | null>(null);
+
+  // Programme dont le chargement des cours s'est EFFECTIVEMENT terminé (transition
+  // coursesLoading true→false). Indispensable pour l'étape 2 : juste après avoir posé le
+  // programme, `coursesLoading` est encore `false` (le loader n'a pas encore basculé) alors
+  // que la liste de cours est vide (fetchPrograms renvoie `courses: []`). Sans ce repère,
+  // l'étape 2 verrait une liste vide et abandonnerait la restauration du cours/canal.
+  const coursesLoadedForRef = useRef<number | null>(null);
+  const prevCoursesLoadingRef = useRef(false);
+  useEffect(() => {
+    if (prevCoursesLoadingRef.current && !coursesLoading) {
+      coursesLoadedForRef.current = activeProgramId;
+    }
+    prevCoursesLoadingRef.current = coursesLoading;
+  }, [coursesLoading, activeProgramId]);
+
+  // Étape 1 : sélectionner le programme sauvegardé, une fois la liste chargée.
+  useEffect(() => {
+    if (restoreStartedRef.current) return;
+    if (profileLoading || currentUser.id < 0) return; // profil (donc settings) pas prêt
+    if (programsLoading) return; // liste des programmes pas prête
+    restoreStartedRef.current = true;
+
+    const loc = settings.location;
+    const programExists =
+      loc?.programId != null && dashboardPrograms.some((p) => p.id === loc.programId);
+    if (programExists) {
+      restoreTargetRef.current = loc ?? null;
+      // Synchronisation légitime d'un état PERSISTÉ (settings BD) → état React, une seule
+      // fois après chargement asynchrone : pas dérivable au rendu.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveProgramId(loc!.programId!);
+      // Le cours + le canal sont restaurés par l'étape 2 (après chargement des cours).
+    } else {
+      restoreDoneRef.current = true; // rien à restaurer → la sauvegarde peut démarrer
+    }
+  }, [profileLoading, currentUser.id, programsLoading, dashboardPrograms, settings]);
+
+  // Étape 2 : sélectionner le cours + le canal une fois les cours du programme chargés.
+  useEffect(() => {
+    if (restoreDoneRef.current || !restoreStartedRef.current) return;
+    const target = restoreTargetRef.current;
+    if (!target || activeProgramId !== target.programId) return;
+    // Attendre la FIN effective du chargement des cours de ce programme. On ne se fie PAS
+    // au seul instantané `coursesLoading` (false pendant la fenêtre initiale) : on exige
+    // qu'un chargement se soit terminé pour CE programme (coursesLoadedForRef).
+    if (coursesLoading || coursesLoadedForRef.current !== activeProgramId) return;
+
+    const courseList = dashboardPrograms.find((p) => p.id === activeProgramId)?.courses ?? [];
+    if (target.courseId != null && courseList.some((c) => c.id === target.courseId)) {
+      // Restauration one-shot d'un état persisté (cf. étape 1).
+      setSelectedCourseId(target.courseId);
+      // Canal restauré tel quel : la dérivation `selectedChannel` retombe sur `null`
+      // si le canal n'existe plus (repli gracieux), sans casser l'affichage.
+      if (target.channel) setSelectedChannelRef(target.channel);
+    }
+    restoreDoneRef.current = true;
+  }, [activeProgramId, coursesLoading, dashboardPrograms]);
+
+  // Sauvegarde debouncée à chaque changement de position (une fois la restauration
+  // terminée, pour ne pas écraser la localisation sauvegardée par l'état par défaut).
+  // On enregistre le cours EFFECTIVEMENT affiché (repli inclus) plutôt que la sélection
+  // brute, pour restaurer exactement ce que l'utilisateur voyait.
+  useEffect(() => {
+    if (!restoreDoneRef.current) return;
+    if (activeProgramId < 0) return; // pas de position réelle à mémoriser
+    saveSettings({
+      location: {
+        programId: activeProgramId,
+        courseId: effectiveSelectedCourseId,
+        channel: selectedChannelRef,
+      },
+    });
+  }, [activeProgramId, effectiveSelectedCourseId, selectedChannelRef, saveSettings]);
+
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>
     api.fetchMessages(channelId, before, limit);
@@ -786,6 +890,7 @@ export default function Dashboard() {
             loading={profileLoading}
             onEditProfile={handleEditProfile}
             onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+            onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
             onLogout={handleLogout}
           />
         }
@@ -847,6 +952,7 @@ export default function Dashboard() {
             onDeleteCourse={handleDeleteCourse}
             onEditProfile={handleEditProfile}
             onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+            onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
             onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
             quizHandlers={quizEditorHandlers}
@@ -889,7 +995,7 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
-        onSubscribeCodeGrading={subscribeCodeGrading}
+        attemptOutcome={attemptOutcome}
         onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
@@ -1069,6 +1175,12 @@ export default function Dashboard() {
             }}
           />
         )}
+
+      {/* Journal d'audit (actions de gestion) — réservé au Gardien. Le popup charge
+          lui-même les entrées (spinner + ErrorPopup/réessayer intégrés). */}
+      {popup?.kind === 'viewAuditLogs' && (
+        <AuditLogsPopup onClose={() => setPopup(null)} load={(q) => api.fetchAuditLogs(q)} />
+      )}
 
       {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
       {popup?.kind === 'mcp' && mcpCourse && (

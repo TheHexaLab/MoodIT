@@ -80,6 +80,15 @@ public class GlobalExceptionHandler {
                 .body(ex.getMessage());
     }
 
+    //Vérification du code impossible (service d'exécution indisponible) : la tentative n'a pas
+    //été enregistrée, l'étudiant peut renvoyer. 503 pour signaler un échec transitoire côté serveur.
+    @ExceptionHandler(CodeVerificationUnavailableException.class)
+    public ResponseEntity<String> handleCodeVerificationUnavailable(CodeVerificationUnavailableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE) //Code 503
+                .body(ex.getMessage());
+    }
+
     //Tentative introuvable
     @ExceptionHandler(AttemptNotFoundException.class)
     public ResponseEntity<String> handleAttemptNotFound(AttemptNotFoundException ex) {

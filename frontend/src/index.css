@@ -197,6 +197,35 @@ body {
     font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* Bouton bascule thème clair/sombre — défini globalement pour être IDENTIQUE sur
+   les pages login et register (sinon non-stylé là où LoginPage.css n'est pas chargé). */
+.light-dark-btn {
+    position: absolute;
+    right: 3%;
+    top: 3%;
+    z-index: 10;
+    border: none;
+    cursor: pointer;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: var(--button-light-dark);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--button-light-dark-ordinateur);
+}
+
+@media (max-width: 768px) {
+    .light-dark-btn {
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        background: var(--bubble);
+        color: var(--button-light-dark-mobile);
+    }
+}
+
 /* ── Sélection de texte ──────────────────────────────────────────────────────
    Couleur de sélection en teinte de marque (vert-sarcelle) au lieu du bleu système, partout. */
 ::selection {

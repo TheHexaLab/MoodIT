@@ -263,6 +263,26 @@ export interface QuizResult {
   questions: QuestionResult[];
 }
 
+/**
+ * Réponse d'une soumission ASYNCHRONE (HTTP 202) : la tentative est enregistrée et sa correction
+ * (code) tourne en tâche de fond. Le résultat arrive ensuite par WebSocket (cf. {@link AttemptOutcome}).
+ */
+export interface AttemptAccepted {
+  attemptId: number;
+}
+
+/**
+ * Verdict PUSH d'une correction asynchrone (WebSocket `quiz:attempt-graded` / `-failed`), reçu par
+ * l'auteur de la tentative. `ok=false` → la tentative a échoué à l'évaluation (code inévaluable) et
+ * a été supprimée : l'étudiant peut renvoyer.
+ */
+export interface AttemptOutcome {
+  quizId: number;
+  attemptId: number;
+  ok: boolean;
+  reason?: string;
+}
+
 /** Résumé d'une tentative (historique). */
 export interface AttemptSummary {
   id: number;
@@ -330,10 +350,12 @@ export function fromSubmission(quiz: Quiz, submission: QuizSubmission): AttemptA
 export type FetchQuizHandler = (quizId: number) => MaybePromise<Quiz>;
 
 /**
- * Soumission d'une tentative. API-ready : le backend corrige et renvoie le
- * `QuizResult`. Absent → le grader de prévisualisation local s'en charge.
+ * Soumission d'une tentative. API-ready : le backend enregistre la tentative de façon
+ * ASYNCHRONE et répond `AttemptAccepted` (202 + id) ; le résultat corrigé arrive ensuite par
+ * WebSocket ({@link AttemptOutcome}). Absent → le grader de prévisualisation local s'en charge
+ * (résultat immédiat, sans passer par cette voie async).
  */
-export type SubmitQuizHandler = (submission: QuizSubmission) => MaybePromise<QuizResult>;
+export type SubmitQuizHandler = (submission: QuizSubmission) => MaybePromise<AttemptAccepted>;
 
 /**
  * Historique des tentatives de l'utilisateur sur un quiz (réhydratation). Liste vide →
@@ -347,43 +369,14 @@ export type FetchAttemptResultHandler = (
   attemptId: number
 ) => MaybePromise<QuizResult>;
 
-// ───────────────────── Correction ASYNC des questions Code (WS) ─────────────────
-
-/** Handlers d'abonnement au verdict de correction de code (event WS `quiz:code-graded`). */
-export interface IncomingQuizGradeHandlers {
-  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void;
-}
-
-/** Facade WS d'abonnement à la correction de code (scope utilisateur). */
-export interface QuizGradingSocket {
-  subscribe: (userId: number, handlers: IncomingQuizGradeHandlers) => () => void;
-}
-
 /**
- * Abonnement PRÉ-LIÉ à l'utilisateur courant, fourni par le parent (Dashboard). Le consommateur
- * (useQuizAttempt) passe un callback et récupère une fonction de désabonnement.
+ * Erreur du contrat de soumission : le backend n'a pas pu vérifier les questions de code
+ * (service d'exécution indisponible, HTTP 503). La tentative n'a PAS été enregistrée →
+ * l'étudiant peut renvoyer. Distincte d'un échec générique pour afficher un message adapté.
  */
-export type SubscribeCodeGrading = (
-  onCodeGraded: (attemptId: number, questions: QuestionResult[]) => void
-) => () => void;
-
-/**
- * Fusionne les verdicts de code fraîchement corrigés (reçus par WS) dans un résultat existant :
- * remplace les questions concernées, recalcule earned/max. No-op si la tentative ne correspond
- * pas (ou pas de résultat courant).
- */
-export function mergeCodeResults(
-  previous: QuizResult | null,
-  attemptId: number,
-  graded: QuestionResult[]
-): QuizResult | null {
-  if (!previous || previous.attemptId !== attemptId) return previous;
-  const gradedById = new Map(graded.map((g) => [g.questionId, g]));
-  const questions = previous.questions.map((q) => gradedById.get(q.questionId) ?? q);
-  return {
-    ...previous,
-    questions,
-    earned: questions.reduce((sum, q) => sum + q.earned, 0),
-    max: questions.reduce((sum, q) => sum + q.max, 0),
-  };
+export class CodeVerificationUnavailableError extends Error {
+  constructor() {
+    super('Code verification unavailable');
+    this.name = 'CodeVerificationUnavailableError';
+  }
 }

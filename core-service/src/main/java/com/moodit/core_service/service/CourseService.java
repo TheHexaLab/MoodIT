@@ -38,6 +38,8 @@ public class CourseService {
   private final UserRepository userRepository;
   private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
+  private final AuditLogService auditLogService;
+
 
   /** Exécute l'action après le commit (ou tout de suite hors transaction). */
   private void afterCommit(Runnable action) {
@@ -192,6 +194,13 @@ public class CourseService {
 
     Course saved = courseRepository.save(course);
 
+    auditLogService.record(
+        "COURSE_UPDATE",
+        "COURSE",
+        courseId,
+        "Cours « " + saved.getTitle() + " » (" + saved.getCode() + ") mis à jour",
+        AuditContext.ofCourse(saved));
+
     // ── Temps réel : le cours modifié est répercuté LIVE dans chaque programme (room program:<id>).
     // Version simple : on émet courseEdited aux programmes ACTUELS (un changement d'appartenance
     // via programIds n'émet pas de created/deleted sur le delta — cas admin rare, à raffiner). ──
@@ -212,10 +221,20 @@ public class CourseService {
 
     // Capturé AVANT delete (collection lazy vidée ensuite) ; émis après commit.
     long cId = course.getId();
+    String title = course.getTitle();
     List<Integer> programIds =
         course.getPrograms() == null ? List.of() : course.getPrograms().stream().map(Program::getId).toList();
+    // Capturé AVANT delete : la collection lazy de programmes sera vidée par la suppression.
+    String programsDetails = AuditContext.ofCourse(course);
 
     courseRepository.delete(course);
+
+    auditLogService.record(
+        "COURSE_DELETE",
+        "COURSE",
+        courseId,
+        "Cours « " + title + " » (#" + courseId + ") supprimé",
+        programsDetails);
 
     afterCommit(() -> programIds.forEach(pid -> realtimePublisher.courseDeleted(pid, cId)));
   }
@@ -234,6 +253,7 @@ public class CourseService {
   public ItemChangeDto changeSection(Integer courseId, String sectionType, ItemChangeDto change) {
     Course course = courseRepository.findById(courseId).orElseThrow(CourseNotFoundException::new);
     int fTypeId = "text".equals(sectionType) ? F_TYPE_DISCUSSION : F_TYPE_THREAD;
+    String courseDetails = AuditContext.ofChildOfCourse(course);
 
     ItemChangeDto emitted;
     switch (change.type()) {
@@ -248,12 +268,24 @@ public class CourseService {
         Forum saved = forumRepository.saveAndFlush(forum); // flush → id réel
         // Cohérence de la collection managée (orphanRemoval) : le forum créé y figure.
         if (course.getForums() != null) course.getForums().add(saved);
+        auditLogService.record(
+            "FORUM_CREATE",
+            "FORUM",
+            saved.getId(),
+            "Forum « " + saved.getTitle() + " » créé dans le cours #" + courseId,
+            courseDetails);
         emitted = ItemChangeDto.create(new ItemDto(String.valueOf(saved.getId()), saved.getTitle()));
       }
       case "rename" -> {
         Forum forum = forumInCourse(course, change.id());
         forum.setTitle(change.name());
         forumRepository.save(forum);
+        auditLogService.record(
+            "FORUM_RENAME",
+            "FORUM",
+            forum.getId(),
+            "Forum « " + change.name() + " » renommé",
+            courseDetails);
         emitted = ItemChangeDto.rename(change.id(), change.name());
       }
       case "delete" -> {
@@ -261,6 +293,12 @@ public class CourseService {
         // orphanRemoval=true sur Course.forums : on RETIRE de la collection managée (au lieu
         // de forumRepository.delete, qui serait annulé par la cascade tant que le forum y est).
         course.getForums().remove(forum);
+        auditLogService.record(
+            "FORUM_DELETE",
+            "FORUM",
+            forum.getId(),
+            "Forum #" + forum.getId() + " supprimé",
+            courseDetails);
         emitted = ItemChangeDto.delete(change.id());
       }
       case "reorder" -> {
@@ -324,10 +362,8 @@ public class CourseService {
     Set<Integer> requestedCourseIds = new HashSet<>(courseIds);
     Integer programId = dto.getProgramId();
 
-    // 1. REMOVE : seulement les inscriptions aux cours DU PROGRAMME concerné qui ne sont
-    //    plus sélectionnés (déselection = désinscription, liste vide comprise).
-    //    programId null → portée globale (rétrocompat).
-    currentEnrollments.removeIf(
+    // Prédicat de désinscription (réutilisé pour la capture d'audit ET le removeIf).
+    java.util.function.Predicate<Enrollment> toRemove =
         enrollment -> {
           Course course = enrollment.getCourse();
           boolean inProgram =
@@ -335,7 +371,16 @@ public class CourseService {
                   || (course.getPrograms() != null
                       && course.getPrograms().stream().anyMatch(p -> p.getId().equals(programId)));
           return inProgram && !requestedCourseIds.contains(course.getId());
-        });
+        };
+
+    // Capturé AVANT le removeIf : les cours dont l'inscription va être retirée (pour l'audit).
+    List<Course> coursesToRemove =
+        currentEnrollments.stream().filter(toRemove).map(Enrollment::getCourse).toList();
+
+    // 1. REMOVE : seulement les inscriptions aux cours DU PROGRAMME concerné qui ne sont
+    //    plus sélectionnés (déselection = désinscription, liste vide comprise).
+    //    programId null → portée globale (rétrocompat).
+    currentEnrollments.removeIf(toRemove);
 
     // 2. Existing after cleanup
     Set<Integer> remainingCourseIds =
@@ -360,6 +405,33 @@ public class CourseService {
 
     userRepository.save(user);
 
+    // ── Audit des changements d'inscription (dans la transaction). ──
+    String userRef = user.getUsername() != null ? user.getUsername() : "#" + user.getId();
+    for (Course course : coursesToAdd) {
+      auditLogService.record(
+          "ENROLLMENT_JOIN",
+          "ENROLLMENT",
+          course.getId(),
+          "Inscription au cours « " + course.getTitle() + " » (" + course.getCode() + ")",
+          AuditContext.ofChildOfCourse(course)
+              + AuditContext.SEP
+              + "Utilisateur : "
+              + userRef
+              + enrollProgramSuffix(course, programId));
+    }
+    for (Course course : coursesToRemove) {
+      auditLogService.record(
+          "ENROLLMENT_LEAVE",
+          "ENROLLMENT",
+          course.getId(),
+          "Désinscription du cours « " + course.getTitle() + " » (" + course.getCode() + ")",
+          AuditContext.ofChildOfCourse(course)
+              + AuditContext.SEP
+              + "Utilisateur : "
+              + userRef
+              + enrollProgramSuffix(course, programId));
+    }
+
     return user.getEnrollments().stream()
         .map(Enrollment::getCourse)
         .distinct()
@@ -370,7 +442,47 @@ public class CourseService {
   public void removeUserFromCourse(Integer courseId, Integer userId) {
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
+    Course course = courseRepository.findById(courseId).orElse(null);
+    String courseLabel =
+        course != null
+            ? "« " + course.getTitle() + " » (" + course.getCode() + ")"
+            : "#" + courseId;
+
     user.getEnrollments().removeIf(e -> e.getCourse().getId().equals(courseId));
     userRepository.save(user);
+
+    String userRef = user.getUsername() != null ? user.getUsername() : "#" + user.getId();
+    String enrollDetails =
+        (course != null ? AuditContext.ofChildOfCourse(course) : "Cours : #" + courseId)
+            + AuditContext.SEP
+            + "Utilisateur : "
+            + userRef;
+    auditLogService.record(
+        "ENROLLMENT_LEAVE",
+        "ENROLLMENT",
+        courseId,
+        "Désinscription du cours " + courseLabel,
+        enrollDetails);
+  }
+
+  /**
+   * Suffixe d'audit « · Programme : <nom> » pour l'inscription passée par ce programme. Le nom est
+   * résolu depuis les programmes DÉJÀ chargés du cours (aucune requête) ; repli sur « #id » sinon.
+   */
+  private String enrollProgramSuffix(Course course, Integer programId) {
+    if (programId == null) {
+      return "";
+    }
+    String name =
+        course.getPrograms() == null
+            ? null
+            : course.getPrograms().stream()
+                .filter(p -> programId.equals(p.getId()))
+                .map(Program::getName)
+                .findFirst()
+                .orElse(null);
+    return name != null
+        ? AuditContext.SEP + "Programme : " + name
+        : AuditContext.SEP + "Programme #" + programId;
   }
 }

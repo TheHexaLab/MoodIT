@@ -226,17 +226,28 @@ CREATE TABLE Drag_Item(
 -- Une TENTATIVE de quiz par un utilisateur (regroupe les soumissions de la tentative).
 -- `attempt_no` = 1, 2, … par (quiz, user). Les tentatives multiples ne sont possibles
 -- que si Quiz.allow_retry = TRUE (contrôlé côté service).
+-- status : 'pending' (correction du code en cours, soumission async) → 'done' (corrigée).
+-- Une tentative dont l'évaluation code échoue est SUPPRIMÉE (la tentative unique n'est
+-- donc pas consommée) ; 'failed' ne persiste pas en base.
 CREATE TABLE Attempt(
    id SERIAL,
    quiz_id INTEGER NOT NULL,
    user_id INTEGER NOT NULL,
    attempt_no INTEGER NOT NULL,
+   -- Défaut 'done' : un INSERT manuel / de démo est une tentative DÉJÀ corrigée. La
+   -- soumission async pose explicitement 'pending' puis 'done'.
+   status VARCHAR(16) NOT NULL DEFAULT 'done',
    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
    PRIMARY KEY(id),
    UNIQUE(quiz_id, user_id, attempt_no),
    FOREIGN KEY(quiz_id) REFERENCES Quiz(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
 );
+
+-- Verrou « une seule correction en cours par (quiz, utilisateur) » : rend l'anti-double-
+-- soumission ATOMIQUE (deux POST concurrents → le 2e viole l'index → 409). Miroir de
+-- uq_mcp_response_pending.
+CREATE UNIQUE INDEX uq_attempt_pending ON Attempt(quiz_id, user_id) WHERE status = 'pending';
 
 -- La réponse soumise est conservée (content) ; le score n'est PAS stocké : il est
 -- recalculé dynamiquement à partir du quiz courant (cf. QuizService).
@@ -358,6 +369,35 @@ CREATE INDEX idx_post_parent_created ON Post(post_parent_id, created_at); -- rep
 CREATE INDEX idx_vote_post_value ON Vote(post_id, value_); -- score d'un post (SUM value_) + cascade post_id
 CREATE INDEX idx_vote_quiz_value ON Vote(quiz_id, value_); -- score d'un quiz + cascade quiz_id
 CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jour" d'un cours + cascade course_id
+
+-- ── Journal d'audit ────────────────────────────────────────────────────────────
+-- Trace les actions de GESTION (rôles global/programme, établissements, programmes, cours,
+-- forums, quiz, analyses MCP) — PAS les actions étudiantes (soumissions, messages). Append-only,
+-- consultable par les Gardiens uniquement. `actor_email` est un INSTANTANÉ (survit à la suppression
+-- de l'auteur → pas de FK). Écrit dans la MÊME transaction que la mutation (atomique avec elle).
+-- pg_trgm : requis par les index GIN trigram de recherche ci-dessous (LIKE '%…%' indexable).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE TABLE Audit_Log(
+   id SERIAL,
+   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+   actor_email VARCHAR(256),            -- instantané de l'auteur (NULL si contexte absent)
+   action VARCHAR(48) NOT NULL,         -- ex. 'ROLE_ASSIGN', 'QUIZ_CREATE', 'FORUM_DELETE'
+   entity_type VARCHAR(24) NOT NULL,    -- 'ROLE','PROGRAM','COURSE','FORUM','QUIZ','ESTABLISHMENT','ENROLLMENT','MCP'
+   entity_id INTEGER,                   -- id de l'entité concernée (peut être NULL)
+   summary VARCHAR(512) NOT NULL,       -- phrase lisible (FR) construite au moment de l'action
+   details VARCHAR(1024),               -- contexte PARENT capturé au moment de l'action (établissement,
+                                        -- programmes, cours…) : survit à la suppression de l'entité. NULL si sans objet
+   PRIMARY KEY(id)
+);
+CREATE INDEX idx_audit_log_created_at ON Audit_Log(created_at);
+CREATE INDEX idx_audit_log_entity ON Audit_Log(entity_type, entity_id);
+-- Recherche plein-texte (LIKE '%…%', joker en tête) : index GIN trigram sur lower(col), aligné sur
+-- AuditLogRepository.search (summary/auteur/details). Le planificateur bitmap-OR les 3 index.
+-- fastupdate=off : pas de pending list → l'index est IMMÉDIATEMENT à jour après écriture (les
+-- recherches l'utilisent sans attendre l'autovacuum). Écritures d'audit rares → coût négligeable.
+CREATE INDEX idx_audit_log_summary_trgm ON Audit_Log USING gin (lower(summary) gin_trgm_ops) WITH (fastupdate = off);
+CREATE INDEX idx_audit_log_actor_trgm ON Audit_Log USING gin (lower(actor_email) gin_trgm_ops) WITH (fastupdate = off);
+CREATE INDEX idx_audit_log_details_trgm ON Audit_Log USING gin (lower(details) gin_trgm_ops) WITH (fastupdate = off);
 CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 
@@ -373,14 +413,9 @@ CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- quest
 -- ------------------------------------------------------------
 -- Program  (programmes de génie offerts à l'UdeS)
 -- ------------------------------------------------------------
+-- Un seul programme conservé pour la démo (Génie informatique).
 INSERT INTO Program (name, code, cohort, color, establishment_id) VALUES
-  ('Génie informatique','GIN', '71',  '#1a6e3c', 1),
-  ('Génie logiciel',    'GLO', '71',  '#0a5cc0', 1),
-  ('Génie électrique',  'GEL', '71',  '#8b1a1a', 1),
-  ('Génie mécanique',   'GMC', '71',  '#7a4e1a', 1),
-  ('Génie civil',       'GCI', '71',  '#3a3a7a', 1),
-  ('Génie chimique',    'GCH', '71',  '#4a7a1a', 1),
-  ('Génie de l''environnement',  'GEN', '2024',  '#0a7a6e', 1);
+  ('Génie informatique','GIN', '71',  '#1a6e3c', 1);
 
 -- ------------------------------------------------------------
 -- Role
@@ -409,18 +444,6 @@ INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
 INSERT INTO User_ (username, first_name, last_name, email, password_hash) VALUES
   ('mich1234', 'mich', 'normand', 'mich1234@usherbrooke.ca', 'hash.pour.tester3');
 
--- Utilisateurs de TEST en masse (ids 4..43) : de quoi éprouver la pagination (10 par 10) et la
--- recherche serveur du popup de gestion des administrateurs. Prénoms variés pour tester le filtre.
-INSERT INTO User_ (username, first_name, last_name, email, password_hash)
-SELECT
-  'user' || g,
-  (ARRAY['Alice','Benoit','Chloé','David','Émilie','Félix','Gabrielle','Hugo','Inès','Jacob',
-         'Katia','Louis','Maya','Nathan','Olivia','Pierre','Quentin','Rosalie','Samuel','Thomas'])[1 + (g % 20)],
-  (ARRAY['Roy','Gagnon','Tremblay','Côté','Bouchard','Gauthier','Morin','Lavoie','Fortin','Bergeron'])[1 + (g % 10)],
-  'user' || g || '@usherbrooke.ca',
-  'hash.pour.tester'
-FROM generate_series(1, 40) AS g;
-
 -- ------------------------------------------------------------
 -- User_Role
 -- ------------------------------------------------------------
@@ -441,42 +464,18 @@ INSERT INTO User_Program (program_id, user_id) VALUES (1, 2);
 -- ------------------------------------------------------------
 -- Course  (cours transversaux + spécifiques génie)
 -- ------------------------------------------------------------
+-- Cours conservés pour la démo (ids 1..5 dans l'ordre d'insertion) :
+--   1 MAT115 → héberge le quiz « tous les types (sauf code) »
+--   2 GIF201 → héberge le quiz « Démo — Questions de code (multi-langages) »
+--   3..5     → cours de DÉMO pour l'analyse MCP (actif / inactif / moyen)
 INSERT INTO Course (title, code) VALUES
-  -- Tronc commun
-  ('Mathématiques pour ingénieurs I',          'MAT115'),
-  ('Mathématiques pour ingénieurs II',         'MAT215'),
-  ('Physique pour ingénieurs I',               'PHY115'),
-  ('Physique pour ingénieurs II',              'PHY215'),
-  ('Chimie pour ingénieurs',                   'CHI105'),
-  ('Communication en génie',                   'COM105'),
-  ('Éthique et déontologie',                   'ETH105'),
-  -- Génie informatique / logiciel
-  ('Structures de données et algorithmes',     'GIF201'),
-  ('Systèmes d''exploitation',                 'GIF301'),
-  ('Réseaux informatiques',                    'GIF401'),
-  ('Génie logiciel I',                         'GLO200'),
-  ('Génie logiciel II',                        'GLO300'),
-  ('Bases de données',                         'GIF501'),
-  -- Génie électrique
-  ('Circuits électriques I',                   'GEL201'),
-  ('Circuits électriques II',                  'GEL301'),
-  ('Électronique analogique',                  'GEL401'),
-  ('Systèmes de contrôle',                     'GEL501'),
-  -- Génie mécanique
-  ('Mécanique des solides I',                  'GMC201'),
-  ('Mécanique des fluides',                    'GMC301'),
-  ('Thermodynamique appliquée',                'GMC401'),
-  -- Génie civil
-  ('Matériaux de construction',                'GCI201'),
-  ('Hydraulique',                              'GCI301'),
-  -- Génie chimique
-  ('Opérations unitaires I',                   'GCH201'),
-  ('Cinétique chimique',                       'GCH301'),
+  ('Mathématiques pour ingénieurs I',          'MAT115'),   -- 1
+  ('Structures de données et algorithmes',     'GIF201'),   -- 2
   -- Cours de DÉMO pour l'analyse MCP (feedback de cours). Ils héritent des forums
   -- auto-créés plus bas (un « Discussion » + un « Thread » par cours).
-  ('Démo MCP — cours actif',                   'MCP100'),   -- riche → bonne note
-  ('Démo MCP — cours inactif',                 'MCP200'),   -- vide → mauvaise note
-  ('Démo MCP — cours moyen',                   'MCP150');   -- tiède → zone warning
+  ('Démo MCP — cours actif',                   'MCP100'),   -- 3 riche → bonne note
+  ('Démo MCP — cours inactif',                 'MCP200'),   -- 4 vide → mauvaise note
+  ('Démo MCP — cours moyen',                   'MCP150');   -- 5 tiède → zone warning
 
 -- ------------------------------------------------------------
 -- F_Type  (types de forum)
@@ -503,103 +502,63 @@ SELECT
 FROM Course c;
 
 -- ------------------------------------------------------------
--- program_course  (association programmes ↔ cours)
--- Tronc commun (MAT115,MAT215,PHY115,PHY215,CHI105,COM105,ETH105)
--- attribué à tous les programmes.
--- Cours spécialisés selon le programme.
+-- program_course  (association programme ↔ cours)
+-- GIN (1) ↔ MAT115 (1) et GIF201 (2). Les 3 cours de démo MCP sont ajoutés
+-- plus bas, dans leurs sections respectives (par code, robuste aux ids).
 -- ------------------------------------------------------------
-
--- Tronc commun pour tous les programmes (ids 1..7 = cours 1..7)
-INSERT INTO program_course (program_id, course_id)
-SELECT p.id, c.id
-FROM Program p, Course c
-WHERE c.id BETWEEN 1 AND 7;   -- MAT115 → ETH105
-
--- GIN (1) : cours info/logiciel + bases communes spécialisées
 INSERT INTO program_course (program_id, course_id) VALUES
-  (1, 8), (1, 9), (1, 10), (1, 13), (1, 14), (1, 17);
-
--- GLO (2) : cours logiciel + info
-INSERT INTO program_course (program_id, course_id) VALUES
-  (2, 8), (2, 11), (2, 12), (2, 13);
-
--- GEL (3) : circuits + contrôle
-INSERT INTO program_course (program_id, course_id) VALUES
-  (3, 14), (3, 15), (3, 16), (3, 17);
-
--- GMC (4) : mécanique + fluides + thermo
-INSERT INTO program_course (program_id, course_id) VALUES
-  (4, 18), (4, 19), (4, 20);
-
--- GCI (5) : matériaux + hydraulique
-INSERT INTO program_course (program_id, course_id) VALUES
-  (5, 21), (5, 22);
-
--- GCH (6) : opérations unitaires + cinétique
-INSERT INTO program_course (program_id, course_id) VALUES
-  (6, 23), (6, 24);
-
--- GEN (7) : partage avec GCI et GCH
-INSERT INTO program_course (program_id, course_id) VALUES
-  (7, 19), (7, 21), (7, 22), (7, 23);
+  (1, 1),   -- GIN ↔ MAT115
+  (1, 2);   -- GIN ↔ GIF201
 
 -- ------------------------------------------------------------
 -- Post (quelques posts dans les forums existants)
 -- ------------------------------------------------------------
+-- Tous sur le forum Discussion de MAT115 (forum 1). Les posts de GIF301 ont été retirés
+-- avec ce cours ; les ids de post sont donc renumérotés 1..10.
 INSERT INTO Post (content, forum_id, user_id, is_pinned) VALUES
   ('Bonjour, est-ce que quelqu''un peut m''expliquer la dérivée en chaîne?', 1, 2, FALSE),  -- post 1
   ('Voici une ressource utile pour MAT115!', 1, 3, TRUE),                                    -- post 2
-  ('Je comprends pas les intégrales doubles...', 1, 2, FALSE),                               -- post 3
-  ('Question sur les systèmes d''exploitation, comment fonctionne un deadlock?', 9, 3, FALSE), -- post 4
-  ('Réponse au deadlock: c''est quand deux processus s''attendent mutuellement.', 9, 2, FALSE); -- post 5
+  ('Je comprends pas les intégrales doubles...', 1, 2, FALSE);                               -- post 3
 
 -- Enfants du post 1
 INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
-  ('C''est une réponse au post 1!', 1, 3, 1, FALSE),           -- post 6
-  ('Une deuxième réponse au post 1!', 1, 1, 1, FALSE);         -- post 7
+  ('C''est une réponse au post 1!', 1, 3, 1, FALSE),           -- post 4
+  ('Une deuxième réponse au post 1!', 1, 1, 1, FALSE);         -- post 5
 
 -- Enfants du post 2
 INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
-  ('Merci pour la ressource, très utile!', 1, 2, 2, FALSE),    -- post 8
-  ('Je confirme, excellente ressource!', 1, 1, 2, FALSE),      -- post 9
-  ('Est-ce qu''il y a d''autres ressources?', 1, 3, 2, FALSE); -- post 10
+  ('Merci pour la ressource, très utile!', 1, 2, 2, FALSE),    -- post 6
+  ('Je confirme, excellente ressource!', 1, 1, 2, FALSE),      -- post 7
+  ('Est-ce qu''il y a d''autres ressources?', 1, 3, 2, FALSE); -- post 8
 
--- Enfants du post 3
+-- Enfant du post 3
 INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
-  ('Moi non plus, on peut étudier ensemble?', 1, 1, 3, FALSE); -- post 11
+  ('Moi non plus, on peut étudier ensemble?', 1, 1, 3, FALSE); -- post 9
 
--- Enfants du post 4
+-- Enfant d'un enfant (post 4 → réponse à une réponse)
 INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
-  ('Bonne question, j''ai le même problème.', 9, 2, 4, FALSE), -- post 12
-  ('Voici un lien utile sur les deadlocks!', 9, 1, 4, FALSE);  -- post 13
-
--- Enfant d'un enfant (post 6 → réponse à une réponse)
-INSERT INTO Post (content, forum_id, user_id, post_parent_id, is_pinned) VALUES
-  ('Je suis d''accord avec toi!', 1, 2, 6, FALSE);             -- post 14
+  ('Je suis d''accord avec toi!', 1, 2, 4, FALSE);             -- post 10
 
 -- ------------------------------------------------------------
 -- Vote
 -- ------------------------------------------------------------
+-- post_id remappés après renumérotation des posts (les votes des posts GIF301 retirés).
 INSERT INTO Vote (value_, user_id, post_id) VALUES
   (1,  2, 2),   -- rosie +1 post 2
   (1,  3, 2),   -- mich +1 post 2
   (1,  1, 2),   -- admin +1 post 2
   (-1, 3, 1),   -- mich -1 post 1
-  (1,  2, 4),   -- rosie +1 post 4
   (-1, 1, 3),   -- admin -1 post 3
-  (1,  3, 5),   -- mich +1 post 5
+  (1,  1, 4),   -- admin +1 post 4
+  (1,  2, 4),   -- rosie +1 post 4
+  (-1, 3, 5),   -- mich -1 post 5
+  (1,  1, 5),   -- admin +1 post 5
   (1,  1, 6),   -- admin +1 post 6
-  (1,  2, 6),   -- rosie +1 post 6
-  (-1, 3, 7),   -- mich -1 post 7
-  (1,  1, 7),   -- admin +1 post 7
-  (1,  1, 8),   -- admin +1 post 8
-  (-1, 2, 9),   -- rosie -1 post 9
-  (1,  3, 9),   -- mich +1 post 9
-  (1,  2, 10),  -- rosie +1 post 10
-  (1,  1, 11),  -- admin +1 post 11
-  (-1, 3, 12),  -- mich -1 post 12
-  (1,  2, 13),  -- rosie +1 post 13
-  (1,  3, 14);  -- mich +1 post 14
+  (-1, 2, 7),   -- rosie -1 post 7
+  (1,  3, 7),   -- mich +1 post 7
+  (1,  2, 8),   -- rosie +1 post 8
+  (1,  1, 9),   -- admin +1 post 9
+  (1,  3, 10);  -- mich +1 post 10
 
 -- ------------------------------------------------------------
 -- Q_Type  (types de question — ordre = mapping vers les slugs front)
@@ -1029,8 +988,10 @@ VALUES ('Écris une fonction somme(a, b) qui renvoie la somme de deux entiers.',
         (SELECT id FROM Quiz WHERE title = 'Quiz noté — exercice de code'
                              AND course_id = (SELECT id FROM Course WHERE code = 'MCP100')));
 
+-- Le harnais Python doit RENVOYER un booléen (contrat : verdict = bool(harnais())) ; un `assert`
+-- renverrait None → toujours faux même sur une bonne réponse. Cf. CodeAssembler.assemblePython.
 INSERT INTO Test_Case (name, harness_code, weight, question_id)
-SELECT 'Test ' || g, 'assert somme(1, 2) == 3', 1,
+SELECT 'Test ' || g, 'return somme(1, 2) == 3', 1,
        (SELECT id FROM Question
         WHERE q_type_id = 6
           AND quiz_id = (SELECT id FROM Quiz WHERE title = 'Quiz noté — exercice de code'

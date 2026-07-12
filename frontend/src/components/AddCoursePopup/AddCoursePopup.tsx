@@ -111,6 +111,8 @@ export function AddCoursePopup({
   // sélection : les programmes disponibles dépendent de l'établissement).
   useEffect(() => {
     if (establishmentId === null) {
+      // Réinitialisation légitime d'un état DÉRIVÉ quand l'entrée change (établissement désélectionné).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPrograms([]);
       return;
     }

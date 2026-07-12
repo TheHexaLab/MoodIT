@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './UserMenu.module.css';
 import { useTheme } from '../../helpers/theme.ts';
+import { useCurrentUser } from '../../context/currentUserContext.ts';
 import { Moon } from '../../assets/Moon.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
+import { AuditLog } from '../../assets/AuditLog.tsx';
 import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
@@ -30,6 +32,11 @@ interface UserMenuProps {
    * l'utilisateur y a droit (admin général / gardien) : sinon l'entrée est masquée.
    */
   onManageAdmins?: () => void;
+  /**
+   * Ouvre le journal d'audit (actions de gestion). Fourni UNIQUEMENT au Gardien : sinon
+   * l'entrée est masquée.
+   */
+  onViewAuditLogs?: () => void;
   /** Déconnecte l'utilisateur. */
   onLogout?: () => void;
   /**
@@ -52,6 +59,7 @@ export default function UserMenu({
   loading = false,
   onEditProfile,
   onManageAdmins,
+  onViewAuditLogs,
   onLogout,
   variant = 'footer',
 }: UserMenuProps): React.ReactElement {
@@ -60,7 +68,16 @@ export default function UserMenu({
   const handle = username ? `@${username}` : '@utilisateur';
   const initials = getInitials(displayName);
 
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
+  const { saveSettings } = useCurrentUser();
+  // Bascule le thème ET le persiste en BD (settings utilisateur) : il suit alors
+  // l'utilisateur d'un appareil à l'autre. On calcule la valeur cible explicitement
+  // pour l'appliquer localement (setTheme) et l'envoyer (saveSettings) de façon cohérente.
+  const handleToggleTheme = useCallback(() => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    saveSettings({ theme: next });
+  }, [theme, setTheme, saveSettings]);
   const [isOpen, setIsOpen] = useState(false);
   /** Fermeture en cours : joue l'animation de sortie avant de démonter le popup. */
   const [isClosing, setIsClosing] = useState(false);
@@ -185,6 +202,11 @@ export default function UserMenu({
     onManageAdmins?.();
   }
 
+  function handleViewAuditLogs() {
+    requestClose();
+    onViewAuditLogs?.();
+  }
+
   function handleLogout() {
     requestClose();
     onLogout?.();
@@ -249,7 +271,7 @@ export default function UserMenu({
                     aria-checked={theme === 'dark'}
                     aria-label="Mode sombre"
                     className={`${styles.toggle}${theme === 'dark' ? ` ${styles.toggleOn}` : ''}`}
-                    onClick={toggleTheme}
+                    onClick={handleToggleTheme}
                   >
                     <span className={styles.toggleKnob} />
                   </button>
@@ -287,6 +309,25 @@ export default function UserMenu({
                         aria-hidden="true"
                       />
                       Gérer les administrateurs
+                    </span>
+                  </button>
+                )}
+
+                {onViewAuditLogs && (
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    role="menuitem"
+                    onClick={handleViewAuditLogs}
+                  >
+                    <span className={styles.actionLabel}>
+                      <AuditLog
+                        className={styles.actionIcon}
+                        width="1rem"
+                        height="1rem"
+                        aria-hidden="true"
+                      />
+                      Journalisation
                     </span>
                   </button>
                 )}

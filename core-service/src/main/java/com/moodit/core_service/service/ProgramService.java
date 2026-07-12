@@ -2,16 +2,17 @@ package com.moodit.core_service.service;
 
 // Model
 import com.moodit.core_service.exception.UserNotFoundException;
+import com.moodit.core_service.model.Enrollment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
+import java.time.LocalDateTime;
 
 // DTO
 import com.moodit.core_service.dto.*;
 
 // Exception
-import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.ProgramNotFoundException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 
@@ -49,6 +50,7 @@ public class ProgramService {
   private final UserProgramRoleRepository userProgramRoleRepository;
   private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
+  private final AuditLogService auditLogService;
   //private final UserService userService;
 
   /** DTO temps réel d'un programme (scope user:<id>). */
@@ -232,22 +234,16 @@ public class ProgramService {
 
   // region POST
   @Transactional
-  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO, String userEmail) {
-    if (courseCreateDTO == null || courseCreateDTO.getProgramIds() == null) {
+  public CourseDTO addCourseToPrograms(CourseCreateInProgramsDTO courseCreateDTO) {
+    if (courseCreateDTO == null
+            || courseCreateDTO.getProgramIds() == null
+            || courseCreateDTO.getProgramIds().isEmpty() ) {
       throw new IllegalArgumentException();
     }
 
-    // ── Autorisation : admin global / gardien → partout ; sinon l'utilisateur doit être
-    // Administrateur ou Enseignant de CHAQUE programme visé (User_Program_Role), sinon 403. ──
-    User requester = userRepository.findByEmail(userEmail).orElseThrow(UserNotFoundException::new);
-    List<Integer> requestedProgramIds = courseCreateDTO.getProgramIds().stream().distinct().toList();
-    if (!isGlobalAdmin(requester) && !requestedProgramIds.isEmpty()) {
-      Set<Integer> managed =
-          new HashSet<>(userRepository.programIdsManagedAmong(requester.getId(), requestedProgramIds));
-      if (!managed.containsAll(requestedProgramIds)) {
-        throw new ForbiddenException();
-      }
-    }
+    // Autorisation PAR RÔLE déléguée au permission-service (règle POST /programs/courses,
+    // predicat canCreateCourse) : Administrateur/Gardien GLOBAL, ou Administrateur/Enseignant
+    // dans CHACUN des programmes visés — 403 rendu par le gateway sinon.
 
     List<Program> programs =
         courseCreateDTO.getProgramIds().stream()
@@ -273,6 +269,48 @@ public class ProgramService {
     String code = course.getCode();
     String title = course.getTitle();
     List<Integer> programIds = programs.stream().map(Program::getId).toList();
+
+    String coursePrograms = AuditContext.ofPrograms(programs); // "Programmes : … · Établissements : …"
+
+    auditLogService.record(
+        "COURSE_CREATE",
+        "COURSE",
+        course.getId(),
+        "Cours « " + title + " » (" + code + ") créé",
+        coursePrograms);
+
+    // ── Auto-inscription du CRÉATEUR au cours qu'il vient de créer (idempotent) + journalisation.
+    //    Le lien bidirectionnel n'a été posé que côté Program (p.getCourses().add) : on construit
+    //    donc le contexte à partir de `programs` (course.getPrograms() est encore vide ici). ──
+    String creatorEmail = auditLogService.currentActor();
+    if (creatorEmail != null) {
+      userRepository
+          .findByEmail(creatorEmail)
+          .ifPresent(
+              creator -> {
+                if (enrollmentRepository
+                    .findByUserIdAndCourseId(creator.getId(), course.getId())
+                    .isEmpty()) {
+                  Enrollment enrollment = new Enrollment();
+                  enrollment.setUser(creator);
+                  enrollment.setCourse(course);
+                  enrollment.setEnrolledAt(LocalDateTime.now());
+                  enrollmentRepository.save(enrollment);
+
+                  String creatorRef =
+                      creator.getUsername() != null ? creator.getUsername() : "#" + creator.getId();
+                  auditLogService.record(
+                      "ENROLLMENT_JOIN",
+                      "ENROLLMENT",
+                      course.getId(),
+                      "Inscription au cours « " + title + " » (" + code + ") à sa création",
+                      "Cours : " + title + " (" + code + ")"
+                          + (coursePrograms != null ? AuditContext.SEP + coursePrograms : "")
+                          + AuditContext.SEP + "Utilisateur : " + creatorRef);
+                }
+              });
+    }
+
     afterCommit(() ->
         programIds.forEach(pid -> realtimePublisher.courseCreated(pid, CourseDto.of(courseId, code, title))));
 
@@ -323,6 +361,24 @@ public class ProgramService {
 
     userRepository.save(user);
 
+    List<Integer> auditProgramIds =
+        userCreateDTO.getProgramIds().stream().distinct().toList();
+    Integer auditProgramId = auditProgramIds.size() == 1 ? auditProgramIds.get(0) : null;
+    // Noms des programmes réellement AJOUTÉS (repli sur les ids si la liste est vide).
+    String auditProgramNames =
+        programsToAdd.isEmpty()
+            ? auditProgramIds.toString()
+            : programsToAdd.stream().map(Program::getName).collect(Collectors.joining(", "));
+    auditLogService.record(
+        "PROGRAM_MEMBER_ADD",
+        "PROGRAM",
+        auditProgramId,
+        "Utilisateur "
+            + (user.getUsername() != null ? user.getUsername() : "#" + user.getId())
+            + " ajouté au(x) programme(s) : "
+            + auditProgramNames,
+        "Programme(s) : " + auditProgramNames);
+
     // ── Temps réel (room user:<id>) : la liste des programmes suivis se met à jour LIVE. ──
     long userId = user.getId();
     List<ProgramDto> addedDtos = programsToAdd.stream().map(this::toRealtimeProgramDto).toList();
@@ -357,6 +413,15 @@ public class ProgramService {
     }
 
     programRepository.save(program);
+
+    auditLogService.record(
+        "PROGRAM_UPDATE",
+        "PROGRAM",
+        programId,
+        "Programme « " + program.getName() + " » mis à jour",
+        program.getEstablishment() != null
+            ? "Établissement : " + program.getEstablishment().getName()
+            : null);
 
     // ── Temps réel : chaque ABONNÉ (room user:<id>) voit le programme mis à jour LIVE. ──
     ProgramDto dto = toRealtimeProgramDto(program);
@@ -401,6 +466,10 @@ public class ProgramService {
   public void removeUserFromProgram(Integer programId, Integer userId) {
     User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
 
+    // Nom du programme capturé pour l'audit (le programme lui-même n'est pas supprimé).
+    String programName =
+        programRepository.findById(programId).map(Program::getName).orElse("#" + programId);
+
     // 1. Quitte le programme (User_Program). saveAndFlush : les nettoyages suivants doivent VOIR le
     //    retrait (le calcul « cours encore accessibles via un autre programme » en dépend).
     user.getPrograms().removeIf(p -> p.getId().equals(programId));
@@ -412,6 +481,17 @@ public class ProgramService {
     // 3. Retire ses inscriptions (Enrollment) aux cours de ce programme devenues inaccessibles
     //    (un cours partagé avec un autre programme encore rejoint reste accessible → conservé).
     enrollmentRepository.deleteForUserLeavingProgram(userId, programId);
+
+    auditLogService.record(
+        "PROGRAM_MEMBER_REMOVE",
+        "PROGRAM",
+        programId,
+        "Utilisateur "
+            + (user.getUsername() != null ? user.getUsername() : "#" + userId)
+            + " retiré du programme « "
+            + programName
+            + " »",
+        "Programme : " + programName);
 
     // ── Temps réel : l'utilisateur qui quitte (room user:<id>) retire le programme de sa liste. ──
     long uId = user.getId();
@@ -429,13 +509,40 @@ public class ProgramService {
     Integer establishmentId =
         program.getEstablishment() != null ? program.getEstablishment().getId() : null;
 
+    // Nom capturé AVANT delete (pour le résumé d'audit).
+    String programName = program.getName();
+    String establishmentName =
+        program.getEstablishment() != null ? program.getEstablishment().getName() : null;
+
     // Abonnés capturés AVANT delete (pour l'écho WS user:<id> ; collection lazy vidée ensuite).
     List<Integer> subscriberIds =
         userRepository.findDistinctByPrograms_Id(programId).stream().map(User::getId).toList();
 
-    // ON DELETE CASCADE en base : User_Program, program_course (les cours PARTAGÉS restent,
-    // seul le lien est retiré), User_Program_Role.
+    // Cours rattachés au programme, capturés AVANT le delete : on supprimera ensuite ceux devenus
+    // orphelins (plus rattachés à aucun programme). Les cours PARTAGÉS avec un autre programme restent.
+    List<Integer> courseIds =
+        program.getCourses() == null
+            ? List.of()
+            : program.getCourses().stream().map(Course::getId).toList();
+
+    // ON DELETE CASCADE en base : User_Program, program_course (seul le lien est retiré),
+    // User_Program_Role. flush() : le retrait des liens program_course doit être VISIBLE avant
+    // le calcul des cours orphelins ci-dessous.
     programRepository.delete(program);
+    programRepository.flush();
+
+    // Supprime les cours devenus orphelins (le ON DELETE CASCADE en base emporte forums, quiz,
+    // inscriptions et réponses MCP du cours supprimé). Garde IN () vide → pas de requête.
+    if (!courseIds.isEmpty()) {
+      courseRepository.deleteOrphanedAmong(courseIds);
+    }
+
+    auditLogService.record(
+        "PROGRAM_DELETE",
+        "PROGRAM",
+        programId,
+        "Programme « " + programName + " » (#" + programId + ") supprimé",
+        "Établissement : " + establishmentName);
 
     // ── Temps réel : chaque abonné (room user:<id>) retire le programme de sa liste. ──
     afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programDeleted(uid, programId)));
