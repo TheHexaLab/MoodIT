@@ -46,7 +46,8 @@ class ForumServiceDeletePostTest {
             postRepository,
             voteRepository,
             userRepository,
-            mock(RealtimeEventPublisher.class));
+            mock(RealtimeEventPublisher.class),
+            mock(AuditLogService.class));
     // Le champ entityManager (@PersistenceContext) n'est pas injecté quand on instancie le service
     // à la main : on branche l'EM du contexte de test.
     ReflectionTestUtils.setField(forumService, "entityManager", em.getEntityManager());

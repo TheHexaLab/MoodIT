@@ -6,6 +6,7 @@ import { useCurrentUser } from '../../context/currentUserContext.ts';
 import { Moon } from '../../assets/Moon.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
+import { AuditLog } from '../../assets/AuditLog.tsx';
 import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
@@ -31,6 +32,11 @@ interface UserMenuProps {
    * l'utilisateur y a droit (admin général / gardien) : sinon l'entrée est masquée.
    */
   onManageAdmins?: () => void;
+  /**
+   * Ouvre le journal d'audit (actions de gestion). Fourni UNIQUEMENT au Gardien : sinon
+   * l'entrée est masquée.
+   */
+  onViewAuditLogs?: () => void;
   /** Déconnecte l'utilisateur. */
   onLogout?: () => void;
   /**
@@ -53,6 +59,7 @@ export default function UserMenu({
   loading = false,
   onEditProfile,
   onManageAdmins,
+  onViewAuditLogs,
   onLogout,
   variant = 'footer',
 }: UserMenuProps): React.ReactElement {
@@ -195,6 +202,11 @@ export default function UserMenu({
     onManageAdmins?.();
   }
 
+  function handleViewAuditLogs() {
+    requestClose();
+    onViewAuditLogs?.();
+  }
+
   function handleLogout() {
     requestClose();
     onLogout?.();
@@ -297,6 +309,25 @@ export default function UserMenu({
                         aria-hidden="true"
                       />
                       Gérer les administrateurs
+                    </span>
+                  </button>
+                )}
+
+                {onViewAuditLogs && (
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    role="menuitem"
+                    onClick={handleViewAuditLogs}
+                  >
+                    <span className={styles.actionLabel}>
+                      <AuditLog
+                        className={styles.actionIcon}
+                        width="1rem"
+                        height="1rem"
+                        aria-hidden="true"
+                      />
+                      Journalisation
                     </span>
                   </button>
                 )}

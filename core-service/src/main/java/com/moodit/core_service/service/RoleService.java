@@ -4,12 +4,14 @@ import com.moodit.core_service.dto.ChangeRoleRequest;
 import com.moodit.core_service.dto.RoleDTO;
 import com.moodit.core_service.dto.UserDTO;
 import com.moodit.core_service.exception.UserNotFoundException;
+import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.RoleDto;
+import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.RoleRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -31,8 +33,10 @@ public class RoleService {
     private final RoleRepository roleRepository;
     private final UserProgramRoleRepository userProgramRoleRepository;
     private final UserRepository userRepository;
+    private final ProgramRepository programRepository;
     private final UserService userService;
     private final RealtimeEventPublisher realtimePublisher;
+    private final AuditLogService auditLogService;
 
     public List<RoleDTO> findAll() {
         return findAll(null);
@@ -114,6 +118,19 @@ public class RoleService {
             throw new IllegalArgumentException("Type inconnu : " + req.getType());
         }
 
+        // ── Audit (dans la tx, avant l'écho after-commit) ──
+        boolean assigned = "assign".equals(req.getType());
+        auditLogService.record(
+                assigned ? "ROLE_ASSIGN" : "ROLE_REVOKE",
+                "ROLE",
+                role.getId(),
+                "Rôle « "
+                        + role.getName()
+                        + " » "
+                        + (assigned ? "attribué" : "retiré")
+                        + " (global) à l'utilisateur "
+                        + (user.getUsername() != null ? user.getUsername() : "#" + user.getId()));
+
         // ── Temps réel (captures DÉTACHÉES avant l'écho after-commit, dans la tx : lazy OK) ──
         //  1. room user:<userId> : l'utilisateur concerné re-dérive ses droits plateforme LIVE ;
         //  2. room adminRoles:0  : les admins/gardiens qui ont le popup ouvert remplacent leur liste.
@@ -153,6 +170,35 @@ public class RoleService {
         } else {
             throw new IllegalArgumentException("Type inconnu : " + req.getType());
         }
+
+        // ── Audit (dans la tx, avant l'écho after-commit) ──
+        boolean assigned = "assign".equals(req.getType());
+        String auditRoleName =
+                roleRepository.findById(req.getRoleId()).map(Role::getName).orElse("#" + req.getRoleId());
+        String auditUserRef =
+                userRepository
+                        .findById(req.getUserId())
+                        .map(u -> u.getUsername() != null ? u.getUsername() : "#" + u.getId())
+                        .orElse("#" + req.getUserId());
+        String auditProgramName =
+                programRepository
+                        .findById(req.getProgramId())
+                        .map(Program::getName)
+                        .orElse("#" + req.getProgramId());
+        auditLogService.record(
+                assigned ? "ROLE_ASSIGN" : "ROLE_REVOKE",
+                "ROLE",
+                req.getRoleId(),
+                "Rôle « "
+                        + auditRoleName
+                        + " » "
+                        + (assigned ? "attribué" : "retiré")
+                        + " à l'utilisateur "
+                        + auditUserRef
+                        + " dans le programme « "
+                        + auditProgramName
+                        + " »",
+                "Programme : " + auditProgramName);
 
         // ── Temps réel : le rôle du membre a changé DANS ce programme → ses menus d'actions
         // administratives se re-calculent LIVE (room user:<userId>). On envoie le rôle le plus

@@ -329,6 +329,11 @@ public class PermissionService {
             rule(
                 "POST",
                 "/roles/global/change",
+                (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN)),
+            // Consulter le JOURNAL D'AUDIT : reserve au Gardien.
+            rule(
+                "GET",
+                "/audit-logs",
                 (user, vars, body) -> hasRole(user, RoleNames.GUARDIAN))
 
         // ── EXEMPLE COMMENTE : a decommenter + adapter ────────

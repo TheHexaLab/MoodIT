@@ -39,6 +39,7 @@ class ProgramServiceCourseAuthTest {
     @Mock private UserProgramRoleRepository userProgramRoleRepository;
     @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
+    @Mock private AuditLogService auditLogService;
 
     private ProgramService service;
 
@@ -46,7 +47,7 @@ class ProgramServiceCourseAuthTest {
     void setUp() {
         service = new ProgramService(
                 programRepository, courseRepository, userRepository,
-                userProgramRoleRepository, enrollmentRepository, realtimePublisher);
+                userProgramRoleRepository, enrollmentRepository, realtimePublisher, auditLogService);
     }
 
     private static User userWith(int id, String... roleNames) {

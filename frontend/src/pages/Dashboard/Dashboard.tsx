@@ -37,6 +37,7 @@ import {
   type User,
 } from '../../components/RoleEditorPopup/RoleEditorPopup.tsx';
 import { DeleteConfirmationPopup } from '../../components/DeleteConfirmationPopup/DeleteConfirmationPopup.tsx';
+import { AuditLogsPopup } from '../../components/AuditLogsPopup/AuditLogsPopup.tsx';
 import { ErrorPopup } from '../../components/ErrorPopup/ErrorPopup.tsx';
 import { ChannelTypeIcon } from '../../components/CourseChannelList/ChannelTypeIcon.tsx';
 import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
@@ -92,6 +93,7 @@ type PopupState =
   | { kind: 'editProgram'; programId: number }
   | { kind: 'manageRoles'; programId: number }
   | { kind: 'manageGlobalRoles' } // gestion des administrateurs (rôles globaux / plateforme)
+  | { kind: 'viewAuditLogs' } // journal d'audit (actions de gestion) — Gardien uniquement
   | { kind: 'leaveProgram'; programId: number }
   | { kind: 'deleteProgram'; programId: number }
   | { kind: 'leaveCourse'; courseId: number }
@@ -332,6 +334,9 @@ export default function Dashboard() {
         setStaleQuizId((prev) => (prev === quizId ? null : prev));
       },
     });
+    // `handleFetchCourses` volontairement HORS deps : l'abonnement WS ne doit se refaire qu'au
+    // changement de programme (l'inclure re-souscrirait à chaque rendu).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProgramId, ws]);
 
   // Ouverture d'un canal (navigation / rendu de vue à implémenter côté canaux).
@@ -396,6 +401,12 @@ export default function Dashboard() {
   };
   // Persiste un changement de rôle GLOBAL (User_Role) via api.changeGlobalRole.
   const handleGlobalRoleChange = (change: RoleChange) => api.changeGlobalRole(change);
+
+  // Ouvre le journal d'audit (réservé au Gardien ; le popup charge lui-même les entrées).
+  const handleViewAuditLogs = () => {
+    if (!isGuardian) return;
+    setPopup({ kind: 'viewAuditLogs' });
+  };
 
   // ── Menu contextuel d'un programme (clic droit dans ProgramMenu) ──
   // Ajout d'un cours au programme ciblé (admin) : préselectionne ce programme.
@@ -792,12 +803,10 @@ export default function Dashboard() {
 
     const courseList = dashboardPrograms.find((p) => p.id === activeProgramId)?.courses ?? [];
     if (target.courseId != null && courseList.some((c) => c.id === target.courseId)) {
-      // Restauration one-shot d'un état persisté (cf. étape 1) : setState en effet assumé.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // Restauration one-shot d'un état persisté (cf. étape 1).
       setSelectedCourseId(target.courseId);
       // Canal restauré tel quel : la dérivation `selectedChannel` retombe sur `null`
       // si le canal n'existe plus (repli gracieux), sans casser l'affichage.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (target.channel) setSelectedChannelRef(target.channel);
     }
     restoreDoneRef.current = true;
@@ -881,6 +890,7 @@ export default function Dashboard() {
             loading={profileLoading}
             onEditProfile={handleEditProfile}
             onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+            onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
             onLogout={handleLogout}
           />
         }
@@ -942,6 +952,7 @@ export default function Dashboard() {
             onDeleteCourse={handleDeleteCourse}
             onEditProfile={handleEditProfile}
             onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+            onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
             onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
             quizHandlers={quizEditorHandlers}
@@ -1164,6 +1175,12 @@ export default function Dashboard() {
             }}
           />
         )}
+
+      {/* Journal d'audit (actions de gestion) — réservé au Gardien. Le popup charge
+          lui-même les entrées (spinner + ErrorPopup/réessayer intégrés). */}
+      {popup?.kind === 'viewAuditLogs' && (
+        <AuditLogsPopup onClose={() => setPopup(null)} load={(q) => api.fetchAuditLogs(q)} />
+      )}
 
       {/* Gestion MCP d'un cours (menu contextuel du sélecteur de cours, admin). */}
       {popup?.kind === 'mcp' && mcpCourse && (

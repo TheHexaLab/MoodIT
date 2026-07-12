@@ -32,7 +32,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  *   3. retire les liens program_course et les entrées User_Program_Role du programme (cascade BD).
  */
 @DataJpaTest
-@Import(ProgramService.class)
+@Import({ProgramService.class, AuditLogService.class})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(
     properties = {

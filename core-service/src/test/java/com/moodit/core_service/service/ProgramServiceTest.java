@@ -28,6 +28,7 @@ public class ProgramServiceTest {
     @Mock private UserProgramRoleRepository userProgramRoleRepository;
     @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
+    @Mock private AuditLogService auditLogService;
 
     //@InjectMocks crée le service et injecte les @Mock dedans automatiquement
     @InjectMocks private ProgramService programService;

@@ -47,6 +47,7 @@ public class ForumService {
     private final VoteRepository voteRepository;
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
+    private final AuditLogService auditLogService;
 
     // Non-final (hors constructeur @RequiredArgsConstructor) : sert à recharger un post après
     // détachement en masse de ses réponses (cf. deletePost, cas Discussion).
@@ -415,6 +416,9 @@ public class ForumService {
         }
 
         forumRepository.save(forum);
+        String details = AuditContext.ofChildOfCourse(forum.getCourse());
+        auditLogService.record("FORUM_UPDATE", "FORUM", forumId,
+                "Forum « " + forum.getTitle() + " » mis à jour", details);
         return toForumDTO(forum);
     }
     @Transactional
@@ -460,7 +464,11 @@ public class ForumService {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
 
+        // Contexte parent capturé AVANT la suppression (course encore accessible).
+        String details = AuditContext.ofChildOfCourse(forum.getCourse());
         forumRepository.delete(forum); //ON DELETE CASCADE
+        auditLogService.record("FORUM_DELETE", "FORUM", forumId,
+                "Forum #" + forumId + " supprimé", details);
     }
     @Transactional
     public void deletePost(Integer forumId, Integer postId) {

@@ -60,6 +60,7 @@ public class QuizService {
     private final ExecutionClient executionClient;
     private final PlatformTransactionManager transactionManager;
     private final ApplicationEventPublisher eventPublisher;
+    private final AuditLogService auditLogService;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -162,6 +163,9 @@ public class QuizService {
         quiz.setQuestions(buildQuestions(dto.getQuestions(), quiz));
 
         Quiz saved = quizRepository.save(quiz);
+        String details = AuditContext.ofChildOfCourse(course);
+        auditLogService.record("QUIZ_CREATE", "QUIZ", saved.getId(),
+                "Quiz « " + saved.getTitle() + " » créé", details);
         broadcastQuiz(course, saved.getId(), false); // created
         return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
@@ -213,6 +217,10 @@ public class QuizService {
         }
 
         Quiz saved = quizRepository.save(quiz);
+        Course course = quiz.getCourse();
+        String details = AuditContext.ofChildOfCourse(course);
+        auditLogService.record("QUIZ_UPDATE", "QUIZ", quizId,
+                "Quiz « " + quiz.getTitle() + " » mis à jour", details);
         broadcastQuiz(saved.getCourse(), saved.getId(), true); // updated
         return toQuizDetailDTO(saved, true); // éditeur → renvoie la correction
     }
@@ -228,7 +236,11 @@ public class QuizService {
         List<Integer> programIds = course == null || course.getPrograms() == null ? List.of()
                 : course.getPrograms().stream().map(Program::getId).toList();
         Integer courseId = course == null ? null : course.getId();
+        String title = quiz.getTitle(); // capturé avant delete
+        String details = AuditContext.ofChildOfCourse(course); // capturé avant delete
         quizRepository.delete(quiz);
+        auditLogService.record("QUIZ_DELETE", "QUIZ", quizId,
+                title != null ? "Quiz « " + title + " » supprimé" : "Quiz #" + quizId + " supprimé", details);
         if (courseId != null) {
             afterCommit(() -> {
                 for (Integer programId : programIds) {

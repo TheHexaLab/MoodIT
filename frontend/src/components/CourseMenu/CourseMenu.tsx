@@ -126,6 +126,8 @@ interface CourseMenuProps {
   onEditProfile?: () => void;
   /** Ouvre le gestionnaire des administrateurs (menu du compte ; masqué si absent). */
   onManageAdmins?: () => void;
+  /** Ouvre le journal d'audit (menu du compte ; masqué si absent — Gardien uniquement). */
+  onViewAuditLogs?: () => void;
   /** Déconnecte l'utilisateur (menu du compte). */
   onLogout?: () => void;
   /**
@@ -166,6 +168,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   userLoading = false,
   onEditProfile,
   onManageAdmins,
+  onViewAuditLogs,
   onLogout,
   quizHandlers,
   onQuizzesChange,
@@ -521,6 +524,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           loading={userLoading}
           onEditProfile={onEditProfile}
           onManageAdmins={onManageAdmins}
+          onViewAuditLogs={onViewAuditLogs}
           onLogout={onLogout}
         />
       </footer>

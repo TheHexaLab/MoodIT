@@ -43,7 +43,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * {@link ExecutionClient} est mocké (pas de sandbox Piston dans un test).
  */
 @DataJpaTest
-@Import(QuizService.class)
+@Import({QuizService.class, AuditLogService.class})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(
     properties = {

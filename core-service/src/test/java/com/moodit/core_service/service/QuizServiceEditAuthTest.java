@@ -46,6 +46,7 @@ class QuizServiceEditAuthTest {
     @Mock private ExecutionClient executionClient;
     @Mock private PlatformTransactionManager transactionManager;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private AuditLogService auditLogService;
 
     private QuizService service;
 
@@ -54,7 +55,8 @@ class QuizServiceEditAuthTest {
         service = new QuizService(
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
-                new ObjectMapper(), realtimePublisher, executionClient, transactionManager, eventPublisher);
+                new ObjectMapper(), realtimePublisher, executionClient, transactionManager, eventPublisher,
+                auditLogService);
     }
 
     @Test

@@ -9,10 +9,12 @@ import com.moodit.mcp_service.exception.AnalysisAlreadyRunningException;
 import com.moodit.mcp_service.exception.AnalysisNotFoundException;
 import com.moodit.mcp_service.exception.CourseNotFoundException;
 import com.moodit.mcp_service.exception.UserNotFoundException;
+import com.moodit.mcp_service.model.AuditLog;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
 import com.moodit.mcp_service.model.McpStatus;
 import com.moodit.mcp_service.model.User;
+import com.moodit.mcp_service.repository.AuditLogRepository;
 import com.moodit.mcp_service.repository.CourseRepository;
 import com.moodit.mcp_service.repository.McpResponseRepository;
 import com.moodit.mcp_service.repository.UserRepository;
@@ -45,6 +47,7 @@ public class McpService {
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final McpAnalysisRunner analysisRunner;
+    private final AuditLogRepository auditLogRepository;
 
     /** Historique (résumés) des analyses TERMINÉES d'un cours, récent → ancien. */
     @Transactional(readOnly = true)
@@ -113,6 +116,16 @@ public class McpService {
             // POST concurrent : l'index unique partiel a tranché.
             throw new AnalysisAlreadyRunningException();
         }
+
+        // Journal d'audit (dans la transaction : atomique avec la création de l'analyse).
+        AuditLog audit = new AuditLog();
+        audit.setActorEmail(userEmail);
+        audit.setAction("MCP_ANALYSIS_REQUEST");
+        audit.setEntityType("MCP");
+        audit.setEntityId(courseId);
+        audit.setSummary("Analyse MCP demandée pour le cours « " + course.getTitle()
+                + " » (" + course.getCode() + ")");
+        auditLogRepository.save(audit);
 
         Integer responseId = saved.getId();
         afterCommit(() -> analysisRunner.run(responseId));

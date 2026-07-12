@@ -393,6 +393,49 @@ export async function fetchGlobalRoles() {
   };
 }
 
+/** Une entrée du journal d'audit (actions de gestion), telle qu'exposée par le core. */
+export interface AuditLogEntry {
+  id: number;
+  createdAt: string;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  summary: string;
+  details: string | null;
+}
+
+/** Critères d'une page du journal (pagination par curseur + recherche/filtre côté serveur). */
+export interface AuditLogQuery {
+  /** Curseur : ne renvoyer que les entrées d'id inférieur (page suivante). Absent = 1re page. */
+  beforeId?: number | null;
+  /** Recherche plein-texte (résumé, auteur, action, type, contexte) — appliquée côté base. */
+  q?: string;
+  /** Filtre par type d'entité (code backend, ex. 'COURSE'). */
+  type?: string | null;
+  /** Taille de page. */
+  limit?: number;
+}
+
+/**
+ * Journal d'audit — une PAGE d'actions de gestion (les plus récentes d'abord). Pagination par
+ * curseur, recherche et filtre appliqués CÔTÉ SERVEUR. Réservé au Gardien (autorisation
+ * permission-service ; 403 sinon).
+ */
+export async function fetchAuditLogs(query: AuditLogQuery = {}): Promise<AuditLogEntry[]> {
+  const params = new URLSearchParams();
+  params.set('limit', String(query.limit ?? 30));
+  if (query.beforeId != null) params.set('beforeId', String(query.beforeId));
+  const q = query.q?.trim();
+  if (q) params.set('q', q);
+  if (query.type) params.set('type', query.type);
+  const res = await apiFetch(`/api/audit-logs?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error('fetch audit logs failed');
+  }
+  return res.json();
+}
+
 /**
  * Candidats paginés à l'attribution d'un rôle GLOBAL (utilisateurs n'ayant pas `roleId`),
  * filtrés côté serveur par `search`. Alimente le sélecteur d'ajout du popup admins (infinite

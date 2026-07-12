@@ -369,6 +369,26 @@ CREATE INDEX idx_post_parent_created ON Post(post_parent_id, created_at); -- rep
 CREATE INDEX idx_vote_post_value ON Vote(post_id, value_); -- score d'un post (SUM value_) + cascade post_id
 CREATE INDEX idx_vote_quiz_value ON Vote(quiz_id, value_); -- score d'un quiz + cascade quiz_id
 CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jour" d'un cours + cascade course_id
+
+-- ── Journal d'audit ────────────────────────────────────────────────────────────
+-- Trace les actions de GESTION (rôles global/programme, établissements, programmes, cours,
+-- forums, quiz, analyses MCP) — PAS les actions étudiantes (soumissions, messages). Append-only,
+-- consultable par les Gardiens uniquement. `actor_email` est un INSTANTANÉ (survit à la suppression
+-- de l'auteur → pas de FK). Écrit dans la MÊME transaction que la mutation (atomique avec elle).
+CREATE TABLE Audit_Log(
+   id SERIAL,
+   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+   actor_email VARCHAR(256),            -- instantané de l'auteur (NULL si contexte absent)
+   action VARCHAR(48) NOT NULL,         -- ex. 'ROLE_ASSIGN', 'QUIZ_CREATE', 'FORUM_DELETE'
+   entity_type VARCHAR(24) NOT NULL,    -- 'ROLE','PROGRAM','COURSE','FORUM','QUIZ','ESTABLISHMENT','ENROLLMENT','MCP'
+   entity_id INTEGER,                   -- id de l'entité concernée (peut être NULL)
+   summary VARCHAR(512) NOT NULL,       -- phrase lisible (FR) construite au moment de l'action
+   details VARCHAR(1024),               -- contexte PARENT capturé au moment de l'action (établissement,
+                                        -- programmes, cours…) : survit à la suppression de l'entité. NULL si sans objet
+   PRIMARY KEY(id)
+);
+CREATE INDEX idx_audit_log_created_at ON Audit_Log(created_at);
+CREATE INDEX idx_audit_log_entity ON Audit_Log(entity_type, entity_id);
 CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 
