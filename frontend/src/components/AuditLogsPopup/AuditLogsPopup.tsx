@@ -313,7 +313,7 @@ export function AuditLogsPopup({
                     {open && (
                       <div className={styles.details}>
                         {entry.details &&
-                          entry.details.split(' · ').map((part, i) => (
+                          entry.details.split('\n').map((part, i) => (
                             <span key={i} className={styles.detailPart}>
                               {part}
                             </span>

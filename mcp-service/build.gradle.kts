@@ -38,6 +38,7 @@ dependencies {
 	// Tests
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.springframework.security:spring-security-test")
+	testRuntimeOnly("com.h2database:h2") // BD embarquée pour les tests JDBC (CourseStatsRepository)
 	testCompileOnly("org.projectlombok:lombok")
 	testAnnotationProcessor("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")

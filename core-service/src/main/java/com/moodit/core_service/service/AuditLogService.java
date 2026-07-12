@@ -6,7 +6,6 @@ import com.moodit.core_service.repository.AuditLogRepository;
 import java.time.ZoneOffset;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -78,7 +77,7 @@ public class AuditLogService {
         int capped = Math.max(1, Math.min(limit, MAX_LIMIT));
         String typeFilter = (type == null || type.isBlank()) ? null : type.trim();
         String like = (q == null || q.isBlank()) ? null : "%" + q.trim().toLowerCase() + "%";
-        return repository.search(beforeId, typeFilter, like, PageRequest.of(0, capped)).stream()
+        return repository.search(beforeId, typeFilter, like, capped).stream()
                 .map(AuditLogService::toDTO)
                 .toList();
     }

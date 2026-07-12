@@ -125,6 +125,7 @@ public class McpService {
         audit.setEntityId(courseId);
         audit.setSummary("Analyse MCP demandée pour le cours « " + course.getTitle()
                 + " » (" + course.getCode() + ")");
+        audit.setDetails("Cours : " + course.getTitle() + " (" + course.getCode() + ")");
         auditLogRepository.save(audit);
 
         Integer responseId = saved.getId();

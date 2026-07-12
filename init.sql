@@ -375,6 +375,8 @@ CREATE INDEX idx_quiz_course_daily ON Quiz(course_id, is_daily); -- "Quiz du jou
 -- forums, quiz, analyses MCP) — PAS les actions étudiantes (soumissions, messages). Append-only,
 -- consultable par les Gardiens uniquement. `actor_email` est un INSTANTANÉ (survit à la suppression
 -- de l'auteur → pas de FK). Écrit dans la MÊME transaction que la mutation (atomique avec elle).
+-- pg_trgm : requis par les index GIN trigram de recherche ci-dessous (LIKE '%…%' indexable).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE TABLE Audit_Log(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -389,6 +391,13 @@ CREATE TABLE Audit_Log(
 );
 CREATE INDEX idx_audit_log_created_at ON Audit_Log(created_at);
 CREATE INDEX idx_audit_log_entity ON Audit_Log(entity_type, entity_id);
+-- Recherche plein-texte (LIKE '%…%', joker en tête) : index GIN trigram sur lower(col), aligné sur
+-- AuditLogRepository.search (summary/auteur/details). Le planificateur bitmap-OR les 3 index.
+-- fastupdate=off : pas de pending list → l'index est IMMÉDIATEMENT à jour après écriture (les
+-- recherches l'utilisent sans attendre l'autovacuum). Écritures d'audit rares → coût négligeable.
+CREATE INDEX idx_audit_log_summary_trgm ON Audit_Log USING gin (lower(summary) gin_trgm_ops) WITH (fastupdate = off);
+CREATE INDEX idx_audit_log_actor_trgm ON Audit_Log USING gin (lower(actor_email) gin_trgm_ops) WITH (fastupdate = off);
+CREATE INDEX idx_audit_log_details_trgm ON Audit_Log USING gin (lower(details) gin_trgm_ops) WITH (fastupdate = off);
 CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
 CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
 

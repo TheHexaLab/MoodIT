@@ -9,7 +9,7 @@ export const defaultLabels: AuditLogsPopupLabels = {
   empty: 'Aucune action enregistrée.',
   emptyFiltered: 'Aucune action ne correspond à ce filtre.',
   filterAll: 'Tout',
-  searchPlaceholder: 'Rechercher (résumé, auteur, action)…',
+  searchPlaceholder: 'Rechercher (résumé, auteur, contexte)…',
   searchClear: 'Effacer la recherche',
   loadingMore: 'Chargement…',
   entityIdLabel: 'Identifiant',

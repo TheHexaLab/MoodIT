@@ -43,4 +43,8 @@ public class AuditLog {
 
     @Column(name = "summary", nullable = false, length = 512)
     private String summary;
+
+    /** Contexte parent capturé au moment de l'action (ici : le cours). Peut être null. */
+    @Column(name = "details", length = 1024)
+    private String details;
 }

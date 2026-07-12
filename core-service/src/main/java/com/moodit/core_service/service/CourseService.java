@@ -414,7 +414,8 @@ public class CourseService {
           course.getId(),
           "Inscription au cours « " + course.getTitle() + " » (" + course.getCode() + ")",
           AuditContext.ofChildOfCourse(course)
-              + " · Utilisateur : "
+              + AuditContext.SEP
+              + "Utilisateur : "
               + userRef
               + enrollProgramSuffix(course, programId));
     }
@@ -425,7 +426,8 @@ public class CourseService {
           course.getId(),
           "Désinscription du cours « " + course.getTitle() + " » (" + course.getCode() + ")",
           AuditContext.ofChildOfCourse(course)
-              + " · Utilisateur : "
+              + AuditContext.SEP
+              + "Utilisateur : "
               + userRef
               + enrollProgramSuffix(course, programId));
     }
@@ -452,7 +454,8 @@ public class CourseService {
     String userRef = user.getUsername() != null ? user.getUsername() : "#" + user.getId();
     String enrollDetails =
         (course != null ? AuditContext.ofChildOfCourse(course) : "Cours : #" + courseId)
-            + " · Utilisateur : "
+            + AuditContext.SEP
+            + "Utilisateur : "
             + userRef;
     auditLogService.record(
         "ENROLLMENT_LEAVE",
@@ -478,6 +481,8 @@ public class CourseService {
                 .map(Program::getName)
                 .findFirst()
                 .orElse(null);
-    return name != null ? " · Programme : " + name : " · Programme #" + programId;
+    return name != null
+        ? AuditContext.SEP + "Programme : " + name
+        : AuditContext.SEP + "Programme #" + programId;
   }
 }

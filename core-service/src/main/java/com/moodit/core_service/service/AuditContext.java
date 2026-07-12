@@ -19,6 +19,13 @@ import java.util.stream.Collectors;
  */
 public final class AuditContext {
 
+    /**
+     * Séparateur de segments dans {@code details}. Un RETOUR DE LIGNE (impossible dans un nom/titre
+     * mono-ligne saisi via un formulaire) → découpage frontend robuste, contrairement à un « · »
+     * qui pourrait apparaître dans un nom. Doit rester synchronisé avec le split côté frontend.
+     */
+    public static final String SEP = "\n";
+
     private AuditContext() {}
 
     /** Contexte d'un COURS : « Programmes : … · Établissements : … ». */
@@ -73,12 +80,12 @@ public final class AuditContext {
         return establishments.isEmpty() ? null : "Établissements : " + String.join(", ", establishments);
     }
 
-    /** Assemble les segments non vides avec « · » ; null si tout est vide. */
+    /** Assemble les segments non vides avec {@link #SEP} ; null si tout est vide. */
     private static String join(String... parts) {
         String joined =
                 Arrays.stream(parts)
                         .filter(p -> p != null && !p.isBlank())
-                        .collect(Collectors.joining(" · "));
+                        .collect(Collectors.joining(SEP));
         return joined.isEmpty() ? null : joined;
     }
 }

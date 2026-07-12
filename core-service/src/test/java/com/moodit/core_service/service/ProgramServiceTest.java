@@ -232,6 +232,56 @@ public class ProgramServiceTest {
             verify(programRepository, times(1)).saveAll(anyList());
         }
         @Test
+        @DisplayName("Inscrit automatiquement le créateur au cours créé + journalise (ENROLLMENT_JOIN)")
+        void addCourseToPrograms_inscrit_le_createur() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder()
+                    .title("Algo").code("GIF201").programIds(List.of(1)).build();
+
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(42);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            // Acteur (créateur) résolu via le SecurityContext (exposé par AuditLogService).
+            when(auditLogService.currentActor()).thenReturn("prof@moodit.ca");
+            User creator = User.builder().id(7).username("prof").build();
+            when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(creator));
+            when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.empty());
+
+            programService.addCourseToPrograms(dto);
+
+            verify(enrollmentRepository, times(1)).save(any(Enrollment.class));
+            verify(auditLogService, times(1))
+                    .record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(), anyString());
+        }
+        @Test
+        @DisplayName("N'inscrit PAS deux fois le créateur (idempotent) si déjà inscrit")
+        void addCourseToPrograms_createur_deja_inscrit_ne_reinscrit_pas() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            CourseCreateInProgramsDTO dto = CourseCreateInProgramsDTO.builder()
+                    .title("Algo").code("GIF201").programIds(List.of(1)).build();
+
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(42);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            when(auditLogService.currentActor()).thenReturn("prof@moodit.ca");
+            User creator = User.builder().id(7).username("prof").build();
+            when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(creator));
+            Enrollment existing = new Enrollment();
+            when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.of(existing));
+
+            programService.addCourseToPrograms(dto);
+
+            verify(enrollmentRepository, never()).save(any(Enrollment.class));
+            verify(auditLogService, never())
+                    .record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(), anyString());
+        }
+        @Test
         @DisplayName("Retourne ProgramNotFoundException, si au moins un des programmes n'existe pas")
         void addCourseToPrograms_avec_un_id_inexistant_devrait_lancer_exception() {
             program = Program.builder().id(1).name("Informatique").code("GI").cohort("71").color("FF0000").courses(new ArrayList<>()).build();

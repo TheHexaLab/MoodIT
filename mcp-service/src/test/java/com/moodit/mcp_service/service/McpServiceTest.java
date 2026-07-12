@@ -15,6 +15,7 @@ import com.moodit.mcp_service.model.McpResponse;
 import com.moodit.mcp_service.model.McpStatus;
 import com.moodit.mcp_service.model.Role;
 import com.moodit.mcp_service.model.User;
+import com.moodit.mcp_service.repository.AuditLogRepository;
 import com.moodit.mcp_service.repository.CourseRepository;
 import com.moodit.mcp_service.repository.McpResponseRepository;
 import com.moodit.mcp_service.repository.UserRepository;
@@ -42,6 +43,7 @@ class McpServiceTest {
     @Mock private CourseRepository courseRepository;
     @Mock private UserRepository userRepository;
     @Mock private McpAnalysisRunner analysisRunner;
+    @Mock private AuditLogRepository auditLogRepository;
 
     private McpService service;
 
@@ -49,7 +51,7 @@ class McpServiceTest {
     void setUp() {
         service = new McpService(
                 mcpResponseRepository, courseRepository, userRepository,
-                new ObjectMapper(), analysisRunner);
+                new ObjectMapper(), analysisRunner, auditLogRepository);
     }
 
     private static User user(int id, String roleName) {

@@ -408,6 +408,7 @@ public class ForumService {
     //endregion
 
     //region PATCH
+    @Transactional
     public ForumDTO updateForum(Integer forumId, ForumUpdateDTO forumUpdateDTO) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
@@ -460,6 +461,7 @@ public class ForumService {
     //endregion
 
     //region DELETE
+    @Transactional
     public void deleteForum(Integer forumId) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);

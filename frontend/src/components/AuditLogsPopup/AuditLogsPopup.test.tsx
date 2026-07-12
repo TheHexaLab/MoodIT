@@ -156,7 +156,7 @@ describe('AuditLogsPopup', () => {
   it('cliquer une entrée déplie son contexte (details + identifiant)', async () => {
     const e = {
       ...makeEntries(5, 1)[0],
-      details: 'Programmes : Génie · Établissements : UdeS',
+      details: 'Programmes : Génie\nÉtablissements : UdeS',
       entityId: 5,
     };
     render(<AuditLogsPopup onClose={vi.fn()} load={vi.fn().mockResolvedValue([e])} />);

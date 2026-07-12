@@ -57,6 +57,12 @@ jobs:
           chmod +x ./gradlew
           ./gradlew test --no-daemon --console=plain
 
+      # IT Testcontainers (vrai Postgres, tag "integration", exclus du `test` par défaut) : seul
+      # core-service en a (garde de non-régression du plan de recherche trgm). Docker dispo sur le runner.
+      - name: Tests d'intégration (Testcontainers)
+        if: matrix.service == 'core-service'
+        run: ./gradlew integrationTest --no-daemon --console=plain
+
       - name: Publier le rapport de tests
         if: always()             # même en cas d'échec, on veut voir quels tests ont cassé
         uses: actions/upload-artifact@v4

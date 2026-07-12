@@ -305,8 +305,8 @@ public class ProgramService {
                       course.getId(),
                       "Inscription au cours « " + title + " » (" + code + ") à sa création",
                       "Cours : " + title + " (" + code + ")"
-                          + (coursePrograms != null ? " · " + coursePrograms : "")
-                          + " · Utilisateur : " + creatorRef);
+                          + (coursePrograms != null ? AuditContext.SEP + coursePrograms : "")
+                          + AuditContext.SEP + "Utilisateur : " + creatorRef);
                 }
               });
     }
