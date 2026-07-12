@@ -673,6 +673,16 @@ public class PermissionService {
         );
   }
 
+  // Signatures "METHOD motif" de toutes les regles (motif avec prefixe /api|/mcp|/exec inclus,
+  // variables {..} comprises). Expose le REGISTRE (pas les predicats) au test de couverture des
+  // routes (RouteCoverageTest), qui verifie que chaque route mutante des controleurs a une regle.
+  // Package-private : usage test uniquement.
+  java.util.List<String> ruleSignatures() {
+    return rules.stream()
+        .map(r -> r.method().toUpperCase(java.util.Locale.ROOT) + " " + r.pattern())
+        .toList();
+  }
+
   // Surcharge sans query string (routes dont l'autorisation n'en depend pas). Delegue avec une
   // query nulle -> map vide cote predicat.
   public boolean isAllowed(String email, String path, String method, String body) {
