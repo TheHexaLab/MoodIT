@@ -26,6 +26,9 @@ input[type="password"]::-ms-reveal {
     align-items: center;
     overflow: hidden;
     flex-shrink: 0;
+    /* border-box : sinon en mobile `width: 100%` + padding horizontal déborde de l'écran
+       (bannière verte plus large que le viewport → décalage/scroll horizontal). */
+    box-sizing: border-box;
 }
 
 .bubble-1 {
@@ -113,6 +116,8 @@ input[type="password"]::-ms-reveal {
     position: relative;
     padding: 2rem 1.25rem;
     background-color: var(--bg-right-login-page);
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .form-card {
