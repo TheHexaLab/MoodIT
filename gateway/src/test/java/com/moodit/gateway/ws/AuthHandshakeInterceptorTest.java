@@ -3,7 +3,9 @@ package com.moodit.gateway.ws;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import jakarta.servlet.http.Cookie;
@@ -11,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
@@ -29,6 +32,7 @@ class AuthHandshakeInterceptorTest {
   private static final String AUTH_URL = "http://localhost:8083";
 
   private AuthHandshakeInterceptor interceptor;
+  private RestClient.RequestBodyUriSpec uriSpec;
   private RestClient.RequestBodySpec bodySpec;
 
   @BeforeEach
@@ -41,7 +45,7 @@ class AuthHandshakeInterceptorTest {
   /** Branche le RestClient sur des mocks : /auth/validate renvoie `active`, ou lève si throwError. */
   private void stubActive(Boolean active, boolean throwError) {
     RestClient restClient = mock(RestClient.class);
-    RestClient.RequestBodyUriSpec uriSpec = mock(RestClient.RequestBodyUriSpec.class);
+    uriSpec = mock(RestClient.RequestBodyUriSpec.class);
     bodySpec = mock(RestClient.RequestBodySpec.class);
     RestClient.ResponseSpec responseSpec = mock(RestClient.ResponseSpec.class);
     when(restClient.post()).thenReturn(uriSpec);
@@ -94,6 +98,20 @@ class AuthHandshakeInterceptorTest {
 
     assertThat(ok).isTrue();
     assertThat(attrs.get(AuthHandshakeInterceptor.TOKEN_ATTR)).isEqualTo("tok");
+  }
+
+  @Test
+  void callsAuthValidate_withCorrectUri_andBearerToken() {
+    // Régression : vérifie l'ENDPOINT et le HEADER exacts (pas juste "un appel a eu lieu").
+    stubActive(true, false);
+    Map<String, Object> attrs = new HashMap<>();
+
+    handshake(request("tok", null), new MockHttpServletResponse(), attrs);
+
+    verify(uriSpec).uri(AUTH_URL + "/auth/validate");
+    ArgumentCaptor<String> value = ArgumentCaptor.forClass(String.class);
+    verify(bodySpec).header(eq("Authorization"), value.capture());
+    assertThat(value.getValue()).isEqualTo("Bearer tok");
   }
 
   @Test

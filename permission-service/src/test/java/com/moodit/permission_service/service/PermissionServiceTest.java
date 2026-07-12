@@ -470,6 +470,39 @@ class PermissionServiceTest {
   }
 
   @Test
+  void joinCourses_mixedNumericAndStringCourseIds_allowed() {
+    loggedIn(user(5));
+    when(membershipService.isSubscribedToProgram(5, 3)).thenReturn(true);
+    when(membershipService.isCourseInProgram(10, 3)).thenReturn(true);
+    when(membershipService.isCourseInProgram(11, 3)).thenReturn(true);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/courses/users",
+                    "POST",
+                    "{\"id\":5,\"courseIds\":[10,\"11\"],\"programId\":3}"))
+        .isTrue();
+  }
+
+  @Test
+  void joinCourses_nonNumericCourseIdSilentlyDropped() {
+    // Un élément non numérique ("x") est IGNORÉ (comme un élément non convertible) : il ne
+    // devient pas un id fantôme qui refuserait à tort. Reste [10] à valider → autorisé.
+    loggedIn(user(5));
+    when(membershipService.isSubscribedToProgram(5, 3)).thenReturn(true);
+    when(membershipService.isCourseInProgram(10, 3)).thenReturn(true);
+    assertThat(
+            service()
+                .isAllowed(
+                    EMAIL,
+                    "/api/courses/users",
+                    "POST",
+                    "{\"id\":5,\"courseIds\":[10,\"x\"],\"programId\":3}"))
+        .isTrue();
+  }
+
+  @Test
   void joinCourses_courseNotInProgram_denied() {
     loggedIn(user(5));
     when(membershipService.isSubscribedToProgram(5, 3)).thenReturn(true);
