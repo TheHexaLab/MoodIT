@@ -64,7 +64,9 @@ export default function ForgotPassword() {
 
       <main className="main">
         <div className="form-card">
-          <h2 className="form-title">Mot de passe oublié 🔑</h2>
+          <h2 className="form-title">
+            Mot de passe oublié <span className="titleIcon">🔑</span>
+          </h2>
           <p className="form-subtitle">
             Entrez votre adresse e-mail : nous vous enverrons un code de réinitialisation.
           </p>

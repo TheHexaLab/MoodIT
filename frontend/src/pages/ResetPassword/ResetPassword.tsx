@@ -6,6 +6,7 @@ import { Lightanddark } from '../../assets/light-dark-btn';
 import logo from '../../assets/Logo.png';
 import { resetPassword, forgotPassword } from '../../helpers/api';
 import { useTheme } from '../../helpers/theme';
+import { CodeInput } from '../../components/CodeInput/CodeInput';
 
 // Étape 2 du « mot de passe oublié » : saisie du code reçu par email + nouveau mot de passe.
 // L'email provient de location.state (posé par ForgotPassword). En accès direct (state vide),
@@ -135,23 +136,19 @@ export default function ResetPassword() {
             <>
               <h2 className="form-title">Réinitialiser le mot de passe</h2>
               <p className="form-subtitle">
-                Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
+                Un code a été envoyé à votre email. Il expire dans 15 minutes.
               </p>
 
-              <form className="form" onSubmit={handleSubmit}>
+              <form className="form resetForm" onSubmit={handleSubmit}>
                 {error && <p className="server-error">⚠ {error}</p>}
 
                 <div className="field">
                   <label className="label">Code à 6 chiffres</label>
-                  <input
-                    className="input"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
+                  <CodeInput
                     value={code}
-                    maxLength={6}
-                    placeholder="123456"
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                    onChange={setCode}
+                    disabled={submitting}
+                    invalid={/code/i.test(error)}
                   />
                 </div>
 

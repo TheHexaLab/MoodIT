@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import '../LoginPage.css';
 import { useTheme } from '../../helpers/theme';
+import { CodeInput } from '../../components/CodeInput/CodeInput';
 import { verifyEmail, verify2FA, resendCode } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 import logo from '../../assets/Logo.png';
@@ -119,27 +120,23 @@ export default function VerifyCode() {
       <main className="main">
         <div className="form-card">
           <h2 className="form-title">
-            {isEmailVerification ? 'Vérifiez votre email 📧' : 'Double authentification 🔒'}
+            {isEmailVerification ? 'Vérifiez votre email' : 'Double authentification'}
           </h2>
           <p className="form-subtitle">
-            Un code a été envoyé à <strong>{email}</strong>. Il expire dans 15 minutes.
+            Un code a été envoyé à votre email. Il expire dans 15 minutes.
           </p>
 
-          <form className="form" onSubmit={handleSubmit}>
+          <form className="form codeForm" onSubmit={handleSubmit}>
             {error && <p className="server-error">⚠ {error}</p>}
 
             <div className="field">
               <label className="label">Code à 6 chiffres</label>
-              <input
-                className="input"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
+              <CodeInput
                 value={code}
-                maxLength={6}
-                placeholder="123456"
+                onChange={handleCodeChange}
                 autoFocus
-                onChange={(e) => handleCodeChange(e.target.value)}
+                disabled={submitting}
+                invalid={!!error}
               />
             </div>
 

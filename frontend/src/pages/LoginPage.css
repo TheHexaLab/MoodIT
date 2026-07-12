@@ -358,6 +358,41 @@ input[type="password"]::-ms-reveal {
     text-decoration: underline;
 }
 
+/* Page de saisie de code (verify-code) : le formulaire est court, donc le grand margin-top
+   de .register-row (calibré pour la page login) étale les liens du bas et donne une
+   impression de vide. On resserre l'espacement sur cette page. */
+.codeForm .register-row {
+    margin-top: 0.75rem;
+}
+
+/* Sur mobile, on rouvre l'espacement entre les liens : ce sont des cibles tactiles, il faut
+   plus de séparation pour éviter les missclics (ex. « Se connecter » vs « ← Retour »). */
+@media (max-width: 768px) {
+    .codeForm .register-row {
+        margin-top: 1.5rem;
+    }
+}
+
+/* Petit téléphone : « Mot de passe oublié » passe sur 2 lignes et l'emoji se retrouve seul
+   sur la 2e ligne → on le masque à ces largeurs. */
+@media (max-width: 400px) {
+    .titleIcon {
+        display: none;
+    }
+}
+
+/* Page de réinitialisation, en mobile uniquement. */
+@media (max-width: 768px) {
+    /* Rapproche le champ « Nouveau mot de passe » du code (l'écart paraît trop grand). */
+    .resetForm .field:nth-of-type(2) .label {
+        margin-top: 0;
+    }
+    /* Plus d'air entre les deux liens du bas (cibles tactiles). */
+    .resetForm .register-row {
+        margin-top: 1.75rem;
+    }
+}
+
 .footer {
     position: absolute;
     bottom: 1.69rem;
