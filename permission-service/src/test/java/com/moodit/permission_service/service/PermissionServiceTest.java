@@ -77,6 +77,50 @@ class PermissionServiceTest {
     assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/manage", "GET", null)).isTrue();
   }
 
+  // ── Réordonnancement des quiz (PATCH /courses/{id}/quizzes/reorder) ────────────────
+  // Même politique que la gestion de contenu : Administrateur/Gardien GLOBAL (User_Role) OU
+  // Administrateur/Enseignant DU PROGRAMME du cours (User_Program_Role). Un étudiant est refusé.
+
+  @Test
+  void quizReorder_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN)); // rôle GLOBAL → court-circuite la BD
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/reorder", "PATCH", "[3,1,2]"))
+        .isTrue();
+  }
+
+  @Test
+  void quizReorder_globalGuardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN)); // rôle GLOBAL → court-circuite la BD
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/reorder", "PATCH", "[3,1,2]"))
+        .isTrue();
+  }
+
+  @Test
+  void quizReorder_programTeacher_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/reorder", "PATCH", "[3,1,2]"))
+        .isTrue();
+  }
+
+  @Test
+  void quizReorder_programAdmin_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/reorder", "PATCH", "[3,1,2]"))
+        .isTrue();
+  }
+
+  @Test
+  void quizReorder_student_denied() {
+    loggedIn(user(5)); // ni gestionnaire global, ni rôle dans le programme du cours
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/courses/1/quizzes/reorder", "PATCH", "[3,1,2]"))
+        .isFalse();
+  }
+
   // ── Liste étudiant (GET /courses/{id}/quizzes) : appartenance requise ──────────────
 
   @Test
