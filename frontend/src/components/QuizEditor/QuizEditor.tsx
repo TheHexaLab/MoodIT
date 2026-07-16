@@ -223,10 +223,23 @@ export function QuizEditor({
   }
 
   function reorderQuizzes(quizIds: number[]) {
+    // Ordre AVANT réordre : sert à ANNULER l'affichage optimiste si la persistance échoue.
+    const prev = quizzes;
     const next = quizIds.map((id) => quizzes.find((q) => q.id === id)!).filter(Boolean);
     setQuizzes(next);
-    onQuizzesChange?.(next); // commit : la sidebar reflète le nouvel ordre
-    void handlers.onReorderQuizzes?.(courseId, quizIds);
+    onQuizzesChange?.(next); // commit optimiste : la sidebar reflète le nouvel ordre
+    if (!handlers.onReorderQuizzes) return;
+    void (async () => {
+      try {
+        await handlers.onReorderQuizzes!(courseId, quizIds);
+      } catch {
+        // Échec (ex. 403 : pas les droits) : on REVIENT à l'ordre précédent (liste + sidebar) et
+        // on remonte l'erreur en POPUP, plutôt que de laisser un réordre fantôme non persisté.
+        setQuizzes(prev);
+        onQuizzesChange?.(prev);
+        setError(t.reorderError);
+      }
+    })();
   }
 
   async function saveQuizMeta(quizId: number, isNew: boolean, meta: QuizMetaDraft) {
