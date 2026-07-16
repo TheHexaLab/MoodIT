@@ -290,6 +290,21 @@ describe('CodingQuestion — mode review (lecture seule + TestResults)', () => {
     expect(screen.getByText('−2/5')).toBeTruthy();
   });
 
+  it('affiche result.submittedCode (code soumis) et NON le template, même si answer vaut le squelette', () => {
+    // Relecture d'une tentative passée : `answer` est réinitialisé au startCode ; c'est
+    // `result.submittedCode` (vérité serveur) qui doit être affiché.
+    render(
+      <CodingQuestion
+        question={codingQuestion('Python')}
+        mode="review"
+        answer={{ kind: 'coding', code: 'print("hi")' }}
+        onChange={noop}
+        result={{ questionId: 1, earned: 5, max: 5, submittedCode: 'x = 42', tests: [] }}
+      />
+    );
+    expect(codeTextarea().value).toBe('x = 42');
+  });
+
   it('les langages non autonomes restent éditables/révisables (SQL en review, lecture seule)', () => {
     render(
       <CodingQuestion
