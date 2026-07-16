@@ -24,6 +24,8 @@ public class QuestionResultDTO {
     private List<Integer> submittedOrder;
     /** Association : détail par élément. */
     private List<MatchingItemResultDTO> matching;
+    /** Code : source réellement soumise par l'étudiant (affichée en révision). */
+    private String submittedCode;
     /** Code : non corrigé côté serveur → null. */
     private List<Object> tests;
 }

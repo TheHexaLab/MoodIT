@@ -723,7 +723,7 @@ public class QuizService {
             case "true_false", "single_choice", "multiple_choice" -> gradeChoice(question, answer, slug);
             case "ordering" -> gradeOrdering(question, answer);
             case "matching" -> gradeMatching(question, answer);
-            case "coding" -> gradeCoding(question, codeVerdicts);
+            case "coding" -> gradeCoding(question, answer, codeVerdicts);
             default -> CodeGrading.pending(question);
         };
     }
@@ -732,9 +732,12 @@ public class QuizService {
      * Note une question Code à partir de ses verdicts ({@code testCaseId → réussi}). Sans verdict
      * (question Code jamais évaluée) → « en cours » (tests = null).
      */
-    private QuestionResultDTO gradeCoding(Question question, Map<Integer, Boolean> codeVerdicts) {
+    private QuestionResultDTO gradeCoding(
+            Question question, SubmittedAnswerDTO answer, Map<Integer, Boolean> codeVerdicts) {
         List<TestCase> harnesses = orderedTestCases(question);
-        return CodeGrading.build(question, harnesses, codeVerdicts == null ? Map.of() : codeVerdicts);
+        String submittedCode = answer != null ? answer.getCode() : null;
+        return CodeGrading.build(
+                question, harnesses, codeVerdicts == null ? Map.of() : codeVerdicts, submittedCode);
     }
 
     private static List<TestCase> orderedTestCases(Question question) {

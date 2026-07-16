@@ -118,6 +118,8 @@ function gradeCoding(question: Question, answer: QuestionAnswer | undefined): Qu
     questionId: question.id,
     earned: scaled(question.totalScore, ratio),
     max: question.totalScore,
+    // Code soumis conservé pour l'afficher en révision (comme la vérité serveur).
+    submittedCode: code,
     // Pas de harnais défini → on garde `null` (note « évalué côté serveur »).
     tests: tests.length > 0 ? results : null,
   };
