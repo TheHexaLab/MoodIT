@@ -61,9 +61,13 @@ else
   log "AVERTISSEMENT : conteneur postgres absent, pas de sauvegarde."
 fi
 
-# --- 2. Récupérer le nouveau code (fast-forward only) -----------------------
-if ! git pull --ff-only origin "$BRANCH"; then
-  fail "git pull --ff-only impossible (historique divergent ?) — aucun changement appliqué."
+# --- 2. Aligner le code sur le dépôt distant (résiste aux dérives locales) ---
+# origin/$BRANCH est déjà récupéré (git fetch plus haut). reset --hard ne touche
+# QUE les fichiers suivis → .env.docker (ignoré par git) est préservé. Immunise
+# contre les « local changes would be overwritten » si un fichier suivi a dérivé
+# sur le serveur.
+if ! git reset --hard "origin/$BRANCH"; then
+  fail "git reset --hard origin/$BRANCH impossible — aucun changement appliqué."
 fi
 
 # --- 3. Rebuild + redéploiement (rollback du code si échec) -----------------
