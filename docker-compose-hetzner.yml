@@ -1,0 +1,219 @@
+# Compose de PRODUCTION pour un VPS unique (Hetzner ~8 €/mois, ARM ou x86).
+# Dérivé de docker-compose-prod.yml, avec 2 différences :
+#   1. Ollama SUPPRIMÉ  → mcp-service pointe sur Groq (LLM gratuit, compatible OpenAI).
+#   2. Caddy AJOUTÉ     → seul conteneur exposé sur Internet (HTTPS auto Let's Encrypt).
+# Le frontend (nginx) reste le reverse-proxy applicatif interne (/api, /mcp, /ws → gateway).
+#
+# Lancer depuis la RACINE du repo :
+#   docker compose -f deploy/docker-compose-hetzner.yml up -d --build
+#
+# Pré-requis : un fichier .env.docker à la racine (cf. deploy/.env.docker.example).
+
+services:
+  # ── Reverse-proxy public + TLS automatique ───────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: moodit_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      - frontend
+
+  postgres:
+    image: postgres:16
+    container_name: moodit_postgres
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      TZ: America/Toronto
+      PGTZ: America/Toronto
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    networks:
+      - internal
+
+  # ── Frontend : plus de port publié, Caddy l'atteint via le réseau interne ──
+  frontend:
+    build: ./frontend
+    container_name: moodit_frontend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    expose:
+      - "5173"
+    mem_limit: 128m
+    networks:
+      - internal
+    depends_on:
+      - gateway
+
+  gateway:
+    build: ./gateway
+    container_name: moodit_gateway
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    expose:
+      - "${GATEWAY_PORT}"
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      - core-service
+      - auth-service
+      - permission-service
+      - mcp-service
+
+  core-service:
+    build: ./core-service
+    container_name: moodit_core
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx320m"
+    mem_limit: 640m
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+
+  auth-service:
+    build: ./auth-service
+    container_name: moodit_auth
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  permission-service:
+    build: ./permission-service
+    container_name: moodit_permission
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── MCP : LLM = Groq (gratuit, sans carte). Pas d'Ollama. ─────────────────
+  # LLM_API_KEY (gsk_...) vient de .env.docker. Clé absente / appel KO → repli
+  # déterministe (l'analyse aboutit quand même à partir des vraies stats).
+  mcp-service:
+    build: ./mcp-service
+    container_name: moodit_mcp
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+      CORE_SERVICE_HOST: core-service
+      LLM_BASE_URL: https://api.groq.com/openai/v1
+      LLM_MODEL: llama-3.3-70b-versatile
+      LLM_TIMEOUT_MS: "60000"
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Sandbox d'exécution du code étudiant (privileged requis par isolate) ──
+  piston:
+    build: ./piston
+    container_name: moodit_piston
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - piston_data:/piston/packages
+    mem_limit: 1g
+    networks:
+      - internal
+
+  piston-init:
+    image: curlimages/curl:latest
+    container_name: moodit_piston_init
+    depends_on:
+      - piston
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |-
+        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do
+          echo "attente de piston..."; sleep 2;
+        done
+        for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
+                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2 sqlite3:3.36.0; do
+          lang=$${pkg%%:*}; ver=$${pkg##*:};
+          echo "installation $$lang $$ver...";
+          curl -sS -X POST http://piston:2000/api/v2/packages \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
+        done
+        rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
+        for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
+          echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
+        done
+        echo "piston pret (12 runtimes ; + JSON via node)";
+    restart: "no"
+    networks:
+      - internal
+
+  execution-service:
+    build: ./execution-service
+    container_name: moodit_execution
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+      PISTON_URL: http://piston:2000
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      piston-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  piston_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
