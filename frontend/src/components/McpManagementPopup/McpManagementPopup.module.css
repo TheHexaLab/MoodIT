@@ -447,34 +447,19 @@
 .points {
   /* Hauteur d'UNE ligne de texte (= line-height de .point). SANS gap entre les points :
      le rythme vertical est uniforme (chaque ligne, qu'elle soit un nouveau point ou la
-     suite d'un point qui revient à la ligne, fait --point-line-height). Du coup
-     max-height = 6 lignes tombe FLUSH à la 6e ligne. Les points restent distingués par
-     leur icône de tête. */
+     suite d'un point qui revient à la ligne, fait --point-line-height). Les points
+     restent distingués par leur icône de tête. */
   --point-line-height: 1.5rem;
-  /* Nombre de lignes de texte visibles : 6 par défaut, 4 en mobile (cf. media query). */
-  --point-visible-lines: 6;
   margin: 0;
-  /* Gouttière à droite pour la scrollbar (quand elle apparaît). */
-  padding: 0 0.25rem 0 0;
+  padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-height: calc(var(--point-visible-lines) * var(--point-line-height));
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Pas de cap ni de scroll interne : la liste s'étend et c'est la modale entière
+     (.dialog, max-height + overflow-y:auto) qui défile. Un cap interne cachait le
+     contenu au-delà de 6 lignes derrière une mini-scrollbar peu visible (troncature). */
 }
-@supports not selector(::-webkit-scrollbar) {
-  .points {
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
-  }
-}
-.points::-webkit-scrollbar { width: 4px; }
-.points::-webkit-scrollbar-track { background: transparent; }
-.points::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
-.points::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-.points::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .point {
   display: flex;
   align-items: flex-start;
@@ -614,15 +599,11 @@
   }
 
   /* Mobile : un SEUL conteneur de défilement (le .dialog). On neutralise le clip de
-     l'animation de taille (hauteur figée en JS) et le scroll interne des points, sinon
-     le défilement tactile reste piégé dans ces sous-conteneurs. L'anim de taille est
-     sacrifiée sur mobile au profit d'un scroll fiable de toute la modale. */
+     l'animation de taille (hauteur figée en JS), sinon le défilement tactile reste
+     piégé dans ce sous-conteneur. L'anim de taille est sacrifiée sur mobile au
+     profit d'un scroll fiable de toute la modale. */
   .viewport {
     height: auto !important;
-    overflow: visible;
-  }
-  .points {
-    max-height: none;
     overflow: visible;
   }
 }
