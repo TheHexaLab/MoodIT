@@ -25,12 +25,21 @@
   background: var(--bg-surface);
   box-shadow: 0 12px 32px var(--shadow-modal);
   animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  /* Scrollbar native masquée : elle chevaucherait les coins arrondis de la modale (aucune
-     façon fiable et cross-navigateur de l'en écarter). Le contenu reste défilable à la
-     molette et au tactile. */
-  scrollbar-width: none;
 }
-.dialog::-webkit-scrollbar { display: none; }
+/* Scrollbar fine (convention de l'app), visible seulement quand le contenu déborde.
+   La piste est écartée des coins arrondis (border-radius:1rem) par une marge haut/bas,
+   pour que le pouce ne les chevauche pas. Firefox : scrollbar fine via scrollbar-width. */
+@supports not selector(::-webkit-scrollbar) {
+  .dialog {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+.dialog::-webkit-scrollbar { width: 4px; }
+.dialog::-webkit-scrollbar-track { background: transparent; margin: 1rem 0; }
+.dialog::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.dialog::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.dialog::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 .scrim.closing {
   animation: mcp-fade-out 0.2s ease-in forwards;
