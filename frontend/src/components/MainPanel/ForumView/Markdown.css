@@ -111,6 +111,38 @@ div[role="markdown-container"] div[role="math-block"] {
     color: var(--text);
 }
 
+/* Scrollbar horizontale alignée sur la convention de l'app (cf. AddCoursePopup) :
+   fine, pouce arrondi discret, piste transparente, sans flèches. */
+@supports not selector(::-webkit-scrollbar) {
+    div[role="markdown-container"] div[role="math-block"] {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar {
+    height: 4px;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
 div[role="markdown-container"] .katex {
     color: inherit;
 }
