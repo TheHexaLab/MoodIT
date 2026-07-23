@@ -58,6 +58,10 @@
 /* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change. */
 .viewport {
   overflow: hidden;
+  /* Ne PAS rétrécir : c'est un flex item de .dialog (flex column, max-height:100dvh).
+     Sans ça, flex-shrink:1 + overflow:hidden écraserait le viewport à la hauteur de la
+     fenêtre et clipperait le contenu long, au lieu de laisser .dialog défiler. */
+  flex-shrink: 0;
   transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 /* Contenu de page : glisse + fond à l'entrée (remonté via sa `key`). */
