@@ -97,6 +97,61 @@ div[role="markdown-container"] hr {
     border-top: 1px solid var(--border);
 }
 
+/* ─── Équations mathématiques (KaTeX). ─── */
+/* KaTeX hérite de la couleur du texte → thème clair/sombre gratuit. */
+div[role="markdown-container"] span[role="math-inline"] {
+    color: var(--text);
+}
+
+div[role="markdown-container"] div[role="math-block"] {
+    margin: 0.6rem 0;
+    /* Une équation trop large défile horizontalement au lieu de casser la mise en page. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    color: var(--text);
+}
+
+/* Scrollbar horizontale alignée sur la convention de l'app (cf. AddCoursePopup) :
+   fine, pouce arrondi discret, piste transparente, sans flèches. */
+@supports not selector(::-webkit-scrollbar) {
+    div[role="markdown-container"] div[role="math-block"] {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar {
+    height: 4px;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div[role="markdown-container"] .katex {
+    color: inherit;
+}
+
+/* Erreur de syntaxe LaTeX (throwOnError:false) : la teinter au rouge du thème. */
+div[role="markdown-container"] .katex .katex-error {
+    color: var(--badge-danger-fg);
+}
+
 /* ─── Bloc de code colore (Prism). ─── */
 div[role="code-block"] {
     position: relative;

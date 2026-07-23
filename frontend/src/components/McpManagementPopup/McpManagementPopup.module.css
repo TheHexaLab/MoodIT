@@ -18,19 +18,37 @@
   /* Fallback vh pour les navigateurs sans dvh (sinon pas de max-height → pas de scroll). */
   max-height: calc(100vh - 2rem);
   max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  /* .dialog ne défile pas lui-même (il clippe aux coins arrondis) : c'est .scrollArea,
+     SOUS le header, qui porte le défilement → la scrollbar ne court que sur le contenu. */
+  overflow: hidden;
   flex-direction: column;
   user-select: none;
   border-radius: 1rem;
   background: var(--bg-surface);
   box-shadow: 0 12px 32px var(--shadow-modal);
   animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  /* Scrollbar native masquée : elle chevaucherait les coins arrondis de la modale (aucune
-     façon fiable et cross-navigateur de l'en écarter). Le contenu reste défilable à la
-     molette et au tactile. */
-  scrollbar-width: none;
 }
-.dialog::-webkit-scrollbar { display: none; }
+/* Zone de défilement, SOUS le header : la scrollbar ne recouvre donc jamais le header.
+   flex + min-height:0 pour pouvoir défiler à l'intérieur du flex column .dialog. */
+.scrollArea {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Scrollbar fine (convention de l'app), visible seulement quand le contenu déborde.
+   Piste écartée du coin arrondi bas par une marge, pour ne pas le chevaucher.
+   Firefox : scrollbar fine via scrollbar-width. */
+@supports not selector(::-webkit-scrollbar) {
+  .scrollArea {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+.scrollArea::-webkit-scrollbar { width: 4px; }
+.scrollArea::-webkit-scrollbar-track { background: transparent; margin: 0.25rem 0 1rem; }
+.scrollArea::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.scrollArea::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.scrollArea::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 .scrim.closing {
   animation: mcp-fade-out 0.2s ease-in forwards;
@@ -55,7 +73,8 @@
 }
 
 /* ── Transition de page (liste ↔ détail) + taille animée ─── */
-/* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change. */
+/* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change.
+   Vit à l'intérieur de .scrollArea, qui porte le défilement. */
 .viewport {
   overflow: hidden;
   transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
@@ -87,10 +106,9 @@
   gap: 0.875rem;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border);
-  /* Collé en haut du conteneur scrollable (.dialog) : le corps défile dessous. Fond opaque
-     pour masquer le contenu qui passe derrière. */
-  position: sticky;
-  top: 0;
+  /* Header FIXE en haut de la modale : flex item non rétractable, HORS de .scrollArea.
+     Le corps défile en dessous → la scrollbar ne recouvre jamais le header. */
+  flex-shrink: 0;
   z-index: 3;
   background: var(--bg-surface);
 }
@@ -447,34 +465,19 @@
 .points {
   /* Hauteur d'UNE ligne de texte (= line-height de .point). SANS gap entre les points :
      le rythme vertical est uniforme (chaque ligne, qu'elle soit un nouveau point ou la
-     suite d'un point qui revient à la ligne, fait --point-line-height). Du coup
-     max-height = 6 lignes tombe FLUSH à la 6e ligne. Les points restent distingués par
-     leur icône de tête. */
+     suite d'un point qui revient à la ligne, fait --point-line-height). Les points
+     restent distingués par leur icône de tête. */
   --point-line-height: 1.5rem;
-  /* Nombre de lignes de texte visibles : 6 par défaut, 4 en mobile (cf. media query). */
-  --point-visible-lines: 6;
   margin: 0;
-  /* Gouttière à droite pour la scrollbar (quand elle apparaît). */
-  padding: 0 0.25rem 0 0;
+  padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-height: calc(var(--point-visible-lines) * var(--point-line-height));
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Pas de cap ni de scroll interne : la liste s'étend et c'est la modale entière
+     (.dialog, max-height + overflow-y:auto) qui défile. Un cap interne cachait le
+     contenu au-delà de 6 lignes derrière une mini-scrollbar peu visible (troncature). */
 }
-@supports not selector(::-webkit-scrollbar) {
-  .points {
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
-  }
-}
-.points::-webkit-scrollbar { width: 4px; }
-.points::-webkit-scrollbar-track { background: transparent; }
-.points::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
-.points::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-.points::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .point {
   display: flex;
   align-items: flex-start;
@@ -614,15 +617,11 @@
   }
 
   /* Mobile : un SEUL conteneur de défilement (le .dialog). On neutralise le clip de
-     l'animation de taille (hauteur figée en JS) et le scroll interne des points, sinon
-     le défilement tactile reste piégé dans ces sous-conteneurs. L'anim de taille est
-     sacrifiée sur mobile au profit d'un scroll fiable de toute la modale. */
+     l'animation de taille (hauteur figée en JS), sinon le défilement tactile reste
+     piégé dans ce sous-conteneur. L'anim de taille est sacrifiée sur mobile au
+     profit d'un scroll fiable de toute la modale. */
   .viewport {
     height: auto !important;
-    overflow: visible;
-  }
-  .points {
-    max-height: none;
     overflow: visible;
   }
 }

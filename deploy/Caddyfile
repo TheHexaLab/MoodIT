@@ -1,0 +1,21 @@
+# Caddy — HTTPS automatique (Let's Encrypt) + reverse-proxy vers le frontend.
+# Remplacer moodit.example.com par ton vrai domaine (DNS A/AAAA -> IP du VPS).
+# Caddy gère seul l'obtention et le renouvellement du certificat TLS.
+
+moodit.ca, www.moodit.ca {
+	encode gzip zstd
+
+	# Le frontend (nginx) sert les statiques ET proxy /api, /mcp, /exec, /auth,
+	# /gateway, /ws vers le gateway. Caddy n'a donc qu'un seul upstream.
+	# reverse_proxy gère nativement l'upgrade WebSocket (/ws).
+	reverse_proxy frontend:5173
+}
+
+# --- Variante SANS domaine (test rapide via l'IP, certificat auto-signé) ------
+# Décommenter ce bloc et commenter celui du dessus pour tester sans DNS.
+# Le navigateur affichera un avertissement de sécurité (normal, cert interne).
+#
+# :443 {
+# 	tls internal
+# 	reverse_proxy frontend:5173
+# }

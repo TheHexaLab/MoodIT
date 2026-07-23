@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Highlight } from 'prism-react-renderer';
+import katex from 'katex';
 import { codeTheme } from './codeTheme';
 import { Copy } from '../../../assets/Copy';
 import { Check } from '../../../assets/Check';
 import './prismLanguages'; // effet de bord : enregistre les grammaires Prism
 import './Markdown.css'; // styles globaux (sélecteurs par role/element) — fichier .css
+import 'katex/dist/katex.min.css'; // styles + polices des équations KaTeX
 // SIMPLE (pas .module.css) : un .module.css importé pour effet de bord est tree-shaké
 // au build de prod (map de classes inutilisée), donc ses styles globaux disparaissent.
 
@@ -84,12 +86,43 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
  * Rendu d'un sous-ensemble courant de Markdown en elements React.
  *
  * Couvre : titres (#..######), gras, italique, code en ligne, blocs de code ```,
- * listes (à puces / numérotées), citations (>), filets (---) et liens.
+ * listes (à puces / numérotées), citations (>), filets (---), liens et
+ * équations LaTeX ($…$ en ligne, $$…$$ en bloc, via KaTeX).
  *
  * On construit uniquement des elements React (jamais de HTML brut via
  * dangerouslySetInnerHTML) : aucune injection possible. Les `href` sont en plus
  * restreints aux schemes surs (pas de `javascript:`).
+ *
+ * SEULE EXCEPTION : les équations, où le HTML vient de KaTeX (`renderToString`).
+ * C'est sûr car KaTeX ÉCHAPPE le texte de l'utilisateur et n'émet que son propre
+ * balisage ; `trust: false` (défaut) bloque les commandes dangereuses (\href,
+ * \includegraphics…) et `throwOnError: false` rend une erreur LaTeX en rouge au
+ * lieu de lever une exception.
  */
+
+/** Rend une expression LaTeX en HTML KaTeX (chaîne). Jamais d'exception. */
+function renderTex(tex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(tex, {
+      displayMode,
+      throwOnError: false,
+      output: 'html',
+      strict: false,
+    });
+  } catch {
+    return '';
+  }
+}
+
+/** Équation en ligne `$…$` (rendu KaTeX). */
+function InlineMath({ tex }: { tex: string }) {
+  return <span role="math-inline" dangerouslySetInnerHTML={{ __html: renderTex(tex, false) }} />;
+}
+
+/** Équation en bloc `$$…$$` (rendu KaTeX, mode display centré). */
+function MathBlock({ tex }: { tex: string }) {
+  return <div role="math-block" dangerouslySetInnerHTML={{ __html: renderTex(tex, true) }} />;
+}
 
 /** Schemes d'URL autorises pour les liens. */
 const SAFE_HREF = /^(?:https?:\/\/|\/|#|mailto:)/i;
@@ -100,11 +133,17 @@ const SAFE_HREF = /^(?:https?:\/\/|\/|#|mailto:)/i;
  * `g` est avec etat — partager l'objet entre les appels recursifs corromprait
  * `lastIndex` et provoquerait une boucle infinie).
  */
+// Les groupes 6 (dollar échappé `\$`) et 7 (équation `$…$`) sont AJOUTÉS EN FIN
+// pour ne pas décaler les indices des marques existantes. L'équation exige un
+// non-espace juste après `$` et juste avant `$` (garde anti « montant en $ » :
+// « $5 pour 10 » ne matche pas), et tolère les `\$` internes. Le contenu utilise
+// `(?:\\.|[^$\\])` (le backslash n'est consommé QUE par `\\.`) : motif non ambigu,
+// pas de backtracking exponentiel (ReDoS) sur une entrée type « $\\\\… » sans fin.
 const INLINE_PATTERN =
-  /\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[(.+?)\]\((https?:\/\/[^\s)]+|\/[^\s)]*|#[^\s)]*|mailto:[^\s)]+)\)/g;
+  /\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[(.+?)\]\((https?:\/\/[^\s)]+|\/[^\s)]*|#[^\s)]*|mailto:[^\s)]+)\)|\\(\$)|\$(?!\s)((?:\\.|[^$\\])+?)(?<!\s)\$/g;
 
 /** Detecte le debut d'un bloc « special » (sert a couper les paragraphes). */
-const SPECIAL = /^(?:```|#{1,6}\s|>\s?|\s*[-*]\s+|\s*\d+\.\s+|(?:---|\*\*\*|___)\s*$)/;
+const SPECIAL = /^(?:```|\$\$|#{1,6}\s|>\s?|\s*[-*]\s+|\s*\d+\.\s+|(?:---|\*\*\*|___)\s*$)/;
 
 /** Parse les marques inline d'un fragment de texte en noeuds React. */
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
@@ -130,6 +169,10 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
           {parseInline(match[4], key)}
         </a>
       );
+    } else if (match[6] !== undefined) {
+      nodes.push(match[6]); // `\$` → dollar littéral (pas une équation)
+    } else if (match[7] !== undefined) {
+      nodes.push(<InlineMath key={key} tex={match[7]} />);
     }
     last = re.lastIndex;
   }
@@ -156,6 +199,31 @@ function renderBlocks(src: string, keyPrefix: string): React.ReactNode[] {
       while (i < lines.length && !lines[i].trim().startsWith('```')) buf.push(lines[i++]);
       i++; // saute la fence de fermeture
       blocks.push(<CodeBlock key={key} code={buf.join('\n')} lang={lang} />);
+      continue;
+    }
+
+    // Bloc mathématique  $$ … $$  (LaTeX, une ou plusieurs lignes)
+    if (line.trim().startsWith('$$')) {
+      const first = line.trim().slice(2);
+      const endOnSame = first.indexOf('$$');
+      let tex: string;
+      if (endOnSame !== -1) {
+        // Tout sur une ligne : $$ … $$
+        tex = first.slice(0, endOnSame);
+        i++;
+      } else {
+        // Multi-lignes : on agrège jusqu'à la fence fermante $$
+        const buf: string[] = first ? [first] : [];
+        i++;
+        while (i < lines.length && !lines[i].includes('$$')) buf.push(lines[i++]);
+        if (i < lines.length) {
+          const closing = lines[i];
+          buf.push(closing.slice(0, closing.indexOf('$$')));
+          i++;
+        }
+        tex = buf.join('\n');
+      }
+      blocks.push(<MathBlock key={key} tex={tex.trim()} />);
       continue;
     }
 

@@ -9,6 +9,13 @@
 .run
 
 # ==============================
+# Artefacts runtime du déploiement (générés par deploy/update.sh sur le serveur)
+# ==============================
+/backups/
+/update.log
+/.update.lock
+
+# ==============================
 # Core Service — Java / Spring Boot / Gradle
 # ==============================
 core-service/build/
