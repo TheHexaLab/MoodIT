@@ -18,7 +18,9 @@
   /* Fallback vh pour les navigateurs sans dvh (sinon pas de max-height → pas de scroll). */
   max-height: calc(100vh - 2rem);
   max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  /* .dialog ne défile pas lui-même (il clippe aux coins arrondis) : c'est .scrollArea,
+     SOUS le header, qui porte le défilement → la scrollbar ne court que sur le contenu. */
+  overflow: hidden;
   flex-direction: column;
   user-select: none;
   border-radius: 1rem;
@@ -26,20 +28,27 @@
   box-shadow: 0 12px 32px var(--shadow-modal);
   animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* Zone de défilement, SOUS le header : la scrollbar ne recouvre donc jamais le header.
+   flex + min-height:0 pour pouvoir défiler à l'intérieur du flex column .dialog. */
+.scrollArea {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 /* Scrollbar fine (convention de l'app), visible seulement quand le contenu déborde.
-   La piste est écartée des coins arrondis (border-radius:1rem) par une marge haut/bas,
-   pour que le pouce ne les chevauche pas. Firefox : scrollbar fine via scrollbar-width. */
+   Piste écartée du coin arrondi bas par une marge, pour ne pas le chevaucher.
+   Firefox : scrollbar fine via scrollbar-width. */
 @supports not selector(::-webkit-scrollbar) {
-  .dialog {
+  .scrollArea {
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
   }
 }
-.dialog::-webkit-scrollbar { width: 4px; }
-.dialog::-webkit-scrollbar-track { background: transparent; margin: 1rem 0; }
-.dialog::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
-.dialog::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-.dialog::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.scrollArea::-webkit-scrollbar { width: 4px; }
+.scrollArea::-webkit-scrollbar-track { background: transparent; margin: 0.25rem 0 1rem; }
+.scrollArea::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.scrollArea::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.scrollArea::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 .scrim.closing {
   animation: mcp-fade-out 0.2s ease-in forwards;
@@ -64,13 +73,10 @@
 }
 
 /* ── Transition de page (liste ↔ détail) + taille animée ─── */
-/* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change. */
+/* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change.
+   Vit à l'intérieur de .scrollArea, qui porte le défilement. */
 .viewport {
   overflow: hidden;
-  /* Ne PAS rétrécir : c'est un flex item de .dialog (flex column, max-height:100dvh).
-     Sans ça, flex-shrink:1 + overflow:hidden écraserait le viewport à la hauteur de la
-     fenêtre et clipperait le contenu long, au lieu de laisser .dialog défiler. */
-  flex-shrink: 0;
   transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 /* Contenu de page : glisse + fond à l'entrée (remonté via sa `key`). */
@@ -100,10 +106,9 @@
   gap: 0.875rem;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border);
-  /* Collé en haut du conteneur scrollable (.dialog) : le corps défile dessous. Fond opaque
-     pour masquer le contenu qui passe derrière. */
-  position: sticky;
-  top: 0;
+  /* Header FIXE en haut de la modale : flex item non rétractable, HORS de .scrollArea.
+     Le corps défile en dessous → la scrollbar ne recouvre jamais le header. */
+  flex-shrink: 0;
   z-index: 3;
   background: var(--bg-surface);
 }

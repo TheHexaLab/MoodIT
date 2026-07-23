@@ -621,14 +621,18 @@ export function McpManagementPopup({
         }}
       >
         <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
-          {/* En-tête STICKY : hors du viewport animé (position:sticky ne fonctionne pas sous
-              un ancêtre overflow:hidden). Il change instantanément entre liste et détail. */}
+          {/* En-tête FIXE (flex item non rétractable de .dialog), HORS de la zone de
+              défilement → la scrollbar ne court que sur le contenu. Change instantanément
+              entre liste et détail. */}
           {selectedSummary ? detailHeader : listHeader}
-          {/* Viewport à hauteur animée ; le corps (clé = page) glisse à chaque changement. */}
-          <div className={styles.viewport} style={height != null ? { height } : undefined}>
-            <div ref={measureRef}>
-              <div key={anim.key} data-dir={anim.dir} className={styles.view}>
-                {detailBody ?? listBody}
+          {/* Zone défilante : seule sa scrollbar apparaît, sous le header. Le viewport
+              anime sa hauteur ; le corps (clé = page) glisse à chaque changement. */}
+          <div className={styles.scrollArea}>
+            <div className={styles.viewport} style={height != null ? { height } : undefined}>
+              <div ref={measureRef}>
+                <div key={anim.key} data-dir={anim.dir} className={styles.view}>
+                  {detailBody ?? listBody}
+                </div>
               </div>
             </div>
           </div>
