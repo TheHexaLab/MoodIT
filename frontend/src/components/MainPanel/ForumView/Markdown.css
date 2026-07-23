@@ -97,6 +97,29 @@ div[role="markdown-container"] hr {
     border-top: 1px solid var(--border);
 }
 
+/* ─── Équations mathématiques (KaTeX). ─── */
+/* KaTeX hérite de la couleur du texte → thème clair/sombre gratuit. */
+div[role="markdown-container"] span[role="math-inline"] {
+    color: var(--text);
+}
+
+div[role="markdown-container"] div[role="math-block"] {
+    margin: 0.6rem 0;
+    /* Une équation trop large défile horizontalement au lieu de casser la mise en page. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    color: var(--text);
+}
+
+div[role="markdown-container"] .katex {
+    color: inherit;
+}
+
+/* Erreur de syntaxe LaTeX (throwOnError:false) : la teinter au rouge du thème. */
+div[role="markdown-container"] .katex .katex-error {
+    color: var(--badge-danger-fg);
+}
+
 /* ─── Bloc de code colore (Prism). ─── */
 div[role="code-block"] {
     position: relative;
