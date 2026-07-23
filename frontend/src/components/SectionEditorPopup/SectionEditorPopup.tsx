@@ -255,7 +255,7 @@ export function SectionEditorPopup({
               type="text"
               value={draftName}
               autoFocus
-              onChange={(e) => setDraftName(e.target.value.toLowerCase())}
+              onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEdit();
                 if (e.key === 'Escape') cancelEdit();
