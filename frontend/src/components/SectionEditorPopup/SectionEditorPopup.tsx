@@ -45,6 +45,13 @@ export function SectionEditorPopup({
   const dragIndex = useRef<number | null>(null);
   const orderBeforeDrag = useRef<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  /**
+   * Rangée « armée » pour le drag : on ne rend `draggable` que pendant l'appui sur le
+   * CORPS de la rangée. Les actions (crayon/corbeille) stoppent le mousedown, donc elles
+   * n'arment jamais le drag — leur clic passe toujours (sinon le drag natif de la rangée
+   * avale le clic et empêche d'ouvrir le renommage).
+   */
+  const [dragArmedId, setDragArmedId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -217,6 +224,7 @@ export function SectionEditorPopup({
   function handleDragEnd() {
     dragIndex.current = null;
     setDraggingId(null);
+    setDragArmedId(null);
 
     const before = orderBeforeDrag.current;
     orderBeforeDrag.current = null;
@@ -303,7 +311,9 @@ export function SectionEditorPopup({
                   ) : (
                     <li
                       key={item.id}
-                      draggable
+                      draggable={dragArmedId === item.id}
+                      onMouseDown={() => setDragArmedId(item.id)}
+                      onMouseUp={() => setDragArmedId(null)}
                       onDragStart={() => handleDragStart(index)}
                       onDragEnter={() => handleDragEnter(index)}
                       onDragOver={(e) => e.preventDefault()}
@@ -319,7 +329,9 @@ export function SectionEditorPopup({
                           <span>{item.name}</span>
                         </span>
                       </div>
-                      <div>
+                      {/* stopPropagation : presser une action n'arme pas le drag → le clic
+                          (renommer / supprimer) passe toujours. */}
+                      <div onMouseDown={(e) => e.stopPropagation()}>
                         <Pencil onClick={() => startEdit(item)} />
                         <TrashCan onClick={() => setDeletingId(item.id)} />
                       </div>

@@ -247,9 +247,10 @@ div.section-editor-popup > div > main > ol > li.dragging {
     cursor: grabbing;
 }
 
-/* Toute la rangée est saisissable (drag-and-drop), pas seulement la poignée
-   (le curseur « grabbing » pendant le drag est posé par la règle li.dragging ci-dessus). */
-div.section-editor-popup > div > main > ol > li[draggable='true'] {
+/* Toute la rangée est saisissable (drag-and-drop), pas seulement la poignée : le corps
+   (poignée + nom) montre le curseur « grab » (le « grabbing » pendant le drag vient de
+   la règle li.dragging ci-dessus ; les actions gardent le curseur « pointer », plus bas). */
+div.section-editor-popup > div > main > ol > li > div:first-child {
     cursor: grab;
 }
 
