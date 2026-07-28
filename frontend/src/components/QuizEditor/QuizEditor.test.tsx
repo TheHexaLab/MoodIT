@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { QuizEditor } from './QuizEditor';
 import { defaultQuizEditorLabels } from './quizEditorLabels';
 import { defaultQuizListLabels } from './quizListLabels';
@@ -349,5 +349,49 @@ describe('QuizEditor — fetch de la liste', () => {
     renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Périmé' })], handlers: { onFetchQuizzes } });
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledWith(42));
     expect(await screen.findByText('Depuis le serveur')).toBeTruthy();
+  });
+});
+
+describe('QuizEditor — réordonnancement (échec de persistance)', () => {
+  // jsdom n'implémente pas elementFromPoint : on le stubbe pour cibler une rangée.
+  function setElementFromPoint(el: Element | null) {
+    (
+      document as unknown as { elementFromPoint: (x: number, y: number) => Element | null }
+    ).elementFromPoint = () => el;
+  }
+
+  it('un échec (ex. 403) ANNULE le réordre optimiste et remonte un popup', async () => {
+    // onReorderQuizzes rejette → simule un 403 (pas les droits) côté serveur.
+    const onReorderQuizzes = vi.fn().mockRejectedValue(new Error('403'));
+    const onQuizzesChange = vi.fn();
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Quiz A' }), makeQuiz({ id: 2, title: 'Quiz B' })],
+      handlers: { onReorderQuizzes },
+      onQuizzesChange,
+    });
+
+    // Les rangées sont rendues dans un Portal (EditorShell) → on requête le document entier.
+    const rowA = document.querySelector('[data-reorder-id="1"]') as HTMLElement;
+    const rowB = document.querySelector('[data-reorder-id="2"]') as HTMLElement;
+    const gripA = rowA.querySelector('span') as HTMLElement; // 1re <span> = poignée (⋮⋮)
+    (gripA as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+
+    // Glisse Quiz A au-dessus de Quiz B, puis relâche → commit du nouvel ordre [2, 1].
+    fireEvent.pointerDown(gripA, { button: 0, pointerType: 'mouse', pointerId: 1 });
+    setElementFromPoint(rowB);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 0, clientY: 30 }));
+    });
+    act(() => {
+      window.dispatchEvent(new Event('pointerup'));
+    });
+
+    // La persistance a été tentée avec le nouvel ordre…
+    await waitFor(() => expect(onReorderQuizzes).toHaveBeenCalledWith(42, [2, 1]));
+    // …puis a échoué → popup d'erreur affiché.
+    expect(await screen.findByText(editorT.reorderError)).toBeTruthy();
+    // …et l'ordre a été REVERTÉ (dernier commit vers la sidebar = ordre initial [1, 2]).
+    const lastCommit = onQuizzesChange.mock.calls.at(-1)?.[0] as Quiz[];
+    expect(lastCommit.map((q) => q.id)).toEqual([1, 2]);
   });
 });

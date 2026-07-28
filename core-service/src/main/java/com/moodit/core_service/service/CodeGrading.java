@@ -21,10 +21,16 @@ final class CodeGrading {
 
     /** Résultat « en cours » d'une question Code (correction async pas encore terminée). */
     static QuestionResultDTO pending(Question question) {
+        return pending(question, null);
+    }
+
+    /** Idem, en conservant le code soumis (affiché en révision même avant les verdicts). */
+    static QuestionResultDTO pending(Question question, String submittedCode) {
         return QuestionResultDTO.builder()
                 .questionId(question.getId())
                 .earned(0.0)
                 .max(question.getTotalScore())
+                .submittedCode(submittedCode)
                 .tests(null)
                 .build();
     }
@@ -34,9 +40,10 @@ final class CodeGrading {
      * Les harnais absents de la map comptent comme non réussis. Vide → « en cours ».
      */
     static QuestionResultDTO build(
-            Question question, List<TestCase> harnesses, Map<Integer, Boolean> passedByTestCaseId) {
+            Question question, List<TestCase> harnesses, Map<Integer, Boolean> passedByTestCaseId,
+            String submittedCode) {
         if (harnesses.isEmpty() || passedByTestCaseId.isEmpty()) {
-            return pending(question);
+            return pending(question, submittedCode);
         }
         int totalWeight = 0;
         int passedWeight = 0;
@@ -55,6 +62,7 @@ final class CodeGrading {
                 .questionId(question.getId())
                 .earned(earned)
                 .max(question.getTotalScore())
+                .submittedCode(submittedCode)
                 .tests(tests)
                 .build();
     }

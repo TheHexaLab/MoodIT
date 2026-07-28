@@ -171,6 +171,8 @@ class QuizServiceSubmitIT {
     // tests non-null (plus de « en cours ») + score plein (harnais réussi sur barème 10).
     assertThat(codeResult.getTests()).isNotNull().hasSize(1);
     assertThat(codeResult.getEarned()).isEqualTo(10.0);
+    // Le code RÉELLEMENT soumis est renvoyé (affiché en révision, cf. front CodingQuestion).
+    assertThat(codeResult.getSubmittedCode()).isEqualTo("print(1)");
 
     assertThat(count("SELECT count(*) FROM attempt WHERE status = 'done'")).isEqualTo(1L);
     assertThat(count("SELECT count(*) FROM submission")).isEqualTo(1L);

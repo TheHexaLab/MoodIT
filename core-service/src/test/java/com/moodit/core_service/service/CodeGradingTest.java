@@ -37,9 +37,11 @@ class CodeGradingTest {
         QuestionResultDTO r = CodeGrading.build(
                 question(1, 2.5),
                 List.of(harness(10, 1), harness(11, 1), harness(12, 1)),
-                Map.of(10, true, 11, true, 12, false));
+                Map.of(10, true, 11, true, 12, false),
+                "print(42)");
         assertThat(r.getEarned()).isEqualTo(1.7);
         assertThat(r.getMax()).isEqualTo(2.5);
+        assertThat(r.getSubmittedCode()).isEqualTo("print(42)"); // code soumis conservé pour la révision
     }
 
     @Test
@@ -48,7 +50,8 @@ class CodeGradingTest {
         QuestionResultDTO r = CodeGrading.build(
                 question(1, 5.0),
                 List.of(harness(10, 3), harness(11, 1)),
-                Map.of(10, true, 11, false));
+                Map.of(10, true, 11, false),
+                "code");
         assertThat(r.getEarned()).isEqualTo(3.8);
     }
 
@@ -57,7 +60,8 @@ class CodeGradingTest {
         QuestionResultDTO r = CodeGrading.build(
                 question(1, 3.0),
                 List.of(harness(10, 2), harness(11, 1)),
-                Map.of(10, true, 11, true));
+                Map.of(10, true, 11, true),
+                "code");
         assertThat(r.getEarned()).isEqualTo(3.0);
     }
 
@@ -66,15 +70,17 @@ class CodeGradingTest {
         QuestionResultDTO r = CodeGrading.build(
                 question(1, 4.0),
                 List.of(harness(10, 1), harness(11, 1)),
-                Map.of(10, false, 11, false));
+                Map.of(10, false, 11, false),
+                "code");
         assertThat(r.getEarned()).isEqualTo(0.0);
     }
 
     @Test
     void empty_harnesses_is_pending() {
-        QuestionResultDTO r = CodeGrading.build(question(1, 2.0), List.of(), Map.of());
+        QuestionResultDTO r = CodeGrading.build(question(1, 2.0), List.of(), Map.of(), "code");
         assertThat(r.getEarned()).isEqualTo(0.0);
         assertThat(r.getMax()).isEqualTo(2.0);
         assertThat(r.getTests()).isNull();   // correction async pas encore terminée
+        assertThat(r.getSubmittedCode()).isEqualTo("code"); // code conservé même « en cours »
     }
 }

@@ -25,6 +25,7 @@ export interface QuizEditorLabels {
   loadError: string;
   saveError: string;
   deleteError: string;
+  reorderError: string;
 
   // ── Confirmations de suppression ──
   deleteQuizTitle: string;
@@ -48,6 +49,7 @@ export const defaultQuizEditorLabels: QuizEditorLabels = {
   loadError: 'Chargement du quiz impossible.',
   saveError: "L'enregistrement a échoué. Réessayez.",
   deleteError: 'La suppression a échoué.',
+  reorderError: "Le réordonnancement a échoué. Vous n'avez peut-être pas les droits.",
 
   deleteQuizTitle: 'Supprimer le quiz ?',
   deleteQuizBody:

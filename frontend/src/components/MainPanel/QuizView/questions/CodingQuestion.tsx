@@ -33,9 +33,17 @@ export function CodingQuestion({
   onRunCode,
 }: QuestionViewProps): React.ReactElement {
   const t = { ...defaultQuestionLabels, ...labels };
-  const code = answer?.kind === 'coding' ? answer.code : question.startCode ?? '';
-  const language = question.language?.name;
   const review = mode === 'review';
+  // En révision, on affiche le code RÉELLEMENT soumis (vérité serveur, porté par
+  // `result.submittedCode`) — et NON l'état `answer`, réinitialisé au squelette de départ
+  // (`startCode`) au chargement d'une tentative passée. En passation, on édite `answer`.
+  const code =
+    review && result?.submittedCode != null
+      ? result.submittedCode
+      : answer?.kind === 'coding'
+        ? answer.code
+        : question.startCode ?? '';
+  const language = question.language?.name;
   // Le « play » n'a de sens que si le langage s'exécute seul (cf. NO_STANDALONE_RUN).
   const runnable = !!language && !NO_STANDALONE_RUN.has(language.toLowerCase());
 

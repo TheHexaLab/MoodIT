@@ -248,6 +248,12 @@ export interface QuestionResult {
   submittedOrder?: number[];
   /** Association : détail par élément. */
   matching?: MatchingItemResult[];
+  /**
+   * Code : source RÉELLEMENT soumise par l'étudiant (vérité serveur), pour l'afficher en
+   * révision. Sans ça, la relecture d'une tentative passée retombe sur le squelette de départ
+   * (`Question.startCode`), l'état `answer` ayant été réinitialisé au template au chargement.
+   */
+  submittedCode?: string;
   /** Code : résultat par harnais. `null` si non évalué (ex. mode mock navigateur). */
   tests?: CodingTestResult[] | null;
 }
