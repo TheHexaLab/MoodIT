@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './LeftMenuGroup.module.css';
 
 interface LeftMenuGroupProps {
@@ -14,6 +14,12 @@ interface LeftMenuGroupProps {
   mobileUserInitial?: string;
   /** Menu du compte rendu dans la barre mobile (avatar cliquable en haut à droite). */
   mobileUserMenu?: React.ReactNode;
+  /**
+   * Ferme le tiroir mobile chaque fois que cette valeur change (hors montage initial).
+   * Sert à replier le menu quand on ouvre un canal : sur mobile, la sélection navigue
+   * vers le panneau principal, qu'il faut donc révéler.
+   */
+  collapseKey?: string | number;
 }
 
 /**
@@ -27,8 +33,21 @@ export default function LeftMenuGroup({
   mobileTitlePrefix = '',
   mobileUserInitial = 'U',
   mobileUserMenu,
+  collapseKey,
 }: LeftMenuGroupProps): React.ReactElement {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const isFirstCollapseRun = useRef(true);
+
+  // Referme le tiroir quand `collapseKey` change (ex. ouverture d'un canal). On saute
+  // le montage initial : refermer un tiroir déjà fermé est sans effet, mais l'intention
+  // est de ne réagir qu'aux changements ultérieurs.
+  useEffect(() => {
+    if (isFirstCollapseRun.current) {
+      isFirstCollapseRun.current = false;
+      return;
+    }
+    setIsDrawerOpen(false);
+  }, [collapseKey]);
 
   useEffect(() => {
     if (!isDrawerOpen) return;

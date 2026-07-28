@@ -946,6 +946,7 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
+        collapseKey={selectedChannelRef?.id}
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
