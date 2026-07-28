@@ -155,6 +155,12 @@ describe('createAppSocket · open()', () => {
     expect(sockets).toHaveLength(1);
   });
 
+  it("n'ajoute jamais de query string à l'URL (aucune fuite de token)", () => {
+    const app = createAppSocket('ws://test/ws');
+    app.open();
+    expect(last().url).not.toContain('token=');
+    expect(last().url).not.toContain('?');
+  });
 });
 
 // ── Facades subscribe/unsubscribe : join / leave ──────────────────────────────

@@ -88,6 +88,23 @@ describe('CurrentUserProvider', () => {
     expect(getMe).toHaveBeenCalledTimes(1);
   });
 
+  it('cookie HttpOnly illisible : part en checking et appelle /api/me pour trancher', async () => {
+    // Le JS ne peut pas lire le cookie moodit_token → on démarre toujours en 'checking'
+    // et c'est le succès/échec de GET /api/me qui décide (plus de court-circuit sur token).
+    getMe.mockResolvedValue({
+      id: 1,
+      username: 'u',
+      firstName: '',
+      lastName: '',
+      avatarColor: '#000',
+    });
+    renderProvider();
+
+    expect(screen.getByTestId('status').textContent).toBe('checking');
+    expect(screen.getByTestId('loading').textContent).toBe('true');
+    await waitFor(() => expect(getMe).toHaveBeenCalledTimes(1));
+  });
+
   it('avec token : part en checking puis passe à authed avec le profil', async () => {
     getToken.mockReturnValue('tok');
     getMe.mockResolvedValue({

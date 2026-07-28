@@ -6,6 +6,7 @@
 
 package com.moodit.gateway.ws;
 
+import java.util.Arrays;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -33,6 +34,24 @@ public class WebSocketProxyConfig implements WebSocketConfigurer {
     registry
         .addHandler(proxyHandler, "/ws")
         .addInterceptors(authHandshakeInterceptor)
-        .setAllowedOrigins(allowedOrigins.split(","));
+        .setAllowedOrigins(parseAllowedOrigins(allowedOrigins));
+  }
+
+  // Origines autorisées (anti-CSWSH) : trim de chaque entrée + filtre des vides (une liste
+  // "a, b" ne doit pas produire une origine " b" qui ne matcherait jamais). FAIL-FAST si le
+  // résultat est VIDE (FRONT_ORIGIN manquant ou blanc) : setAllowedOrigins([]) DÉSACTIVERAIT
+  // le contrôle d'Origin (allow-all → CSWSH). On refuse de démarrer plutôt que d'ouvrir le WS.
+  static String[] parseAllowedOrigins(String raw) {
+    String[] origins =
+        Arrays.stream(raw == null ? new String[0] : raw.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .toArray(String[]::new);
+    if (origins.length == 0) {
+      throw new IllegalStateException(
+          "app.cors.allowed-origins est vide (FRONT_ORIGIN manquant ou blanc) : aucune origine "
+              + "WebSocket autorisée. Refus de démarrer (sinon le contrôle d'Origin serait désactivé).");
+    }
+    return origins;
   }
 }

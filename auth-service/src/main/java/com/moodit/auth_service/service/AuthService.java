@@ -529,6 +529,11 @@ public class AuthService {
   // simplement pas de courriel), sans jamais lever d'exception qui trahirait un compte.
   public Map<String, String> forgotPassword(String email) {
     email = normalizeEmail(email);
+    // Anti-énumération (timing) : on paie le coût CPU de génération du code de façon UNIFORME,
+    // que le compte existe ou non, pour ne pas exposer d'écart mesurable au chemin "not found".
+    // Résidu accepté : le save() indexé + l'envoi d'email ASYNC (non bloquant) du chemin
+    // "compte existant", dominés par la latence réseau/mail.
+    String code = generateCode();
     User user = userRepository.findByEmail(email).orElse(null);
     if (user == null) {
       return Map.of("message", RESET_REQUESTED_MESSAGE);
@@ -557,7 +562,8 @@ public class AuthService {
             && user.getResetCodeExpiresAt() != null
             && user.getResetCodeExpiresAt().isAfter(now);
 
-    String code = generateCode();
+    // `code` est déjà généré plus haut (coût CPU uniforme anti-timing) ; ici on ne fait que
+    // le HACHER (HMAC keyé) avant persistance — le code en clair ne part qu'à l'email.
     user.setResetCode(hashCode(code));
     user.setResetCodeExpiresAt(now.plusMinutes(15));
     if (!hadActiveReset) {
@@ -593,7 +599,10 @@ public class AuthService {
       throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
-    if (user.getResetCode() == null) {
+    // Pas de code actif : on groupe l'expiry null avec le code null (état incohérent = pas de
+    // code valide) pour éviter un NPE 500 qui serait un oracle (500 vs 4xx générique). Message
+    // uniforme (INVALID_CODE_MESSAGE) pour ne rien révéler (anti-énumération).
+    if (user.getResetCode() == null || user.getResetCodeExpiresAt() == null) {
       throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 

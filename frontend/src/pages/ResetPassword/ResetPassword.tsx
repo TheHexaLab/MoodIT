@@ -24,6 +24,9 @@ export default function ResetPassword() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  // Le champ « code » est-il en cause ? État explicite plutôt qu'une heuristique sur le
+  // texte du message (fragile). Piloté aux points où l'on sait que l'erreur concerne le code.
+  const [codeError, setCodeError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -56,8 +59,10 @@ export default function ResetPassword() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setCodeError(false);
     if (code.length !== 6) {
       setError('Le code doit contenir 6 chiffres');
+      setCodeError(true);
       return;
     }
     if (!password) {
@@ -79,6 +84,9 @@ export default function ResetPassword() {
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
+      // Le serveur ne rejette que sur le code (invalide / expiré / verrouillé) : on surligne
+      // le champ code, seul champ actionnable côté utilisateur.
+      setCodeError(true);
     } finally {
       setSubmitting(false);
     }
@@ -87,6 +95,7 @@ export default function ResetPassword() {
   async function handleResend() {
     if (cooldown > 0 || resending) return;
     setError('');
+    setCodeError(false);
     setResendMsg('');
     setResending(true);
     try {
@@ -148,7 +157,7 @@ export default function ResetPassword() {
                     value={code}
                     onChange={setCode}
                     disabled={submitting}
-                    invalid={/code/i.test(error)}
+                    invalid={codeError}
                   />
                 </div>
 

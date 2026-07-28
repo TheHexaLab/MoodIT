@@ -30,5 +30,6 @@ describe('clearToken (purge du token localStorage résiduel)', () => {
     localStorage.setItem(TOKEN_KEY, 'abc');
     clearToken();
     expect(localStorage.getItem('autre')).toBe('valeur');
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
   });
 });

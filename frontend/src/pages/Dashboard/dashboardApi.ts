@@ -1072,13 +1072,12 @@ export async function createPost(
   clientPostId: string,
   title?: string
 ): Promise<ForumPost> {
-  const email = localStorage.getItem('moodit_user_email');
-
+  // L'identité vient du JWT (cookie), résolue par le gateway → pas de X-User-Email côté client
+  // (le gateway écrase toute valeur cliente). Cohérent avec sendMessage / votePost.
   const res = await apiFetch('/api/forums/posts', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-User-Email': email ?? '',
     },
     body: JSON.stringify({
       forumId,
