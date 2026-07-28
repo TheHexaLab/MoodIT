@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './ErrorPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { defaultLabels } from './labels.ts';
 import type { ErrorPopupLabels } from './types.ts';
 
@@ -30,6 +31,7 @@ export function ErrorPopup({
   const t = { ...defaultLabels, ...labels };
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
 
   function requestClose(action: (...args: unknown[]) => unknown) {
@@ -66,9 +68,7 @@ export function ErrorPopup({
   return (
     <div
       className={`${styles['error-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) requestClose(onClose);
-      }}
+      {...backdrop}
     >
       <div onAnimationEnd={handleAnimationEnd}>
         <div>

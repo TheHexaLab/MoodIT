@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './EditProfilePopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Camera } from '../../assets/Camera.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { firstGrapheme } from '../../helpers/text.ts';
 import { DEFAULT_PALETTE, NAME_MAX_LENGTH, defaultLabels } from './labels.ts';
 import type { EditProfilePopupLabels, MaybePromise, ProfileUpdate, ProfileUser } from './types.ts';
 
@@ -61,6 +63,7 @@ export function EditProfilePopup({
   const requestRef = useRef(0);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
@@ -115,7 +118,7 @@ export function EditProfilePopup({
   }
 
   function initials(): string {
-    return `${firstName[0] ?? ''}${lastName[0] ?? ''}`.toUpperCase();
+    return `${firstGrapheme(firstName)}${firstGrapheme(lastName)}`.toUpperCase();
   }
 
   const canSave = firstName.trim() !== '' && lastName.trim() !== '';
@@ -150,9 +153,7 @@ export function EditProfilePopup({
     <>
       <div
         className={`${styles['edit-profile']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>

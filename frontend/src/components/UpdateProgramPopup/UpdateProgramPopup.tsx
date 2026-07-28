@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './UpdateProgramPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
@@ -71,6 +72,7 @@ export function UpdateProgramPopup({
   const requestRef = useRef(0);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
@@ -134,9 +136,7 @@ export function UpdateProgramPopup({
     <>
       <div
         className={`${styles['update-program']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>

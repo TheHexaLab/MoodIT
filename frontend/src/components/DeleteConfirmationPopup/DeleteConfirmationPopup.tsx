@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import styles from './DeleteConfirmationPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { defaultLabels } from './labels.ts';
 import type { DeleteConfirmationPopupLabels } from './types.ts';
 
@@ -25,6 +26,7 @@ export function DeleteConfirmationPopup({
   const t = { ...defaultLabels, ...labels };
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
 
   function requestClose(action: (...args: unknown[]) => unknown) {
@@ -46,9 +48,7 @@ export function DeleteConfirmationPopup({
   return (
     <div
       className={`${styles['delete-confirmation-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) requestClose(onClose);
-      }}
+      {...backdrop}
     >
       <div onAnimationEnd={handleAnimationEnd}>
         <div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddSubscriptionPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -193,6 +194,7 @@ export function AddSubscriptionPopup({
   const [confirmDeleteEst, setConfirmDeleteEst] = useState<ManagedEstablishment | null>(null);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
 
   /** Retour au menu (en nettoyant l'erreur). */
@@ -1139,9 +1141,7 @@ export function AddSubscriptionPopup({
     <>
       <div
         className={`${styles['add-subscription']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>

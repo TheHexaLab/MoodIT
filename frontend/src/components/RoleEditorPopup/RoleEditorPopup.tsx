@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './RoleEditorPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -114,6 +115,7 @@ export function RoleEditorPopup({
   const requestRef = useRef(0);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
   /** Header de la section dont le sélecteur est ouvert (pour le click-outside). */
   const openSectionRef = useRef<HTMLElement | null>(null);
@@ -326,9 +328,7 @@ export function RoleEditorPopup({
     <>
       <div
         className={`${styles['role-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>

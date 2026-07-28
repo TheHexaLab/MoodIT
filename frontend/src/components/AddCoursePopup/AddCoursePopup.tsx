@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddCoursePopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
@@ -69,6 +70,7 @@ export function AddCoursePopup({
   const [loadingPrograms, setLoadingPrograms] = useState(false);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
   /** Conteneur du champ programmes (pour le click-outside du menu). */
   const fieldRef = useRef<HTMLElement | null>(null);
@@ -237,9 +239,7 @@ export function AddCoursePopup({
     <>
       <div
         className={`${styles['add-course']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>

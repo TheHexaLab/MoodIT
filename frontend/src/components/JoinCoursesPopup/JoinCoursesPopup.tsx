@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './JoinCoursesPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -56,6 +57,7 @@ export function JoinCoursesPopup({
   /** Message d'erreur d'enregistrement (null = aucune). */
   const [error, setError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
 
   const mountedRef = useRef(true);
   /** Jeton de la dernière requête async : ignore les réponses périmées. */
@@ -170,9 +172,7 @@ export function JoinCoursesPopup({
     <>
       <div
         className={`${styles.scrim}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
           <header className={styles.header}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './McpManagementPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Sparkles } from '../../assets/Sparkles.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -143,6 +144,7 @@ export function McpManagementPopup({
   const [progressStep, setProgressStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   /** Animation de transition entre pages (liste ↔ détail) : clé (remonte) + sens. */
   const [anim, setAnim] = useState<{ key: string; dir: 'forward' | 'back' }>({
     key: 'list',
@@ -616,9 +618,7 @@ export function McpManagementPopup({
     <>
       <div
         className={`${styles.scrim}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
           {/* En-tête FIXE (flex item non rétractable de .dialog), HORS de la zone de

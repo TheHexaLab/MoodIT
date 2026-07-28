@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './AuditLogsPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -90,6 +91,7 @@ export function AuditLogsPopup({
   const [openId, setOpenId] = useState<number | null>(null);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
   const mountedRef = useRef(true);
   // Jeton de la requête de PREMIÈRE page : invalide les réponses (page 1 ou suivantes) périmées.
@@ -202,9 +204,7 @@ export function AuditLogsPopup({
     <>
       <div
         className={`${styles['audit-logs-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <div className={styles.header}>
