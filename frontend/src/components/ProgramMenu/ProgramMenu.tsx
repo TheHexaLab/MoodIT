@@ -127,6 +127,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     programId: number;
     left: number;
     top: number;
+    /** Pastille du programme : ancre pour ne fermer que sur un scroll qui la déplace. */
+    anchor: HTMLElement;
   } | null>(null);
 
   // Ferme le menu contextuel au clic, à l'Échap, au scroll ou au redimensionnement.
@@ -136,14 +138,21 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setContextMenu(null);
     };
+    const onScroll = (event: Event) => {
+      // Ne ferme que si le conteneur qui défile PORTE l'ancre. Un défilement ailleurs
+      // — p. ex. la liste de messages qui s'auto-scrolle sur un flux WebSocket — ne doit
+      // pas fermer le menu.
+      const target = event.target;
+      if (target instanceof Node && target.contains(contextMenu.anchor)) close();
+    };
     window.addEventListener('click', close);
     window.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', close);
     return () => {
       window.removeEventListener('click', close);
       window.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', close);
     };
   }, [contextMenu]);
@@ -165,7 +174,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     const itemCount = adminItemCount + (onJoinCourses ? 1 : 0) + 1;
     const estimatedHeight = itemCount * 40 + 16;
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
-    setContextMenu({ programId, left: rect.right + gap, top });
+    setContextMenu({ programId, left: rect.right + gap, top, anchor: event.currentTarget });
   }
 
   /** Exécute une action du menu contextuel puis le referme. */
