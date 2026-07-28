@@ -488,6 +488,13 @@
 .listRowActive { border-color: var(--brand-teal); }
 .listRowDragging { opacity: 0.5; }
 
+/* Souris (pointeur fin) : toute la rangée se saisit pour réordonner (cf. onRowPointerDown).
+   Au tactile, aucun curseur et la rangée sert au tap → on ne l'affiche pas comme glissable. */
+@media (hover: hover) and (pointer: fine) {
+    .listRow { cursor: grab; }
+    .listRow:active { cursor: grabbing; }
+}
+
 /* Poignée de réordonnancement (souris + tactile) : `touch-action: none` empêche le
    défilement de la page pendant le glissé au doigt. */
 .grip {

@@ -43,6 +43,34 @@ function makeGripEvent(pointerType: 'mouse' | 'touch' = 'mouse', button = 0) {
   };
 }
 
+// Fabrique un React.PointerEvent pour onRowPointerDown : `target` est le descendant
+// réellement pressé (corps de rangée par défaut, ou un bouton pour simuler une action).
+function makeRowEvent(
+  pointerType: 'mouse' | 'touch' = 'mouse',
+  target?: HTMLElement,
+  button = 0
+) {
+  const row = document.createElement('div');
+  const body = target ?? document.createElement('span');
+  row.appendChild(body);
+  document.body.appendChild(row);
+  const setPointerCapture = vi.fn();
+  (row as unknown as { setPointerCapture: unknown }).setPointerCapture = setPointerCapture;
+  return {
+    event: {
+      pointerType,
+      button,
+      pointerId: 1,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      currentTarget: row,
+      target: body,
+    } as unknown as React.PointerEvent,
+    row,
+    setPointerCapture,
+  };
+}
+
 // jsdom n'implémente pas elementFromPoint : on l'installe pour pouvoir le stubber.
 function setElementFromPoint(el: Element | null) {
   (document as unknown as { elementFromPoint: (x: number, y: number) => Element | null })
@@ -190,5 +218,38 @@ describe('usePointerReorder', () => {
     expect(() => act(() => result.current.onGripPointerDown(event, 1))).not.toThrow();
     expect(result.current.draggingId).toBe(1);
     act(() => firePointerUp());
+  });
+
+  // --- onRowPointerDown : saisie de toute la rangée (souris) ----------------------------------
+  it('onRowPointerDown glisse la rangée entière à la souris', () => {
+    const onReorder = vi.fn();
+    const { rowById } = buildRows([1, 2, 3]);
+    const { result } = renderHook(() => usePointerReorder([1, 2, 3], onReorder));
+    const { event, setPointerCapture } = makeRowEvent('mouse');
+    act(() => result.current.onRowPointerDown(event, 1));
+    expect(result.current.draggingId).toBe(1);
+    expect(setPointerCapture).toHaveBeenCalled();
+    pointElementAt(rowById, 2);
+    act(() => firePointerMove(10, 20));
+    expect(result.current.order).toEqual([2, 1, 3]);
+    act(() => firePointerUp());
+    expect(onReorder).toHaveBeenCalledWith([2, 1, 3]);
+  });
+
+  it('onRowPointerDown ignore le tactile (le doigt défile, la poignée glisse)', () => {
+    const onReorder = vi.fn();
+    const { result } = renderHook(() => usePointerReorder([1, 2, 3], onReorder));
+    const { event } = makeRowEvent('touch');
+    act(() => result.current.onRowPointerDown(event, 1));
+    expect(result.current.draggingId).toBeNull();
+  });
+
+  it('onRowPointerDown n\'arme rien si l\'appui vient d\'un bouton (clic d\'action intact)', () => {
+    const onReorder = vi.fn();
+    const button = document.createElement('button');
+    const { result } = renderHook(() => usePointerReorder([1, 2, 3], onReorder));
+    const { event } = makeRowEvent('mouse', button);
+    act(() => result.current.onRowPointerDown(event, 1));
+    expect(result.current.draggingId).toBeNull();
   });
 });

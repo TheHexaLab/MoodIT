@@ -59,8 +59,9 @@ export function QuizListBody({
   onReorder,
 }: QuizListBodyProps): React.ReactElement {
   const t = { ...defaultQuizListLabels, ...labels };
-  // Réordonnancement souris + tactile (poignée), cf. usePointerReorder.
-  const { order, draggingId, onGripPointerDown } = usePointerReorder(
+  // Réordonnancement souris + tactile, cf. usePointerReorder. La rangée entière se
+  // saisit à la souris (onRowPointerDown) ; la poignée couvre aussi le tactile.
+  const { order, draggingId, onGripPointerDown, onRowPointerDown } = usePointerReorder(
     quizzes.map((q) => q.id),
     onReorder
   );
@@ -126,6 +127,7 @@ export function QuizListBody({
             ]
               .filter(Boolean)
               .join(' ')}
+            onPointerDown={(e) => onRowPointerDown(e, quiz.id)}
             onClick={() => setRevealedId((id) => (id === quiz.id ? null : quiz.id))}
           >
             <span

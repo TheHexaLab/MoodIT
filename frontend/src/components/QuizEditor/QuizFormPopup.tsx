@@ -78,8 +78,9 @@ export function QuizFormBody({
   const [allowRetry, setAllowRetry] = useState(!!quiz.allowRetry);
 
   const questions = quiz.questions ?? [];
-  // Réordonnancement souris + tactile (poignée), cf. usePointerReorder.
-  const { order, draggingId, onGripPointerDown } = usePointerReorder(
+  // Réordonnancement souris + tactile, cf. usePointerReorder. La rangée entière se
+  // saisit à la souris (onRowPointerDown) ; la poignée couvre aussi le tactile.
+  const { order, draggingId, onGripPointerDown, onRowPointerDown } = usePointerReorder(
     questions.map((q) => q.id),
     onReorderQuestions
   );
@@ -133,6 +134,7 @@ export function QuizFormBody({
             ]
               .filter(Boolean)
               .join(' ')}
+            onPointerDown={(e) => onRowPointerDown(e, question.id)}
             // Mobile : tap sur la ligne pour révéler/masquer ses actions.
             onClick={() => setRevealedId((id) => (id === question.id ? null : question.id))}
           >
