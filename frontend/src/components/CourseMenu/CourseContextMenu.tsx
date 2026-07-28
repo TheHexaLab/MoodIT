@@ -11,6 +11,12 @@ interface CourseContextMenuProps {
   /** Position du clic droit (coordonnées viewport). */
   x: number;
   y: number;
+  /**
+   * Élément d'ancrage (le sélecteur de cours). Sert à ne fermer sur un défilement QUE
+   * si le conteneur qui défile déplace réellement l'ancre. Un flux WebSocket qui
+   * auto-scrolle la liste de messages ne doit donc pas fermer le menu.
+   */
+  anchor?: HTMLElement | null;
   /** Code du cours ciblé (pour les libellés accessibles). */
   courseCode: string;
   /** Action « Modifier le cours » (absente → item masqué). */
@@ -33,6 +39,7 @@ interface CourseContextMenuProps {
 export function CourseContextMenu({
   x,
   y,
+  anchor,
   courseCode,
   onEditCourse,
   onOpenMcp,
@@ -62,17 +69,25 @@ export function CourseContextMenu({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose();
     }
+    function onScroll(event: Event) {
+      // Ne ferme que si le conteneur qui défile PORTE l'ancre (le menu suivrait sinon
+      // son point d'ancrage). Un défilement ailleurs — p. ex. la liste de messages qui
+      // s'auto-scrolle sur un flux WebSocket — ne doit pas fermer le menu. Sans ancre,
+      // on garde l'ancien comportement (fermeture sur tout défilement).
+      const target = event.target;
+      if (!anchor || (target instanceof Node && target.contains(anchor))) onClose();
+    }
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', onClose);
-    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onClose);
-      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('scroll', onScroll, true);
     };
-  }, [onClose]);
+  }, [onClose, anchor]);
 
   return createPortal(
     <div

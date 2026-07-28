@@ -190,7 +190,11 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     width: number;
   } | null>(null);
   /** Position du menu contextuel (clic droit sur le sélecteur) ; null si fermé. */
-  const [ctxMenuPos, setCtxMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxMenuPos, setCtxMenuPos] = useState<{
+    x: number;
+    y: number;
+    anchor: HTMLElement;
+  } | null>(null);
   /** Conteneur du sélecteur de cours (pour le click-outside du menu). */
   const selectRef = useRef<HTMLDivElement | null>(null);
   /** Liste déroulante portée vers <body> (pour le click-outside). */
@@ -363,7 +367,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     event.preventDefault();
     closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
     const rect = event.currentTarget.getBoundingClientRect();
-    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4 });
+    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4, anchor: event.currentTarget });
   }
 
   /** Cours filtrés par la recherche (sur le code et le titre). */
@@ -549,6 +553,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         <CourseContextMenu
           x={ctxMenuPos.x}
           y={ctxMenuPos.y}
+          anchor={ctxMenuPos.anchor}
           courseCode={selectedCourse.code}
           onEditCourse={
             isAdmin && onEditCourse
