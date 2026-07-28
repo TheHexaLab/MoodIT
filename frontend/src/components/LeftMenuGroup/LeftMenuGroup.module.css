@@ -118,6 +118,9 @@
         font-family: Inter, sans-serif;
         font-size: 0.6875rem;
         font-weight: 700;
+        /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
+        white-space: nowrap;
+        letter-spacing: -0.05em;
     }
 
     .sidebarShell {
