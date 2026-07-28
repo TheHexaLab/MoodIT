@@ -17,6 +17,7 @@ import com.moodit.core_service.realtime.dto.Author;
 import com.moodit.core_service.repository.MeRepository;
 import jakarta.validation.Valid;
 import java.security.Principal;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -57,7 +58,10 @@ public class MeController {
                 // Token valide mais aucun compte correspondant en BD : cas anormal
                 // (compte supprimé alors que le token est encore actif).
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilisateur introuvable"));
-    return ResponseEntity.ok(me);
+    // Cache-Control: no-store — le profil est propre à l'identité du cookie, or les cookies
+    // ne font pas partie de la clé de cache HTTP. Sans ça, un cache (navigateur/proxy Caddy)
+    // pouvait resservir le profil de l'utilisateur PRÉCÉDENT après un changement de session.
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(me);
   }
 
   // PATCH /api/me — l'utilisateur modifie son propre profil (prénom, nom, couleur).
@@ -82,7 +86,7 @@ public class MeController {
             updated.lastName(),
             updated.avatarColor()));
 
-    return ResponseEntity.ok(updated);
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(updated);
   }
 
   // PUT /api/me/settings — l'utilisateur écrase son blob de préférences (thème, dernière
@@ -118,6 +122,6 @@ public class MeController {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilisateur introuvable"));
 
-    return ResponseEntity.ok(updated);
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(updated);
   }
 }

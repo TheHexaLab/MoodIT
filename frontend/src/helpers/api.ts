@@ -27,7 +27,13 @@ export interface RegisterResponse {
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   // L'authentification passe par le cookie HttpOnly `moodit_token`, envoyé automatiquement
   // grâce à credentials:'include'. Le front ne manipule plus le token (invisible au JS).
-  const res = await fetch(input, { ...init, credentials: 'include' });
+  //
+  // cache:'no-store' : les cookies ne font PAS partie de la clé de cache HTTP du navigateur.
+  // Sans ça, une réponse à URL constante (typiquement GET /api/me) pouvait être resservie
+  // depuis le cache après un changement de session (token échangé + refresh) → on affichait
+  // le profil de l'utilisateur PRÉCÉDENT. Toute réponse authentifiée par identité doit
+  // contourner le cache HTTP.
+  const res = await fetch(input, { cache: 'no-store', ...init, credentials: 'include' });
 
   if (res.status === 401) {
     // Session invalide/expirée : le cookie HttpOnly ne peut pas être effacé ici (seul le
