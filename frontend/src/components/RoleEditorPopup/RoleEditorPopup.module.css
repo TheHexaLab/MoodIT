@@ -384,13 +384,7 @@ div.role-editor-popup > div > section > header > div.picker > ul > li > button >
     font-weight: 500;
     line-height: normal;
     text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;
-    /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
-    white-space: nowrap;
-    letter-spacing: -0.12em;
-    /* Recentre : compense l'avance que letter-spacing ajoute après le dernier glyphe. */
-    text-indent: -0.12em;
-}
+    text-box-edge: cap alphabetic;}
 
 div.role-editor-popup > div > section > header > div.picker > ul > li > button > div {
     display: flex;
@@ -535,13 +529,7 @@ div.role-editor-popup > div > section > ul > li > div > span > span {
     font-weight: 500;
     line-height: normal;
     text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;
-    /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
-    white-space: nowrap;
-    letter-spacing: -0.12em;
-    /* Recentre : compense l'avance que letter-spacing ajoute après le dernier glyphe. */
-    text-indent: -0.12em;
-}
+    text-box-edge: cap alphabetic;}
 
 @supports not (text-box-trim: trim-both) {
     div.role-editor-popup > div > section > ul > li > div > span > span {

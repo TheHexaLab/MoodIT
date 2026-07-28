@@ -28,9 +28,15 @@ describe('avatarInitials', () => {
     expect(avatarInitials('éric', 'nadeau')).toBe('ÉN');
   });
 
-  it('garde les emojis entiers et identiques partout', () => {
-    expect(avatarInitials('😀', 'Bob')).toBe('😀B');
-    expect(avatarInitials('🎨Design', '🚀Team')).toBe('🎨🚀');
+  it('privilégie les vraies lettres et ignore les emojis en tête', () => {
+    expect(avatarInitials('😀', 'Bob')).toBe('B');
+    expect(avatarInitials('🎨Design', '🚀Team')).toBe('DT');
+    expect(avatarInitials('Léa 🎉', 'Roy')).toBe('LR');
+  });
+
+  it('affiche UN SEUL emoji quand le nom ne contient aucune lettre', () => {
+    expect(avatarInitials('😀', '🎉')).toBe('😀');
+    expect(avatarInitials('🔥', '')).toBe('🔥');
   });
 
   it('se rabat sur le nom d’utilisateur quand prénom et nom sont vides', () => {
