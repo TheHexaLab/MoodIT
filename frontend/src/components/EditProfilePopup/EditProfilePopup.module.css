@@ -232,7 +232,7 @@ div.edit-profile > div > section.avatar > div > label.avatar-edit > span.preview
     text-box-edge: cap alphabetic;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 div.edit-profile > div > section.avatar > div > div > p {

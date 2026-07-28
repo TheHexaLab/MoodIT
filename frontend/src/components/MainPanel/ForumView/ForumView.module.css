@@ -438,7 +438,7 @@ div.forum-view div[role="header"] > span[role="avatar"] > span {
     text-box-edge: cap alphabetic;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 div.forum-view div[role="header"] > span[role="author"] {

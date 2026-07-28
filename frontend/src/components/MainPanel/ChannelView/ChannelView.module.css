@@ -185,7 +185,7 @@ div.channel-view > div > ul > li[role="message"] > button > .replyRefAvatar {
     user-select: none;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 div.channel-view > div > ul > li[role="message"] > button > .replyRefName {
@@ -252,7 +252,7 @@ div.channel-view > div > ul > li[role="message"] > span:first-of-type {
     user-select: none;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 div.channel-view > div > ul > li[role="message"] > div:first-of-type {

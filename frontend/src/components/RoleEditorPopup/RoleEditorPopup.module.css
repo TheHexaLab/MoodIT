@@ -387,7 +387,7 @@ div.role-editor-popup > div > section > header > div.picker > ul > li > button >
     text-box-edge: cap alphabetic;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 div.role-editor-popup > div > section > header > div.picker > ul > li > button > div {
@@ -536,7 +536,7 @@ div.role-editor-popup > div > section > ul > li > div > span > span {
     text-box-edge: cap alphabetic;
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.12em;
 }
 
 @supports not (text-box-trim: trim-both) {
