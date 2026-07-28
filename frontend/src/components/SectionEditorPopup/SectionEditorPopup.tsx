@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './SectionEditorPopup.module.css';
+import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
@@ -43,7 +44,6 @@ export function SectionEditorPopup({
   const [items, setItems] = useState<Item[]>(itemList);
   const dragIndex = useRef<number | null>(null);
   const orderBeforeDrag = useRef<string[] | null>(null);
-  const [handleHeldId, setHandleHeldId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -61,6 +61,7 @@ export function SectionEditorPopup({
   const requestRef = useRef(0);
 
   const [isClosing, setIsClosing] = useState(false);
+  const backdrop = useBackdropClose(() => requestClose(onClose));
   const pendingAction = useRef<(() => void) | null>(null);
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
@@ -216,7 +217,6 @@ export function SectionEditorPopup({
   function handleDragEnd() {
     dragIndex.current = null;
     setDraggingId(null);
-    setHandleHeldId(null);
 
     const before = orderBeforeDrag.current;
     orderBeforeDrag.current = null;
@@ -280,9 +280,7 @@ export function SectionEditorPopup({
     <>
       <div
         className={`${styles['section-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+        {...backdrop}
       >
         <div onAnimationEnd={handleAnimationEnd}>
           <header>
@@ -305,7 +303,7 @@ export function SectionEditorPopup({
                   ) : (
                     <li
                       key={item.id}
-                      draggable={handleHeldId === item.id}
+                      draggable
                       onDragStart={() => handleDragStart(index)}
                       onDragEnter={() => handleDragEnter(index)}
                       onDragOver={(e) => e.preventDefault()}
@@ -313,11 +311,7 @@ export function SectionEditorPopup({
                       className={draggingId === item.id ? styles.dragging : undefined}
                     >
                       <div>
-                        <span
-                          className={styles.handle}
-                          onMouseDown={() => setHandleHeldId(item.id)}
-                          onMouseUp={() => setHandleHeldId(null)}
-                        >
+                        <span className={styles.handle} aria-hidden="true">
                           ⠿
                         </span>
                         <span>

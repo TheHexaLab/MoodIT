@@ -247,14 +247,20 @@ div.section-editor-popup > div > main > ol > li.dragging {
     cursor: grabbing;
 }
 
-/* Poignée de réorganisation : seule zone qui déclenche le drag */
-div.section-editor-popup > div > main > ol > li .handle {
+/* Toute la rangée est saisissable (drag-and-drop), pas seulement la poignée
+   (le curseur « grabbing » pendant le drag est posé par la règle li.dragging ci-dessus). */
+div.section-editor-popup > div > main > ol > li[draggable='true'] {
     cursor: grab;
+}
+
+/* Poignée de réorganisation : simple repère visuel (le drag part de toute la rangée). */
+div.section-editor-popup > div > main > ol > li .handle {
     user-select: none;
 }
 
-div.section-editor-popup > div > main > ol > li.dragging .handle {
-    cursor: grabbing;
+/* Les actions (crayon / corbeille) restent cliquables avec un curseur adapté. */
+div.section-editor-popup > div > main > ol > li > div:last-child {
+    cursor: pointer;
 }
 
 div.section-editor-popup > div > main > ol > li > div {
