@@ -72,6 +72,8 @@
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
     letter-spacing: -0.12em;
+    /* Recentre : compense l'avance que letter-spacing ajoute après le dernier glyphe. */
+    text-indent: -0.12em;
 }
 
 .userInfo {
@@ -346,6 +348,8 @@
     /* Emojis (plus larges) : rester sur une ligne et rapprocher les deux glyphes. */
     white-space: nowrap;
     letter-spacing: -0.12em;
+    /* Recentre : compense l'avance que letter-spacing ajoute après le dernier glyphe. */
+    text-indent: -0.12em;
 }
 
 .identityText {
