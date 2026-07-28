@@ -12,7 +12,7 @@ import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
-import { firstGrapheme } from '../../helpers/text.ts';
+import { avatarInitials } from '../../helpers/text.ts';
 import { type User as UserMenuUser } from '../../types/domain.ts';
 
 // L'utilisateur affiché est l'entité User du domaine (source unique).
@@ -69,7 +69,7 @@ export default function UserMenu({
   const displayName = getDisplayName(user);
   const username = user?.username?.trim() ?? '';
   const handle = username ? `@${username}` : '@utilisateur';
-  const initials = getInitials(displayName);
+  const initials = avatarInitials(user?.firstName, user?.lastName, user?.username, 'U');
 
   const { theme, setTheme } = useTheme();
   const { saveSettings } = useCurrentUser();
@@ -471,13 +471,3 @@ function getDisplayName(user?: UserMenuUser | null): string {
   return user.username?.trim() || 'Utilisateur';
 }
 
-function getInitials(displayName: string): string {
-  const words = displayName
-    .split(/\s+/)
-    .map((word) => word.trim())
-    .filter(Boolean);
-
-  if (words.length === 0) return 'U';
-  if (words.length === 1) return firstGrapheme(words[0]).toUpperCase();
-  return `${firstGrapheme(words[0])}${firstGrapheme(words[1])}`.toUpperCase();
-}

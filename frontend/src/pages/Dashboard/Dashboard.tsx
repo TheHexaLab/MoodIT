@@ -49,6 +49,7 @@ import { useCurrentUser } from '../../context/currentUserContext.ts';
 import type { SavedLocation } from '../../helpers/userSettings.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
+import { avatarInitials } from '../../helpers/text.ts';
 import * as api from './dashboardApi.ts';
 import { type QuizEditorHandlers } from '../../components/QuizEditor/editorTypes.ts';
 import UserMenu, { type UserMenuUser } from '../../components/UserMenu/UserMenu.tsx';
@@ -1349,8 +1350,7 @@ export default function Dashboard() {
 }
 
 function getUserInitial(user: UserMenuUser): string {
-  const display = user.firstName?.trim() || user.username?.trim() || 'U';
-  return display[0].toUpperCase();
+  return avatarInitials(user.firstName, user.lastName, user.username, 'U');
 }
 
 function getEffectiveSelectedCourseId(

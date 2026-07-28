@@ -29,8 +29,8 @@ describe('initials', () => {
     expect(initials(makeUser('Jean', ''))).toBe('J');
   });
 
-  it('retourne une chaîne vide quand prénom et nom sont vides', () => {
-    expect(initials(makeUser('', ''))).toBe('');
+  it('se rabat sur le nom d\'utilisateur quand prénom et nom sont vides', () => {
+    expect(initials(makeUser('', ''))).toBe('U');
   });
 
   it('n\'utilise que le premier caractère de chaque champ', () => {
