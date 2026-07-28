@@ -8,6 +8,7 @@ import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { contrastingTextColor } from '../../../helpers/color';
+import { firstGrapheme } from '../../../helpers/text';
 import { Reply } from '../../../assets/Reply';
 import { Pencil } from '../../../assets/Pencil';
 import { TrashCan } from '../../../assets/TrashCan';
@@ -94,8 +95,8 @@ function getAuthorName(author: ForumAuthor): string {
 
 /** Deux initiales affichees dans l'avatar. */
 function getInitials(author: ForumAuthor): string {
-  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
-  return (initials || author.username[0] || '?').toUpperCase();
+  const initials = `${firstGrapheme(author.firstName)}${firstGrapheme(author.lastName)}`.trim();
+  return (initials || firstGrapheme(author.username) || '?').toUpperCase();
 }
 
 /**

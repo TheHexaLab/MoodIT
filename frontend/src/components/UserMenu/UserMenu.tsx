@@ -12,6 +12,7 @@ import { Copy } from '../../assets/Copy.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { firstGrapheme } from '../../helpers/text.ts';
 import { type User as UserMenuUser } from '../../types/domain.ts';
 
 // L'utilisateur affiché est l'entité User du domaine (source unique).
@@ -477,6 +478,6 @@ function getInitials(displayName: string): string {
     .filter(Boolean);
 
   if (words.length === 0) return 'U';
-  if (words.length === 1) return words[0].slice(0, 1).toUpperCase();
-  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  if (words.length === 1) return firstGrapheme(words[0]).toUpperCase();
+  return `${firstGrapheme(words[0])}${firstGrapheme(words[1])}`.toUpperCase();
 }

@@ -15,6 +15,7 @@ import { Reply } from '../../../assets/Reply';
 import { Send } from '../../../assets/Send';
 import { TrashCan } from '../../../assets/TrashCan';
 import { contrastingTextColor } from '../../../helpers/color';
+import { firstGrapheme } from '../../../helpers/text';
 import {
   useChannelMessages,
   type ChannelSocket,
@@ -99,8 +100,8 @@ function getAuthorName(author: ChannelMessageAuthor): string {
 
 /** Deux initiales affichées dans l'avatar (firstName + lastName). */
 function getInitials(author: ChannelMessageAuthor): string {
-  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
-  return (initials || author.username[0] || '?').toUpperCase();
+  const initials = `${firstGrapheme(author.firstName)}${firstGrapheme(author.lastName)}`.trim();
+  return (initials || firstGrapheme(author.username) || '?').toUpperCase();
 }
 
 /** Apercu court (une ligne) du contenu d'un message, pour la reference de réponse. */
