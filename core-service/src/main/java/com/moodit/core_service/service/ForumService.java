@@ -473,7 +473,7 @@ public class ForumService {
                 "Forum #" + forumId + " supprimé", details);
     }
     @Transactional
-    public void deletePost(Integer forumId, Integer postId) {
+    public void deletePost(Integer forumId, Integer postId, String email) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
         Post post = forum.getPosts()
@@ -486,6 +486,14 @@ public class ForumService {
         long fId = forum.getId();
         long pId = post.getId();
         boolean discussion = isDiscussion(forum);
+
+        // MODERATION : si l'appelant N'est PAS l'auteur du post, la suppression est une action de
+        // modération (gardien / admin — l'autorisation est déjà tranchée par le permission-service).
+        // On la TRACE dans le journal d'audit (l'auto-suppression, elle, n'est pas journalisée).
+        // Capturé AVANT delete : auteur + contexte cours encore accessibles.
+        Integer actorId = resolveUserId(email);
+        boolean moderation = actorId != null && !post.getUser().getId().equals(actorId);
+        String auditDetails = moderation ? AuditContext.ofChildOfCourse(forum.getCourse()) : null;
 
         if (discussion) {
             // DISCUSSION (chat) : une réponse ne doit PAS disparaître avec le message auquel elle
@@ -503,6 +511,14 @@ public class ForumService {
         } else {
             // Thread : supprimer le post supprime tout son sous-fil (cascade JPA + BD conservée).
             postRepository.delete(post);
+        }
+
+        // Trace de modération (auteur ≠ acteur) : l'acteur est lu du SecurityContext par
+        // auditLogService ; détails = contexte cours capturé avant la suppression.
+        if (moderation) {
+            auditLogService.record("POST_MODERATION_DELETE", "POST", postId,
+                    (discussion ? "Message #" : "Post #") + postId + " supprimé (modération)",
+                    auditDetails);
         }
 
         afterCommit(() -> {

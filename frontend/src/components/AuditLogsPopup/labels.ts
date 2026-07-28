@@ -24,6 +24,7 @@ export const defaultLabels: AuditLogsPopupLabels = {
     PROGRAM: 'Programme',
     COURSE: 'Cours',
     FORUM: 'Forum',
+    POST: 'Message',
     QUIZ: 'Quiz',
     ENROLLMENT: 'Inscription',
     MCP: 'Analyse MCP',

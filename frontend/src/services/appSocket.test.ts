@@ -132,11 +132,13 @@ function openAndConnect(app: AppSocket): FakeWebSocket {
 // ── open() ────────────────────────────────────────────────────────────────────
 
 describe('createAppSocket · open()', () => {
-  it('ouvre une connexion WebSocket avec le token en query', () => {
-    const app = createAppSocket('ws://test/ws', () => 'tok en&');
+  it("ouvre la connexion sur l'URL telle quelle (auth par cookie, sans ?token=)", () => {
+    // Le cookie HttpOnly moodit_token part automatiquement au handshake (même origine) ;
+    // le JS ne passe plus aucun token en query string.
+    const app = createAppSocket('ws://test/ws');
     app.open();
     expect(sockets).toHaveLength(1);
-    expect(last().url).toBe('ws://test/ws?token=tok%20en%26');
+    expect(last().url).toBe('ws://test/ws');
   });
 
   it("est idempotent : n'ouvre pas de 2e socket si CONNECTING", () => {
@@ -153,11 +155,6 @@ describe('createAppSocket · open()', () => {
     expect(sockets).toHaveLength(1);
   });
 
-  it('utilise un token vide par défaut', () => {
-    const app = createAppSocket('ws://test/ws');
-    app.open();
-    expect(last().url).toBe('ws://test/ws?token=');
-  });
 });
 
 // ── Facades subscribe/unsubscribe : join / leave ──────────────────────────────

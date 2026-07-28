@@ -8,6 +8,7 @@ import {
 } from '../CourseChannelList/CourseChannelList.tsx';
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources.ts';
 import { type Program } from '../ProgramMenu/ProgramMenu.tsx';
+import { ROLE } from '../../helpers/roles.ts';
 import { type MaybePromise } from './ChannelView/useChannelMessages.ts';
 import ChannelView, {
   type ChannelSocket,
@@ -152,6 +153,11 @@ const MainPanel: React.FC<MainPanelProps> = ({
   quizStale = false,
   onReloadStale,
 }) => {
+  // Modérateur : peut supprimer (jamais éditer) les messages/posts d'autrui. Admin/Gardien
+  // GLOBAL (isAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est PAS
+  // modérateur. Gating COSMÉTIQUE : l'autorisation réelle est tranchée par le permission-service.
+  const canModerate = isAdmin || program?.roleName === ROLE.ADMIN;
+
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.
     if (!program) {
@@ -209,6 +215,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onEditPost={onEditPost}
             onDeletePost={onDeletePost}
             onVotePost={onVotePost}
+            canModerate={canModerate}
             socket={forumSocket}
           />
         );
@@ -240,6 +247,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onSendMessage={onSendMessage}
             onEditMessage={onEditMessage}
             onDeleteMessage={onDeleteMessage}
+            canModerate={canModerate}
             socket={socket}
           />
         );

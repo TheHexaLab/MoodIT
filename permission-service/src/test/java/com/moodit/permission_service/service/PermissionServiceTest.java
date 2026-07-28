@@ -755,6 +755,56 @@ class PermissionServiceTest {
     assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isTrue();
   }
 
+  // ── Forums : MODÉRATION de la suppression (gardien / admin), pas l'auteur ────────────
+
+  @Test
+  void deletePost_globalAdmin_allowed() {
+    loggedIn(user(5, RoleNames.ADMIN)); // rôle GLOBAL → court-circuite l'auteur et la BD
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deletePost_globalGuardian_allowed() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deletePost_programAdminOfForumCourse_allowed() {
+    loggedIn(user(5)); // pas l'auteur, pas de rôle global
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    // Administrateur DU programme du cours du forum (forumId 9) → modérateur.
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void deletePost_teacherOfForumCourse_denied() {
+    loggedIn(user(5)); // enseignant du cours mais PAS modérateur (choix produit)
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isFalse();
+  }
+
+  @Test
+  void deletePost_programAdminOfOtherProgram_denied() {
+    // Administrateur d'un AUTRE programme (pas celui du cours du forum 9) : pas de rôle GLOBAL,
+    // et hasRoleInForumCourse renvoie false car la chaîne forum→cours→programme→admin ne matche
+    // PAS son périmètre. Un admin de programme ne modère QUE ses propres programmes.
+    loggedIn(user(5)); // aucun rôle global
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "DELETE", null)).isFalse();
+  }
+
+  @Test
+  void deletePost_moderator_cannotEdit() {
+    // Un modérateur (admin global) peut SUPPRIMER mais PAS ÉDITER le message d'autrui.
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "PATCH", "{}")).isFalse();
+  }
+
   @Test
   void editPost_nonAuthor_denied() {
     loggedIn(user(5));

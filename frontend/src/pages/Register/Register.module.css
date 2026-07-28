@@ -78,8 +78,10 @@
     gap: 1rem;
 }
 
-.cardHeader h2 { margin: 0; font-size: 1.6rem; }
-.cardHeader p { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+/* Aligné sur .form-title / .form-subtitle (LoginPage.css) : mêmes taille/poids que les autres
+   pages d'auth (Login, Mot de passe oublié, etc.) pour un en-tête cohérent avec le Figma. */
+.cardHeader h2 { margin: 0; font-size: 1.75rem; font-weight: 700; color: var(--text); }
+.cardHeader p { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.875rem; font-weight: 400; }
 
 .field { display: flex; flex-direction: column; gap: 0.375rem; }
 

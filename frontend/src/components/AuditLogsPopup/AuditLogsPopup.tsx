@@ -35,6 +35,7 @@ const HUE: Record<string, number> = {
   PROGRAM: 215,
   COURSE: 175,
   FORUM: 35,
+  POST: 15,
   QUIZ: 330,
   ESTABLISHMENT: 150,
   ENROLLMENT: 95,

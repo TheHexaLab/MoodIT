@@ -133,6 +133,24 @@ describe('ForumView', () => {
     expect(screen.queryByLabelText('Supprimer')).toBeNull();
   });
 
+  it("modérateur : supprimer est présent sur les sujets d'autrui, pas modifier", async () => {
+    renderForum([thread(101, { author: other })], { canModerate: true });
+    await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
+    // Le modérateur peut supprimer le sujet d'autrui…
+    expect(screen.getByLabelText('Supprimer')).toBeTruthy();
+    // …mais pas l'éditer (édition réservée à l'auteur).
+    expect(screen.queryByLabelText('Modifier')).toBeNull();
+  });
+
+  it("modérateur : supprimer le sujet d'autrui appelle onDeletePost", async () => {
+    const onDeletePost = vi.fn().mockResolvedValue(undefined);
+    renderForum([thread(101, { author: other })], { canModerate: true, onDeletePost });
+    await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Supprimer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    await waitFor(() => expect(onDeletePost).toHaveBeenCalledWith(101));
+  });
+
   it('supprimer un sujet ouvre la confirmation qui appelle onDeletePost', async () => {
     const onDeletePost = vi.fn().mockResolvedValue(undefined);
     renderForum([thread(101, { author: me })], { onDeletePost });

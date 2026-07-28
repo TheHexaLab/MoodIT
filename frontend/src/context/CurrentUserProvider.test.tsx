@@ -77,13 +77,15 @@ afterEach(() => {
 });
 
 describe('CurrentUserProvider', () => {
-  it('sans token : status unauthed immédiat, aucun appel /api/me', async () => {
-    getToken.mockReturnValue(null);
+  it('sans session : part en checking, interroge /api/me, puis unauthed sur échec', async () => {
+    // Le token est dans un cookie HttpOnly invisible au JS : on ne peut plus décider
+    // localement. Le provider part toujours en 'checking' et laisse GET /api/me trancher.
+    getMe.mockRejectedValue(new Error('401'));
     renderProvider();
 
-    expect(screen.getByTestId('status').textContent).toBe('unauthed');
-    expect(screen.getByTestId('loading').textContent).toBe('false');
-    expect(getMe).not.toHaveBeenCalled();
+    expect(screen.getByTestId('status').textContent).toBe('checking');
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('unauthed'));
+    expect(getMe).toHaveBeenCalledTimes(1);
   });
 
   it('avec token : part en checking puis passe à authed avec le profil', async () => {

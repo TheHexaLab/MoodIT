@@ -69,6 +69,11 @@ public class AuthService {
   // de comptes via le statut/message de retour.
   private static final String RESET_REQUESTED_MESSAGE =
       "Si un compte existe pour cet email, un code de réinitialisation vient d'être envoyé.";
+  // Réponse UNIQUE de tous les échecs de vérification d'un code (2FA ET reset de mot de passe) :
+  // compte inexistant, verrou, absence de code, expiration, mauvais code renvoient TOUS ce même
+  // message + statut 400 → ni le statut ni le message ne trahissent l'existence ou l'état du
+  // compte (anti-énumération, HIGH #2).
+  private static final String INVALID_CODE_MESSAGE = "Code invalide ou expiré.";
   // Générateur cryptographique réutilisé (thread-safe) plutôt qu'instancié à chaque code.
   private static final SecureRandom RANDOM = new SecureRandom();
   // Hash BCrypt bidon (valide, même cost que les vrais) pour égaliser le temps de réponse du
@@ -140,7 +145,7 @@ public class AuthService {
     pending.setLastName(request.getLastName());
     pending.setEmail(email);
     pending.setPasswordHash(passwordEncoder.encode(peppered(request.getPassword())));
-    pending.setVerificationCode(code);
+    pending.setVerificationCode(hashCode(code));
     pending.setVerificationCodeExpiresAt(now.plusMinutes(15));
     pending.setLastCodeSentAt(now);
     pending.setVerificationAttempts(0);
@@ -190,9 +195,13 @@ public class AuthService {
 
     // Verrou de connexion : après trop de mots de passe erronés, le compte est bloqué un
     // moment. Le comptage est PAR COMPTE (l'IP n'est jamais lue ni mise en mémoire).
+    // Anti-énumération (HIGH #2) : on renvoie la MÊME erreur générique 401 qu'un mauvais mot de
+    // passe / un compte inexistant, et on exécute un BCrypt bidon pour égaliser le temps de
+    // réponse — un 429 (plus rapide, car sans BCrypt) trahirait l'existence ET l'état verrouillé
+    // du compte. Le verrou reste effectif : on ne va pas plus loin.
     if (user.getLoginLockedUntil() != null && user.getLoginLockedUntil().isAfter(now)) {
-      throw new TooManyRequestsException(
-          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+      passwordEncoder.matches(peppered(request.getPassword()), DUMMY_HASH);
+      throw new InvalidCredentialsException();
     }
 
     // Vérifier le mot de passe ; chaque échec est compté pour déclencher le verrou.
@@ -221,9 +230,26 @@ public class AuthService {
     user.setFailedLoginAttempts(0);
     user.setLoginLockedUntil(null);
 
-    // Générer et envoyer le code 2FA
+    // Anti brute-force des codes 2FA (HIGH #1). Tant qu'un code émis reste VALIDE (non expiré),
+    // une reconnexion ne réémet PAS de nouveau code et ne remet PAS `verificationAttempts` à zéro :
+    // les essais restent plafonnés à MAX_VERIFY_ATTEMPTS POUR CE code, puis le verrou 15 min de
+    // verify2FA s'applique. Sans cette garde, un mot de passe volé permettait de régénérer un code
+    // (et de réinitialiser le compteur) à chaque login → le plafond par-code était contournable.
+    // Le client bascule quand même sur l'écran 2FA (token null) et utilise le code déjà reçu, ou
+    // en redemande un via resendCode une fois le cooldown écoulé.
+    boolean hasActiveCode =
+        user.getVerificationCode() != null
+            && user.getVerificationCodeExpiresAt() != null
+            && user.getVerificationCodeExpiresAt().isAfter(now);
+    if (hasActiveCode) {
+      userRepository.save(user);
+      return authResponseFor(user, null);
+    }
+
+    // Aucun code actif (1re connexion, code expiré, ou verrou 2FA écoulé) : on émet un nouveau
+    // code et on repart d'un compteur de tentatives neuf.
     String code = generateCode();
-    user.setVerificationCode(code);
+    user.setVerificationCode(hashCode(code));
     user.setVerificationCodeExpiresAt(now.plusMinutes(15));
     user.setVerificationAttempts(0);
     user.setVerificationLockedUntil(null);
@@ -338,7 +364,7 @@ public class AuthService {
       throw new InvalidVerificationCodeException("Code expiré");
     }
 
-    if (!pending.getVerificationCode().equals(code)) {
+    if (!codeMatches(pending.getVerificationCode(), code)) {
       // Mauvais code : on compte la tentative et on invalide le code au-delà du plafond,
       // pour empêcher le brute-force des 6 chiffres.
       pending.setVerificationAttempts(pending.getVerificationAttempts() + 1);
@@ -393,40 +419,43 @@ public class AuthService {
   // Chaque save() doit committer indépendamment.
   public AuthResponse verify2FA(String email, String code) {
     email = normalizeEmail(email);
-    User user =
-        userRepository
-            .findByEmail(email)
-            .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      // Compte inexistant : on calcule quand même un HMAC (temps de réponse égalisé) et on renvoie
+      // la MÊME erreur générique que pour un mauvais code — aucun oracle d'existence de compte.
+      hashCode(code);
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
+    }
 
     LocalDateTime now = LocalDateTime.now();
-    // Blocage actif : on refuse toute tentative tant que le délai n'est pas écoulé.
+
+    // Anti-énumération (HIGH #2) : verrou actif, absence de code, expiration et mauvais code
+    // renvoient TOUS la même réponse générique (INVALID_CODE_MESSAGE, statut 400). Les contrôles
+    // anti-brute-force (compteur, verrou, invalidation) restent appliqués en interne — seule la
+    // réponse est uniformisée pour ne rien révéler de l'état du compte.
     if (user.getVerificationLockedUntil() != null
         && user.getVerificationLockedUntil().isAfter(now)) {
-      throw new TooManyRequestsException(
-          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     if (user.getVerificationCode() == null) {
-      throw new InvalidVerificationCodeException("Code invalide. Reconnectez-vous.");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     if (user.getVerificationCodeExpiresAt().isBefore(now)) {
-      throw new InvalidVerificationCodeException("Code expiré");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
-    if (!user.getVerificationCode().equals(code)) {
+    if (!codeMatches(user.getVerificationCode(), code)) {
       // Mauvais code 2FA : on compte la tentative et, au plafond, on invalide le code ET on pose
       // un blocage temporel — le verrou survit à une reconnexion (vérifié dans login()).
       user.setVerificationAttempts(user.getVerificationAttempts() + 1);
       if (user.getVerificationAttempts() >= MAX_VERIFY_ATTEMPTS) {
         user.setVerificationCode(null);
         user.setVerificationLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
-        userRepository.save(user);
-        throw new TooManyRequestsException(
-            "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
       }
       userRepository.save(user);
-      throw new InvalidVerificationCodeException("Code invalide");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     user.setVerificationCode(null);
@@ -462,9 +491,10 @@ public class AuthService {
       }
       enforceResendCooldown(user.getLastCodeSentAt(), now);
       String code = generateCode();
-      user.setVerificationCode(code);
+      user.setVerificationCode(hashCode(code));
       user.setVerificationCodeExpiresAt(now.plusMinutes(15));
-      user.setVerificationAttempts(0);
+      // On NE réinitialise PAS `verificationAttempts` (HIGH #1) : un renvoi ne doit pas servir à
+      // remettre le plafond d'essais à zéro. Les tentatives s'accumulent jusqu'au verrou 15 min.
       user.setLastCodeSentAt(now);
       userRepository.save(user);
       emailService.send2FACode(email, code);
@@ -482,7 +512,7 @@ public class AuthService {
     enforceResendCap(pending.getResendCount());
 
     String code = generateCode();
-    pending.setVerificationCode(code);
+    pending.setVerificationCode(hashCode(code));
     pending.setVerificationCodeExpiresAt(now.plusMinutes(15));
     pending.setLastCodeSentAt(now);
     pending.setResendCount(pending.getResendCount() + 1);
@@ -518,10 +548,21 @@ public class AuthService {
       return Map.of("message", RESET_REQUESTED_MESSAGE);
     }
 
+    // Anti brute-force (HIGH #1) : on ne remet `resetAttempts` à zéro que si aucun code de reset
+    // n'était encore valide. Redemander un code ne réinitialise donc plus le plafond d'essais —
+    // les tentatives s'accumulent jusqu'au verrou 15 min de resetPassword — tout en laissant
+    // l'utilisateur légitime recevoir un code fonctionnel.
+    boolean hadActiveReset =
+        user.getResetCode() != null
+            && user.getResetCodeExpiresAt() != null
+            && user.getResetCodeExpiresAt().isAfter(now);
+
     String code = generateCode();
-    user.setResetCode(code);
+    user.setResetCode(hashCode(code));
     user.setResetCodeExpiresAt(now.plusMinutes(15));
-    user.setResetAttempts(0);
+    if (!hadActiveReset) {
+      user.setResetAttempts(0);
+    }
     user.setResetLastSentAt(now);
     userRepository.save(user);
 
@@ -534,40 +575,42 @@ public class AuthService {
   // sinon le rollback annulerait l'incrément et l'anti-brute-force ne se déclencherait jamais.
   public Map<String, String> resetPassword(String email, String code, String newPassword) {
     email = normalizeEmail(email);
-    // Compte introuvable : même message générique que "mauvais code" (pas d'oracle).
-    User user =
-        userRepository
-            .findByEmail(email)
-            .orElseThrow(() -> new InvalidVerificationCodeException("Code invalide"));
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      // Compte inexistant : on calcule quand même un HMAC (temps de réponse égalisé) et on renvoie
+      // la MÊME erreur générique que pour un mauvais code — aucun oracle d'existence de compte.
+      hashCode(code);
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
+    }
 
     LocalDateTime now = LocalDateTime.now();
 
+    // Anti-énumération (HIGH #2) : verrou actif, absence de code, expiration et mauvais code
+    // renvoient TOUS la même réponse générique (INVALID_CODE_MESSAGE, statut 400). Les contrôles
+    // anti-brute-force (compteur, verrou, invalidation) restent appliqués en interne — seule la
+    // réponse est uniformisée pour ne rien révéler de l'état du compte.
     if (user.getResetLockedUntil() != null && user.getResetLockedUntil().isAfter(now)) {
-      throw new TooManyRequestsException(
-          "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     if (user.getResetCode() == null) {
-      throw new InvalidVerificationCodeException("Code invalide. Demandez un nouveau code.");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     if (user.getResetCodeExpiresAt().isBefore(now)) {
-      throw new InvalidVerificationCodeException("Code expiré");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
-    if (!user.getResetCode().equals(code)) {
+    if (!codeMatches(user.getResetCode(), code)) {
       // Mauvais code : on compte la tentative et, au plafond, on invalide le code et on pose
       // un verrou temporel (anti brute-force des 6 chiffres).
       user.setResetAttempts(user.getResetAttempts() + 1);
       if (user.getResetAttempts() >= MAX_VERIFY_ATTEMPTS) {
         user.setResetCode(null);
         user.setResetLockedUntil(now.plusMinutes(LOCKOUT_MINUTES));
-        userRepository.save(user);
-        throw new TooManyRequestsException(
-            "Trop de tentatives. Réessayez dans " + LOCKOUT_MINUTES + " minutes.");
       }
       userRepository.save(user);
-      throw new InvalidVerificationCodeException("Code invalide");
+      throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
     // Code valide : on pose le nouveau mot de passe (peppered + BCrypt, comme au register).
@@ -625,6 +668,26 @@ public class AuthService {
   private String generateCode() {
     int code = 100000 + RANDOM.nextInt(900000);
     return String.valueOf(code);
+  }
+
+  // Les codes (2FA / vérification email / reset) ne sont JAMAIS stockés en clair : on ne
+  // persiste que leur HMAC-SHA256 keyé par le pepper (même primitive que `peppered()`). Une
+  // lecture de la BD ne révèle donc pas les codes actifs. HMAC déterministe → comparable en
+  // temps constant, sans besoin de recherche par valeur (le code est toujours comparé au hash
+  // stocké d'un utilisateur précis). L'email, lui, reçoit le code EN CLAIR.
+  private String hashCode(String code) {
+    return peppered(code);
+  }
+
+  // Comparaison à temps constant du code fourni contre le hash stocké (évite un oracle par
+  // timing sur les 6 chiffres). null des deux côtés déjà écarté par les gardes appelantes.
+  private boolean codeMatches(String storedHash, String providedCode) {
+    if (storedHash == null || providedCode == null) {
+      return false;
+    }
+    return MessageDigest.isEqual(
+        storedHash.getBytes(StandardCharsets.UTF_8),
+        hashCode(providedCode).getBytes(StandardCharsets.UTF_8));
   }
 
   // Anti-bombing partagé (register / resendCode) : délai minimal entre deux envois de code.

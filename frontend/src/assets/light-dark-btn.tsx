@@ -17,6 +17,7 @@ export function Lightanddark({ isDark = false }: LightanddarkProps): React.React
         height="20"
         viewBox="0 0 20 20"
         fill="none"
+        style={{ color: 'var(--sun-color, #f5a623)' }}
       >
         <path
           d="M10 13.75C12.0711 13.75 13.75 12.0711 13.75 10C13.75 7.92893 12.0711 6.25 10 6.25C7.92893 6.25 6.25 7.92893 6.25 10C6.25 12.0711 7.92893 13.75 10 13.75Z"

@@ -295,16 +295,22 @@ public class PermissionService {
                       return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
                     }),
 
-            // Editer / supprimer un post ou message : reserve a SON AUTEUR (Post.user_id). On
-            // protege via le postId (PATH) ; le forumId du motif n'intervient pas dans la decision.
+            // EDITER un post ou message : reserve a SON AUTEUR (Post.user_id). On protege via le
+            // postId (PATH) ; le forumId du motif n'intervient pas dans la decision. La MODERATION
+            // (cf. DELETE ci-dessous) n'ouvre PAS l'edition : un moderateur supprime, il ne
+            // reecrit pas le message d'autrui.
             rule(
                     "PATCH",
                     "/forums/{forumId}/posts/{postId}",
                     (user, vars, body) -> isPostAuthor(user, vars, "postId")),
+            // SUPPRIMER un post ou message : SON AUTEUR, OU un MODERATEUR du forum. Moderateur =
+            // Administrateur/Gardien GLOBAL (partout), OU Administrateur DU programme du cours du
+            // forum (User_Program_Role via Forum.course_id). L'Enseignant N'est PAS moderateur.
+            // postId (auteur) et forumId (moderation) sont tous deux dans le PATH.
             rule(
                     "DELETE",
                     "/forums/{forumId}/posts/{postId}",
-                    (user, vars, body) -> isPostAuthor(user, vars, "postId")),
+                    (user, vars, body) -> canModerateForumPost(user, vars)),
 
             // ── Course / Program : structure, inscription, abonnement ─────────────────────
             // Lister les forums d'un cours (canaux 'Discussion' + forums 'Thread', filtres par
@@ -955,6 +961,25 @@ public class PermissionService {
   private boolean isPostAuthor(User user, Map<String, String> vars, String postVar) {
     long postId = longVar(vars, postVar);
     return postId > 0 && membershipService.isPostAuthor(user.getId(), postId);
+  }
+
+  // ── PREDICAT : SUPPRIMER un post/message (auteur OU moderateur du forum) ────────────
+  // Autorise la suppression d'un post/message a :
+  //   - SON AUTEUR (Post.user_id == user) — cas nominal, inchange ;
+  //   - un MODERATEUR : Administrateur/Gardien GLOBAL (user_role, partout), OU Administrateur
+  //     DU programme du cours du forum (User_Program_Role, resolu via Forum.course_id).
+  // L'Enseignant du cours N'est PAS moderateur (choix produit : gardien + admin seulement).
+  // postId (auteur) et forumId (moderation) sont lus dans les variables de PATH.
+  private boolean canModerateForumPost(User user, Map<String, String> vars) {
+    if (isPostAuthor(user, vars, "postId")) {
+      return true;
+    }
+    if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+      return true;
+    }
+    long forumId = longVar(vars, "forumId");
+    return forumId > 0
+        && membershipService.hasRoleInForumCourse(user.getId(), forumId, RoleNames.ADMIN);
   }
 
   // ── PREDICAT GENERIQUE : appartenance au forum (id de forum dans le PATH) ───────────

@@ -116,6 +116,22 @@ describe('ChannelView', () => {
     expect(deleteButtons.length).toBe(1);
   });
 
+  it('modérateur : la corbeille apparaît AUSSI sur les messages d\'autrui', () => {
+    renderChannel([msg(1, me, 'Le mien'), msg(2, other, 'Le sien')], { canModerate: true });
+    // Un modérateur peut supprimer les deux messages (le sien + celui d'autrui).
+    expect(screen.getAllByLabelText('Supprimer le message').length).toBe(2);
+    // Mais l'ÉDITION reste réservée à l'auteur → un seul stylo (son propre message).
+    expect(screen.getAllByLabelText('Modifier le message').length).toBe(1);
+  });
+
+  it('modérateur : supprimer le message d\'autrui appelle onDeleteMessage', async () => {
+    const onDeleteMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(2, other, "Message d'autrui")], { canModerate: true, onDeleteMessage });
+    fireEvent.click(screen.getByLabelText('Supprimer le message'));
+    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    await waitFor(() => expect(onDeleteMessage).toHaveBeenCalledWith(2));
+  });
+
   it('édite un message : le stylo ouvre l\'éditeur, Enregistrer appelle onEditMessage', async () => {
     const onEditMessage = vi.fn().mockResolvedValue(undefined);
     renderChannel([msg(1, me, 'Original')], { onEditMessage });

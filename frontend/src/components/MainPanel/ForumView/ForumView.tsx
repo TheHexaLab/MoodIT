@@ -67,6 +67,11 @@ interface ForumViewProps {
   onDeletePost?: DeletePostHandler;
   /** Vote sur un post (API-ready). */
   onVotePost?: VotePostHandler;
+  /**
+   * Modérateur (gardien / admin) : peut SUPPRIMER (jamais éditer) les posts d'autrui.
+   * Gating cosmétique — l'autorisation réelle est tranchée par le permission-service.
+   */
+  canModerate?: boolean;
   /** Socket temps reel (optionnel) : posts / votes des autres utilisateurs. */
   socket?: ForumSocket;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
@@ -156,6 +161,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   onEditPost,
   onDeletePost,
   onVotePost,
+  canModerate = false,
   socket,
   labels,
 }) => {
@@ -525,22 +531,31 @@ const ForumView: React.FC<ForumViewProps> = ({
     );
   }
 
-  /** Actions reservees a l'auteur (modifier / supprimer), sinon rien. */
+  /**
+   * Actions sur un post : ÉDITION réservée à l'auteur ; SUPPRESSION ouverte à l'auteur OU à un
+   * modérateur (gardien / admin — un modérateur supprime, il ne réécrit pas). Rien à afficher si
+   * ni l'un ni l'autre.
+   */
   function renderOwnerActions(post: ForumPost) {
-    if (!isOwn(post)) return null;
+    const own = isOwn(post);
+    if (!own && !canModerate) return null;
     return (
       <>
-        <button type="button" role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
-          <Pencil width={14} height={14} />
-        </button>
-        <button
-          type="button"
-          role="delete"
-          aria-label={t.delete}
-          onClick={() => setConfirmDeleteId(post.id)}
-        >
-          <TrashCan width={14} height={14} />
-        </button>
+        {own && (
+          <button type="button" role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
+            <Pencil width={14} height={14} />
+          </button>
+        )}
+        {(own || canModerate) && (
+          <button
+            type="button"
+            role="delete"
+            aria-label={t.delete}
+            onClick={() => setConfirmDeleteId(post.id)}
+          >
+            <TrashCan width={14} height={14} />
+          </button>
+        )}
       </>
     );
   }

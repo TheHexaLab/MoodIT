@@ -58,6 +58,11 @@ interface ChannelViewProps {
   onEditMessage?: EditMessageHandler;
   /** Émise à la suppression d'un de ses messages (optimiste + rollback). */
   onDeleteMessage?: DeleteMessageHandler;
+  /**
+   * Modérateur (gardien / admin) : peut SUPPRIMER (jamais éditer) les messages d'autrui.
+   * Gating cosmétique — l'autorisation réelle est tranchée par le permission-service.
+   */
+  canModerate?: boolean;
   /** Socket temps reel (optionnel) : reception des messages des autres users. */
   socket?: ChannelSocket;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
@@ -121,6 +126,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   onSendMessage,
   onEditMessage,
   onDeleteMessage,
+  canModerate = false,
   socket,
   labels,
 }: ChannelViewProps) => {
@@ -424,24 +430,26 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                           >
                             <Reply />
                           </button>
+                          {/* Édition : AUTEUR uniquement (un modérateur ne réécrit pas). */}
                           {isOwnMessage(message) && (
-                            <>
-                              <button
-                                type="button"
-                                aria-label={t.edit}
-                                onClick={() => startEdit(message)}
-                              >
-                                <Pencil />
-                              </button>
-                              <button
-                                type="button"
-                                role="delete"
-                                aria-label={t.delete}
-                                onClick={() => setConfirmDeleteId(message.id)}
-                              >
-                                <TrashCan />
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              aria-label={t.edit}
+                              onClick={() => startEdit(message)}
+                            >
+                              <Pencil />
+                            </button>
+                          )}
+                          {/* Suppression : auteur OU modérateur (gardien / admin). */}
+                          {(isOwnMessage(message) || canModerate) && (
+                            <button
+                              type="button"
+                              role="delete"
+                              aria-label={t.delete}
+                              onClick={() => setConfirmDeleteId(message.id)}
+                            >
+                              <TrashCan />
+                            </button>
                           )}
                         </div>
                       )}

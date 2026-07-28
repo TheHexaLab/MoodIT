@@ -3,9 +3,10 @@ import { apiFetch } from './api';
 
 /**
  * Tests de la couche réseau bas niveau (apiFetch : wrapper de fetch).
- * fetch est mocké via vi.stubGlobal ; le token vient du localStorage (helpers/auth).
- * Couvre : injection du header Authorization, absence de token, transmission de init,
- * et la gestion du 401 (purge du token + redirection /login).
+ * fetch est mocké via vi.stubGlobal. Depuis la migration cookie HttpOnly, apiFetch
+ * n'injecte plus de header Authorization : il envoie credentials:'include' (le cookie
+ * `moodit_token` part automatiquement). Couvre : credentials, transmission de init,
+ * et la gestion du 401 (purge d'un résidu localStorage + redirection /login).
  */
 
 const TOKEN_KEY = 'moodit_token';
@@ -39,32 +40,25 @@ describe('apiFetch', () => {
     expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/api/thing');
   });
 
-  it('ajoute le header Authorization Bearer quand un token est présent', async () => {
-    localStorage.setItem(TOKEN_KEY, 'abc123');
+  it('envoie credentials:"include" (cookie HttpOnly) et n’ajoute aucun header Authorization', async () => {
     await apiFetch('/api/thing');
     const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = init.headers as Headers;
-    expect(headers.get('Authorization')).toBe('Bearer abc123');
+    expect(init.credentials).toBe('include');
+    // Le token n'est plus manipulé par le JS : aucun header Authorization n'est injecté.
+    expect(init.headers).toBeUndefined();
   });
 
-  it('n’ajoute PAS le header Authorization en l’absence de token', async () => {
-    await apiFetch('/api/thing');
-    const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = init.headers as Headers;
-    expect(headers.get('Authorization')).toBeNull();
-  });
-
-  it('conserve les headers fournis dans init et y ajoute le token', async () => {
-    localStorage.setItem(TOKEN_KEY, 'tok');
+  it('conserve les headers et la méthode fournis dans init, sans Authorization', async () => {
     await apiFetch('/api/thing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
     const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = init.headers as Headers;
-    expect(headers.get('Content-Type')).toBe('application/json');
-    expect(headers.get('Authorization')).toBe('Bearer tok');
     expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers.Authorization).toBeUndefined();
   });
 
   it('retourne la Response telle quelle (200)', async () => {
