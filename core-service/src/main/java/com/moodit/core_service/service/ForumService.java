@@ -494,6 +494,10 @@ public class ForumService {
         Integer actorId = resolveUserId(email);
         boolean moderation = actorId != null && !post.getUser().getId().equals(actorId);
         String auditDetails = moderation ? AuditContext.ofChildOfCourse(forum.getCourse()) : null;
+        // Capturés AVANT la suppression (entités encore attachées) : email de l'auteur du message
+        // supprimé (plus parlant que son id) et nom du canal/forum où il se trouvait.
+        String deletedAuthorEmail = moderation ? post.getUser().getEmail() : null;
+        String channelName = forum.getTitle();
 
         if (discussion) {
             // DISCUSSION (chat) : une réponse ne doit PAS disparaître avec le message auquel elle
@@ -517,7 +521,8 @@ public class ForumService {
         // auditLogService ; détails = contexte cours capturé avant la suppression.
         if (moderation) {
             auditLogService.record("POST_MODERATION_DELETE", "POST", postId,
-                    (discussion ? "Message #" : "Post #") + postId + " supprimé (modération)",
+                    (discussion ? "Message de " : "Post de ") + deletedAuthorEmail
+                            + " supprimé dans « " + channelName + " » (modération)",
                     auditDetails);
         }
 

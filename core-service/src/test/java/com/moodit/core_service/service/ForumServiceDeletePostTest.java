@@ -19,6 +19,7 @@ import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.repository.VoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
@@ -164,7 +165,15 @@ class ForumServiceDeletePostTest {
     forumService.deletePost(forum.getId(), victim.getId(), moderator.getEmail());
     em.flush();
 
+    // Le résumé identifie l'auteur du message par son EMAIL (pas son id) et nomme le canal.
+    ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
     verify(auditLogService)
-        .record(eq("POST_MODERATION_DELETE"), eq("POST"), eq(victim.getId()), any(), any());
+        .record(
+            eq("POST_MODERATION_DELETE"),
+            eq("POST"),
+            eq(victim.getId()),
+            summary.capture(),
+            any());
+    assertThat(summary.getValue()).contains("author@test.ca").contains("Canal Discussion");
   }
 }
