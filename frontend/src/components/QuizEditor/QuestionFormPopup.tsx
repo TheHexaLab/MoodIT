@@ -3,7 +3,7 @@ import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
 import { Dropdown } from './Dropdown';
-import { usePointerReorder } from './usePointerReorder';
+import { usePointerReorder } from '../../hooks/usePointerReorder';
 import { MarkdownEditor } from '../MainPanel/ForumView/MarkdownEditor';
 import { GripVertical } from '../../assets/GripVertical';
 import { TrashCan } from '../../assets/TrashCan';

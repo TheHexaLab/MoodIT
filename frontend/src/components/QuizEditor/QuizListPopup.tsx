@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
-import { usePointerReorder } from './usePointerReorder';
+import { usePointerReorder } from '../../hooks/usePointerReorder';
 import { GripVertical } from '../../assets/GripVertical';
 import { Pencil } from '../../assets/Pencil';
 import { TrashCan } from '../../assets/TrashCan';

@@ -3,7 +3,7 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { GripVertical } from '../../../../assets/GripVertical';
-import { usePointerReorder } from '../../../QuizEditor/usePointerReorder';
+import { usePointerReorder } from '../../../../hooks/usePointerReorder';
 import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels } from './questionLabels';
 

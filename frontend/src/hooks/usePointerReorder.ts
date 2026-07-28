@@ -1,19 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export interface PointerReorder {
+export interface PointerReorder<Id extends string | number = number> {
   /** Ordre courant des ids (à utiliser pour rendre la liste). */
-  order: number[];
+  order: Id[];
   /** Id de la ligne en cours de glissement (pour le style), sinon null. */
-  draggingId: number | null;
+  draggingId: Id | null;
   /** À poser sur la poignée (⋮⋮) de chaque ligne : démarre TOUJOURS un glissement. */
-  onGripPointerDown: (e: React.PointerEvent, id: number) => void;
+  onGripPointerDown: (e: React.PointerEvent, id: Id) => void;
   /**
    * À poser sur la RANGÉE entière : la ligne se saisit n'importe où (comme les canaux),
    * SAUF si l'appui vient d'un élément interactif (bouton/lien/champ ou `[data-no-drag]`)
    * — leurs clics passent alors intacts. Souris/stylet uniquement : au tactile on n'arme
    * rien pour laisser le doigt défiler la liste (le glissement tactile passe par la poignée).
    */
-  onRowPointerDown: (e: React.PointerEvent, id: number) => void;
+  onRowPointerDown: (e: React.PointerEvent, id: Id) => void;
 }
 
 // Descendants dont l'appui ne doit JAMAIS armer le glissement de la rangée : leur clic
@@ -36,13 +36,13 @@ const INTERACTIVE = 'button, a, input, textarea, select, [contenteditable="true"
  * `onPointerDown={(e) => onGripPointerDown(e, id)}` + `touch-action: none` ; la rangée
  * peut recevoir `onPointerDown={(e) => onRowPointerDown(e, id)}` pour être saisie entière.
  */
-export function usePointerReorder(
-  ids: number[],
-  onReorder: (ids: number[]) => void
-): PointerReorder {
+export function usePointerReorder<Id extends string | number = number>(
+  ids: Id[],
+  onReorder: (ids: Id[]) => void
+): PointerReorder<Id> {
   // Ordre transitoire pendant un glissement (null = pas de glissement → on suit `ids`).
-  const [dragOrder, setDragOrder] = useState<number[] | null>(null);
-  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOrder, setDragOrder] = useState<Id[] | null>(null);
+  const [draggingId, setDraggingId] = useState<Id | null>(null);
 
   const order = dragOrder ?? ids;
 
@@ -59,7 +59,7 @@ export function usePointerReorder(
   // Cœur commun : arme le glissement de `id` et capture le pointeur sur `captureEl`.
   // Appelé par la poignée comme par la rangée entière ; renvoie sans effet si l'appui
   // n'est pas un clic gauche (souris).
-  function beginDrag(e: React.PointerEvent, id: number, captureEl: HTMLElement) {
+  function beginDrag(e: React.PointerEvent, id: Id, captureEl: HTMLElement) {
     // Souris : bouton gauche uniquement. Tactile/stylet : toujours.
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
@@ -80,12 +80,14 @@ export function usePointerReorder(
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const row = el?.closest('[data-reorder-id]');
       if (!row) return;
-      const overId = Number(row.getAttribute('data-reorder-id'));
-      if (Number.isNaN(overId) || overId === id) return;
+      // L'attribut DOM est toujours une chaîne : on compare par String(...) pour gérer
+      // indifféremment des ids numériques (quiz) ou chaînes (canaux : UUID).
+      const overAttr = row.getAttribute('data-reorder-id');
+      if (overAttr === null || overAttr === String(id)) return;
       setDragOrder((cur) => {
         const base = cur ?? startIds;
         const from = base.indexOf(id);
-        const to = base.indexOf(overId);
+        const to = base.findIndex((x) => String(x) === overAttr);
         if (from < 0 || to < 0 || from === to) return base;
         moved = true;
         const next = [...base];
@@ -122,14 +124,14 @@ export function usePointerReorder(
     window.addEventListener('pointercancel', onUp);
   }
 
-  function onGripPointerDown(e: React.PointerEvent, id: number) {
+  function onGripPointerDown(e: React.PointerEvent, id: Id) {
     // La poignée isole son geste de la rangée : son appui n'atteint pas onRowPointerDown
     // (pas de double armement) et son clic ne bascule pas les actions.
     e.stopPropagation();
     beginDrag(e, id, e.currentTarget as HTMLElement);
   }
 
-  function onRowPointerDown(e: React.PointerEvent, id: number) {
+  function onRowPointerDown(e: React.PointerEvent, id: Id) {
     // Tactile : on laisse le doigt défiler la liste ; le glissement tactile passe par la
     // poignée (touch-action:none). Souris/stylet : toute la rangée est saisissable.
     if (e.pointerType === 'touch') return;
