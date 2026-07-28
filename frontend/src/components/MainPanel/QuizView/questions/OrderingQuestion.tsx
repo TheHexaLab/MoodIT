@@ -54,7 +54,14 @@ export function OrderingQuestion({
             .join(' ');
 
           return (
-            <li key={itemId} className={rowClass} data-reorder-id={!review ? itemId : undefined}>
+            <li
+              key={itemId}
+              className={rowClass}
+              data-reorder-id={!review ? itemId : undefined}
+              // Toute la rangée est saisissable à la souris (comme les canaux) ; la poignée
+              // couvre aussi le tactile. Rien en révision (lecture seule).
+              onPointerDown={!review ? (e) => reorder.onRowPointerDown(e, itemId) : undefined}
+            >
               {!review && (
                 <span
                   className={styles.grip}
