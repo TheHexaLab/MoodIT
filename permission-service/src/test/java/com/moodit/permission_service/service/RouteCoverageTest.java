@@ -40,12 +40,47 @@ class RouteCoverageTest {
    */
   private static final Set<String> INTENTIONALLY_UNGUARDED = Set.of();
 
-  /** Emplacement des manifestes (relatif à la racine du repo). */
+  /** Emplacement des manifestes MUTANTS (relatif à la racine du repo). */
   private static final List<String> MANIFESTS =
       List.of(
           "core-service/src/test/resources/mutating-routes.txt",
           "mcp-service/src/test/resources/mutating-routes.txt",
           "execution-service/src/test/resources/mutating-routes.txt");
+
+  /** Emplacement des manifestes de LECTURE (GET). */
+  private static final List<String> READABLE_MANIFESTS =
+      List.of(
+          "core-service/src/test/resources/readable-routes.txt",
+          "mcp-service/src/test/resources/readable-routes.txt",
+          "execution-service/src/test/resources/readable-routes.txt");
+
+  /**
+   * Lectures (GET) DÉLIBÉRÉMENT ouvertes à tout authentifié (default-allow) : catalogue, données de
+   * référence, ou profil propre. Toute AUTRE route GET doit porter une règle dans
+   * {@link PermissionService#buildRules()}. Motifs normalisés ({@code {var}} → {@code {}}).
+   *
+   * <p>Ajouter une route ICI est une décision EXPLICITE « donnée non sensible ». Le pendant lecture
+   * du {@link #INTENTIONALLY_UNGUARDED} des mutations : sans ça, un GET sensible oublié serait servi
+   * silencieusement (default-allow) à n'importe quel authentifié.
+   */
+  private static final Set<String> PUBLIC_READS =
+      Set.of(
+          // Profil propre / self
+          "GET /api/me",
+          // Données de référence
+          "GET /api/languages",
+          "GET /api/question-types",
+          // Catalogue programmes (navigation + flux d'adhésion)
+          "GET /api/programs",
+          "GET /api/programs/{}",
+          "GET /api/programs/{}/courses",
+          "GET /api/programs/{}/courses/{}",
+          // Catalogue établissements (alimente création/adhésion, non-gardien)
+          "GET /api/establishments",
+          "GET /api/establishments/{}/programs",
+          "GET /api/establishments/{}/manageable-programs",
+          // Détail d'un cours (métadonnées) — à revoir si jugé sensible : le passer en règle.
+          "GET /api/courses/{}");
 
   @Test
   void everyMutatingRouteHasARule() {
@@ -84,6 +119,46 @@ class RouteCoverageTest {
             "Routes MUTANTES SANS règle de permission (default-deny → 403 silencieux). Ajoute une "
                 + "règle dans PermissionService.buildRules() — un vrai gate, ou (user,vars,body) -> "
                 + "true pour l'ouvrir — ou ajoute la route à INTENTIONALLY_UNGUARDED pour la fermer.")
+        .isEmpty();
+  }
+
+  @Test
+  void everyReadableRouteIsGatedOrExplicitlyPublic() {
+    Path repoRoot = findRepoRoot();
+    assertThat(repoRoot)
+        .as("racine du repo (dossier contenant core-service ET permission-service) introuvable")
+        .isNotNull();
+
+    List<String> reads =
+        READABLE_MANIFESTS.stream()
+            .flatMap(rel -> readManifest(repoRoot.resolve(rel)).stream())
+            .map(RouteCoverageTest::normalizeSignature)
+            .distinct()
+            .toList();
+
+    // Garde-fou du garde-fou : au moins core + mcp exposent des GET.
+    assertThat(reads)
+        .as("aucune route GET dans les manifestes — les readableManifest tests ont-ils tourné ?")
+        .isNotEmpty();
+
+    Set<String> ruleSet =
+        new PermissionService(null, null, new ObjectMapper())
+            .ruleSignatures().stream()
+                .map(RouteCoverageTest::normalizeSignature)
+                .collect(Collectors.toSet());
+
+    List<String> unclassified =
+        reads.stream()
+            .filter(sig -> !ruleSet.contains(sig))
+            .filter(sig -> !PUBLIC_READS.contains(sig))
+            .sorted()
+            .toList();
+
+    assertThat(unclassified)
+        .as(
+            "GET NON CLASSÉ (default-allow → servi à TOUT authentifié). Décide : ajoute une règle "
+                + "dans PermissionService.buildRules() si la donnée est SENSIBLE (appartenance / "
+                + "rôle), sinon ajoute la route à PUBLIC_READS (catalogue / référence / self).")
         .isEmpty();
   }
 

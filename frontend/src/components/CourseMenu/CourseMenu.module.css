@@ -101,6 +101,12 @@
     outline: none;
     cursor: pointer;
     transition: background-color 0.15s ease, color 0.15s ease;
+    /* Long-press mobile (ouvre le menu contextuel) : on supprime le callout iOS et la
+       sélection de texte, sinon l'appui maintenu déclenche la loupe/le menu natif au lieu
+       de notre menu. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .courseSelect:hover,

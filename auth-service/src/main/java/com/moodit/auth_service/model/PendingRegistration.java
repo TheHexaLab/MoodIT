@@ -38,7 +38,8 @@ public class PendingRegistration {
   @Column(name = "password_hash", nullable = false, length = 256)
   private String passwordHash;
 
-  @Column(name = "verification_code", length = 6)
+  // Stocke le HMAC du code (44 car. en Base64), jamais le code en clair — cf. AuthService.hashCode.
+  @Column(name = "verification_code", length = 64)
   private String verificationCode;
 
   @Column(name = "verification_code_expires_at")

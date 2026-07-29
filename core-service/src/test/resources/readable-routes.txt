@@ -1,0 +1,40 @@
+# Routes de LECTURE (GET) exposées via le gateway. GÉNÉRÉ par
+# MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.
+# Lu par le RouteCoverageTest : chaque GET doit être GATÉ (règle) ou PUBLIC.
+GET /api/audit-logs
+GET /api/courses/{courseId}
+GET /api/courses/{courseId}/forums
+GET /api/courses/{courseId}/forums/{forumId}
+GET /api/courses/{courseId}/quizzes
+GET /api/courses/{courseId}/quizzes/manage
+GET /api/establishments
+GET /api/establishments/{establishmentId}/manageable-programs
+GET /api/establishments/{establishmentId}/programs
+GET /api/forums/{forumId}
+GET /api/forums/{forumId}/f_type
+GET /api/forums/{forumId}/messages
+GET /api/forums/{forumId}/posts
+GET /api/forums/{forumId}/posts/{postId}
+GET /api/forums/{forumId}/posts/{postId}/replies
+GET /api/languages
+GET /api/me
+GET /api/programs
+GET /api/programs/{programId}
+GET /api/programs/{programId}/courses
+GET /api/programs/{programId}/courses/{courseId}
+GET /api/programs/{programId}/role-candidates
+GET /api/programs/{programId}/users
+GET /api/question-types
+GET /api/quizzes/{quizId}
+GET /api/quizzes/{quizId}/attempts
+GET /api/quizzes/{quizId}/attempts/{attemptId}
+GET /api/quizzes/{quizId}/edit
+GET /api/roles
+GET /api/roles/global/candidates
+GET /api/roles/global/users
+GET /api/users/role/{role}/programs/{programId}
+GET /api/users/username/{username}
+GET /api/users/{userId}
+GET /api/users/{userId}/enrollments
+GET /api/users/{userId}/programs
+GET /api/users/{userId}/programs/{programId}/enrollments

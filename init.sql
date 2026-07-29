@@ -37,7 +37,8 @@ CREATE TABLE User_(
    active_token_hash VARCHAR(256) ,
    password_hash VARCHAR(256) NOT NULL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-   verification_code VARCHAR(6),
+   -- verification_code / reset_code : HMAC du code (Base64, 44 car.), jamais le code en clair.
+   verification_code VARCHAR(64),
    verification_code_expires_at TIMESTAMP,
    verification_attempts INTEGER NOT NULL DEFAULT 0,
    last_code_sent_at TIMESTAMP,
@@ -46,7 +47,7 @@ CREATE TABLE User_(
    login_locked_until TIMESTAMP,
    -- Réinitialisation de mot de passe : champs dédiés (séparés de verification_*, qui
    -- servent à la 2FA) pour éviter toute collision entre un code 2FA et un code de reset.
-   reset_code VARCHAR(6),
+   reset_code VARCHAR(64),
    reset_code_expires_at TIMESTAMP,
    reset_attempts INTEGER NOT NULL DEFAULT 0,
    reset_last_sent_at TIMESTAMP,
@@ -63,7 +64,8 @@ CREATE TABLE Pending_Registration(
    last_name VARCHAR(128) NOT NULL,
    email VARCHAR(256) NOT NULL UNIQUE,
    password_hash VARCHAR(256) NOT NULL,
-   verification_code VARCHAR(6),
+   -- HMAC du code (Base64, 44 car.), jamais le code en clair — cf. AuthService.hashCode.
+   verification_code VARCHAR(64),
    verification_code_expires_at TIMESTAMP,
    resend_count INTEGER NOT NULL DEFAULT 0,
    verification_attempts INTEGER NOT NULL DEFAULT 0,

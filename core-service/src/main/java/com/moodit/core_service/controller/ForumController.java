@@ -134,8 +134,9 @@ public class ForumController {
 
     @DeleteMapping("/{forumId}/posts/{postId}")
     public ResponseEntity<Void> deletePost(@PathVariable Integer forumId,
-                                           @PathVariable Integer postId) {
-        forumService.deletePost(forumId, postId);
+                                           @PathVariable Integer postId,
+                                           @RequestHeader("X-User-Email") String email) { //Le gateway met ça automatiquement
+        forumService.deletePost(forumId, postId, email);
         return ResponseEntity.noContent().build();
     }
     //endregion

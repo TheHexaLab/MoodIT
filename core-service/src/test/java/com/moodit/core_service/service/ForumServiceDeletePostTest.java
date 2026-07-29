@@ -1,7 +1,11 @@
 package com.moodit.core_service.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.FType;
@@ -15,6 +19,7 @@ import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.repository.VoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
@@ -36,10 +41,12 @@ class ForumServiceDeletePostTest {
   @Autowired private TestEntityManager em;
 
   private ForumService forumService;
+  private AuditLogService auditLogService;
   private User author;
 
   @BeforeEach
   void setUp() {
+    auditLogService = mock(AuditLogService.class);
     forumService =
         new ForumService(
             forumRepository,
@@ -47,7 +54,7 @@ class ForumServiceDeletePostTest {
             voteRepository,
             userRepository,
             mock(RealtimeEventPublisher.class),
-            mock(AuditLogService.class));
+            auditLogService);
     // Le champ entityManager (@PersistenceContext) n'est pas injecté quand on instancie le service
     // à la main : on branche l'EM du contexte de test.
     ReflectionTestUtils.setField(forumService, "entityManager", em.getEntityManager());
@@ -97,7 +104,7 @@ class ForumServiceDeletePostTest {
     em.flush();
     em.clear();
 
-    forumService.deletePost(forum.getId(), parent.getId());
+    forumService.deletePost(forum.getId(), parent.getId(), author.getEmail());
     em.flush();
     em.clear();
 
@@ -115,7 +122,7 @@ class ForumServiceDeletePostTest {
     em.flush();
     em.clear();
 
-    forumService.deletePost(forum.getId(), parent.getId());
+    forumService.deletePost(forum.getId(), parent.getId(), author.getEmail());
     em.flush();
     em.clear();
 
@@ -123,5 +130,50 @@ class ForumServiceDeletePostTest {
     assertThat(postRepository.findById(reply.getId()))
         .as("dans un thread, la réponse part en cascade")
         .isEmpty();
+  }
+
+  @Test
+  void autoSuppression_neJournalisePas() {
+    Forum forum = newForum("Discussion");
+    Post own = newPost(forum, null, "mon message");
+    em.flush();
+    em.clear();
+
+    // L'auteur supprime SON propre message → pas de trace d'audit de modération.
+    forumService.deletePost(forum.getId(), own.getId(), author.getEmail());
+    em.flush();
+
+    verify(auditLogService, never()).record(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void moderation_parUnAutre_journalise() {
+    User moderator = new User();
+    moderator.setUsername("mod");
+    moderator.setFirstName("Mod");
+    moderator.setLastName("Erator");
+    moderator.setEmail("mod@test.ca");
+    moderator.setPasswordHash("hash");
+    em.persist(moderator);
+
+    Forum forum = newForum("Discussion");
+    Post victim = newPost(forum, null, "message d'autrui");
+    em.flush();
+    em.clear();
+
+    // Un modérateur (≠ auteur) supprime le message → trace d'audit POST_MODERATION_DELETE.
+    forumService.deletePost(forum.getId(), victim.getId(), moderator.getEmail());
+    em.flush();
+
+    // Le résumé identifie l'auteur du message par son EMAIL (pas son id) et nomme le canal.
+    ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+    verify(auditLogService)
+        .record(
+            eq("POST_MODERATION_DELETE"),
+            eq("POST"),
+            eq(victim.getId()),
+            summary.capture(),
+            any());
+    assertThat(summary.getValue()).contains("author@test.ca").contains("Canal Discussion");
   }
 }

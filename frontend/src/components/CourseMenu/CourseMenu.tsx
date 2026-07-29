@@ -204,6 +204,12 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   /** État du drag : position et largeur de départ. */
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
 
+  // Long-press tactile sur le sélecteur de cours (ouvre le menu contextuel sur mobile) :
+  // `longPressTimer` = timer d'appui maintenu ; `longPressFired` = vrai quand le long-press
+  // a ouvert le menu, pour NEUTRALISER le clic de fin d'appui (sinon la liste s'ouvrirait aussi).
+  const longPressTimer = useRef<number | null>(null);
+  const longPressFired = useRef(false);
+
   const courseOptions = courses.map((course) => ({
     id: course.id,
     code: formatCourseCode(course),
@@ -326,6 +332,12 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   }
 
   function toggleCourseOpen() {
+    // Un long-press vient d'ouvrir le menu contextuel → le clic de fin d'appui ne doit PAS
+    // aussi ouvrir la liste déroulante. On consomme le drapeau et on sort.
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return;
+    }
     setIsCourseOpen((prev) => {
       if (!prev) computePickerPosition();
       return !prev;
@@ -359,16 +371,53 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     isAdmin && (Boolean(onEditCourse) || Boolean(onOpenMcpManagement) || Boolean(onDeleteCourse));
   const hasContextMenu = hasAdminContextActions || Boolean(onLeaveCourse);
 
-  // Clic droit sur le sélecteur de cours → menu contextuel. Ancré sous le sélecteur
-  // (comme le Figma), pas à la position de la souris. Si aucun item n'est applicable,
+  // Ouvre le menu contextuel ANCRÉ sous le sélecteur (comme le Figma), pas à la position du
+  // pointeur. Partagé par le clic droit (desktop / long-press Android) et le long-press tactile.
+  function openCourseContextMenu(anchor: HTMLElement) {
+    closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
+    const rect = anchor.getBoundingClientRect();
+    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4, anchor });
+  }
+
+  // Clic droit sur le sélecteur de cours → menu contextuel. Si aucun item n'est applicable,
   // on laisse le menu natif du navigateur (pas de preventDefault).
   function handleCourseContextMenu(event: React.MouseEvent<HTMLButtonElement>) {
     if (!selectedCourse || !hasContextMenu) return;
     event.preventDefault();
-    closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
-    const rect = event.currentTarget.getBoundingClientRect();
-    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4, anchor: event.currentTarget });
+    openCourseContextMenu(event.currentTarget);
   }
+
+  // ── Long-press tactile → menu contextuel (parité iOS) ──────────────────────────────────
+  // iOS Safari n'émet PAS l'évènement `contextmenu` au long-press (contrairement à Android
+  // Chrome) : le menu « Feedback du cours / Quitter » y était donc inaccessible. On détecte
+  // nous-mêmes un appui maintenu (~500 ms sans glissement) pour ouvrir le MÊME menu.
+  const LONG_PRESS_MS = 500;
+
+  function clearLongPress() {
+    if (longPressTimer.current != null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  function handleCourseTouchStart(event: React.TouchEvent<HTMLButtonElement>) {
+    if (!selectedCourse || !hasContextMenu) return;
+    longPressFired.current = false;
+    const anchor = event.currentTarget; // capturé : l'évènement React est réutilisé après le timeout
+    clearLongPress();
+    longPressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true; // neutralise le clic de fin d'appui (cf. toggleCourseOpen)
+      openCourseContextMenu(anchor);
+    }, LONG_PRESS_MS);
+  }
+
+  // Un glissement (l'utilisateur scrolle) ou la levée du doigt annule le long-press en cours.
+  function cancelCourseLongPress() {
+    clearLongPress();
+  }
+
+  // Nettoyage : ne jamais laisser un timer d'appui courir après le démontage.
+  useEffect(() => clearLongPress, []);
 
   /** Cours filtrés par la recherche (sur le code et le titre). */
   function filteredCourses() {
@@ -396,6 +445,10 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
               className={`${styles.courseSelect}${isCourseOpen ? ` ${styles.courseSelectOpen}` : ''}`}
               onClick={toggleCourseOpen}
               onContextMenu={handleCourseContextMenu}
+              onTouchStart={handleCourseTouchStart}
+              onTouchMove={cancelCourseLongPress}
+              onTouchEnd={cancelCourseLongPress}
+              onTouchCancel={cancelCourseLongPress}
               aria-haspopup="listbox"
               aria-expanded={isCourseOpen}
             >
