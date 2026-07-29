@@ -125,6 +125,10 @@
     justify-content: center;
     width: 100%;
     cursor: pointer;
+    /* Long-press iOS : sans ceci, Safari ouvre sa bulle de sélection au lieu du menu contextuel. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 /* Pastille laterale unique pour les deux etats (survol et selectionne).

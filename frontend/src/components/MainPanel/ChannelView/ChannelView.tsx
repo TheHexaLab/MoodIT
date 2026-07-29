@@ -151,7 +151,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
   const listRef = useRef<HTMLUListElement>(null);
   /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
-  const composerRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
   /**
@@ -196,6 +196,39 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const draftOverLimit = draft.length > MAX_POST_CONTENT_LENGTH;
   const editOverLimit = editDraft.length > MAX_POST_CONTENT_LENGTH;
   const canSend = draft.trim() !== '' && !pending && !draftOverLimit;
+
+  // Auto-hauteur du composer : le textarea grandit avec le contenu (retour à la ligne OU
+  // saut de ligne explicite) jusqu'à un plafond CSS (max-height), au-delà duquel il scrolle.
+  // On repart de 'auto' pour laisser scrollHeight refléter le contenu réel (rétrécit aussi
+  // quand on efface / après envoi, quand `draft` redevient vide).
+  useLayoutEffect(() => {
+    const ta = composerRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [draft]);
+
+  // Décalage clavier mobile : sur iOS, le clavier virtuel recouvre le bas de page sans réduire
+  // `innerHeight` → le composer était masqué. On mesure la portion occultée via l'API
+  // visualViewport et on l'expose en variable CSS `--keyboard-inset` (consommée en padding-bottom
+  // du composer, cf. CSS) pour faire remonter la barre juste au-dessus du clavier.
+  useLayoutEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return; // desktop / navigateurs sans l'API : rien à décaler.
+    const root = document.documentElement;
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty('--keyboard-inset', `${inset}px`);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      root.style.removeProperty('--keyboard-inset'); // pas de décalage résiduel après démontage.
+    };
+  }, []);
 
   /** Fait defiler jusqu'au message cible (clic sur une reference de réponse). */
   function scrollToMessage(messageId: number) {
@@ -504,12 +537,13 @@ const ChannelView: React.FC<ChannelViewProps> = ({
               <button type="button" aria-label={t.addAttachment}>
                 +
               </button>
-              <input
+              <textarea
                 ref={composerRef}
-                type="text"
+                rows={1}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
+                  // Entrée = envoyer ; Maj+Entrée = saut de ligne (le textarea grandit).
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     handleSend();

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './ProgramMenu.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
@@ -131,6 +131,12 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     anchor: HTMLElement;
   } | null>(null);
 
+  // Long-press tactile sur une pastille de programme (ouvre le menu contextuel sur mobile) :
+  // `longPressTimer` = timer d'appui maintenu ; `longPressFired` = vrai quand le long-press a
+  // ouvert le menu, pour NEUTRALISER la sélection de fin d'appui (sinon le programme changerait).
+  const longPressTimer = useRef<number | null>(null);
+  const longPressFired = useRef(false);
+
   // Ferme le menu contextuel au clic, à l'Échap, au scroll ou au redimensionnement.
   useEffect(() => {
     if (!contextMenu) return;
@@ -158,9 +164,9 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   }, [contextMenu]);
 
   // Ouvre le menu à DROITE de la pastille du programme (pas à la position de la souris).
-  function openContextMenu(event: React.MouseEvent<HTMLLIElement>, programId: number) {
-    event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
+  // Partagé par le clic droit (desktop / long-press Android) et le long-press tactile (iOS).
+  function openContextMenuAt(anchor: HTMLElement, programId: number) {
+    const rect = anchor.getBoundingClientRect();
     const gap = 8;
     // Estimation de hauteur (actions admin PAR PROGRAMME + « rejoindre » + « quitter ») pour
     // éviter le débordement bas.
@@ -174,7 +180,54 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     const itemCount = adminItemCount + (onJoinCourses ? 1 : 0) + 1;
     const estimatedHeight = itemCount * 40 + 16;
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - estimatedHeight - 8));
-    setContextMenu({ programId, left: rect.right + gap, top, anchor: event.currentTarget });
+    setContextMenu({ programId, left: rect.right + gap, top, anchor });
+  }
+
+  // Clic droit sur une pastille → menu contextuel (desktop, long-press Android).
+  function openContextMenu(event: React.MouseEvent<HTMLLIElement>, programId: number) {
+    event.preventDefault();
+    openContextMenuAt(event.currentTarget, programId);
+  }
+
+  // ── Long-press tactile → menu contextuel (parité iOS) ──────────────────────────────────
+  // iOS Safari n'émet PAS l'évènement `contextmenu` au long-press (contrairement à Android
+  // Chrome) : le menu du programme y était inaccessible. On détecte nous-mêmes un appui
+  // maintenu (~500 ms sans glissement) pour ouvrir le MÊME menu. `longPressFired` neutralise
+  // la sélection du programme sur le clic de fin d'appui.
+  const LONG_PRESS_MS = 500;
+
+  function clearLongPress() {
+    if (longPressTimer.current != null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  function handleProgramTouchStart(event: React.TouchEvent<HTMLLIElement>, programId: number) {
+    longPressFired.current = false;
+    const anchor = event.currentTarget; // capturé : l'évènement React est réutilisé après le timeout
+    clearLongPress();
+    longPressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true; // neutralise la sélection sur le clic de fin d'appui
+      openContextMenuAt(anchor, programId);
+    }, LONG_PRESS_MS);
+  }
+
+  // Un glissement (scroll de la liste) ou la levée du doigt annule le long-press en cours.
+  function cancelProgramLongPress() {
+    clearLongPress();
+  }
+
+  // Nettoyage : ne jamais laisser un timer d'appui courir après le démontage.
+  useEffect(() => clearLongPress, []);
+
+  // Sélection d'un programme (tap / clic), sauf si un long-press vient d'ouvrir le menu.
+  function handleSelectProgram(programId: number) {
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return;
+    }
+    onSelectProgram?.(programId);
   }
 
   /** Exécute une action du menu contextuel puis le referme. */
@@ -254,8 +307,12 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
               <li
                 key={programId}
                 className={`${styles.programItem} ${isActive ? styles.programItemActive : ''}`}
-                onClick={() => onSelectProgram?.(programId)}
+                onClick={() => handleSelectProgram(programId)}
                 onContextMenu={(event) => openContextMenu(event, programId)}
+                onTouchStart={(event) => handleProgramTouchStart(event, programId)}
+                onTouchMove={cancelProgramLongPress}
+                onTouchEnd={cancelProgramLongPress}
+                onTouchCancel={cancelProgramLongPress}
               >
                 <button
                   className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}

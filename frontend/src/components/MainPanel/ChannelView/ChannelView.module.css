@@ -484,15 +484,20 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > button:hover
     color: var(--text);
 }
 
-/* Zone de saisie (mock non fonctionnel pour l'instant). */
+/* Zone de saisie. Hauteur flexible : la barre grandit avec le composer (textarea
+   auto-extensible) au lieu d'une hauteur fixe. Les boutons restent alignés en bas. */
 div.channel-view > div > div:last-child {
     position: relative;
     flex-shrink: 0;
     display: flex;
+    align-items: flex-end;
     padding: 0.625rem 1rem;
-    height: 4rem;
+    min-height: 4rem;
     box-sizing: border-box;
     border-top: 1px solid rgba(0, 0, 0, 0.18);
+    /* Décalage clavier mobile : la barre remonte de la hauteur du clavier virtuel (piloté
+       en JS via l'API visualViewport, cf. --keyboard-inset), sinon iOS la masque. */
+    padding-bottom: calc(0.625rem + var(--keyboard-inset, 0px));
 }
 
 /* Pendant le chargement / l'erreur de chargement : on masque la barre de saisie. */
@@ -500,13 +505,14 @@ div.channel-view > div[data-loading] > div:last-child {
     display: none;
 }
 
-/* Champ de saisie : la bordure englobe l'input et les deux boutons. */
+/* Champ de saisie : la bordure englobe le textarea et les deux boutons. `flex-end` garde
+   les boutons (+ / envoi) alignés en bas quand le textarea s'étend sur plusieurs lignes. */
 div.channel-view > div > div:last-child > div {
     position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 0.25rem;
     padding: 0.375rem 0.5rem;
     border: 1px solid var(--border);
@@ -548,7 +554,7 @@ div.channel-view > div > div[role="reply"]:last-child > div > div {
     transition: border-color 0.15s ease;
 }
 
-div.channel-view > div > div:last-child > div > input {
+div.channel-view > div > div:last-child > div > textarea {
     flex: 1;
     min-width: 0;
     border: none;
@@ -556,8 +562,14 @@ div.channel-view > div > div:last-child > div > input {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
+    line-height: 1.4;
     padding: 0.55rem 0.25rem;
     outline: none;
+    /* Auto-extensible : hauteur pilotée en JS (scrollHeight), sans poignée de resize.
+       Plafond ~6 lignes puis scroll interne. `rows=1` fixe la hauteur de départ. */
+    resize: none;
+    max-height: 9rem;
+    overflow-y: auto;
 }
 
 /* Boutons d'action a l'interieur du champ (+ a gauche, envoi a droite). */
