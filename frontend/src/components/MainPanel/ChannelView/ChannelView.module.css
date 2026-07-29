@@ -485,12 +485,14 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > button:hover
 }
 
 /* Zone de saisie. Hauteur flexible : la barre grandit avec le composer (textarea
-   auto-extensible) au lieu d'une hauteur fixe. Les boutons restent alignés en bas. */
+   auto-extensible) au lieu d'une hauteur fixe. `center` garde le champ centré
+   verticalement quand il tient sur une ligne (sinon, vide, il se collait en bas
+   → placeholder décalé) ; quand il grandit, la barre grandit avec (min-height). */
 div.channel-view > div > div:last-child {
     position: relative;
     flex-shrink: 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     padding: 0.625rem 1rem;
     min-height: 4rem;
     box-sizing: border-box;
