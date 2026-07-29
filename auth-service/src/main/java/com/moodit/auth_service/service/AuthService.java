@@ -438,7 +438,9 @@ public class AuthService {
       throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
-    if (user.getVerificationCode() == null) {
+    // On groupe l'expiry null avec le code null (état incohérent = pas de code valide) pour éviter
+    // un NPE 500 qui serait un oracle (500 vs 4xx générique) — symétrique à resetPassword.
+    if (user.getVerificationCode() == null || user.getVerificationCodeExpiresAt() == null) {
       throw new InvalidVerificationCodeException(INVALID_CODE_MESSAGE);
     }
 
