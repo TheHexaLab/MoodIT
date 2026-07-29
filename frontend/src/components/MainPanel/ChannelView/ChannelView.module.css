@@ -567,10 +567,17 @@ div.channel-view > div > div:last-child > div > textarea {
     line-height: 1.4;
     padding: 0.55rem 0.25rem;
     outline: none;
+    /* Retour à la ligne : le texte qui dépasse la largeur wrappe (et fait grandir la
+       hauteur via le JS) au lieu de scroller horizontalement. `overflow-x: hidden` est
+       indispensable — sans lui, `overflow-y: auto` fait calculer `overflow-x: auto`, et
+       un contenu non cassé scrollerait à l'horizontale sans jamais wrapper. */
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
     /* Auto-extensible : hauteur pilotée en JS (scrollHeight), sans poignée de resize.
        Plafond ~6 lignes puis scroll interne. `rows=1` fixe la hauteur de départ. */
     resize: none;
     max-height: 9rem;
+    overflow-x: hidden;
     overflow-y: auto;
 }
 
