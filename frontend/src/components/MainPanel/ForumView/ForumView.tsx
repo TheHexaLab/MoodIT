@@ -16,6 +16,7 @@ import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { Spinner } from '../../Spinner/Spinner';
 import { Markdown } from './Markdown';
 import { MarkdownEditor } from './MarkdownEditor';
+import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import {
   getMockForumReplies,
   getMockForumThreads,
@@ -298,7 +299,8 @@ const ForumView: React.FC<ForumViewProps> = ({
   /** Publie une reponse (optimiste via le hook) ; restaure le composer si echec. */
   async function submitReply(post: ForumPost) {
     const content = replyDraft.trim();
-    if (!content) return;
+    // Vide ou trop long : bloqué (le bouton de l'éditeur est déjà désactivé, filet de sécurité).
+    if (!content || replyDraft.length > MAX_POST_CONTENT_LENGTH) return;
     setReplyingTo(null);
     setReplyDraft('');
     // On s'assure que la nouvelle reponse sera visible (branche depliee).
@@ -335,8 +337,8 @@ const ForumView: React.FC<ForumViewProps> = ({
   async function submitEdit(post: ForumPost, isThread: boolean) {
     const content = editDraft.trim();
     const title = editTitleDraft.trim();
-    // Rien de vide (le bouton est deja desactive, filet de securite).
-    if (!content || (isThread && !title)) return;
+    // Rien de vide, rien de trop long (le bouton est deja desactive, filet de securite).
+    if (!content || (isThread && !title) || editDraft.length > MAX_POST_CONTENT_LENGTH) return;
     cancelEdit();
     const ok = await editPost(post.id, content, isThread ? title : undefined);
     if (!ok) {
@@ -380,7 +382,8 @@ const ForumView: React.FC<ForumViewProps> = ({
     if (publishing) return;
     const title = newTitle.trim();
     const content = newContent.trim();
-    if (!title || !content) return;
+    // Vide ou trop long : bloqué (le bouton de l'éditeur est déjà désactivé, filet de sécurité).
+    if (!title || !content || newContent.length > MAX_POST_CONTENT_LENGTH) return;
     setPublishing(true);
     const ok = await addThread(title, content);
     setPublishing(false);
@@ -490,6 +493,7 @@ const ForumView: React.FC<ForumViewProps> = ({
           onCancel={cancelEdit}
           submitLabel={t.editSave}
           placeholder={t.editPlaceholder}
+          maxLength={MAX_POST_CONTENT_LENGTH}
           disableSubmit={isThread && editTitleDraft.trim() === ''}
         />
       </>
@@ -527,6 +531,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         onCancel={cancelReply}
         submitLabel={t.reply}
         placeholder={t.replyPlaceholder}
+        maxLength={MAX_POST_CONTENT_LENGTH}
       />
     );
   }
@@ -814,6 +819,7 @@ const ForumView: React.FC<ForumViewProps> = ({
               autoFocus={false}
               submitting={publishing}
               placeholder={t.newThreadPlaceholder}
+              maxLength={MAX_POST_CONTENT_LENGTH}
             />
           </div>
         )}

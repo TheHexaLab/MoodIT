@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.dto.*;
 
 import com.moodit.core_service.exception.ForumNotFoundException;
+import com.moodit.core_service.exception.InvalidPostException;
 import com.moodit.core_service.exception.PostNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Forum;
@@ -48,6 +49,24 @@ public class ForumService {
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
     private final AuditLogService auditLogService;
+
+    /**
+     * Longueur MAX du contenu d'un message/post. Source de vérité de la limite : le front doit
+     * s'aligner sur cette valeur (frontend/src/helpers/forumLimits.ts). La colonne BD est un TEXT
+     * (illimité) → c'est cette validation applicative qui borne réellement la saisie.
+     */
+    public static final int MAX_CONTENT_LENGTH = 5000;
+
+    /** Rejette un contenu vide ou plus long que {@link #MAX_CONTENT_LENGTH}. */
+    private void validateContent(String content) {
+        if (content == null || content.isBlank()) {
+            throw new InvalidPostException("Le contenu ne peut pas être vide.");
+        }
+        if (content.length() > MAX_CONTENT_LENGTH) {
+            throw new InvalidPostException(
+                    "Le contenu dépasse la limite de " + MAX_CONTENT_LENGTH + " caractères.");
+        }
+    }
 
     // Non-final (hors constructeur @RequiredArgsConstructor) : sert à recharger un post après
     // détachement en masse de ses réponses (cf. deletePost, cas Discussion).
@@ -306,6 +325,7 @@ public class ForumService {
     //region POST
     @Transactional
     public PostVoteUserDTO addPostToForum(PostCreateInForumDTO postCreateInForumDTO, String email) {
+        validateContent(postCreateInForumDTO.getContent());
         Forum forum = forumRepository.findById(postCreateInForumDTO.getForumId())
                 .orElseThrow(ForumNotFoundException::new);
         User user = userRepository.findByEmail(email)
@@ -433,6 +453,7 @@ public class ForumService {
             .orElseThrow(PostNotFoundException::new);
 
         if (forumUpdatePostDTO.getContent() != null) {
+            validateContent(forumUpdatePostDTO.getContent());
             post.setContent(forumUpdatePostDTO.getContent());
         }
         if (forumUpdatePostDTO.getTitle() != null) {

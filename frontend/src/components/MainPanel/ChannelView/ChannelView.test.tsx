@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import ChannelView from './ChannelView';
 import type { Course } from '../../CourseMenu/CourseMenu';
 import type {
@@ -130,6 +131,24 @@ describe('ChannelView', () => {
     fireEvent.click(screen.getByLabelText('Supprimer le message'));
     fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(onDeleteMessage).toHaveBeenCalledWith(2));
+  });
+
+  it('dépasser la limite : erreur inline dans le bandeau + envoi bloqué (pas de troncature)', () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(1, me, 'Hi')], { onSendMessage });
+    const input = screen.getByLabelText('Envoyer un message dans general') as HTMLInputElement;
+    const tooLong = 'a'.repeat(MAX_POST_CONTENT_LENGTH + 1);
+    fireEvent.change(input, { target: { value: tooLong } });
+    // Pas de troncature.
+    expect(input.value.length).toBe(MAX_POST_CONTENT_LENGTH + 1);
+    // Erreur affichée EN DIRECT (bandeau style « répondre à… ») + bouton d'envoi désactivé.
+    expect(screen.getByText(/limite de .* dépassée/i)).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Envoyer le message' }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    // La touche Entrée n'envoie rien.
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSendMessage).not.toHaveBeenCalled();
   });
 
   it('édite un message : le stylo ouvre l\'éditeur, Enregistrer appelle onEditMessage', async () => {

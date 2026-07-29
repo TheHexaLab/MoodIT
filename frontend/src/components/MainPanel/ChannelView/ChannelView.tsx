@@ -10,6 +10,7 @@ import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon';
 import { type Course } from '../../CourseMenu/CourseMenu';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { DeleteConfirmationPopup } from '../../DeleteConfirmationPopup/DeleteConfirmationPopup';
+import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import { Pencil } from '../../../assets/Pencil';
 import { Reply } from '../../../assets/Reply';
 import { Send } from '../../../assets/Send';
@@ -189,7 +190,12 @@ const ChannelView: React.FC<ChannelViewProps> = ({
 
   /** Index par id pour résoudre le message parent d'une réponse. */
   const messagesById = new Map(messages.map((message) => [message.id, message]));
-  const canSend = draft.trim() !== '' && !pending;
+  // Dépassement de la limite (aligné backend) : on ne COUPE PLUS le texte — on laisse saisir/coller
+  // au-delà. L'erreur s'affiche EN DIRECT dans le bandeau du composer (style « répondre à… ») et
+  // l'envoi est bloqué tant que c'est trop long. L'édition suit la même règle.
+  const draftOverLimit = draft.length > MAX_POST_CONTENT_LENGTH;
+  const editOverLimit = editDraft.length > MAX_POST_CONTENT_LENGTH;
+  const canSend = draft.trim() !== '' && !pending && !draftOverLimit;
 
   /** Fait defiler jusqu'au message cible (clic sur une reference de réponse). */
   function scrollToMessage(messageId: number) {
@@ -237,7 +243,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   /** Envoie le message saisi (optimiste via le hook) ; restaure le composer si échec. */
   async function handleSend() {
     const content = draft.trim();
-    if (!content || pending) return;
+    // Bloqué si vide, en cours, ou trop long (le bandeau du composer affiche déjà l'erreur).
+    if (!content || pending || draft.length > MAX_POST_CONTENT_LENGTH) return;
     const parent = replyingTo;
     setDraft('');
     setReplyingTo(null);
@@ -274,6 +281,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
 
   /** Valide la modification inline (optimiste via le hook). */
   function submitEdit(messageId: number, currentContent: string) {
+    // Trop long : on NE ferme PAS l'éditeur (l'erreur est affichée sous le champ, bouton désactivé).
+    if (editDraft.length > MAX_POST_CONTENT_LENGTH) return;
     const content = editDraft.trim();
     cancelEdit();
     if (!content || content === currentContent) return;
@@ -404,12 +413,18 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               aria-label={t.edit}
                               autoFocus
                             />
+                            {editOverLimit && (
+                              <p role="composer-error">
+                                ⚠ {t.overLimit(MAX_POST_CONTENT_LENGTH)}
+                              </p>
+                            )}
                             <div>
                               <button type="button" onClick={cancelEdit}>
                                 {t.editCancel}
                               </button>
                               <button
                                 type="button"
+                                disabled={editOverLimit}
                                 onClick={() => submitEdit(message.id, message.content)}
                               >
                                 {t.editSave}
@@ -460,20 +475,30 @@ const ChannelView: React.FC<ChannelViewProps> = ({
             </ul>
           )}
 
-          <div role={replyingTo ? 'reply' : undefined}>
+          <div role={replyingTo || draftOverLimit ? 'reply' : undefined}>
             <div>
-              {replyingTo && (
+              {(replyingTo || draftOverLimit) && (
                 <div>
-                  <span>
-                    {t.replyingToPrefix} <strong>{getAuthorName(replyingTo.author)}</strong>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={t.cancelReply}
-                    onClick={() => setReplyingTo(null)}
-                  >
-                    ✕
-                  </button>
+                  {draftOverLimit ? (
+                    // Erreur de dépassement, dans le MÊME bandeau que « répondre à… » (priorité
+                    // sur l'indicateur de réponse tant que c'est trop long).
+                    <span role="composer-error">
+                      ⚠ {t.overLimit(MAX_POST_CONTENT_LENGTH)}
+                    </span>
+                  ) : replyingTo ? (
+                    <>
+                      <span>
+                        {t.replyingToPrefix} <strong>{getAuthorName(replyingTo.author)}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={t.cancelReply}
+                        onClick={() => setReplyingTo(null)}
+                      >
+                        ✕
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               )}
               <button type="button" aria-label={t.addAttachment}>

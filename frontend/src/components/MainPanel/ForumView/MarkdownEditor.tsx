@@ -8,6 +8,23 @@ import { Markdown } from './Markdown';
 import { defaultMarkdownEditorLabels } from './labels';
 import { type MarkdownEditorLabels } from './types';
 
+/**
+ * Ancetre defilant verticalement le plus proche d'un element (ou null). Sert a preserver la
+ * position de scroll du feed pendant l'auto-resize du textarea (cf. resize()).
+ */
+function getScrollableParent(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return node;
+    }
+  }
+  return null;
+}
+
 /** Une entree de menu (libelle affiche + texte insere). */
 interface MenuItem {
   label: string;
@@ -54,6 +71,8 @@ interface MarkdownEditorProps {
   submitLabel?: string;
   /** Placeholder du textarea. */
   placeholder?: string;
+  /** Longueur MAX du contenu (aligne le front sur la limite backend). Affiche un compteur. */
+  maxLength?: number;
   /** Desactive la validation en plus du contenu vide (ex. titre manquant). */
   disableSubmit?: boolean;
   /** Focus automatique du textarea au montage (defaut : true). */
@@ -82,6 +101,7 @@ export function MarkdownEditor({
   onCancel,
   submitLabel,
   placeholder,
+  maxLength,
   disableSubmit = false,
   autoFocus = true,
   submitting = false,
@@ -112,12 +132,40 @@ export function MarkdownEditor({
     const ta = textareaRef.current;
     if (!ta) return;
     const resize = () => {
+      const scrollParent = getScrollableParent(ta);
+      const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
       ta.style.height = 'auto';
       // scrollHeight n'inclut pas la bordure (box-sizing: border-box) : on l'ajoute,
       // sinon le contenu deborde de quelques pixels et la derniere ligne est rognee.
       const cs = getComputedStyle(ta);
       const borderY = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
       ta.style.height = `${ta.scrollHeight + borderY}px`;
+      if (!scrollParent) return;
+
+      // Le passage par height:auto (repli du textarea pour la mesure) + le scroll natif du caret
+      // font sauter/déborder le feed → ce qu'on écrit atterrit hors de la vue. On FIXE nous-mêmes
+      // la position finale, avant le paint :
+      //   1. on repart de la position d'origine (annule le clamp du repli) → aucune dérive ;
+      scrollParent.scrollTop = prevScrollTop;
+      //   2. si on écrit dans ce champ et qu'il déborde du feed, on scrolle du STRICT minimum
+      //      pour le rendre visible (pas de dépassement).
+      if (document.activeElement !== ta) return;
+      const pRect = scrollParent.getBoundingClientRect();
+      const margin = 8; // petite marge pour ne pas coller au bord
+      // Cible : l'ÉDITEUR COMPLET (barre d'outils + zone de saisie + compteur/boutons) s'il TIENT
+      // dans le feed → tout reste visible ; sinon (éditeur plus haut que le feed) on se rabat sur
+      // la zone de saisie, pour au moins suivre le curseur.
+      const editorRoot = ta.closest('[role^="markdown-editor"]') as HTMLElement | null;
+      const rootRect = editorRoot?.getBoundingClientRect();
+      const target =
+        rootRect && rootRect.height <= pRect.height - margin
+          ? rootRect
+          : ta.getBoundingClientRect();
+      if (target.bottom > pRect.bottom) {
+        scrollParent.scrollTop += target.bottom - pRect.bottom + margin;
+      } else if (target.top < pRect.top) {
+        scrollParent.scrollTop -= pRect.top - target.top + margin;
+      }
     };
     resize();
 
@@ -182,7 +230,10 @@ export function MarkdownEditor({
     wrap('```' + lang + '\n', '\n```');
   }
 
-  const submitDisabled = disableSubmit || value.trim() === '';
+  // Dépassement de limite : le compteur passe EN ROUGE et l'envoi est désactivé tant que
+  // c'est trop long (pas de popup — indicateur inline, cohérent avec le composer du chat).
+  const overLimit = maxLength != null && value.length > maxLength;
+  const submitDisabled = disableSubmit || value.trim() === '' || overLimit;
 
   return (
     <div
@@ -297,6 +348,7 @@ export function MarkdownEditor({
         <textarea
           ref={textareaRef}
           value={value}
+          aria-invalid={overLimit || undefined}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -333,6 +385,13 @@ export function MarkdownEditor({
 
       {!embedded && (
         <div role="editor-actions">
+          {maxLength != null && (
+            <span role="editor-status" data-over={overLimit ? '' : undefined}>
+              <span role="char-count">
+                {value.length} / {maxLength}
+              </span>
+            </span>
+          )}
           <button type="button" onClick={onCancel}>
             {t.cancel}
           </button>

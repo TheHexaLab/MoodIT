@@ -37,4 +37,6 @@ export interface ChannelViewLabels {
   deleteTitle: string;
   /** Contenu du popup de confirmation de suppression. */
   deleteContent: string;
+  /** Avertissement de dépassement de la limite de caractères (reçoit la limite max). */
+  overLimit: (max: number) => string;
 }

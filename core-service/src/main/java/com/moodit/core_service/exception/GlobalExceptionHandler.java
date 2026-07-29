@@ -105,6 +105,15 @@ public class GlobalExceptionHandler {
                 .body(ex.getMessage());
     }
 
+    //Contenu de post/message invalide (ex. limite de caractères dépassée) : donnée soumise
+    //non conforme → 400 (la requête est mal formée, l'appelant doit corriger sa saisie).
+    @ExceptionHandler(InvalidPostException.class)
+    public ResponseEntity<String> handleInvalidPost(InvalidPostException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST) //Code 400
+                .body(ex.getMessage());
+    }
+
     //Violation d'une contrainte BD (UNIQUE, CHECK…) : ex. domaine d'établissement déjà utilisé.
     //Renvoie 409 (au lieu de laisser l'exception non gérée finir en 404/500).
     @ExceptionHandler(DataIntegrityViolationException.class)

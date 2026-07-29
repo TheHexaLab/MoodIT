@@ -446,6 +446,24 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > span > stron
     font-weight: 600;
 }
 
+/* Erreur de dépassement affichée dans le bandeau du composer (même emplacement que
+   « répondre à… ») : rouge, et autorisée à passer sur plusieurs lignes (message complet). */
+div.channel-view > div > div[role="reply"]:last-child > div > div > span[role="composer-error"] {
+    color: var(--danger, #e5484d);
+    font-weight: 600;
+    white-space: normal;
+    overflow: visible;
+}
+
+/* Erreur de dépassement sous le champ d'édition inline d'un message. */
+div.channel-view p[role="composer-error"] {
+    margin: 0;
+    font-family: Inter, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--danger, #e5484d);
+}
+
 div.channel-view > div > div[role="reply"]:last-child > div > div > button {
     flex-shrink: 0;
     display: flex;

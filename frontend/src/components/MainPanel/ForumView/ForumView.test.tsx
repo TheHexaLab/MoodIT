@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import ForumView from './ForumView';
+import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import type { ForumPost, ForumAuthor } from './forumThreads';
 import type { Course } from '../../CourseMenu/CourseMenu';
 import type { CourseChannel, ChannelMessageAuthor } from '../../CourseChannelList/CourseChannelList';
@@ -159,6 +160,20 @@ describe('ForumView', () => {
     // Popup de confirmation : bouton « Supprimer » (texte).
     fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(onDeletePost).toHaveBeenCalledWith(101));
+  });
+
+  it('éditeur : dépasser la limite → bouton Enregistrer désactivé (pas de troncature)', async () => {
+    renderForum([thread(101, { author: me })]); // titre par défaut 'Sujet 101' (non vide)
+    await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Modifier'));
+    const editor = screen.getByLabelText('Éditeur Markdown') as HTMLTextAreaElement;
+    const tooLong = 'a'.repeat(MAX_POST_CONTENT_LENGTH + 1);
+    fireEvent.change(editor, { target: { value: tooLong } });
+    // Pas de troncature + le compteur rouge et le bouton Enregistrer désactivé bloquent l'envoi.
+    expect(editor.value.length).toBe(MAX_POST_CONTENT_LENGTH + 1);
+    expect(
+      (screen.getByRole('button', { name: 'Enregistrer' }) as HTMLButtonElement).disabled
+    ).toBe(true);
   });
 
   it('modifier un sujet ouvre un éditeur inline avec le titre courant', async () => {
