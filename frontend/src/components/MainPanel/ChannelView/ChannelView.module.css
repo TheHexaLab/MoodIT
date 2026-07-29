@@ -581,6 +581,16 @@ div.channel-view > div > div:last-child > div > textarea {
     overflow-y: auto;
 }
 
+/* Placeholder sur UNE seule ligne (comme l'ancien <input>). Un textarea wrappe son
+   placeholder par défaut : le libellé long (« Envoyer un message dans #canal ») débordait
+   sur 2 lignes sur écran étroit → tronqué, et gonflait la hauteur de départ. Le CONTENU
+   saisi, lui, wrappe toujours (white-space: pre-wrap du textarea ci-dessus). */
+div.channel-view > div > div:last-child > div > textarea::placeholder {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Boutons d'action a l'interieur du champ (+ a gauche, envoi a droite). */
 div.channel-view > div > div:last-child > div > button {
     flex-shrink: 0;
