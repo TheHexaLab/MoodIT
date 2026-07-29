@@ -29,6 +29,8 @@
     --danger-alt: #e5484d;
     --warning: #f5a623;
     --accent-amber: #f6c350;
+    /* Teinte du soleil (bouton bascule thème) — orange, indépendante du teal du bouton. */
+    --sun-color: #f5a623;
     /* Pastilles de score (révision/résumé des quiz) : plein / nul / partiel. */
     --badge-success-bg: #ccfbf1;
     --badge-success-fg: #0a6a60;

@@ -132,7 +132,9 @@ function openAndConnect(app: AppSocket): FakeWebSocket {
 // ── open() ────────────────────────────────────────────────────────────────────
 
 describe('createAppSocket · open()', () => {
-  it("ouvre une connexion WebSocket sur l'URL fournie (auth par cookie, pas de token en query)", () => {
+  it("ouvre la connexion sur l'URL telle quelle (auth par cookie, sans ?token=)", () => {
+    // Le cookie HttpOnly moodit_token part automatiquement au handshake (même origine) ;
+    // le JS ne passe plus aucun token en query string.
     const app = createAppSocket('ws://test/ws');
     app.open();
     expect(sockets).toHaveLength(1);

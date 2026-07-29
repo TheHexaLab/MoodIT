@@ -3,10 +3,10 @@ import { apiFetch } from './api';
 
 /**
  * Tests de la couche réseau bas niveau (apiFetch : wrapper de fetch).
- * fetch est mocké via vi.stubGlobal. Depuis la migration cookie, apiFetch envoie
- * credentials:'include' (cookie HttpOnly) et n'ajoute PLUS de header Authorization.
- * Couvre : credentials:'include', transmission de init, et la gestion du 401 (purge
- * d'un résidu localStorage + redirection /login).
+ * fetch est mocké via vi.stubGlobal. Depuis la migration cookie HttpOnly, apiFetch
+ * n'injecte plus de header Authorization : il envoie credentials:'include' (le cookie
+ * `moodit_token` part automatiquement). Couvre : credentials, transmission de init,
+ * et la gestion du 401 (purge d'un résidu localStorage + redirection /login).
  */
 
 const TOKEN_KEY = 'moodit_token';
@@ -40,23 +40,25 @@ describe('apiFetch', () => {
     expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/api/thing');
   });
 
-  it('envoie credentials:include (cookie HttpOnly) et aucun header Authorization', async () => {
+  it('envoie credentials:"include" (cookie HttpOnly) et n’ajoute aucun header Authorization', async () => {
     await apiFetch('/api/thing');
     const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(init.credentials).toBe('include');
-    // Le front ne manipule plus de token : apiFetch n'ajoute aucun header.
+    // Le token n'est plus manipulé par le JS : aucun header Authorization n'est injecté.
     expect(init.headers).toBeUndefined();
   });
 
-  it('conserve method et headers fournis dans init, en ajoutant credentials:include', async () => {
+  it('conserve les headers et la méthode fournis dans init, sans Authorization', async () => {
     await apiFetch('/api/thing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
     const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(init.method).toBe('POST');
-    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
     expect(init.credentials).toBe('include');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers.Authorization).toBeUndefined();
   });
 
   it('retourne la Response telle quelle (200)', async () => {

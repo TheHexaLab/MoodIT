@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.dto.*;
 
 import com.moodit.core_service.exception.ForumNotFoundException;
+import com.moodit.core_service.exception.InvalidPostException;
 import com.moodit.core_service.exception.PostNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Forum;
@@ -48,6 +49,24 @@ public class ForumService {
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
     private final AuditLogService auditLogService;
+
+    /**
+     * Longueur MAX du contenu d'un message/post. Source de vérité de la limite : le front doit
+     * s'aligner sur cette valeur (frontend/src/helpers/forumLimits.ts). La colonne BD est un TEXT
+     * (illimité) → c'est cette validation applicative qui borne réellement la saisie.
+     */
+    public static final int MAX_CONTENT_LENGTH = 5000;
+
+    /** Rejette un contenu vide ou plus long que {@link #MAX_CONTENT_LENGTH}. */
+    private void validateContent(String content) {
+        if (content == null || content.isBlank()) {
+            throw new InvalidPostException("Le contenu ne peut pas être vide.");
+        }
+        if (content.length() > MAX_CONTENT_LENGTH) {
+            throw new InvalidPostException(
+                    "Le contenu dépasse la limite de " + MAX_CONTENT_LENGTH + " caractères.");
+        }
+    }
 
     // Non-final (hors constructeur @RequiredArgsConstructor) : sert à recharger un post après
     // détachement en masse de ses réponses (cf. deletePost, cas Discussion).
@@ -306,6 +325,7 @@ public class ForumService {
     //region POST
     @Transactional
     public PostVoteUserDTO addPostToForum(PostCreateInForumDTO postCreateInForumDTO, String email) {
+        validateContent(postCreateInForumDTO.getContent());
         Forum forum = forumRepository.findById(postCreateInForumDTO.getForumId())
                 .orElseThrow(ForumNotFoundException::new);
         User user = userRepository.findByEmail(email)
@@ -433,6 +453,7 @@ public class ForumService {
             .orElseThrow(PostNotFoundException::new);
 
         if (forumUpdatePostDTO.getContent() != null) {
+            validateContent(forumUpdatePostDTO.getContent());
             post.setContent(forumUpdatePostDTO.getContent());
         }
         if (forumUpdatePostDTO.getTitle() != null) {
@@ -473,7 +494,7 @@ public class ForumService {
                 "Forum #" + forumId + " supprimé", details);
     }
     @Transactional
-    public void deletePost(Integer forumId, Integer postId) {
+    public void deletePost(Integer forumId, Integer postId, String email) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
         Post post = forum.getPosts()
@@ -486,6 +507,18 @@ public class ForumService {
         long fId = forum.getId();
         long pId = post.getId();
         boolean discussion = isDiscussion(forum);
+
+        // MODERATION : si l'appelant N'est PAS l'auteur du post, la suppression est une action de
+        // modération (gardien / admin — l'autorisation est déjà tranchée par le permission-service).
+        // On la TRACE dans le journal d'audit (l'auto-suppression, elle, n'est pas journalisée).
+        // Capturé AVANT delete : auteur + contexte cours encore accessibles.
+        Integer actorId = resolveUserId(email);
+        boolean moderation = actorId != null && !post.getUser().getId().equals(actorId);
+        String auditDetails = moderation ? AuditContext.ofChildOfCourse(forum.getCourse()) : null;
+        // Capturés AVANT la suppression (entités encore attachées) : email de l'auteur du message
+        // supprimé (plus parlant que son id) et nom du canal/forum où il se trouvait.
+        String deletedAuthorEmail = moderation ? post.getUser().getEmail() : null;
+        String channelName = forum.getTitle();
 
         if (discussion) {
             // DISCUSSION (chat) : une réponse ne doit PAS disparaître avec le message auquel elle
@@ -503,6 +536,15 @@ public class ForumService {
         } else {
             // Thread : supprimer le post supprime tout son sous-fil (cascade JPA + BD conservée).
             postRepository.delete(post);
+        }
+
+        // Trace de modération (auteur ≠ acteur) : l'acteur est lu du SecurityContext par
+        // auditLogService ; détails = contexte cours capturé avant la suppression.
+        if (moderation) {
+            auditLogService.record("POST_MODERATION_DELETE", "POST", postId,
+                    (discussion ? "Message de " : "Post de ") + deletedAuthorEmail
+                            + " supprimé dans « " + channelName + " » (modération)",
+                    auditDetails);
         }
 
         afterCommit(() -> {

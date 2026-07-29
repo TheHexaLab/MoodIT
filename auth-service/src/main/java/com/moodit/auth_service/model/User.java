@@ -32,7 +32,8 @@ public class User {
   @Column(nullable = false, unique = true, length = 256)
   private String email;
 
-  @Column(name = "verification_code", length = 6)
+  // Stocke le HMAC du code (44 car. en Base64), jamais le code en clair — cf. AuthService.hashCode.
+  @Column(name = "verification_code", length = 64)
   private String verificationCode;
 
   @Column(name = "verification_code_expires_at")
@@ -54,7 +55,8 @@ public class User {
   private LocalDateTime loginLockedUntil;
 
   // Réinitialisation de mot de passe : champs dédiés, distincts des verification_* (2FA).
-  @Column(name = "reset_code", length = 6)
+  // Stocke le HMAC du code (44 car. en Base64), jamais le code en clair — cf. AuthService.hashCode.
+  @Column(name = "reset_code", length = 64)
   private String resetCode;
 
   @Column(name = "reset_code_expires_at")

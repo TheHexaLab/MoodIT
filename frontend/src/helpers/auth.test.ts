@@ -4,16 +4,17 @@ import { clearToken } from './auth';
 const TOKEN_KEY = 'moodit_token';
 
 /**
- * Depuis la migration cookie (JWT dans un cookie HttpOnly, invisible au JS), auth.ts
- * n'expose plus que `clearToken()` : il purge un éventuel token RÉSIDUEL en localStorage
- * (anciennes sessions d'avant la migration). Il ne lit/écrit plus de token.
+ * Depuis la migration cookie HttpOnly, le JWT n'est plus lu ni écrit par le JS :
+ * `auth.ts` n'expose plus que `clearToken`, qui purge un éventuel token résiduel
+ * en localStorage (sessions d'avant la migration). On vide le storage avant chaque
+ * test pour l'isolation (localStorage fourni par jsdom).
  */
-describe('clearToken', () => {
+describe('clearToken (purge du token localStorage résiduel)', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('supprime le token résiduel en localStorage', () => {
+  it('supprime un token résiduel sous la clé moodit_token', () => {
     localStorage.setItem(TOKEN_KEY, 'abc');
     clearToken();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();

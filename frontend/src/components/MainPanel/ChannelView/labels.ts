@@ -18,4 +18,5 @@ export const defaultChannelViewLabels: ChannelViewLabels = {
   send: 'Envoyer le message',
   deleteTitle: 'Supprimer le message',
   deleteContent: 'Ce message sera définitivement supprimé. Continuer ?',
+  overLimit: (max) => `Message trop long : limite de ${max} caractères dépassée.`,
 };

@@ -101,7 +101,7 @@ class AuthServiceTest {
     PendingRegistration saved = captor.getValue();
     assertThat(saved.getEmail()).isEqualTo("karine.roussel@usherbrooke.ca"); // minuscules
     assertThat(saved.getPasswordHash()).isEqualTo("hashed");
-    assertThat(saved.getVerificationCode()).hasSize(6);
+    assertThat(saved.getVerificationCode()).hasSize(44); // HMAC Base64, jamais le code en clair
     verify(emailService).sendVerificationCode(eq("karine.roussel@usherbrooke.ca"), anyString());
   }
 
@@ -332,6 +332,30 @@ class AuthServiceTest {
   }
 
   @Test
+  void login_whenActiveCodeExists_reusesSession_withoutReemittingNorResettingAttempts() {
+    // HIGH #1 : un code 2FA valide est déjà en circulation. Une reconnexion ne doit ni renvoyer
+    // un nouveau code ni remettre le compteur de tentatives à zéro (sinon le plafond par-code
+    // serait contournable avec un mot de passe volé).
+    LoginRequest req = new LoginRequest();
+    req.setEmail("karine.roussel@usherbrooke.ca");
+    req.setPassword("Sup3rPass!");
+    User u = verifiedUser();
+    String storedCode = peppered("111111");
+    u.setVerificationCode(storedCode);
+    u.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10)); // encore valide
+    u.setVerificationAttempts(3); // essais déjà consommés sur ce code
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+    when(passwordEncoder.matches(peppered("Sup3rPass!"), "storedHash")).thenReturn(true);
+
+    AuthResponse res = authService.login(req);
+
+    assertThat(res.getToken()).isNull(); // 2FA toujours requise
+    verify(emailService, never()).send2FACode(anyString(), anyString()); // pas de réémission
+    assertThat(u.getVerificationAttempts()).isEqualTo(3); // compteur préservé
+    assertThat(u.getVerificationCode()).isEqualTo(storedCode); // code inchangé
+  }
+
+  @Test
   void login_fifthWrongPassword_locksAccount() {
     LoginRequest req = new LoginRequest();
     req.setEmail("karine.roussel@usherbrooke.ca");
@@ -348,7 +372,9 @@ class AuthServiceTest {
   }
 
   @Test
-  void login_whenAccountLocked_throwsTooManyRequests_withoutCheckingPassword() {
+  void login_whenAccountLocked_returnsGenericInvalidCredentials_andEqualizesTiming() {
+    // HIGH #2 (anti-énumération) : un compte verrouillé ne doit PAS renvoyer un 429 distinctif —
+    // même 401 générique qu'un mauvais mot de passe, + un BCrypt bidon pour égaliser le temps.
     LoginRequest req = new LoginRequest();
     req.setEmail("karine.roussel@usherbrooke.ca");
     req.setPassword("Sup3rPass!");
@@ -357,8 +383,8 @@ class AuthServiceTest {
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
 
     assertThatThrownBy(() -> authService.login(req))
-        .isInstanceOf(TooManyRequestsException.class);
-    verify(passwordEncoder, never()).matches(anyString(), anyString());
+        .isInstanceOf(InvalidCredentialsException.class); // plus de TooManyRequests
+    verify(passwordEncoder).matches(anyString(), anyString()); // BCrypt bidon exécuté (timing)
     verify(emailService, never()).send2FACode(anyString(), anyString());
   }
 
@@ -371,7 +397,8 @@ class AuthServiceTest {
     p.setLastName("Roussel");
     p.setEmail("karine.roussel@usherbrooke.ca");
     p.setPasswordHash("hashed");
-    p.setVerificationCode("123456");
+    // Le service ne stocke que le HMAC du code : on reproduit ce hachage dans le setup.
+    p.setVerificationCode(peppered("123456"));
     p.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
     p.setVerificationAttempts(0);
     return p;
@@ -500,7 +527,7 @@ class AuthServiceTest {
   @Test
   void verify2FA_success_returnsToken_andStoresHash() {
     User u = verifiedUser();
-    u.setVerificationCode("123456");
+    u.setVerificationCode(peppered("123456"));
     u.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
     when(jwtService.generateToken("karine.roussel@usherbrooke.ca")).thenReturn("jwt-token");
@@ -516,7 +543,7 @@ class AuthServiceTest {
   @Test
   void verify2FA_wrongCode_incrementsAttempts() {
     User u = verifiedUser();
-    u.setVerificationCode("123456");
+    u.setVerificationCode(peppered("123456"));
     u.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
 
@@ -528,15 +555,28 @@ class AuthServiceTest {
   @Test
   void verify2FA_maxAttempts_locksAccount() {
     User u = verifiedUser();
-    u.setVerificationCode("123456");
+    u.setVerificationCode(peppered("123456"));
     u.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
     u.setVerificationAttempts(4); // la prochaine tentative ratée atteint le plafond
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
 
+    // HIGH #2 : au plafond, le verrou est bien posé et le code invalidé EN INTERNE, mais la
+    // réponse reste la même erreur générique (400) — pas de 429 qui trahirait l'état verrouillé.
     assertThatThrownBy(() -> authService.verify2FA("karine.roussel@usherbrooke.ca", "999999"))
-        .isInstanceOf(TooManyRequestsException.class);
+        .isInstanceOf(InvalidVerificationCodeException.class);
     assertThat(u.getVerificationLockedUntil()).isAfter(LocalDateTime.now());
     assertThat(u.getVerificationCode()).isNull();
+  }
+
+  @Test
+  void verify2FA_unknownAccount_genericError_noOracle() {
+    // HIGH #2 : un compte inexistant renvoie EXACTEMENT la même erreur générique qu'un mauvais
+    // code sur un compte existant — aucun moyen de distinguer l'existence du compte.
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> authService.verify2FA("ghost@usherbrooke.ca", "123456"))
+        .isInstanceOf(InvalidVerificationCodeException.class)
+        .hasMessage("Code invalide ou expiré.");
   }
 
   @Test
@@ -568,9 +608,27 @@ class AuthServiceTest {
     Map<String, String> res = authService.forgotPassword("Karine.Roussel@USHERBROOKE.ca");
 
     assertThat(res.get("message")).contains("Si un compte existe");
-    assertThat(u.getResetCode()).hasSize(6);
+    assertThat(u.getResetCode()).hasSize(44); // HMAC Base64, jamais le code en clair
     assertThat(u.getResetCodeExpiresAt()).isAfter(LocalDateTime.now());
     verify(userRepository).save(u);
+    verify(emailService).sendPasswordResetCode(eq("karine.roussel@usherbrooke.ca"), anyString());
+  }
+
+  @Test
+  void forgotPassword_activeResetCode_reemits_butKeepsAttempts() {
+    // HIGH #1 : un code de reset valide existe déjà (cooldown écoulé). On renvoie bien un code
+    // (UX de récupération), mais on NE réinitialise PAS `resetAttempts` — redemander un code ne
+    // remet donc plus le plafond d'essais à zéro.
+    User u = verifiedUser();
+    u.setResetCode(peppered("222222"));
+    u.setResetCodeExpiresAt(LocalDateTime.now().plusMinutes(10)); // encore valide
+    u.setResetAttempts(3); // essais déjà consommés
+    u.setResetLastSentAt(LocalDateTime.now().minusMinutes(2)); // cooldown 60 s écoulé
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
+
+    authService.forgotPassword("karine.roussel@usherbrooke.ca");
+
+    assertThat(u.getResetAttempts()).isEqualTo(3); // compteur préservé
     verify(emailService).sendPasswordResetCode(eq("karine.roussel@usherbrooke.ca"), anyString());
   }
 
@@ -615,7 +673,7 @@ class AuthServiceTest {
 
   private User userWithResetCode() {
     User u = verifiedUser();
-    u.setResetCode("123456");
+    u.setResetCode(peppered("123456"));
     u.setResetCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
     return u;
   }
@@ -693,11 +751,25 @@ class AuthServiceTest {
     u.setResetAttempts(4); // la 5e tentative atteint le plafond
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
 
+    // HIGH #2 : au plafond, le verrou est posé et le code invalidé EN INTERNE, mais la réponse
+    // reste la même erreur générique (400) — pas de 429 qui trahirait l'état verrouillé.
     assertThatThrownBy(
             () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "000000", "N0uveauPass!"))
-        .isInstanceOf(TooManyRequestsException.class);
+        .isInstanceOf(InvalidVerificationCodeException.class);
     assertThat(u.getResetLockedUntil()).isAfter(LocalDateTime.now());
     assertThat(u.getResetCode()).isNull();
+  }
+
+  @Test
+  void resetPassword_unknownAccount_genericError_noOracle() {
+    // HIGH #2 : un compte inexistant renvoie EXACTEMENT la même erreur générique qu'un mauvais
+    // code sur un compte existant — aucun oracle d'existence de compte.
+    when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () -> authService.resetPassword("ghost@usherbrooke.ca", "123456", "N0uveauPass!"))
+        .isInstanceOf(InvalidVerificationCodeException.class)
+        .hasMessage("Code invalide ou expiré.");
   }
 
   @Test
@@ -713,14 +785,16 @@ class AuthServiceTest {
   }
 
   @Test
-  void resetPassword_whenLocked_throws_withoutTouchingPassword() {
+  void resetPassword_whenLocked_returnsGenericError_withoutTouchingPassword() {
+    // HIGH #2 : un compte au verrou de reset actif renvoie la même erreur générique (400) qu'un
+    // mauvais code — pas de 429 distinctif. Le verrou reste effectif (mot de passe non modifié).
     User u = userWithResetCode();
     u.setResetLockedUntil(LocalDateTime.now().plusMinutes(10));
     when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(u));
 
     assertThatThrownBy(
             () -> authService.resetPassword("karine.roussel@usherbrooke.ca", "123456", "N0uveauPass!"))
-        .isInstanceOf(TooManyRequestsException.class);
+        .isInstanceOf(InvalidVerificationCodeException.class);
     verify(passwordEncoder, never()).encode(anyString());
   }
 }

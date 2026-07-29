@@ -168,10 +168,14 @@ div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"]:hover {
 div[role^="markdown-editor"] textarea {
     width: 100%;
     box-sizing: border-box;
-    /* Hauteur pilotee par le contenu (auto-resize JS), sans plafond ni scroll interne. */
+    /* Hauteur pilotee par le contenu (auto-resize JS) MAIS plafonnee : au-dela, la zone defile
+       en INTERNE (scroll propre au textarea). Ainsi l'editeur complet (barre d'outils + compteur
+       + boutons) tient toujours dans le feed et reste visible, et le curseur reste visible via le
+       scroll interne (au lieu de faire grandir l'editeur au point de pousser la toolbar hors vue). */
     resize: none;
-    overflow-y: hidden;
+    overflow-y: auto;
     min-height: 3.5rem;
+    max-height: 40vh;
     border: 1px solid var(--border);
     border-top-color: transparent;
     border-bottom-left-radius: 0.5rem;
@@ -219,8 +223,32 @@ div[role^="markdown-editor"] div[role="preview"] > p {
 /* ─── Actions (Annuler / Valider). ─── */
 div[role^="markdown-editor"] > div[role="editor-actions"] {
     display: flex;
+    align-items: center;
     gap: 0.5rem;
     margin-top: 0.5rem;
+}
+
+/* Zone d'état (compteur + avertissement) : poussée à gauche (margin-right auto → boutons à
+   droite), discrète, passe en rouge quand la limite est dépassée (data-over). */
+div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"] {
+    margin-right: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    font-family: Inter, sans-serif;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"] > span[role="char-count"] {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"][data-over] {
+    color: var(--danger, #e5484d);
+    font-weight: 600;
 }
 
 div[role^="markdown-editor"] > div[role="editor-actions"] > button {
