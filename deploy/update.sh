@@ -70,6 +70,42 @@ if ! git reset --hard "origin/$BRANCH"; then
   fail "git reset --hard origin/$BRANCH impossible — aucun changement appliqué."
 fi
 
+# --- 2b. Migrations de schéma : appliquer les nouvelles, avec suivi ----------
+# init.sql ne rejoue JAMAIS sur un volume existant → les évolutions de schéma
+# passent par migrations/*.sql (générées par deploy/generate-migration.sh). On
+# applique, dans l'ordre, celles pas encore enregistrées dans `schema_migrations`,
+# chacune en transaction (rollback atomique si elle échoue). AVANT le rebuild :
+# le schéma doit être prêt avant que les services (profil `validate`) ne démarrent.
+#
+# ⚠️ Un volume VIERGE possède déjà tout le schéma via init.sql : NE PAS y rejouer
+# les migrations (elles feraient doublon). Après un 1er `compose up` sur volume
+# neuf, marque-les comme appliquées sans les exécuter (cf. DEPLOY.md, section
+# « Changement de schéma »).
+if docker ps --format '{{.Names}}' | grep -q '^moodit_postgres$'; then
+  psql_db() { docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDB" "$@"; }
+  psql_db -q -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" \
+    || fail "Création de la table schema_migrations impossible."
+  MIGRATED=0
+  for m in $(ls -1 "$REPO_DIR"/migrations/*.sql 2>/dev/null | sort); do
+    base="$(basename "$m")"
+    seen="$(docker exec moodit_postgres psql -tAX -U "$PGUSER" -d "$PGDB" \
+      -c "SELECT 1 FROM schema_migrations WHERE filename='$base'" 2>/dev/null)"
+    [ "$seen" = "1" ] && continue
+    log "Migration BD : $base"
+    # -c (enregistrement) PUIS -f (migration) dans UNE transaction : si la migration
+    # échoue, l'enregistrement est annulé aussi → elle sera retentée au prochain run.
+    if psql_db -q --single-transaction \
+         -c "INSERT INTO schema_migrations(filename) VALUES ('$base')" -f - < "$m" >>"$LOG" 2>&1; then
+      MIGRATED=$((MIGRATED + 1))
+    else
+      fail "Migration '$base' échouée — déploiement interrompu (BD sauvegardée : $BACKUP_FILE). Corrige la migration puis relance."
+    fi
+  done
+  if [ "$MIGRATED" -gt 0 ]; then log "$MIGRATED migration(s) BD appliquée(s)."; else log "Aucune migration BD en attente."; fi
+else
+  log "AVERTISSEMENT : conteneur postgres absent, migrations BD non appliquées."
+fi
+
 # --- 3. Rebuild + redéploiement (rollback du code si échec) -----------------
 rollback() {
   log "Rollback du code vers ${LOCAL:0:8}…"

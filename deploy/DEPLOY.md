@@ -129,6 +129,63 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 `validate`. Pour toute évolution de schéma, applique les scripts de `migrations/`
 sur la base en cours (ne supprime pas le volume `postgres_data` en prod).
 
+#### 1. Générer la migration automatiquement (dev)
+
+Tu édites `init.sql` (source de vérité du schéma complet) comme d'habitude, puis :
+
+```bash
+./deploy/generate-migration.sh <nom_migration>     # ex. add_bio_colonne_user
+```
+
+Le script diffe le schéma de `init.sql@HEAD` (avant ta modif) contre le `init.sql`
+courant, via deux Postgres jetables + [migra](https://github.com/djrobstep/migra),
+et écrit le SQL dans `migrations/<date>_<nom>.sql`. **Prérequis : Docker.** Rien à
+installer localement.
+
+> ⚠️ Le fichier généré est un **point de départ, à RELIRE** : un renommage de
+> colonne apparaît comme `DROP + ADD` (perte de données), et les conversions de
+> type peuvent nécessiter un `USING`. Corrige à la main puis committe le `.sql`
+> **avec** ta modif de `init.sql`.
+
+Diff contre la vraie prod plutôt que `HEAD` (optionnel) : fournis un dump et
+`REF=prod PROD_DUMP=backups/db-XX.sql.gz ./deploy/generate-migration.sh <nom>`.
+
+#### 2. Appliquer la migration (prod)
+
+`init.sql` contient déjà la version à jour du schéma → un **volume vierge** n'a
+**pas** besoin des migrations (elles feraient doublon et échoueraient, p. ex.
+`ADD COLUMN` d'une colonne déjà présente). Les migrations ne servent qu'aux bases
+**déjà peuplées**. Applique-les avec un suivi (pour ne jamais rejouer une migration) :
+
+```bash
+PGUSER="$(grep -E '^POSTGRES_USER=' .env.docker | cut -d= -f2-)"
+PGDB="$(grep -E '^POSTGRES_DB=' .env.docker | cut -d= -f2-)"
+# Table de suivi (idempotent)
+docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDB" -c \
+  "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());"
+# Appliquer chaque migration non encore enregistrée, en transaction
+for m in $(ls -1 migrations/*.sql | sort); do
+  base="$(basename "$m")"
+  seen="$(docker exec moodit_postgres psql -tAX -U "$PGUSER" -d "$PGDB" -c \
+    "SELECT 1 FROM schema_migrations WHERE filename='$base'")"
+  [ "$seen" = "1" ] && continue
+  echo "Migration : $base"
+  docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 --single-transaction -U "$PGUSER" -d "$PGDB" \
+    -c "INSERT INTO schema_migrations(filename) VALUES ('$base')" -f - < "$m" \
+    || { echo "ÉCHEC : $base"; break; }
+done
+```
+
+Sur un **volume neuf** créé depuis `init.sql`, enregistre les migrations comme
+déjà appliquées **sans les exécuter** (sinon doublon) :
+
+```bash
+for m in migrations/*.sql; do
+  docker exec -i moodit_postgres psql -U "$PGUSER" -d "$PGDB" -c \
+    "INSERT INTO schema_migrations(filename) VALUES ('$(basename "$m")') ON CONFLICT DO NOTHING"
+done
+```
+
 ---
 
 ## Notes de coût / dimensionnement
