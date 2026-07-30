@@ -667,6 +667,9 @@ div.channel-view > div > div:last-child > div > button {
     justify-content: center;
     width: 2rem;
     height: 2rem;
+    /* Léger décalage vers le bas (1.595px) : recentre verticalement les boutons face au textarea
+       sur une ligne (le champ est aligné en haut — align-items: flex-start — pour la croissance). */
+    margin-top: 0.0997rem;
     padding: 0;
     border: none;
     cursor: pointer;
