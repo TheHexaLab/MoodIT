@@ -1,7 +1,14 @@
 div.edit-profile {
     position: fixed;
     z-index: 79;
-    inset: 0;
+    /* Hauteur = viewport VISIBLE (dynamique). `inset: 0` vaudrait 100vh (viewport large, barre
+       d'URL comprise) : sur mobile la carte, centrée et plafonnée à 100dvh, dépassait alors sous
+       la zone visible → footer coupé. On borne donc le conteneur à 100dvh (fallback 100vh). */
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100vh;
+    height: 100dvh;
     display: flex;
     justify-content: center;
     align-items: center;

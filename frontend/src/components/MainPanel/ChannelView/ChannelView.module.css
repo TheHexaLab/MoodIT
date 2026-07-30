@@ -676,6 +676,10 @@ div.channel-view > div > div:last-child > div > button {
 div.channel-view > div > div:last-child > div > button:first-of-type {
     background: transparent;
     color: var(--text-muted);
+    /* Même taille visuelle que le bouton d'envoi (34x34 ; l'envoi l'obtient via son ::before
+       inset:-1px qui étend son fond de 32→34px). */
+    width: 2.125rem;
+    height: 2.125rem;
 }
 
 div.channel-view > div > div:last-child > div > button:first-of-type {
