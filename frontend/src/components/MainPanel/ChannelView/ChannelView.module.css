@@ -287,6 +287,9 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-
     font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
     line-height: 1.45;
     overflow-wrap: anywhere;
+    /* Préserve les sauts de ligne saisis via Maj+Entrée (sinon le HTML réduit les \n à une
+       espace) tout en continuant de wrapper les lignes trop longues. */
+    white-space: pre-wrap;
 }
 
 /* Actions d'un message (repondre / modifier / supprimer) : revelees au survol. */
