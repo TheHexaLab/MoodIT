@@ -17,6 +17,12 @@ interface EditorShellProps {
   onBack?: () => void;
   /** Fermeture (croix + clic sur le fond). */
   onClose: () => void;
+  /**
+   * Intercepte la fermeture (X / clic extérieur) AVANT l'animation : reçoit `proceed`, la
+   * fermeture animée réelle. Permet au parent d'afficher une confirmation (perte de données)
+   * et de n'appeler `proceed` qu'après validation — sinon le panneau se fermerait tout de suite.
+   */
+  onCloseGuard?: (proceed: () => void) => void;
   /** Largeur du panneau (défaut 30rem). Animée au changement de vue. */
   width?: string;
   /**
@@ -74,6 +80,7 @@ export function EditorShell({
   subtitle,
   onBack,
   onClose,
+  onCloseGuard,
   width,
   scrollBody = false,
   desktopMaxVh,
@@ -148,6 +155,14 @@ export function EditorShell({
     setIsClosing(true);
   }
 
+  // Fermeture demandée (X / clic extérieur) : si un garde est fourni, on le laisse décider
+  // (confirmation) AVANT de lancer l'animation ; il rappellera `proceed` pour fermer vraiment.
+  function attemptClose() {
+    const proceed = () => requestClose(onClose);
+    if (onCloseGuard) onCloseGuard(proceed);
+    else proceed();
+  }
+
   function onAnimationEnd(e: React.AnimationEvent<HTMLDivElement>) {
     if (isClosing && e.target === e.currentTarget) {
       pending.current?.();
@@ -164,7 +179,7 @@ export function EditorShell({
       onClick={(e) => {
         // Ferme uniquement si le pointeur s'est ABAISSÉ ET relâché sur le fond (vrai clic de fond),
         // pas si une sélection démarrée dans le popup se termine ici.
-        if (e.target === e.currentTarget && backdropMouseDown.current) requestClose(onClose);
+        if (e.target === e.currentTarget && backdropMouseDown.current) attemptClose();
         backdropMouseDown.current = false;
       }}
     >
@@ -201,7 +216,7 @@ export function EditorShell({
             type="button"
             className={styles.closeButton}
             aria-label="Fermer"
-            onClick={() => requestClose(onClose)}
+            onClick={attemptClose}
           >
             ✕
           </button>

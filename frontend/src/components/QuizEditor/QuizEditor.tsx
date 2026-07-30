@@ -389,7 +389,6 @@ export function QuizEditor({
     if (dirty) setPendingDiscard(() => action);
     else action();
   };
-  const guardedClose = () => requestDiscard(onClose);
   // Le retour de la vue « Tester » (prévisualisation) ne perd rien → jamais de confirmation.
   const backLosesData = view.kind !== 'list' && view.kind !== 'test';
 
@@ -492,7 +491,8 @@ export function QuizEditor({
             ? () => (backLosesData ? requestDiscard(shell.onBack!) : shell.onBack!())
             : undefined
         }
-        onClose={guardedClose}
+        onClose={onClose}
+        onCloseGuard={requestDiscard}
         width={shell.width}
         scrollBody={shell.scrollBody}
         desktopMaxVh={shell.desktopMaxVh}
