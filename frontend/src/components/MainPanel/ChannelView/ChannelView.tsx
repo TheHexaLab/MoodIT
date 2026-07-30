@@ -152,6 +152,8 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const listRef = useRef<HTMLUListElement>(null);
   /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  /** Champ d'édition inline d'un message (auto-hauteur, multi-ligne). */
+  const editRef = useRef<HTMLTextAreaElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
   /**
@@ -210,6 +212,15 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     // Le plancher CSS `min-height` (une ligne) prend le relais tant que c'est masqué.
     if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
   }, [draft, loading, loadError]);
+
+  // Auto-hauteur du champ d'édition inline (même principe que le composer) : s'ajuste au montage
+  // (ouverture de l'édition) et à chaque frappe, pour afficher les sauts de ligne existants.
+  useLayoutEffect(() => {
+    const ta = editRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
+  }, [editDraft, editingId]);
 
   // Décalage clavier mobile : sur iOS, le clavier virtuel recouvre le bas de page sans réduire
   // `innerHeight` → le composer était masqué. On mesure la portion occultée via l'API
@@ -433,11 +444,13 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                         </p>
                         {editingId === message.id ? (
                           <div>
-                            <input
-                              type="text"
+                            <textarea
+                              ref={editRef}
+                              rows={1}
                               value={editDraft}
                               onChange={(event) => setEditDraft(event.target.value)}
                               onKeyDown={(event) => {
+                                // Entrée = enregistrer ; Maj+Entrée = saut de ligne ; Échap = annuler.
                                 if (event.key === 'Enter' && !event.shiftKey) {
                                   event.preventDefault();
                                   submitEdit(message.id, message.content);
