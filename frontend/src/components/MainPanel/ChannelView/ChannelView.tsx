@@ -205,8 +205,11 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     const ta = composerRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = `${ta.scrollHeight}px`;
-  }, [draft]);
+    // Si le composer est masqué au montage (état de chargement → display:none), scrollHeight
+    // vaut 0 : on NE fixe PAS height:0px (sinon le champ reste écrasé, texte coupé + scrollbar).
+    // Le plancher CSS `min-height` (une ligne) prend le relais tant que c'est masqué.
+    if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
+  }, [draft, loading, loadError]);
 
   // Décalage clavier mobile : sur iOS, le clavier virtuel recouvre le bas de page sans réduire
   // `innerHeight` → le composer était masqué. On mesure la portion occultée via l'API

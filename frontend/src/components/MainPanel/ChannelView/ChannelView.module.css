@@ -567,6 +567,12 @@ div.channel-view > div > div:last-child > div > textarea {
     line-height: 1.4;
     padding: 0.55rem 0.25rem;
     outline: none;
+    /* Plancher d'UNE ligne (1.4em de texte + padding vertical). Indispensable : si l'effet
+       d'auto-resize se mesure pendant que le composer est masqué (chargement), la hauteur JS
+       serait nulle → texte coupé + scrollbar. `border-box` rend le calcul height=scrollHeight
+       cohérent. */
+    box-sizing: border-box;
+    min-height: calc(1.4em + 1.1rem);
     /* Retour à la ligne : le texte qui dépasse la largeur wrappe (et fait grandir la
        hauteur via le JS) au lieu de scroller horizontalement. `overflow-x: hidden` est
        indispensable — sans lui, `overflow-y: auto` fait calculer `overflow-x: auto`, et
