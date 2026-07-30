@@ -90,7 +90,12 @@ export function CodeInput({
           type="text"
           inputMode="numeric"
           autoComplete={i === 0 ? 'one-time-code' : 'off'}
-          maxLength={1}
+          // PAS maxLength=1 : sur mobile l'évènement `paste` ne se déclenche souvent pas, et
+          // maxLength=1 tronquerait le collage à un seul chiffre AVANT `onChange`. En laissant
+          // passer toute la chaîne, `handleChange` la répartit sur les cases (comme l'autofill).
+          // La saisie normale reste à 1 chiffre : le focus avance à chaque frappe + `onFocus`
+          // sélectionne le contenu (une nouvelle frappe le remplace).
+          maxLength={length}
           value={digit}
           disabled={disabled}
           autoFocus={autoFocus && i === 0}
