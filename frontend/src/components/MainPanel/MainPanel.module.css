@@ -1,5 +1,8 @@
 .mainPanel {
     height: 100vh;
+    /* Hauteur dynamique (mobile) : suit la zone visible du navigateur (barre d'URL comprise)
+       pour que la barre de message reste au bas de l'écran, jamais sous le pli. */
+    height: 100dvh;
     flex-grow: 1;
     min-width: 0;
     box-sizing: border-box;

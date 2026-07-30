@@ -947,7 +947,10 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        collapseKey={selectedChannelRef?.id}
+        // Clé COMPOSITE (type + id) : un quiz et un canal peuvent partager le même id (séquences
+        // indépendantes). Sans le type, passer d'un quiz à un canal de même id ne changerait pas la
+        // clé → le drawer ne se refermerait pas. `isSameChannel` compare aussi les deux champs.
+        collapseKey={selectedChannelRef ? `${selectedChannelRef.type}:${selectedChannelRef.id}` : undefined}
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
