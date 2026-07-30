@@ -362,7 +362,8 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     outline: none;
     transition: border-color 0.2s ease;
     /* Multi-ligne : préserve/affiche les sauts de ligne (Maj+Entrée), wrappe, et s'auto-agrandit
-       (hauteur pilotée en JS) jusqu'à un plafond puis scroll (barre masquée). */
+       (hauteur pilotée en JS) jusqu'à un plafond puis scroll. Barre de scroll VISIBLE ici
+       (contrairement au composer) pour bien signaler le débordement pendant l'édition. */
     white-space: pre-wrap;
     overflow-wrap: break-word;
     resize: none;
@@ -370,12 +371,6 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     max-height: 12rem;
     overflow-x: hidden;
     overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar {
-    display: none;
 }
 
 div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea:focus {
