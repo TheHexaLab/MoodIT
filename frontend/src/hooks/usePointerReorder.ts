@@ -20,6 +20,21 @@ export interface PointerReorder<Id extends string | number = number> {
 // (édition, suppression, saisie) doit rester fiable — cf. le même principe que les canaux.
 const INTERACTIVE = 'button, a, input, textarea, select, [contenteditable="true"], [data-no-drag]';
 
+/** Ancêtre défilant verticalement le plus proche (ou null → on défilera la fenêtre). */
+function getScrollableParent(el: HTMLElement | null): HTMLElement | null {
+  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return null;
+}
+
+// Auto-scroll pendant le glissement : zone sensible (px) depuis chaque bord + vitesse max (px/frame).
+const AUTOSCROLL_EDGE = 64;
+const AUTOSCROLL_MAX_SPEED = 16;
+
 /**
  * Réordonnancement par glisser via **Pointer Events** : fonctionne souris ET tactile
  * (contrairement au drag-and-drop HTML5, inopérant au doigt). Deux façons de saisir une
@@ -76,8 +91,10 @@ export function usePointerReorder<Id extends string | number = number>(
       /* setPointerCapture peut échouer si le pointeur est déjà relâché : sans gravité. */
     }
 
-    const onMove = (ev: PointerEvent) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+    // Détecte la ligne survolée (par (cx, cy)) et déplace l'élément saisi dessus. Factorisé pour
+    // être appelé au pointermove ET par la boucle d'auto-scroll (le contenu défile sous le curseur).
+    const detectOver = (cx: number, cy: number) => {
+      const el = document.elementFromPoint(cx, cy);
       const row = el?.closest('[data-reorder-id]');
       if (!row) return;
       // L'attribut DOM est toujours une chaîne : on compare par String(...) pour gérer
@@ -96,7 +113,39 @@ export function usePointerReorder<Id extends string | number = number>(
         return next;
       });
     };
+
+    // Auto-scroll : quand le pointeur approche du bord haut/bas du conteneur défilant, on le fait
+    // défiler (vitesse proportionnelle à la proximité). Une boucle rAF entretient le défilement
+    // même si le pointeur reste immobile près du bord, et poursuit le réordonnancement au passage.
+    const scroller = getScrollableParent(captureEl);
+    let px = e.clientX;
+    let py = e.clientY;
+    let raf = 0;
+    const autoScroll = () => {
+      const top = scroller ? scroller.getBoundingClientRect().top : 0;
+      const bottom = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
+      let dy = 0;
+      if (py < top + AUTOSCROLL_EDGE) {
+        dy = -AUTOSCROLL_MAX_SPEED * Math.min(1, (top + AUTOSCROLL_EDGE - py) / AUTOSCROLL_EDGE);
+      } else if (py > bottom - AUTOSCROLL_EDGE) {
+        dy = AUTOSCROLL_MAX_SPEED * Math.min(1, (py - (bottom - AUTOSCROLL_EDGE)) / AUTOSCROLL_EDGE);
+      }
+      if (dy !== 0) {
+        if (scroller) scroller.scrollTop += dy;
+        else window.scrollBy(0, dy);
+        detectOver(px, py);
+      }
+      raf = requestAnimationFrame(autoScroll);
+    };
+    raf = requestAnimationFrame(autoScroll);
+
+    const onMove = (ev: PointerEvent) => {
+      px = ev.clientX;
+      py = ev.clientY;
+      detectOver(ev.clientX, ev.clientY);
+    };
     const onUp = () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
