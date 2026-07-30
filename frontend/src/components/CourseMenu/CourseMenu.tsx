@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { isTouchDevice } from '../../helpers/viewport';
 import { createPortal } from 'react-dom';
 import styles from './CourseMenu.module.css';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -476,7 +477,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
                   <input
                     type="text"
                     placeholder={dropdownLabels.searchPlaceholder}
-                    autoFocus
+                    autoFocus={!isTouchDevice()}
                     value={courseSearch}
                     onChange={(event) => setCourseSearch(event.target.value)}
                     onKeyDown={(event) => {

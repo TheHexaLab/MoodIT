@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './JoinCoursesPopup.module.css';
+import { isTouchDevice } from '../../helpers/viewport';
 import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -191,7 +192,7 @@ export function JoinCoursesPopup({
               <input
                 type="text"
                 placeholder={t.searchPlaceholder}
-                autoFocus
+                autoFocus={!isTouchDevice()}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />

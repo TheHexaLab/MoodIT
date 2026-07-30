@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddSubscriptionPopup.module.css';
+import { isTouchDevice } from '../../helpers/viewport';
 import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
@@ -783,7 +784,7 @@ export function AddSubscriptionPopup({
               <input
                 type="text"
                 placeholder={t.searchPlaceholder}
-                autoFocus
+                autoFocus={!isTouchDevice()}
                 value={establishmentSearch}
                 onChange={(e) => setEstablishmentSearch(e.target.value)}
                 onKeyDown={(e) => {
@@ -883,7 +884,7 @@ export function AddSubscriptionPopup({
         <input
           type="text"
           placeholder={t.searchPlaceholder}
-          autoFocus
+          autoFocus={!isTouchDevice()}
           value={joinSearch}
           onChange={(e) => setJoinSearch(e.target.value)}
         />
@@ -927,7 +928,7 @@ export function AddSubscriptionPopup({
           <input
             type="text"
             placeholder={t.programSearchPlaceholder}
-            autoFocus
+            autoFocus={!isTouchDevice()}
             value={programSearch}
             onChange={(e) => setProgramSearch(e.target.value)}
           />

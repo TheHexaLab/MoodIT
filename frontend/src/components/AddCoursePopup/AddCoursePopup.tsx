@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddCoursePopup.module.css';
+import { isTouchDevice } from '../../helpers/viewport';
 import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -281,7 +282,7 @@ export function AddCoursePopup({
                   <input
                     type="text"
                     placeholder={t.establishmentSearchPlaceholder}
-                    autoFocus
+                    autoFocus={!isTouchDevice()}
                     value={estSearch}
                     onChange={(e) => setEstSearch(e.target.value)}
                     onKeyDown={(e) => {
@@ -378,7 +379,7 @@ export function AddCoursePopup({
                   <input
                     type="text"
                     placeholder={t.searchPlaceholder}
-                    autoFocus
+                    autoFocus={!isTouchDevice()}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={(e) => {

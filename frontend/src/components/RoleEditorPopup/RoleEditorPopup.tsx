@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './RoleEditorPopup.module.css';
+import { isTouchDevice } from '../../helpers/viewport';
 import { useBackdropClose } from '../../hooks/useBackdropClose';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
@@ -357,7 +358,7 @@ export function RoleEditorPopup({
                       <input
                         type="text"
                         placeholder={t.searchPlaceholder}
-                        autoFocus
+                        autoFocus={!isTouchDevice()}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                       />
