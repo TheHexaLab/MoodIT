@@ -390,7 +390,13 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
 div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button {
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:start,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:end,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:start,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:end,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:increment,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:decrement {
     display: none;
     width: 0;
     height: 0;
