@@ -548,9 +548,11 @@ div.channel-view > div > div:last-child {
     min-height: 4rem;
     box-sizing: border-box;
     border-top: 1px solid rgba(0, 0, 0, 0.18);
-    /* Décalage clavier mobile : la barre remonte de la hauteur du clavier virtuel (piloté
-       en JS via l'API visualViewport, cf. --keyboard-inset), sinon iOS la masque. */
-    padding-bottom: calc(0.625rem + var(--keyboard-inset, 0px));
+    /* Le décalage clavier n'est PLUS géré ici (padding) : c'est la HAUTEUR du panneau qui est
+       réduite de --keyboard-inset (cf. MainPanel), donc le composer est déjà au-dessus du
+       clavier sans padding parasite (qui provoquait un débordement → 2e scrollbar). On garde
+       juste la marge de sécurité iOS (encoche / barre home) quand le clavier est fermé. */
+    padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Pendant le chargement / l'erreur de chargement : on masque la barre de saisie. */

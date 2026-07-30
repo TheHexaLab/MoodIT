@@ -1,8 +1,13 @@
 .mainPanel {
     height: 100vh;
     /* Hauteur dynamique (mobile) : suit la zone visible du navigateur (barre d'URL comprise)
-       pour que la barre de message reste au bas de l'écran, jamais sous le pli. */
-    height: 100dvh;
+       pour que la barre de message reste au bas de l'écran, jamais sous le pli. On soustrait
+       AUSSI --keyboard-inset (hauteur du clavier virtuel, piloté en JS via visualViewport, cf.
+       ChannelView) : le panneau rétrécit quand le clavier s'ouvre → le composer se retrouve
+       naturellement juste au-dessus du clavier, sans que le panneau ait à défiler (ce qui
+       créait une 2e scrollbar et faisait « disparaître » la barre au scroll). --keyboard-inset
+       vaut 0 hors clavier. */
+    height: calc(100dvh - var(--keyboard-inset, 0px));
     flex-grow: 1;
     min-width: 0;
     box-sizing: border-box;
