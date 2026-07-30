@@ -137,6 +137,15 @@ export default function Dashboard() {
   // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
   const openQuizIdRef = useRef<number | null>(null);
   const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
+  // Signal de fermeture du tiroir mobile : incrémenté UNIQUEMENT à la sélection d'un canal/quiz
+  // (navigation vers le contenu). Un changement de cours ou de programme ne l'incrémente PAS →
+  // le tiroir reste ouvert pour choisir un canal dans le nouveau cours.
+  const [drawerCollapseTick, setDrawerCollapseTick] = useState(0);
+  // Sélection d'un canal/quiz : met à jour la référence ET ferme le tiroir (via le compteur).
+  const selectChannelAndCollapse = (ref: ChannelRef) => {
+    setSelectedChannelRef(ref);
+    setDrawerCollapseTick((t) => t + 1);
+  };
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
   const [popup, setPopup] = useState<PopupState | null>(null);
   // Type de section en cours de création via les états vides du MainPanel
@@ -947,10 +956,10 @@ export default function Dashboard() {
   return (
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        // Clé COMPOSITE (type + id) : un quiz et un canal peuvent partager le même id (séquences
-        // indépendantes). Sans le type, passer d'un quiz à un canal de même id ne changerait pas la
-        // clé → le drawer ne se refermerait pas. `isSameChannel` compare aussi les deux champs.
-        collapseKey={selectedChannelRef ? `${selectedChannelRef.type}:${selectedChannelRef.id}` : undefined}
+        // Compteur incrémenté seulement à la sélection d'un canal/quiz (cf. selectChannelAndCollapse).
+        // Un changement de cours/programme (qui remet selectedChannelRef à undefined) ne le change
+        // PAS → le tiroir NE se ferme PAS, on peut choisir un canal du nouveau cours.
+        collapseKey={drawerCollapseTick}
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
@@ -1008,7 +1017,7 @@ export default function Dashboard() {
               setSelectedChannelRef(undefined);
             }}
             selectedChannel={selectedChannelRef}
-            onSelectChannel={setSelectedChannelRef}
+            onSelectChannel={selectChannelAndCollapse}
             onOpenChannel={handleOpenChannel}
             onSectionChange={handleSectionChange}
             // Gestion du contenu du programme actif (Enseignant / Administrateur / super-admin).
