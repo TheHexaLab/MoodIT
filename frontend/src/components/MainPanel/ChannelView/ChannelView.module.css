@@ -371,9 +371,17 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     max-height: 12rem;
     overflow-x: hidden;
     overflow-y: auto;
-    /* Firefox : scrollbar fine cohérente avec la liste de messages. */
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Firefox UNIQUEMENT (pas de support ::-webkit-scrollbar). Important : ne PAS définir
+   scrollbar-width sur Chrome — depuis Chrome 121+, cela lui fait IGNORER les règles
+   ::-webkit-scrollbar ci-dessous → il réafficherait sa scrollbar native (avec flèches).
+   Même pattern que la liste de messages. */
+@supports not selector(::-webkit-scrollbar) {
+    div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
 }
 
 /* WebKit : même style de scrollbar que la liste de messages (fine, thumb arrondi, sans boutons). */
