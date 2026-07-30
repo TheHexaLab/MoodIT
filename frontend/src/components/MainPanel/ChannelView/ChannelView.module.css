@@ -371,6 +371,29 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     max-height: 12rem;
     overflow-x: hidden;
     overflow-y: auto;
+    /* Firefox : scrollbar fine cohérente avec la liste de messages. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+
+/* WebKit : même style de scrollbar que la liste de messages (fine, thumb arrondi, sans boutons). */
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar {
+    width: 4px;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-track {
+    background: transparent;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea:focus {

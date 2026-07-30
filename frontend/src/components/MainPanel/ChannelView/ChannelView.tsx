@@ -220,6 +220,20 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     if (!ta) return;
     ta.style.height = 'auto';
     if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
+
+    // Suivre le curseur : tant qu'on édite (champ focus), on garde la zone d'édition visible dans
+    // le feed. Quand le textarea grandit vers le bas, on scrolle la liste du minimum nécessaire
+    // pour que son bas (là où on tape) reste dans le viewport, sans jamais dépasser.
+    const list = listRef.current;
+    if (!list || document.activeElement !== ta) return;
+    const taRect = ta.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    const margin = 8;
+    if (taRect.bottom > listRect.bottom) {
+      list.scrollTop += taRect.bottom - listRect.bottom + margin;
+    } else if (taRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - taRect.top + margin;
+    }
   }, [editDraft, editingId]);
 
   // Décalage clavier mobile : sur iOS, le clavier virtuel recouvre le bas de page sans réduire
