@@ -219,7 +219,15 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     const ta = editRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
+    if (ta.scrollHeight > 0) {
+      // La barre de scroll ne doit apparaître QUE sur un vrai débordement : tant que le contenu
+      // tient sous max-height, on met overflow:hidden (sinon l'arrondi au pixel affiche une barre
+      // parasite) ; au-delà, on plafonne la hauteur et on active le scroll.
+      const maxH = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
+      const capped = ta.scrollHeight > maxH;
+      ta.style.height = capped ? `${maxH}px` : `${ta.scrollHeight}px`;
+      ta.style.overflowY = capped ? 'auto' : 'hidden';
+    }
 
     // Suivre le curseur : tant qu'on édite (champ focus), on garde la zone d'édition visible dans
     // le feed. Quand le textarea grandit vers le bas, on scrolle la liste du minimum nécessaire
