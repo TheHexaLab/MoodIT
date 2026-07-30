@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
@@ -44,6 +44,8 @@ interface QuestionFormBodyProps {
   labels?: Partial<QuestionFormLabels>;
   /** Annule (bouton « Annuler ») : retour au formulaire de quiz — pas de fermeture. */
   onCancel: () => void;
+  /** Signalé au 1er changement du brouillon → suivi « modifié » (perte de données). */
+  onDirty?: () => void;
   onSave: (draft: QuestionDraft) => void;
   /** Ouvre la page « Harnais de test » avec le brouillon courant (édits en cours). */
   onManageHarness: (draft: QuestionDraft) => void;
@@ -120,6 +122,7 @@ export function QuestionFormBody({
   onRequestQuestionTypes,
   labels,
   onCancel,
+  onDirty,
   onSave,
   onManageHarness,
   onTest,
@@ -134,6 +137,11 @@ export function QuestionFormBody({
   /** Mobile (associations) : index de la ligne active dont la flèche devient poubelle. */
   const [activeMatch, setActiveMatch] = useState<number | null>(null);
   const matchingListRef = useRef<HTMLDivElement>(null);
+  // Liste courante des entrées (choix / ordre / association) : sert à amener la nouvelle
+  // ligne dans la vue et à la focaliser après un ajout depuis le bouton du pied.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Incrémenté à chaque ajout d'entrée → déclenche le scroll+focus sur la nouvelle ligne.
+  const [addTick, setAddTick] = useState(0);
 
   // Ouverture de l'éditeur de question (ajout/modif) : charge les types de question.
   useEffect(() => {
@@ -159,7 +167,49 @@ export function QuestionFormBody({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [activeMatch]);
 
-  const patch = (p: Partial<QuestionDraft>) => setDraft((d) => ({ ...d, ...p }));
+  const patch = (p: Partial<QuestionDraft>) => {
+    onDirty?.();
+    setDraft((d) => ({ ...d, ...p }));
+  };
+
+  // Ajoute une entrée selon le type (choix / ordre / association) puis demande le scroll+focus.
+  function appendEntry() {
+    onDirty?.();
+    setDraft((d) => {
+      if (d.qType === 'single_choice' || d.qType === 'multiple_choice') {
+        return { ...d, answers: [...(d.answers ?? []), { content: '', isCorrect: false }] };
+      }
+      if (d.qType === 'ordering') {
+        const items = d.dragItems ?? [];
+        return { ...d, dragItems: [...items, { content: '', correctOrder: items.length }] };
+      }
+      if (d.qType === 'matching') {
+        return { ...d, dragItems: [...(d.dragItems ?? []), { content: '', correctOrder: 0, groupName: '' }] };
+      }
+      return d;
+    });
+    setAddTick((n) => n + 1);
+  }
+
+  // Après un ajout (bouton du pied, hors zone scrollable) : amène la nouvelle ligne dans la vue
+  // et focalise son premier champ. `useLayoutEffect` → avant le paint (pas de saut visible).
+  useLayoutEffect(() => {
+    if (addTick === 0) return;
+    const lastRow = listRef.current?.lastElementChild as HTMLElement | null;
+    const input = lastRow?.querySelector('input');
+    input?.scrollIntoView?.({ block: 'nearest' }); // scrollIntoView absent en jsdom (tests)
+    input?.focus();
+  }, [addTick]);
+
+  // Libellé du bouton d'ajout du pied selon le type (null = pas de bouton : Vrai/Faux, Code).
+  const addEntryLabel =
+    draft.qType === 'single_choice' || draft.qType === 'multiple_choice'
+      ? t.addAnswer
+      : draft.qType === 'ordering'
+        ? t.addItem
+        : draft.qType === 'matching'
+          ? t.addAssociation
+          : null;
 
   // Réordonnancement (souris + tactile) des éléments à ordonner (« Remise en ordre »).
   // Les ids sont les INDICES courants — stables le temps du glissé (`dragItems` ne
@@ -179,6 +229,7 @@ export function QuestionFormBody({
 
   /** Changement de type : on repart d'un brouillon vierge du type, en gardant énoncé + points. */
   function changeType(qType: QuestionType) {
+    onDirty?.();
     setDraft((d) => ({ ...emptyQuestionDraft(qType), id: d.id, prompt: d.prompt, totalScore: d.totalScore }));
   }
 
@@ -246,6 +297,14 @@ export function QuestionFormBody({
 
 
       <EditorFooter>
+        {/* Bouton d'ajout HORS de la zone défilante (juste au-dessus des actions). */}
+        {addEntryLabel && (
+          <div className={styles.footerAddRow}>
+            <button type="button" className={styles.addButton} onClick={appendEntry}>
+              + {addEntryLabel}
+            </button>
+          </div>
+        )}
         <div className={styles.footer}>
           <button
             type="button"
@@ -310,7 +369,7 @@ export function QuestionFormBody({
         <div className={styles.sectionBar}>
           <span className={styles.sectionTitle}>{t.answersSection}</span>
         </div>
-        <div className={styles.list}>
+        <div className={styles.list} ref={listRef}>
           {answers.map((a, i) => (
             <div key={i} className={styles.answerRow}>
               <button
@@ -350,15 +409,6 @@ export function QuestionFormBody({
             </div>
           ))}
         </div>
-        {!fixed && (
-          <button
-            type="button"
-            className={styles.addButton}
-            onClick={() => setAnswers([...answers, { content: '', isCorrect: false }])}
-          >
-            + {t.addAnswer}
-          </button>
-        )}
       </div>
     );
   }
@@ -373,7 +423,7 @@ export function QuestionFormBody({
         <div className={styles.sectionBar}>
           <span className={styles.sectionTitle}>{t.orderingSection}</span>
         </div>
-        <div className={styles.list}>
+        <div className={styles.list} ref={listRef}>
           {orderReorder.order.map((id, position) => {
             const d = items[id];
             if (!d) return null;
@@ -416,13 +466,6 @@ export function QuestionFormBody({
             );
           })}
         </div>
-        <button
-          type="button"
-          className={styles.addButton}
-          onClick={() => setItems([...items, { content: '', correctOrder: items.length }])}
-        >
-          + {t.addItem}
-        </button>
       </div>
     );
   }
@@ -436,7 +479,13 @@ export function QuestionFormBody({
         <div className={styles.sectionBar}>
           <span className={styles.sectionTitle}>{t.matchingSection}</span>
         </div>
-        <div className={[styles.list, styles.matchingList].join(' ')} ref={matchingListRef}>
+        <div
+          className={[styles.list, styles.matchingList].join(' ')}
+          ref={(el) => {
+            matchingListRef.current = el;
+            listRef.current = el;
+          }}
+        >
           {items.map((d, i) => (
             <div
               key={i}
@@ -499,13 +548,6 @@ export function QuestionFormBody({
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className={styles.addButton}
-          onClick={() => setItems([...items, { content: '', correctOrder: 0, groupName: '' }])}
-        >
-          + {t.addAssociation}
-        </button>
       </div>
     );
   }

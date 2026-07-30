@@ -858,6 +858,11 @@
 }
 .outlineButton:hover { background: var(--brand-teal-surface); }
 
+/* Bouton d'ajout d'entrée, placé dans le pied FIXE (hors zone défilante), au-dessus des actions. */
+.footerAddRow {
+    margin-bottom: 0.75rem;
+}
+
 /* ── Barre d'actions (dans le pied fixe `.panelFooter`) ── */
 .footer {
     display: flex;

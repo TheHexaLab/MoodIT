@@ -103,6 +103,13 @@ export function QuizEditor({
   // Échec de chargement du détail d'un quiz (clic sur le crayon) : affiché en POPUP, PAS en
   // inline dans le formulaire — on reste sur la liste. `retryEdit` rejoue l'ouverture.
   const [loadFailedQuiz, setLoadFailedQuiz] = useState<Quiz | null>(null);
+  // Modifications non enregistrées dans la session d'édition (méta, brouillon de question,
+  // ajout/suppression/réordre de question, harnais). Pilote la confirmation de perte de
+  // données à la fermeture (X / clic extérieur) et au retour (chevron).
+  const [dirty, setDirty] = useState(false);
+  // Action de fermeture/retour en attente de confirmation (perte de données), ou null.
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
+  const markDirty = useCallback(() => setDirty(true), []);
 
   // AUCUN cache : l'éditeur refetch la liste COMPLÈTE (brouillons compris) à CHAQUE
   // fois que la vue liste s'affiche — à l'ouverture ET au retour depuis l'édition/
@@ -188,6 +195,7 @@ export function QuizEditor({
   async function openEdit(quiz: Quiz) {
     setError(null);
     setLoadFailedQuiz(null);
+    setDirty(false); // nouvelle session d'édition : rien de modifié encore
     snapshotRef.current = quizzes; // état à restaurer si « Annuler »
     // AUCUN cache : on refetch le détail (questions) du quiz à CHAQUE ouverture.
     let full = quiz;
@@ -210,6 +218,7 @@ export function QuizEditor({
   }
 
   function openCreate() {
+    setDirty(false); // nouvelle session : le quiz vierge n'est pas « modifié » tant qu'on ne saisit rien
     snapshotRef.current = quizzes; // état SANS le nouveau quiz : « Annuler » le retire
     const draft: Quiz = {
       id: nextTmpId(),
@@ -273,6 +282,7 @@ export function QuizEditor({
       }
       // Enregistré : les changements de la session deviennent définitifs.
       snapshotRef.current = null;
+      setDirty(false);
       // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
       onQuizzesChange?.(next);
     } catch {
@@ -297,6 +307,7 @@ export function QuizEditor({
         const quiz = quizById(target.quizId);
         if (quiz) {
           upsertQuiz({ ...quiz, questions: (quiz.questions ?? []).filter((x) => x.id !== target.id) });
+          setDirty(true); // suppression de question en mémoire → session modifiée
         }
       }
     } catch {
@@ -338,6 +349,7 @@ export function QuizEditor({
     const i = existing.findIndex((q) => q.id === saved.id);
     const questions = i < 0 ? [...existing, saved] : existing.map((q) => (q.id === saved.id ? saved : q));
     upsertQuiz({ ...quiz, questions });
+    setDirty(true); // question ajoutée/éditée en mémoire → session modifiée
     setError(null);
     // Retour au formulaire en préservant le statut « nouveau quiz ».
     setView({ kind: 'form', quizId, isNew: quizIsNew });
@@ -349,6 +361,7 @@ export function QuizEditor({
     if (!quiz) return;
     const map = new Map((quiz.questions ?? []).map((q) => [q.id, q]));
     upsertQuiz({ ...quiz, questions: questionIds.map((id) => map.get(id)!).filter(Boolean) });
+    setDirty(true); // réordre en mémoire → session modifiée
   }
 
   /**
@@ -362,12 +375,23 @@ export function QuizEditor({
       setQuizzes(snapshotRef.current);
       snapshotRef.current = null;
     }
+    setDirty(false); // session abandonnée → plus rien de « modifié »
     setView({ kind: 'list' });
   }
 
   // ─────────────────────────────────── Rendu ───────────────────────────────────
 
   const activeQuiz = view.kind !== 'list' ? quizById(view.quizId) : null;
+
+  // Fermeture/retour protégés : si des modifications ne sont pas enregistrées, on demande
+  // confirmation (perte de données) avant d'exécuter réellement l'action.
+  const requestDiscard = (action: () => void) => {
+    if (dirty) setPendingDiscard(() => action);
+    else action();
+  };
+  const guardedClose = () => requestDiscard(onClose);
+  // Le retour de la vue « Tester » (prévisualisation) ne perd rien → jamais de confirmation.
+  const backLosesData = view.kind !== 'list' && view.kind !== 'test';
 
   // Identité de la vue affichée : sert à réinitialiser le défilement de la coquille
   // à chaque navigation (liste → quiz → question → harnais), pour ne pas hériter du
@@ -463,8 +487,12 @@ export function QuizEditor({
       <EditorShell
         title={shell.title}
         subtitle={shell.subtitle}
-        onBack={shell.onBack}
-        onClose={onClose}
+        onBack={
+          shell.onBack
+            ? () => (backLosesData ? requestDiscard(shell.onBack!) : shell.onBack!())
+            : undefined
+        }
+        onClose={guardedClose}
         width={shell.width}
         scrollBody={shell.scrollBody}
         desktopMaxVh={shell.desktopMaxVh}
@@ -490,6 +518,7 @@ export function QuizEditor({
             saving={saving}
             labels={labels?.form}
             onCancel={cancelForm}
+            onDirty={markDirty}
             onSaveMeta={(meta) => saveQuizMeta(view.quizId, view.isNew, meta)}
             onAddQuestion={() => openAddQuestion(view.quizId, view.isNew)}
             onEditQuestion={(q) => openEditQuestion(view.quizId, view.isNew, q)}
@@ -509,6 +538,7 @@ export function QuizEditor({
             onRequestQuestionTypes={requestQuestionTypes}
             labels={labels?.question}
             onCancel={() => setView({ kind: 'form', quizId: view.quizId, isNew: view.quizIsNew })}
+            onDirty={markDirty}
             onSave={(draft) => saveQuestion(view.quizId, view.quizIsNew, draft)}
             onManageHarness={(draft) =>
               setView({
@@ -553,15 +583,16 @@ export function QuizEditor({
                     isNew: view.isNew,
                   })
                 }
-                onSave={(testCases) =>
+                onSave={(testCases) => {
+                  markDirty(); // harnais modifié → session modifiée
                   setView({
                     kind: 'question',
                     quizId: view.quizId,
                     quizIsNew: view.quizIsNew,
                     draft: { ...view.draft, testCases },
                     isNew: view.isNew,
-                  })
-                }
+                  });
+                }}
               />
             );
           })()}
@@ -585,6 +616,24 @@ export function QuizEditor({
             content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
             onDeleteConfirmation={confirmDelete}
             onClose={() => setPendingDelete(null)}
+          />
+        </Portal>
+      )}
+
+      {/* Confirmation de PERTE DE DONNÉES : fermeture (X / clic extérieur) ou retour (chevron)
+          alors que des modifications ne sont pas enregistrées. */}
+      {pendingDiscard && (
+        <Portal>
+          <DeleteConfirmationPopup
+            title={t.discardTitle}
+            content={t.discardBody}
+            labels={{ cancel: t.discardCancel, confirm: t.discardConfirm }}
+            onDeleteConfirmation={() => {
+              const action = pendingDiscard;
+              setPendingDiscard(null);
+              action();
+            }}
+            onClose={() => setPendingDiscard(null)}
           />
         </Portal>
       )}

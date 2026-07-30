@@ -20,6 +20,8 @@ interface QuizFormBodyProps {
   labels?: Partial<QuizFormLabels>;
   /** Annule (bouton « Annuler ») : retour à la liste — pas de fermeture. */
   onCancel: () => void;
+  /** Signalé au 1er changement de méta (titre / interrupteurs) → suivi « modifié ». */
+  onDirty?: () => void;
   onSaveMeta: (meta: QuizMetaDraft) => void;
   onAddQuestion: () => void;
   onEditQuestion: (question: Question) => void;
@@ -65,6 +67,7 @@ export function QuizFormBody({
   saving,
   labels,
   onCancel,
+  onDirty,
   onSaveMeta,
   onAddQuestion,
   onEditQuestion,
@@ -102,14 +105,38 @@ export function QuizFormBody({
           value={title}
           maxLength={128}
           placeholder={t.titlePlaceholder}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            onDirty?.();
+            setTitle(e.target.value);
+          }}
         />
       </label>
 
       <div className={styles.toggles}>
-        <Toggle label={t.published} on={isPublished} onToggle={() => setIsPublished((v) => !v)} />
-        <Toggle label={t.daily} on={isDaily} onToggle={() => setIsDaily((v) => !v)} />
-        <Toggle label={t.allowRetry} on={allowRetry} onToggle={() => setAllowRetry((v) => !v)} />
+        <Toggle
+          label={t.published}
+          on={isPublished}
+          onToggle={() => {
+            onDirty?.();
+            setIsPublished((v) => !v);
+          }}
+        />
+        <Toggle
+          label={t.daily}
+          on={isDaily}
+          onToggle={() => {
+            onDirty?.();
+            setIsDaily((v) => !v);
+          }}
+        />
+        <Toggle
+          label={t.allowRetry}
+          on={allowRetry}
+          onToggle={() => {
+            onDirty?.();
+            setAllowRetry((v) => !v);
+          }}
+        />
       </div>
 
       <hr className={styles.divider} />
