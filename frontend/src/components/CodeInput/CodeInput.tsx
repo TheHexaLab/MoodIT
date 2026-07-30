@@ -36,20 +36,27 @@ export function CodeInput({
 
   const handleChange = (index: number, raw: string) => {
     const clean = raw.replace(/\D/g, '');
-    const next = digits.slice();
     if (clean.length === 0) {
+      const next = digits.slice();
       next[index] = '';
       emit(next);
       return;
     }
-    // Saisie rapide / autofill : plusieurs chiffres arrivent d'un coup → on les répartit.
-    const chars = clean.slice(0, length - index).split('');
-    chars.forEach((c, k) => {
-      next[index + k] = c;
-    });
+    // Collage / autofill : plusieurs chiffres arrivent d'un coup. Quelle que soit la case où ils
+    // atterrissent, on remplit TOUT le code depuis le DÉBUT (comme un vrai champ OTP), et non à
+    // partir de la case courante. Couvre le collage mobile (l'évènement `paste` ne se déclenche
+    // souvent pas → tout passe par ce `onChange`).
+    if (clean.length > 1) {
+      const code = clean.slice(0, length);
+      onChange(code);
+      refs.current[Math.min(code.length, length - 1)]?.focus();
+      return;
+    }
+    // Un seul chiffre : saisie normale → on le place dans la case courante et on avance.
+    const next = digits.slice();
+    next[index] = clean;
     emit(next);
-    const focusAt = Math.min(index + chars.length, length - 1);
-    refs.current[focusAt]?.focus();
+    if (index < length - 1) refs.current[index + 1]?.focus();
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
