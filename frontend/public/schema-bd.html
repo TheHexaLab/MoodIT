@@ -2,31 +2,33 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>MoodIt — Schéma de la base de données (interactif)</title>
 <style>
-  html,body { margin:0; height:100%; overflow:hidden; font-family:system-ui,sans-serif; background:#fafafa; }
+  html,body { margin:0; height:100%; overflow:hidden; font-family:system-ui,sans-serif;
+               background:#fff; overscroll-behavior:none; }
   #bar { position:fixed; top:0; left:0; right:0; z-index:10; display:flex; gap:8px; align-items:center;
-         flex-wrap:wrap; padding:10px 14px; background:#ffffffee; border-bottom:1px solid #e2e5ea;
-         backdrop-filter:blur(4px); }
+         flex-wrap:wrap; padding:10px 14px; background:#ffffffee; border-bottom:1px solid #e2e5ea; }
   #bar h1 { font-size:15px; margin:0 14px 0 0; color:#1a1a2e; }
   #bar button { border:1.5px solid var(--c,#666); color:var(--c,#333); background:#fff;
                  border-radius:16px; padding:5px 13px; font-size:13px; cursor:pointer; font-weight:600; }
   #bar button:hover { background:var(--c); color:#fff; }
   #bar .home { --c:#1a1a2e; }
   #hint { margin-left:auto; font-size:12px; color:#8a8f98; }
-  #stage { position:absolute; inset:0; top:52px; cursor:grab; }
-  #stage.drag { cursor:grabbing; }
-  #stage svg { position:absolute; transform-origin:0 0; will-change:transform; }
+  #stage { position:absolute; top:52px; left:0; right:0; bottom:0; cursor:grab;
+            -webkit-user-select:none; user-select:none; touch-action:none; }
+  #stage.drag, #stage[class=drag] { cursor:grabbing; }
+  #schema { display:block; }
 </style>
 </head>
 <body>
 <div id="bar">
   <h1>MoodIt — Schéma BD</h1>
   <button class="home" onclick="fitAll(true)">⌂ Vue d'ensemble</button>
-  <button style="--c:#1e5aa8" onclick="goTo(3243.0,914.0,1124.0,1366.0)">Utilisateurs & rôles</button><button style="--c:#1a6e3c" onclick="goTo(12.0,12.0,1322.0,641.0)">Établissements & programmes</button><button style="--c:#7a3e9d" onclick="goTo(1474.0,1150.0,1579.0,940.0)">Cours & forums</button><button style="--c:#b3541e" onclick="goTo(3243.0,2299.0,1445.0,906.0)">Quiz & questions</button><button style="--c:#a4133c" onclick="goTo(1824.0,2509.0,1229.0,487.0)">Tentatives & soumissions</button><button style="--c:#41525d" onclick="goTo(910.0,672.0,424.0,696.0)">Audit & analyse MCP</button>
-  <span id="hint">molette = zoom &nbsp;•&nbsp; glisser = déplacer &nbsp;•&nbsp; double-clic = zoom ciblé &nbsp;•&nbsp; touches 0-6</span>
+  <button style="--c:#1e5aa8" onclick="goTo(3243,914,1124,1366)">Utilisateurs & rôles</button><button style="--c:#1a6e3c" onclick="goTo(12,12,1322,641)">Établissements & programmes</button><button style="--c:#7a3e9d" onclick="goTo(1474,1150,1579,940)">Cours & forums</button><button style="--c:#b3541e" onclick="goTo(3243,2299,1445,906)">Quiz & questions</button><button style="--c:#a4133c" onclick="goTo(1824,2509,1229,487)">Tentatives & soumissions</button><button style="--c:#41525d" onclick="goTo(910,672,424,696)">Audit & analyse MCP</button>
+  <span id="hint">molette / pincer = zoom • glisser = déplacer • double-clic = zoom • touches 0-6</span>
 </div>
-<div id="stage"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.7.0" preserveAspectRatio="xMinYMin meet" viewBox="0 0 4923 3436"><svg class="d2-2418443704 d2-svg" width="4923" height="3436" viewBox="-89 -89 4923 3436"><rect x="-89.000000" y="-89.000000" width="4923.000000" height="3436.000000" rx="0.000000" fill="#FFFFFF" class=" fill-N7" stroke-width="0" /><style type="text/css"><![CDATA[
+<div id="stage"><svg id="schema" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="d2-2418443704 d2-svg" viewBox="-89 -89 4923 3436"><rect x="-89.000000" y="-89.000000" width="4923.000000" height="3436.000000" rx="0.000000" fill="#FFFFFF" class=" fill-N7" stroke-width="0" /><style type="text/css"><![CDATA[
 .d2-2418443704 .text {
 	font-family: "d2-2418443704-font-regular";
 }
@@ -139,82 +141,158 @@
 <rect x="3882.500000" y="2304.000000" width="166" height="28" fill="rgba(0,0,0,0.75)"></rect>
 <rect x="2313.000000" y="2514.000000" width="251" height="28" fill="rgba(0,0,0,0.75)"></rect>
 <rect x="1020.500000" y="677.000000" width="203" height="28" fill="rgba(0,0,0,0.75)"></rect>
-</mask></svg></svg>
-</div>
+</mask></svg></div>
 <script>
-const stage = document.getElementById('stage');
-const svg = stage.querySelector('svg');
-const VW = 4923.0, VH = 3436.0;
-svg.setAttribute('width', VW); svg.setAttribute('height', VH);
-svg.style.left = 0; svg.style.top = 0;
+var stage = document.getElementById('stage');
+var svgEl = document.getElementById('schema');
+var WORLD = { x: -89.0, y: -89.0, w: 4923.0, h: 3436.0 };
+var view = { x: WORLD.x, y: WORLD.y, w: WORLD.w, h: WORLD.h };
+var animId = null;
+var WMIN = 60, WMAX = WORLD.w * 4;
 
-let scale = 1, tx = 0, ty = 0, anim = null;
-function apply() { svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; }
-
-function viewSize() { return [stage.clientWidth, stage.clientHeight]; }
-
+function stW() { return stage.clientWidth  || window.innerWidth || 1024; }
+function stH() { return stage.clientHeight || ((window.innerHeight || 768) - 52); }
+function aspect() { return stH() / stW(); }
+function applyView() {
+  view.h = view.w * aspect();
+  svgEl.setAttribute('width',  stW());
+  svgEl.setAttribute('height', stH());
+  svgEl.setAttribute('viewBox', view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h);
+}
+function pxToWorld(px, py) {
+  return [view.x + (px / stW()) * view.w, view.y + (py / stH()) * view.h];
+}
 function targetFor(x, y, w, h, pad) {
-  const [SW, SH] = viewSize();
-  const s = Math.min(SW / (w + 2*pad), SH / (h + 2*pad));
-  return [s, SW/2 - (x + w/2) * s, SH/2 - (y + h/2) * s];
+  var a = aspect();
+  var tw = w + 2 * pad, th = h + 2 * pad;
+  if (th / tw > a) tw = th / a;
+  return { x: x + w/2 - tw/2, y: y + h/2 - (tw * a)/2, w: tw };
 }
-
-function animateTo(s2, tx2, ty2) {
-  if (anim) cancelAnimationFrame(anim);
-  const s1 = scale, x1 = tx, y1 = ty, t0 = performance.now(), D = 550;
-  function step(t) {
-    let k = Math.min(1, (t - t0) / D);
-    k = k < .5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;   // easeInOutCubic
-    scale = s1 + (s2 - s1) * k;
-    tx = x1 + (tx2 - x1) * k;  ty = y1 + (ty2 - y1) * k;
-    apply();
-    if (k < 1) anim = requestAnimationFrame(step);
+function stopAnim() { if (animId) { cancelAnimationFrame(animId); animId = null; } }
+function animateTo(t) {
+  stopAnim();
+  var s = { x: view.x, y: view.y, w: view.w };
+  var t0 = (window.performance && performance.now) ? performance.now() : +new Date();
+  var D = 550;
+  function now() { return (window.performance && performance.now) ? performance.now() : +new Date(); }
+  function step() {
+    var k = Math.min(1, (now() - t0) / D);
+    k = k < .5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3) / 2;
+    view.x = s.x + (t.x - s.x) * k;
+    view.y = s.y + (t.y - s.y) * k;
+    view.w = s.w + (t.w - s.w) * k;
+    applyView();
+    if (k < 1) animId = requestAnimationFrame(step); else animId = null;
   }
-  anim = requestAnimationFrame(step);
+  if (!window.requestAnimationFrame) { view.x = t.x; view.y = t.y; view.w = t.w; applyView(); return; }
+  animId = requestAnimationFrame(step);
 }
-
-function goTo(x, y, w, h) { animateTo(...targetFor(x, y, w, h, 30)); }
+function goTo(x, y, w, h) { animateTo(targetFor(x, y, w, h, 30)); }
 function fitAll(smooth) {
-  const t = targetFor(0, 0, VW, VH, 20);
-  smooth ? animateTo(...t) : ([scale, tx, ty] = t, apply());
+  var t = targetFor(WORLD.x, WORLD.y, WORLD.w, WORLD.h, 20);
+  if (smooth) animateTo(t);
+  else { view.x = t.x; view.y = t.y; view.w = t.w; applyView(); }
+}
+function zoomAt(px, py, f) {
+  var w2 = Math.min(WMAX, Math.max(WMIN, view.w / f));
+  f = view.w / w2;
+  var wpt = pxToWorld(px, py);
+  view.w = w2;
+  view.x = wpt[0] - (wpt[0] - view.x) / f;
+  view.y = wpt[1] - (wpt[1] - view.y) / f;
+  applyView();
+}
+function stagePos(e) {
+  var r = stage.getBoundingClientRect();
+  return [e.clientX - r.left, e.clientY - r.top];
 }
 
-// molette : zoom centré sur le curseur
-stage.addEventListener('wheel', e => {
+// --- molette / trackpad ---
+function onWheel(e) {
+  e.preventDefault(); stopAnim();
+  var d = (e.deltaY !== undefined) ? e.deltaY : -e.wheelDelta;
+  var p = stagePos(e);
+  var f = e.ctrlKey ? Math.exp(-d * 0.01) : (d < 0 ? 1.18 : 1/1.18);
+  zoomAt(p[0], p[1], f);
+}
+stage.addEventListener('wheel', onWheel, { passive: false });
+
+// --- souris : glisser ---
+var mDown = false, mX = 0, mY = 0;
+stage.addEventListener('mousedown', function(e) {
+  if (e.button !== 0) return;
+  mDown = true; mX = e.clientX; mY = e.clientY;
+  stage.className = 'drag'; stopAnim(); e.preventDefault();
+});
+window.addEventListener('mousemove', function(e) {
+  if (!mDown) return;
+  view.x -= (e.clientX - mX) * view.w / stW();
+  view.y -= (e.clientY - mY) * view.h / stH();
+  mX = e.clientX; mY = e.clientY; applyView();
+});
+window.addEventListener('mouseup', function() { mDown = false; stage.className = ''; });
+
+// --- tactile : 1 doigt glisse, 2 doigts pincent ---
+var tD = 0, tC = null, tP = null;
+stage.addEventListener('touchstart', function(e) {
+  stopAnim();
+  if (e.touches.length === 1) { tP = [e.touches[0].clientX, e.touches[0].clientY]; }
+  else if (e.touches.length === 2) {
+    var a = e.touches[0], b = e.touches[1];
+    tD = Math.sqrt(Math.pow(a.clientX-b.clientX,2) + Math.pow(a.clientY-b.clientY,2));
+    tC = [(a.clientX+b.clientX)/2, (a.clientY+b.clientY)/2];
+  }
   e.preventDefault();
-  const f = e.deltaY < 0 ? 1.18 : 1/1.18;
-  const r = stage.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  tx = mx - (mx - tx) * f;  ty = my - (my - ty) * f;
-  scale *= f;  apply();
-}, { passive:false });
-
-// glisser pour déplacer
-let dragging = false, lx = 0, ly = 0;
-stage.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY;
-  stage.classList.add('drag'); stage.setPointerCapture(e.pointerId); });
-stage.addEventListener('pointermove', e => { if (!dragging) return;
-  tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply(); });
-stage.addEventListener('pointerup', () => { dragging = false; stage.classList.remove('drag'); });
-
-// double-clic : zoom x2 sur le point
-stage.addEventListener('dblclick', e => {
-  const r = stage.getBoundingClientRect();
-  const px = (e.clientX - r.left - tx) / scale, py = (e.clientY - r.top - ty) / scale;
-  const [SW, SH] = viewSize();
-  animateTo(scale*2, SW/2 - px*scale*2, SH/2 - py*scale*2);
+}, { passive: false });
+stage.addEventListener('touchmove', function(e) {
+  if (e.touches.length === 1 && tP) {
+    var t = e.touches[0];
+    view.x -= (t.clientX - tP[0]) * view.w / stW();
+    view.y -= (t.clientY - tP[1]) * view.h / stH();
+    tP = [t.clientX, t.clientY]; applyView();
+  } else if (e.touches.length === 2 && tD > 0) {
+    var a = e.touches[0], b = e.touches[1];
+    var d = Math.sqrt(Math.pow(a.clientX-b.clientX,2) + Math.pow(a.clientY-b.clientY,2));
+    var c = [(a.clientX+b.clientX)/2, (a.clientY+b.clientY)/2];
+    var r = stage.getBoundingClientRect();
+    if (d > 0) zoomAt(c[0]-r.left, c[1]-r.top, d / tD);
+    view.x -= (c[0] - tC[0]) * view.w / stW();
+    view.y -= (c[1] - tC[1]) * view.h / stH();
+    applyView();
+    tD = d; tC = c;
+  }
+  e.preventDefault();
+}, { passive: false });
+stage.addEventListener('touchend', function(e) {
+  if (e.touches.length === 0) { tP = null; tD = 0; }
+  else if (e.touches.length === 1) { tP = [e.touches[0].clientX, e.touches[0].clientY]; tD = 0; }
 });
 
-// raccourcis clavier : 0 = vue d'ensemble, 1-6 = domaines
-const Z = [[3243.0, 914.0, 1124.0, 1366.0], [12.0, 12.0, 1322.0, 641.0], [1474.0, 1150.0, 1579.0, 940.0], [3243.0, 2299.0, 1445.0, 906.0], [1824.0, 2509.0, 1229.0, 487.0], [910.0, 672.0, 424.0, 696.0]];
-window.addEventListener('keydown', e => {
-  if (e.key === '0' || e.key === 'Escape') fitAll(true);
-  const n = parseInt(e.key);
-  if (n >= 1 && n <= Z.length) goTo(...Z[n-1]);
+// --- double-clic ---
+stage.addEventListener('dblclick', function(e) {
+  e.preventDefault();
+  var p = stagePos(e);
+  var wpt = pxToWorld(p[0], p[1]);
+  var w2 = Math.max(WMIN, view.w / 2);
+  animateTo({ x: wpt[0] - w2/2, y: wpt[1] - (w2 * aspect())/2, w: w2 });
 });
 
-window.addEventListener('resize', () => fitAll(false));
+// --- clavier ---
+var Z = [[3243, 914, 1124, 1366], [12, 12, 1322, 641], [1474, 1150, 1579, 940], [3243, 2299, 1445, 906], [1824, 2509, 1229, 487], [910, 672, 424, 696]];
+window.addEventListener('keydown', function(e) {
+  var k = e.key || String.fromCharCode(e.keyCode);
+  if (k === '0') fitAll(true);
+  var n = parseInt(k, 10);
+  if (n >= 1 && n <= Z.length) { var z = Z[n-1]; goTo(z[0], z[1], z[2], z[3]); }
+});
+
+var lastW = window.innerWidth;
+window.addEventListener('resize', function() {
+  applyView();
+  if (Math.abs(window.innerWidth - lastW) > 40) { lastW = window.innerWidth; fitAll(false); }
+});
 fitAll(false);
+window.addEventListener('load', function() { fitAll(false); });
 </script>
 </body>
 </html>
