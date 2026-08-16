@@ -18,6 +18,11 @@ COPY <<'EOF' /etc/nginx/conf.d/default.conf
 server {
     listen 5173;
 
+    # Anti fuite de version : masque "nginx/x.y.z" dans l'en-tête Server et les
+    # pages d'erreur. Caddy retire de toute façon l'en-tête Server côté public,
+    # ceci couvre les réponses internes / défense en profondeur.
+    server_tokens off;
+
     location / {
         root /usr/share/nginx/html;
         index index.html;
