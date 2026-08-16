@@ -43,6 +43,17 @@
 	}
 }
 
+# Redirection HTTP -> HTTPS EXPLICITE (port 80). Sans ce bloc, Caddy génère une
+# redirection 308 automatique qui NE porte PAS les en-têtes de sécurité -> les
+# scanners signalent "HSTS Header Not Set" sur ces réponses. On y attache donc
+# security_headers avant de rediriger. (Les navigateurs ignorent HSTS reçu en
+# HTTP par la RFC 6797 ; c'est surtout pour la conformité scanner.) Caddy sert
+# toujours les challenges ACME /.well-known/ sur le port 80 malgré ce bloc.
+http://moodit.ca, http://www.moodit.ca {
+	import security_headers
+	redir https://{host}{uri} permanent
+}
+
 moodit.ca, www.moodit.ca {
 	encode gzip zstd
 	import security_headers
