@@ -14,10 +14,12 @@
 		#  - script-src : 'self' + hash du script inline de bootstrap thème dans
 		#    index.html (pas de 'unsafe-inline' JS). Si ce script change, recalculer
 		#    le hash (openssl dgst -sha256 -binary | openssl base64 sur son contenu).
-		#  - style-src 'unsafe-inline' : REQUIS par les ~43 style={{…}} dynamiques
-		#    (couleurs de programmes/avatars, barres de progression, positions de
-		#    menus). Valeurs calculées au runtime → ni hash ni nonce possibles.
-		#    N'autorise AUCUN script (script-src reste strict) → risque marginal.
+		#  - style-src 'unsafe-inline' : REQUIS par KaTeX. Le rendu des formules
+		#    maths du forum (Markdown.tsx -> dangerouslySetInnerHTML) produit du
+		#    HTML avec des attributs style="..." inline, dynamiques (dépendent de
+		#    l'équation) -> ni hash ni nonce possibles. (Les style={{}} de React,
+		#    eux, passent par le CSSOM et ne nécessitent PAS 'unsafe-inline'.)
+		#    N'autorise AUCUN script (script-src reste strict) => risque marginal.
 		#  - img-src : PAS de wildcard 'https:' (aucune image externe en prod ;
 		#    seule une page de test chargeait une photo LinkedIn). data:/blob:
 		#    conservés pour favicons et aperçus d'images générés côté client.
