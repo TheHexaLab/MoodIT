@@ -1,9 +1,11 @@
 (function () {
   var FILE = 'Plan_de_test_MoodIT.xlsx';
+  var STYLES = 'plan-de-test.styles.json';
   var statusEl = document.getElementById('status');
   var tabsEl = document.getElementById('tabs');
   var sheetEl = document.getElementById('sheet');
   var wb = null;
+  var styles = null; // { defaults:{bg,fg}, sheets:{ name:{ "r,c":{b,f,w} } } }
 
   function setError(msg) {
     statusEl.style.display = '';
@@ -72,6 +74,7 @@
       return;
     }
     var mm = buildMergeMaps(ws);
+    var styleMap = (styles && styles.sheets[name]) || null;
     var table = document.createElement('table');
     var thead = document.createElement('thead');
     var tbody = document.createElement('tbody');
@@ -91,6 +94,13 @@
         }
         td.textContent = cellText(cell);
         if (!isHeader && cell && cell.t === 'n') td.className = 'num';
+        // Couleurs du document Excel (fond/texte/gras) — cf. plan-de-test.styles.json.
+        var st = styleMap && styleMap[key];
+        if (st) {
+          if (st.b) td.style.backgroundColor = '#' + st.b;
+          if (st.f) td.style.color = '#' + st.f;
+          if (st.w) td.style.fontWeight = '700';
+        }
         tr.appendChild(td);
       }
       (isHeader ? thead : tbody).appendChild(tr);
@@ -128,13 +138,20 @@
     return idx >= 0 ? idx : 0;
   }
 
-  fetch(FILE)
-    .then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.arrayBuffer();
-    })
-    .then(function (buf) {
-      wb = XLSX.read(buf, { type: 'array' });
+  // Les styles sont optionnels : en cas d'échec, on rend quand même les données.
+  var stylesReq = fetch(STYLES)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; });
+
+  var dataReq = fetch(FILE).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.arrayBuffer();
+  });
+
+  Promise.all([dataReq, stylesReq])
+    .then(function (res) {
+      styles = res[1];
+      wb = XLSX.read(res[0], { type: 'array' });
       if (!wb.SheetNames.length) throw new Error('classeur vide');
       statusEl.style.display = 'none';
       buildTabs();
