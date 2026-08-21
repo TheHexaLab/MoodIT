@@ -47,12 +47,84 @@ step() { printf '\n[%s] ===== %s =====\n' "$(date '+%F %T')" "$*" >>"$LOG"
 fail() { printf '[%s] ÉCHEC : %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
          printf '\n%s✖ ÉCHEC : %s%s\n' "$RED" "$*" "$RST"; exit 1; }
 
-# Exécute une commande longue en STREAMANT sa sortie (console + log).
-# pipefail (set plus haut) fait remonter l'échec de la commande malgré le tee.
+# Conteneurs à longue durée de vie (piston_init est one-shot, traité à part).
+SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_piston moodit_execution"
+BOX_H="${BOX_H:-14}"   # hauteur (lignes) de la boîte de sortie du build
+
+# Répète un caractère n fois (gère l'UTF-8 des bordures).
+_rep() { local n="$1" c="$2" s='' i; for ((i=0;i<n;i++)); do s+="$c"; done; printf '%s' "$s"; }
+
+# Affiche les dernières lignes de stdin dans une BOÎTE à hauteur fixe qui se
+# redessine en place (au lieu de dérouler tout l'écran). Le flux complet est
+# déjà écrit dans le log en amont (tee) ; ici on ne fait que l'AFFICHER.
+box_tail() {
+  local title="$1" H="${2:-14}"
+  local W; W="$(tput cols 2>/dev/null || echo 100)"
+  [ -z "$W" ] && W=100; [ "$W" -gt 118 ] && W=118; [ "$W" -lt 48 ] && W=48
+  local inner=$((W-2)) usable=$((W-4))
+  local -a buf=(); local drawn=0
+  local t=" ${title} "; (( ${#t} > inner-2 )) && t="${t:0:inner-2}"
+  local fill=$(( inner - 1 - ${#t} )); (( fill < 0 )) && fill=0
+  local topb="┌─${t}$(_rep "$fill" '─')┐"
+  local botb="└$(_rep "$inner" '─')┘"
+  redraw() {
+    (( drawn )) && printf '\033[%dA' $((H+2)); drawn=1
+    printf '\r\033[2K%s%s%s\n' "$DIM" "$topb" "$RST"
+    local n=${#buf[@]} start=0 i idx ln pad
+    (( n > H )) && start=$((n-H))
+    for ((i=0;i<H;i++)); do
+      idx=$((start+i)); ln=''; (( idx < n )) && ln="${buf[idx]}"
+      (( ${#ln} > usable )) && ln="${ln:0:usable}"
+      printf -v pad '%*s' "$(( usable - ${#ln} ))" ''
+      printf '\r\033[2K%s│%s %s%s %s│%s\n' "$DIM" "$RST" "$ln" "$pad" "$DIM" "$RST"
+    done
+    printf '\r\033[2K%s%s%s\n' "$DIM" "$botb" "$RST"
+  }
+  redraw
+  while IFS= read -r line; do line="${line//$'\r'/}"; buf+=("$line"); redraw; done
+}
+
+# Exécute une commande longue. En terminal : sortie confinée dans une BOÎTE à
+# hauteur fixe ($BOX_H dernières lignes). Hors terminal/cron : flux brut. Le log
+# reçoit TOUT dans les deux cas. pipefail fait remonter l'échec malgré le tee.
 stream() {
-  printf '%s   $ %s%s\n' "$DIM" "$*" "$RST"
+  local title="$1"; shift
   printf '[%s] $ %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
-  "$@" 2>&1 | tee -a "$LOG"
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    "$@" 2>&1 | tee -a "$LOG" | box_tail "$title" "$BOX_H"
+  else
+    printf '   $ %s\n' "$*"
+    "$@" 2>&1 | tee -a "$LOG"
+  fi
+}
+
+# Health check par service : HTTPS public + état de chaque conteneur (running,
+# + statut de santé Docker s'il existe, ex. postgres). Renvoie 0 si tout est OK.
+hcheck() {
+  local allok=1 name st health code
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo 000)"
+  if [ "$code" = "200" ]; then
+    printf '   %s✔%s %-14s %shttps %s%s\n' "$GRN" "$RST" "moodit.ca" "$DIM" "$code" "$RST"
+    printf '[%s] health HTTPS -> %s\n' "$(date '+%F %T')" "$code" >>"$LOG"
+  else
+    printf '   %s✖%s %-14s %shttps %s%s\n' "$RED" "$RST" "moodit.ca" "$YEL" "$code" "$RST"
+    printf '[%s] health HTTPS -> %s (KO)\n' "$(date '+%F %T')" "$code" >>"$LOG"; allok=0
+  fi
+  for name in $SERVICES_UP; do
+    st="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo absent)"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null || true)"
+    if [ "$st" = "running" ] && { [ -z "$health" ] || [ "$health" = "healthy" ]; }; then
+      printf '   %s✔%s %-14s %srunning%s%s\n' "$GRN" "$RST" "${name#moodit_}" "$DIM" "${health:+ ($health)}" "$RST"
+      printf '[%s] health %s: running%s\n' "$(date '+%F %T')" "$name" "${health:+ ($health)}" >>"$LOG"
+    else
+      printf '   %s✖%s %-14s %s%s%s%s\n' "$RED" "$RST" "${name#moodit_}" "$YEL" "$st" "${health:+ ($health)}" "$RST"
+      printf '[%s] health %s: %s%s (KO)\n' "$(date '+%F %T')" "$name" "$st" "${health:+ ($health)}" >>"$LOG"; allok=0
+    fi
+  done
+  st="$(docker inspect -f '{{.State.Status}}' moodit_piston_init 2>/dev/null || echo absent)"
+  health="$(docker inspect -f '{{.State.ExitCode}}' moodit_piston_init 2>/dev/null || echo '?')"
+  printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "piston_init" "$DIM" "$st" "$health" "$RST"
+  return $(( allok ? 0 : 1 ))
 }
 
 banner() {
@@ -161,13 +233,13 @@ rollback() {
   fail "Build/déploiement de la nouvelle version échoué — ancienne version restaurée."
 }
 
-step "4/5 · Build des images  (sortie en direct ↓)"
+step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
-if ! stream $COMPOSE build; then rollback; fi
+if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
 ok "Images construites."
 
-step "5/5 · Redémarrage des services  (sortie en direct ↓)"
-if ! stream $COMPOSE up -d; then rollback; fi
+step "5/5 · Redémarrage des services"
+if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
 ok "Services démarrés."
 
 # --- 4. Nettoyage des images orphelines -------------------------------------
@@ -175,25 +247,21 @@ docker image prune -f >/dev/null 2>&1 || true
 
 # --- 5. Health check --------------------------------------------------------
 step "Vérification de santé"
-printf '   %sAttente du démarrage (8 s)…%s\n' "$DIM" "$RST"
+printf '   %sAttente du démarrage des services (8 s)…%s\n' "$DIM" "$RST"
 sleep 8
-CODE="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo 000)"
-# On ignore piston_init : conteneur one-shot qui S'ARRÊTE normalement (exit 0)
-# après avoir installé les langages dans le sandbox.
-DOWN="$($COMPOSE ps --status exited --status dead --format '{{.Name}}' 2>/dev/null | grep -vc 'piston_init' || true)"
 
 ELAPSED="$((SECONDS / 60))m$((SECONDS % 60))s"
-if [ "$CODE" = "200" ] && [ "$DOWN" -eq 0 ]; then
+if hcheck; then
   printf '\n%s╔══════════════════════════════════════════════════════╗%s\n' "$GRN" "$RST"
-  printf '%s║  ✔ DÉPLOIEMENT RÉUSSI%s\n' "$GRN" "$RST"
+  printf '%s║  ✔ DÉPLOIEMENT RÉUSSI                                 ║%s\n' "$GRN" "$RST"
   printf '%s╚══════════════════════════════════════════════════════╝%s\n' "$GRN" "$RST"
-  log "OK : déployé ${REMOTE:0:8} — HTTPS $CODE, tous les conteneurs up.  (durée $ELAPSED)"
-  ok "Version ${REMOTE:0:8} · HTTPS $CODE · conteneurs OK · $ELAPSED"
+  log "OK : déployé ${REMOTE:0:8} — tous les services up.  (durée $ELAPSED)"
+  ok "Version ${REMOTE:0:8} · tous services OK · $ELAPSED"
 else
   printf '\n%s╔══════════════════════════════════════════════════════╗%s\n' "$YEL" "$RST"
-  printf '%s║  ⚠ DÉPLOYÉ, MAIS À VÉRIFIER%s\n' "$YEL" "$RST"
+  printf '%s║  ⚠ DÉPLOYÉ, MAIS AU MOINS UN SERVICE KO              ║%s\n' "$YEL" "$RST"
   printf '%s╚══════════════════════════════════════════════════════╝%s\n' "$YEL" "$RST"
-  warn "post-déploiement : HTTPS=$CODE, conteneurs arrêtés=$DOWN.  (durée $ELAPSED)"
-  printf '   Inspecte : %s$COMPOSE ps%s   et   %s$COMPOSE logs%s\n' "$BOLD" "$RST" "$BOLD" "$RST"
+  warn "post-déploiement : au moins un service KO (voir ci-dessus).  (durée $ELAPSED)"
+  printf '   Inspecte : %sdocker compose -f docker-compose-hetzner.yml logs -f <service>%s\n' "$BOLD" "$RST"
 fi
 log "=== FIN ($ELAPSED) ==="
