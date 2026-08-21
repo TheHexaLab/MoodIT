@@ -27,13 +27,28 @@ KEEP_BACKUPS=7
 HEALTH_URL="https://moodit.ca"
 FORCE="${1:-}"
 
-# --- Couleurs (désactivées hors terminal, en cron, ou si NO_COLOR) ----------
+# --- Thème « matrix » (vert). Désactivé hors terminal, en cron, ou si NO_COLOR -
+shopt -s extglob
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[1;31m'; GRN=$'\033[1;32m'
-  YEL=$'\033[1;33m'; BLU=$'\033[1;34m'; CYA=$'\033[1;36m'; RST=$'\033[0m'
+  RST=$'\033[0m'
+  GB=$'\033[1;32m'          # vert vif  (titres, ✔, cadres forts)
+  G=$'\033[32m'             # vert      (bordures de boîte)
+  GD=$'\033[2;32m'          # vert sombre (détails, horodatage, pluie)
+  RED=$'\033[1;31m'; YEL=$'\033[1;33m'
 else
-  BOLD=''; DIM=''; RED=''; GRN=''; YEL=''; BLU=''; CYA=''; RST=''
+  RST=''; GB=''; G=''; GD=''; RED=''; YEL=''
 fi
+# Alias de compatibilité (le reste du script utilise ces noms) :
+BOLD="$GB"; DIM="$GD"; BLU="$GB"; CYA="$G"; GRN="$GB"
+COLS="$(tput cols 2>/dev/null || echo 60)"; [ -z "$COLS" ] && COLS=60; (( COLS > 64 )) && COLS=64
+
+# Ligne de « pluie » façon Matrix — ASCII pur pour un alignement parfait.
+matrix_line() {
+  [ -z "$GD" ] && return 0
+  local w="${1:-$COLS}" s='' i set='01001011010<>|/\=+*.01'
+  for ((i=0;i<w;i++)); do s+="${set:RANDOM%${#set}:1}"; done
+  printf '%s%s%s\n' "$GD" "$s" "$RST"
+}
 
 # Journalise : fichier en BRUT (horodaté), console en COULEUR.
 log()  { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
@@ -54,9 +69,27 @@ BOX_H="${BOX_H:-14}"   # hauteur (lignes) de la boîte de sortie du build
 # Répète un caractère n fois (gère l'UTF-8 des bordures).
 _rep() { local n="$1" c="$2" s='' i; for ((i=0;i<n;i++)); do s+="$c"; done; printf '%s' "$s"; }
 
+# Largeur d'AFFICHAGE d'une chaîne (points de code UTF-8, 1 colonne/caractère) —
+# indépendante de la locale, pour aligner les bordures malgré les accents / ✔.
+_dw() { local LC_ALL=C s="$1" i n=0 b
+  for ((i=0;i<${#s};i++)); do printf -v b '%d' "'${s:i:1}"; (( (b & 192) != 128 )) && ((n++)); done
+  printf '%s' "$n"; }
+
 # Affiche les dernières lignes de stdin dans une BOÎTE à hauteur fixe qui se
 # redessine en place (au lieu de dérouler tout l'écran). Le flux complet est
 # déjà écrit dans le log en amont (tee) ; ici on ne fait que l'AFFICHER.
+# Nettoie une ligne pour un alignement fiable : retire les codes ANSI (largeur 0),
+# convertit les tabulations et supprime les autres caractères de contrôle.
+_clean() {
+  local s="$1" esc=$'\033'
+  s="${s//$'\r'/}"
+  s="${s//$'\t'/    }"
+  s="${s//${esc}\[*([0-9;:<=>?])*([ -\/])[@-~]/}"      # séquences CSI (ESC[…m, etc.)
+  s="${s//${esc}\][^${esc}]*${esc}\\/}"                # séquences OSC (ESC]…ST)
+  s="${s//[$'\001'-$'\010'$'\013'-$'\037']/}"          # autres contrôles
+  printf '%s' "$s"
+}
+
 box_tail() {
   local title="$1" H="${2:-14}"
   local W; W="$(tput cols 2>/dev/null || echo 100)"
@@ -69,19 +102,34 @@ box_tail() {
   local botb="└$(_rep "$inner" '─')┘"
   redraw() {
     (( drawn )) && printf '\033[%dA' $((H+2)); drawn=1
-    printf '\r\033[2K%s%s%s\n' "$DIM" "$topb" "$RST"
+    printf '\r\033[2K%s%s%s\n' "$G" "$topb" "$RST"
     local n=${#buf[@]} start=0 i idx ln pad
     (( n > H )) && start=$((n-H))
     for ((i=0;i<H;i++)); do
       idx=$((start+i)); ln=''; (( idx < n )) && ln="${buf[idx]}"
       (( ${#ln} > usable )) && ln="${ln:0:usable}"
       printf -v pad '%*s' "$(( usable - ${#ln} ))" ''
-      printf '\r\033[2K%s│%s %s%s %s│%s\n' "$DIM" "$RST" "$ln" "$pad" "$DIM" "$RST"
+      printf '\r\033[2K%s│%s %s%s %s│%s\n' "$G" "$RST" "$ln" "$pad" "$G" "$RST"
     done
-    printf '\r\033[2K%s%s%s\n' "$DIM" "$botb" "$RST"
+    printf '\r\033[2K%s%s%s\n' "$G" "$botb" "$RST"
   }
   redraw
-  while IFS= read -r line; do line="${line//$'\r'/}"; buf+=("$line"); redraw; done
+  while IFS= read -r line; do buf+=("$(_clean "$line")"); redraw; done
+}
+
+# Boîte à double bordure, largeur calculée sur le contenu (barre droite alignée).
+dbox() {
+  local color="$1"; shift
+  local -a lines=("$@"); local l w=0 dwl pad rule
+  for l in "${lines[@]}"; do dwl="$(_dw "$l")"; (( dwl > w )) && w=$dwl; done
+  (( w < 34 )) && w=34
+  rule="$(_rep $((w+2)) '═')"
+  printf '%s╔%s╗%s\n' "$color" "$rule" "$RST"
+  for l in "${lines[@]}"; do
+    printf -v pad '%*s' "$(( w - $(_dw "$l") ))" ''
+    printf '%s║%s %s%s %s║%s\n' "$color" "$RST" "$l" "$pad" "$color" "$RST"
+  done
+  printf '%s╚%s╝%s\n' "$color" "$rule" "$RST"
 }
 
 # Exécute une commande longue. En terminal : sortie confinée dans une BOÎTE à
@@ -128,10 +176,9 @@ hcheck() {
 }
 
 banner() {
-  printf '%s%s' "$BOLD" "$CYA"
-  printf '╔══════════════════════════════════════════════════════╗\n'
-  printf '║   MoodIT — mise à jour du déploiement                 ║\n'
-  printf '╚══════════════════════════════════════════════════════╝%s\n' "$RST"
+  matrix_line
+  dbox "$GB" "MoodIT :: mise à jour du déploiement"
+  matrix_line
 }
 
 # --- Verrou : pas deux updates en parallèle (cron + lancement manuel) -------
@@ -251,17 +298,17 @@ printf '   %sAttente du démarrage des services (8 s)…%s\n' "$DIM" "$RST"
 sleep 8
 
 ELAPSED="$((SECONDS / 60))m$((SECONDS % 60))s"
+echo
 if hcheck; then
-  printf '\n%s╔══════════════════════════════════════════════════════╗%s\n' "$GRN" "$RST"
-  printf '%s║  ✔ DÉPLOIEMENT RÉUSSI                                 ║%s\n' "$GRN" "$RST"
-  printf '%s╚══════════════════════════════════════════════════════╝%s\n' "$GRN" "$RST"
+  echo
+  matrix_line
+  dbox "$GB" "✔ DÉPLOIEMENT RÉUSSI" "version ${REMOTE:0:8}  ·  durée $ELAPSED"
+  matrix_line
   log "OK : déployé ${REMOTE:0:8} — tous les services up.  (durée $ELAPSED)"
-  ok "Version ${REMOTE:0:8} · tous services OK · $ELAPSED"
 else
-  printf '\n%s╔══════════════════════════════════════════════════════╗%s\n' "$YEL" "$RST"
-  printf '%s║  ⚠ DÉPLOYÉ, MAIS AU MOINS UN SERVICE KO              ║%s\n' "$YEL" "$RST"
-  printf '%s╚══════════════════════════════════════════════════════╝%s\n' "$YEL" "$RST"
-  warn "post-déploiement : au moins un service KO (voir ci-dessus).  (durée $ELAPSED)"
-  printf '   Inspecte : %sdocker compose -f docker-compose-hetzner.yml logs -f <service>%s\n' "$BOLD" "$RST"
+  echo
+  dbox "$YEL" "⚠ DÉPLOYÉ — AU MOINS UN SERVICE KO" "durée $ELAPSED  ·  voir le détail ci-dessus"
+  warn "post-déploiement : au moins un service KO.  (durée $ELAPSED)"
+  printf '   Inspecte : %sdocker compose -f docker-compose-hetzner.yml logs -f <service>%s\n' "$GB" "$RST"
 fi
 log "=== FIN ($ELAPSED) ==="
