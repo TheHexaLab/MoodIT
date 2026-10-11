@@ -1,0 +1,24 @@
+# Config du SFU LiveKit (prototype vocal MoodIT).
+#
+# Les CLES d'API ne sont PAS ici : elles arrivent par la variable d'env LIVEKIT_KEYS
+# (docker-compose), pour ne JAMAIS commiter de secret. Ce fichier ne porte que la
+# topologie reseau.
+#
+# udp_port unique (mux) au lieu de la plage 50000-60000 par defaut : Docker Desktop
+# (Windows/Mac) ne sait pas publier une grande plage UDP proprement. Un seul port
+# demultiplexe tous les flux (cf. doc section 5, "multiplexage sur un seul port").
+port: 7880           # signalisation WebSocket/HTTP (le navigateur s'y connecte)
+rtc:
+  tcp_port: 7881     # repli ICE/TCP quand l'UDP est bloque (reseaux restrictifs)
+  udp_port: 7882     # port UDP unique (mux) pour tout le media WebRTC
+  use_external_ip: false
+  # ⚠ DEV LOCAL (Docker Desktop) : sans ceci, LiveKit annonce l'IP INTERNE du conteneur
+  # (172.x) comme candidat ICE → le navigateur, sur l'hote, ne peut pas la joindre et la
+  # connexion WebRTC echoue ("could not establish pc connection"). On force l'annonce de
+  # 127.0.0.1 : les ports 7881/7882 etant publies sur localhost par docker-compose, le
+  # navigateur (meme machine) les atteint via le forwarding Docker.
+  # ⚠ Valable UNIQUEMENT pour un test sur la machine locale. En deploiement reel : retirer
+  # node_ip et mettre use_external_ip: true (ou nat_1to1_ips avec l'IP publique du nœud).
+  node_ip: 127.0.0.1
+logging:
+  level: info
