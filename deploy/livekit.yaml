@@ -20,5 +20,11 @@ rtc:
   # ⚠ Valable UNIQUEMENT pour un test sur la machine locale. En deploiement reel : retirer
   # node_ip et mettre use_external_ip: true (ou nat_1to1_ips avec l'IP publique du nœud).
   node_ip: 127.0.0.1
+  # ⚠ NE PAS activer use_ice_lite dans ce setup Docker-Desktop local : en mode ICE-Lite le SFU
+  # est un agent PASSIF (aucun connectivity-check), et il n'arrive alors PAS à établir le chemin
+  # UDP à travers le NAT de Docker → repli sur TCP (7881), plus lent pour l'audio temps réel
+  # (constaté : "connectionType":"tcp" au lieu de "udp"). Le serveur a besoin de l'ICE COMPLET
+  # pour percer l'UDP ici. (ICE-Lite reste pertinent en prod avec IP publique joignable, mais
+  # alors ce fichier n'est de toute façon pas celui utilisé — voir la note node_ip ci-dessus.)
 logging:
   level: info

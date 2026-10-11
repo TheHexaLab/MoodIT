@@ -38,7 +38,11 @@ services:
   # Retirer la feature = supprimer ce bloc + mettre VOICE_ENABLED=false. Aucun autre
   # service n'en depend au demarrage.
   livekit:
-    image: livekit/livekit-server:v1.8.4
+    # v1.13.x : aligne le serveur sur le client livekit-client ^2.22.4 (frontend). Le client
+    # 2.22 se connecte d'abord sur /rtc/v1 ; l'ancien serveur v1.8.4 ne connaissait pas ce
+    # chemin (404) → echec WS + repli /rtc a CHAQUE connexion/reconnexion (bruit console +
+    # latence). v1.13.9 expose /rtc/v1 → connexion directe, sans repli.
+    image: livekit/livekit-server:v1.13.9
     container_name: moodit_livekit
     restart: unless-stopped
     command: --config /etc/livekit/livekit.yaml

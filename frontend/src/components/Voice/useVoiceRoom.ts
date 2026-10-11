@@ -66,8 +66,13 @@ export function useVoiceRoom(channelId: number): UseVoiceRoom {
   const roomRef = useRef<Room | null>(null);
   /** Éléments <audio> créés pour lire les flux distants (détachés à la fermeture). */
   const audioElsRef = useRef<HTMLAudioElement[]>([]);
-  /** Garde anti-chevauchement : empêche deux bascules micro concurrentes (clics rapprochés). */
+  /** Micro en cours de PUBLICATION initiale (join) : désactive brièvement le bouton le temps
+   *  que la piste soit live. NE sert PAS aux bascules mute/unmute (voir desiredMicOnRef). */
   const micBusyRef = useRef(false);
+  /** Dernière intention mute/unmute voulue par l'utilisateur. Permet de coalescer des clics
+   *  rapprochés (dernier clic gagne) sans jamais en perdre, et d'éviter qu'un `await` plus
+   *  ancien, qui se termine après un clic plus récent, n'écrase l'UI avec un état périmé. */
+  const desiredMicOnRef = useRef<boolean | null>(null);
 
   const cleanup = useCallback(async () => {
     const room = roomRef.current;
@@ -88,6 +93,10 @@ export function useVoiceRoom(channelId: number): UseVoiceRoom {
       const { token, url } = await getVoiceToken(channelId);
       const room = new Room();
       roomRef.current = room;
+
+      // Pré-chauffe DNS/TLS/ICE pendant qu'on attache les écouteurs : une partie de la
+      // négociation est faite d'avance, donc room.connect() plus bas rend la main plus vite.
+      room.prepareConnection(url, token);
 
       const refresh = () => setParticipants(snapshot(room));
 
@@ -124,10 +133,34 @@ export function useVoiceRoom(channelId: number): UseVoiceRoom {
         setParticipants([]);
       });
 
+      // On est "dans le salon" dès que connect() rend la main (~300ms : on entend déjà les
+      // autres). On NE bloque PAS cet état sur la publication du micro : publier déclenche une
+      // renégociation WebRTC qui prend ~1-2s (ICE), et attendre dessus donnait une UI figée sur
+      // « Connexion… » alors qu'on était déjà connecté.
       await room.connect(url, token);
-      await room.localParticipant.setMicrophoneEnabled(true);
       setStatus('connected');
       refresh();
+
+      // Publication du micro EN TÂCHE DE FOND. Le bouton micro reste désactivé (micBusy) le temps
+      // de la renégociation, puis est réactivé. Échec (permission refusée, périphérique occupé) =
+      // NON fatal : on reste connecté, micro coupé. Les gardes `roomRef.current === room` évitent
+      // d'écrire dans l'UI si l'utilisateur a quitté pendant la publication.
+      micBusyRef.current = true;
+      setMicBusy(true);
+      void room.localParticipant
+        .setMicrophoneEnabled(true)
+        .then(() => {
+          if (roomRef.current === room) refresh();
+        })
+        .catch(() => {
+          if (roomRef.current === room) setError('Micro indisponible — connecté, micro coupé.');
+        })
+        .finally(() => {
+          if (roomRef.current === room) {
+            micBusyRef.current = false;
+            setMicBusy(false);
+          }
+        });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Connexion vocale impossible');
       setStatus('error');
@@ -143,22 +176,33 @@ export function useVoiceRoom(channelId: number): UseVoiceRoom {
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
-    // Ignore le clic si pas connecté, ou si une bascule est déjà en cours (anti-chevauchement :
-    // setMicrophoneEnabled est async — deux appels concurrents se court-circuitaient, d'où des
-    // clics « sans effet »). L'état réel est toujours relu de LiveKit en fin de bascule.
-    if (!room || micBusyRef.current) return;
-    micBusyRef.current = true;
-    setMicBusy(true);
+    if (!room) return;
+
+    // État courant = la dernière intention en vol si une bascule tourne, sinon l'état réel LiveKit.
+    // On ne LÂCHE PAS le clic même si une bascule est en cours (l'ancien garde « micBusy » perdait
+    // les clics rapprochés → bouton qui semblait lent/sans effet) : on enregistre la nouvelle
+    // intention et on relance. setMicrophoneEnabled est sérialisé en interne par le SDK (muteLock),
+    // donc des appels successifs convergent dans l'ordre.
+    const current = desiredMicOnRef.current ?? room.localParticipant.isMicrophoneEnabled;
+    const target = !current;
+    desiredMicOnRef.current = target;
+
+    // Bascule OPTIMISTE : l'UI reflète l'intention IMMÉDIATEMENT (pas d'attente du round-trip).
+    setParticipants((prev) =>
+      prev.map((p) => (p.isLocal ? { ...p, isMuted: !target } : p))
+    );
+
     try {
-      await room.localParticipant.setMicrophoneEnabled(
-        !room.localParticipant.isMicrophoneEnabled
-      );
+      await room.localParticipant.setMicrophoneEnabled(target);
     } catch {
-      // Échec (périphérique occupé, etc.) : on ne casse pas l'état, on resynchronise ci-dessous.
+      // Échec (périphérique occupé, etc.) : on resynchronise ci-dessous sur l'état réel.
     } finally {
-      micBusyRef.current = false;
-      setMicBusy(false);
-      setParticipants(snapshot(room));
+      // Ne resynchronise QUE si cette bascule est la plus récente : sinon un await plus ancien
+      // écraserait l'UI avec un état périmé (un clic plus récent est déjà en cours).
+      if (desiredMicOnRef.current === target) {
+        desiredMicOnRef.current = null;
+        if (roomRef.current === room) setParticipants(snapshot(room));
+      }
     }
   }, []);
 
