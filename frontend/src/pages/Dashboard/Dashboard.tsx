@@ -1480,7 +1480,8 @@ function applySectionChange(course: Course, sectionType: string, change: ItemCha
   if (sectionType === 'quiz') {
     return { ...course, quizzes: applyToQuizzes(course.quizzes ?? [], change) };
   }
-  const fType: ForumType = sectionType === 'text' ? 'Discussion' : 'Thread';
+  const fType: ForumType =
+    sectionType === 'text' ? 'Discussion' : sectionType === 'voice' ? 'Voice' : 'Thread';
   return { ...course, forums: applyToForums(course.forums ?? [], fType, change) };
 }
 
