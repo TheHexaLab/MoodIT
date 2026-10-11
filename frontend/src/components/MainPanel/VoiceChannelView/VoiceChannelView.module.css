@@ -1,0 +1,36 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* En-tête aligné sur celui de ChannelView : nom à gauche, titre du cours à droite. */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #2a2a2a);
+}
+
+.header p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.header p:last-child {
+  margin-left: auto;
+  font-weight: 400;
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}

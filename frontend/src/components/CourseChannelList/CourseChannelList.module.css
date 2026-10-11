@@ -158,6 +158,55 @@
     white-space: nowrap;
 }
 
+/* ── Présence vocale (prototype) ─────────────────────────────────────────── */
+
+/* Compteur à droite du nom du salon vocal (nombre de connectés). */
+.voiceCount {
+    margin-left: auto;
+    flex-shrink: 0;
+    min-width: 1.25rem;
+    padding: 0 0.3rem;
+    border-radius: 0.625rem;
+    background: var(--brand-teal, #2f9e44);
+    color: #fff;
+    font-size: 0.7rem;
+    line-height: 1.25rem;
+    text-align: center;
+}
+
+/* Liste des participants, indentée sous le bouton du salon. */
+.voiceParticipants {
+    list-style: none;
+    margin: 0.125rem 0 0.25rem;
+    padding: 0 0 0 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.voiceParticipant {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.voiceDot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--brand-teal, #2f9e44);
+    flex-shrink: 0;
+}
+
+.voiceParticipantName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .channelButtonActive .channelName {
     font-weight: 600;
 }

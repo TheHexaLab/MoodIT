@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
 import styles from './CourseChannelList.module.css';
 import { ChannelTypeIcon } from './ChannelTypeIcon';
-import { defaultTypeDefinitions } from './channelTypeDefinitions.ts';
+import { uiTypeDefinitions } from './channelTypeDefinitions.ts';
 import { Edit } from '../../assets/Edit.tsx';
-import { type ChannelMessage, type CourseChannel, type User } from '../../types/domain.ts';
+import {
+  type ChannelMessage,
+  type CourseChannel,
+  type User,
+  type VoicePresenceParticipant,
+} from '../../types/domain.ts';
 
 // Entités ré-exportées depuis le modèle de domaine (source unique : src/types/domain.ts).
 export type { ChannelMessage, CourseChannel };
@@ -47,6 +52,8 @@ interface CourseChannelListProps {
   channels?: CourseChannel[];
   /** Types supportés par défaut, extensibles par le parent. */
   typeDefinitions?: ChannelTypeDefinition[];
+  /** Présence vocale par canal (channelId → participants) : affichée sous les salons vocaux. */
+  voicePresence?: Record<number, VoicePresenceParticipant[]>;
   /** Canal actuellement sélectionné (type + id : les id_ se chevauchent entre quiz/forum). */
   selectedChannel?: ChannelRef;
   /** Callback de sélection d'un canal. */
@@ -72,7 +79,8 @@ interface CourseChannelListProps {
  */
 const CourseChannelList: React.FC<CourseChannelListProps> = ({
   channels = [],
-  typeDefinitions = defaultTypeDefinitions,
+  typeDefinitions = uiTypeDefinitions(),
+  voicePresence,
   selectedChannel,
   onSelectChannel,
   onOpenChannel,
@@ -146,6 +154,9 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
               <ul className={styles.channelList} role="list">
                 {typedChannels.map((channel) => {
                   const isSelected = isSameChannel(selectedChannel, channel);
+                  // Présence vocale : participants connectés à ce salon (vide pour les autres types).
+                  const present =
+                    channel.type === 'voice' ? (voicePresence?.[channel.id] ?? []) : [];
                   return (
                     <li key={channel.id} className={styles.channelItem}>
                       <button
@@ -161,7 +172,23 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
                           <ChannelTypeIcon type={channel.type} />
                         </span>
                         <span className={styles.channelName}>{channel.name}</span>
+                        {present.length > 0 && (
+                          <span className={styles.voiceCount} aria-label={`${present.length} connecté(s)`}>
+                            {present.length}
+                          </span>
+                        )}
                       </button>
+
+                      {present.length > 0 && (
+                        <ul className={styles.voiceParticipants} role="list">
+                          {present.map((p) => (
+                            <li key={p.id} className={styles.voiceParticipant}>
+                              <span className={styles.voiceDot} aria-hidden="true" />
+                              <span className={styles.voiceParticipantName}>{p.name}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
                   );
                 })}

@@ -494,7 +494,8 @@ INSERT INTO Course (title, code) VALUES
 -- ------------------------------------------------------------
 INSERT INTO F_Type (name) VALUES
   ('Discussion'),
-  ('Thread');
+  ('Thread'),
+  ('Voice');   -- Salon vocal (prototype) : forum sans Post, le « contenu » est le flux audio.
 
 -- ------------------------------------------------------------
 -- Forum  (un forum Q&R et un forum Annonces par cours)
@@ -511,6 +512,15 @@ SELECT
     'Thread — ' || c.title,
     2,   -- Post + réponses
     c.id, 1
+FROM Course c;
+
+-- Salon vocal (prototype) : un par cours, f_type 3 ('Voice'). La room LiveKit est
+-- "channel:<forum_id>" (même scope d'autorisation que les canaux de discussion).
+INSERT INTO Forum (title, f_type_id, course_id, position)
+SELECT
+    'Vocal — ' || c.title,
+    3,
+    c.id, 2
 FROM Course c;
 
 -- ------------------------------------------------------------

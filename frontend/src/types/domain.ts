@@ -14,8 +14,9 @@
 
 import type { ProgramRoleName } from '../helpers/roles.ts';
 
-/** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses. */
-export type ForumType = 'Discussion' | 'Thread';
+/** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses,
+ *  'Voice' = salon vocal (prototype — aucun Post, le contenu est le flux audio). */
+export type ForumType = 'Discussion' | 'Thread' | 'Voice';
 
 /** Établissement (table Establishment). */
 export interface Establishment {
@@ -290,6 +291,12 @@ export interface CourseChannel {
   name: string;
   type: string;
   messages?: ChannelMessage[];
+}
+
+/** Participant présent dans un salon vocal (présence sidebar). Reçu via `voice:presence`. */
+export interface VoicePresenceParticipant {
+  id: number;
+  name: string;
 }
 
 /**

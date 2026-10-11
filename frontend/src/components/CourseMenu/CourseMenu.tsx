@@ -18,7 +18,7 @@ import { CourseContextMenu } from './CourseContextMenu.tsx';
 import { defaultLabels as dropdownLabels } from './labels.ts';
 import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/types.ts';
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources';
-import { type Course, type Quiz } from '../../types/domain.ts';
+import { type Course, type Quiz, type VoicePresenceParticipant } from '../../types/domain.ts';
 import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
 
 // Entité ré-exportée depuis le modèle de domaine (source unique : src/types/domain.ts).
@@ -60,6 +60,8 @@ interface CourseMenuProps {
   onSelectCourse?: (courseId: number) => void;
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
+  /** Présence vocale par canal (channelId → participants), affichée sous les salons vocaux. */
+  voicePresence?: Record<number, VoicePresenceParticipant[]>;
   /** Canal actuellement sélectionné (type + id). */
   selectedChannel?: ChannelRef;
   /** Callback lors d'un changement de canal. */
@@ -151,6 +153,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   selectedCourseId,
   onSelectCourse,
   channelTypeDefinitions,
+  voicePresence,
   selectedChannel,
   onSelectChannel,
   onOpenChannel,
@@ -562,6 +565,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           <CourseChannelList
             channels={selectedCourse?.channels ?? []}
             typeDefinitions={channelTypeDefinitions}
+            voicePresence={voicePresence}
             selectedChannel={effectiveSelectedChannel}
             onSelectChannel={onSelectChannel}
             onOpenChannel={onOpenChannel}
