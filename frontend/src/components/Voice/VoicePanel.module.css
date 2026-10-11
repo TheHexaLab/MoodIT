@@ -1,0 +1,88 @@
+.panel {
+  border-bottom: 1px solid var(--border-color, #2a2a2a);
+  padding: 8px 16px;
+  background: var(--panel-bg, rgba(0, 0, 0, 0.03));
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  opacity: 0.8;
+  margin-right: auto;
+}
+
+.join,
+.mute,
+.leave {
+  border: 1px solid var(--border-color, #3a3a3a);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+}
+
+.join {
+  background: #2f9e44;
+  color: #fff;
+  border-color: #2f9e44;
+}
+
+.leave {
+  background: #e03131;
+  color: #fff;
+  border-color: #e03131;
+}
+
+.join:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #e03131;
+}
+
+.participants {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.participant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+/* Pastille : grise au repos, verte + halo quand le participant parle. */
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #868e96;
+  transition: box-shadow 0.1s ease, background 0.1s ease;
+}
+
+.participant[data-speaking] .dot {
+  background: #2f9e44;
+  box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.35);
+}
+
+.mutedTag {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
