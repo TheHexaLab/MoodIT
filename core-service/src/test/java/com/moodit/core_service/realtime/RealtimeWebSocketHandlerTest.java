@@ -32,7 +32,7 @@ class RealtimeWebSocketHandlerTest {
     registry = new SubscriptionRegistry();
     publisher = new RealtimeEventPublisher(registry, objectMapper);
     // Autorisation permissive : les tests vérifient le routage, pas les droits.
-    handler = new RealtimeWebSocketHandler(registry, objectMapper, (email, scope, id) -> true);
+    handler = new RealtimeWebSocketHandler(registry, objectMapper, (email, scope, id) -> true, null);
   }
 
   private WebSocketSession openSession() {
@@ -113,7 +113,7 @@ class RealtimeWebSocketHandlerTest {
     // Autorizer qui REFUSE la room admins (simule un utilisateur SANS rôle global).
     RealtimeWebSocketHandler strict =
         new RealtimeWebSocketHandler(
-            registry, objectMapper, (email, scope, id) -> !"adminRoles".equals(scope));
+            registry, objectMapper, (email, scope, id) -> !"adminRoles".equals(scope), null);
     WebSocketSession session = openSession();
     strict.afterConnectionEstablished(session);
     strict.handleTextMessage(

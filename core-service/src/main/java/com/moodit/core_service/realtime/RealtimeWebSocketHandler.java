@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Set;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -39,12 +40,18 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
   private final SubscriptionRegistry registry;
   private final ObjectMapper objectMapper;
   private final RoomAuthorizer authorizer;
+  /** Présence vocale : null quand moodit.voice.enabled=false (bean absent) → commandes voice_* ignorées. */
+  private final @Nullable VoicePresenceService voicePresence;
 
   public RealtimeWebSocketHandler(
-      SubscriptionRegistry registry, ObjectMapper objectMapper, RoomAuthorizer authorizer) {
+      SubscriptionRegistry registry,
+      ObjectMapper objectMapper,
+      RoomAuthorizer authorizer,
+      @Nullable VoicePresenceService voicePresence) {
     this.registry = registry;
     this.objectMapper = objectMapper;
     this.authorizer = authorizer;
+    this.voicePresence = voicePresence;
   }
 
   @Override
@@ -68,9 +75,25 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
     }
 
     String type = node.path("type").asText(null);
-    String scope = node.path("scope").asText(null);
     JsonNode idNode = node.path("id");
 
+    // ── Présence vocale (hors `scope`) : annonce d'entrée/sortie d'un salon vocal. ──
+    // Liée à CETTE session WebSocket → nettoyée automatiquement à sa fermeture (voir
+    // afterConnectionClosed). Ignorée si la feature est désactivée (voicePresence == null).
+    if ("voice_join".equals(type) || "voice_leave".equals(type)) {
+      if (voicePresence != null && idNode.canConvertToInt()) {
+        WebSocketSession voiceTarget = registry.decorated(session);
+        int forumId = idNode.asInt();
+        if ("voice_join".equals(type)) {
+          voicePresence.join(email(session), voiceTarget, forumId);
+        } else {
+          voicePresence.leave(voiceTarget, forumId);
+        }
+      }
+      return;
+    }
+
+    String scope = node.path("scope").asText(null);
     if (type == null || scope == null || !idNode.canConvertToLong()) {
       return;
     }
@@ -84,6 +107,10 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
       case "join" -> {
         if (authorizer.canJoin(email(session), scope, id)) {
           registry.join(scope, id, target);
+          // Nouvel abonné au programme : lui pousser l'état vocal courant de ses salons.
+          if (voicePresence != null && "program".equals(scope)) {
+            voicePresence.sendSnapshot(target, (int) id);
+          }
         } else {
           log.debug("WS join REFUSÉ : {} sur {}:{}", email(session), scope, id);
           // (option) notifier le client par une trame d'erreur dédiée.
@@ -97,7 +124,13 @@ public class RealtimeWebSocketHandler extends TextWebSocketHandler {
 
   @Override
   public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
-    registry.removeSession(registry.decorated(session));
+    WebSocketSession target = registry.decorated(session);
+    // Retire sa présence vocale AVANT de le sortir des rooms : la re-diffusion doit encore
+    // pouvoir atteindre les autres abonnés du programme.
+    if (voicePresence != null) {
+      voicePresence.removeSession(target);
+    }
+    registry.removeSession(target);
     registry.unbindDecorated(session);
     log.debug("WS déconnecté : session {} ({})", session.getId(), status);
   }
