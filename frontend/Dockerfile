@@ -6,6 +6,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Flag vocal fige au BUILD (Vite statique) : true => l'UI vocale est incluse dans le bundle.
+# Passe par build.args du compose (depuis VOICE_ENABLED de .env.docker). false par defaut.
+ARG VITE_VOICE_ENABLED=false
+ENV VITE_VOICE_ENABLED=$VITE_VOICE_ENABLED
 RUN npm run build
 
 # Run stage

@@ -1,0 +1,20 @@
+# Config du SFU LiveKit en PRODUCTION (VPS a IP publique).
+#
+# Difference avec deploy/livekit.yaml (DEV, Docker Desktop local) :
+#   - PAS de node_ip: 127.0.0.1 (c'etait un hack loopback pour la machine locale).
+#   - use_external_ip: true → LiveKit decouvre l'IP PUBLIQUE du VPS (via STUN) et l'annonce
+#     comme candidat ICE, au lieu de l'IP interne du conteneur (172.x, injoignable de dehors).
+#
+# Les cles d'API NE sont PAS ici : elles arrivent par LIVEKIT_KEYS (docker-compose, interpole
+# depuis .env.docker). Ce fichier ne porte que la topologie reseau.
+#
+# ⚠ Le media WebRTC passe EN DIRECT par ces ports (pas par Caddy, qui ne fait que la
+# signalisation WSS). Ouvrir au pare-feu du VPS : ufw allow 7882/udp && ufw allow 7881/tcp
+# (et, si firewall Hetzner Cloud actif, y autoriser aussi 7881/tcp + 7882/udp).
+port: 7880           # signalisation WS/HTTP — atteinte par Caddy en interne (-> wss://)
+rtc:
+  tcp_port: 7881     # repli ICE/TCP quand l'UDP est bloque
+  udp_port: 7882     # port UDP unique (mux) pour tout le media WebRTC
+  use_external_ip: true
+logging:
+  level: info

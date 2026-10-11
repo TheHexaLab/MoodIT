@@ -1,12 +1,11 @@
 // Fabrique de JoinToken LiveKit. Un JoinToken est un JWT HS256 signe avec le secret d'API
 // LiveKit, portant un "video grant" qui dit quel salon l'utilisateur peut rejoindre et avec
-// quels droits. LiveKit le verifie a la connexion WebRTC : c'est l'equivalent du "token a
-// usage unique" de la doc (section 4) — ici, aucun secret ne transite vers le navigateur,
-// seul le JWT signe part.
+// quels droits. LiveKit le verifie a la connexion WebRTC : aucun secret ne transite vers le
+// navigateur, seul le JWT signe part.
 //
-// On reutilise jjwt (deja present pour les JWT d'auth MoodIT), donc zero nouvelle dependance.
+// On reutilise jjwt (deja utilise ailleurs dans MoodIT), donc zero dependance exotique.
 
-package com.moodit.core_service.voice;
+package com.moodit.voice_service.voice;
 
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;

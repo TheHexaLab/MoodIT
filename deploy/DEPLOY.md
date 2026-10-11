@@ -107,6 +107,47 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 
 ---
 
+## Vocal (LiveKit) — optionnel
+
+Le vocal (salons audio WebRTC) utilise un SFU **LiveKit** auto-hébergé. Il est **désactivé**
+tant que `VOICE_ENABLED` n'est pas à `true`. Pour l'activer en prod :
+
+1. **DNS** — ajoute un sous-domaine qui pointe sur le VPS (comme le domaine principal) :
+   ```
+   livekit.moodit.ca   A     <IP_DU_VPS>
+   ```
+   Caddy obtiendra seul le certificat TLS de ce sous-domaine (bloc déjà dans `deploy/Caddyfile`).
+
+2. **Pare-feu** — le média WebRTC passe **en direct** (pas par Caddy/443), il faut ouvrir :
+   ```bash
+   ufw allow 7882/udp    # média WebRTC (UDP, le chemin normal)
+   ufw allow 7881/tcp    # repli ICE/TCP si l'UDP est bloqué côté client
+   ```
+   Si un **firewall Hetzner Cloud** est actif, y autoriser aussi `7881/tcp` et `7882/udp`.
+
+3. **Secrets** (`.env.docker`) — renseigne :
+   ```
+   VOICE_ENABLED=true
+   LIVEKIT_URL=wss://livekit.moodit.ca          # DOIT matcher le sous-domaine ci-dessus
+   LIVEKIT_API_KEY=<une clé>
+   LIVEKIT_API_SECRET=<secret ≥ 32 octets>      # openssl rand -base64 48
+   ```
+   `VOICE_ENABLED=true` active le backend ET l'UI vocale (le frontend lit ce flag **au build**
+   via `build.args`, donc un rebuild de l'image frontend est nécessaire après activation).
+
+4. **Déploiement** — depuis la racine :
+   ```bash
+   docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build
+   ```
+   Vérifie : `livekit` up (`...ps`), `wss://livekit.moodit.ca` répond (cert OK), et un join
+   de salon vocal dans l'app connecte deux onglets qui s'entendent.
+
+> Architecture : la **signalisation** va `navigateur → wss://livekit.moodit.ca` (Caddy → `livekit:7880`
+> en interne) ; le **média** va `navigateur → UDP <IP_VPS>:7882` en direct. Le `voice-service`
+> ne signe que le JoinToken ; la **présence** (qui est là / qui parle) reste dans `core-service`.
+
+---
+
 ## Exploitation
 
 | Action | Commande (depuis la racine du repo) |

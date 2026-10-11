@@ -85,6 +85,18 @@ services:
       postgres:
         condition: service_healthy
 
+  #Voice service (minting du JoinToken LiveKit) -----------------------
+  # Pas de DB. Doit joindre permission-service (reseau interne) + le SFU LiveKit. NB : LiveKit
+  # n'est declare que dans docker-compose-dev.yml pour l'instant — le deploiement prod du vocal
+  # (SFU + LIVEKIT_*/VOICE_ENABLED dans .env.docker) est un chantier distinct.
+  voice-service:
+    build: ./voice-service
+    container_name: moodit_voice
+    env_file:
+      - .env.docker
+    networks:
+      - internal
+
   #Ollama (LLM local, API compatible OpenAI) --------------------
   # Sert le modèle sur le réseau interne : aucune donnée ne sort vers un tiers.
   ollama:

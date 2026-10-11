@@ -50,7 +50,12 @@ services:
 
   # ── Frontend : plus de port publié, Caddy l'atteint via le réseau interne ──
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Vite lit VITE_VOICE_ENABLED au BUILD : sans ce flag, le bundle de prod MASQUE l'UI
+      # vocale. Interpole depuis .env.docker (--env-file). false par defaut si absent.
+      args:
+        VITE_VOICE_ENABLED: "${VOICE_ENABLED:-false}"
     container_name: moodit_frontend
     restart: unless-stopped
     env_file:
@@ -128,6 +133,44 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Voice service (minting du JoinToken LiveKit). Pas de DB. Lit LIVEKIT_* depuis .env.docker
+  # (profil prod → secrets OBLIGATOIRES, sinon crash au demarrage). Appelle permission-service.
+  voice-service:
+    build: ./voice-service
+    container_name: moodit_voice
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    mem_limit: 512m
+    networks:
+      - internal
+    depends_on:
+      - livekit
+      - permission-service
+
+  # ── SFU vocal LiveKit ─────────────────────────────────────────────────────
+  # Signalisation (7880) atteinte par Caddy en INTERNE → exposee en wss://livekit.<domaine>.
+  # Media WebRTC EN DIRECT : UDP 7882 (+ TCP 7881 repli) publies sur l'hote. Ouvrir au pare-feu
+  # du VPS : ufw allow 7882/udp && ufw allow 7881/tcp (+ firewall Hetzner si actif).
+  # LIVEKIT_KEYS interpole depuis .env.docker (le deploiement passe --env-file .env.docker).
+  # On N'injecte PAS tout .env.docker ici (LiveKit interprete les LIVEKIT_* comme sa config).
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    container_name: moodit_livekit
+    restart: unless-stopped
+    command: --config /etc/livekit/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./deploy/livekit-prod.yaml:/etc/livekit/livekit.yaml:ro
+    networks:
+      - internal
 
   # ── MCP : LLM = Groq (gratuit, sans carte). Pas d'Ollama. ─────────────────
   # LLM_API_KEY (gsk_...) vient de .env.docker. Clé absente / appel KO → repli
