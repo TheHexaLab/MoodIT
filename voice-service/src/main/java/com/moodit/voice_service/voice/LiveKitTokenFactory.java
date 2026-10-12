@@ -49,7 +49,10 @@ public class LiveKitTokenFactory {
                 "canPublish", true,
                 "canSubscribe", true,
                 "canPublishData", true))
-        .signWith(key)
+        // HS256 IMPOSE : LiveKit n'accepte que HS256. Sans l'algo explicite, jjwt le choisit
+        // selon la taille du secret (>= 64 octets -> HS512, >= 48 -> HS384), ce qui fait rejeter
+        // le token par LiveKit (401 /rtc/validate) des qu'on utilise un secret long en prod.
+        .signWith(key, Jwts.SIG.HS256)
         .compact();
   }
 }
