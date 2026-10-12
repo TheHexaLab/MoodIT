@@ -29,6 +29,7 @@ import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import com.moodit.core_service.realtime.dto.AdminUserDto;
 import com.moodit.core_service.realtime.dto.RoleDto;
+import com.moodit.core_service.realtime.dto.VoicePresenceParticipant;
 import com.moodit.core_service.dto.UserDTO;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +37,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.socket.WebSocketSession;
 
 @Service
 public class RealtimeEventPublisher {
@@ -360,6 +362,45 @@ public class RealtimeEventPublisher {
 
   public void userUpdated(Author author) {
     emitAll(event("user:updated", "user", author));
+  }
+
+  // ─── Présence vocale (scope = program) ────────────────────────────────────
+  // Qui est connecté dans un salon vocal. Diffusé sur la room `program:<id>` (la sidebar y est
+  // déjà abonnée pour les sections). `participants` = liste COMPLÈTE à jour (le front remplace).
+
+  public void voicePresence(
+      int programId, int courseId, int forumId, List<VoicePresenceParticipant> participants) {
+    emit(
+        "program",
+        programId,
+        event(
+            "voice:presence",
+            "programId", programId,
+            "courseId", courseId,
+            "channelId", forumId,
+            "participants", participants));
+  }
+
+  /** Même évènement, mais envoyé à UNE session (snapshot à l'abonnement au programme). */
+  public void voicePresenceTo(
+      WebSocketSession session,
+      int programId,
+      int courseId,
+      int forumId,
+      List<VoicePresenceParticipant> participants) {
+    try {
+      registry.sendTo(
+          session,
+          objectMapper.writeValueAsString(
+              event(
+                  "voice:presence",
+                  "programId", programId,
+                  "courseId", courseId,
+                  "channelId", forumId,
+                  "participants", participants)));
+    } catch (JsonProcessingException e) {
+      log.error("Échec de sérialisation du snapshot de présence vocale (program:{})", programId, e);
+    }
   }
 
   // ─── Interne ──────────────────────────────────────────────────────────────

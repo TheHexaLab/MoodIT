@@ -239,9 +239,10 @@ public class CourseService {
     afterCommit(() -> programIds.forEach(pid -> realtimePublisher.courseDeleted(pid, cId)));
   }
 
-  /** F_Type.id des sections : 'text' = canal 'Discussion' (1), 'forum' = 'Thread' (2). */
+  /** F_Type.id des sections : 'text' = 'Discussion' (1), 'forum' = 'Thread' (2), 'voice' = 'Voice' (3). */
   private static final int F_TYPE_DISCUSSION = 1;
   private static final int F_TYPE_THREAD = 2;
+  private static final int F_TYPE_VOICE = 3;
 
   /**
    * Persiste une modification de section (canal 'text' / forum) et la diffuse en temps réel.
@@ -252,7 +253,14 @@ public class CourseService {
   @Transactional
   public ItemChangeDto changeSection(Integer courseId, String sectionType, ItemChangeDto change) {
     Course course = courseRepository.findById(courseId).orElseThrow(CourseNotFoundException::new);
-    int fTypeId = "text".equals(sectionType) ? F_TYPE_DISCUSSION : F_TYPE_THREAD;
+    // 'forum' (Thread) reste le défaut ; 'text' et 'voice' sont mappés explicitement — sinon un
+    // salon vocal retombait sur Thread et apparaissait dans les FORUMS.
+    int fTypeId =
+        switch (sectionType) {
+          case "text" -> F_TYPE_DISCUSSION;
+          case "voice" -> F_TYPE_VOICE;
+          default -> F_TYPE_THREAD;
+        };
     String courseDetails = AuditContext.ofChildOfCourse(course);
 
     ItemChangeDto emitted;

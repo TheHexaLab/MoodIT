@@ -103,6 +103,21 @@ permission-service/*.iws
 permission-service/*.ipr
 permission-service/.run
 
+# ==============================
+# Voice Service — Java / Spring Boot / Gradle
+# ==============================
+voice-service/build/
+voice-service/.gradle/
+voice-service/out/
+voice-service/*.class
+voice-service/*.jar
+voice-service/*.war
+voice-service/.idea/*
+voice-service/*.iml
+voice-service/*.iws
+voice-service/*.ipr
+voice-service/.run
+
 # Eclipse / STS
 .classpath
 .project

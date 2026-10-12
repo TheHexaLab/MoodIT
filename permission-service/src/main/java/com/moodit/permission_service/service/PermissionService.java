@@ -295,6 +295,17 @@ public class PermissionService {
                       return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
                     }),
 
+            // Obtenir un JoinToken vocal (prototype) : meme appartenance qu'un message — etre
+            // abonne a un programme du cours du salon vocal (Forum de F_Type 'Voice'). channelId
+            // = id du forum, dans le BODY (VoiceTokenRequest). Core re-verifie via canJoin.
+            rule(
+                    "POST",
+                    "/voice/token",
+                    (user, vars, body) -> {
+                      long forumId = longField(body, "channelId");
+                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+                    }),
+
             // EDITER un post ou message : reserve a SON AUTEUR (Post.user_id). On protege via le
             // postId (PATH) ; le forumId du motif n'intervient pas dans la decision. La MODERATION
             // (cf. DELETE ci-dessous) n'ouvre PAS l'edition : un moderateur supprime, il ne

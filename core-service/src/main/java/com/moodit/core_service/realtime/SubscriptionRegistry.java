@@ -89,6 +89,21 @@ public class SubscriptionRegistry {
   }
 
   /**
+   * Envoie une charge JSON à UNE session précise (hors room) : sert au snapshot de présence
+   * vocale, poussé au seul abonné qui vient de rejoindre un programme (pas à toute la room).
+   */
+  public void sendTo(WebSocketSession session, String payload) {
+    if (session == null || !session.isOpen()) {
+      return;
+    }
+    try {
+      session.sendMessage(new TextMessage(payload));
+    } catch (IOException e) {
+      log.warn("Échec d'envoi ciblé vers la session {}", session.getId(), e);
+    }
+  }
+
+  /**
    * Diffuse à TOUTES les sessions abonnées (toutes rooms confondues, dédupliquées) : pour les
    * évènements GLOBAUX comme la mise à jour de profil — l'auteur peut apparaître dans
    * n'importe quel canal / forum, on ne peut donc pas cibler une room précise.

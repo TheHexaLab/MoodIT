@@ -26,6 +26,7 @@ import ForumView, {
   type VotePostHandler,
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
+import VoiceChannelView from './VoiceChannelView/VoiceChannelView.tsx';
 import {
   type AttemptOutcome,
   type FetchAttemptResultHandler,
@@ -110,6 +111,8 @@ interface MainPanelProps {
   onReloadStale?: () => void;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
+  /** Annonce de présence vocale (sidebar) : liée à la session WebSocket de l'app. */
+  onVoicePresence?: (channelId: number, joined: boolean) => void;
 }
 
 /**
@@ -152,6 +155,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   quizRefreshKey = 0,
   quizStale = false,
   onReloadStale,
+  onVoicePresence,
 }) => {
   // Modérateur : peut supprimer (jamais éditer) les messages/posts d'autrui. Admin/Gardien
   // GLOBAL (isAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est PAS
@@ -233,6 +237,15 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onRunCode={onRunCode}
             staleNotice={quizStale}
             onReloadStale={onReloadStale}
+          />
+        );
+      case 'voice': // fType 'Voice' — salon vocal (prototype), pas de messages
+        return (
+          <VoiceChannelView
+            key={`${channel.type}-${channel.id}`}
+            course={course}
+            channel={channel}
+            onPresence={onVoicePresence}
           />
         );
       case 'text': // fType 'Discussion'

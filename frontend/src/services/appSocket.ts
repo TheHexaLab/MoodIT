@@ -1,4 +1,9 @@
-import { type AuthorUpdate, type ChannelMessage, type Role } from '../types/domain.ts';
+import {
+  type AuthorUpdate,
+  type ChannelMessage,
+  type Role,
+  type VoicePresenceParticipant,
+} from '../types/domain.ts';
 import { type ProgramRoleName } from '../helpers/roles.ts';
 import {
   type ChannelSocket,
@@ -74,6 +79,14 @@ type ServerEvent =
   | { type: 'quiz:updated'; programId: number; courseId: number; quizId: number }
   | { type: 'quiz:reordered'; programId: number; courseId: number }
   | { type: 'quiz:deleted'; programId: number; courseId: number; quizId: number }
+  // Présence vocale (scope = programme) : liste À JOUR des participants d'un salon vocal.
+  | {
+      type: 'voice:presence';
+      programId: number;
+      courseId: number;
+      channelId: number;
+      participants: VoicePresenceParticipant[];
+    }
   // Programmes / abonnements (scope = utilisateur)
   | { type: 'program:created'; userId: number; program: Program }
   | { type: 'program:updated'; userId: number; program: Program }
@@ -160,6 +173,15 @@ export interface AdminRolesSocket {
   subscribe: (handler: (users: GlobalRoleUser[]) => void) => () => void;
 }
 
+/**
+ * Facade « vocal » : annonce que CETTE session entre/sort d'un salon vocal (forum de F_Type
+ * 'Voice'). La présence est liée à la session WebSocket → nettoyée côté serveur à sa fermeture.
+ * La RÉCEPTION de la présence passe par `courses` (handler `onVoicePresence`, scope programme).
+ */
+export interface VoiceSocket {
+  announce: (channelId: number, joined: boolean) => void;
+}
+
 export interface AppSocket {
   channels: ChannelSocket;
   forums: ForumSocket;
@@ -168,6 +190,7 @@ export interface AppSocket {
   mcp: McpSocket;
   establishments: EstablishmentsSocket;
   adminRoles: AdminRolesSocket;
+  voice: VoiceSocket;
   /** Ouvre (ou rouvre) la connexion. Idempotent. À appeler au montage. */
   open: () => void;
   /** Ferme volontairement la connexion (logout / démontage) : pas de reconnexion. */
@@ -211,6 +234,8 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
   const adminRoleSubs = new Set<(users: GlobalRoleUser[]) => void>();
   const programSubs = new Map<number, IncomingProgramHandlers>();
   const mcpSubs = new Map<number, IncomingMcpHandlers>();
+  /** Salons vocaux où CETTE session est présente : ré-annoncés à la reconnexion. */
+  const voiceRooms = new Set<number>();
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -241,6 +266,8 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
       // Room UNIQUE du catalogue d'établissements (id 0), si le popup est ouvert.
       if (establishmentSubs.size > 0) send({ type: 'join', scope: 'establishment', id: 0 });
       if (adminRoleSubs.size > 0) send({ type: 'join', scope: 'adminRoles', id: 0 });
+      // Ré-annoncer la présence vocale : une reconnexion = nouvelle session côté serveur.
+      for (const channelId of voiceRooms) send({ type: 'voice_join', id: channelId });
 
       // Resync à la RECONNEXION uniquement : prévient les abonnés que des events ont pu
       // être manqués pendant la coupure (le rejoin ne rejoue pas l'historique). Branché
@@ -303,6 +330,11 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
           break;
         case 'quiz:deleted':
           courseSubs.get(data.programId)?.onQuizDeleted?.(data.courseId, data.quizId);
+          break;
+        case 'voice:presence':
+          courseSubs
+            .get(data.programId)
+            ?.onVoicePresence?.(data.courseId, data.channelId, data.participants);
           break;
         case 'program:created':
         case 'program:updated':
@@ -456,6 +488,17 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
           adminRoleSubs.delete(handler);
           if (adminRoleSubs.size === 0) send({ type: 'leave', scope: 'adminRoles', id: 0 });
         };
+      },
+    },
+    voice: {
+      announce(channelId, joined) {
+        if (joined) {
+          voiceRooms.add(channelId);
+          send({ type: 'voice_join', id: channelId });
+        } else {
+          voiceRooms.delete(channelId);
+          send({ type: 'voice_leave', id: channelId });
+        }
       },
     },
     open() {

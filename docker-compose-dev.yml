@@ -34,6 +34,29 @@ services:
       - pgadmin_data:/var/lib/pgadmin
       - ./servers.json:/pgadmin4/servers.json
 
+  # SFU vocal (greffon retirable) : relaie l'audio WebRTC entre les navigateurs.
+  # Retirer la feature = supprimer ce bloc + mettre VOICE_ENABLED=false. Aucun autre
+  # service n'en depend au demarrage.
+  livekit:
+    # v1.13.x : aligne le serveur sur le client livekit-client ^2.22.4 (frontend). Le client
+    # 2.22 se connecte d'abord sur /rtc/v1 ; l'ancien serveur v1.8.4 ne connaissait pas ce
+    # chemin (404) → echec WS + repli /rtc a CHAQUE connexion/reconnexion (bruit console +
+    # latence). v1.13.9 expose /rtc/v1 → connexion directe, sans repli.
+    image: livekit/livekit-server:v1.13.9
+    container_name: moodit_livekit
+    restart: unless-stopped
+    command: --config /etc/livekit/livekit.yaml
+    environment:
+      # Format impose par LiveKit : "<cle>: <secret>". Doivent etre identiques aux
+      # proprietes moodit.voice.livekit.* du core-service (qui signe les JoinToken).
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7880:7880"       # signalisation WS/HTTP
+      - "7881:7881"       # repli ICE/TCP
+      - "7882:7882/udp"   # media WebRTC (port UDP mux)
+    volumes:
+      - ./deploy/livekit.yaml:/etc/livekit/livekit.yaml:ro
+
 volumes:
   postgres_data:
   pgadmin_data:

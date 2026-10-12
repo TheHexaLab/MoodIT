@@ -45,6 +45,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // Client WebSocket réel : UNE seule connexion sert le chat, le forum, les cours et
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
+import { type VoicePresenceParticipant } from '../../types/domain.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import type { SavedLocation } from '../../helpers/userSettings.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -239,6 +240,11 @@ export default function Dashboard() {
   // Les quatre facades (ws.channels / ws.forums / ws.courses / ws.programs) partagent
   // cette connexion ; ws.close() la ferme volontairement (sans reconnexion).
   const ws = useMemo(() => createAppSocket(), []);
+  // Présence vocale (prototype) : participants par canal vocal (channelId → liste), alimentée
+  // par les évènements `voice:presence` du programme actif, affichée dans la sidebar.
+  const [voicePresence, setVoicePresence] = useState<Record<number, VoicePresenceParticipant[]>>(
+    {}
+  );
   // Ouverture/fermeture pilotées par l'effet : en StrictMode (dev), le démontage
   // ferme puis le remontage rouvre — la garde `ws !== socket` côté appSocket évite
   // qu'un ancien socket en cours de connexion ne tue la nouvelle connexion.
@@ -411,6 +417,9 @@ export default function Dashboard() {
         );
         setStaleQuizId((prev) => (prev === quizId ? null : prev));
       },
+      // Présence vocale : remplace la liste des participants du salon concerné.
+      onVoicePresence: (_courseId, channelId, participants) =>
+        setVoicePresence((prev) => ({ ...prev, [channelId]: participants })),
     });
     // `handleFetchCourses` volontairement HORS deps : l'abonnement WS ne doit se refaire qu'au
     // changement de programme (l'inclure re-souscrirait à chaque rendu).
@@ -1019,6 +1028,7 @@ export default function Dashboard() {
             selectedChannel={selectedChannelRef}
             onSelectChannel={selectChannelAndCollapse}
             onOpenChannel={handleOpenChannel}
+            voicePresence={voicePresence}
             onSectionChange={handleSectionChange}
             // Gestion du contenu du programme actif (Enseignant / Administrateur / super-admin).
             isAdmin={permsForProgram(activeProgramId).canManageContent}
@@ -1082,6 +1092,8 @@ export default function Dashboard() {
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
+        // Présence vocale : annonce liée à la session WebSocket (nettoyée à sa fermeture).
+        onVoicePresence={ws.voice.announce}
       />
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que
@@ -1481,7 +1493,8 @@ function applySectionChange(course: Course, sectionType: string, change: ItemCha
   if (sectionType === 'quiz') {
     return { ...course, quizzes: applyToQuizzes(course.quizzes ?? [], change) };
   }
-  const fType: ForumType = sectionType === 'text' ? 'Discussion' : 'Thread';
+  const fType: ForumType =
+    sectionType === 'text' ? 'Discussion' : sectionType === 'voice' ? 'Voice' : 'Thread';
   return { ...course, forums: applyToForums(course.forums ?? [], fType, change) };
 }
 

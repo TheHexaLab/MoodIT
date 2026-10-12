@@ -1,5 +1,6 @@
 import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/SectionEditorPopup';
 import { type Course } from './CourseMenu';
+import { type VoicePresenceParticipant } from '../../types/domain.ts';
 
 /**
  * Contrat « API + temps réel » de CourseMenu (miroir de ChannelView / ForumView).
@@ -42,6 +43,12 @@ export interface IncomingCourseHandlers {
   onQuizReordered?: (courseId: number) => void;
   /** Un quiz du cours a été supprimé (→ retrait de la liste, fermeture de la vue ouverte). */
   onQuizDeleted?: (courseId: number, quizId: number) => void;
+  /** Présence d'un salon vocal mise à jour : liste COMPLÈTE à jour des participants (à remplacer). */
+  onVoicePresence?: (
+    courseId: number,
+    channelId: number,
+    participants: VoicePresenceParticipant[]
+  ) => void;
   /**
    * Reconnexion WebSocket après coupure : des évènements ont pu être manqués → on
    * resynchronise (recharge les cours du programme, donc canaux/quiz/forums).
