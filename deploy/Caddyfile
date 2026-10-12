@@ -27,8 +27,11 @@
 		#  - img-src : PAS de wildcard 'https:' (aucune image externe en prod ;
 		#    seule une page de test chargeait une photo LinkedIn). data:/blob:
 		#    conservés pour favicons et aperçus d'images générés côté client.
-		#  - connect-src 'self' : couvre le WebSocket same-origin wss://moodit.ca/ws.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-jiVY1wMx7/ZirDhELvxOE4hml8jraFv+QvVD/aAicy4='; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		#  - connect-src : 'self' (WebSocket same-origin wss://moodit.ca/ws) + le SFU vocal
+		#    LiveKit, qui vit sur une AUTRE origine (livekit.moodit.ca) → il faut l'autoriser
+		#    explicitement en https (fetch /rtc/v1/validate) ET wss (signalisation), sinon le
+		#    navigateur bloque la connexion vocale ("violates connect-src 'self'").
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-jiVY1wMx7/ZirDhELvxOE4hml8jraFv+QvVD/aAicy4='; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://livekit.moodit.ca wss://livekit.moodit.ca; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 		# Empêche le MIME-sniffing et fuite du Referer complet vers l'extérieur.
 		X-Content-Type-Options "nosniff"
