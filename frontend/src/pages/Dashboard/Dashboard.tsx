@@ -62,6 +62,7 @@ import {
 } from '../../components/CourseChannelList/courseChannelSources.ts';
 import MainPanel from '../../components/MainPanel/MainPanel.tsx';
 import { type DemoProgram } from './dashboardApi.ts';
+import { mergeProgramsKeepingCourses } from './programMerge.ts';
 import { type AttemptOutcome } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import styles from './Dashboard.module.css';
 
@@ -255,7 +256,8 @@ export default function Dashboard() {
   // Chargement de la liste des programmes : api.fetchPrograms renvoie les données,
   // on les pose dans le state ; le loader pilote loading/erreur.
   const handleFetchPrograms = useCallback(async () => {
-    setDashboardPrograms(await api.fetchPrograms());
+    const fresh = await api.fetchPrograms();
+    setDashboardPrograms((current) => mergeProgramsKeepingCourses(current, fresh));
   }, []);
 
   const {
