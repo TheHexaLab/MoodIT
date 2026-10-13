@@ -236,4 +236,28 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       @Param("userId") long userId,
       @Param("forumId") long forumId,
       @Param("roleName") String roleName);
+
+  // Cles publiques d'appareil du vocal chiffre (GET /api/keys/devices/{deviceId}) : lisibles par
+  // le PROPRIETAIRE ou par quiconque partage AU MOINS un programme avec lui (seules personnes
+  // susceptibles d'etre dans un meme salon vocal). Cast texte : deviceId arrive en String du path.
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM Device_Key d
+            WHERE CAST(d.device_id AS VARCHAR) = :deviceId
+              AND (
+                d.user_id = :userId
+                OR EXISTS (
+                  SELECT 1
+                  FROM User_Program mine
+                  JOIN User_Program theirs ON theirs.program_id = mine.program_id
+                  WHERE mine.user_id = :userId AND theirs.user_id = d.user_id
+                )
+              )
+          )
+          """,
+      nativeQuery = true)
+  boolean canSeeDeviceKey(@Param("userId") long userId, @Param("deviceId") String deviceId);
 }

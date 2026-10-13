@@ -6,6 +6,7 @@ DELETE /api/courses/{courseId}/users/{userId}
 DELETE /api/establishments/{establishmentId}
 DELETE /api/forums/{forumId}
 DELETE /api/forums/{forumId}/posts/{postId}
+DELETE /api/keys/devices/{deviceId}
 DELETE /api/programs/{programId}
 DELETE /api/programs/{programId}/users/{userId}
 DELETE /api/quizzes/{quizId}
@@ -26,6 +27,7 @@ POST /api/establishments/programs
 POST /api/forums/messages
 POST /api/forums/posts
 POST /api/forums/posts/votes
+POST /api/keys/devices
 POST /api/programs/courses
 POST /api/programs/users
 POST /api/quizzes/{quizId}/submissions

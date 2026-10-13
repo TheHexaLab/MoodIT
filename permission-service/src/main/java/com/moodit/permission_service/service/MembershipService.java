@@ -81,6 +81,21 @@ public class MembershipService {
   }
 
   /**
+   * Les cles publiques de cet appareil (vocal chiffre) sont-elles lisibles par l'utilisateur ?
+   * Regle : etre le proprietaire, ou partager au moins un programme avec lui. deviceId est
+   * valide comme UUID AVANT la requete (refus sinon, sans toucher la BD).
+   */
+  @Transactional(readOnly = true)
+  public boolean canSeeDeviceKey(long userId, String deviceId) {
+    try {
+      java.util.UUID.fromString(deviceId);
+    } catch (IllegalArgumentException | NullPointerException e) {
+      return false;
+    }
+    return membershipRepository.canSeeDeviceKey(userId, deviceId.toLowerCase());
+  }
+
+  /**
    * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
    * l'abonnement. Sert a autoriser l'inscription a des cours d'un programme (POST /courses/users) :
    * on ne s'inscrit qu'aux cours d'un programme rejoint.

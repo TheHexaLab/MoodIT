@@ -11,6 +11,8 @@
 package com.moodit.voice_service.voice;
 
 import com.moodit.voice_service.authz.RoomAuthorizer;
+import com.moodit.voice_service.device.DeviceOwnershipClient;
+import com.moodit.voice_service.device.DeviceOwnershipClient.DeviceOwner;
 import com.moodit.voice_service.voice.dto.VoiceTokenRequest;
 import com.moodit.voice_service.voice.dto.VoiceTokenResponse;
 import jakarta.validation.Valid;
@@ -29,12 +31,17 @@ public class VoiceTokenController {
   private static final String SCOPE = "channel";
 
   private final RoomAuthorizer authorizer;
+  private final DeviceOwnershipClient devices;
   private final LiveKitTokenFactory tokenFactory;
   private final VoiceProperties props;
 
   public VoiceTokenController(
-      RoomAuthorizer authorizer, LiveKitTokenFactory tokenFactory, VoiceProperties props) {
+      RoomAuthorizer authorizer,
+      DeviceOwnershipClient devices,
+      LiveKitTokenFactory tokenFactory,
+      VoiceProperties props) {
     this.authorizer = authorizer;
+    this.devices = devices;
     this.tokenFactory = tokenFactory;
     this.props = props;
   }
@@ -54,11 +61,20 @@ public class VoiceTokenController {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acces au salon vocal refuse");
     }
 
+    // L'appareil doit etre ACTIF et a cet utilisateur (annuaire core, fail-closed). Sans ca, un
+    // client pourrait se presenter sous le deviceId d'un autre (il ne pourrait pas dechiffrer,
+    // mais usurperait son identite affichee dans le salon).
+    DeviceOwner owner =
+        devices
+            .activeOwner(body.deviceId(), email)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Appareil non reconnu"));
+
     String room = SCOPE + ":" + body.channelId();
-    // TODO(confidentialite) : l'email devient l'identite LiveKit, VISIBLE des autres
-    // participants. Avant livraison, mapper email -> userId/username pour ne pas divulguer
-    // l'email des membres entre eux (idem TODO d'origine cote core).
-    String joinToken = tokenFactory.createJoinToken(room, email);
+    // Identite "<userId>.<deviceId>" (E2EE.md §5.4) : l'email n'est plus visible des autres
+    // participants, et deux navigateurs du meme compte ne s'ejectent plus (DUPLICATE_IDENTITY).
+    String identity = owner.userId() + "." + body.deviceId();
+    String joinToken = tokenFactory.createJoinToken(room, identity, owner.username());
 
     return ResponseEntity.ok(new VoiceTokenResponse(joinToken, props.livekit().url(), room));
   }

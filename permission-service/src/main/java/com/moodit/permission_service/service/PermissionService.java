@@ -306,6 +306,21 @@ public class PermissionService {
                       return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
                     }),
 
+            // ── Vocal chiffre : annuaire des cles PUBLIQUES d'appareil (voice-service/E2EE.md) ──
+            // Ecritures « self » : l'appareil est enregistre/revoque pour l'identite du token ;
+            // core verifie que c'est BIEN le sien (revoquer celui d'un autre -> 404).
+            rule("POST", "/keys/devices", (user, vars, body) -> true),
+            rule("DELETE", "/keys/devices/{deviceId}", (user, vars, body) -> true),
+            // Ses propres appareils (« Mes appareils ») : self, filtre par email cote core.
+            rule("GET", "/keys/my-devices", (user, vars, body) -> true),
+            // Cles d'un appareil : proprietaire ou membre d'un programme commun (echange de cles
+            // entre participants d'un meme salon, qui partagent forcement le programme du cours).
+            rule(
+                    "GET",
+                    "/keys/devices/{deviceId}",
+                    (user, vars, body) ->
+                        membershipService.canSeeDeviceKey(user.getId(), vars.get("deviceId"))),
+
             // EDITER un post ou message : reserve a SON AUTEUR (Post.user_id). On protege via le
             // postId (PATH) ; le forumId du motif n'intervient pas dans la decision. La MODERATION
             // (cf. DELETE ci-dessous) n'ouvre PAS l'edition : un moderateur supprime, il ne

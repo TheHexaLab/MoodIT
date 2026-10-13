@@ -6,6 +6,7 @@
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
@@ -52,6 +53,12 @@
   color: #e03131;
 }
 
+.e2ee {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #2f9e44;
+}
+
 .participants {
   list-style: none;
   margin: 8px 0 0;
@@ -85,4 +92,128 @@
 .mutedTag {
   font-size: 0.7rem;
   opacity: 0.6;
+}
+
+.keyRejected {
+  font-size: 0.7rem;
+  color: #e03131;
+}
+
+.verifiedTag {
+  font-size: 0.7rem;
+  color: #2f9e44;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.safety {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  font-size: 0.8rem;
+}
+
+.safetyCode {
+  display: block;
+  margin: 6px 0;
+  font-size: 1rem;
+  letter-spacing: 0.05em;
+  word-spacing: 0.4em;
+  line-height: 1.6;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.devices {
+  margin-top: 6px;
+}
+
+.deviceList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.device {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+/* ── Vidéo (caméra / partage d'écran) ─────────────────────────────────────── */
+.videoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.videoTile,
+.screenTile {
+  position: relative;
+  margin: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.videoTile {
+  aspect-ratio: 16 / 9;
+}
+
+/* Un partage d'écran occupe toute la largeur : c'est le contenu principal d'un cours. */
+.screenTile {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 9;
+}
+
+.videoTile video,
+.screenTile video {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.videoTile video {
+  object-fit: cover;
+}
+
+/* L'écran partagé n'est jamais recadré (texte lisible en entier). */
+.screenTile video {
+  object-fit: contain;
+}
+
+.mirrored {
+  transform: scaleX(-1);
+}
+
+.videoLabel {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
 }

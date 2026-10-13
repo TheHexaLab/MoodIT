@@ -16,6 +16,8 @@ GET /api/forums/{forumId}/messages
 GET /api/forums/{forumId}/posts
 GET /api/forums/{forumId}/posts/{postId}
 GET /api/forums/{forumId}/posts/{postId}/replies
+GET /api/keys/devices/{deviceId}
+GET /api/keys/my-devices
 GET /api/languages
 GET /api/me
 GET /api/programs

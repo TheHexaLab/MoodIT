@@ -24,12 +24,17 @@ export interface VoiceTokenResponse {
  * ce canal) est tranchée côté backend via le permission-service AVANT la signature :
  *   - 401 si non authentifié, 403 si pas le droit (→ Error remontée au composant).
  * Le cookie d'auth part automatiquement (apiFetch → credentials:'include').
+ * `deviceId` : appareil enregistré dans l'annuaire du vocal chiffré (e2ee/deviceStore) ; le
+ * backend vérifie qu'il est à nous et en fait l'identité LiveKit "<userId>.<deviceId>".
  */
-export async function getVoiceToken(channelId: number): Promise<VoiceTokenResponse> {
+export async function getVoiceToken(
+  channelId: number,
+  deviceId: string
+): Promise<VoiceTokenResponse> {
   const res = await apiFetch('/api/voice/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channelId }),
+    body: JSON.stringify({ channelId, deviceId }),
   });
 
   if (!res.ok) {

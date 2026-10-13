@@ -329,6 +329,26 @@ CREATE TABLE User_Role(
    FOREIGN KEY(role_id) REFERENCES Role(id) ON DELETE CASCADE
 );
 
+-- Clés PUBLIQUES d'appareil du vocal chiffré de bout en bout (voice-service/E2EE.md §5.2).
+-- Un « appareil » = un profil de navigateur. Les clés PRIVÉES ne quittent jamais le navigateur
+-- (IndexedDB, non extractibles) : le serveur n'en stocke aucune. Les clés d'un appareil sont
+-- IMMUABLES (nouvelles clés = nouvel appareil) ; révocation = revoked_at, jamais d'effacement
+-- (les autres clients doivent pouvoir constater qu'une clé a été révoquée).
+CREATE TABLE Device_Key(
+   id SERIAL,
+   user_id INTEGER NOT NULL,
+   device_id UUID NOT NULL UNIQUE,
+   label VARCHAR(64),               -- libellé d'affichage (ex. « Edge · Windows »), non fiable
+   sign_pub TEXT NOT NULL,          -- clé publique ECDSA P-256 (SPKI, Base64)
+   dh_pub TEXT NOT NULL,            -- clé publique ECDH P-256 (SPKI, Base64)
+   dh_sig TEXT NOT NULL,            -- signature de dh_pub par sign_pub (P1363, Base64)
+   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+   revoked_at TIMESTAMP,
+   PRIMARY KEY(id),
+   FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_device_key_user ON Device_Key(user_id);
+
 CREATE TABLE program_course(
    program_id INTEGER,
    course_id INTEGER,

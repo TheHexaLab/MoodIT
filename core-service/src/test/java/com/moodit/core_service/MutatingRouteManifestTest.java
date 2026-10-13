@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -110,6 +111,10 @@ class MutatingRouteManifestTest {
     ClassPathScanningCandidateComponentProvider scanner =
         new ClassPathScanningCandidateComponentProvider(false);
     scanner.addIncludeFilter(new AnnotationTypeFilter(Controller.class)); // @RestController inclus (méta)
+    // Le scanner ÉVALUE les @Conditional* : sans ça, les contrôleurs derrière un flag OFF par défaut
+    // (vocal : moodit.voice.enabled) seraient INVISIBLES ici, donc hors du garde-fou de couverture
+    // des règles de permission. On scanne avec les flags de greffons ACTIVÉS pour tout lister.
+    scanner.setEnvironment(new MockEnvironment().withProperty("moodit.voice.enabled", "true"));
 
     Set<String> routes = new TreeSet<>();
     for (BeanDefinition bd : scanner.findCandidateComponents(basePackage)) {

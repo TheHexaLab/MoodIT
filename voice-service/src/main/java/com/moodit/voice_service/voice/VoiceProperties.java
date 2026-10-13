@@ -9,6 +9,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "moodit.voice")
 public record VoiceProperties(Livekit livekit, long tokenTtlSeconds) {
 
-  /** Coordonnees du SFU LiveKit. url = URL publique donnee au navigateur. */
-  public record Livekit(String url, String apiKey, String apiSecret) {}
+  /**
+   * Coordonnees du SFU LiveKit. url = URL publique donnee au navigateur ; apiUrl = URL INTERNE
+   * (HTTP) de l'API serveur LiveKit (Twirp), utilisee pour ejecter un appareil revoque.
+   */
+  public record Livekit(String url, String apiUrl, String apiKey, String apiSecret) {}
 }
