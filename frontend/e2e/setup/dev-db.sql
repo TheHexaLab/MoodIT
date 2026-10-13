@@ -3,7 +3,7 @@
 --
 -- 1. Table Device_Key (vocal chiffré) : init.sql ne s'applique qu'à un volume NEUF, et core ne
 --    crée pas les tables en dev (les lignes %dev.* de son application.properties sont une syntaxe
---    Quarkus, ignorée par Spring). Copie du bloc d'init.sql.
+--    Quarkus, ignorée par Spring). Copie de migrations/2026-10-12_device_key.sql.
 CREATE TABLE IF NOT EXISTS Device_Key(
    id SERIAL,
    user_id INTEGER NOT NULL,

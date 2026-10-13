@@ -24,8 +24,9 @@
 >   session du compte est encore valide (d'où l'email « nouvel appareil » et le conseil de changer
 >   de mot de passe). Révoquer un appareil ≠ fermer les sessions du compte.
 >
-> ⚠ **Prod** : `ddl-auto=validate` → créer la table `Device_Key` à la main avant de déployer (SQL
-> du bloc `CREATE TABLE Device_Key` d'`init.sql` + son index). En dev, `ddl-auto=update` la crée.
+> ⚠ **Prod** : `ddl-auto=validate` → appliquer `migrations/2026-10-12_device_key.sql` AVANT de
+> déployer core. En dev, sur une BD antérieure au vocal chiffré : même script (ou
+> `frontend/e2e/setup/dev-db.sql`, qui l'inclut) — core ne crée pas les tables lui-même.
 > Branche : `feature/voice-chat-prototype`. SDK : `livekit-client` 2.22.4, serveur LiveKit v1.13.9.
 
 ## 1. Pourquoi, et ce que ça change
