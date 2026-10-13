@@ -38,6 +38,8 @@ public class SecurityConfig {
                         "/auth/resend-code",
                         "/auth/forgot-password",
                         "/auth/reset-password",
+                        // Service à service (non routé par le gateway), protégé par X-Internal-Token.
+                        "/internal/**",
                         "/swagger-ui/**",
                         "/swagger-ui/index.html",
                         "/swagger-ui.html",

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.moodit.auth_service.config.DevFixedTwoFactorCode;
 import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
@@ -46,6 +47,8 @@ class AuthServiceTest {
   @Mock private JwtService jwtService;
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private EmailService emailService;
+  // Mock = Optional.empty() par défaut → code 2FA aléatoire, comme en prod.
+  @Mock private DevFixedTwoFactorCode devFixedTwoFactorCode;
 
   @InjectMocks private AuthService authService;
 
@@ -329,6 +332,23 @@ class AuthServiceTest {
     assertThat(res.getToken()).isNull(); // 2FA requise avant l'émission du token
     verify(emailService).send2FACode(eq("karine.roussel@usherbrooke.ca"), anyString());
     verify(userRepository).save(any(User.class));
+  }
+
+  @Test
+  void login_withDevFixedCode_storesTheFixedCode_andSendsNoEmail() {
+    LoginRequest req = new LoginRequest();
+    req.setEmail("karine.roussel@usherbrooke.ca");
+    req.setPassword("Sup3rPass!");
+    User user = verifiedUser();
+    when(userRepository.findByEmail("karine.roussel@usherbrooke.ca")).thenReturn(Optional.of(user));
+    when(passwordEncoder.matches(peppered("Sup3rPass!"), "storedHash")).thenReturn(true);
+    when(devFixedTwoFactorCode.code()).thenReturn(Optional.of("000000"));
+
+    authService.login(req);
+
+    verify(emailService, never()).send2FACode(anyString(), anyString());
+    // Toujours HACHÉ en BD, même en mode dev (le parcours reste celui de la prod).
+    assertThat(user.getVerificationCode()).isEqualTo(peppered("000000"));
   }
 
   @Test
