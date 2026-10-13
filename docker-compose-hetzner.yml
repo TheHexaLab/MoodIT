@@ -150,6 +150,7 @@ services:
     depends_on:
       - livekit
       - permission-service
+      - core-service   # verification d'appartenance des appareils (/internal/keys/...)
 
   # ── SFU vocal LiveKit ─────────────────────────────────────────────────────
   # Signalisation (7880) atteinte par Caddy en INTERNE → exposee en wss://livekit.<domaine>.
@@ -167,10 +168,18 @@ services:
     ports:
       - "7881:7881"
       - "7882:7882/udp"
+      - "3478:3478/udp"   # TURN/UDP
+      - "5349:5349"       # TURN/TLS
     volumes:
       - ./deploy/livekit-prod.yaml:/etc/livekit/livekit.yaml:ro
+      # Cert TLS de turn.moodit.ca, obtenu/renouvele par Caddy (lecture seule).
+      - caddy_data:/caddy-data:ro
     networks:
       - internal
+    # Caddy doit avoir obtenu le cert TURN avant que LiveKit ne le charge. Au tout premier
+    # deploiement, livekit peut redemarrer en boucle quelques secondes le temps que Caddy l'obtienne.
+    depends_on:
+      - caddy
 
   # ── MCP : LLM = Groq (gratuit, sans carte). Pas d'Ollama. ─────────────────
   # LLM_API_KEY (gsk_...) vient de .env.docker. Clé absente / appel KO → repli

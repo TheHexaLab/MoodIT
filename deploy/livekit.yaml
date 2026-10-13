@@ -26,5 +26,9 @@ rtc:
   # (constaté : "connectionType":"tcp" au lieu de "udp"). Le serveur a besoin de l'ICE COMPLET
   # pour percer l'UDP ici. (ICE-Lite reste pertinent en prod avec IP publique joignable, mais
   # alors ce fichier n'est de toute façon pas celui utilisé — voir la note node_ip ci-dessus.)
+# Plafond par salon (decision equipe, E2EE.md §8) : la rotation des cles du vocal chiffre coute
+# O(n^2) messages a chaque arrivee/depart ; au-dela, LiveKit refuse le join (salon plein).
+room:
+  max_participants: 50
 logging:
   level: info

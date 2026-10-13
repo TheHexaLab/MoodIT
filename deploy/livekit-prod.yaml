@@ -16,5 +16,28 @@ rtc:
   tcp_port: 7881     # repli ICE/TCP quand l'UDP est bloque
   udp_port: 7882     # port UDP unique (mux) pour tout le media WebRTC
   use_external_ip: true
+
+# Serveur TURN INTEGRE a LiveKit : dernier recours quand le client ne peut joindre ni l'UDP
+# 7882 ni le TCP 7881 en direct. Cas constate : Edge avec « Secure Network » (VPN integre)
+# interdit l'UDP non proxifie a WebRTC → sans TURN, « could not establish pc connection ».
+# LiveKit annonce lui-meme ce TURN (avec identifiants ephemeres) au client dans la reponse de
+# join : AUCUN changement cote frontend.
+#   - udp_port 3478 : TURN/UDP (reseaux qui filtrent les ports hauts mais pas 3478).
+#   - tls_port 5349 : TURN/TLS (TCP chiffre, passe la plupart des proxys/pare-feux).
+# Le cert est celui que Caddy obtient pour turn.moodit.ca (bloc dedie du Caddyfile), lu dans
+# le volume caddy_data monte en /caddy-data:ro. ⚠ LiveKit ne charge le cert qu'au DEMARRAGE :
+# apres un renouvellement Caddy (~tous les 60 j), redemarrer livekit (cron, cf. DEPLOY.md).
+turn:
+  enabled: true
+  domain: turn.moodit.ca
+  udp_port: 3478
+  tls_port: 5349
+  cert_file: /caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/turn.moodit.ca/turn.moodit.ca.crt
+  key_file: /caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/turn.moodit.ca/turn.moodit.ca.key
+
+# Plafond par salon (decision equipe, E2EE.md §8) : la rotation des cles du vocal chiffre coute
+# O(n^2) messages a chaque arrivee/depart ; au-dela, LiveKit refuse le join (salon plein).
+room:
+  max_participants: 50
 logging:
   level: info

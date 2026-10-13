@@ -22,10 +22,22 @@ COPY <<'EOF' /etc/nginx/conf.d/default.conf
 server {
     listen 5173;
 
+    # index.html (et fallback SPA) : TOUJOURS revalide. Sans Cache-Control, le navigateur le
+    # garde en cache selon son heuristique et charge le bundle d'un ANCIEN deploiement
+    # (constate dans Edge : salons vocaux absents tant qu'on ne rafraichit pas).
     location / {
         root /usr/share/nginx/html;
         index index.html;
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Assets Vite : nom hache par contenu → immuables, cache long sans risque. =404 (et NON le
+    # fallback index.html) : sinon un chunk manquant renverrait du HTML mis en cache 1 an.
+    location /assets/ {
+        root /usr/share/nginx/html;
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 
     location /api/ {

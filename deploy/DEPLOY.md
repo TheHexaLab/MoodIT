@@ -115,15 +115,25 @@ tant que `VOICE_ENABLED` n'est pas à `true`. Pour l'activer en prod :
 1. **DNS** — ajoute un sous-domaine qui pointe sur le VPS (comme le domaine principal) :
    ```
    livekit.moodit.ca   A     <IP_DU_VPS>
+   turn.moodit.ca      A     <IP_DU_VPS>
    ```
-   Caddy obtiendra seul le certificat TLS de ce sous-domaine (bloc déjà dans `deploy/Caddyfile`).
+   Caddy obtiendra seul le certificat TLS de ces sous-domaines (blocs déjà dans `deploy/Caddyfile`).
+   Celui de `turn.moodit.ca` est lu par le serveur TURN intégré à LiveKit.
 
 2. **Pare-feu** — le média WebRTC passe **en direct** (pas par Caddy/443), il faut ouvrir :
    ```bash
    ufw allow 7882/udp    # média WebRTC (UDP, le chemin normal)
    ufw allow 7881/tcp    # repli ICE/TCP si l'UDP est bloqué côté client
+   ufw allow 3478/udp    # TURN/UDP
+   ufw allow 5349/tcp    # TURN/TLS (VPN/proxy qui bloquent l'UDP, ex. Edge Secure Network)
    ```
-   Si un **firewall Hetzner Cloud** est actif, y autoriser aussi `7881/tcp` et `7882/udp`.
+   Si un **firewall Hetzner Cloud** est actif, y autoriser aussi ces 4 ports.
+
+   **Renouvellement du cert TURN** — LiveKit ne lit le cert qu'au démarrage ; Caddy le renouvelle
+   tous les ~60 j. Ajouter un cron hebdo (nuit, hors usage) sur le VPS (`crontab -e`) :
+   ```
+   0 5 * * 1  docker restart moodit_livekit
+   ```
 
 3. **Secrets** (`.env.docker`) — renseigne :
    ```
@@ -143,7 +153,8 @@ tant que `VOICE_ENABLED` n'est pas à `true`. Pour l'activer en prod :
    de salon vocal dans l'app connecte deux onglets qui s'entendent.
 
 > Architecture : la **signalisation** va `navigateur → wss://livekit.moodit.ca` (Caddy → `livekit:7880`
-> en interne) ; le **média** va `navigateur → UDP <IP_VPS>:7882` en direct. Le `voice-service`
+> en interne) ; le **média** va `navigateur → UDP <IP_VPS>:7882` en direct (repli TCP 7881,
+> puis TURN 3478/udp ou 5349/tls si le client ne peut pas joindre le SFU directement). Le `voice-service`
 > ne signe que le JoinToken ; la **présence** (qui est là / qui parle) reste dans `core-service`.
 
 ---
