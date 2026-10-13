@@ -1221,4 +1221,26 @@ class PermissionServiceTest {
     when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
     assertThat(service().isAllowed(EMAIL, "/api/users/role/1/programs/7", "GET", null)).isFalse();
   }
+
+  // ── Moderation vocale (voice-service) : delegue a MembershipService.canModerateVoice ─────
+
+  @Test
+  void voiceModeration_routesDelegateToCanModerateVoice() {
+    User u = user(5);
+    loggedIn(u);
+    when(membershipService.canModerateVoice(u, 11)).thenReturn(true);
+    PermissionService svc = service();
+    assertThat(svc.isAllowed(EMAIL, "/api/voice/channels/11/participants/7/mute", "POST", null)).isTrue();
+    assertThat(svc.isAllowed(EMAIL, "/api/voice/channels/11/participants/7/mute", "DELETE", null)).isTrue();
+    assertThat(svc.isAllowed(EMAIL, "/api/voice/channels/11/participants/7/kick", "POST", null)).isTrue();
+  }
+
+  @Test
+  void voiceModeration_nonModerator_denied() {
+    User u = user(5);
+    loggedIn(u);
+    when(membershipService.canModerateVoice(u, 11)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/voice/channels/11/participants/7/kick", "POST", null))
+        .isFalse();
+  }
 }

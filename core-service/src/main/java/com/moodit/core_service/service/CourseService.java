@@ -16,6 +16,7 @@ import com.moodit.core_service.realtime.dto.ItemDto;
 import java.util.Objects;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -39,6 +40,7 @@ public class CourseService {
   private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
   private final AuditLogService auditLogService;
+  private final ApplicationEventPublisher events;
 
 
   /** Exécute l'action après le commit (ou tout de suite hors transaction). */
@@ -226,8 +228,12 @@ public class CourseService {
         course.getPrograms() == null ? List.of() : course.getPrograms().stream().map(Program::getId).toList();
     // Capturé AVANT delete : la collection lazy de programmes sera vidée par la suppression.
     String programsDetails = AuditContext.ofCourse(course);
+    List<Integer> forumIds =
+        course.getForums() == null ? List.of() : course.getForums().stream().map(Forum::getId).toList();
 
     courseRepository.delete(course);
+    // Salons vocaux du cours : fermés après commit (cf. ForumsDeletedEvent).
+    if (!forumIds.isEmpty()) events.publishEvent(new ForumsDeletedEvent(forumIds));
 
     auditLogService.record(
         "COURSE_DELETE",
@@ -307,6 +313,8 @@ public class CourseService {
             forum.getId(),
             "Forum #" + forum.getId() + " supprimé",
             courseDetails);
+        // Salon vocal (section 'voice') : fermé après commit (cf. ForumsDeletedEvent).
+        events.publishEvent(new ForumsDeletedEvent(List.of(forum.getId())));
         emitted = ItemChangeDto.delete(change.id());
       }
       case "reorder" -> {

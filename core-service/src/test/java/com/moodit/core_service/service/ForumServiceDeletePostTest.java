@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -54,7 +55,8 @@ class ForumServiceDeletePostTest {
             voteRepository,
             userRepository,
             mock(RealtimeEventPublisher.class),
-            auditLogService);
+            auditLogService,
+            mock(ApplicationEventPublisher.class));
     // Le champ entityManager (@PersistenceContext) n'est pas injecté quand on instancie le service
     // à la main : on branche l'EM du contexte de test.
     ReflectionTestUtils.setField(forumService, "entityManager", em.getEntityManager());

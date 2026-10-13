@@ -7,9 +7,13 @@
 //   program -> abonne au programme (User_Program)
 //   channel/forum -> le forum est visible : abonne au programme du cours.
 //   mcp     -> le cours est visible : abonne a un programme du cours.
+//   voiceModerate -> peut moderer le salon vocal du canal (server-mute, expulsion) ; consulte
+//                    par voice-service (pas une room WebSocket, meme contrat oui/non).
 
 package com.moodit.permission_service.service;
 
+import com.moodit.permission_service.model.Role;
+import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.MembershipRepository;
 import com.moodit.permission_service.repository.UserRepository;
@@ -31,6 +35,11 @@ public class MembershipService {
   /** Autorise (ou non) l'abonnement a une room WebSocket. */
   @Transactional(readOnly = true)
   public boolean canJoin(String email, String scope, long id) {
+    if ("voiceModerate".equals(scope)) {
+      // Besoin des roles GLOBAUX : on charge l'utilisateur entier (pas seulement son id).
+      return email != null
+          && userRepository.findByEmail(email).map(u -> canModerateVoice(u, id)).orElse(false);
+    }
     Long userId = resolveUserId(email);
     if (userId == null) {
       return false;
@@ -78,6 +87,26 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean canAccessForum(long userId, long forumId) {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
+  }
+
+  /**
+   * L'utilisateur peut-il MODERER le salon vocal de ce canal (server-mute, expulsion) ?
+   * Regle : Administrateur/Gardien GLOBAL (partout), ou Administrateur/Enseignant d'un programme
+   * du cours du canal (meme population que la gestion du contenu du cours). Contrairement a la
+   * suppression de messages, l'Enseignant EST moderateur ici : c'est lui qui anime le cours.
+   */
+  @Transactional(readOnly = true)
+  public boolean canModerateVoice(User user, long forumId) {
+    if (forumId <= 0) {
+      return false;
+    }
+    boolean global =
+        user.getRoles().stream()
+            .map(Role::getName)
+            .anyMatch(n -> RoleNames.ADMIN.equals(n) || RoleNames.GUARDIAN.equals(n));
+    return global
+        || membershipRepository.hasRoleInForumCourse(user.getId(), forumId, RoleNames.ADMIN)
+        || membershipRepository.hasRoleInForumCourse(user.getId(), forumId, RoleNames.TEACHER);
   }
 
   /**

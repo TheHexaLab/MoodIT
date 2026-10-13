@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -33,7 +34,8 @@ class ForumServiceContentLimitTest {
             mock(VoteRepository.class),
             mock(UserRepository.class),
             mock(RealtimeEventPublisher.class),
-            mock(AuditLogService.class));
+            mock(AuditLogService.class),
+            mock(ApplicationEventPublisher.class));
   }
 
   private PostCreateInForumDTO dto(String content) {

@@ -3,10 +3,13 @@ package com.moodit.permission_service.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.moodit.permission_service.model.Role;
+import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.MembershipRepository;
 import com.moodit.permission_service.repository.UserRepository;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -155,5 +158,57 @@ class MembershipServiceTest {
   void hasRoleInForumCourse_delegatesFalse() {
     when(membershipRepository.hasRoleInForumCourse(5, 9, "Enseignant")).thenReturn(false);
     assertThat(service.hasRoleInForumCourse(5, 9, "Enseignant")).isFalse();
+  }
+
+  // ── Moderation vocale (scope "voiceModerate", consulte par voice-service) ──────────────
+
+  private User withGlobalRole(int id, String roleName) {
+    User u = new User();
+    u.setId(id);
+    u.setEmail(EMAIL);
+    Role r = new Role();
+    r.setName(roleName);
+    u.setRoles(Set.of(r));
+    when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(u));
+    return u;
+  }
+
+  @Test
+  void voiceModerate_globalGuardian_allowedWithoutDbLookup() {
+    withGlobalRole(5, RoleNames.GUARDIAN);
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 7)).isTrue();
+  }
+
+  @Test
+  void voiceModerate_courseTeacher_allowed() {
+    loggedIn(5);
+    when(membershipRepository.hasRoleInForumCourse(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipRepository.hasRoleInForumCourse(5, 7, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 7)).isTrue();
+  }
+
+  @Test
+  void voiceModerate_programAdmin_allowed() {
+    loggedIn(5);
+    when(membershipRepository.hasRoleInForumCourse(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 7)).isTrue();
+  }
+
+  @Test
+  void voiceModerate_student_denied() {
+    loggedIn(5);
+    when(membershipRepository.hasRoleInForumCourse(5, 7, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipRepository.hasRoleInForumCourse(5, 7, RoleNames.TEACHER)).thenReturn(false);
+    // Etre abonne au canal (pouvoir y parler) ne suffit pas a le moderer.
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 7)).isFalse();
+  }
+
+  @Test
+  void voiceModerate_unknownUserOrBadId_denied() {
+    when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 7)).isFalse();
+    assertThat(service.canJoin(null, "voiceModerate", 7)).isFalse();
+    withGlobalRole(5, RoleNames.ADMIN);
+    assertThat(service.canJoin(EMAIL, "voiceModerate", 0)).isFalse();
   }
 }

@@ -13,6 +13,8 @@ package com.moodit.voice_service.voice;
 import com.moodit.voice_service.authz.RoomAuthorizer;
 import com.moodit.voice_service.device.DeviceOwnershipClient;
 import com.moodit.voice_service.device.DeviceOwnershipClient.DeviceOwner;
+import com.moodit.voice_service.moderation.VoiceModerationController;
+import com.moodit.voice_service.moderation.VoiceModerationService;
 import com.moodit.voice_service.voice.dto.VoiceTokenRequest;
 import com.moodit.voice_service.voice.dto.VoiceTokenResponse;
 import jakarta.validation.Valid;
@@ -33,16 +35,19 @@ public class VoiceTokenController {
   private final RoomAuthorizer authorizer;
   private final DeviceOwnershipClient devices;
   private final LiveKitTokenFactory tokenFactory;
+  private final VoiceModerationService moderation;
   private final VoiceProperties props;
 
   public VoiceTokenController(
       RoomAuthorizer authorizer,
       DeviceOwnershipClient devices,
       LiveKitTokenFactory tokenFactory,
+      VoiceModerationService moderation,
       VoiceProperties props) {
     this.authorizer = authorizer;
     this.devices = devices;
     this.tokenFactory = tokenFactory;
+    this.moderation = moderation;
     this.props = props;
   }
 
@@ -74,8 +79,21 @@ public class VoiceTokenController {
     // Identite "<userId>.<deviceId>" (E2EE.md §5.4) : l'email n'est plus visible des autres
     // participants, et deux navigateurs du meme compte ne s'ejectent plus (DUPLICATE_IDENTITY).
     String identity = owner.userId() + "." + body.deviceId();
-    String joinToken = tokenFactory.createJoinToken(room, identity, owner.username());
+    // Server-mute en cours (moderateur) : le token n'autorise pas le micro, sinon il suffirait
+    // de se reconnecter pour le retrouver.
+    boolean serverMuted = moderation.isServerMuted(room, owner.userId());
+    String joinToken =
+        tokenFactory.createJoinToken(
+            room,
+            identity,
+            owner.username(),
+            serverMuted ? VoiceModerationService.GRANT_SOURCES_WITHOUT_MIC : null);
+    // Le front n'affiche les actions de moderation qu'a un moderateur (le serveur re-verifie).
+    boolean canModerate =
+        authorizer.canJoin(email, VoiceModerationController.MODERATE_SCOPE, body.channelId());
 
-    return ResponseEntity.ok(new VoiceTokenResponse(joinToken, props.livekit().url(), room));
+    return ResponseEntity.ok(
+        new VoiceTokenResponse(
+            joinToken, props.livekit().url(), room, owner.userId(), canModerate, serverMuted));
   }
 }

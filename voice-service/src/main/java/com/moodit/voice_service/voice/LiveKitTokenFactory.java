@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import javax.crypto.SecretKey;
 
@@ -35,6 +36,17 @@ public class LiveKitTokenFactory {
    * @return un JWT signe a passer au SDK LiveKit cote navigateur
    */
   public String createJoinToken(String room, String identity, String name) {
+    return createJoinToken(room, identity, name, null);
+  }
+
+  /**
+   * Variante restreignant les sources publiables (server-mute d'un moderateur : tout sauf le
+   * micro). publishSources null = toutes les sources.
+   *
+   * @param publishSources sources LiveKit au format des grants ("camera", "screen_share"...)
+   */
+  public String createJoinToken(
+      String room, String identity, String name, List<String> publishSources) {
     Instant now = Instant.now();
     Map<String, Object> grant = new HashMap<>();
     // "video grant" : schema impose par LiveKit. roomJoin + room borne l'acces a CE salon.
@@ -44,6 +56,9 @@ public class LiveKitTokenFactory {
     grant.put("canSubscribe", true);
     // Le data channel reste ouvert dans tous les cas : l'echange de cles E2EE en depend.
     grant.put("canPublishData", true);
+    if (publishSources != null) {
+      grant.put("canPublishSources", publishSources);
+    }
     return Jwts.builder()
         .issuer(props.livekit().apiKey()) // LiveKit retrouve le secret via la cle (iss)
         .subject(identity)
@@ -70,6 +85,9 @@ public class LiveKitTokenFactory {
     Map<String, Object> grant = new HashMap<>();
     grant.put("roomList", true);
     grant.put("roomAdmin", true);
+    // Exige par DeleteRoom (fermeture du salon d'un canal supprime) : LiveKit range la
+    // suppression sous le droit de creation.
+    grant.put("roomCreate", true);
     if (room != null) {
       grant.put("room", room);
     }

@@ -306,6 +306,24 @@ public class PermissionService {
                       return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
                     }),
 
+            // Moderation d'un salon vocal (voice-service VoiceModerationController) : server-mute,
+            // levee du mute, expulsion d'un participant. channelId (forum 'Voice') dans le PATH.
+            // Moderateur = Administrateur/Gardien GLOBAL, ou Administrateur/Enseignant d'un
+            // programme du cours (MembershipService.canModerateVoice, aussi scope can-join
+            // "voiceModerate" re-verifie par voice-service).
+            rule(
+                    "POST",
+                    "/voice/channels/{channelId}/participants/{userId}/mute",
+                    (user, vars, body) -> canModerateVoice(user, vars)),
+            rule(
+                    "DELETE",
+                    "/voice/channels/{channelId}/participants/{userId}/mute",
+                    (user, vars, body) -> canModerateVoice(user, vars)),
+            rule(
+                    "POST",
+                    "/voice/channels/{channelId}/participants/{userId}/kick",
+                    (user, vars, body) -> canModerateVoice(user, vars)),
+
             // ── Vocal chiffre : annuaire des cles PUBLIQUES d'appareil (voice-service/E2EE.md) ──
             // Ecritures « self » : l'appareil est enregistre/revoque pour l'identite du token ;
             // core verifie que c'est BIEN le sien (revoquer celui d'un autre -> 404).
@@ -1013,6 +1031,11 @@ public class PermissionService {
     long forumId = longVar(vars, "forumId");
     return forumId > 0
         && membershipService.hasRoleInForumCourse(user.getId(), forumId, RoleNames.ADMIN);
+  }
+
+  // Moderation vocale : channelId (id du forum 'Voice') lu dans le PATH.
+  private boolean canModerateVoice(User user, Map<String, String> vars) {
+    return membershipService.canModerateVoice(user, longVar(vars, "channelId"));
   }
 
   // ── PREDICAT GENERIQUE : appartenance au forum (id de forum dans le PATH) ───────────

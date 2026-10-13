@@ -21,6 +21,7 @@ import com.moodit.core_service.realtime.dto.ForumPostDto;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,7 @@ public class ForumService {
     private final UserRepository userRepository;
     private final RealtimeEventPublisher realtimePublisher;
     private final AuditLogService auditLogService;
+    private final ApplicationEventPublisher events;
 
     /**
      * Longueur MAX du contenu d'un message/post. Source de vérité de la limite : le front doit
@@ -492,6 +494,8 @@ public class ForumService {
         forumRepository.delete(forum); //ON DELETE CASCADE
         auditLogService.record("FORUM_DELETE", "FORUM", forumId,
                 "Forum #" + forumId + " supprimé", details);
+        // Salon vocal éventuel : fermé après commit (participants déjà connectés déconnectés).
+        events.publishEvent(new ForumsDeletedEvent(List.of(forumId)));
     }
     @Transactional
     public void deletePost(Integer forumId, Integer postId, String email) {

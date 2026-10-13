@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -52,7 +53,8 @@ class ForumServicePaginationTest {
             voteRepository,
             userRepository,
             mock(RealtimeEventPublisher.class),
-            mock(AuditLogService.class));
+            mock(AuditLogService.class),
+            mock(ApplicationEventPublisher.class));
 
     FType fType = new FType();
     fType.setName("Discussion");
