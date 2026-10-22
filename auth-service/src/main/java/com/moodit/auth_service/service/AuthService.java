@@ -3,6 +3,7 @@
 
 package com.moodit.auth_service.service;
 
+import com.moodit.auth_service.config.DevFixedTwoFactorCode;
 import com.moodit.auth_service.dto.AuthResponse;
 import com.moodit.auth_service.dto.LoginRequest;
 import com.moodit.auth_service.dto.RegisterRequest;
@@ -13,6 +14,7 @@ import com.moodit.auth_service.repository.PendingRegistrationRepository;
 import com.moodit.auth_service.repository.EstablishmentRepository;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -38,6 +40,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
   private final UserRepository userRepository;
@@ -46,6 +49,7 @@ public class AuthService {
   private final JwtService jwtService;
   private final PasswordEncoder passwordEncoder;
   private final EmailService emailService;
+  private final DevFixedTwoFactorCode devFixedTwoFactorCode;
 
   @Value("${app.security.pepper}")
   private String pepper;
@@ -248,7 +252,7 @@ public class AuthService {
 
     // Aucun code actif (1re connexion, code expiré, ou verrou 2FA écoulé) : on émet un nouveau
     // code et on repart d'un compteur de tentatives neuf.
-    String code = generateCode();
+    String code = generate2FACode();
     user.setVerificationCode(hashCode(code));
     user.setVerificationCodeExpiresAt(now.plusMinutes(15));
     user.setVerificationAttempts(0);
@@ -256,7 +260,7 @@ public class AuthService {
     user.setLastCodeSentAt(now);
     userRepository.save(user);
 
-    emailService.send2FACode(email, code);
+    send2FACode(email, code);
 
     return authResponseFor(user, null);
   }
@@ -492,14 +496,14 @@ public class AuthService {
         throw new InvalidVerificationCodeException("Aucun code à renvoyer. Reconnectez-vous.");
       }
       enforceResendCooldown(user.getLastCodeSentAt(), now);
-      String code = generateCode();
+      String code = generate2FACode();
       user.setVerificationCode(hashCode(code));
       user.setVerificationCodeExpiresAt(now.plusMinutes(15));
       // On NE réinitialise PAS `verificationAttempts` (HIGH #1) : un renvoi ne doit pas servir à
       // remettre le plafond d'essais à zéro. Les tentatives s'accumulent jusqu'au verrou 15 min.
       user.setLastCodeSentAt(now);
       userRepository.save(user);
-      emailService.send2FACode(email, code);
+      send2FACode(email, code);
       return Map.of("message", "Code renvoyé.");
     }
 
@@ -674,6 +678,23 @@ public class AuthService {
     } catch (GeneralSecurityException e) {
       throw new IllegalStateException("HMAC indisponible", e);
     }
+  }
+
+  // Code 2FA du login : FIXE en dev si moodit.auth.dev-fixed-2fa-code est posé (garde-fous dans
+  // DevFixedTwoFactorCode : profil dev obligatoire, démarrage refusé sinon), aléatoire sinon.
+  // Les codes d'inscription et de reset restent TOUJOURS aléatoires.
+  private String generate2FACode() {
+    return devFixedTwoFactorCode.code().orElseGet(this::generateCode);
+  }
+
+  // En mode code fixe (dev), l'email 2FA n'apporte rien (le code est connu) et partirait vers des
+  // comptes de test aux domaines fictifs (rebonds SMTP) : on ne l'envoie pas.
+  private void send2FACode(String email, String code) {
+    if (devFixedTwoFactorCode.code().isPresent()) {
+      log.debug("2FA dev (code fixe) : email non envoyé à {}", email);
+      return;
+    }
+    emailService.send2FACode(email, code);
   }
 
   private String generateCode() {

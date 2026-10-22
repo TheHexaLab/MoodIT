@@ -15,10 +15,10 @@ jobs:
     strategy:
       fail-fast: false          # un service qui casse ne masque pas le résultat des autres
       matrix:
-        service: [auth-service, core-service, execution-service, gateway, mcp-service]
+        service: [auth-service, core-service, execution-service, gateway, mcp-service, permission-service]
 
-    # Postgres requis par CoreServiceApplicationTests (@SpringBootTest démarre tout le
-    # contexte, qui ouvre la datasource au boot). Aligné sur les valeurs par défaut de
+    # Postgres requis par Core/PermissionServiceApplicationTests (@SpringBootTest démarre tout
+    # le contexte, qui ouvre la datasource au boot). Aligné sur les valeurs par défaut de
     # l'appli (localhost:5432 / moodit_db / postgres / postgres) → aucun env à surcharger.
     # Idle pour les autres services (auth/gateway/mcp/execution ne s'y connectent pas).
     services:
@@ -93,8 +93,10 @@ jobs:
       - name: Installer les dépendances
         run: npm ci
 
-      - name: Typecheck (tsc)
-        run: npx tsc --noEmit -p tsconfig.json
+      # `tsc -b` (et non `tsc -p tsconfig.json`) : tsconfig.json est une solution (`files: []` +
+      # références app/node), donc `-p` ne vérifiait AUCUN fichier. Même commande que le Dockerfile.
+      - name: Typecheck + build (tsc -b && vite build)
+        run: npm run build
 
       - name: Tests unitaires (Vitest)
         run: npm run test
@@ -103,6 +105,165 @@ jobs:
       # ce gate empêche toute nouvelle erreur OU warning d'être fusionnée.
       - name: Lint
         run: npm run lint
+
+  # ── Schéma : chaque service JPA démarre en profil prod contre le VRAI schéma ─────
+  # Les tests unitaires tournent sur H2 avec un schéma généré depuis les entités : un écart entre
+  # init.sql et le code n'y casse jamais rien. Ici, Postgres est monté avec init.sql (comme le
+  # docker-entrypoint de prod), puis migrations/*.sql sont rejouées (idempotentes : elles doivent
+  # passer sans erreur sur une base à jour). Le VRAI JAR démarre ensuite en profil prod, donc en
+  # `ddl-auto=validate` : une table ou colonne manquante empêche le démarrage → job rouge.
+  # mcp-service n'est pas listé : JDBC brut, `ddl-auto=none`, rien à valider côté Hibernate.
+  schema:
+    name: ${{ matrix.service }} — démarrage prod (vrai schéma)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, core-service, permission-service]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: moodit_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Construire le JAR
+        working-directory: ${{ matrix.service }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew bootJar --no-daemon --console=plain
+
+      - name: Créer le schéma (init.sql puis migrations/)
+        env:
+          PGPASSWORD: postgres
+          PGOPTIONS: "-c client_min_messages=warning"   # masque les NOTICE « already exists » des migrations rejouées
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f init.sql
+          for f in migrations/*.sql; do
+            echo "→ $f"
+            psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f "$f"
+          done
+
+      # Lancé depuis la racine du dépôt : `optional:file:../.env` pointe alors hors du workspace
+      # (aucun .env ne vient surcharger le profil). Secrets bidons : seuls les placeholders sans
+      # valeur de repli du profil prod doivent se résoudre ; aucun mail n'est envoyé.
+      - name: Démarrer en profil prod
+        env:
+          SPRING_PROFILES_ACTIVE: prod
+          JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else-0123456789abcdef0123456789abcdef0123456789
+          APP_SECURITY_PEPPER: ci-only-pepper
+          INTERNAL_TOKEN: ci-only-internal-token
+          MAIL_USERNAME: ci@example.invalid
+          MAIL_PASSWORD: ci
+        run: |
+          jar=$(find "${{ matrix.service }}/build/libs" -name '*.jar' ! -name '*-plain.jar')
+          java -jar "$jar" --server.port=18080 > boot.log 2>&1 &
+          pid=$!
+          # Démarré = le port HTTP répond (n'importe quel code, même 401/404). Le processus qui
+          # meurt avant (ex. SchemaManagementException) fait échouer le job avec son log.
+          for i in $(seq 1 90); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::${{ matrix.service }} s'est arrêté au démarrage (schéma ou configuration prod)."
+              cat boot.log
+              exit 1
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/ || true)
+            if [ "$code" != "000" ]; then
+              echo "${{ matrix.service }} a démarré en profil prod (HTTP $code après ${i}s)."
+              kill "$pid"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::${{ matrix.service }} n'a pas démarré en 90 s."
+          cat boot.log
+          kill "$pid" || true
+          exit 1
+
+  # ── Bout en bout : Playwright sur la pile Docker Compose ───────────────────────
+  # Vraies images (Dockerfile), en profil dev, courriels capturés par Mailpit, MCP en repli sans LLM,
+  # Piston avec Python (docker-compose-e2e.yml). Voir frontend/e2e/core/README.md.
+  # Seul `e2e/core` tourne ici : les tests vocaux (e2e/voice, branche vocale) exigent LiveKit.
+  # Un job par profil (frontend/playwright.core.config.ts) : la suite complète sur les trois moteurs
+  # en disposition de bureau, et la suite « responsive » sur tablettes et téléphones.
+  e2e:
+    name: e2e — Playwright (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { project: desktop-chromium, browser: chromium }
+          - { project: desktop-firefox, browser: firefox }
+          - { project: desktop-webkit, browser: webkit }
+          - { project: tablet-portrait, browser: webkit }
+          - { project: tablet-landscape, browser: webkit }
+          - { project: mobile-chromium, browser: chromium }
+          - { project: mobile-webkit, browser: webkit }
+          - { project: mobile-small, browser: chromium }
+    env:
+      COMPOSE: docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml
+      FRONTEND_PORT: "5173"
+      GATEWAY_PORT: "8080"
+      POSTGRES_USER: postgres
+      POSTGRES_DB: moodit_db
+    steps:
+      - uses: actions/checkout@v4
+
+      # Même script qu'en local : construction, BD, attente, Python dans Piston, comptes à rôles.
+      - name: Démarrer et préparer la pile
+        run: sh frontend/e2e/core/start-stack.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installer les dépendances et le navigateur
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Tests Playwright
+        working-directory: frontend
+        run: npx playwright test e2e/core --config playwright.core.config.ts --project=${{ matrix.project }}
+
+      - name: Logs des services (en cas d'échec)
+        if: failure()
+        run: $COMPOSE logs --no-color --tail=300
+
+      - name: Publier le rapport Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: |
+            frontend/e2e/report/
+            frontend/e2e/results/
+          if-no-files-found: ignore
 
   # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
