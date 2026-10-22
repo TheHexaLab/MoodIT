@@ -83,7 +83,9 @@ def project_items():
 def main():
     today = datetime.datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
     changes = 0
+    seen = {}
     for number, status in project_items():
+        seen[status] = seen.get(status, 0) + 1
         if status not in STARTED:
             continue
         values = gh([f"repos/{REPO}/issues/{number}/issue-field-values", "-X", "GET", "-f", "per_page=100"]) or []
@@ -107,6 +109,7 @@ def main():
             if not DRY_RUN:
                 gh(["-X", "DELETE", f"repos/{REPO}/issues/{number}/issue-field-values/{TARGET_FIELD_ID}"])
             changes += 1
+    print("Issues lues par statut : " + ", ".join(f"{k or 'sans statut'}={v}" for k, v in sorted(seen.items(), key=lambda kv: str(kv[0]))))
     print(f"{changes} modification(s){' (simulation)' if DRY_RUN else ''}.")
 
 
