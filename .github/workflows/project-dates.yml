@@ -4,7 +4,7 @@ name: Dates du Kanban
 # pour que la vue Roadmap montre quand chaque tâche a commencé et fini.
 # Voir .github/scripts/project_dates.py pour les règles.
 #
-# Prérequis : un secret de dépôt PROJECT_TOKEN (jeton avec lecture des Projects de l'organisation
+# Prérequis : un secret de dépôt MOODIT_PROJECT_TOKEN (jeton avec lecture des Projects de l'organisation
 # et écriture des issues de ce dépôt). GITHUB_TOKEN ne peut pas lire les Projects d'une organisation.
 
 on:
@@ -29,20 +29,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: .github/scripts
 
       - name: Mettre à jour les dates
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          GH_TOKEN: ${{ secrets.MOODIT_PROJECT_TOKEN }}
           ORG: TheHexaLab
           PROJECT_NUMBER: "1"
           REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Secret PROJECT_TOKEN manquant (Settings → Secrets and variables → Actions)."
+            echo "::error::Secret MOODIT_PROJECT_TOKEN manquant (Settings → Secrets and variables → Actions)."
             exit 1
           fi
           python3 .github/scripts/project_dates.py
