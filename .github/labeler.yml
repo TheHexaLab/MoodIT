@@ -1,0 +1,46 @@
+# Labels « service touché » posés automatiquement sur les PR selon les fichiers modifiés
+# (actions/labeler, voir .github/workflows/pr-labels.yml).
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file: "frontend/**"
+
+gateway:
+  - changed-files:
+      - any-glob-to-any-file: "gateway/**"
+
+auth-service:
+  - changed-files:
+      - any-glob-to-any-file: "auth-service/**"
+
+core-service:
+  - changed-files:
+      - any-glob-to-any-file: "core-service/**"
+
+permission-service:
+  - changed-files:
+      - any-glob-to-any-file: "permission-service/**"
+
+execution-service:
+  - changed-files:
+      - any-glob-to-any-file: ["execution-service/**", "piston/**"]
+
+mcp-service:
+  - changed-files:
+      - any-glob-to-any-file: "mcp-service/**"
+
+voice-service:
+  - changed-files:
+      - any-glob-to-any-file: ["voice-service/**", "deploy/livekit*.yaml"]
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+migration BD:
+  - changed-files:
+      - any-glob-to-any-file: ["init.sql", "migrations/**"]
+
+déploiement:
+  - changed-files:
+      - any-glob-to-any-file: ["deploy/**", "docker-compose*.yml", "**/Dockerfile"]
