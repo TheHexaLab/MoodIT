@@ -56,7 +56,8 @@ def gh(args, payload=None):
                        input=json.dumps(payload) if payload is not None else None,
                        capture_output=True, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"gh api {' '.join(args)} : {p.stderr.strip() or p.stdout.strip()}")
+        what = "graphql (lecture du projet)" if args[0] == "graphql" else " ".join(a for a in args if not a.startswith("query="))
+        raise RuntimeError(f"gh api {what} : {p.stderr.strip() or p.stdout.strip()}")
     return json.loads(p.stdout) if p.stdout.strip() else None
 
 
