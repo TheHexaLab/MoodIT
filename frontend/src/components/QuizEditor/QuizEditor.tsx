@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup';
-import { EditorShell, Portal } from './EditorShell';
+import { EditorShell } from './EditorShell';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { QuizListBody } from './QuizListPopup';
 import { QuizFormBody } from './QuizFormPopup';
@@ -579,36 +579,30 @@ export function QuizEditor({
       </EditorShell>
 
       {pendingDelete && (
-        <Portal>
-          <DeleteConfirmationPopup
-            title={pendingDelete.kind === 'quiz' ? t.deleteQuizTitle : t.deleteQuestionTitle}
-            content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
-            onDeleteConfirmation={confirmDelete}
-            onClose={() => setPendingDelete(null)}
-          />
-        </Portal>
+        <DeleteConfirmationPopup
+          title={pendingDelete.kind === 'quiz' ? t.deleteQuizTitle : t.deleteQuestionTitle}
+          content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
+          onDeleteConfirmation={confirmDelete}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
 
       {loadFailedQuiz && (
-        <Portal>
-          <ErrorPopup
-            content={t.loadError}
-            onClose={() => setLoadFailedQuiz(null)}
-            onRetry={() => {
-              const quiz = loadFailedQuiz;
-              setLoadFailedQuiz(null);
-              void openEdit(quiz);
-            }}
-          />
-        </Portal>
+        <ErrorPopup
+          content={t.loadError}
+          onClose={() => setLoadFailedQuiz(null)}
+          onRetry={() => {
+            const quiz = loadFailedQuiz;
+            setLoadFailedQuiz(null);
+            void openEdit(quiz);
+          }}
+        />
       )}
 
       {/* Erreurs de sauvegarde / suppression (quiz ou question) : en POPUP, pas en inline dans
           le formulaire. Le formulaire reste ouvert dessous → l'utilisateur peut réessayer. */}
       {error && (
-        <Portal>
-          <ErrorPopup content={error} onClose={() => setError(null)} />
-        </Portal>
+        <ErrorPopup content={error} onClose={() => setError(null)} />
       )}
     </>
   );

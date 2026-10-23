@@ -1,85 +1,16 @@
-div.add-course {
-    position: fixed;
-    z-index: 90;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: add-course-fade-in 0.2s ease-out;
-}
-
 div.add-course > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
-    box-sizing: border-box;
-    width: min(25.75rem, 100% - 2rem);
-    /* Sur écran court, le panneau défile au lieu de dépasser le viewport. */
-    max-height: calc(100dvh - 2rem);
-    overflow-y: auto;
     padding: 1rem;
-    margin: 1rem;
     user-select: none;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.88rem;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
-    animation: add-course-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (min-width: 768px) {
     div.add-course > div {
-        max-height: calc(100dvh - 4.26rem);
         padding: 1.25rem;
-        margin: 2.13rem;
-    }
-}
-
-@keyframes add-course-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes add-course-pop-in {
-    from {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-@keyframes add-course-fade-out {
-    from { opacity: 1; }
-    to { opacity: 0; }
-}
-
-@keyframes add-course-pop-out {
-    from {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-}
-
-div.add-course.closing {
-    animation: add-course-fade-out 0.2s ease-in forwards;
-}
-
-div.add-course.closing > div {
-    animation: add-course-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.add-course,
-    div.add-course > div {
-        animation: none;
     }
 }
 
@@ -327,13 +258,6 @@ div.add-course > div > section.programs > div.field-control > svg.chevron.chevro
 }
 
 /* Pastille (chip) d'un programme sélectionné (code - cohorte). */
-div.add-course {
-    /* Fond de pastille : opacité 0.08 en clair, 0.12 en sombre. */
-    --chip-tint: 8%;
-    /* Texte de pastille : assombri en clair pour mieux ressortir sur le fond pâle. */
-    --chip-text-shade: black;
-    --chip-text-amount: 28%;
-}
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) div.add-course {

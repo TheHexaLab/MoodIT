@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import styles from './SectionEditorPopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
@@ -60,8 +62,8 @@ export function SectionEditorPopup({
   /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
   const requestRef = useRef(0);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
   useEffect(() => {
@@ -177,24 +179,6 @@ export function SectionEditorPopup({
     }
   }
 
-  function requestClose(action?: () => void) {
-    const act = action ?? (() => {});
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      act();
-      return;
-    }
-    pendingAction.current = act;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
-
   function handleDragStart(index: number) {
     dragIndex.current = index;
     orderBeforeDrag.current = items.map((item) => item.id);
@@ -258,7 +242,10 @@ export function SectionEditorPopup({
               onChange={(e) => setDraftName(e.target.value.toLowerCase())}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEdit();
-                if (e.key === 'Escape') cancelEdit();
+                if (e.key === 'Escape') {
+                  e.stopPropagation(); // annule l'édition sans fermer la popup
+                  cancelEdit();
+                }
               }}
             />
           </div>
@@ -276,76 +263,75 @@ export function SectionEditorPopup({
 
   // Porté vers <body> : un modal en position:fixed doit vivre à la racine, sinon
   // il est rogné par un ancêtre (ex. la sidebar CourseMenu en overflow:hidden).
-  return createPortal(
+  return (
     <>
-      <div
-        className={`${styles['section-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.Editor}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['section-editor-popup']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button onClick={() => requestClose(onClose)}>✕</button>
-          </header>
-          <main>
-            {items.length === 0 && !isAdding ? (
-              <p className={styles.empty}>{t.emptyMessage}</p>
-            ) : (
-              <ol>
-                {items.map((item, index) =>
-                  editingId === item.id ? (
-                    <li key={item.id} className={styles['edit-row']}>
-                      {editRowInner(t.editTitle)}
-                    </li>
-                  ) : (
-                    <li
-                      key={item.id}
-                      draggable={handleHeldId === item.id}
-                      onDragStart={() => handleDragStart(index)}
-                      onDragEnter={() => handleDragEnter(index)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDragEnd={handleDragEnd}
-                      className={draggingId === item.id ? styles.dragging : undefined}
-                    >
-                      <div>
-                        <span
-                          className={styles.handle}
-                          onMouseDown={() => setHandleHeldId(item.id)}
-                          onMouseUp={() => setHandleHeldId(null)}
-                        >
-                          ⠿
-                        </span>
-                        <span>
-                          <span>{prefix}</span>
-                          <span>{item.name}</span>
-                        </span>
-                      </div>
-                      <div>
-                        <Pencil onClick={() => startEdit(item)} />
-                        <TrashCan onClick={() => setDeletingId(item.id)} />
-                      </div>
-                    </li>
-                  )
-                )}
-              </ol>
-            )}
-          </main>
-          <footer>
-            {isAdding ? (
-              <div className={styles['edit-row']}>{editRowInner(t.addTitle)}</div>
-            ) : (
-              <button onClick={startAdd}>
-                +<span>{t.addButton}</span>
-              </button>
-            )}
-          </footer>
-        </div>
-      </div>
+        <header>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
+          </div>
+          <button onClick={() => requestClose(onClose)}>✕</button>
+        </header>
+        <main>
+          {items.length === 0 && !isAdding ? (
+            <p className={styles.empty}>{t.emptyMessage}</p>
+          ) : (
+            <ol>
+              {items.map((item, index) =>
+                editingId === item.id ? (
+                  <li key={item.id} className={styles['edit-row']}>
+                    {editRowInner(t.editTitle)}
+                  </li>
+                ) : (
+                  <li
+                    key={item.id}
+                    draggable={handleHeldId === item.id}
+                    onDragStart={() => handleDragStart(index)}
+                    onDragEnter={() => handleDragEnter(index)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnd={handleDragEnd}
+                    className={draggingId === item.id ? styles.dragging : undefined}
+                  >
+                    <div>
+                      <span
+                        className={styles.handle}
+                        onMouseDown={() => setHandleHeldId(item.id)}
+                        onMouseUp={() => setHandleHeldId(null)}
+                      >
+                        ⠿
+                      </span>
+                      <span>
+                        <span>{prefix}</span>
+                        <span>{item.name}</span>
+                      </span>
+                    </div>
+                    <div>
+                      <Pencil onClick={() => startEdit(item)} />
+                      <TrashCan onClick={() => setDeletingId(item.id)} />
+                    </div>
+                  </li>
+                )
+              )}
+            </ol>
+          )}
+        </main>
+        <footer>
+          {isAdding ? (
+            <div className={styles['edit-row']}>{editRowInner(t.addTitle)}</div>
+          ) : (
+            <button onClick={startAdd}>
+              +<span>{t.addButton}</span>
+            </button>
+          )}
+        </footer>
+      </Popup>
       {deletingItem && (
         <DeleteConfirmationPopup
           title={t.deleteTitle}
@@ -361,7 +347,6 @@ export function SectionEditorPopup({
           onClose={() => setError(null)}
         />
       )}
-    </>,
-    document.body
+    </>
   );
 }

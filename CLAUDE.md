@@ -44,6 +44,7 @@ docker compose -f docker-compose-dev.yml up -d   # Postgres + pgAdmin pour le de
 - **Schéma de BD** : pas de Flyway pour l'instant ([#96](https://github.com/TheHexaLab/MoodIT/issues/96)). Tout changement se fait **à deux endroits** : `init.sql` (bases neuves) **et** un nouveau script idempotent `migrations/AAAA-MM-JJ_sujet.sql` (bases existantes).
 - **Secrets** : le dépôt est public. Ne jamais committer `.env`, de clés ou de jetons. Les secrets de prod (`application-prod.properties`) n'ont pas de valeur de repli.
 - **Analyse MCP** : si le LLM est injoignable, `mcp-service` produit une analyse déterministe de repli. Ne pas casser ce repli.
+- **Popups frontend** : toute fenêtre modale passe par `frontend/src/components/Popup` (`<Popup variant={PopupVariant.…}>`), qui fournit le voile, le conteneur selon la variante, le rôle `dialog`, le focus, Échap et l'animation de sortie. Ne pas réécrire d'overlay dans un composant ; un gestionnaire Échap interne (liste déroulante, édition en ligne) doit appeler `stopPropagation()`.
 
 ## Conventions
 

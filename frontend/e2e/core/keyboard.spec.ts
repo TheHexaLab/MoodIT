@@ -232,10 +232,8 @@ test.describe('popups', () => {
     return page;
   }
 
-  // Attendu (WAI-ARIA dialog) : à l'ouverture, le focus est déplacé dans la popup. Obtenu : il reste
-  // sur le déclencheur (ou tombe sur <body> quand le menu qui l'a ouverte se démonte).
+  // WAI-ARIA dialog : à l'ouverture, la coquille Popup déplace le focus dans la popup.
   test('le focus entre dans la popup à son ouverture', async ({ browser, baseURL }) => {
-    test.fail(true, 'aucune popup ne reçoit le focus à l’ouverture (sauf « Rejoindre des cours », autoFocus)');
     const page = await studentHome(browser, baseURL!);
     for (const { title, open, close } of STUDENT_POPUPS) {
       await open(page);
@@ -248,13 +246,12 @@ test.describe('popups', () => {
     }
   });
 
-  // Attendu : Tab et Maj+Tab tournent à l'intérieur de la popup ouverte. Obtenu : le focus repart
-  // dans la page derrière le voile. Vérifié en RECULANT (Maj+Tab depuis le premier élément) : les
+  // Tab et Maj+Tab tournent à l'intérieur de la popup ouverte (piège de focus de la coquille).
+  // Vérifié en RECULANT (Maj+Tab depuis le premier élément) : les
   // popups sont en fin de document, donc Tab depuis leur dernier élément sort vers l'interface du
   // navigateur, où Firefox ne change pas `document.activeElement` ; en reculant, la sortie atterrit
   // sur un élément de la page, observable sur les trois moteurs.
   test('Maj+Tab reste dans la popup ouverte (piège de focus)', async ({ browser, baseURL }) => {
-    test.fail(true, 'pas de piège de focus : Maj+Tab sort de toutes les popups');
     const page = await studentHome(browser, baseURL!);
     for (const { title, open, close } of STUDENT_POPUPS) {
       await open(page);
@@ -279,9 +276,8 @@ test.describe('popups', () => {
     }
   });
 
-  // Attendu : Échap ferme la popup et rend le focus à l'élément qui l'a ouverte. Obtenu : rien.
+  // Échap ferme la popup et rend le focus à l'élément qui l'a ouverte (coquille Popup).
   test('Échap ferme la popup et rend le focus au déclencheur', async ({ browser, baseURL }) => {
-    test.fail(true, 'Échap n’est géré par aucune popup (profil, programme, cours, confirmation, erreur, sections)');
     const page = await studentHome(browser, baseURL!);
     for (const { title, open, close } of STUDENT_POPUPS) {
       await open(page);
@@ -592,9 +588,8 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await expect(control).toBeFocused();
   });
 
-  // Attendu : Échap ferme l'éditeur (coquille) et la popup des sections. Obtenu : rien.
+  // Échap ferme l'éditeur de quiz et la popup des sections (tous deux bâtis sur Popup).
   test('Échap ferme l’éditeur de quiz et l’éditeur de sections', async ({ browser }) => {
-    test.fail(true, 'EditorShell et SectionEditorPopup ne gèrent pas Échap');
     const { page } = await openHome(browser, fixture.admin.storageState);
     await programButton(page, fixture.program.name).click();
     const nav = page.getByRole('navigation', { name: 'Cours' });

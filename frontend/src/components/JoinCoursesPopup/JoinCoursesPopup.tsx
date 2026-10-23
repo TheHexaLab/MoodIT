@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './JoinCoursesPopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -55,12 +58,12 @@ export function JoinCoursesPopup({
   const [pending, setPending] = useState(false);
   /** Message d'erreur d'enregistrement (null = aucune). */
   const [error, setError] = useState<string | null>(null);
-  const [isClosing, setIsClosing] = useState(false);
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   const mountedRef = useRef(true);
   /** Jeton de la dernière requête async : ignore les réponses périmées. */
   const requestRef = useRef(0);
-  const pendingAction = useRef<(() => void) | null>(null);
   /** Loaders dans des refs : l'effet de chargement ne dépend pas de leur identité. */
   const loadCoursesRef = useRef(loadCourses);
   const loadJoinedCourseIdsRef = useRef(loadJoinedCourseIds);
@@ -117,23 +120,6 @@ export function JoinCoursesPopup({
     setReloadKey((key) => key + 1);
   }
 
-  /** Joue l'animation de sortie puis exécute l'action (immédiat si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
-
   function toggle(id: number) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((cid) => cid !== id) : [...prev, id]));
   }
@@ -168,95 +154,94 @@ export function JoinCoursesPopup({
 
   return (
     <>
-      <div
-        className={`${styles.scrim}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.FormWide}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        panelClassName={styles.dialog}
       >
-        <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
-          <header className={styles.header}>
-            <div className={styles.headerText}>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle(programName)}</p>
-            </div>
-            <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
-              ✕
-            </button>
-          </header>
-
-          {hasCourses && (
-            <div className={styles.search}>
-              <MagnifyingGlass width="1rem" height="1rem" />
-              <input
-                type="text"
-                placeholder={t.searchPlaceholder}
-                autoFocus
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-          )}
-
-          <div className={styles.body}>
-            {loading ? (
-              <div className={styles.stateMsg} role="status" aria-live="polite">
-                <Spinner />
-              </div>
-            ) : loadError ? (
-              <div className={styles.stateMsg} role="alert">
-                <p>{t.loadError}</p>
-                <button type="button" className={styles.retry} onClick={reload}>
-                  {t.retry}
-                </button>
-              </div>
-            ) : courses.length === 0 ? (
-              <div className={styles.stateMsg}>{t.noCourses}</div>
-            ) : (
-              <ul className={styles.list}>
-                {filtered.length === 0 ? (
-                  <li className={styles.empty}>{t.noResults}</li>
-                ) : (
-                  filtered.map((course) => {
-                    const selected = selectedIds.includes(course.id);
-                    return (
-                      <li key={course.id}>
-                        <button
-                          type="button"
-                          className={`${styles.itemBtn}${selected ? ` ${styles.selected}` : ''}`}
-                          aria-pressed={selected}
-                          onClick={() => toggle(course.id)}
-                        >
-                          <span
-                            className={styles.swatch}
-                            style={{ background: programColor, color: contrastingTextColor(programColor) }}
-                          >
-                            {course.code.slice(0, 3)}
-                          </span>
-                          <span className={styles.info}>
-                            <span className={styles.courseTitle}>{course.title}</span>
-                            <span className={styles.courseCode}>{course.code}</span>
-                          </span>
-                          {selected && <Check className={styles.check} width="1rem" height="1rem" />}
-                        </button>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
-            )}
+        <header className={styles.header}>
+          <div className={styles.headerText}>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle(programName)}</p>
           </div>
+          <button type="button" className={styles.close} onClick={() => requestClose(onClose)}>
+            ✕
+          </button>
+        </header>
 
-          <footer className={styles.footer}>
-            <button type="button" className={styles.cancelBtn} onClick={() => requestClose(onClose)}>
-              {t.cancel}
-            </button>
-            <button type="button" className={styles.joinBtn} onClick={join} disabled={!canJoin}>
-              {pending ? <Spinner /> : t.join}
-            </button>
-          </footer>
+        {hasCourses && (
+          <div className={styles.search}>
+            <MagnifyingGlass width="1rem" height="1rem" />
+            <input
+              type="text"
+              placeholder={t.searchPlaceholder}
+              autoFocus
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        )}
+
+        <div className={styles.body}>
+          {loading ? (
+            <div className={styles.stateMsg} role="status" aria-live="polite">
+              <Spinner />
+            </div>
+          ) : loadError ? (
+            <div className={styles.stateMsg} role="alert">
+              <p>{t.loadError}</p>
+              <button type="button" className={styles.retry} onClick={reload}>
+                {t.retry}
+              </button>
+            </div>
+          ) : courses.length === 0 ? (
+            <div className={styles.stateMsg}>{t.noCourses}</div>
+          ) : (
+            <ul className={styles.list}>
+              {filtered.length === 0 ? (
+                <li className={styles.empty}>{t.noResults}</li>
+              ) : (
+                filtered.map((course) => {
+                  const selected = selectedIds.includes(course.id);
+                  return (
+                    <li key={course.id}>
+                      <button
+                        type="button"
+                        className={`${styles.itemBtn}${selected ? ` ${styles.selected}` : ''}`}
+                        aria-pressed={selected}
+                        onClick={() => toggle(course.id)}
+                      >
+                        <span
+                          className={styles.swatch}
+                          style={{ background: programColor, color: contrastingTextColor(programColor) }}
+                        >
+                          {course.code.slice(0, 3)}
+                        </span>
+                        <span className={styles.info}>
+                          <span className={styles.courseTitle}>{course.title}</span>
+                          <span className={styles.courseCode}>{course.code}</span>
+                        </span>
+                        {selected && <Check className={styles.check} width="1rem" height="1rem" />}
+                      </button>
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          )}
         </div>
-      </div>
+
+        <footer className={styles.footer}>
+          <button type="button" className={styles.cancelBtn} onClick={() => requestClose(onClose)}>
+            {t.cancel}
+          </button>
+          <button type="button" className={styles.joinBtn} onClick={join} disabled={!canJoin}>
+            {pending ? <Spinner /> : t.join}
+          </button>
+        </footer>
+      </Popup>
 
       {error && (
         <ErrorPopup

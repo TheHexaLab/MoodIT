@@ -1,69 +1,15 @@
-div.audit-logs-popup {
-    position: fixed;
-    z-index: 90;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: audit-logs-popup-fade-in 0.2s ease-out;
-}
-
 div.audit-logs-popup > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
-    box-sizing: border-box;
-    width: min(34rem, 100% - 2rem);
-    max-height: min(80vh, 44rem);
     padding: 1rem;
-    margin: 1rem;
     flex-direction: column;
     align-items: stretch;
     gap: 0.88rem;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
-    animation: audit-logs-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (min-width: 768px) {
     div.audit-logs-popup > div {
         padding: 1.25rem;
-        margin: 2.13rem;
-    }
-}
-
-@keyframes audit-logs-popup-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes audit-logs-popup-pop-in {
-    from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes audit-logs-popup-fade-out {
-    from { opacity: 1; }
-    to { opacity: 0; }
-}
-
-@keyframes audit-logs-popup-pop-out {
-    from { opacity: 1; transform: translateY(0) scale(1); }
-    to { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-}
-
-div.audit-logs-popup.closing {
-    animation: audit-logs-popup-fade-out 0.2s ease-in forwards;
-}
-
-div.audit-logs-popup.closing > div {
-    animation: audit-logs-popup-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.audit-logs-popup,
-    div.audit-logs-popup > div {
-        animation: none;
     }
 }
 

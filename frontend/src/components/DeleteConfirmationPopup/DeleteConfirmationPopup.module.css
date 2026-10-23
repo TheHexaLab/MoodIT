@@ -1,83 +1,11 @@
-div.delete-confirmation-popup {
-    position: fixed;
-    inset: 0;
-    /* Confirmation top-most : au-dessus de toute la chrome ET de l'éditeur de quiz (1000). */
-    z-index: 1100;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: delete-confirmation-popup-fade-in 0.2s ease-out;
-}
-
 div.delete-confirmation-popup > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
-    width: 25.75rem;
     padding: 1.25rem;
-    margin: 2.13rem;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.88rem;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
     user-select: none;
-    animation: delete-confirmation-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes delete-confirmation-popup-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes delete-confirmation-popup-pop-in {
-    from {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-@keyframes delete-confirmation-popup-fade-out {
-    from {
-        opacity: 1;
-    }
-    to {
-        opacity: 0;
-    }
-}
-
-@keyframes delete-confirmation-popup-pop-out {
-    from {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-}
-
-div.delete-confirmation-popup.closing {
-    animation: delete-confirmation-popup-fade-out 0.2s ease-in forwards;
-}
-
-div.delete-confirmation-popup.closing > div {
-    animation: delete-confirmation-popup-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.delete-confirmation-popup,
-    div.delete-confirmation-popup > div {
-        animation: none;
-    }
 }
 
 div.delete-confirmation-popup > div > * {

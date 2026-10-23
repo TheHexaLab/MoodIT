@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './McpManagementPopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Sparkles } from '../../assets/Sparkles.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -142,7 +145,8 @@ export function McpManagementPopup({
   /** Étape courante du job en cours (clé poussée par le serveur ; null = pas d'étape reçue). */
   const [progressStep, setProgressStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isClosing, setIsClosing] = useState(false);
+  const popup = usePopupController();
+  const { requestClose } = popup;
   /** Animation de transition entre pages (liste ↔ détail) : clé (remonte) + sens. */
   const [anim, setAnim] = useState<{ key: string; dir: 'forward' | 'back' }>({
     key: 'list',
@@ -154,7 +158,6 @@ export function McpManagementPopup({
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
   const detailReqRef = useRef(0);
-  const pendingAction = useRef<(() => void) | null>(null);
   const loadAnalysesRef = useRef(loadAnalyses);
   const loadPendingRef = useRef(loadPending);
   const subscribeCompletionRef = useRef(subscribeCompletion);
@@ -220,22 +223,6 @@ export function McpManagementPopup({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
 
   async function analyze() {
     if (analyzing) return;
@@ -614,30 +601,29 @@ export function McpManagementPopup({
 
   return (
     <>
-      <div
-        className={`${styles.scrim}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.Workspace}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        panelClassName={styles.dialog}
       >
-        <div className={styles.dialog} onAnimationEnd={handleAnimationEnd}>
-          {/* En-tête FIXE (flex item non rétractable de .dialog), HORS de la zone de
-              défilement → la scrollbar ne court que sur le contenu. Change instantanément
-              entre liste et détail. */}
-          {selectedSummary ? detailHeader : listHeader}
-          {/* Zone défilante : seule sa scrollbar apparaît, sous le header. Le viewport
-              anime sa hauteur ; le corps (clé = page) glisse à chaque changement. */}
-          <div className={styles.scrollArea}>
-            <div className={styles.viewport} style={height != null ? { height } : undefined}>
-              <div ref={measureRef}>
-                <div key={anim.key} data-dir={anim.dir} className={styles.view}>
-                  {detailBody ?? listBody}
-                </div>
+        {/* En-tête FIXE (flex item non rétractable de .dialog), HORS de la zone de
+            défilement → la scrollbar ne court que sur le contenu. Change instantanément
+            entre liste et détail. */}
+        {selectedSummary ? detailHeader : listHeader}
+        {/* Zone défilante : seule sa scrollbar apparaît, sous le header. Le viewport
+            anime sa hauteur ; le corps (clé = page) glisse à chaque changement. */}
+        <div className={styles.scrollArea}>
+          <div className={styles.viewport} style={height != null ? { height } : undefined}>
+            <div ref={measureRef}>
+              <div key={anim.key} data-dir={anim.dir} className={styles.view}>
+                {detailBody ?? listBody}
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </Popup>
 
       {error && (
         <ErrorPopup

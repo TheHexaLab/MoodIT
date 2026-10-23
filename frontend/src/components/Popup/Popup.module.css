@@ -1,0 +1,167 @@
+/* Popup centralisée : voile + panneau. La variante (`data-variant` sur le voile) fixe la largeur,
+   la hauteur maximale, le défilement et le rang d'empilement. Le contenu garde ses propres
+   styles (les feuilles historiques ciblent `div.<classe> > div > …`, le panneau étant le `div`
+   enfant direct du voile). */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.35);
+    animation: popup-fade-in 0.2s ease-out;
+}
+
+.panel {
+    --popup-width: 25.75rem;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    /* Flex-item : sans min-width:0, un texte long (nowrap) pousse le panneau au-delà de sa largeur. */
+    min-width: 0;
+    width: min(var(--popup-width), 100% - 2rem);
+    margin: 1rem;
+    border-radius: 1rem;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 32px var(--shadow-modal);
+    outline: none;
+    animation: popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+    .panel {
+        margin: 2.13rem;
+    }
+}
+
+/* Barre de défilement fine (convention de l'app) quand le panneau défile. */
+.panel {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.panel::-webkit-scrollbar { width: 4px; }
+.panel::-webkit-scrollbar-track { background: transparent; margin: 0.75rem 0; }
+.panel::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.panel::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.panel::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+/* ── Variantes ─────────────────────────────────────────────────────────── */
+
+/* Erreur : au-dessus de tout (chrome, éditeur de quiz 1000, confirmations 1100). */
+.overlay[data-variant='alert'] {
+    z-index: 1200;
+}
+.overlay[data-variant='alert'] > .panel {
+    --popup-width: 23rem;
+}
+
+/* Confirmation : au-dessus de la chrome et de l'éditeur de quiz (1000). */
+.overlay[data-variant='confirm'] {
+    z-index: 1100;
+}
+.overlay[data-variant='confirm'] > .panel {
+    --popup-width: 25.75rem;
+}
+
+/* Formulaires : sur écran bas, le panneau défile au lieu de dépasser le viewport. */
+.overlay[data-variant='form'] > .panel,
+.overlay[data-variant='form-wide'] > .panel {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+}
+.overlay[data-variant='form'] > .panel {
+    --popup-width: 25.75rem;
+}
+.overlay[data-variant='form-wide'] > .panel {
+    --popup-width: 28.75rem;
+}
+@media (min-width: 768px) {
+    .overlay[data-variant='form'] > .panel,
+    .overlay[data-variant='form-wide'] > .panel {
+        max-height: calc(100dvh - 4.26rem);
+    }
+}
+
+/* Éditeur : bordure, largeur ajustable par `--popup-width` (éditeur de quiz animé). */
+.overlay[data-variant='editor'] > .panel {
+    --popup-width: 30rem;
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    border: 1px solid var(--border);
+}
+
+/* Consultation : hauteur bornée, la liste interne défile. */
+.overlay[data-variant='browser'] > .panel {
+    --popup-width: 34rem;
+    max-height: min(80vh, 44rem);
+}
+
+/* Espace de travail : le panneau clippe aux coins arrondis, le corps gère son défilement. */
+.overlay[data-variant='workspace'] > .panel {
+    --popup-width: 47.5rem;
+    /* Repli vh pour les navigateurs sans dvh (sinon pas de max-height → pas de défilement). */
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
+}
+
+/* `overflow="visible"` : un contenu flottant (liste de recherche) peut dépasser du panneau ;
+   le panneau ne défile pas, le contenu plafonne lui-même ses listes. Déclaré APRÈS les variantes
+   et avec une spécificité supérieure pour l'emporter sur leur `overflow-y: auto`. */
+.overlay[data-variant] > .panel[data-overflow='visible'] {
+    max-height: none;
+    overflow: visible;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+
+@keyframes popup-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes popup-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes popup-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes popup-pop-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(0.75rem) scale(0.96);
+    }
+}
+
+.overlay.closing {
+    animation: popup-fade-out 0.2s ease-in forwards;
+}
+
+.overlay.closing > .panel {
+    animation: popup-pop-out 0.2s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .overlay,
+    .overlay > .panel,
+    .overlay.closing,
+    .overlay.closing > .panel {
+        animation: none;
+    }
+}
