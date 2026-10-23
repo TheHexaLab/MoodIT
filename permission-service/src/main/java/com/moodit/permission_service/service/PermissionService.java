@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.util.AntPathMatcher;
+import org.springframework.web.util.UriUtils;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -698,6 +699,19 @@ public class PermissionService {
   public boolean isAllowed(String email, String path, String method, String body, String query) {
     if (email == null || email.isBlank() || path == null || method == null) {
       return false;
+    }
+
+    // 0) Le gateway transmet le chemin BRUT (getRequestURI), alors que core le decode avant de
+    //    router : /api/audit%2Dlogs atteint le controleur du journal d'audit. Comparer le chemin
+    //    brut aux regles laissait donc echapper toute route a une lettre encodee pres (puis
+    //    default-allow en lecture). On decode une fois, comme core ; un encodage invalide est refuse.
+    try {
+      path = UriUtils.decode(path, StandardCharsets.UTF_8);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+    if (path.indexOf('%') >= 0) {
+      return false; // double encodage (%252D...) : jamais legitime ici, refuse plutot que deviner.
     }
 
     // 1) Chercher une regle applicable AVANT toute requete BD / tout parsing.

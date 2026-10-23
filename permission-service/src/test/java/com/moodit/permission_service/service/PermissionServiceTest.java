@@ -1221,4 +1221,34 @@ class PermissionServiceTest {
     when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(false);
     assertThat(service().isAllowed(EMAIL, "/api/users/role/1/programs/7", "GET", null)).isFalse();
   }
+
+  // ── Chemin encodé : décodé comme le fait core avant la recherche de règle ──────────
+  // Le gateway transmet le chemin brut ; core décode avant de router. Sans décodage ici,
+  // /api/audit%2Dlogs échappait à la règle du journal d'audit (lecture par défaut autorisée).
+
+  @Test
+  void cheminEncode_etudiant_refuse() {
+    lenient().when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user(5)));
+    assertThat(service().isAllowed(EMAIL, "/api/audit%2Dlogs", "GET", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/audit-l%6Fgs", "GET", null)).isFalse();
+  }
+
+  @Test
+  void cheminEncode_gardien_garde_son_acces() {
+    loggedIn(user(5, RoleNames.GUARDIAN));
+    assertThat(service().isAllowed(EMAIL, "/api/audit%2Dlogs", "GET", null)).isTrue();
+  }
+
+  @Test
+  void cheminDoublementEncode_refuse() {
+    // %252D se décode en « %2D » : jamais légitime, refusé même pour une route sans règle.
+    assertThat(service().isAllowed(EMAIL, "/api/audit%252Dlogs", "GET", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/catalogue%2541", "GET", null)).isFalse();
+  }
+
+  @Test
+  void cheminEncodageInvalide_refuse() {
+    assertThat(service().isAllowed(EMAIL, "/api/audit%ZZlogs", "GET", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/audit-logs%", "GET", null)).isFalse();
+  }
 }
