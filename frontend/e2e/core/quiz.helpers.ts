@@ -127,20 +127,76 @@ export async function deleteQuizzesMatching(
  */
 export async function pointerDrag(page: Page, source: Locator, target: Locator) {
   await source.hover();
+  // Les composants ne défilent pas pendant le glisser : comme un utilisateur, on fait d'abord
+  // tenir la source et la cible ensemble à l'écran. Sans ça, survoler la source pouvait faire
+  // défiler la cible hors de l'écran, et le relâchement tombait dans le vide (WebKit mobile).
+  await bringBothIntoView(page, source, target);
+  await source.hover();
   const from = await center(source);
   await page.mouse.down();
   await page.mouse.move(from.x + 2, from.y + 2, { steps: 2 });
   const start = { x: from.x + 2, y: from.y + 2 };
-  const to = await center(target);
+  const to = await visiblePoint(target);
+  expect(to, `cible du glisser visible et non recouverte : ${target}`).not.toBeNull();
   const steps = 10;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(
-      start.x + ((to.x - start.x) * i) / steps,
-      start.y + ((to.y - start.y) * i) / steps
+      start.x + ((to!.x - start.x) * i) / steps,
+      start.y + ((to!.y - start.y) * i) / steps
     );
     await flushReactUpdates(page);
   }
   await page.mouse.up();
+}
+
+/**
+ * Point de `locator` visible dans le viewport et non recouvert (barre collante, pied d'actions) :
+ * le centre si possible, sinon le premier point d'une grille 5×5. `null` si aucun.
+ */
+async function visiblePoint(locator: Locator): Promise<{ x: number; y: number } | null> {
+  return locator.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const candidates: [number, number][] = [[0.5, 0.5]];
+    for (const fy of [0.1, 0.3, 0.5, 0.7, 0.9]) for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) candidates.push([fx, fy]);
+    for (const [fx, fy] of candidates) {
+      const x = r.left + r.width * fx;
+      const y = r.top + r.height * fy;
+      if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && el.contains(hit)) return { x, y };
+    }
+    return null;
+  });
+}
+
+/**
+ * Fait défiler le conteneur de la cible jusqu'à ce que la source et la cible soient toutes deux
+ * visibles et non recouvertes (milieu des deux centré). Échoue clairement si elles ne tiennent
+ * pas ensemble à l'écran : le geste serait alors impossible pour un utilisateur.
+ */
+async function bringBothIntoView(page: Page, source: Locator, target: Locator) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if ((await visiblePoint(source)) && (await visiblePoint(target))) return;
+    const s = await source.boundingBox();
+    const t = await target.boundingBox();
+    expect(s && t, 'source et cible du glisser rendues').toBeTruthy();
+    const viewportHeight = page.viewportSize()!.height;
+    const dy = (s!.y + s!.height / 2 + t!.y + t!.height / 2) / 2 - viewportHeight / 2;
+    await target.evaluate((el, delta) => {
+      let node: HTMLElement | null = el.parentElement;
+      while (node) {
+        const style = getComputedStyle(node);
+        if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) break;
+        node = node.parentElement;
+      }
+      (node ?? document.scrollingElement ?? document.documentElement).scrollBy({ top: delta, behavior: 'instant' });
+    }, dy);
+    await expect.poll(async () => JSON.stringify(await target.boundingBox())).toBe(JSON.stringify(await target.boundingBox()));
+  }
+  expect(
+    (await visiblePoint(source)) && (await visiblePoint(target)),
+    `source et cible du glisser visibles ensemble à l'écran : ${source} → ${target}`
+  ).toBeTruthy();
 }
 
 /**

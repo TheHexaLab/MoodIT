@@ -127,14 +127,18 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void interne_jeton_non_configure_desactive_le_controle() throws Exception {
-        InternalExecutionController open = new InternalExecutionController(service);
-        ReflectionTestUtils.setField(open, "internalToken", "");
-        MockMvc openMvc = MockMvcBuilders.standaloneSetup(open).build();
-        when(service.evaluate(any())).thenReturn(List.of());
+    void interne_jeton_non_configure_refuse_tout() throws Exception {
+        InternalExecutionController closed = new InternalExecutionController(service);
+        ReflectionTestUtils.setField(closed, "internalToken", "");
+        MockMvc closedMvc = MockMvcBuilders.standaloneSetup(closed).build();
 
-        openMvc.perform(post("/internal/exec/evaluate")
+        // Ni sans en-tête, ni avec un en-tête vide : un jeton absent de la config n'ouvre rien.
+        closedMvc.perform(post("/internal/exec/evaluate")
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
+        closedMvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "")
+                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isForbidden());
+        verify(service, never()).evaluate(any());
     }
 }

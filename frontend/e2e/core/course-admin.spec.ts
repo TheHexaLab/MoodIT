@@ -200,9 +200,11 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
 
     // Le cours apparaît dans le sélecteur ; on l'ouvre : il est vide. Le programme est ouvert
     // explicitement : le test ne doit pas dépendre du dernier emplacement enregistré du compte.
+    // Le cours sélectionné à l'ouverture n'est pas garanti (dernier emplacement, ou tri par code :
+    // « C… » passe avant MAT115) : on ouvre le sélecteur quel que soit le cours affiché.
     await programButton(page, PROGRAM_NAME).click();
     const sidebar = page.getByRole('navigation', { name: 'Cours' });
-    await sidebar.getByRole('button', { name: 'MAT115', exact: true }).click();
+    await sidebar.locator('button[aria-haspopup="listbox"]').click();
     const picker = page.getByRole('listbox');
     await picker.getByRole('option', { name: `${code} ${title}` }).click();
     await expect(courseSelector(page, code)).toBeVisible();
