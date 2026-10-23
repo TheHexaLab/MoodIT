@@ -18,7 +18,10 @@ import com.moodit.auth_service.dto.RegisterRequest;
 import com.moodit.auth_service.exception.DomainNotAllowedException;
 import com.moodit.auth_service.exception.EmailAlreadyUsedException;
 import com.moodit.auth_service.exception.InvalidCredentialsException;
+import com.moodit.auth_service.exception.InvalidVerificationCodeException;
+import com.moodit.auth_service.exception.NotFoundException;
 import com.moodit.auth_service.exception.TooManyRequestsException;
+import com.moodit.auth_service.exception.UsernameAlreadyUsedException;
 import com.moodit.auth_service.service.AuthService;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -269,5 +272,162 @@ class AuthControllerTest {
     mockMvc
         .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest());
+  }
+
+  // ----- Compléments (#90) -----
+
+  @Test
+  void login_success_returnsIdentity_withoutTokenNorCookie() throws Exception {
+    // Login = étape 1 seulement : aucune session n'est créée avant la 2FA.
+    when(authService.login(any()))
+        .thenReturn(new AuthResponse(null, "rkarine", "karine@usherbrooke.ca", "Karine", "Roussel"));
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"password\":\"Sup3rPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.token").doesNotExist())
+        .andExpect(jsonPath("$.username").value("rkarine"))
+        .andExpect(jsonPath("$.email").value("karine@usherbrooke.ca"))
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+    verify(authCookie, never()).build(any());
+  }
+
+  @Test
+  void register_valid_returnsServiceMessage() throws Exception {
+    when(authService.register(any(RegisterRequest.class)))
+        .thenReturn(Map.of("message", "Compte créé!"));
+
+    mockMvc
+        .perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.message").value("Compte créé!"));
+  }
+
+  @Test
+  void resendCode_valid_delegatesEmailAndMode_andReturnsMessage() throws Exception {
+    when(authService.resendCode("karine@usherbrooke.ca", "2fa"))
+        .thenReturn(Map.of("message", "Code renvoyé."));
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"mode\":\"2fa\"}";
+
+    mockMvc
+        .perform(post("/auth/resend-code").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.message").value("Code renvoyé."));
+    verify(authService).resendCode("karine@usherbrooke.ca", "2fa");
+  }
+
+  @Test
+  void logout_withoutAnyCookie_passesNullToken_andStillClearsCookie() throws Exception {
+    when(authCookie.clear())
+        .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
+
+    mockMvc
+        .perform(post("/auth/logout"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("Max-Age=0")));
+
+    verify(authService).logout(null);
+  }
+
+  @Test
+  void logout_withOnlyForeignCookies_passesNullToken() throws Exception {
+    // Seul le cookie moodit_token est lu : un autre cookie ne doit jamais être pris pour un JWT.
+    when(authCookie.clear())
+        .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
+
+    mockMvc
+        .perform(
+            post("/auth/logout")
+                .cookie(new Cookie("JSESSIONID", "abc"), new Cookie("theme", "dark")))
+        .andExpect(status().isOk());
+
+    verify(authService).logout(null);
+  }
+
+  @Test
+  void logout_picksAuthCookie_amongSeveral() throws Exception {
+    when(authCookie.clear())
+        .thenReturn(ResponseCookie.from("moodit_token", "").httpOnly(true).maxAge(0).build());
+
+    mockMvc
+        .perform(
+            post("/auth/logout")
+                .cookie(new Cookie("theme", "dark"), new Cookie("moodit_token", "jwt-token")))
+        .andExpect(status().isOk());
+
+    verify(authService).logout("jwt-token");
+  }
+
+  @Test
+  void usernameAlreadyUsed_mapsTo409_withMessage() throws Exception {
+    when(authService.register(any())).thenThrow(new UsernameAlreadyUsedException());
+
+    mockMvc
+        .perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value(new UsernameAlreadyUsedException().getMessage()));
+  }
+
+  @Test
+  void invalidVerificationCode_mapsTo400_withGenericMessage() throws Exception {
+    when(authService.verify2FA(anyString(), anyString()))
+        .thenThrow(new InvalidVerificationCodeException("Code invalide ou expiré."));
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value("Code invalide ou expiré."))
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+  }
+
+  @Test
+  void resetPassword_invalidCode_mapsTo400() throws Exception {
+    when(authService.resetPassword(anyString(), anyString(), anyString()))
+        .thenThrow(new InvalidVerificationCodeException("Code invalide ou expiré."));
+    String body =
+        "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"123456\",\"newPassword\":\"N0uveauPass!\"}";
+
+    mockMvc
+        .perform(post("/auth/reset-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value("Code invalide ou expiré."));
+  }
+
+  @Test
+  void notFound_mapsTo404_withMessage() throws Exception {
+    when(authService.forgotPassword(anyString()))
+        .thenThrow(new NotFoundException("Inscription en attente non trouvée"));
+    String body = "{\"email\":\"karine@usherbrooke.ca\"}";
+
+    mockMvc
+        .perform(post("/auth/forgot-password").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.message").value("Inscription en attente non trouvée"));
+  }
+
+  @Test
+  void validationError_returnsFieldMessage() throws Exception {
+    // Le handler renvoie le message de la contrainte violée (ici @Pattern du code).
+    String body = "{\"email\":\"karine@usherbrooke.ca\",\"code\":\"abc123\"}";
+
+    mockMvc
+        .perform(post("/auth/verify-2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.message").value("Le code doit contenir 6 chiffres"));
+    verify(authService, never()).verify2FA(anyString(), anyString());
+  }
+
+  @Test
+  void tooManyRequests_mapsTo429_withMessage() throws Exception {
+    when(authService.resendCode(anyString(), any()))
+        .thenThrow(new TooManyRequestsException("Patientez."));
+    String body = "{\"email\":\"karine@usherbrooke.ca\"}"; // mode absent = inscription
+
+    mockMvc
+        .perform(post("/auth/resend-code").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isTooManyRequests())
+        .andExpect(jsonPath("$.message").value("Patientez."));
   }
 }

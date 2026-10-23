@@ -64,4 +64,109 @@ class DeterministicMcpAnalysisTest {
                 DeterministicMcpAnalysis.compute(ctx(2, 3, 3, 4, 2, 65, null)).dimensions();
         assertThat(d.success()).isEqualTo(65);
     }
+
+    // ── Compléments (#90) : chaque branche du repli produit un message cohérent ──
+
+    @Test
+    void emptyCourse_scoreDeBase40_etRecommandationsDeLancement() {
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(0, 0, 0, 0, 0, null, null));
+
+        // Base 40 sans aucune contribution ; « peu actif » sous 45.
+        assertThat(a.score()).isEqualTo(40);
+        assertThat(a.summary()).startsWith("Cours peu actif : 0 quiz, 0 message(s) de forum, 0 inscrit(s).");
+        assertThat(a.dimensions().content()).isZero();
+        assertThat(a.dimensions().engagement()).isZero();
+        assertThat(a.improvements()).contains(
+                "Ajouter des quiz : aucune évaluation formative n'est disponible.",
+                "Animer les forums : aucun message n'a encore été publié.",
+                "Renforcer les inscriptions : seulement 0 étudiant(s) pour l'instant.");
+        // Contrat du front : au moins 2 points forts, même pour un cours vide (complément générique).
+        assertThat(a.strengths()).containsExactly(
+                "La structure du cours est en place et prête à être enrichie.");
+        assertThat(a.recommendations()).containsExactly(
+                "Ajouter des quiz pour évaluer régulièrement les acquis.",
+                "Animer les forums (questions, annonces) pour stimuler les échanges.",
+                "Promouvoir le cours pour augmenter le nombre d'inscrits.");
+    }
+
+    @Test
+    void forumFaible_quizSansTentative_etReussitesMoyennes() {
+        // 2 quiz, 4 messages, 6 inscrits, aucune tentative, quiz 60 %, code 55 %.
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(2, 4, 6, 0, 0, 55, 60));
+
+        // 40 + 2*4 + 4/2 + 6 = 56 → « d'activité moyenne ».
+        assertThat(a.score()).isEqualTo(56);
+        assertThat(a.summary()).startsWith("Cours d'activité moyenne : 2 quiz, 4 message(s) de forum, 6 inscrit(s)");
+        assertThat(a.summary()).contains("(réussite quiz 60%)", "(code 55%)");
+        assertThat(a.summary()).doesNotContain("tentative(s)");
+        assertThat(a.strengths()).contains(
+                "Le cours propose 2 quiz pour évaluer les acquis.",
+                "6 étudiants sont inscrits au cours.");
+        assertThat(a.improvements()).contains(
+                "Stimuler les échanges : l'activité de forum reste faible (4 messages).",
+                "Inciter les étudiants à faire les quiz : aucune tentative enregistrée.",
+                "Réussite aux quiz moyenne (60%) : consolider les acquis.",
+                "Réussite au code moyenne (55% des tests) : renforcer la pratique.");
+        assertThat(a.recommendations()).containsExactly(
+                "Animer les forums (questions, annonces) pour stimuler les échanges.",
+                "Inciter les étudiants à réaliser les quiz déjà publiés.");
+        // content = 2*12 + 4 = 28 ; engagement = 4*2 + 0 = 8 ; success = moyenne quiz prioritaire.
+        assertThat(a.dimensions().content()).isEqualTo(28);
+        assertThat(a.dimensions().engagement()).isEqualTo(8);
+        assertThat(a.dimensions().success()).isEqualTo(60);
+    }
+
+    @Test
+    void reussitesFaibles_declenchentAmeliorationsEtRecommandations() {
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(8, 40, 20, 10, 8, 30, 40));
+
+        assertThat(a.improvements()).contains(
+                "Réussite aux quiz faible (40% de moyenne) : revoir les notions clés.",
+                "Réussite au code faible (30% des tests) : revoir les notions de programmation.");
+        assertThat(a.recommendations()).contains(
+                "Revoir les notions les moins réussies aux quiz.",
+                "Renforcer la pratique du code par des exercices guidés.");
+        assertThat(a.strengths()).contains(
+                "10 tentative(s) de quiz par 8 étudiant(s) : les quiz sont réellement utilisés.",
+                "Les forums sont actifs (40 messages échangés).");
+        assertThat(a.summary()).startsWith("Cours en bonne santé");
+    }
+
+    @Test
+    void bonnesReussites_sontDesPointsForts_etRecommandationGeneriqueSiRienAFaire() {
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(8, 40, 20, 10, 8, 90, 85));
+
+        assertThat(a.strengths()).contains(
+                "Bonne réussite aux quiz : 85% de moyenne.",
+                "Bonne réussite au code : 90% des cas de test réussis.");
+        // Aucun signal faible : complément générique pour garantir 2 recommandations / améliorations.
+        assertThat(a.recommendations()).containsExactly(
+                "Maintenir le rythme et solliciter régulièrement les étudiants.");
+        assertThat(a.improvements()).containsExactly(
+                "Diversifier les contenus et solliciter régulièrement les étudiants.");
+    }
+
+    @Test
+    void codeEntre40Et50_estMoyen_maisRecommandeQuandMemeLaPratique() {
+        // Seuils différents : amélioration « moyenne » (>=40) mais recommandation (<50).
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(8, 40, 20, 10, 8, 45, null));
+
+        assertThat(a.improvements()).contains(
+                "Réussite au code moyenne (45% des tests) : renforcer la pratique.");
+        assertThat(a.recommendations()).contains(
+                "Renforcer la pratique du code par des exercices guidés.");
+        assertThat(a.dimensions().success()).isEqualTo(45);
+    }
+
+    @Test
+    void seuilsDeReussite_70estBon_50estMoyen() {
+        McpAnalysis bon = DeterministicMcpAnalysis.compute(ctx(1, 0, 0, 0, 0, 70, 70));
+        McpAnalysis moyen = DeterministicMcpAnalysis.compute(ctx(1, 0, 0, 0, 0, null, 50));
+
+        assertThat(bon.strengths()).contains(
+                "Bonne réussite aux quiz : 70% de moyenne.",
+                "Bonne réussite au code : 70% des cas de test réussis.");
+        assertThat(moyen.improvements()).contains("Réussite aux quiz moyenne (50%) : consolider les acquis.");
+        assertThat(moyen.recommendations()).doesNotContain("Revoir les notions les moins réussies aux quiz.");
+    }
 }

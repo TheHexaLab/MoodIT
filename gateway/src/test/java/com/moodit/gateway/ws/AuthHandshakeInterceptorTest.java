@@ -5,16 +5,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import jakarta.servlet.http.Cookie;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -189,5 +194,72 @@ class AuthHandshakeInterceptorTest {
 
     assertThat(ok).isTrue();
     assertThat(attrs.get(AuthHandshakeInterceptor.TOKEN_ATTR)).isEqualTo("qtok");
+  }
+
+  @Test
+  void queryTokenVide_returns401SansAppelerAuthService() {
+    stubActive(true, false);
+    MockHttpServletResponse res = new MockHttpServletResponse();
+    Map<String, Object> attrs = new HashMap<>();
+
+    boolean ok = handshake(request(null, ""), res, attrs);
+
+    assertThat(ok).isFalse();
+    assertThat(res.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED.value());
+    verify(uriSpec, never()).uri(anyString());
+  }
+
+  @Test
+  void autreCookie_ignore_returns401() {
+    ReflectionTestUtils.setField(interceptor, "allowLegacyToken", false);
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/ws");
+    req.setCookies(new Cookie("autre_cookie", "tok"));
+    MockHttpServletResponse res = new MockHttpServletResponse();
+    Map<String, Object> attrs = new HashMap<>();
+
+    boolean ok = handshake(new ServletServerHttpRequest(req), res, attrs);
+
+    assertThat(ok).isFalse();
+    assertThat(res.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED.value());
+    assertThat(attrs).isEmpty();
+  }
+
+  @Test
+  void requeteNonServlet_legacyAutorise_utiliseLaQuery() {
+    stubActive(true, false);
+    ServerHttpRequest req = mock(ServerHttpRequest.class);
+    when(req.getURI()).thenReturn(URI.create("ws://gateway/ws?token=qtok"));
+    Map<String, Object> attrs = new HashMap<>();
+
+    boolean ok = interceptor.beforeHandshake(req, mock(ServerHttpResponse.class), null, attrs);
+
+    assertThat(ok).isTrue();
+    assertThat(attrs.get(AuthHandshakeInterceptor.TOKEN_ATTR)).isEqualTo("qtok");
+  }
+
+  @Test
+  void requeteNonServlet_legacyDesactive_returns401() {
+    ReflectionTestUtils.setField(interceptor, "allowLegacyToken", false);
+    ServerHttpRequest req = mock(ServerHttpRequest.class);
+    when(req.getURI()).thenReturn(URI.create("ws://gateway/ws?token=qtok"));
+    ServerHttpResponse res = mock(ServerHttpResponse.class);
+    Map<String, Object> attrs = new HashMap<>();
+
+    boolean ok = interceptor.beforeHandshake(req, res, null, attrs);
+
+    assertThat(ok).isFalse();
+    verify(res).setStatusCode(HttpStatus.UNAUTHORIZED);
+    assertThat(attrs).isEmpty();
+  }
+
+  @Test
+  void afterHandshake_neModifiePasLaReponse() {
+    ServerHttpRequest req = mock(ServerHttpRequest.class);
+    ServerHttpResponse res = mock(ServerHttpResponse.class);
+
+    interceptor.afterHandshake(req, res, null, null);
+
+    // Après l'upgrade, plus rien à faire : ni statut ni header ne doivent être touchés.
+    verifyNoInteractions(req, res);
   }
 }
