@@ -82,6 +82,14 @@ jobs:
           path: ${{ matrix.service }}/build/reports/tests/test/
           if-no-files-found: ignore
 
+      # Rapport JaCoCo (produit après `test`) : lu par le job « couverture ».
+      - name: Publier le rapport de couverture
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/jacoco/test/jacocoTestReport.xml
+          if-no-files-found: error
+
   # ── Frontend : typecheck + tests unitaires (Vitest) ───────────────────────────
   # Le Dockerfile frontend fait `tsc -b && vite build` (typecheck au build) mais NE lance NI les
   # tests NI le lint : ce job est le filet qui empêche un test frontend cassé d'être fusionné.
@@ -109,13 +117,47 @@ jobs:
       - name: Typecheck + build (tsc -b && vite build)
         run: npm run build
 
-      - name: Tests unitaires (Vitest)
-        run: npm run test
+      - name: Tests unitaires avec couverture (Vitest)
+        run: npm run test:coverage
+
+      - name: Publier le rapport de couverture
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: error
 
       # Lint BLOQUANT et strict (`--max-warnings 0` via le script) : la dette ESLint a été résorbée,
       # ce gate empêche toute nouvelle erreur OU warning d'être fusionnée.
       - name: Lint
         run: npm run lint
+
+  # ── Couverture : une ligne verte ou rouge par service, selon son seuil ─────────
+  # Seuils dans .github/coverage-thresholds.json (#90). Tourne même si un job de tests a échoué :
+  # un rapport manquant compte alors comme un échec, en rouge.
+  coverage:
+    name: couverture — seuils par service
+    runs-on: ubuntu-latest
+    needs: [gradle, frontend]
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Récupérer les rapports de couverture
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-reports
+
+      # download-artifact range chaque artefact dans coverage-reports/<nom> : on retire le préfixe.
+      - name: Ranger les rapports par service
+        run: |
+          cd coverage-reports
+          for d in coverage-*; do [ -d "$d" ] && mv "$d" "${d#coverage-}"; done
+          ls -R
+
+      - name: Vérifier les seuils
+        run: python3 .github/scripts/coverage-gate.py coverage-reports .github/coverage-thresholds.json
 
   # ── Schéma : chaque service JPA démarre en profil prod contre le VRAI schéma ─────
   # Les tests unitaires tournent sur H2 avec un schéma généré depuis les entités : un écart entre
