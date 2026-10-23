@@ -346,7 +346,9 @@ export async function expectTapTarget(locator: Locator, min = 24, label = 'cible
   if (Math.min(box.width, box.height) < 32) {
     test.info().annotations.push({ type: 'cible tactile < 32 px', description: `${label} : ${size}` });
   }
-  expect(Math.min(box.width, box.height), `${label} ${size}`).toBeGreaterThanOrEqual(min);
+  // Tolérance d'un dixième de pixel : sur les runners Linux, un bouton de 24 px rendu avec une autre
+  // police mesure 23,9997 px (arrondi sous-pixel), ce qui n'est pas un défaut d'interface.
+  expect(Math.min(box.width, box.height) + 0.1, `${label} ${size}`).toBeGreaterThanOrEqual(min);
 }
 
 /** Atteignable + (au tactile) taille minimale. */
@@ -387,7 +389,7 @@ export async function expectField(locator: Locator, hasTouch: boolean) {
   if (height < 32) {
     test.info().annotations.push({ type: 'cible tactile < 32 px', description: `${label} : ${Math.round(height)} px de haut` });
   }
-  expect(height, `${label} : ${Math.round(height)} px de haut`).toBeGreaterThanOrEqual(24);
+  expect(height + 0.1, `${label} : ${Math.round(height)} px de haut`).toBeGreaterThanOrEqual(24); // tolérance sous-pixel, cf. expectTapTarget
 }
 
 /** Nom accessible (ou texte) d'un élément, pour les messages et annotations. */

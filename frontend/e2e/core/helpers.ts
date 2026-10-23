@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { expect, request, type APIRequestContext, type Page } from '@playwright/test';
 import { DEV_2FA_CODE, TEST_COURSE_ID, TEST_PASSWORD, TEST_PROGRAM_ID } from '../setup/accounts';
 
@@ -7,7 +8,10 @@ export const FORUM_NAME = 'Thread — Mathématiques pour ingénieurs I';
 export const QUIZ_NAME = 'Quiz découverte — tous les types (sauf code)';
 
 /** Suffixe unique par exécution : la BD de dev persiste entre deux runs locaux. */
-export const uniqueSuffix = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
+// Suffixe unique des noms de comptes et de contenus de test. `randomBytes` plutôt que
+// `Math.random` : le suffixe entre dans des identifiants de compte, CodeQL (js/insecure-randomness)
+// exige une source cryptographique pour tout ce qui ressemble à un identifiant.
+export const uniqueSuffix = () => `${Date.now().toString(36)}${randomBytes(2).toString('hex')}`;
 
 export interface FreshUser {
   username: string;

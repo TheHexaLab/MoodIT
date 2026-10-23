@@ -62,13 +62,21 @@ async function tabUntilFocused(page: Page, target: Locator, max = 25) {
 }
 
 /**
- * Ordre de Tab attendu. WebKit (comme Safari) ne s'arrête pas sur les liens avec Tab seul
- * (Option+Tab) : les entrées `link` en sont retirées sur ce moteur.
+ * Vérifie l'ordre de Tab. Les entrées `link` sont des liens : Chromium et Firefox s'y arrêtent
+ * toujours ; WebKit s'y arrête sur Linux (runners CI) mais pas sur macOS/Windows (Option+Tab).
+ * Sur WebKit on compare donc la séquence SANS les liens, quelle que soit la plateforme.
  */
-const expectedTabOrder = (browserName: string, items: (string | { link: string })[]) =>
-  items.flatMap((item) =>
-    typeof item === 'string' ? [item] : browserName === 'webkit' ? [] : [item.link]
-  );
+async function expectTabOrder(page: Page, browserName: string, items: (string | { link: string })[]) {
+  const full = items.map((item) => (typeof item === 'string' ? item : item.link));
+  const links = new Set(items.flatMap((item) => (typeof item === 'string' ? [] : [item.link])));
+  const received = await tabSequence(page, full.length);
+  if (browserName !== 'webkit') {
+    expect(received).toEqual(full);
+    return;
+  }
+  const withoutLinks = full.filter((name) => !links.has(name));
+  expect(received.filter((name) => !links.has(name)).slice(0, withoutLinks.length)).toEqual(withoutLinks);
+}
 
 const codeBoxes = (page: Page) =>
   page.getByRole('group', { name: 'Code à 6 chiffres' }).getByRole('textbox');
@@ -82,7 +90,7 @@ test.describe('formulaires d’authentification', () => {
     const { user } = await createEnrolledUser(baseURL!);
     await page.goto('/login');
     await expect(page.getByPlaceholder('exemple@gmail.com')).toBeVisible(); // page rendue avant le 1er Tab
-    const expected = expectedTabOrder(browserName, [
+    await expectTabOrder(page, browserName, [
       'exemple@gmail.com',
       '••••••••••',
       '', // œil (sans nom accessible)
@@ -90,7 +98,6 @@ test.describe('formulaires d’authentification', () => {
       'Se connecter →',
       { link: 'Créer un compte' },
     ]);
-    expect(await tabSequence(page, expected.length)).toEqual(expected);
 
     // Saisie entièrement au clavier, Entrée dans le mot de passe soumet : on arrive à la 2FA.
     await page.getByPlaceholder('exemple@gmail.com').focus();
@@ -105,7 +112,7 @@ test.describe('formulaires d’authentification', () => {
   test('inscription : Tab suit l’ordre visuel', async ({ page, browserName }) => {
     await page.goto('/register');
     await expect(page.getByPlaceholder('ex : RKarine')).toBeVisible(); // sinon WebKit tabule sur <body>
-    const expected = expectedTabOrder(browserName, [
+    await expectTabOrder(page, browserName, [
       'ex : RKarine',
       'ex: Karine',
       'ex: Roussel',
@@ -119,7 +126,6 @@ test.describe('formulaires d’authentification', () => {
       { link: 'politique de confidentialité' },
       'Créer mon compte →',
     ]);
-    expect(await tabSequence(page, expected.length)).toEqual(expected);
   });
 
   // Bogue : la page d'inscription n'a pas de <form> (le bouton « Créer mon compte → » n'est qu'un
