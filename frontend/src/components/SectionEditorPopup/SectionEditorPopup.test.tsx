@@ -270,8 +270,9 @@ describe('SectionEditorPopup', () => {
   it('« ✕ » et le voile appellent onClose', () => {
     const { onClose } = renderPopup();
     fireEvent.click(screen.getByText('✕'));
-    const scrim = screen.getByRole('heading', { level: 1 }).closest('div')
-      ?.parentElement?.parentElement?.parentElement as HTMLElement;
+    // Voile de la coquille Popup (porté dans body) : le clic doit commencer sur le voile.
+    const scrim = document.body.querySelector('[data-variant]') as HTMLElement;
+    fireEvent.mouseDown(scrim);
     fireEvent.click(scrim);
     expect(onClose).toHaveBeenCalledTimes(2);
   });

@@ -3,6 +3,15 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { DeleteConfirmationPopup } from './DeleteConfirmationPopup';
 import { defaultLabels } from './labels';
 
+// Depuis la coquille Popup (#106), la popup est portée dans document.body : le voile n'est plus
+// dans le `container` du rendu. Le panneau reste l'enfant direct du voile. Un clic sur le voile ne
+// ferme que s'il commence sur le voile (mousedown puis click).
+const popupOverlay = () => document.body.querySelector('[data-variant]') as HTMLElement;
+const clickBackdrop = (el: HTMLElement = popupOverlay()) => {
+  fireEvent.mouseDown(el);
+  fireEvent.click(el);
+};
+
 // Fermeture immédiate (pas d'attente d'animationend, non émis par jsdom) via reduced-motion.
 function stubReducedMotion(reduce: boolean) {
   vi.stubGlobal(
@@ -80,8 +89,8 @@ describe('DeleteConfirmationPopup', () => {
   });
 
   it('cliquer sur le voile (hors de la boîte) ferme le popup', () => {
-    const { onClose, container } = renderPopup();
-    fireEvent.click(container.firstElementChild as HTMLElement);
+    const { onClose } = renderPopup();
+    clickBackdrop();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -99,11 +108,11 @@ describe('DeleteConfirmationPopup', () => {
 
   it('sans reduced-motion, l’action attend la fin de l’animation de sortie', () => {
     stubReducedMotion(false);
-    const { onDeleteConfirmation, container } = renderPopup();
+    const { onDeleteConfirmation } = renderPopup();
     fireEvent.click(screen.getByText(defaultLabels.confirm));
     // Pas encore exécutée : on attend animationend sur la boîte.
     expect(onDeleteConfirmation).not.toHaveBeenCalled();
-    const box = (container.firstElementChild as HTMLElement).firstElementChild as HTMLElement;
+    const box = popupOverlay().firstElementChild as HTMLElement;
     fireAnimationEnd(box);
     expect(onDeleteConfirmation).toHaveBeenCalledTimes(1);
   });

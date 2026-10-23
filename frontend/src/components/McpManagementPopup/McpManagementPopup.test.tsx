@@ -5,6 +5,15 @@ import { defaultLabels } from './labels';
 import type { McpResponse, McpResponseSummary } from './types';
 import type { McpAnalysis } from '../../types/domain';
 
+// Depuis la coquille Popup (#106), la popup est portée dans document.body : le voile n'est plus
+// dans le `container` du rendu. Le panneau reste l'enfant direct du voile. Un clic sur le voile ne
+// ferme que s'il commence sur le voile (mousedown puis click).
+const popupOverlay = () => document.body.querySelector('[data-variant]') as HTMLElement;
+const clickBackdrop = (el: HTMLElement = popupOverlay()) => {
+  fireEvent.mouseDown(el);
+  fireEvent.click(el);
+};
+
 // Fermeture immédiate (pas d'attente d'animationend, non émis par jsdom) via reduced-motion.
 function stubReducedMotion(reduce: boolean) {
   vi.stubGlobal(
@@ -405,10 +414,10 @@ describe('McpManagementPopup', () => {
   // ── Fermeture / libellés ──
 
   it('« ✕ » (liste et détail) et le voile appellent onClose', async () => {
-    const { onClose, container } = renderPopup();
+    const { onClose } = renderPopup();
     await screen.findByText(t.rowSummary(3, 1));
     fireEvent.click(screen.getByText('✕'));
-    fireEvent.click(container.firstElementChild as HTMLElement);
+    clickBackdrop();
     // Un clic DANS la boîte ne ferme pas.
     fireEvent.click(screen.getByText(t.historyLabel));
     expect(onClose).toHaveBeenCalledTimes(2);
@@ -420,11 +429,11 @@ describe('McpManagementPopup', () => {
 
   it('sans reduced-motion, la fermeture attend la fin de l’animation de sortie', async () => {
     stubReducedMotion(false);
-    const { onClose, container } = renderPopup();
+    const { onClose } = renderPopup();
     await screen.findByText(t.rowSummary(3, 1));
     fireEvent.click(screen.getByText('✕'));
     expect(onClose).not.toHaveBeenCalled();
-    const scrim = container.firstElementChild as HTMLElement;
+    const scrim = popupOverlay();
     expect(scrim.className).toMatch(/closing/);
     // jsdom n'a pas AnimationEvent : React écoute alors la variante préfixée webkit.
     fireEvent(scrim.firstElementChild as HTMLElement, new Event('webkitAnimationEnd', { bubbles: true }));

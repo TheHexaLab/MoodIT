@@ -4,6 +4,15 @@ import { AddCoursePopup } from './AddCoursePopup';
 import { defaultLabels } from './labels';
 import type { Establishment, NewCourse, Program } from './types';
 
+// Depuis la coquille Popup (#106), la popup est portée dans document.body : le voile n'est plus
+// dans le `container` du rendu. Le panneau reste l'enfant direct du voile. Un clic sur le voile ne
+// ferme que s'il commence sur le voile (mousedown puis click).
+const popupOverlay = () => document.body.querySelector('[data-variant]') as HTMLElement;
+const clickBackdrop = (el: HTMLElement = popupOverlay()) => {
+  fireEvent.mouseDown(el);
+  fireEvent.click(el);
+};
+
 // Fermeture immédiate (pas d'attente d'animationend, non émis par jsdom) via reduced-motion.
 function stubReducedMotion(reduce: boolean) {
   vi.stubGlobal(
@@ -260,10 +269,10 @@ describe('AddCoursePopup', () => {
   });
 
   it('« Annuler », « ✕ » et le voile appellent onClose sans sauvegarder', () => {
-    const { onClose, onSave, container } = renderPopup();
+    const { onClose, onSave } = renderPopup();
     fireEvent.click(screen.getByText(t.cancel));
     fireEvent.click(screen.getByText('✕'));
-    fireEvent.click(container.firstElementChild as HTMLElement);
+    clickBackdrop();
     expect(onClose).toHaveBeenCalledTimes(3);
     expect(onSave).not.toHaveBeenCalled();
   });

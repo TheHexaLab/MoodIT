@@ -7,6 +7,15 @@ import type { CreateEstablishment, JoinEstablishment, Program } from './types';
 import type { ManagedEstablishment } from '../../types/domain';
 import type { EstablishmentEvent } from '../../services/appSocket';
 
+// Depuis la coquille Popup (#106), la popup est portée dans document.body : le voile n'est plus
+// dans le `container` du rendu. Le panneau reste l'enfant direct du voile. Un clic sur le voile ne
+// ferme que s'il commence sur le voile (mousedown puis click).
+const popupOverlay = () => document.body.querySelector('[data-variant]') as HTMLElement;
+const clickBackdrop = (el: HTMLElement = popupOverlay()) => {
+  fireEvent.mouseDown(el);
+  fireEvent.click(el);
+};
+
 // Fermeture immédiate (pas d'attente d'animationend, non émis par jsdom) via reduced-motion.
 function stubReducedMotion(reduce: boolean) {
   vi.stubGlobal(
@@ -85,7 +94,7 @@ function renderPopup(overrides: Partial<Props> = {}) {
 
 /** Titre de la modale (h1 de la boîte, pas celui d'un ErrorPopup superposé). */
 function heading() {
-  const scrim = document.body.firstElementChild!.firstElementChild!;
+  const scrim = popupOverlay();
   return scrim.querySelector('h1')!.textContent;
 }
 /** Bouton d'option du menu, repéré par son titre. */
@@ -237,19 +246,19 @@ describe('AddSubscriptionPopup', () => {
     });
 
     it('« ✕ » et le voile appellent onClose ; un clic dans la boîte ne ferme pas', () => {
-      const { onClose, container } = renderPopup();
+      const { onClose } = renderPopup();
       fireEvent.click(screen.getByText('✕'));
-      fireEvent.click(container.firstElementChild as HTMLElement);
+      clickBackdrop();
       fireEvent.click(screen.getByText(t.subtitle));
       expect(onClose).toHaveBeenCalledTimes(2);
     });
 
     it('sans reduced-motion, la fermeture attend la fin de l’animation de sortie', () => {
       stubReducedMotion(false);
-      const { onClose, container } = renderPopup();
+      const { onClose } = renderPopup();
       fireEvent.click(screen.getByText('✕'));
       expect(onClose).not.toHaveBeenCalled();
-      const scrim = container.firstElementChild as HTMLElement;
+      const scrim = popupOverlay();
       expect(scrim.className).toMatch(/closing/);
       // jsdom n'a pas AnimationEvent : React écoute alors la variante préfixée webkit.
       fireEvent(scrim.firstElementChild as HTMLElement, new Event('webkitAnimationEnd', { bubbles: true }));

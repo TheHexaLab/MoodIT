@@ -4,6 +4,15 @@ import { EditProfilePopup } from './EditProfilePopup';
 import { DEFAULT_PALETTE, defaultLabels } from './labels';
 import type { ProfileUpdate, ProfileUser } from './types';
 
+// Depuis la coquille Popup (#106), la popup est portée dans document.body : le voile n'est plus
+// dans le `container` du rendu. Le panneau reste l'enfant direct du voile. Un clic sur le voile ne
+// ferme que s'il commence sur le voile (mousedown puis click).
+const popupOverlay = () => document.body.querySelector('[data-variant]') as HTMLElement;
+const clickBackdrop = (el: HTMLElement = popupOverlay()) => {
+  fireEvent.mouseDown(el);
+  fireEvent.click(el);
+};
+
 // Fermeture immédiate (pas d'attente d'animationend, non émis par jsdom) via reduced-motion.
 function stubReducedMotion(reduce: boolean) {
   vi.stubGlobal(
@@ -81,12 +90,12 @@ function lastNameInput() {
 function saveButton() {
   return screen.getByText(t.save).closest('button') as HTMLButtonElement;
 }
-function fileInput(container: HTMLElement) {
-  return container.querySelector('input[type="file"]') as HTMLInputElement;
+function fileInput() {
+  return document.body.querySelector('input[type="file"]') as HTMLInputElement;
 }
 /** Pastille d'aperçu de l'avatar (1er span du label « avatar »). */
-function preview(container: HTMLElement) {
-  return container.querySelector('label span') as HTMLElement;
+function preview() {
+  return document.body.querySelector('label span') as HTMLElement;
 }
 
 describe('EditProfilePopup', () => {
@@ -162,8 +171,8 @@ describe('EditProfilePopup', () => {
   });
 
   it('avec une photo existante : aperçu en image, pas d’initiales, bouton « retirer »', () => {
-    const { container } = renderPopup({ user: { ...USER, avatarUrl: 'https://cdn/x.png' } });
-    expect(preview(container).style.backgroundImage).toContain('https://cdn/x.png');
+    renderPopup({ user: { ...USER, avatarUrl: 'https://cdn/x.png' } });
+    expect(preview().style.backgroundImage).toContain('https://cdn/x.png');
     expect(screen.queryByText('MN')).toBeNull();
     expect(screen.getByText(t.removePhoto)).toBeTruthy();
   });
@@ -181,11 +190,11 @@ describe('EditProfilePopup', () => {
   });
 
   it('choisir une photo affiche l’aperçu local et envoie le fichier', async () => {
-    const { container, onSave, onClose } = renderPopup();
+    const { onSave, onClose } = renderPopup();
     const file = new File(['img'], 'moi.png', { type: 'image/png' });
-    fireEvent.change(fileInput(container), { target: { files: [file] } });
+    fireEvent.change(fileInput(), { target: { files: [file] } });
     expect(createObjectURL).toHaveBeenCalledWith(file);
-    expect(preview(container).style.backgroundImage).toContain('blob:preview');
+    expect(preview().style.backgroundImage).toContain('blob:preview');
     expect(screen.queryByText('MN')).toBeNull();
     fireEvent.click(saveButton());
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -193,8 +202,8 @@ describe('EditProfilePopup', () => {
   });
 
   it('remplacer un aperçu local révoque l’ancienne URL blob', () => {
-    const { container } = renderPopup();
-    const input = fileInput(container);
+    renderPopup();
+    const input = fileInput();
     fireEvent.change(input, { target: { files: [new File(['a'], 'a.png')] } });
     expect(revokeObjectURL).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { files: [new File(['b'], 'b.png')] } });
@@ -204,8 +213,8 @@ describe('EditProfilePopup', () => {
   });
 
   it('une sélection vide (annulée) ne change rien', () => {
-    const { container } = renderPopup();
-    fireEvent.change(fileInput(container), { target: { files: [] } });
+    renderPopup();
+    fireEvent.change(fileInput(), { target: { files: [] } });
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(screen.getByText('MN')).toBeTruthy();
   });
@@ -240,20 +249,20 @@ describe('EditProfilePopup', () => {
   });
 
   it('« Annuler », « ✕ » et le voile appellent onClose sans enregistrer', () => {
-    const { onClose, onSave, container } = renderPopup();
+    const { onClose, onSave } = renderPopup();
     fireEvent.click(screen.getByText(t.cancel));
     fireEvent.click(screen.getByText('✕'));
-    fireEvent.click(container.firstElementChild as HTMLElement);
+    clickBackdrop();
     expect(onClose).toHaveBeenCalledTimes(3);
     expect(onSave).not.toHaveBeenCalled();
   });
 
   it('sans reduced-motion, la fermeture attend la fin de l’animation', () => {
     stubReducedMotion(false);
-    const { onClose, container } = renderPopup();
+    const { onClose } = renderPopup();
     fireEvent.click(screen.getByText(t.cancel));
     expect(onClose).not.toHaveBeenCalled();
-    const box = (container.firstElementChild as HTMLElement).firstElementChild as HTMLElement;
+    const box = popupOverlay().firstElementChild as HTMLElement;
     fireAnimationEnd(box);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
