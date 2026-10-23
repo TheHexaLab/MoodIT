@@ -84,6 +84,12 @@ un compte **neuf**.
   `clickProgramMenu` / `clickCourseMenu` d'`admin.helpers.ts` réessaient.
 - **Le dernier emplacement est restauré par compte** : ne pas supposer qu'un cours est ouvert au
   chargement.
+- **La police change le layout** : l'app demande Inter sans la fournir. Sur Windows elle retombe
+  sur Segoe UI, sur Linux sur DejaVu Sans (plus large) : le titre du forum déborde alors de 41 px
+  à 390 px. Le CI installe `fonts-inter` pour un rendu stable ; en cas de débordement, le message
+  d'erreur liste les éléments en cause et la police effective. Pour reproduire le rendu des
+  runners : `docker run --rm -v "$PWD:/work" -w /work -e E2E_BASE_URL=http://host.docker.internal:5173
+  mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test …`.
 - **WebKit dispatche les événements de pointeur sans laisser React rendre** : utiliser `pointerDrag`
   de `quiz.helpers.ts`, qui attend le rendu entre chaque pas.
 

@@ -238,16 +238,20 @@ export { PROGRAM_NAME };
 
 /** Le document ne défile pas horizontalement (aucun élément ne déborde de la page). */
 export async function expectNoHorizontalOverflow(page: Page) {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const root = document.documentElement;
-          return Math.max(root.scrollWidth, document.body.scrollWidth) - root.clientWidth;
-        }),
-      { message: 'débordement horizontal du document (scrollWidth - clientWidth)' }
-    )
-    .toBeLessThanOrEqual(0);
+  try {
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const root = document.documentElement;
+            return Math.max(root.scrollWidth, document.body.scrollWidth) - root.clientWidth;
+          }),
+        { message: 'débordement horizontal du document (scrollWidth - clientWidth)' }
+      )
+      .toBeLessThanOrEqual(0);
+  } catch (error) {
+    throw withOffenders(error, await page.locator('body').evaluate(listOffenders));
+  }
 }
 
 /**
@@ -255,11 +259,52 @@ export async function expectNoHorizontalOverflow(page: Page) {
  * son contenu tient dans sa largeur.
  */
 export async function expectNoScrollableOverflow(container: Locator) {
-  await expect
-    .poll(() => container.evaluate((el) => el.scrollWidth - el.clientWidth), {
-      message: 'débordement horizontal du conteneur (scrollWidth - clientWidth)',
-    })
-    .toBeLessThanOrEqual(1);
+  try {
+    await expect
+      .poll(() => container.evaluate((el) => el.scrollWidth - el.clientWidth), {
+        message: 'débordement horizontal du conteneur (scrollWidth - clientWidth)',
+      })
+      .toBeLessThanOrEqual(1);
+  } catch (error) {
+    throw withOffenders(error, await container.evaluate(listOffenders));
+  }
+}
+
+/**
+ * Diagnostic d'un débordement : éléments dont le bord droit dépasse celui du conteneur (hors
+ * descendants d'une zone qui défile elle-même en interne, ex. bloc de code), avec la police
+ * effective — un débordement qui n'apparaît que sur les runners Linux vient souvent d'une
+ * police de repli plus large (l'app demande Inter sans la fournir).
+ */
+function listOffenders(root: Element): string[] {
+  const right = root.getBoundingClientRect().right;
+  const scrolls = (el: Element) => {
+    for (let p = el.parentElement; p && p !== root; p = p.parentElement) {
+      const o = getComputedStyle(p).overflowX;
+      if ((o === 'auto' || o === 'scroll') && p.scrollWidth > p.clientWidth) return true;
+    }
+    return false;
+  };
+  const out: string[] = [];
+  for (const el of root.querySelectorAll<HTMLElement>('*')) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.right <= right + 1 || scrolls(el)) continue;
+    const cs = getComputedStyle(el);
+    out.push(
+      `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : ''}` +
+        `[role=${el.getAttribute('role') ?? '-'}] dépasse de ${Math.round(r.right - right)} px ` +
+        `(largeur ${Math.round(r.width)}, police ${cs.fontFamily.split(',')[0]}, nowrap=${cs.whiteSpace === 'nowrap'}) ` +
+        `« ${(el.textContent ?? '').trim().slice(0, 40)} »`
+    );
+    if (out.length >= 8) break;
+  }
+  out.unshift(`police du document : ${getComputedStyle(document.body).fontFamily}`);
+  return out;
+}
+
+function withOffenders(error: unknown, offenders: string[]): Error {
+  const base = error instanceof Error ? error.message : String(error);
+  return new Error(`${base}\n\nÉléments en cause :\n  - ${offenders.join('\n  - ')}`);
 }
 
 /**

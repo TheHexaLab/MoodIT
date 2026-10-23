@@ -276,13 +276,16 @@ jobs:
         timeout-minutes: 6
         run: npx playwright install ${{ matrix.browser }}
 
-      - name: Dépendances système du navigateur
+      # `fonts-inter` : l'app demande la police Inter sans la fournir ; sans elle, le runner retombe
+      # sur DejaVu Sans, plus large, et des textes débordent (titre du forum : +41 px à 390 px).
+      # Avec Inter, le rendu est celui voulu par l'app et identique d'un runner à l'autre.
+      - name: Dépendances système du navigateur et police Inter
         working-directory: frontend
         timeout-minutes: 10
         run: |
           { echo 'Acquire::Retries "3";'; echo 'Acquire::http::Timeout "30";'; echo 'Acquire::https::Timeout "30";'; } | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null
           for attempt in 1 2 3; do
-            npx playwright install-deps ${{ matrix.browser }} && exit 0
+            sudo apt-get install -y --no-install-recommends fonts-inter && npx playwright install-deps ${{ matrix.browser }} && exit 0
             echo "::warning::dépendances système : échec (tentative $attempt), nouvel essai dans 15 s"
             sleep 15
           done
