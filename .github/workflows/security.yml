@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: "17 6 * * 1"   # lundi matin : nouvelles CVE publiées sur du code qui n'a pas bougé
 
+# Un seul run par PR (ou par branche) : un nouveau push annule le run précédent, encore en cours.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

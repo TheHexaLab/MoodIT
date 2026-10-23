@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
 
+# Un seul run par PR (ou par branche) : un nouveau push annule le run précédent, encore en cours.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Jeton GITHUB_TOKEN en lecture seule pour tous les jobs (aucun n'écrit dans le dépôt).
 permissions:
   contents: read
@@ -249,9 +254,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # Navigateurs Playwright mis en cache par version (le téléchargement de WebKit est lent et
-      # l'installation des paquets apt a déjà bloqué un job 30 min) ; `--with-deps` n'est relancé
-      # que si le cache est absent, avec un plafond et deux nouvelles tentatives.
+      # Navigateurs Playwright : binaires mis en cache par version (téléchargement CDN), puis
+      # dépendances système par apt. Le miroir Ubuntu des runners cale parfois en plein
+      # téléchargement (un job a attendu 8 min sur 12 paquets) : apt reçoit un délai de 30 s par
+      # connexion et trois essais, et l'étape est relancée jusqu'à trois fois.
       - name: Version de Playwright
         id: pw
         working-directory: frontend
@@ -264,24 +270,23 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ matrix.browser }}
 
-      - name: Installer le navigateur
+      - name: Télécharger le navigateur
         if: steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: frontend
-        timeout-minutes: 8
+        timeout-minutes: 6
+        run: npx playwright install ${{ matrix.browser }}
+
+      - name: Dépendances système du navigateur
+        working-directory: frontend
+        timeout-minutes: 10
         run: |
+          { echo 'Acquire::Retries "3";'; echo 'Acquire::http::Timeout "30";'; echo 'Acquire::https::Timeout "30";'; } | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null
           for attempt in 1 2 3; do
-            npx playwright install --with-deps ${{ matrix.browser }} && exit 0
-            echo "::warning::installation du navigateur échouée (tentative $attempt), nouvel essai dans 20 s"
-            sleep 20
+            npx playwright install-deps ${{ matrix.browser }} && exit 0
+            echo "::warning::dépendances système : échec (tentative $attempt), nouvel essai dans 15 s"
+            sleep 15
           done
           exit 1
-
-      # Cache présent : seules les dépendances système manquent (le cache ne contient que les binaires).
-      - name: Dépendances système du navigateur
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        working-directory: frontend
-        timeout-minutes: 8
-        run: npx playwright install-deps ${{ matrix.browser }}
 
       - name: Tests Playwright
         working-directory: frontend
