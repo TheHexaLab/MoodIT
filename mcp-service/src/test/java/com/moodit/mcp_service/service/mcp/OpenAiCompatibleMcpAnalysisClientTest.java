@@ -265,4 +265,42 @@ class OpenAiCompatibleMcpAnalysisClientTest {
                 .isInstanceOf(McpAnalysisException.class)
                 .hasMessageContaining("Clé API LLM absente");
     }
+
+    @Test
+    void jsonSuiviDeTexte_seulLObjetEstLu() throws Exception {
+        // Le modèle commence par l'objet puis bavarde : on ne garde que « {…} ».
+        String url = startStub(200, envelope("{\"score\":55,\"summary\":\"s\"} Voilà mon analyse."));
+
+        McpAnalysis a = client(url, "key").analyze(ctx());
+
+        assertThat(a.score()).isEqualTo(55);
+        assertThat(a.summary()).isEqualTo("s");
+    }
+
+    @Test
+    void llmTropLent_delaiDeLectureDepasse_leveMcpAnalysisException() throws Exception {
+        // Un LLM qui ne répond pas dans le délai configuré ne doit pas bloquer le job :
+        // l'exception déclenche le repli déterministe.
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/chat/completions", exchange -> {
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            byte[] bytes = envelope(ANALYSIS_JSON).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+        server.start();
+        String url = "http://localhost:" + server.getAddress().getPort();
+        OpenAiCompatibleMcpAnalysisClient lent =
+                new OpenAiCompatibleMcpAnalysisClient(mapper, url, "key", "test-model", 300);
+
+        assertThatThrownBy(() -> lent.analyze(ctx()))
+                .isInstanceOf(McpAnalysisException.class)
+                .hasMessageStartingWith("Appel au LLM échoué");
+    }
 }

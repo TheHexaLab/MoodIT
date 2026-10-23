@@ -101,5 +101,5 @@ pitest {
 	outputFormats = setOf("XML", "HTML")
 	timestampedReports = false
 	timeoutConstInMillis = 8000
-	mutationThreshold = 87 // score mesuré le 2026-10-23 : 90 % ; ne jamais baisser
+	mutationThreshold = 95 // score mesuré le 2026-10-23 : 98 % ; ne jamais baisser
 }

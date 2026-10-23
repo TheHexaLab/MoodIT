@@ -73,5 +73,5 @@ pitest {
     threads = 4
     outputFormats = setOf("XML", "HTML")
     timestampedReports = false
-    mutationThreshold = 85 // score mesuré le 2026-10-23 : 88 % ; ne jamais baisser
+    mutationThreshold = 90 // score mesuré le 2026-10-23 : 93 % ; ne jamais baisser
 }

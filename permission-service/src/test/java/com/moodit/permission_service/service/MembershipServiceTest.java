@@ -141,6 +141,15 @@ class MembershipServiceTest {
   }
 
   @Test
+  void courseProgramIds_convertitChaqueIdEnLong() {
+    // La requête native renvoie des Number (Integer/Long/BigInteger selon le pilote) : chaque
+    // id est ramené en long, dans l'ordre, pour le calcul des programmes ajoutés ou retirés.
+    when(membershipRepository.findProgramIdsByCourse(7))
+        .thenReturn(java.util.List.of(3, 4L, java.math.BigInteger.valueOf(8)));
+    assertThat(service.courseProgramIds(7)).containsExactly(3L, 4L, 8L);
+  }
+
+  @Test
   void roleName_unknownId_null() {
     when(membershipRepository.findRoleNameById(99)).thenReturn(null);
     assertThat(service.roleName(99)).isNull();

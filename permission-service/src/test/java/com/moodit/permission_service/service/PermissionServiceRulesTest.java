@@ -1,6 +1,16 @@
 package com.moodit.permission_service.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import java.util.List;
+import java.util.stream.Stream;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -1269,6 +1279,133 @@ class PermissionServiceRulesTest {
               sig ->
                   assertThat(sig)
                       .matches("^(GET|POST|PUT|PATCH|DELETE) /(api|mcp|exec)/.*"));
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════
+  //  Id nul (0) : jamais un identifiant valide (SERIAL commence à 1)
+  // ═══════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Chaque règle qui lit un id (PATH ou BODY) le valide avec {@code id > 0} AVANT toute requête
+   * BD. Un id 0 doit donc être refusé SANS consulter les appartenances : si la borne devenait
+   * {@code >= 0}, la règle interrogerait la BD (et accorderait l'accès si la ligne existait).
+   */
+  @Nested
+  class IdNulRefuseSansRequeteBd {
+
+    static Stream<Arguments> routesAvecIdNul() {
+      return Stream.of(
+          Arguments.of("/api/forums/posts", "POST", "{\"forumId\":0}"),
+          Arguments.of("/api/forums/posts/votes", "POST", "{\"forumId\":0}"),
+          Arguments.of("/api/forums/messages", "POST", "{\"forumId\":0}"),
+          Arguments.of("/api/forums/0/posts", "GET", null),
+          Arguments.of("/api/courses/0/forums", "GET", null),
+          Arguments.of("/api/courses/0/quizzes", "GET", null),
+          Arguments.of("/api/courses/0/sections", "PATCH", "{}"),
+          Arguments.of("/api/courses/forums", "POST", "{\"courseId\":0}"),
+          Arguments.of("/api/courses/users", "POST", "{\"id\":5,\"programId\":0,\"courseIds\":[]}"),
+          Arguments.of("/api/roles/change", "POST", "{\"programId\":0}"),
+          Arguments.of("/api/programs/0/users", "GET", null),
+          Arguments.of("/api/programs/0", "PATCH", "{}"),
+          Arguments.of("/api/forums/0", "PATCH", "{}"),
+          Arguments.of("/api/quizzes/0", "PUT", "{}"),
+          Arguments.of("/api/quizzes/0", "GET", null),
+          Arguments.of("/mcp/analyses/0", "GET", null),
+          Arguments.of("/api/forums/1/posts/0", "PATCH", "{}"),
+          Arguments.of("/api/forums/0/posts/0", "DELETE", null));
+    }
+
+    @ParameterizedTest(name = "{1} {0}")
+    @MethodSource("routesAvecIdNul")
+    void etudiant_idNul_refuseSansConsulterLesAppartenances(
+        String path, String method, String body) {
+      loggedIn(user(5));
+      assertThat(allowed(path, method, body)).isFalse();
+      verifyNoInteractions(membershipService);
+    }
+
+    @Test
+    void roleGlobal_attributionRoleIdNul_gardien_refuseSansResoudreLeRole() {
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      assertThat(
+              allowed("/api/roles/global/change", "POST", "{\"type\":\"assign\",\"roleId\":0}"))
+          .isFalse();
+      verifyNoInteractions(membershipService);
+    }
+
+    @Test
+    void roleProgramme_roleIdNul_adminDuProgramme_decideAuSeulRoleDansLeProgramme() {
+      // roleId absent ou non positif : pas de résolution du rôle cible (le core rejettera la
+      // requête) ; la décision repose sur le rôle Administrateur DANS le programme visé.
+      loggedIn(user(5));
+      when(membershipService.hasRoleInProgram(5, 3, RoleNames.ADMIN)).thenReturn(true);
+      assertThat(allowed("/api/roles/change", "POST", "{\"programId\":3,\"roleId\":0}")).isTrue();
+      verify(membershipService, never()).roleName(anyLong());
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════
+  //  PATCH /courses/{courseId} : changement des programmes du cours (body.programIds)
+  // ═══════════════════════════════════════════════════════════════════════════════════
+
+  @Nested
+  class ChangementDesProgrammesDuCours {
+
+    private static final String PATH = "/api/courses/1";
+
+    private void enseignantDuCours() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInCourse(5, 1, RoleNames.TEACHER)).thenReturn(true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {RoleNames.ADMIN, RoleNames.GUARDIAN})
+    void roleGlobal_changeLesProgrammes_autoriseSansLireLesProgrammesActuels(String role) {
+      loggedIn(user(5, role));
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":[3,99]}")).isTrue();
+      verify(membershipService, never()).courseProgramIds(anyLong());
+    }
+
+    @Test
+    void enseignant_ajouteUnProgrammeQuIlGere_autorise() {
+      enseignantDuCours();
+      when(membershipService.courseProgramIds(1)).thenReturn(List.of(3L));
+      when(membershipService.hasRoleInProgram(5, 4, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInProgram(5, 4, RoleNames.TEACHER)).thenReturn(true);
+      // Seul le programme 4 change (3 est conservé) : lui seul doit être géré.
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":[3,4]}")).isTrue();
+    }
+
+    @Test
+    void enseignant_programmesInchanges_autoriseSansVerifierLesProgrammes() {
+      enseignantDuCours();
+      when(membershipService.courseProgramIds(1)).thenReturn(List.of(3L));
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":[3]}")).isTrue();
+      verify(membershipService, never()).hasRoleInProgram(anyLong(), anyLong(), anyString());
+    }
+
+    @Test
+    void enseignant_retireUnProgrammeQuIlNeGerePas_refuse() {
+      enseignantDuCours();
+      when(membershipService.courseProgramIds(1)).thenReturn(List.of(3L, 8L));
+      when(membershipService.hasRoleInProgram(5, 8, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInProgram(5, 8, RoleNames.TEACHER)).thenReturn(false);
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":[3]}")).isFalse();
+    }
+
+    @Test
+    void enseignant_programIdsNonTableau_refuse() {
+      enseignantDuCours();
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":3}")).isFalse();
+      verify(membershipService, never()).courseProgramIds(anyLong());
+    }
+
+    @Test
+    void enseignant_programIdsNull_neChangeRien_autorise() {
+      enseignantDuCours();
+      assertThat(allowed(PATH, "PATCH", "{\"programIds\":null}")).isTrue();
     }
   }
 }

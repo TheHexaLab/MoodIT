@@ -169,4 +169,102 @@ class DeterministicMcpAnalysisTest {
         assertThat(moyen.improvements()).contains("Réussite aux quiz moyenne (50%) : consolider les acquis.");
         assertThat(moyen.recommendations()).doesNotContain("Revoir les notions les moins réussies aux quiz.");
     }
+
+    // ---- Seuils exacts (tests de mutation : chaque borne est vérifiée des deux côtés) ----
+
+    @Test
+    void forum_dixMessagesSontUneForce_neufUneFaiblesse() {
+        McpAnalysis dix = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, null, null));
+        McpAnalysis neuf = DeterministicMcpAnalysis.compute(ctx(1, 9, 5, 1, 1, null, null));
+
+        assertThat(dix.strengths()).contains("Les forums sont actifs (10 messages échangés).");
+        assertThat(dix.recommendations())
+                .doesNotContain("Animer les forums (questions, annonces) pour stimuler les échanges.");
+        assertThat(neuf.improvements())
+                .contains("Stimuler les échanges : l'activité de forum reste faible (9 messages).");
+        assertThat(neuf.recommendations())
+                .contains("Animer les forums (questions, annonces) pour stimuler les échanges.");
+    }
+
+    @Test
+    void inscriptions_cinqEtudiantsSontUneForce_quatreUneFaiblesse() {
+        McpAnalysis cinq = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, null, null));
+        McpAnalysis quatre = DeterministicMcpAnalysis.compute(ctx(1, 10, 4, 1, 1, null, null));
+
+        assertThat(cinq.strengths()).contains("5 étudiants sont inscrits au cours.");
+        assertThat(cinq.recommendations())
+                .doesNotContain("Promouvoir le cours pour augmenter le nombre d'inscrits.");
+        assertThat(quatre.improvements())
+                .contains("Renforcer les inscriptions : seulement 4 étudiant(s) pour l'instant.");
+        assertThat(quatre.recommendations())
+                .contains("Promouvoir le cours pour augmenter le nombre d'inscrits.");
+    }
+
+    @Test
+    void sansQuizNiTentative_onNIncitePasAFaireDesQuizInexistants() {
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(0, 0, 0, 0, 0, null, null));
+
+        assertThat(a.improvements())
+                .doesNotContain("Inciter les étudiants à faire les quiz : aucune tentative enregistrée.");
+        assertThat(a.recommendations())
+                .doesNotContain("Inciter les étudiants à réaliser les quiz déjà publiés.");
+    }
+
+    @Test
+    void code_quaranteEstMoyen_trenteNeufEstFaible() {
+        McpAnalysis quarante = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, 40, null));
+        McpAnalysis trenteNeuf = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, 39, null));
+
+        assertThat(quarante.improvements())
+                .contains("Réussite au code moyenne (40% des tests) : renforcer la pratique.");
+        assertThat(trenteNeuf.improvements())
+                .contains("Réussite au code faible (39% des tests) : revoir les notions de programmation.");
+    }
+
+    @Test
+    void code_recommandationDePratiqueSousCinquante_pasACinquante() {
+        McpAnalysis cinquante = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, 50, null));
+        McpAnalysis quaranteNeuf = DeterministicMcpAnalysis.compute(ctx(1, 10, 5, 1, 1, 49, null));
+
+        assertThat(cinquante.recommendations())
+                .doesNotContain("Renforcer la pratique du code par des exercices guidés.");
+        assertThat(quaranteNeuf.recommendations())
+                .contains("Renforcer la pratique du code par des exercices guidés.");
+    }
+
+    @Test
+    void deuxForcesEtDeuxAxes_aucuneEntreeGeneriqueAjoutee() {
+        // 1 quiz (force), forum 10 (force) ; 4 étudiants (axe), aucune tentative (axe).
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(1, 10, 4, 0, 0, null, null));
+        // Forces : quiz + forum = exactement 2 → pas de complément générique.
+        assertThat(a.strengths()).hasSize(2)
+                .doesNotContain("La structure du cours est en place et prête à être enrichie.");
+        // Axes : inscriptions + tentatives = exactement 2 → pas de complément générique.
+        assertThat(a.improvements()).hasSize(2)
+                .doesNotContain("Diversifier les contenus et solliciter régulièrement les étudiants.");
+    }
+
+    @Test
+    void uneSeuleForce_completeeParUneEntreeGenerique() {
+        // 0 quiz (axe), forum 10 (force), 4 étudiants (axe) → une seule force réelle.
+        McpAnalysis a = DeterministicMcpAnalysis.compute(ctx(0, 10, 4, 0, 0, null, null));
+        assertThat(a.strengths()).containsExactly(
+                "Les forums sont actifs (10 messages échangés).",
+                "La structure du cours est en place et prête à être enrichie.");
+    }
+
+    @Test
+    void sante_seuilsExactsA75Et45() {
+        // score = 40 + quiz*4 + forum/2 + étudiants.
+        // 75 = 40 + 8*4 (32) + 0 + 3 ; 74 = 40 + 32 + 0 + 2.
+        assertThat(DeterministicMcpAnalysis.compute(ctx(8, 0, 3, 0, 0, null, null)).summary())
+                .startsWith("Cours en bonne santé :");
+        assertThat(DeterministicMcpAnalysis.compute(ctx(8, 0, 2, 0, 0, null, null)).summary())
+                .startsWith("Cours d'activité moyenne :");
+        // 45 = 40 + 1*4 + 0 + 1 ; 44 = 40 + 4 + 0 + 0.
+        assertThat(DeterministicMcpAnalysis.compute(ctx(1, 0, 1, 0, 0, null, null)).summary())
+                .startsWith("Cours d'activité moyenne :");
+        assertThat(DeterministicMcpAnalysis.compute(ctx(1, 0, 0, 0, 0, null, null)).summary())
+                .startsWith("Cours peu actif :");
+    }
 }

@@ -243,6 +243,52 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void splitSqlStatements_un_tiret_isole_n_ouvre_pas_de_commentaire() {
+        // « 5-3 » est une soustraction : seul « -- » ouvre un commentaire de ligne.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 5-3; SELECT 2"))
+                .containsExactly("SELECT 5-3", "SELECT 2");
+    }
+
+    @Test
+    void splitSqlStatements_un_point_virgule_dans_un_commentaire_de_ligne_ne_separe_pas() {
+        // Commentaire en début de ligne (après un saut de ligne) et « ; » juste avant le saut de ligne.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\n-- a;b\nFROM t"))
+                .containsExactly("SELECT 1\n-- a;b\nFROM t");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1 -- x;\nFROM t"))
+                .containsExactly("SELECT 1 -- x;\nFROM t");
+    }
+
+    @Test
+    void splitSqlStatements_un_point_virgule_dans_un_commentaire_de_bloc_ne_separe_pas() {
+        // « */ » qui précède l'ouverture « /* » n'est pas la fermeture du commentaire.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 2*/*c;*/3"))
+                .containsExactly("SELECT 2*/*c;*/3");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1 /* a; b */ FROM t; SELECT 2"))
+                .containsExactly("SELECT 1 /* a; b */ FROM t", "SELECT 2");
+    }
+
+    @Test
+    void splitSqlStatements_un_point_virgule_dans_un_identifiant_crochete_ne_separe_pas() {
+        assertThat(CodeAssembler.splitSqlStatements("SELECT [a][x;y] FROM t"))
+                .containsExactly("SELECT [a][x;y] FROM t");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT [x;] FROM t; SELECT 2"))
+                .containsExactly("SELECT [x;] FROM t", "SELECT 2");
+    }
+
+    @Test
+    void splitSqlStatements_litteral_final_et_delimiteurs_doubles() {
+        // Littéral fermé sur le DERNIER caractère, et délimiteur doublé (échappé) contenant un « ; ».
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 'x'")).containsExactly("SELECT 'x'");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 'a'';b'; SELECT \"c;d\"; SELECT `e;f`"))
+                .containsExactly("SELECT 'a'';b'", "SELECT \"c;d\"", "SELECT `e;f`");
+        // Littéral ne contenant qu'un guillemet échappé (« '''' ») : bien refermé avant le « ; ».
+        assertThat(CodeAssembler.splitSqlStatements("SELECT ''''; SELECT 2"))
+                .containsExactly("SELECT ''''", "SELECT 2");
+        // Littéral jamais fermé : on garde tout jusqu'au bout.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 'a;b")).containsExactly("SELECT 'a;b");
+    }
+
+    @Test
     void sql_readonly_fences_the_verdict_with_nonce_sentinels() {
         // Lecture seule : la sortie du verdict est encadrée par les sentinelles au nonce.
         String ro = onlyFileContent(assembler.assemble("SQL", "SELECT 1", "SELECT 1;", "N"));

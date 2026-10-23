@@ -441,6 +441,21 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
+    void sql_modification_dump_exactement_a_la_limite_est_accepte() {
+        ReflectionTestUtils.setField(service, "maxSqlDumpChars", 50);
+        String body = "-- " + "x".repeat(47); // dump relu : exactement 50 caractères
+        pistonRun(f -> isPhase1(f)
+                ? stage(dump(f, body + "\n"), "", 0, null, null)
+                : stage(sqlFenced(f, "1"), "", 0, null, null));
+
+        TestResult t = single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS);
+
+        assertThat(body).hasSize(50);
+        assertThat(t.passed()).isTrue();
+        verify(piston, times(2)).execute(anyString(), any(), any());
+    }
+
+    @Test
     void sql_modification_phase2_ne_recharge_que_les_tables_du_prof() {
         List<String> phase2 = new ArrayList<>();
         pistonRun(f -> {

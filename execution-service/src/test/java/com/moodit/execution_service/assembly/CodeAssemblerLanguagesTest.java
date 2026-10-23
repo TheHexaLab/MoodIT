@@ -235,6 +235,18 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void javascript_ne_proxifie_pas_une_classe_au_nom_interne() {
+        // Une classe nommée __moodit… ne doit pas redéclarer un symbole interne du noteur.
+        var a = assembler.assemble("JavaScript", "class __moodit_K {}\nclass Pile {}",
+                "return true;", "MOODIT_OK_c");
+        String grader = a.files().get(0).content();
+
+        assertThat(grader)
+                .contains("const Pile = new Proxy(")
+                .doesNotContain("const __moodit_K");
+    }
+
+    @Test
     void php_proxifie_les_classes_y_compris_abstract_et_ignore_les_symboles_internes() {
         var a = assembler.assemble("PHP",
                 "<?php\nclass Compteur { function inc(){ return 1; } }\nabstract class Base {}\n"
