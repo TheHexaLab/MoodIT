@@ -254,46 +254,41 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # Navigateurs Playwright : binaires mis en cache par version (téléchargement CDN), puis
-      # dépendances système par apt. Le miroir Ubuntu des runners cale parfois en plein
-      # téléchargement (un job a attendu 8 min sur 12 paquets) : apt reçoit un délai de 30 s par
-      # connexion et trois essais, et l'étape est relancée jusqu'à trois fois.
+      # Les tests tournent dans l'image officielle de Playwright, à la version exacte de
+      # @playwright/test : navigateurs, dépendances système et polices déjà dedans. Plus d'apt sur
+      # le chemin critique : le miroir Ubuntu des runners a bloqué ou bridé (93 ko/s) quatre jobs
+      # en une soirée. La pile, elle, tourne sur l'hôte ; le conteneur la joint par `--network host`.
       - name: Version de Playwright
         id: pw
         working-directory: frontend
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache des navigateurs Playwright
-        id: pw-cache
+      # Police Inter : l'app la demande sans la fournir. Sans elle, le repli (DejaVu Sans, plus
+      # large) fait déborder des titres (forum : +41 px à 390 px). Récupérée depuis la release
+      # GitHub (CDN, pas apt) et mise en cache ; montée dans le conteneur comme police système.
+      - name: Cache de la police Inter
+        id: inter
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ matrix.browser }}
+          path: .inter
+          key: inter-4.1
 
-      - name: Télécharger le navigateur
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        working-directory: frontend
-        timeout-minutes: 6
-        run: npx playwright install ${{ matrix.browser }}
-
-      # `fonts-inter` : l'app demande la police Inter sans la fournir ; sans elle, le runner retombe
-      # sur DejaVu Sans, plus large, et des textes débordent (titre du forum : +41 px à 390 px).
-      # Avec Inter, le rendu est celui voulu par l'app et identique d'un runner à l'autre.
-      - name: Dépendances système du navigateur et police Inter
-        working-directory: frontend
-        timeout-minutes: 10
+      - name: Télécharger la police Inter
+        if: steps.inter.outputs.cache-hit != 'true'
         run: |
-          { echo 'Acquire::Retries "3";'; echo 'Acquire::http::Timeout "30";'; echo 'Acquire::https::Timeout "30";'; } | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null
-          for attempt in 1 2 3; do
-            sudo apt-get install -y --no-install-recommends fonts-inter && npx playwright install-deps ${{ matrix.browser }} && exit 0
-            echo "::warning::dépendances système : échec (tentative $attempt), nouvel essai dans 15 s"
-            sleep 15
-          done
-          exit 1
+          mkdir -p .inter
+          curl -sSL --retry 5 --retry-all-errors -o /tmp/inter.zip \
+            https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+          unzip -q -j /tmp/inter.zip Inter.ttc -d .inter
 
       - name: Tests Playwright
-        working-directory: frontend
-        run: npx playwright test e2e/core --config playwright.core.config.ts --project=${{ matrix.project }}
+        run: |
+          docker run --rm --network host --ipc=host \
+            -v "$PWD/frontend:/work" -w /work \
+            -v "$PWD/.inter:/usr/share/fonts/truetype/inter:ro" \
+            -e CI=true \
+            mcr.microsoft.com/playwright:v${{ steps.pw.outputs.version }}-noble \
+            bash -c "fc-cache -f > /dev/null && npx playwright test e2e/core --config playwright.core.config.ts --project=${{ matrix.project }}"
 
       - name: Logs des services (en cas d'échec)
         if: failure()
