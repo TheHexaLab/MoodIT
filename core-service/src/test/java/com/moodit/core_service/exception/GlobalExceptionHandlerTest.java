@@ -74,6 +74,13 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Quiz incohérent → 400 avec le message")
+    void quizInvalide_400() {
+        assertResponse(handler.handleInvalidQuiz(new InvalidQuizException("Question 1 : …")),
+                HttpStatus.BAD_REQUEST, "Question 1 : …");
+    }
+
+    @Test
     @DisplayName("Violation de contrainte BD → 409 avec un libellé générique (pas de fuite SQL)")
     void contrainteBd_409_libelleGenerique() {
         ResponseEntity<String> r = handler.handleDataIntegrity(

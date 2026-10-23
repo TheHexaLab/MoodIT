@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import com.moodit.core_service.exception.InvalidQuizException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -228,6 +229,51 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
     @DisplayName("createQuiz")
     class Create {
 
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"true_false", "single_choice", "multiple_choice"})
+        @DisplayName("Question à choix sans aucune bonne réponse → refusée, rien n'est enregistré")
+        void choixSansBonneReponse_refuse(String slug) {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            String name = switch (slug) {
+                case "true_false" -> TRUE_FALSE;
+                case "single_choice" -> SINGLE;
+                default -> MULTIPLE;
+            };
+            when(qTypeRepository.findByName(name)).thenReturn(Optional.of(type(1, name)));
+            QuestionDTO bonne = QuestionDTO.builder().qType("ordering").build();
+            QuestionDTO sansBonne = QuestionDTO.builder().qType(slug)
+                    .answers(List.of(
+                            AnswerDTO.builder().content("A").isCorrect(false).build(),
+                            AnswerDTO.builder().content("B").build()))
+                    .build();
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+
+            assertThatThrownBy(() -> service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(bonne, sansBonne)).build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 2 : au moins une bonne réponse doit être cochée.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Question à choix avec au moins une bonne réponse → acceptée")
+        void choixAvecBonneReponse_accepte() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().qType("multiple_choice")
+                            .answers(List.of(
+                                    AnswerDTO.builder().content("A").isCorrect(true).build(),
+                                    AnswerDTO.builder().content("B").isCorrect(false).build()))
+                            .build()))
+                    .build());
+
+            verify(quizRepository).save(any(Quiz.class));
+        }
+
+
         @Test
         @DisplayName("Cours introuvable → CourseNotFoundException, rien d'enregistré")
         void coursIntrouvable() {
@@ -341,9 +387,9 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         @DisplayName("orderIndex absent → position dans la liste (0, 1, 2…)")
         void orderIndexAbsent_positionDansLaListe() {
             when(courseRepository.findById(1)).thenReturn(Optional.of(course));
-            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
-            QuestionDTO sansIndex = QuestionDTO.builder().qType("single_choice").build();
+            QuestionDTO sansIndex = QuestionDTO.builder().qType("ordering").build();
 
             service.createQuiz(1, QuizDetailDTO.builder().title("T")
                     .questions(List.of(sansIndex, sansIndex, sansIndex)).build());
@@ -358,14 +404,14 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         @DisplayName("Listes absentes du DTO → collections vides MODIFIABLES (Hibernate, édition ultérieure)")
         void listesAbsentes_collectionsModifiables() {
             when(courseRepository.findById(1)).thenReturn(Optional.of(course));
-            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             // Quiz sans questions : la collection doit pouvoir recevoir des questions plus tard.
             service.createQuiz(1, QuizDetailDTO.builder().title("Vide").build());
             // Question sans réponses / éléments / harnais.
             service.createQuiz(1, QuizDetailDTO.builder().title("T")
-                    .questions(List.of(QuestionDTO.builder().qType("single_choice").build())).build());
+                    .questions(List.of(QuestionDTO.builder().qType("ordering").build())).build());
 
             ArgumentCaptor<Quiz> captor = ArgumentCaptor.forClass(Quiz.class);
             verify(quizRepository, org.mockito.Mockito.times(2)).save(captor.capture());
@@ -453,6 +499,23 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
     @DisplayName("updateQuiz : mise à jour en place (ids stables)")
     class Update {
 
+        @Test
+        @DisplayName("Mise à jour qui décoche la dernière bonne réponse → refusée, rien n'est enregistré")
+        void decocheLaDerniereBonneReponse_refuse() {
+            when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
+            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+
+            assertThatThrownBy(() -> service.updateQuiz(5, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(1).qType("single_choice")
+                            .answers(List.of(AnswerDTO.builder().id(10).content("A").isCorrect(false).build()))
+                            .build()))
+                    .build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessageContaining("Question 1");
+            verify(quizRepository, never()).save(any());
+        }
+
+
         private Question kept;
         private Question removed;
         private Answer keptAnswer;
@@ -490,6 +553,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         void reutiliseRetireEtAjoute() {
             when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
             when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             QuizDetailDTO dto = QuizDetailDTO.builder()
@@ -508,7 +572,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                                             TestCaseDTO.builder().name("nouveau cas").harnessCode("h3").build()))
                                     .build(),
                             // id inconnu → traité comme une nouvelle question
-                            QuestionDTO.builder().id(999).prompt("nouvelle").qType("single_choice").build()))
+                            QuestionDTO.builder().id(999).prompt("nouvelle").qType("ordering").build()))
                     .build();
 
             QuizDetailDTO result = service.updateQuiz(5, dto);
@@ -572,11 +636,11 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             kept.setTestCases(null);
             quiz.setQuestions(null);
             when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
-            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             service.updateQuiz(5, QuizDetailDTO.builder().title("T")
-                    .questions(List.of(QuestionDTO.builder().prompt("p").qType("single_choice").build()))
+                    .questions(List.of(QuestionDTO.builder().prompt("p").qType("ordering").build()))
                     .build());
 
             assertThat(quiz.getQuestions()).singleElement().satisfies(q -> {

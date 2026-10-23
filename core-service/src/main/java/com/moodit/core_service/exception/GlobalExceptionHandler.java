@@ -107,6 +107,13 @@ public class GlobalExceptionHandler {
 
     //Contenu de post/message invalide (ex. limite de caractères dépassée) : donnée soumise
     //non conforme → 400 (la requête est mal formée, l'appelant doit corriger sa saisie).
+    @ExceptionHandler(InvalidQuizException.class)
+    public ResponseEntity<String> handleInvalidQuiz(InvalidQuizException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST) //Code 400
+                .body(ex.getMessage());
+    }
+
     @ExceptionHandler(InvalidPostException.class)
     public ResponseEntity<String> handleInvalidPost(InvalidPostException ex) {
         return ResponseEntity

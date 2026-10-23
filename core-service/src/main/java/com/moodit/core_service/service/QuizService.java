@@ -7,6 +7,7 @@ import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.exception.CourseNotFoundException;
+import com.moodit.core_service.exception.InvalidQuizException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
@@ -761,7 +762,11 @@ public class QuizService {
 
         double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;
         double earned;
-        if ("multiple_choice".equals(slug)) {
+        if (correctIds.isEmpty()) {
+            // Question mal configurée (antérieure à la validation, cf. requireCorrectOption) :
+            // aucun point à gagner, plutôt que le score plein pour une réponse vide.
+            earned = 0.0;
+        } else if ("multiple_choice".equals(slug)) {
             long good = selectedIds.stream().filter(correctSet::contains).count();
             long bad = selectedIds.stream().filter(id -> !correctSet.contains(id)).count();
             double ratio = correctIds.isEmpty() ? 0 : (double) (good - bad) / correctIds.size();
@@ -863,6 +868,7 @@ public class QuizService {
             q.setQType(resolveQType(qd));
             q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
+            requireCorrectOption(q, index);
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
             q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
@@ -891,8 +897,27 @@ public class QuizService {
         q.setQType(resolveQType(qd));
         q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
+        requireCorrectOption(q, index);
         applyDragItems(q, qd.getDragItems());
         applyTestCases(q, qd.getTestCases());
+    }
+
+    /**
+     * Une question à choix (Vrai/Faux, choix unique, choix multiple) doit avoir au moins une bonne
+     * réponse. Sans elle, la notation n'a pas de sens : l'ensemble vide attendu donnait le score
+     * plein à une réponse vide. L'éditeur le bloque déjà ; ici on protège l'API elle-même.
+     */
+    private static void requireCorrectOption(Question q, int index) {
+        String slug = q.getQType() == null ? null : Q_TYPE_NAME_TO_SLUG.get(q.getQType().getName());
+        boolean choice = "true_false".equals(slug) || "single_choice".equals(slug)
+                || "multiple_choice".equals(slug);
+        if (!choice) return;
+        boolean hasCorrect = q.getAnswers() != null
+                && q.getAnswers().stream().anyMatch(a -> Boolean.TRUE.equals(a.getIsCorrect()));
+        if (!hasCorrect) {
+            throw new InvalidQuizException(
+                    "Question " + (index + 1) + " : au moins une bonne réponse doit être cochée.");
+        }
     }
 
     /** Résout le langage d'une question Code depuis le DTO (id imbriqué). null si absent/non-code. */

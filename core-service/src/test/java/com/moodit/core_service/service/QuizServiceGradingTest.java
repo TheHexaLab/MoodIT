@@ -61,6 +61,22 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
     @DisplayName("Choix unique et Vrai/Faux : tout ou rien")
     class SingleChoice {
 
+        @Test
+        @DisplayName("Question sans aucune bonne réponse (donnée antérieure) → 0, même pour une réponse vide")
+        void sansBonneReponse_zeroMemePourReponseVide() {
+            for (String type : List.of(SINGLE, TRUE_FALSE)) {
+                Question none = question(11, type, 4.0, 0);
+                answer(none, 1, "A", false);
+                answer(none, 2, "B", false);
+
+                // Avant : ensemble vide attendu = ensemble vide soumis → score plein.
+                assertThat(gradeSingle(none, null).getEarned()).as(type).isZero();
+                assertThat(gradeSingle(none, choice(11)).getEarned()).as(type).isZero();
+                assertThat(gradeSingle(none, choice(11, 1)).getEarned()).as(type).isZero();
+            }
+        }
+
+
         private Question q;
 
         @BeforeEach
