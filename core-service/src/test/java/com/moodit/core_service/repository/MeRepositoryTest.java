@@ -18,10 +18,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 /**
- * {@link MeRepository} en SQL direct. Les requêtes utilisent {@code UPDATE … RETURNING} (Postgres,
- * non supporté par H2) : on remplace donc le {@link JdbcTemplate} par un double qui ENREGISTRE le
- * SQL et les paramètres, et applique le {@link RowMapper} du dépôt à un {@link ResultSet} simulé.
- * On vérifie ainsi le mapping des colonnes, l'ordre des paramètres et l'ajout des rôles globaux.
+ * {@link MeRepository} sans base : le {@link JdbcTemplate} est remplacé par un double qui
+ * enregistre les paramètres et applique le {@link RowMapper} du dépôt à un {@link ResultSet}
+ * simulé. On vérifie le mapping des colonnes, l'ORDRE des paramètres et l'assemblage des rôles
+ * (chargés avec l'id du profil, pas chargés si le compte n'existe pas). Le SQL lui-même
+ * ({@code UPDATE … RETURNING}, propre à Postgres) est exécuté pour de vrai dans {@link
+ * MeRepositoryIT} (Testcontainers).
  */
 class MeRepositoryTest {
 
@@ -93,9 +95,9 @@ class MeRepositoryTest {
 
         assertThat(me).isPresent();
         assertRosie(me.get());
-        assertThat(jdbc.sqls.get(0)).contains("SELECT").contains("FROM User_").contains("WHERE email = ?");
+        assertThat(jdbc.sqls).hasSize(2);
         assertThat(jdbc.params.get(0)).containsExactly("rosie@test.ca");
-        assertThat(jdbc.sqls.get(1)).contains("JOIN User_Role").contains("ORDER BY r.id");
+        // Les rôles sont chargés avec l'id LU dans la ligne du profil (et non l'email).
         assertThat(jdbc.params.get(1)).containsExactly(12L);
     }
 
@@ -109,16 +111,12 @@ class MeRepositoryTest {
     }
 
     @Test
-    @DisplayName("updateByEmail : UPDATE … RETURNING avec prénom, nom, couleur puis email")
+    @DisplayName("updateByEmail : paramètres prénom, nom, couleur puis email ; rôles rattachés")
     void updateByEmail_parametresDansLOrdre() {
         Optional<MeDto> me = repository.updateByEmail("rosie@test.ca", "Rosie", "Tremblay", "#0a5cc0");
 
         assertThat(me).isPresent();
         assertRosie(me.get());
-        assertThat(jdbc.sqls.get(0))
-                .contains("UPDATE User_")
-                .contains("SET first_name = ?, last_name = ?, avatar_color = ?")
-                .contains("RETURNING");
         assertThat(jdbc.params.get(0)).containsExactly("Rosie", "Tremblay", "#0a5cc0", "rosie@test.ca");
     }
 
@@ -128,6 +126,7 @@ class MeRepositoryTest {
         jdbc.userExists = false;
 
         assertThat(repository.updateByEmail("ghost@test.ca", "a", "b", "#000000")).isEmpty();
+        assertThat(jdbc.sqls).hasSize(1);
     }
 
     @Test
@@ -137,7 +136,6 @@ class MeRepositoryTest {
 
         assertThat(me).isPresent();
         assertRosie(me.get());
-        assertThat(jdbc.sqls.get(0)).contains("SET settings = ?").contains("RETURNING");
         assertThat(jdbc.params.get(0)).containsExactly("{\"theme\":\"dark\"}", "rosie@test.ca");
     }
 
@@ -147,5 +145,6 @@ class MeRepositoryTest {
         jdbc.userExists = false;
 
         assertThat(repository.updateSettingsByEmail("ghost@test.ca", "{}")).isEmpty();
+        assertThat(jdbc.sqls).hasSize(1);
     }
 }

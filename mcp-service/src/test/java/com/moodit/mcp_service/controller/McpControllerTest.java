@@ -3,6 +3,7 @@ package com.moodit.mcp_service.controller;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -103,30 +105,75 @@ class McpControllerTest {
     }
 
     @Test
-    void listAnalyses_renvoieLesResumesEnJson() throws Exception {
+    void listAnalyses_repond200_etInterrogeLeServicePourLeCoursDuChemin() throws Exception {
         when(mcpService.listAnalyses(10)).thenReturn(List.of(
                 new McpResponseSummaryDto(2, "2026-01-02T12:00:00Z", 3, 1)));
 
-        mvc.perform(get("/mcp/courses/10/analyses"))
+        // L'en-tête d'identité n'entre pas en jeu : l'historique est celui du COURS, pas de l'utilisateur.
+        mvc.perform(get("/mcp/courses/10/analyses").header("X-User-Email", "a@a"))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value(2))
                 .andExpect(jsonPath("$[0].createdAt").value("2026-01-02T12:00:00Z"))
                 .andExpect(jsonPath("$[0].strengthsCount").value(3))
                 .andExpect(jsonPath("$[0].improvementsCount").value(1));
+
+        verify(mcpService).listAnalyses(10);
+        verifyNoMoreInteractions(mcpService);
     }
 
     @Test
-    void getAnalysis_renvoieLeDetail() throws Exception {
+    void listAnalyses_sansAnalyse_repond200AvecUneListeVide() throws Exception {
+        when(mcpService.listAnalyses(7)).thenReturn(List.of());
+
+        mvc.perform(get("/mcp/courses/7/analyses"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
+
+        verify(mcpService).listAnalyses(7);
+    }
+
+    @Test
+    void listAnalyses_idDeCoursNonNumerique_repond400_sansAppelerLeService() throws Exception {
+        mvc.perform(get("/mcp/courses/abc/analyses"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(mcpService);
+    }
+
+    @Test
+    void listAnalyses_coursInconnu_repond404_etAccesRefuse_repond403() throws Exception {
+        when(mcpService.listAnalyses(99)).thenThrow(new CourseNotFoundException());
+        when(mcpService.listAnalyses(3)).thenThrow(new ForbiddenException());
+
+        mvc.perform(get("/mcp/courses/99/analyses"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string("Cours introuvable"));
+        mvc.perform(get("/mcp/courses/3/analyses"))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string("Accès refusé"));
+    }
+
+    @Test
+    void getAnalysis_repond200_avecLeDetailComplet_pourLIdDuChemin() throws Exception {
         when(mcpService.getAnalysis(42)).thenReturn(new McpResponseDto(
-                42, "2026-07-02T16:21:38Z", "{}", 5, 10,
+                42, "2026-07-02T16:21:38Z", "{\"summary\":\"ok\"}", 5, 10,
                 new Author(5, "jdoe", "Jean", "Doe", "#123456")));
 
-        mvc.perform(get("/mcp/analyses/42"))
+        mvc.perform(get("/mcp/analyses/42").header("X-User-Email", "a@a"))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").value(42))
+                .andExpect(jsonPath("$.createdAt").value("2026-07-02T16:21:38Z"))
+                .andExpect(jsonPath("$.content").value("{\"summary\":\"ok\"}"))
+                .andExpect(jsonPath("$.userId").value(5))
                 .andExpect(jsonPath("$.courseId").value(10))
+                .andExpect(jsonPath("$.author.id").value(5))
                 .andExpect(jsonPath("$.author.username").value("jdoe"));
+
+        verify(mcpService).getAnalysis(42);
+        verifyNoMoreInteractions(mcpService);
     }
 
     @Test
@@ -136,6 +183,14 @@ class McpControllerTest {
         mvc.perform(get("/mcp/analyses/999"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().string("Analyse introuvable"));
+    }
+
+    @Test
+    void getAnalysis_idNonNumerique_repond400_sansAppelerLeService() throws Exception {
+        mvc.perform(get("/mcp/analyses/abc"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(mcpService);
     }
 
     @Test

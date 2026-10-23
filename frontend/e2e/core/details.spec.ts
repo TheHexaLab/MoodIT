@@ -601,8 +601,17 @@ test('retour en ligne : un message envoyé pendant la coupure apparaît ensuite'
   await composer.fill(backText);
   await composer.press('Enter');
   await expect(main.getByText(backText)).toBeVisible();
+  // L'envoi est optimiste : le message s'affiche AVANT la réponse du POST. On attend donc qu'il
+  // soit persisté (sinon la lecture peut précéder l'écriture et le test échoue par instants).
   const check = await apiFor(baseURL!, author.storageState);
-  const res = await check.get(`/api/forums/${fx.channelId}/messages?limit=5`);
-  expect(((await res.json()) as { content: string }[]).map((m) => m.content)).toContain(backText);
+  await expect
+    .poll(
+      async () => {
+        const res = await check.get(`/api/forums/${fx.channelId}/messages?limit=5`);
+        return ((await res.json()) as { content: string }[]).map((m) => m.content);
+      },
+      { message: 'message envoyé après la reconnexion persisté', timeout: 15_000 }
+    )
+    .toContain(backText);
   await check.dispose();
 });

@@ -133,9 +133,34 @@ class EstablishmentControllerTest {
             mockMvc.perform(post("/api/establishments")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(inputDto)))
-                    .andExpect(status().isCreated()) // Validation du statut 201
-                    .andExpect(jsonPath("$.id").value(1))
-                    .andExpect(jsonPath("$.name").value("Cégep de Sherbrooke"));
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.id").value(1));
+
+            verify(establishmentService).create(argThat(e -> "Cégep de Sherbrooke".equals(e.getName())
+                    && "cegepsherbrooke.qc.ca".equals(e.getDomainEmail())));
+        }
+
+        @Test
+        @DisplayName("Erroné → domaine déjà utilisé (contrainte UNIQUE) retourne 409")
+        void devrait_retourner_409_si_domaine_deja_utilise() throws Exception {
+            when(establishmentService.create(any(EstablishmentDTO.class)))
+                    .thenThrow(new org.springframework.dao.DataIntegrityViolationException("uq_domain"));
+
+            mockMvc.perform(post("/api/establishments")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Doublon\",\"domainEmail\":\"usherbrooke.ca\"}"))
+                    .andExpect(status().isConflict());
+        }
+
+        @Test
+        @DisplayName("Erroné → JSON mal formé retourne 400 sans appeler le service")
+        void devrait_retourner_400_si_json_mal_forme() throws Exception {
+            mockMvc.perform(post("/api/establishments")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(establishmentService);
         }
     }
 
@@ -158,9 +183,12 @@ class EstablishmentControllerTest {
             mockMvc.perform(post("/api/establishments/programs")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
-                    .andExpect(status().isCreated()) // Validation du statut 201
-                    .andExpect(jsonPath("$.id").value(1))
-                    .andExpect(jsonPath("$.name").value("Informatique"));
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.id").value(1));
+
+            // L'établissement parent vient du CORPS (pas du chemin) : il doit être transmis.
+            verify(establishmentService).addProgramToEstablishment(argThat(p -> p.getEstablishmentId() == 1
+                    && "Informatique".equals(p.getName()) && "420".equals(p.getCode())));
         }
 
         @Test
@@ -202,7 +230,10 @@ class EstablishmentControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.name").value("Nouveau Nom Cégep"));
+                    .andExpect(jsonPath("$.id").value(1));
+
+            verify(establishmentService).updateEstablishment(eq(1),
+                    argThat(u -> "Nouveau Nom Cégep".equals(u.getName()) && u.getDomainEmail() == null));
         }
 
         @Test
@@ -230,8 +261,11 @@ class EstablishmentControllerTest {
             mockMvc.perform(patch("/api/establishments/1")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.name").value("Cégep de Sherbrooke")); // Nom d'origine intact
+                    .andExpect(status().isOk());
+
+            // Corps vide → DTO entièrement null : le service ne doit rien écraser.
+            verify(establishmentService).updateEstablishment(eq(1),
+                    argThat(u -> u.getName() == null && u.getDomainEmail() == null));
         }
     }
 }

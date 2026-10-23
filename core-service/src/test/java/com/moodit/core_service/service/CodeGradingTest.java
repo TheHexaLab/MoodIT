@@ -56,6 +56,24 @@ class CodeGradingTest {
     }
 
     @Test
+    void poids_nul_ou_negatif_compte_pour_un() {
+        // Un poids 0 (ou négatif) saisi par erreur ne doit pas rendre un harnais « gratuit » :
+        // il compte pour 1. 4 pts, harnais poids 0 échoué + poids 1 réussi → 4 × 1/2 = 2.0.
+        TestCase zero = harness(10, 0);
+        TestCase negatif = harness(12, -3);
+        QuestionResultDTO r = CodeGrading.build(
+                question(1, 4.0),
+                List.of(zero, harness(11, 1)),
+                Map.of(10, false, 11, true),
+                "code");
+        assertThat(r.getEarned()).isEqualTo(2.0);
+
+        QuestionResultDTO neg = CodeGrading.build(
+                question(1, 4.0), List.of(negatif, harness(11, 1)), Map.of(12, true, 11, false), "code");
+        assertThat(neg.getEarned()).isEqualTo(2.0);
+    }
+
+    @Test
     void all_passed_earns_full_score() {
         QuestionResultDTO r = CodeGrading.build(
                 question(1, 3.0),

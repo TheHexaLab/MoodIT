@@ -65,10 +65,10 @@ class SecurityConfigTest {
 
   @Test
   void nonPublicRoute_isRejected_whenAnonymous() throws Exception {
-    // anyRequest().authenticated() : une route hors liste blanche est refusée sans authentification.
-    MvcResult res = mockMvc.perform(get("/auth/admin")).andReturn();
-
-    assertThat(res.getResponse().getStatus()).isIn(401, 403);
+    // anyRequest().authenticated() sans httpBasic ni formLogin : le point d'entrée par défaut est
+    // Http403ForbiddenEntryPoint, donc 403 (pas 401, ni redirection vers une page de connexion).
+    mockMvc.perform(get("/auth/admin")).andExpect(status().isForbidden());
+    mockMvc.perform(post("/auth/admin")).andExpect(status().isForbidden());
   }
 
   @Test

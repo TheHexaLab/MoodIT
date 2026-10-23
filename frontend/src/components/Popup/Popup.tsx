@@ -119,7 +119,10 @@ export function Popup({
   }, [controller, requestClose]);
 
   // Focus initial : `[data-autofocus]`, sinon le premier champ, sinon le premier élément
-  // focalisable, sinon le panneau. Un `autoFocus` enfant déjà appliqué est respecté.
+  // focalisable, sinon le panneau. Un focus déjà posé dans le panneau (ex. par un effet enfant)
+  // est respecté. Attention : l'attribut `autoFocus` d'un enfant est SANS effet à l'ouverture
+  // (le portail attache son hôte au document après le montage des enfants) : utiliser
+  // `data-autofocus` pour choisir l'élément focalisé.
   useEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;

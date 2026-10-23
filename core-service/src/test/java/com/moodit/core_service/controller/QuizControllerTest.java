@@ -4,12 +4,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +21,7 @@ import com.moodit.core_service.dto.QuestionDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.service.QuizService;
 import java.time.Instant;
@@ -85,6 +88,20 @@ class QuizControllerTest {
         mockMvc.perform(get("/api/quizzes/4/edit"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.questions[0].answers[0].isCorrect").value(true));
+
+        // Route d'édition → getQuizForEdit (avec correction), jamais la passation.
+        verify(quizService).getQuizForEdit(4);
+        verify(quizService, never()).getQuizDetail(any());
+    }
+
+    @Test
+    @DisplayName("GET /quizzes/{id}/edit refusé par le service → 403")
+    void edition_refusee_403() throws Exception {
+        when(quizService.getQuizForEdit(4)).thenThrow(new ForbiddenException("Réservé aux enseignants"));
+
+        mockMvc.perform(get("/api/quizzes/4/edit"))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string("Réservé aux enseignants"));
     }
 
     @Test

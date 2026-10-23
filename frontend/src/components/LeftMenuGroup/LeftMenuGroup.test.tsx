@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import LeftMenuGroup from './LeftMenuGroup';
 
@@ -146,6 +146,27 @@ describe('LeftMenuGroup', () => {
     expect(hamburger().getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(hamburger());
     rerender(<LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="b" />);
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
+  });
+  it("retire l'écouteur Échap de window au démontage", () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const { unmount } = renderGroup();
+    const handler = add.mock.calls.find(([type]) => type === 'keydown')?.[1];
+    expect(handler).toBeTypeOf('function');
+    unmount();
+    expect(remove).toHaveBeenCalledWith('keydown', handler);
+    add.mockRestore();
+    remove.mockRestore();
+  });
+
+  it("un clic dans le tiroir FERMÉ n'arme pas la fermeture automatique", () => {
+    const { rerender } = renderGroup();
+    clickInDrawer(); // tiroir fermé : ne doit rien armer
+    fireEvent.click(hamburger());
+    rerender(
+      <LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="general" />
+    );
     expect(hamburger().getAttribute('aria-expanded')).toBe('true');
   });
 });

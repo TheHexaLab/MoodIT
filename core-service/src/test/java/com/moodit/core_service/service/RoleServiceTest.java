@@ -124,6 +124,20 @@ class RoleServiceTest {
       assertThat(page.getAllValues()).extracting(Pageable::getPageNumber).containsExactly(0, 4, 1);
       assertThat(page.getAllValues()).extracting(Pageable::getPageSize).containsExactly(10, 50, 25);
     }
+
+    @Test
+    @DisplayName("getGlobalRoleCandidates renvoie les candidats mappés par UserService, dans l'ordre")
+    void getGlobalRoleCandidates_mappe_les_candidats() {
+      User bob = user(1, "bob");
+      User zoe = user(2, "zoe");
+      UserDTO bobDto = UserDTO.builder().id(1).build();
+      UserDTO zoeDto = UserDTO.builder().id(2).build();
+      when(userRepository.findGlobalRoleCandidates(any(), any(), any())).thenReturn(List.of(bob, zoe));
+      when(userService.toUserDTO(bob)).thenReturn(bobDto);
+      when(userService.toUserDTO(zoe)).thenReturn(zoeDto);
+
+      assertThat(roleService.getGlobalRoleCandidates(2, null, 0, 10)).containsExactly(bobDto, zoeDto);
+    }
   }
 
   @Nested
@@ -166,6 +180,20 @@ class RoleServiceTest {
           "Rôle « Administrateur » retiré (global) à l'utilisateur #7");
       verify(realtimePublisher).globalRolesChanged(7L, List.of());
       verify(realtimePublisher).adminRolesChanged(List.of());
+    }
+
+    @Test
+    @DisplayName("unassign ne retire QUE le rôle visé : les autres rôles globaux restent")
+    void unassign_garde_les_autres_roles() {
+      User bob = user(7, "bob", ADMIN, GUARDIAN);
+      when(userRepository.findById(7)).thenReturn(Optional.of(bob));
+      when(roleRepository.findById(2)).thenReturn(Optional.of(ADMIN));
+      when(userRepository.findUsersWithGlobalRole()).thenReturn(List.of());
+
+      roleService.changeGlobalRole(req("unassign", 2, 7, null));
+
+      assertThat(bob.getRoles()).containsExactly(GUARDIAN);
+      verify(userRepository).save(bob);
     }
 
     @Test

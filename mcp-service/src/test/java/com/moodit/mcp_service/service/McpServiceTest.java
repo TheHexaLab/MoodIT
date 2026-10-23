@@ -100,6 +100,26 @@ class McpServiceTest {
     }
 
     @Test
+    void requestAnalysis_fileDAnalysePleine_marqueLAnalyseRefusee() {
+        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Administrateur")));
+        Course course = new Course();
+        course.setId(10);
+        when(courseRepository.findById(10)).thenReturn(Optional.of(course));
+        when(mcpResponseRepository.existsByCourse_IdAndUser_IdAndStatus(10, 5, McpStatus.PENDING))
+                .thenReturn(false);
+        McpResponse saved = new McpResponse();
+        saved.setId(42);
+        when(mcpResponseRepository.saveAndFlush(any(McpResponse.class))).thenReturn(saved);
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("pleine"))
+                .when(analysisRunner).run(42);
+
+        service.requestAnalysis(10, "a@a");
+
+        // Le refus ne remonte pas au client (la ligne existe déjà) : l'analyse passe en FAILED.
+        verify(analysisRunner).markRejected(42);
+    }
+
+    @Test
     void requestAnalysis_alreadyPending_throws409_andDoesNotRun() {
         when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(user(5, "Administrateur")));
         Course course = new Course();

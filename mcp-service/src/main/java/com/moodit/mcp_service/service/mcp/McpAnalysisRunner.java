@@ -12,8 +12,12 @@ import com.moodit.mcp_service.util.Timestamps;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * Exécute le job d'analyse MCP EN ARRIÈRE-PLAN (bean séparé : le proxy @Async ne s'applique
@@ -34,6 +38,39 @@ public class McpAnalysisRunner {
     private final McpAnalysisClient analysisClient;
     private final McpRealtimeGateway realtimeGateway;
     private final ObjectMapper objectMapper;
+
+    /** Motif générique poussé au client quand une analyse ne peut pas aboutir. */
+    static final String UNAVAILABLE = "Analyse indisponible pour le moment.";
+
+    /**
+     * Job refusé par l'exécuteur (file pleine) : sans ça, la ligne resterait PENDING pour toujours
+     * et bloquerait le verrou (cours, utilisateur). Marque FAILED et notifie le lanceur.
+     */
+    public void markRejected(Integer responseId) {
+        McpResponse response = mcpResponseRepository.findById(responseId).orElse(null);
+        if (response == null || response.getStatus() != McpStatus.PENDING) return;
+        log.warn("Analyse MCP #{} refusée : file d'analyse pleine.", responseId);
+        response.setStatus(McpStatus.FAILED);
+        mcpResponseRepository.save(response);
+        realtimeGateway.analysisFailed(response.getCourse().getId(), response.getUser().getId(), UNAVAILABLE);
+    }
+
+    /**
+     * Au démarrage, toute analyse PENDING est orpheline : la file d'exécution est en mémoire, donc
+     * un job interrompu par un redémarrage ne reprendra jamais. On les passe en FAILED pour
+     * libérer le verrou (cours, utilisateur) ; l'utilisateur peut relancer l'analyse.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void failOrphanedPending() {
+        List<McpResponse> orphans = mcpResponseRepository.findByStatus(McpStatus.PENDING);
+        for (McpResponse orphan : orphans) {
+            orphan.setStatus(McpStatus.FAILED);
+        }
+        if (!orphans.isEmpty()) {
+            mcpResponseRepository.saveAll(orphans);
+            log.warn("{} analyse(s) MCP orpheline(s) passée(s) en FAILED au démarrage.", orphans.size());
+        }
+    }
 
     @Async("mcpExecutor")
     public void run(Integer responseId) {
@@ -92,7 +129,7 @@ public class McpAnalysisRunner {
             log.warn("Analyse MCP #{} (cours {}) échouée : {}", responseId, courseId, e.getMessage(), e);
             response.setStatus(McpStatus.FAILED);
             mcpResponseRepository.save(response);
-            realtimeGateway.analysisFailed(courseId, userId, "Analyse indisponible pour le moment.");
+            realtimeGateway.analysisFailed(courseId, userId, UNAVAILABLE);
         }
     }
 }

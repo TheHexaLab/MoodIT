@@ -5,12 +5,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -19,8 +23,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Compléments aux tests de {@link CodeAssemblerTest} (mêmes conventions : aucun Piston, on vérifie
  * le programme assemblé) : langages compilés non encore exercés (Go, Rust, C#), HTML (bundle
  * vendor), exécution simple (« run ») de chaque langage, alias, proxys de classes (JS/PHP) et cas
- * limites du découpage SQL. Quand c'est possible, on compare le programme assemblé EXACT : toute
- * modification de l'enveloppe (point d'entrée, émission du nonce, code de sortie) fait échouer.
+ * limites du découpage SQL. Pour les langages compilés, on vérifie des PROPRIÉTÉS (point d'entrée
+ * unique, code étudiant intact, harnais et nonce dans le noteur) plutôt que le texte exact ; le
+ * fait que le programme s'exécute et note correctement relève d'ExecutionIntegrationTest.
  */
 class CodeAssemblerLanguagesTest {
 
@@ -31,87 +36,143 @@ class CodeAssemblerLanguagesTest {
         return a.files().get(0).content();
     }
 
-    // ── Langages compilés : programme exact ─────────────────────────────────────
+    // ── Langages compilés : propriétés du programme assemblé ────────────────────
+    //
+    // On ne compare plus le programme caractère par caractère (fragile, et ça ne prouve pas qu'il
+    // s'exécute : c'est le rôle d'ExecutionIntegrationTest contre un vrai Piston). On vérifie les
+    // INVARIANTS dont dépend la correction : un seul point d'entrée (le nôtre), le code étudiant
+    // présent tel quel (au renommage de son main près), le harnais intact dans sa fonction, le nonce
+    // émis une seule fois, par notre main, APRÈS l'appel du harnais, et aucun code étudiant dans la
+    // partie « noteur ». Un harnais = un programme : le nonce est le marqueur propre à chaque test.
 
-    @Test
-    void go_renomme_le_main_etudiant_et_emet_le_nonce_si_le_harnais_reussit() {
-        var a = assembler.assemble("Go", "package main\n\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                "return solution() == 5", "MOODIT_OK_go");
-
-        assertThat(a.pistonLanguage()).isEqualTo("go");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.go");
-        assertThat(onlyFileContent(a)).isEqualTo(
-                "package main\n\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}"
-                        + "\n\nfunc __moodit_harness() bool {\n"
-                        + "return solution() == 5"
-                        + "\n}\n"
-                        + "func main() {\n"
-                        + "\tif __moodit_harness() {\n"
-                        + "\t\tprint(\"MOODIT_OK_go\")\n"
-                        + "\t}\n"
-                        + "}\n");
+    /**
+     * Cas d'un langage compilé. {@code studentSegment} = code étudiant attendu dans le programme
+     * (identique à la soumission pour C/C++, main renommé ailleurs) ; {@code macroGuard} = le main
+     * étudiant est neutralisé par {@code #define main} (C/C++) plutôt que par renommage.
+     */
+    private record Compiled(String language, String pistonLanguage, String fileName, String studentCode,
+            String studentSegment, String harness, String harnessSignature, String harnessCall,
+            String entryPoint, boolean macroGuard) {
+        @Override
+        public String toString() {
+            return language;
+        }
     }
 
-    @Test
-    void rust_renomme_le_main_etudiant_meme_avec_espaces_et_emet_le_nonce_sur_stderr() {
-        var a = assembler.assemble("Rust", "fn solution() -> i32 { 5 }\nfn  main ()  {}",
-                "solution() == 5", "MOODIT_OK_rs");
+    private static final String MARK = "ETUDIANT_SEULEMENT";
+    private static final String NONCE = "MOODIT_OK_n0nce";
 
-        assertThat(a.pistonLanguage()).isEqualTo("rust");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.rs");
-        assertThat(onlyFileContent(a)).isEqualTo(
-                "fn solution() -> i32 { 5 }\nfn __moodit_student_main()  {}"
-                        + "\n\nfn __moodit_harness() -> bool {\n"
-                        + "solution() == 5"
-                        + "\n}\n"
-                        + "fn main() {\n"
-                        + "    if __moodit_harness() {\n"
-                        + "        eprint!(\"MOODIT_OK_rs\");\n"
-                        + "    }\n"
-                        + "}\n");
+    static Stream<Compiled> compiledLanguages() {
+        return Stream.of(
+                new Compiled("Go", "go", "main.go",
+                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc main() {}",
+                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
+                        "return solution() == 5", "func __moodit_harness() bool {", "__moodit_harness()",
+                        "func\\s+main\\s*\\(", false),
+                // Espaces autour de « main » : le renommage doit quand même s'appliquer.
+                new Compiled("Rust", "rust", "main.rs",
+                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn  main ()  {}",
+                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn __moodit_student_main()  {}",
+                        "solution() == 5", "fn __moodit_harness() -> bool {", "__moodit_harness()",
+                        "fn\\s+main\\s*\\(", false),
+                new Compiled("C", "c", "main.c",
+                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
+                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
+                        "return solution() == 5;", "static int __moodit_harness(void) {", "__moodit_harness()",
+                        "int\\s+main\\s*\\(", true),
+                new Compiled("C++", "c++", "main.cpp",
+                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
+                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
+                        "return solution() == 5;", "static bool __moodit_harness() {", "__moodit_harness()",
+                        "int\\s+main\\s*\\(", true),
+                // Les deux formes de Main (void et int) doivent être renommées.
+                new Compiled("C#", "csharp", "main.cs",
+                        "// " + MARK + "\nclass A { static void Main(string[] a) {} }\n"
+                                + "class B { static int Main () { return 0; } }",
+                        "// " + MARK + "\nclass A { static void __moodit_student_main(string[] a) {} }\n"
+                                + "class B { static int __moodit_student_main () { return 0; } }",
+                        "return true;", "static bool __moodit_run() {", "__moodit_run()",
+                        "static\\s+(?:void|int)\\s+Main\\s*\\(", false),
+                new Compiled("Java", "java", "Main.java",
+                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
+                                + "public static void main(String[] a){} }",
+                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
+                                + "public static void __moodit_student_main(String[] a){} }",
+                        "return Solution.solution() == 5;", "static boolean __moodit_harness() {",
+                        "__moodit_harness()", "static\\s+void\\s+main\\s*\\(\\s*String", false));
     }
 
-    @Test
-    void cpp_bascule_le_main_par_macro_et_capture_les_exceptions() {
-        var a = assembler.assemble("C++", "int solution(){ return 5; }\nint main(){ return 0; }",
-                "return solution() == 5;", "MOODIT_OK_cpp");
-
-        assertThat(a.pistonLanguage()).isEqualTo("c++");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.cpp");
-        assertThat(onlyFileContent(a)).isEqualTo(
-                "#define main __moodit_student_main\n"
-                        + "int solution(){ return 5; }\nint main(){ return 0; }"
-                        + "\n#undef main\n"
-                        + "#include <iostream>\n"
-                        + "static bool __moodit_harness() {\n"
-                        + "return solution() == 5;"
-                        + "\n}\n"
-                        + "int main() {\n"
-                        + "    try {\n"
-                        + "        if (__moodit_harness()) { std::cerr << \"MOODIT_OK_cpp\"; return 0; }\n"
-                        + "        return 1;\n"
-                        + "    } catch (...) { return 1; }\n"
-                        + "}\n");
+    private static int occurrences(String text, String needle) {
+        return text.split(Pattern.quote(needle), -1).length - 1;
     }
 
-    @Test
-    void csharp_renomme_les_main_void_et_int_de_l_etudiant() {
-        var a = assembler.assemble("C#",
-                "class A { static void Main(string[] a) {} }\nclass B { static int Main () { return 0; } }",
-                "return true;", "MOODIT_OK_cs");
+    private static int matches(String regex, String text) {
+        return (int) Pattern.compile(regex).matcher(text).results().count();
+    }
 
-        assertThat(a.pistonLanguage()).isEqualTo("csharp");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.cs");
+    /** Programme assemblé, découpé en segment étudiant et partie « noteur » (tout le reste). */
+    private record Split(String program, int studentStart, int studentEnd) {
+        String grader() {
+            return program.substring(0, studentStart) + program.substring(studentEnd);
+        }
+    }
+
+    private Split assembleCompiled(Compiled c) {
+        var a = assembler.assemble(c.language(), c.studentCode(), c.harness(), NONCE);
+        assertThat(a.pistonLanguage()).isEqualTo(c.pistonLanguage());
+        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly(c.fileName());
         String program = onlyFileContent(a);
-        assertThat(program)
-                .startsWith("class A { static void __moodit_student_main(string[] a) {} }\n"
-                        + "class B { static int __moodit_student_main () { return 0; } }")
-                .contains("static bool __moodit_run() {\nreturn true;\n    }")
-                .contains("if (__moodit_run()) { System.Console.Error.Write(\"MOODIT_OK_cs\"); return 0; }")
-                .contains("catch (System.Exception __e) { System.Console.Error.WriteLine(__e); return 1; }");
-        // Un SEUL point d'entrée subsiste : le nôtre.
-        assertThat(program.split("static int Main\\(", -1)).hasSize(2);
-        assertThat(program).doesNotContain("static void Main(");
+        // Le code étudiant figure une seule fois, tel quel (main renommé le cas échéant).
+        assertThat(occurrences(program, c.studentSegment())).isEqualTo(1);
+        int start = program.indexOf(c.studentSegment());
+        return new Split(program, start, start + c.studentSegment().length());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("compiledLanguages")
+    void compile_un_seul_point_d_entree_et_le_code_etudiant_intact(Compiled c) {
+        Split s = assembleCompiled(c);
+
+        // Exactement UN point d'entrée effectif : le nôtre, dans la partie noteur.
+        assertThat(matches(c.entryPoint(), s.grader())).isEqualTo(1);
+        if (c.macroGuard()) {
+            // C/C++ : le main étudiant reste dans le texte, mais encadré par la macro qui le renomme.
+            assertThat(s.program().substring(0, s.studentStart())).isEqualTo("#define main __moodit_student_main\n");
+            assertThat(s.program().substring(s.studentEnd())).startsWith("\n#undef main\n");
+        } else {
+            assertThat(matches(c.entryPoint(), c.studentSegment())).isZero();
+        }
+
+        // Aucun fragment étudiant dans le noteur, ni harnais/nonce dans le segment étudiant.
+        assertThat(s.grader()).doesNotContain(MARK);
+        assertThat(c.studentSegment()).doesNotContain(NONCE).doesNotContain(c.harness());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("compiledLanguages")
+    void compile_harnais_intact_et_nonce_emis_par_notre_main_apres_le_harnais(Compiled c) {
+        Split s = assembleCompiled(c);
+        String grader = s.grader();
+
+        // Le harnais est le corps exact de SA fonction, dans le noteur.
+        assertThat(occurrences(grader, c.harnessSignature() + "\n" + c.harness() + "\n")).isEqualTo(1);
+
+        // Notre main appelle le harnais, puis seulement émet le nonce (une seule émission en tout).
+        assertThat(occurrences(s.program(), NONCE)).isEqualTo(1);
+        Matcher entry = Pattern.compile(c.entryPoint()).matcher(grader);
+        assertThat(entry.find()).isTrue();
+        int callAt = grader.indexOf(c.harnessCall(), entry.end());
+        assertThat(callAt).isPositive();
+        assertThat(grader.indexOf(NONCE)).isGreaterThan(callAt);
+    }
+
+    @Test
+    void java_notre_classe_d_entree_vient_en_premier() {
+        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté.
+        String program = onlyFileContent(assembler.assemble("Java",
+                "public class Main { public static void main(String[] a){} }", "return true;", "N"));
+
+        assertThat(program).startsWith("public class __MooditMain {");
     }
 
     // ── HTML (bundle vendor) ────────────────────────────────────────────────────

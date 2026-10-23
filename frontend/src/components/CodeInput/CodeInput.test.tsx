@@ -192,4 +192,80 @@ describe('CodeInput', () => {
     paste(boxes()[0], 'abc');
     expect(onChange).not.toHaveBeenCalled();
   });
+  it('caractère non numérique sur une case remplie : seule cette case est vidée, focus inchangé', () => {
+    render(<Host initial="123" />);
+    const b = boxes();
+    b[1].focus();
+    fireEvent.change(b[1], { target: { value: 'x' } });
+    expect(currentValue()).toBe('13');
+    expect(document.activeElement).toBe(b[1]);
+  });
+
+  it('saisie multiple depuis une case du milieu : répartie à partir de cette case', () => {
+    render(<Host initial="12" />);
+    fireEvent.change(boxes()[2], { target: { value: '345' } });
+    expect(currentValue()).toBe('12345');
+    expect(document.activeElement).toBe(boxes()[5]);
+  });
+
+  it('saisie multiple près de la fin : tronquée aux cases restantes', () => {
+    const onChange = vi.fn();
+    render(<CodeInput value="1234" onChange={onChange} />);
+    fireEvent.change(boxes()[4], { target: { value: '9876' } });
+    expect(onChange).toHaveBeenLastCalledWith('123498');
+    expect(document.activeElement).toBe(boxes()[5]);
+  });
+
+  it('la valeur émise ne dépasse jamais la longueur, même avec une longueur réduite', () => {
+    const onChange = vi.fn();
+    render(<CodeInput value="12" onChange={onChange} length={4} />);
+    fireEvent.change(screen.getByLabelText('Chiffre 2'), { target: { value: '99999' } });
+    expect(onChange).toHaveBeenLastCalledWith('1999');
+  });
+
+  it('collage depuis une case du milieu : remplace tout le code depuis le début', () => {
+    render(<Host initial="999" />);
+    paste(boxes()[3], '123');
+    expect(currentValue()).toBe('123');
+    expect(document.activeElement).toBe(boxes()[3]);
+  });
+
+  it('collage avec une longueur réduite : tronqué, focus sur la dernière case', () => {
+    const onChange = vi.fn();
+    render(<CodeInput value="" onChange={onChange} length={4} />);
+    paste(screen.getByLabelText('Chiffre 1'), '123456');
+    expect(onChange).toHaveBeenCalledWith('1234');
+    expect(document.activeElement).toBe(screen.getByLabelText('Chiffre 4'));
+  });
+
+  it('retour arrière sur une case vide au milieu recule même si la précédente est vide', () => {
+    const onChange = vi.fn();
+    render(<CodeInput value="1" onChange={onChange} />);
+    const b = boxes();
+    b[3].focus();
+    fireEvent.keyDown(b[3], { key: 'Backspace' });
+    expect(document.activeElement).toBe(b[2]);
+    expect(onChange).toHaveBeenCalledWith('1');
+  });
+
+  it('les flèches ne modifient pas la valeur et une autre touche ne déplace pas le focus', () => {
+    const onChange = vi.fn();
+    render(<CodeInput value="12" onChange={onChange} />);
+    const b = boxes();
+    b[1].focus();
+    fireEvent.keyDown(b[1], { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(b[2]);
+    fireEvent.keyDown(b[2], { key: 'Enter' });
+    expect(document.activeElement).toBe(b[2]);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('prendre le focus sélectionne le chiffre de la case (la saisie le remplace)', () => {
+    render(<CodeInput value="5" onChange={vi.fn()} />);
+    const first = boxes()[0];
+    first.setSelectionRange(1, 1);
+    fireEvent.focus(first);
+    expect(first.selectionStart).toBe(0);
+    expect(first.selectionEnd).toBe(1);
+  });
 });

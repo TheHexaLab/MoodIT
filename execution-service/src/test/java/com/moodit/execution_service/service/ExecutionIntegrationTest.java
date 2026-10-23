@@ -203,6 +203,80 @@ class ExecutionIntegrationTest {
         assertThat(passes("Python", "import sys\nsys.exit(0)", "return doubler(5) == 10")).isFalse();
     }
 
+    // ─────────────────────── Compilés : le programme assemblé s'exécute ───────────────────────
+    // Pendant comportemental des tests de PROPRIÉTÉS de CodeAssemblerLanguagesTest : pour chaque
+    // langage compilé, avec un main étudiant présent (qui doit être neutralisé), une bonne réponse
+    // réussit, une mauvaise échoue, et une erreur à l'exécution (exception/panic) vaut échec.
+
+    @Test
+    void go_s_execute_et_note() {
+        requireRuntime("go");
+        String good = "package main\n\nfunc doubler(n int) int { return n * 2 }\n\nfunc main() {}";
+        assertThat(passes("Go", good, "return doubler(5) == 10")).isTrue();
+        assertThat(passes("Go", good.replace("n * 2", "0"), "return doubler(5) == 10")).isFalse();
+        assertThat(passes("Go", "package main\n\nfunc doubler(n int) int { panic(\"x\") }\n\nfunc main() {}",
+                "return doubler(5) == 10")).isFalse();
+    }
+
+    @Test
+    void rust_s_execute_et_note() {
+        requireRuntime("rust");
+        String good = "fn doubler(n: i32) -> i32 { n * 2 }\nfn main() {}";
+        assertThat(passes("Rust", good, "doubler(5) == 10")).isTrue();
+        assertThat(passes("Rust", good.replace("n * 2", "0 * n"), "doubler(5) == 10")).isFalse();
+        assertThat(passes("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
+                "doubler(5) == 10")).isFalse();
+    }
+
+    @Test
+    void cpp_s_execute_et_note() {
+        requireRuntime("c++");
+        String good = "int doubler(int n){ return n * 2; }\nint main(){ return 0; }";
+        assertThat(passes("C++", good, "return doubler(5) == 10;")).isTrue();
+        assertThat(passes("C++", good.replace("n * 2", "0"), "return doubler(5) == 10;")).isFalse();
+        assertThat(passes("C++", "int doubler(int n){ throw 1; }\nint main(){ return 0; }",
+                "return doubler(5) == 10;")).isFalse();
+    }
+
+    @Test
+    void csharp_s_execute_et_note() {
+        requireRuntime("csharp");
+        String good = "class S { public static int Doubler(int n) { return n * 2; } static void Main(string[] a) {} }";
+        assertThat(passes("C#", good, "return S.Doubler(5) == 10;")).isTrue();
+        assertThat(passes("C#", good.replace("n * 2", "0"), "return S.Doubler(5) == 10;")).isFalse();
+        assertThat(passes("C#",
+                "class S { public static int Doubler(int n) { throw new System.Exception(); } }",
+                "return S.Doubler(5) == 10;")).isFalse();
+    }
+
+    @Test
+    void java_s_execute_et_note() {
+        requireRuntime("java");
+        String good = "public class Main { static int doubler(int n){ return n * 2; } "
+                + "public static void main(String[] a){} }";
+        assertThat(passes("Java", good, "return Main.doubler(5) == 10;")).isTrue();
+        assertThat(passes("Java", good.replace("n * 2", "0"), "return Main.doubler(5) == 10;")).isFalse();
+        assertThat(passes("Java", "class Main { static int doubler(int n){ throw new RuntimeException(); } }",
+                "return Main.doubler(5) == 10;")).isFalse();
+    }
+
+    /**
+     * Le runtime est-il installé dans Piston ? Même politique que {@link #gate} : ignoré en local
+     * (ex. Piston de la pile e2e, qui n'a que Python), échec en CI où tous les runtimes sont posés.
+     */
+    private static void requireRuntime(String language) {
+        gate(runtimes().contains("\"language\":\"" + language + "\""),
+                "Runtime Piston « " + language + " » absent");
+    }
+
+    private static String runtimes() {
+        try (var in = URI.create(PISTON + "/api/v2/runtimes").toURL().openStream()) {
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     // ─────────────────────── SQL (isolation 2 phases) : non-régression ───────────────────────
     @Test
     void sql_isolation_still_works() {

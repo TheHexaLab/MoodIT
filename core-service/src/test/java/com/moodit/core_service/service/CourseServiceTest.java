@@ -168,6 +168,8 @@ class CourseServiceTest {
 
       CourseProgramsDTO dto = courseService.toCourseProgramsDTO(c);
 
+      assertThat(dto.getId()).isEqualTo(1);
+      assertThat(dto.getTitle()).isEqualTo("Base de données");
       assertThat(dto.getCode()).isEqualTo("IFT287");
       assertThat(dto.getPrograms()).extracting(ProgramDTO::getId).containsExactly(10, 11);
     }
@@ -183,6 +185,9 @@ class CourseServiceTest {
 
       CourseForumsDTO dto = courseService.toCourseForumsDTO(c);
 
+      assertThat(dto.getId()).isEqualTo(1);
+      assertThat(dto.getTitle()).isEqualTo("Base de données");
+      assertThat(dto.getCode()).isEqualTo("IFT287");
       assertThat(dto.getQuizzes()).extracting(QuizDTO::getTitle)
           .containsExactly("Premier", "Troisième", "Sans position");
       assertThat(dto.getQuizzes().get(0).getQuestionCount()).isEqualTo(4);
@@ -211,8 +216,14 @@ class CourseServiceTest {
       Quiz q = quiz(1, "Q", 0, true, 0);
       q.setQuestions(null);
 
+      q.setIsDaily(true);
+      q.setPosition(6);
       QuizDTO dto = courseService.toQuizDTO(q);
 
+      assertThat(dto.getId()).isEqualTo(1);
+      assertThat(dto.getPosition()).isEqualTo(6);
+      assertThat(dto.getIsDaily()).isTrue();
+      assertThat(dto.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 1, 1, 0, 0));
       assertThat(dto.getQuestionCount()).isZero();
       assertThat(dto.getTitle()).isEqualTo("Q");
       assertThat(dto.getIsPublished()).isTrue();
@@ -562,6 +573,26 @@ class CourseServiceTest {
     }
 
     @Test
+    @DisplayName("create (text) : les positions des AUTRES sections sont ignorées pour le calcul")
+    void create_text_ignore_les_autres_sections() {
+      Course c = courseWithForums();
+      // Un Thread très loin dans SA section ne doit pas décaler la section Discussion.
+      c.getForums().add(forum(8, "Thread lointain", 9, fType(2, "Thread"), c));
+      when(courseRepository.findById(1)).thenReturn(Optional.of(c));
+      when(forumRepository.saveAndFlush(any())).thenAnswer(inv -> {
+        Forum f = inv.getArgument(0);
+        f.setId(43);
+        return f;
+      });
+
+      courseService.changeSection(1, "text", ItemChangeDto.create(new ItemDto("tmp", "Autre canal")));
+
+      ArgumentCaptor<Forum> captor = ArgumentCaptor.forClass(Forum.class);
+      verify(forumRepository).saveAndFlush(captor.capture());
+      assertThat(captor.getValue().getPosition()).isEqualTo(5);
+    }
+
+    @Test
     @DisplayName("create (forum) : type Thread ; section vide → position 0 ; sans programme, pas d'écho")
     void create_forum_section_vide_position_zero() {
       Course c = course(1);
@@ -706,6 +737,8 @@ class CourseServiceTest {
     void desinscrit_seulement_dans_le_programme() {
       User u = user(1, "alice");
       Course inProgram = course(1);
+      // Partagé avec un autre programme placé AVANT : le suffixe doit nommer le programme demandé.
+      inProgram.getPrograms().add(program(30, "Génie civil"));
       inProgram.getPrograms().add(program(10, "Informatique"));
       Course otherProgram = course(2);
       otherProgram.getPrograms().add(program(20, "Électrique"));

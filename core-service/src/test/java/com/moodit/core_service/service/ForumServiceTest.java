@@ -138,10 +138,13 @@ class ForumServiceTest {
     @Test
     @DisplayName("toForumDTO copie titre, position, type et cours")
     void toForumDTO_copie_les_champs() {
-      ForumDTO dto = forumService.toForumDTO(forum(5, "Thread"));
+      Forum source = forum(5, "Thread");
+      source.setPosition(3);
+      ForumDTO dto = forumService.toForumDTO(source);
 
       assertThat(dto.getId()).isEqualTo(5);
       assertThat(dto.getTitle()).isEqualTo("Canal 5");
+      assertThat(dto.getPosition()).isEqualTo(3);
       assertThat(dto.getFTypeId()).isEqualTo(2);
       assertThat(dto.getFTypeName()).isEqualTo("Thread");
       assertThat(dto.getCourseId()).isEqualTo(100);
@@ -155,8 +158,10 @@ class ForumServiceTest {
 
       PostDTO dto = forumService.toPostDTO(p);
 
+      assertThat(dto.getId()).isEqualTo(7);
       assertThat(dto.getCreatedAt()).hasToString("2026-03-14T15:09:26Z");
       assertThat(dto.getContent()).isEqualTo("bonjour");
+      assertThat(dto.getTitle()).isEqualTo("Titre 7");
       assertThat(dto.getIsPinned()).isTrue();
 
       p.setCreatedAt(null);
@@ -174,13 +179,20 @@ class ForumServiceTest {
       child.setChildren(List.of(post(4, bob, "petite-fille")));
       p.setChildren(List.of(child));
 
+      p.setIsPinned(true);
       PostVoteUserDTO dto = forumService.toPostVoteUserDTO(p, true, 2);
 
+      assertThat(dto.getCreatedAt()).hasToString("2026-03-14T15:09:26Z");
+      assertThat(dto.getTitle()).isEqualTo("Titre 2");
+      assertThat(dto.getIsPinned()).isTrue();
       assertThat(dto.getVoteTotalValue()).isEqualTo(1);
       assertThat(dto.getUserVoteValue()).as("vote propre de bob").isEqualTo(1);
       assertThat(dto.getUserId()).isEqualTo(1);
       assertThat(dto.getPostParentId()).isEqualTo(1);
+      assertThat(dto.getAuthor().getId()).isEqualTo(1);
       assertThat(dto.getAuthor().getFirstName()).isEqualTo("ALICE");
+      assertThat(dto.getAuthor().getLastName()).isEqualTo("Test");
+      assertThat(dto.getAuthor().getEmail()).isEqualTo("alice@test.ca");
       assertThat(dto.getAuthor().getAvatarColor()).isEqualTo("#000001");
       assertThat(dto.getChildrenCount()).isEqualTo(1);
       assertThat(dto.getChildren()).hasSize(1);
@@ -211,6 +223,86 @@ class ForumServiceTest {
 
       assertThat(forumService.toPostVoteUserDTO(p, false, 2).getUserVoteValue()).isNull();
       assertThat(forumService.toPostVoteUserDTO(p, false, 1).getUserVoteValue()).isEqualTo(-1);
+    }
+  }
+
+  // ── Ciblage : l'id demandé, pas le premier post du forum ──────────────────
+
+  /**
+   * Chaque opération sur un post le cherche PAR ID dans le forum. Le forum contient ici un post
+   * leurre (6) AVANT la cible (7) : un filtre qui laisserait tout passer prendrait le leurre.
+   */
+  @Nested
+  class Ciblage_du_post {
+
+    private Forum f;
+    private Post leurre;
+    private Post cible;
+
+    @BeforeEach
+    void setUp() {
+      f = forum(5, "Thread");
+      leurre = post(6, bob, "leurre");
+      leurre.setChildren(List.of(post(60, bob, "réponse au leurre")));
+      cible = post(7, alice, "cible");
+      f.getPosts().add(leurre);
+      f.getPosts().add(cible);
+      when(forumRepository.findById(5)).thenReturn(Optional.of(f));
+    }
+
+    @Test
+    @DisplayName("getPostByForum renvoie le post demandé, pas le premier du forum")
+    void getPostByForum_bonPost() {
+      assertThat(forumService.getPostByForum(5, 7, false, null).getId()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("getRepliesByPost renvoie les réponses du post demandé")
+    void getRepliesByPost_bonPost() {
+      // La cible n'a pas de réponse : celles du leurre ne doivent pas fuiter.
+      assertThat(forumService.getRepliesByPost(5, 7, null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("addPostToForum rattache la réponse au parent demandé")
+    void addPostToForum_bonParent() {
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(postRepository.saveAndFlush(any())).thenAnswer(inv -> {
+        Post saved = inv.getArgument(0);
+        saved.setId(70);
+        return saved;
+      });
+
+      forumService.addPostToForum(PostCreateInForumDTO.builder()
+          .forumId(5).content("réponse").parentPostId(7).build(), "alice@test.ca");
+
+      ArgumentCaptor<Post> saved = ArgumentCaptor.forClass(Post.class);
+      verify(postRepository).saveAndFlush(saved.capture());
+      assertThat(saved.getValue().getParent()).isSameAs(cible);
+    }
+
+    @Test
+    @DisplayName("addVoteToPost vote sur le post demandé")
+    void addVoteToPost_bonPost() {
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
+
+      forumService.addVoteToPost(
+          VoteCreateInPostDTO.builder().forumId(5).postId(7).voteValue(1).build(), "alice@test.ca");
+
+      ArgumentCaptor<Vote> saved = ArgumentCaptor.forClass(Vote.class);
+      verify(voteRepository).save(saved.capture());
+      assertThat(saved.getValue().getPost()).isSameAs(cible);
+    }
+
+    @Test
+    @DisplayName("updatePost modifie le post demandé, le leurre reste intact")
+    void updatePost_bonPost() {
+      PostDTO result = forumService.updatePost(5, 7, ForumUpdatePostDTO.builder().isPinned(true).build());
+
+      assertThat(result.getId()).isEqualTo(7);
+      assertThat(cible.getIsPinned()).isTrue();
+      assertThat(leurre.getIsPinned()).isFalse();
     }
   }
 
@@ -297,6 +389,9 @@ class ForumServiceTest {
       assertThat(first.getChildrenCount()).isZero();
       assertThat(first.getPostParentId()).isEqualTo(1);
       assertThat(first.getAuthor().getUsername()).isEqualTo("bob");
+      assertThat(first.getUserId()).isEqualTo(2);
+      assertThat(first.getTitle()).isEqualTo("Titre 2");
+      assertThat(first.getIsPinned()).isFalse();
       assertThat(first.getCreatedAt()).hasToString("2026-03-14T15:09:26Z");
       PostVoteUserDTO second = replies.get(1);
       assertThat(second.getVoteTotalValue()).isZero();
@@ -375,6 +470,19 @@ class ForumServiceTest {
       assertThat(page).hasSize(1);
       assertThat(page.get(0).getChildren()).extracting(PostVoteUserDTO::getContent).containsExactly("réponse");
       verifyNoInteractions(voteRepository);
+    }
+
+    @Test
+    @DisplayName("getRootPostsPage : limite 0 → taille par défaut 20 (borne incluse)")
+    void getRootPostsPage_limiteZero() {
+      when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
+      when(postRepository.findRootPostsPage(eq(5), eq(null), any())).thenReturn(List.of());
+
+      forumService.getRootPostsPage(5, null, 0, false, null);
+
+      ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+      verify(postRepository).findRootPostsPage(eq(5), eq(null), pageable.capture());
+      assertThat(pageable.getValue().getPageSize()).isEqualTo(20);
     }
 
     @Test

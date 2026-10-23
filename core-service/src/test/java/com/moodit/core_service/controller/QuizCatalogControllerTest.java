@@ -1,7 +1,12 @@
 package com.moodit.core_service.controller;
 
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -42,6 +47,28 @@ class QuizCatalogControllerTest {
                 .andExpect(jsonPath("$[1].id").value(6))
                 .andExpect(jsonPath("$[1].slug").value("coding"))
                 .andExpect(jsonPath("$[1].label").value("Code"));
+
+        verify(quizService).getQuestionTypes();
+        verifyNoMoreInteractions(quizService);
+    }
+
+    @Test
+    @DisplayName("GET /question-types sans type en base → 200 et liste vide (pas 404)")
+    void typesDeQuestion_vide() throws Exception {
+        when(quizService.getQuestionTypes()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/question-types"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
+    }
+
+    @Test
+    @DisplayName("Catalogues en lecture seule : POST → 405, service non appelé")
+    void catalogues_lectureSeule_405() throws Exception {
+        mockMvc.perform(post("/api/question-types")).andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(post("/api/languages")).andExpect(status().isMethodNotAllowed());
+
+        verifyNoInteractions(quizService);
     }
 
     @Test
@@ -56,5 +83,8 @@ class QuizCatalogControllerTest {
                 .andExpect(jsonPath("$[0].harnessTemplate").value("h"))
                 .andExpect(jsonPath("$[0].startCodeTemplate").value("s"))
                 .andExpect(jsonPath("$[0].harnessLanguageId").doesNotExist());
+
+        verify(quizService).getLanguages();
+        verifyNoMoreInteractions(quizService);
     }
 }

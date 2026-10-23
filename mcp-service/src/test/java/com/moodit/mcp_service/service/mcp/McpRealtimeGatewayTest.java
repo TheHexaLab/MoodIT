@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -134,14 +135,32 @@ class McpRealtimeGatewayTest {
     }
 
     @Test
-    void jetonInterneVide_estEnvoyeVide_etNonOmis() throws Exception {
-        // Valeur par défaut de app.internal.token = "" : l'en-tête part vide, core refusera (401),
-        // mais le pont ne doit pas planter sur un jeton absent.
+    void jetonLuDepuisAppInternalToken_etEnvoyeTelQuel() throws Exception {
+        // Câblage réel par Spring (@Value) : c'est bien app.internal.token qui alimente l'en-tête.
+        // En dev, application.properties le fixe à ${INTERNAL_TOKEN:dev-internal-token-change-me} ;
+        // en prod (application-prod.properties) il n'a AUCUN repli : démarrage refusé s'il manque.
+        String url = startStub(200);
+        new ApplicationContextRunner()
+                .withBean(McpRealtimeGateway.class)
+                .withPropertyValues("app.core-service.internal-url=" + url,
+                        "app.internal.token=dev-internal-token-change-me")
+                .run(ctx -> ctx.getBean(McpRealtimeGateway.class).analysisProgress(1L, 2L, "collecting"));
+
+        assertThat(received).hasSize(1);
+        assertThat(received.getFirst().token()).isEqualTo("dev-internal-token-change-me");
+        assertThat(received.getFirst().path()).isEqualTo("/internal/realtime/mcp/analysis-progress");
+    }
+
+    @Test
+    void jetonInterneVide_estEnvoyeVide_etLeRefusDeCoreEstAvale() throws Exception {
+        // Cas dégradé : INTERNAL_TOKEN défini mais vide (ou propriété absente → repli "" du @Value ;
+        // le défaut des fichiers de config est dev-internal-token-change-me, pas ""). L'en-tête part
+        // vide (présent, pas omis), core refuse (401) et le pont ne propage rien au job.
         McpRealtimeGateway gateway = new McpRealtimeGateway(startStub(401), "");
 
         assertThatCode(() -> gateway.analysisProgress(1L, 1L, "collecting")).doesNotThrowAnyException();
         assertThat(received).hasSize(1);
-        assertThat(received.getFirst().token()).isEmpty();
+        assertThat(received.getFirst().token()).isNotNull().isEmpty();
     }
 
     @Test

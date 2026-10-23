@@ -114,6 +114,13 @@ public class ProgramServiceTest {
 
             ProgramCoursesDTO result = programService.getCoursesByProgram(1);
 
+            assertEquals(1, result.getId());
+            assertEquals("Informatique", result.getName());
+            assertEquals("GI", result.getCode());
+            assertEquals("71", result.getCohort());
+            assertEquals("FF0000", result.getColor());
+            assertEquals(10, result.getCourses().get(0).getId());
+            assertEquals("BD101", result.getCourses().get(0).getCode());
             assertEquals(2, result.getCourses().size());
             assertEquals("Base de données", result.getCourses().get(0).getTitle());
             assertEquals("Patron de conception", result.getCourses().get(1).getTitle());
@@ -230,6 +237,42 @@ public class ProgramServiceTest {
             assertEquals("Mathématique de l'ingénierie", program2.getCourses().get(0).getTitle());
             verify(courseRepository, times(1)).save(any(Course.class));
             verify(programRepository, times(1)).saveAll(anyList());
+
+            assertEquals(1, result.getId());
+            // Journalisé avec le contexte des programmes visés…
+            verify(auditLogService).record("COURSE_CREATE", "COURSE", 1,
+                    "Cours « Mathématique de l'ingénierie » (MATH67) créé",
+                    "Programmes : Informatique, Réseaux");
+            // …et diffusé en direct dans CHAQUE programme (hors transaction → immédiat).
+            com.moodit.core_service.realtime.dto.CourseDto live =
+                    com.moodit.core_service.realtime.dto.CourseDto.of(1, "MATH67", "Mathématique de l'ingénierie");
+            verify(realtimePublisher).courseCreated(1L, live);
+            verify(realtimePublisher).courseCreated(2L, live);
+        }
+
+        @Test
+        @DisplayName("Dans une transaction : courseCreated diffusé seulement APRÈS le commit")
+        void addCourseToPrograms_diffusion_apres_commit() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(3);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+            try {
+                programService.addCourseToPrograms(CourseCreateInProgramsDTO.builder()
+                        .title("Algo").code("GIF201").programIds(List.of(1)).build());
+
+                verifyNoInteractions(realtimePublisher);
+                org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                        .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+                verify(realtimePublisher).courseCreated(1L,
+                        com.moodit.core_service.realtime.dto.CourseDto.of(3, "GIF201", "Algo"));
+            } finally {
+                org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            }
         }
         @Test
         @DisplayName("Inscrit automatiquement le créateur au cours créé + journalise (ENROLLMENT_JOIN)")
@@ -250,11 +293,39 @@ public class ProgramServiceTest {
             when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(creator));
             when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.empty());
 
-            programService.addCourseToPrograms(dto);
+            CourseDTO created = programService.addCourseToPrograms(dto);
 
-            verify(enrollmentRepository, times(1)).save(any(Enrollment.class));
-            verify(auditLogService, times(1))
-                    .record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(), anyString());
+            org.mockito.ArgumentCaptor<Enrollment> enrollment = org.mockito.ArgumentCaptor.forClass(Enrollment.class);
+            verify(enrollmentRepository, times(1)).save(enrollment.capture());
+            assertSame(creator, enrollment.getValue().getUser());
+            assertEquals(42, enrollment.getValue().getCourse().getId());
+            assertNotNull(enrollment.getValue().getEnrolledAt());
+            assertEquals(42, created.getId());
+            verify(auditLogService, times(1)).record("ENROLLMENT_JOIN", "ENROLLMENT", 42,
+                    "Inscription au cours « Algo » (GIF201) à sa création",
+                    "Cours : Algo (GIF201)\nProgrammes : Informatique"
+                            + "\nUtilisateur : prof");
+        }
+
+        @Test
+        @DisplayName("Créateur sans nom d'utilisateur → référencé par #id dans le journal")
+        void addCourseToPrograms_createur_sans_username() {
+            program = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            when(courseRepository.save(any(Course.class))).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(42);
+                return c;
+            });
+            when(programRepository.findById(1)).thenReturn(Optional.of(program));
+            when(auditLogService.currentActor()).thenReturn("prof@moodit.ca");
+            when(userRepository.findByEmail("prof@moodit.ca")).thenReturn(Optional.of(User.builder().id(7).build()));
+            when(enrollmentRepository.findByUserIdAndCourseId(7, 42)).thenReturn(Optional.empty());
+
+            programService.addCourseToPrograms(CourseCreateInProgramsDTO.builder()
+                    .title("Algo").code("GIF201").programIds(List.of(1)).build());
+
+            verify(auditLogService).record(eq("ENROLLMENT_JOIN"), eq("ENROLLMENT"), eq(42), anyString(),
+                    argThat((String d) -> d.endsWith("\nUtilisateur : #7")));
         }
         @Test
         @DisplayName("N'inscrit PAS deux fois le créateur (idempotent) si déjà inscrit")
@@ -474,6 +545,27 @@ public class ProgramServiceTest {
             verify(userRepository).saveAndFlush(u);                 // flush avant les nettoyages
             verify(userProgramRoleRepository).deleteByProgramIdAndUserId(1, 5); // rôles retirés
             verify(enrollmentRepository).deleteForUserLeavingProgram(5, 1);     // inscriptions retirées
+            // Programme introuvable → nom de repli « #id » ; utilisateur sans username → « #id ».
+            verify(auditLogService).record("PROGRAM_MEMBER_REMOVE", "PROGRAM", 1,
+                    "Utilisateur #5 retiré du programme « #1 »", "Programme : #1");
+            verify(realtimePublisher).subscriptionRemoved(5L, 1L);
+        }
+
+        @Test
+        @DisplayName("Quitter un programme : le journal nomme l'utilisateur et le programme ; les autres programmes restent")
+        void removeUserFromProgram_journal_nomme() {
+            User u = User.builder().id(5).username("alice").build();
+            Program quitte = Program.builder().id(1).name("Informatique").build();
+            Program garde = Program.builder().id(2).name("Réseaux").build();
+            u.setPrograms(new ArrayList<>(List.of(quitte, garde)));
+            when(userRepository.findById(5)).thenReturn(Optional.of(u));
+            when(programRepository.findById(1)).thenReturn(Optional.of(quitte));
+
+            programService.removeUserFromProgram(1, 5);
+
+            assertEquals(List.of(garde), u.getPrograms());
+            verify(auditLogService).record("PROGRAM_MEMBER_REMOVE", "PROGRAM", 1,
+                    "Utilisateur alice retiré du programme « Informatique »", "Programme : Informatique");
         }
     }
 
@@ -496,7 +588,9 @@ public class ProgramServiceTest {
         @Test
         @DisplayName("Chaque membre porte ses rôles DANS ce programme (vide s'il n'en a pas)")
         void getUsersByProgram_roles_par_programme() {
-            User alice = User.builder().id(1).username("alice").email("a@test.ca").build();
+            User alice = User.builder().id(1).username("alice").email("a@test.ca")
+                    .firstName("Alice").lastName("Lovelace").settings("{\"theme\":\"dark\"}")
+                    .avatarColor("#123456").createdAt(java.time.LocalDateTime.of(2026, 1, 2, 3, 4)).build();
             User bob = User.builder().id(2).username("bob").build();
             when(userProgramRoleRepository.findByProgramId(10)).thenReturn(List.of(
                     new UserProgramRole(10, 1, 1), new UserProgramRole(10, 1, 2)));
@@ -507,6 +601,12 @@ public class ProgramServiceTest {
             assertEquals(2, result.size());
             assertEquals("alice", result.get(0).getUsername());
             assertEquals("a@test.ca", result.get(0).getEmail());
+            assertEquals(1, result.get(0).getId());
+            assertEquals("Alice", result.get(0).getFirstName());
+            assertEquals("Lovelace", result.get(0).getLastName());
+            assertEquals("{\"theme\":\"dark\"}", result.get(0).getSettings());
+            assertEquals("#123456", result.get(0).getAvatarColor());
+            assertEquals(java.time.LocalDateTime.of(2026, 1, 2, 3, 4), result.get(0).getCreatedAt());
             assertEquals(List.of(1, 2), result.get(0).getRoles());
             assertEquals(List.of(), result.get(1).getRoles());
         }

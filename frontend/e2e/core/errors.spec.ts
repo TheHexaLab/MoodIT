@@ -249,10 +249,10 @@ test('modifier le cours et le programme : échec puis succès (administrateur du
   await expect(page.getByRole('heading', { name: 'Modifier le programme' })).toHaveCount(0);
   // Persisté côté serveur.
   const api = await apiFor(baseURL!, admin.storageState);
-  const program = (await (await api.get(`/api/programs/${fx.program.id}`)).json()) as {
-    cohort: string;
-  };
-  expect(program.cohort).toBe('Promo rétablie');
+  // Attente : la popup se ferme dès la réussite, la lecture ne doit pas précéder l'écriture.
+  await expect
+    .poll(async () => ((await (await api.get(`/api/programs/${fx.program.id}`)).json()) as { cohort: string }).cohort)
+    .toBe('Promo rétablie');
   await api.dispose();
 });
 
@@ -412,7 +412,7 @@ test('supprimer le cours puis le programme : « Impossible de … Réessaie. » 
     );
     await expect(programButton(page, program.name)).toHaveCount(0);
     await asGardien(baseURL!, async (api) => {
-      expect((await api.get(`/api/programs/${program.id}`)).ok()).toBe(false);
+      await expect.poll(async () => (await api.get(`/api/programs/${program.id}`)).ok()).toBe(false);
     });
   } finally {
     await asGardien(baseURL!, async (api) => {
@@ -593,7 +593,7 @@ test('établissements : chargement, création et suppression en panne (gardien)'
       }
     );
     await expect(row).toHaveCount(0);
-    expect((await api.get(`/api/establishments/${createdId}`)).ok()).toBe(false);
+    await expect.poll(async () => (await api.get(`/api/establishments/${createdId}`)).ok()).toBe(false);
   } finally {
     if (createdId !== undefined) await api.delete(`/api/establishments/${createdId}`);
     await close();

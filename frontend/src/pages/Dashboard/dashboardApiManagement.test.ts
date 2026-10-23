@@ -52,6 +52,16 @@ import {
   createPost,
   editPost,
   deletePost,
+  submitQuiz,
+  evaluateCode,
+  runCode,
+  createQuiz,
+  updateQuiz,
+  reorderQuizzes,
+  createEstablishment,
+  updateEstablishment,
+  votePost,
+  sendMessage,
 } from './dashboardApi.ts';
 
 const mockedApiFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
@@ -789,5 +799,51 @@ describe('editPost', () => {
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(editPost(4, 80, 'x')).rejects.toThrow('Échec de la modification du post');
+  });
+});
+
+// ── En-tête Content-Type de toutes les requêtes à corps JSON ───────────────────
+// Spring répond 415 (Unsupported Media Type) à un corps JSON sans `Content-Type:
+// application/json` : chaque appel qui envoie un corps doit le déclarer.
+
+describe('requêtes à corps JSON : en-tête Content-Type', () => {
+  const savedPost = { id: 1, content: 'c', createdAt: 'd', author: { id: 7 }, childrenCount: 0 };
+  // [nom, appel, corps de réponse renvoyé à chaque appel]
+  const cases: [string, () => Promise<unknown>, unknown][] = [
+    ['submitQuiz', () => submitQuiz({ quizId: 1, answers: [] }), { attemptId: 1 }],
+    ['evaluateCode', () => evaluateCode({ language: 'py', code: 'x', testCases: [] } as never), []],
+    ['runCode', () => runCode({ language: 'py', code: 'x' } as never), {}],
+    ['createQuiz', () => createQuiz(1, { title: 'Q', questions: [] } as never), { id: 1 }],
+    ['updateQuiz', () => updateQuiz(1, { title: 'Q', questions: [] } as never), { id: 1 }],
+    ['reorderQuizzes', () => reorderQuizzes(1, [2, 1]), {}],
+    ['changeGlobalRole', () => changeGlobalRole({ userId: 1 } as never), {}],
+    ['changeRole', () => changeRole(1, { userId: 1 } as never), {}],
+    ['createEstablishment', () => createEstablishment('E', 'e.ca'), { id: 1 }],
+    ['updateEstablishment', () => updateEstablishment(1, { name: 'E' }), { id: 1 }],
+    ['createCourse', () => createCourse({ code: 'C', title: 'T' } as never), { id: 1 }],
+    ['createProgram', () => createProgram({ name: 'P' } as never), { id: 1 }],
+    ['joinPrograms', () => joinPrograms({ programIds: [1], establishmentId: 1 }), []],
+    ['updateCourse', () => updateCourse(1, { title: 'T' } as never), {}],
+    ['updateProgram', () => updateProgram(1, { name: 'P' } as never), {}],
+    ['joinCourses', () => joinCourses(1, [2]), []],
+    ['changeSection', () => changeSection(1, 'text', { type: 'create' } as never), {}],
+    ['sendMessage', () => sendMessage(1, 'm', null, 'cid'), savedPost],
+    ['editMessage', () => editMessage(1, 2, 'm'), {}],
+    ['createPost', () => createPost(1, 'c', null, 'cp', 'T'), savedPost],
+    ['editPost', () => editPost(1, 2, 'c', 'T'), {}],
+    ['votePost', () => votePost(1, 2, 1), {}],
+  ];
+
+  it.each(cases)('%s envoie Content-Type: application/json avec son corps', async (_, call, body) => {
+    mockedApiFetch.mockResolvedValue(res(body));
+    await call();
+    const withBody = mockedApiFetch.mock.calls
+      .map((c) => c[1] as RequestInit | undefined)
+      .filter((init) => init?.body !== undefined);
+    expect(withBody.length).toBeGreaterThan(0);
+    for (const init of withBody) {
+      expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+      expect(() => JSON.parse(init?.body as string)).not.toThrow();
+    }
   });
 });

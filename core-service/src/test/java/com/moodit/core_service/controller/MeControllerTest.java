@@ -190,6 +190,44 @@ class MeControllerTest {
     }
 
     @Test
+    @DisplayName("PUT /me/settings d'exactement 8 Ko → accepté (borne incluse)")
+    void updateSettings_exactement8Ko_accepte() throws Exception {
+        String atLimit = "{\"b\":\"" + "x".repeat(8 * 1024 - 8) + "\"}";
+        when(users.updateSettingsByEmail(EMAIL, atLimit)).thenReturn(Optional.of(rosie("Rosie", atLimit)));
+
+        mockMvc.perform(put("/me/settings").principal(PRINCIPAL)
+                        .contentType("application/json;charset=UTF-8").content(atLimit))
+                .andExpect(status().isOk());
+
+        verify(users).updateSettingsByEmail(EMAIL, atLimit);
+    }
+
+    @Test
+    @DisplayName("PUT /me/settings : 8 Ko + 1 octet → 413")
+    void updateSettings_unOctetDeTrop_413() throws Exception {
+        String overLimit = "{\"b\":\"" + "x".repeat(8 * 1024 - 7) + "\"}";
+
+        mockMvc.perform(put("/me/settings").principal(PRINCIPAL)
+                        .contentType("application/json;charset=UTF-8").content(overLimit))
+                .andExpect(status().is(413));
+
+        verifyNoInteractions(users);
+    }
+
+    @Test
+    @DisplayName("PUT /me/settings : la limite compte les OCTETS UTF-8, pas les caractères")
+    void updateSettings_limiteEnOctets_413() throws Exception {
+        // ~4 100 caractères mais 8 194 octets (« é » = 2 octets en UTF-8).
+        String accents = "{\"b\":\"" + "é".repeat(4093) + "\"}";
+
+        mockMvc.perform(put("/me/settings").principal(PRINCIPAL)
+                        .contentType("application/json;charset=UTF-8").content(accents))
+                .andExpect(status().is(413));
+
+        verifyNoInteractions(users);
+    }
+
+    @Test
     @DisplayName("PUT /me/settings sur un compte inexistant → 404")
     void updateSettings_compteInexistant_404() throws Exception {
         when(users.updateSettingsByEmail(EMAIL, "{}")).thenReturn(Optional.empty());

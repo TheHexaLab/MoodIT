@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -27,6 +28,7 @@ import com.moodit.core_service.dto.UserDTO;
 import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.EstablishmentNotFoundException;
 import com.moodit.core_service.exception.ProgramNotFoundException;
+import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.realtime.dto.ItemChangeDto;
 import com.moodit.core_service.realtime.dto.ItemDto;
 import com.moodit.core_service.service.CourseService;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -196,6 +199,57 @@ class ManagementControllersTest {
 
             verify(quizService).reorderQuizzes(3, List.of(5, 4, 6));
         }
+
+        @Test
+        @DisplayName("PATCH /courses/{id}/quizzes/reorder avec un objet au lieu d'une liste → 400")
+        void reordonnerQuiz_corpsInvalide_400() throws Exception {
+            mockMvc.perform(patch("/api/courses/3/quizzes/reorder").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"ids\":[5,4]}"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(quizService);
+        }
+
+        @Test
+        @DisplayName("POST /courses/{id}/quizzes sur un cours inexistant → 404")
+        void creerQuiz_coursInexistant_404() throws Exception {
+            when(quizService.createQuiz(eq(99), any(QuizDetailDTO.class))).thenThrow(new CourseNotFoundException());
+
+            mockMvc.perform(post("/api/courses/99/quizzes").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Nouveau\",\"questions\":[]}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("POST /courses/users : violation de contrainte BD → 409")
+        void synchroniserCours_contrainte_409() throws Exception {
+            when(courseService.syncUserCourses(any(UserCreateInCoursesDTO.class)))
+                    .thenThrow(new DataIntegrityViolationException("fk_enrollment"));
+
+            mockMvc.perform(post("/api/courses/users").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"id\":5,\"courseIds\":[3],\"programId\":7}"))
+                    .andExpect(status().isConflict());
+        }
+
+        @Test
+        @DisplayName("PATCH /courses/{id}/sections avec JSON mal formé → 400, service non appelé")
+        void changerSection_jsonMalForme_400() throws Exception {
+            mockMvc.perform(patch("/api/courses/3/sections").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"sectionType\":"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(courseService);
+        }
+
+        @Test
+        @DisplayName("DELETE /courses/{id}/users/{userId} : ordre des ids du chemin respecté")
+        void desinscrire_ordreDesIds() throws Exception {
+            mockMvc.perform(delete("/api/courses/5/users/3"))
+                    .andExpect(status().isNoContent());
+
+            verify(courseService).removeUserFromCourse(5, 3);
+            verifyNoMoreInteractions(courseService);
+        }
     }
 
     // ── ProgramController ───────────────────────────────────────────────────────
@@ -211,7 +265,18 @@ class ManagementControllersTest {
 
             mockMvc.perform(get("/api/programs/7/users"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$[0].username").value("rosie"));
+                    .andExpect(jsonPath("$[0].id").value(5));
+
+            verify(programService).getUsersByProgram(7);
+        }
+
+        @Test
+        @DisplayName("GET /programs/{id}/users d'un programme inexistant → 404")
+        void membres_programmeInexistant_404() throws Exception {
+            when(programService.getUsersByProgram(99)).thenThrow(new ProgramNotFoundException());
+
+            mockMvc.perform(get("/api/programs/99/users"))
+                    .andExpect(status().isNotFound());
         }
 
         @Test
@@ -236,6 +301,17 @@ class ManagementControllersTest {
                             .param("roleId", "2").param("search", "ro").param("page", "1").param("size", "5"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].id").value(9));
+
+            verify(programService).getProgramRoleCandidates(7, 2, "ro", 1, 5);
+        }
+
+        @Test
+        @DisplayName("GET /programs/{id}/role-candidates avec roleId non numérique → 400")
+        void candidatsRole_roleIdInvalide_400() throws Exception {
+            mockMvc.perform(get("/api/programs/7/role-candidates").param("roleId", "abc"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(programService);
         }
 
         @Test
@@ -280,7 +356,10 @@ class ManagementControllersTest {
 
             mockMvc.perform(get("/api/establishments/2/manageable-programs").header("X-User-Email", "rosie@test.ca"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$[0].name").value("Génie info"));
+                    .andExpect(jsonPath("$[0].id").value(7));
+
+            // L'utilisateur courant vient du header posé par le gateway, transmis tel quel.
+            verify(programService).getManageableProgramsInEstablishment(2, "rosie@test.ca");
         }
 
         @Test
@@ -327,6 +406,17 @@ class ManagementControllersTest {
             mockMvc.perform(get("/api/users/5/enrollments"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].courseId").value(3));
+
+            verify(userService).getEnrollmentsByUser(5);
+        }
+
+        @Test
+        @DisplayName("GET /users/{id}/enrollments d'un utilisateur inexistant → 404")
+        void inscriptions_utilisateurInexistant_404() throws Exception {
+            when(userService.getEnrollmentsByUser(99)).thenThrow(new UserNotFoundException());
+
+            mockMvc.perform(get("/api/users/99/enrollments"))
+                    .andExpect(status().isNotFound());
         }
 
         @Test
@@ -337,8 +427,10 @@ class ManagementControllersTest {
 
             mockMvc.perform(get("/api/users/5/programs/7/enrollments"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$[0].code").value("IFT3"))
-                    .andExpect(jsonPath("$[0].forums").isArray());
+                    .andExpect(jsonPath("$[0].id").value(3));
+
+            // userId puis programId : un échange des deux variables de chemin casserait ce test.
+            verify(userService).getEnrollmentsByUserAndProgram(5, 7);
         }
     }
 

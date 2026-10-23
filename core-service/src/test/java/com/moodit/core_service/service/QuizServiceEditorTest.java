@@ -284,6 +284,8 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
             Question choiceQ = saved.getQuestions().get(0);
             assertThat(choiceQ.getQuiz()).isSameAs(saved);
+            assertThat(choiceQ.getPrompt()).isEqualTo("Choisir");
+            assertThat(choiceQ.getAnswers()).extracting(Answer::getContent).containsExactly("oui", "non");
             assertThat(choiceQ.getOrderIndex()).isZero();
             assertThat(choiceQ.getTotalScore()).isZero();
             assertThat(choiceQ.getQType().getName()).isEqualTo(SINGLE);
@@ -291,6 +293,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThat(choiceQ.getAnswers()).extracting(Answer::getIsCorrect).containsExactly(true, false);
             assertThat(choiceQ.getAnswers().get(0).getQuestion()).isSameAs(choiceQ);
             DragItem item = choiceQ.getDragItems().get(0);
+            assertThat(item.getContent()).isEqualTo("d");
             assertThat(item.getCorrectOrder()).isZero();
             assertThat(item.getGroupName()).isEqualTo("G");
             assertThat(item.getQuestion()).isSameAs(choiceQ);
@@ -301,6 +304,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThat(codeQ.getStartCode()).isEqualTo("def f():");
             assertThat(codeQ.getLanguage().getName()).isEqualTo("python");
             TestCase tc = codeQ.getTestCases().get(0);
+            assertThat(tc.getName()).isEqualTo("t");
             assertThat(tc.getWeight()).isEqualTo(1);
             assertThat(tc.getHarnessCode()).isEqualTo("h");
             assertThat(tc.getQuestion()).isSameAs(codeQ);
@@ -331,6 +335,50 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThat(created.getQuestions()).isEmpty();
             // Pas d'id persisté → aucune diffusion (broadcastQuiz ignore un id null).
             verifyNoInteractions(realtimePublisher);
+        }
+
+        @Test
+        @DisplayName("orderIndex absent → position dans la liste (0, 1, 2…)")
+        void orderIndexAbsent_positionDansLaListe() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+            QuestionDTO sansIndex = QuestionDTO.builder().qType("single_choice").build();
+
+            service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(sansIndex, sansIndex, sansIndex)).build());
+
+            ArgumentCaptor<Quiz> captor = ArgumentCaptor.forClass(Quiz.class);
+            verify(quizRepository).save(captor.capture());
+            assertThat(captor.getValue().getQuestions()).extracting(Question::getOrderIndex)
+                    .containsExactly(0, 1, 2);
+        }
+
+        @Test
+        @DisplayName("Listes absentes du DTO → collections vides MODIFIABLES (Hibernate, édition ultérieure)")
+        void listesAbsentes_collectionsModifiables() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            // Quiz sans questions : la collection doit pouvoir recevoir des questions plus tard.
+            service.createQuiz(1, QuizDetailDTO.builder().title("Vide").build());
+            // Question sans réponses / éléments / harnais.
+            service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().qType("single_choice").build())).build());
+
+            ArgumentCaptor<Quiz> captor = ArgumentCaptor.forClass(Quiz.class);
+            verify(quizRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+            Quiz empty = captor.getAllValues().get(0);
+            empty.getQuestions().add(new Question());
+            assertThat(empty.getQuestions()).hasSize(1);
+            Question q = captor.getAllValues().get(1).getQuestions().get(0);
+            q.getAnswers().add(new Answer());
+            q.getDragItems().add(new DragItem());
+            q.getTestCases().add(new TestCase());
+            assertThat(q.getAnswers()).hasSize(1);
+            assertThat(q.getDragItems()).hasSize(1);
+            assertThat(q.getTestCases()).hasSize(1);
         }
 
         @Test
@@ -422,6 +470,8 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             keptCase = testCase(kept, 30, "cas", 1);
             testCase(kept, 31, "cas retiré", 1);
             removed = question(2, SINGLE, 1.0, 1);
+            kept.setStartCode("ancien code");
+            kept.setLanguage(language(9, "java"));
             quiz = quiz(5, course, kept, removed);
             quiz.setTitle("Ancien titre");
         }
@@ -446,6 +496,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                     .title("Nouveau titre").allowRetry(true).position(3)
                     .questions(List.of(
                             QuestionDTO.builder().id(1).prompt("modifiée").qType("single_choice").totalScore(2.0)
+                                    .startCode("nouveau code")
                                     .answers(List.of(
                                             AnswerDTO.builder().id(10).content("mise à jour").isCorrect(true).build(),
                                             AnswerDTO.builder().content("ajoutée").build()))
@@ -476,6 +527,10 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
             assertThat(kept.getPrompt()).isEqualTo("modifiée");
             assertThat(kept.getTotalScore()).isEqualTo(2.0);
+            assertThat(kept.getStartCode()).isEqualTo("nouveau code");
+            // Type re-résolu depuis le DTO (id 2 du dépôt, pas l'ancien) ; langage retiré du DTO → null.
+            assertThat(kept.getQType().getId()).isEqualTo(2);
+            assertThat(kept.getLanguage()).isNull();
             assertThat(kept.getAnswers()).hasSize(2);
             assertThat(kept.getAnswers().get(0)).isSameAs(keptAnswer);
             assertThat(keptAnswer.getContent()).isEqualTo("mise à jour");
@@ -490,11 +545,15 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThat(keptItem.getCorrectOrder()).isZero();
             assertThat(keptItem.getGroupName()).isEqualTo("C");
             assertThat(kept.getDragItems().get(1).getCorrectOrder()).isEqualTo(4);
+            assertThat(kept.getDragItems().get(1).getContent()).isEqualTo("nouvel item");
+            assertThat(kept.getDragItems().get(1).getQuestion()).isSameAs(kept);
 
             assertThat(kept.getTestCases()).hasSize(2);
             assertThat(kept.getTestCases().get(0)).isSameAs(keptCase);
             assertThat(keptCase.getName()).isEqualTo("cas modifié");
             assertThat(keptCase.getWeight()).isEqualTo(5);
+            assertThat(keptCase.getHarnessCode()).isEqualTo("h2");
+            assertThat(kept.getTestCases().get(1).getHarnessCode()).isEqualTo("h3");
             assertThat(kept.getTestCases().get(1).getWeight()).isEqualTo(1);
             assertThat(kept.getTestCases().get(1).getQuestion()).isSameAs(kept);
 

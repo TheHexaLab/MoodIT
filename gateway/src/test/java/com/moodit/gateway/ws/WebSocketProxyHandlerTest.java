@@ -2,6 +2,7 @@ package com.moodit.gateway.ws;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
@@ -13,14 +14,21 @@ import java.net.ConnectException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedConstruction;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -28,7 +36,6 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
-import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 /**
  * Proxy WebSocket navigateur ↔ core-service. Le handler instancie lui-même son
@@ -176,15 +183,61 @@ class WebSocketProxyHandlerTest {
   }
 
   @Test
-  void relaisAval_ecritVersLeClientViaLeDecorateurConcurrent() throws Exception {
-    // Garde-fou concurrence : le thread aval écrit vers le navigateur à travers
-    // ConcurrentWebSocketSessionDecorator (sinon écritures concurrentes sur la même session).
+  void relaisAval_envoisConcurrentsVersLeClient_serialises_sansPerteNiBlocage() throws Exception {
+    // Garde-fou concurrence (observable) : une session WebSocket n'accepte pas deux écritures
+    // simultanées. Si un envoi vers le navigateur est en cours (réseau lent), un 2e envoi venu d'un
+    // autre thread ne doit NI écrire en parallèle, NI bloquer son thread : il est mis en tampon puis
+    // livré, dans l'ordre, par le premier. C'est ce que garantit le décorateur concurrent.
     DownstreamRelayHandler relay = connect();
+    CountDownLatch firstSendEntered = new CountDownLatch(1);
+    CountDownLatch releaseFirstSend = new CountDownLatch(1);
+    AtomicInteger inFlight = new AtomicInteger();
+    AtomicInteger maxInFlight = new AtomicInteger();
+    List<Object> delivered = new CopyOnWriteArrayList<>();
+    doAnswer(
+            inv -> {
+              maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+              try {
+                if (delivered.isEmpty()) {
+                  firstSendEntered.countDown();
+                  releaseFirstSend.await(5, TimeUnit.SECONDS);
+                }
+                delivered.add(inv.getArgument(0));
+              } finally {
+                inFlight.decrementAndGet();
+              }
+              return null;
+            })
+        .when(client)
+        .sendMessage(any());
+    TextMessage first = new TextMessage("premier");
+    TextMessage second = new TextMessage("second");
+    ExecutorService threads = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> a = threads.submit(() -> {
+        relay.handleMessage(downstream, first);
+        return null;
+      });
+      assertThat(firstSendEntered.await(5, TimeUnit.SECONDS)).isTrue();
 
-    Object clientSession = ReflectionTestUtils.getField(relay, "clientSession");
-    assertThat(clientSession).isInstanceOf(ConcurrentWebSocketSessionDecorator.class);
-    assertThat(((ConcurrentWebSocketSessionDecorator) clientSession).getDelegate())
-        .isSameAs(client);
+      // Pendant que le 1er envoi est bloqué, le 2e rend la main sans écrire.
+      threads
+          .submit(
+              () -> {
+                relay.handleMessage(downstream, second);
+                return null;
+              })
+          .get(2, TimeUnit.SECONDS);
+      assertThat(delivered).isEmpty();
+
+      releaseFirstSend.countDown();
+      a.get(5, TimeUnit.SECONDS);
+      assertThat(delivered).containsExactly(first, second);
+      assertThat(maxInFlight).hasValue(1);
+    } finally {
+      releaseFirstSend.countDown();
+      threads.shutdownNow();
+    }
   }
 
   // ------------------------------------------------------------------ amont → aval

@@ -138,4 +138,54 @@ class McpAnalysisRunnerTest {
 
         verifyNoInteractions(realtimeGateway, analysisClient, coreQuizStatsClient);
     }
+
+    @Test
+    void markRejected_passeEnFailed_etNotifieLeLanceur() {
+        McpResponse response = pending();
+        when(mcpResponseRepository.findById(1)).thenReturn(Optional.of(response));
+
+        runner.markRejected(1);
+
+        assertThat(response.getStatus()).isEqualTo(McpStatus.FAILED);
+        verify(mcpResponseRepository).save(response);
+        verify(realtimeGateway).analysisFailed(10L, 5L, McpAnalysisRunner.UNAVAILABLE);
+    }
+
+    @Test
+    void markRejected_ignoreUneAnalyseDejaTermineeOuAbsente() {
+        McpResponse done = pending();
+        done.setStatus(McpStatus.DONE);
+        when(mcpResponseRepository.findById(1)).thenReturn(Optional.of(done));
+        when(mcpResponseRepository.findById(2)).thenReturn(Optional.empty());
+
+        runner.markRejected(1);
+        runner.markRejected(2);
+
+        assertThat(done.getStatus()).isEqualTo(McpStatus.DONE);
+        verify(mcpResponseRepository, never()).save(any());
+        verifyNoInteractions(realtimeGateway);
+    }
+
+    @Test
+    void auDemarrage_lesPendingOrphelinesPassentEnFailed() {
+        McpResponse a = pending();
+        McpResponse b = pending();
+        b.setId(2);
+        when(mcpResponseRepository.findByStatus(McpStatus.PENDING)).thenReturn(List.of(a, b));
+
+        runner.failOrphanedPending();
+
+        assertThat(a.getStatus()).isEqualTo(McpStatus.FAILED);
+        assertThat(b.getStatus()).isEqualTo(McpStatus.FAILED);
+        verify(mcpResponseRepository).saveAll(List.of(a, b));
+    }
+
+    @Test
+    void auDemarrage_sansOrphelines_rienNestEcrit() {
+        when(mcpResponseRepository.findByStatus(McpStatus.PENDING)).thenReturn(List.of());
+
+        runner.failOrphanedPending();
+
+        verify(mcpResponseRepository, never()).saveAll(any());
+    }
 }

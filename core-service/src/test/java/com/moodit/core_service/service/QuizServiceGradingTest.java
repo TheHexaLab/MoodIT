@@ -281,6 +281,47 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Ordre avec doublons : un élément répété ne compte qu'à SA position")
+        void ordreAvecDoublons_pasDePointsEnPlus() {
+            // 101 attendu en position 0 seulement : le répéter partout ne rapporte qu'un point.
+            assertThat(gradeSingle(q, order(101, 101, 101)).getEarned()).isEqualTo(1.0);
+            // 102 attendu en position 1 : idem, un seul point.
+            assertThat(gradeSingle(q, order(102, 102, 102)).getEarned()).isEqualTo(1.0);
+        }
+
+        @Test
+        @DisplayName("Ordre plus long que la liste : positions en trop ignorées, jamais plus que le barème")
+        void ordrePlusLong_positionsEnTropIgnorees() {
+            // Règle positionnelle : ajouter des éléments APRÈS l'ordre exact ne rapporte rien de plus.
+            QuestionResultDTO r = gradeSingle(q, order(101, 102, 100, 101, 999));
+
+            assertThat(r.getEarned()).isEqualTo(3.0);
+            assertThat(r.getEarned()).isLessThanOrEqualTo(r.getMax());
+            assertThat(r.getSubmittedOrder()).containsExactly(101, 102, 100, 101, 999);
+        }
+
+        @Test
+        @DisplayName("Ordre plus long décalé par un élément en tête → plus aucune position juste")
+        void ordrePlusLong_decale_zero() {
+            assertThat(gradeSingle(q, order(999, 101, 102, 100)).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Ordre composé d'ids d'une autre question → 0")
+        void idsEtrangers_zero() {
+            assertThat(gradeSingle(q, order(200, 201, 202)).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Ordre contenant un id null → pas de plantage, la position est fausse")
+        void idNull_pasDePlantage() {
+            SubmittedAnswerDTO a = SubmittedAnswerDTO.builder().questionId(30)
+                    .orderedItemIds(java.util.Arrays.asList(101, null, 100)).build();
+
+            assertThat(gradeSingle(q, a).getEarned()).isEqualTo(2.0);
+        }
+
+        @Test
         @DisplayName("Question sans élément → 0")
         void sansElement_zero() {
             Question empty = question(32, ORDERING, 2.0, 0);
@@ -414,6 +455,107 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
 
             assertThat(r.getSubmittedCode()).isNull();
             assertThat(r.getTests()).isNull();
+        }
+    }
+
+    // ── Réponses forgées : ids appartenant à une AUTRE question ─────────────────
+
+    @Nested
+    @DisplayName("Ids d'une autre question : jamais de points sur la question courante")
+    class IdsDUneAutreQuestion {
+
+        private Question q1;
+        private Question q2;
+        private Quiz quiz;
+
+        @BeforeEach
+        void setUp() {
+            q1 = question(100, MULTIPLE, 4.0, 0);
+            answer(q1, 1, "A", true);
+            answer(q1, 2, "B", true);
+            answer(q1, 3, "C", false);
+            q2 = question(101, SINGLE, 2.0, 1);
+            answer(q2, 11, "bonne de Q2", true);
+            answer(q2, 12, "mauvaise de Q2", false);
+            quiz = quiz(1, course(1), q1, q2);
+        }
+
+        @Test
+        @DisplayName("Choix unique : seule la bonne option d'une AUTRE question → 0")
+        void choixUnique_optionDUneAutreQuestion_zero() {
+            Question single = question(110, SINGLE, 3.0, 0);
+            answer(single, 21, "ok", true);
+            answer(single, 22, "ko", false);
+
+            assertThat(gradeSingle(single, choice(110, 11)).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Choix unique : bonne option + id étranger → 0 (l'ensemble doit être exact)")
+        void choixUnique_bonneEtEtrangere_zero() {
+            Question single = question(110, SINGLE, 3.0, 0);
+            answer(single, 21, "ok", true);
+
+            assertThat(gradeSingle(single, choice(110, 21, 11)).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Choix multiple : un id étranger compte comme une MAUVAISE réponse")
+        void choixMultiple_idEtranger_penalise() {
+            QuestionResultDTO r = gradeSingle(q1, choice(100, 1, 2, 11));
+
+            // (2 bonnes − 1 étrangère) / 2 = 0,5 → 2,0 / 4,0, jamais le score plein.
+            assertThat(r.getEarned()).isEqualTo(2.0);
+            assertThat(r.getCorrectAnswerIds()).containsExactly(1, 2);
+        }
+
+        @Test
+        @DisplayName("Choix multiple : uniquement des ids étrangers → 0")
+        void choixMultiple_seulementEtrangers_zero() {
+            assertThat(gradeSingle(q1, choice(100, 11, 12)).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Réponses de Q2 envoyées sous Q1 : 0 pour Q1, Q2 reste non répondue")
+        void reponsesCroisees_aucunPoint() {
+            QuizResultDTO result = grade(quiz,
+                    submission(q1, choice(100, 11)), submission(q2, choice(101, 1, 2)));
+
+            assertThat(result.getQuestions()).extracting(QuestionResultDTO::getEarned)
+                    .containsExactly(0.0, 0.0);
+            assertThat(result.getEarned()).isZero();
+            assertThat(result.getMax()).isEqualTo(6.0);
+        }
+
+        @Test
+        @DisplayName("Remise en ordre : ids des éléments d'une autre question → 0")
+        void ordre_elementsDUneAutreQuestion_zero() {
+            Question ord = question(120, ORDERING, 2.0, 0);
+            drag(ord, 400, "a", 0, null);
+            drag(ord, 401, "b", 1, null);
+            Question other = question(121, ORDERING, 2.0, 1);
+            drag(other, 500, "x", 0, null);
+            drag(other, 501, "y", 1, null);
+
+            QuizResultDTO result = grade(quiz(2, course(1), ord, other), submission(ord,
+                    SubmittedAnswerDTO.builder().questionId(120).orderedItemIds(List.of(500, 501)).build()));
+
+            assertThat(result.getQuestions().get(0).getEarned()).isZero();
+        }
+
+        @Test
+        @DisplayName("Association : placement d'éléments d'une autre question ignoré → 0")
+        void association_elementsDUneAutreQuestion_zero() {
+            Question match = question(130, MATCHING, 2.0, 0);
+            drag(match, 600, "Java", 0, "Objet");
+            drag(match, 601, "Haskell", 0, "Fonctionnel");
+
+            QuestionResultDTO r = gradeSingle(match, SubmittedAnswerDTO.builder().questionId(130)
+                    .placement(Map.of(700, "Objet", 701, "Fonctionnel")).build());
+
+            assertThat(r.getEarned()).isZero();
+            assertThat(r.getMatching()).extracting(MatchingItemResultDTO::getItemId).containsExactly(600, 601);
+            assertThat(r.getMatching()).allSatisfy(m -> assertThat(m.getChosenGroup()).isNull());
         }
     }
 
