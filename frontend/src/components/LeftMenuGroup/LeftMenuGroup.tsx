@@ -6,8 +6,13 @@ interface LeftMenuGroupProps {
   programMenu: React.ReactNode;
   /** Second panneau (menu cours). */
   courseMenu: React.ReactNode;
-  /** Titre affiche dans la barre mobile. */
+  /** Titre affiche dans la barre mobile (absent : « Accueil »). */
   mobileTitle?: string;
+  /**
+   * Identifiant de l'élément ouvert (canal, forum, quiz). Quand il change vers un élément
+   * défini, le tiroir mobile se referme. Absent : le titre mobile sert d'identifiant.
+   */
+  selectionKey?: string | number;
   /** Icône/préfixe du titre (ex. `<ChannelTypeIcon />`). */
   mobileTitlePrefix?: React.ReactNode;
   /** Initiale affichée dans l'avatar mobile (repli si aucun menu fourni). */
@@ -23,12 +28,29 @@ interface LeftMenuGroupProps {
 export default function LeftMenuGroup({
   programMenu,
   courseMenu,
-  mobileTitle = 'Accueil',
+  mobileTitle,
+  selectionKey,
   mobileTitlePrefix = '',
   mobileUserInitial = 'U',
   mobileUserMenu,
 }: LeftMenuGroupProps): React.ReactElement {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  // Choisir un élément dans le tiroir le referme (sinon le contenu reste caché derrière ses
+  // 90 vw). Seul un choix fait dans le tiroir compte : un clic dans le tiroir arme la
+  // fermeture, et le prochain changement de sélection la déclenche. Un changement asynchrone
+  // (restauration du dernier emplacement après rechargement) ne referme donc pas un tiroir
+  // que l'utilisateur vient d'ouvrir. Ajustement pendant le rendu plutôt qu'un effet : pas
+  // de rendu intermédiaire où le tiroir recouvre encore le nouvel élément. Retour à
+  // l'accueil (aucun élément, ex. changement de programme) : le tiroir reste ouvert.
+  const selection = selectionKey ?? mobileTitle;
+  const [lastSelection, setLastSelection] = useState(selection);
+  const [pickedInDrawer, setPickedInDrawer] = useState(false);
+  if (selection !== lastSelection) {
+    setLastSelection(selection);
+    setPickedInDrawer(false);
+    if (pickedInDrawer && selection !== undefined) setIsDrawerOpen(false);
+  }
 
   useEffect(() => {
     if (!isDrawerOpen) return;
@@ -70,7 +92,7 @@ export default function LeftMenuGroup({
           {mobileTitlePrefix && (
             <span role="prefix">{mobileTitlePrefix}</span>
           )}
-          <span role="title">{mobileTitle}</span>
+          <span role="title">{mobileTitle ?? 'Accueil'}</span>
         </h2>
 
         {mobileUserMenu ?? (
@@ -84,6 +106,9 @@ export default function LeftMenuGroup({
         id="left-menu-drawer"
         className={`${styles.sidebarShell} ${isDrawerOpen ? styles.sidebarShellOpen : ''}`}
         aria-label="Menus lateraux"
+        onClick={() => {
+          if (isDrawerOpen) setPickedInDrawer(true);
+        }}
       >
         <div className={styles.sidebarMenus}>
           {programMenu}

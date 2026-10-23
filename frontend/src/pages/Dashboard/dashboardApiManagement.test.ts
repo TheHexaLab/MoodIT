@@ -29,6 +29,7 @@ import {
   fetchEstablishmentPrograms,
   fetchManageableProgramsInEstablishment,
   fetchProgramCourses,
+  fetchCourseProgramIds,
   fetchJoinedCourseIds,
   fetchCourseAnalyses,
   fetchCourseAnalysis,
@@ -364,6 +365,24 @@ describe('fetchManageableProgramsInEstablishment', () => {
 
 // ── Programmes / cours ─────────────────────────────────────────────────────────
 
+describe('fetchCourseProgramIds', () => {
+  it('renvoie les programmes du cours lus dans GET /api/courses/{id}', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({ id: 4, code: 'IFT1', title: 'Algo', programIds: [1, 3] }));
+    expect(await fetchCourseProgramIds(4)).toEqual([1, 3]);
+    expect(mockedApiFetch.mock.calls.map((c) => c[0])).toEqual(['/api/courses/4']);
+  });
+
+  it('liste vide si la réponse ne contient pas programIds', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({ id: 4, programIds: null }));
+    expect(await fetchCourseProgramIds(4)).toEqual([]);
+  });
+
+  it('throw si le cours ne répond pas', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes());
+    await expect(fetchCourseProgramIds(4)).rejects.toThrow();
+  });
+});
+
 describe('fetchProgramCourses', () => {
   it('extrait data.courses et remplace code/titre absents par ""', async () => {
     mockedApiFetch.mockResolvedValueOnce(
@@ -443,10 +462,9 @@ describe('createProgram', () => {
     expect(mockedApiFetch).toHaveBeenCalledTimes(1);
   });
 
-  // BOGUE : la réponse de l'abonnement (POST /api/programs/users) n'est pas vérifiée. Si elle
-  // échoue, createProgram renvoie quand même le programme : le Dashboard l'affiche, mais
-  // l'utilisateur n'y est pas abonné (il disparaît au rechargement), sans aucune erreur.
-  it.fails('throw si l’abonnement au programme créé échoue', async () => {
+  // Garde : si l'abonnement (POST /api/programs/users) échoue, createProgram doit lever une
+  // erreur, sinon le programme s'affiche mais disparaît au rechargement.
+  it('throw si l’abonnement au programme créé échoue', async () => {
     mockedApiFetch
       .mockResolvedValueOnce(res({ id: 30, name: 'Génie' }, { status: 201 }))
       .mockResolvedValueOnce(errRes(500));

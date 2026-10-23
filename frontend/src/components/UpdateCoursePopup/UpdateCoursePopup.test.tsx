@@ -167,6 +167,30 @@ describe('UpdateCoursePopup', () => {
     expect(saveButton().disabled).toBe(true);
   });
 
+  // Garde : un cours rattaché à plusieurs programmes, ouvert depuis l'un d'eux, pré-remplit
+  // TOUS ses programmes (et non le seul programme actif fourni dans course.programIds).
+  it('loadProgramIds : ajoute les programmes rattachés et bloque l’enregistrement pendant le chargement', async () => {
+    let resolve!: (ids: number[]) => void;
+    const loadProgramIds = vi.fn(() => new Promise<number[]>((r) => (resolve = r)));
+    const { onSave } = renderPopup({ loadProgramIds });
+    expect(loadProgramIds).toHaveBeenCalledTimes(1);
+    expect(saveButton().disabled).toBe(true);
+    resolve([1, 3]);
+    expect(await screen.findByText('MAT - 2026')).toBeTruthy();
+    expect(screen.getByText('GIN - Promo 71')).toBeTruthy();
+    expect(saveButton().disabled).toBe(false);
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0][0] as CourseUpdate).programIds).toEqual([1, 3]);
+  });
+
+  it('loadProgramIds en échec : ErrorPopup, programmes pré-remplis conservés', async () => {
+    renderPopup({ loadProgramIds: vi.fn().mockRejectedValue(new Error('panne')) });
+    expect(await screen.findByText(t.loadProgramsError)).toBeTruthy();
+    expect(screen.getByText('GIN - Promo 71')).toBeTruthy();
+    expect(saveButton().disabled).toBe(false);
+  });
+
   it('onSave reçoit le cours modifié (rogné) puis onClose', async () => {
     const { onSave, onClose } = renderPopup();
     fireEvent.change(codeInput(), { target: { value: ' gif300 ' } });

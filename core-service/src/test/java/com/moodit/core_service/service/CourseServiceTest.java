@@ -234,6 +234,18 @@ class CourseServiceTest {
 
       assertThat(dto.getId()).isEqualTo(3);
       assertThat(dto.getCode()).isEqualTo("IFT287");
+      assertThat(dto.getProgramIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findById renvoie les ids des programmes du cours (pré-remplissage de « Modifier le cours »)")
+    void findById_renvoie_les_programmes() {
+      Course c = course(3);
+      c.getPrograms().add(program(10, "Informatique"));
+      c.getPrograms().add(program(11, "Électrique"));
+      when(courseRepository.findById(3)).thenReturn(Optional.of(c));
+
+      assertThat(courseService.findById(3).getProgramIds()).containsExactly(10, 11);
     }
 
     @Test
@@ -295,18 +307,14 @@ class CourseServiceTest {
       when(forumService.findById(5)).thenReturn(ForumDTO.builder().id(5).build());
 
       assertThat(courseService.getForumByIdInCourse(1, 5).getId()).isEqualTo(5);
-      // Forum hors du cours : refusé (RuntimeException générique dans le code actuel).
+      // Forum hors du cours : refusé (détail du type d'exception dans le test suivant).
       assertThatThrownBy(() -> courseService.getForumByIdInCourse(1, 42))
-          .isInstanceOf(RuntimeException.class)
-          .hasMessageContaining("42");
+          .isInstanceOf(RuntimeException.class);
     }
 
-    // Bogue : getForumByIdInCourse lève une RuntimeException générique (non gérée par
-    // GlobalExceptionHandler → HTTP 500) au lieu de ForumNotFoundException (→ 404), alors que
-    // changeSection/forumInCourse utilisent bien ForumNotFoundException pour le même cas.
+    // Forum hors du cours : ForumNotFoundException (→ 404 par GlobalExceptionHandler), comme
+    // changeSection/forumInCourse, et non une RuntimeException générique (→ 500).
     @Test
-    @org.junit.jupiter.api.Disabled(
-        "bogue : getForumByIdInCourse lève RuntimeException (HTTP 500) au lieu de ForumNotFoundException (404)")
     @DisplayName("getForumByIdInCourse : forum hors du cours → ForumNotFoundException (404)")
     void getForumByIdInCourse_forum_hors_cours_devrait_lancer_ForumNotFound() {
       Course c = course(1);
@@ -386,6 +394,33 @@ class CourseServiceTest {
       assertThat(captor.getValue().id()).isEqualTo(1L);
       assertThat(captor.getValue().code()).isEqualTo("IFT999");
       assertThat(captor.getValue().title()).isEqualTo("Nouveau titre");
+    }
+
+    @Test
+    @DisplayName("programIds met à jour le côté propriétaire : programme retiré et programme ajouté")
+    void programIds_met_a_jour_le_cote_proprietaire() {
+      // Course.programs est le côté inverse (mappedBy) : seul Program.courses écrit
+      // program_course. Sans cette mise à jour, le PATCH était ignoré en base.
+      Course c = course(1);
+      Program garde = program(10, "Informatique");
+      Program retire = program(12, "Mécanique");
+      Program ajoute = program(11, "Électrique");
+      garde.setCourses(new java.util.ArrayList<>(List.of(c)));
+      retire.setCourses(new java.util.ArrayList<>(List.of(c)));
+      ajoute.setCourses(new java.util.ArrayList<>());
+      c.getPrograms().add(garde);
+      c.getPrograms().add(retire);
+      when(courseRepository.findById(1)).thenReturn(Optional.of(c));
+      when(courseRepository.save(c)).thenReturn(c);
+      when(programService.findProgramById(10)).thenReturn(garde);
+      when(programService.findProgramById(11)).thenReturn(ajoute);
+
+      courseService.updateCourse(1, CourseUpdateDTO.builder().programIds(List.of(10, 11)).build());
+
+      assertThat(garde.getCourses()).containsExactly(c); // pas de doublon
+      assertThat(ajoute.getCourses()).containsExactly(c);
+      assertThat(retire.getCourses()).isEmpty();
+      assertThat(c.getPrograms()).containsExactly(garde, ajoute);
     }
 
     @Test

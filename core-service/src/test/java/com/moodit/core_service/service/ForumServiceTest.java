@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -799,7 +798,6 @@ class ForumServiceTest {
     // GlobalExceptionHandler → HTTP 500) au lieu de PostNotFoundException (→ 404), contrairement
     // à getPostByForum / updatePost pour le même cas.
     @Test
-    @Disabled("bogue : deletePost lève RuntimeException (HTTP 500) au lieu de PostNotFoundException (404)")
     @DisplayName("deletePost : post absent du forum → PostNotFoundException (404)")
     void deletePost_post_absent_devrait_lancer_PostNotFound() {
       when(forumRepository.findById(6)).thenReturn(Optional.of(forum(6, "Thread")));

@@ -17,6 +17,8 @@ export const defaultLabels: UpdateCoursePopupLabels = {
   save: 'Enregistrer',
   errorTitle: 'Une erreur est survenue',
   saveError: "Échec de l'enregistrement. Réessaie.",
+  loadProgramsError:
+    'Impossible de charger tous les programmes rattachés au cours. Vérifie la liste avant d’enregistrer.',
   errorClose: 'Fermer',
 };
 

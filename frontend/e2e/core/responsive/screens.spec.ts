@@ -38,8 +38,8 @@ import {
 // (document et conteneurs défilants) et les éléments clés (champs, boutons d'action) sont
 // entièrement dans le viewport, non recouverts, et d'une taille tactile suffisante (≥ 24 px,
 // seuil WCAG 2.5.8) sur les profils tactiles. Les cibles entre 24 et 32 px sont annotées dans
-// le rapport (`cible tactile < 32 px`), pas bloquantes ; celles sous 24 px sont dans le
-// `test.fail` en fin de fichier.
+// le rapport (`cible tactile < 32 px`), pas bloquantes ; les boutons-icônes encore sous 24 px
+// passent par `noteTarget` (annotés seulement). Test « cibles tactiles » en fin de fichier.
 
 const main = (page: Page) => mainContent(page);
 
@@ -227,11 +227,9 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
 test('forum : sujet Markdown long et réponses sans débordement', async ({ browser, baseURL, hasTouch }) => {
   const { page, context } = await studentPage(browser, baseURL!);
   const { dense } = layoutOf(page);
-  // Défaut : à 360 px (Galaxy S8), le panneau du forum déborde de 9 px horizontalement dès
-  // l'ouverture (avant tout sujet long) : un paragraphe de 351 px placé à x = 18 dépasse le bord
-  // droit. Les blocs de code, eux, défilent en interne. Attendu : aucun débordement (les profils
-  // ≥ 390 px passent).
-  test.fail(page.viewportSize()!.width <= 360, 'forum : un paragraphe dépasse de 9 px à 360 px');
+  // Dès l'ouverture, à 360 px (Galaxy S8) : le nom du forum dans l'en-tête (« Thread — … »,
+  // caché sous la barre mobile mais mesuré) se tronque au lieu de déborder du panneau ; les
+  // blocs de code, eux, défilent en interne.
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openSidebarItem(page, FORUM_NAME, hasTouch);
   await expectScreenFits(page);
@@ -268,8 +266,7 @@ test('forum : sujet Markdown long et réponses sans débordement', async ({ brow
   await expectReachable(page.getByRole('toolbar', { name: 'Mise en forme Markdown' }));
   await page.getByRole('textbox', { name: 'Titre du sujet' }).fill(title);
   await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill(content);
-  // « Publier » : 23,6 px de haut, cf. le test.fail « cibles tactiles » en fin de fichier.
-  await expectReachable(page.getByRole('button', { name: 'Publier' }));
+  await expectActionable(page.getByRole('button', { name: 'Publier' }), hasTouch);
   await press(page.getByRole('button', { name: 'Publier' }), hasTouch);
 
   const card = main(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) });
@@ -312,8 +309,7 @@ test('quiz : question de code (éditeur, console) sans débordement', async ({ b
   await expectScreenFits(page);
   const editor = main(page).getByRole('textbox', { name: 'Éditeur de code (Python)' });
   await expectField(editor, hasTouch);
-  // « Exécuter » : 22×22 px, cf. le test.fail « cibles tactiles » en fin de fichier.
-  await expectReachable(main(page).getByRole('button', { name: 'Exécuter' }));
+  await expectActionable(main(page).getByRole('button', { name: 'Exécuter' }), hasTouch);
   await expectActionable(main(page).getByRole('button', { name: 'Soumettre' }), hasTouch, 32);
 
   // Ligne très longue : l'éditeur défile en interne, la page et la carte ne bougent pas.
@@ -368,7 +364,7 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
   await expectActionable(program, hasTouch, 32);
   await expect(program).toHaveAttribute('aria-pressed', 'true'); // déjà abonné
   await noteTarget(page.getByRole('button', { name: 'Retour', exact: true }), hasTouch); // 18×18 px
-  for (const name of ['Annuler', 'Enregister']) {
+  for (const name of ['Annuler', 'Enregistrer']) {
     await expectActionable(page.getByRole('button', { name, exact: true }), hasTouch);
   }
   await press(page.getByRole('button', { name: 'Annuler' }), hasTouch);
@@ -630,11 +626,7 @@ test('popups du gardien : établissements et journal d’audit', async ({ browse
     // Journal d'audit (menu du compte) : recherche, filtres, entrées, « Fermer ».
     const menu = await openUserMenu(page);
     await press(menu.getByRole('menuitem', { name: 'Journalisation' }), hasTouch);
-    await expectPopup(page, "Journal d'audit", [], hasTouch);
-    // « Fermer » du journal : 26×23,1 px avec la police Inter (24 px minimum, WCAG 2.5.8) — sa
-    // hauteur vient de la ligne de texte, sans min-height. Annoté, pas bloquant, comme les autres
-    // cibles sous 24 px (cf. test « cibles tactiles » en fin de fichier).
-    await noteTarget(page.getByRole('button', { name: 'Fermer', exact: true }), hasTouch);
+    await expectPopup(page, "Journal d'audit", ['Fermer'], hasTouch);
     await expectField(page.getByRole('textbox', { name: 'Rechercher (résumé, auteur, contexte)…' }), hasTouch);
     const filters = page.getByRole('group', { name: "Journal d'audit" });
     for (const name of ['Tout', 'Établissement', 'Analyse MCP']) {
@@ -693,16 +685,15 @@ test('popups du gardien : établissements et journal d’audit', async ({ browse
   }
 });
 
-// Défaut : cibles tactiles sous le minimum de 24 px (WCAG 2.5.8), CSS identique sur tous les
-// profils — boutons « Voter pour » / « Voter contre » du forum (15×15 px), « Publier » (23,6 px
-// de haut) et « Exécuter » de l'éditeur de code (22×22 px). Attendu : ≥ 24 px. `test.fail` sur
-// tous les profils tant que ce n'est pas corrigé.
+// Cibles tactiles d'au moins 24 px (WCAG 2.5.8), CSS identique sur tous les profils : boutons
+// « Voter pour » / « Voter contre » du forum (icône 15 px dans une zone de 24 px), « Publier » de
+// l'éditeur Markdown et « Exécuter » de l'éditeur de code. Mesuré sur tous les profils, tactiles
+// ou non (le « Fermer » du journal d'audit l'est dans « popups du gardien »).
 test('cibles tactiles : vote, « Publier » et « Exécuter » font au moins 24 px', async ({
   browser,
   baseURL,
   hasTouch,
 }) => {
-  test.fail(true, 'vote 15×15 px, « Publier » 23,6 px de haut, « Exécuter » 22×22 px ; « Fermer » du journal d’audit 23,1 px (annoté dans « popups du gardien »)');
   const { page, context } = await studentPage(browser, baseURL!, [CODE_COURSE.id]);
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await pickCourse(page, 'MAT115', hasTouch); // l'ordre des cours n'est pas garanti (cf. ensureCourse)

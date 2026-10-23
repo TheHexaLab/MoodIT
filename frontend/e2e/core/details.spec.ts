@@ -417,12 +417,10 @@ async function coursesOf(baseURL: string, programId: number): Promise<number[]> 
   });
 }
 
-// Bogue (core-service) : PATCH /api/courses/{id} applique `programIds` sur `Course.programs`, côté
-// INVERSE de la relation (@ManyToMany(mappedBy = "courses")) : Hibernate ignore la modification et
-// le rattachement n'est jamais persisté (ni par l'UI, ni par un appel direct à l'API). Attendu : le
-// cours apparaît dans les cours du second programme.
+// Garde (core-service) : PATCH /api/courses/{id} doit persister `programIds` (autrefois appliqué
+// sur `Course.programs`, côté INVERSE de la relation, donc ignoré). Attendu : le cours apparaît
+// dans les cours du second programme.
 test('« Modifier le cours » : rattacher le cours à un second programme', async ({ browser, baseURL }) => {
-  test.fail(true, 'PATCH /api/courses/{id} ignore programIds (côté inverse de la relation)');
   const other = await asGardien(baseURL!, (api) => createProgramApi(api, 'Det2'));
   const admin = await globalAdmin(baseURL!);
   await enrollApi(admin.api, fx.program.id, [fx.course.id]);
@@ -458,12 +456,10 @@ test('« Modifier le cours » : rattacher le cours à un second programme', asyn
   }
 });
 
-// Bogue (frontend) : UpdateCoursePopup reçoit `programIds: [activeProgramId]` (Dashboard.tsx) au
-// lieu des programmes réellement rattachés au cours. Un cours rattaché à deux programmes, ouvert
-// depuis l'un d'eux, n'affiche que celui-ci (et l'enregistrement enverrait une liste amputée).
-// Attendu : le formulaire pré-remplit tous les programmes rattachés.
+// Garde (frontend) : UpdateCoursePopup ne recevait que `programIds: [activeProgramId]`
+// (Dashboard.tsx). Un cours rattaché à deux programmes, ouvert depuis l'un d'eux, doit afficher
+// les deux (le popup charge les programmes rattachés via loadProgramIds).
 test('« Modifier le cours » : les programmes rattachés sont pré-remplis', async ({ browser, baseURL }) => {
-  test.fail(true, 'le popup ne pré-remplit que le programme actif');
   const other = await asGardien(baseURL!, (api) => createProgramApi(api, 'Det3'));
   // Cours créé d'emblée dans les deux programmes (POST /api/programs/courses, qui rattache bien).
   const course = await asGardien(baseURL!, (api) => createCourseApi(api, [fx.program.id, other.id], 'D3'));

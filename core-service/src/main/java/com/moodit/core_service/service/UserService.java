@@ -163,7 +163,7 @@ public class UserService {
 
   public List<EnrollmentDTO> getEnrollmentsByUser(Integer userId) {
     User user =
-        userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+        userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
     return user.getEnrollments().stream()
         .map(
             e -> {

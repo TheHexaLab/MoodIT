@@ -82,7 +82,7 @@ test('rejoindre un programme depuis l’accueil puis rejoindre et quitter un cou
   await expect(row).toHaveAttribute('aria-pressed', 'false');
   await row.click();
   await expect(row).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'Enregister' }).click();
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
 
   await programButton(page, program.name).click();
   await expect(programButton(page, program.name)).toHaveAttribute('aria-current', 'page');
@@ -140,7 +140,7 @@ test('un programme sans cours propose « Rejoindre un cours » sans rien à rejo
   const { context, page } = await freshUserHome(browser, baseURL!);
   const row = await openJoinProgram(page, emptyProgram.name);
   await row.click();
-  await page.getByRole('button', { name: 'Enregister' }).click();
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
 
   await programButton(page, emptyProgram.name).click();
   const main = mainContent(page);
@@ -169,14 +169,14 @@ test('« Annuler » ne change pas les abonnements ; décocher un programme désa
 
   // Abonnement réel.
   await (await openJoinProgram(page, program.name)).click();
-  await page.getByRole('button', { name: 'Enregister' }).click();
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(programButton(page, program.name)).toBeVisible();
 
   // Rouvrir : le programme suivi est pré-coché ; le décocher puis enregistrer = désabonnement.
   const again = await openJoinProgram(page, program.name);
   await expect(again).toHaveAttribute('aria-pressed', 'true');
   await again.click();
-  await page.getByRole('button', { name: 'Enregister' }).click();
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(programButton(page, program.name)).toHaveCount(0);
 
   await page.reload();
@@ -194,7 +194,7 @@ test('quitter un programme par son menu contextuel (avec confirmation)', async (
 }) => {
   const { context, page } = await freshUserHome(browser, baseURL!);
   await (await openJoinProgram(page, program.name)).click();
-  await page.getByRole('button', { name: 'Enregister' }).click();
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(programButton(page, program.name)).toBeVisible();
 
   // Un étudiant n'a que les deux actions communes à tous.

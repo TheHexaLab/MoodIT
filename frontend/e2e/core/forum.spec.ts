@@ -362,10 +362,6 @@ test('modération : l’enseignant ne voit pas « Supprimer » sur le sujet d’
   browser,
   baseURL,
 }) => {
-  test.fail(
-    true,
-    'Bogue : MainPanel reçoit isAdmin = canManageContent (Dashboard.tsx), donc canModerate est vrai pour un Enseignant'
-  );
   const title = `Sujet E2E gating enseignant ${uniqueSuffix()}`;
   const author = await openForum(browser, await newStudent(baseURL!));
   await publishThread(author.page, title);

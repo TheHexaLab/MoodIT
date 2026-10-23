@@ -19,6 +19,13 @@ function renderGroup(props: Partial<React.ComponentProps<typeof LeftMenuGroup>> 
   );
 }
 
+/** Clic dans le tiroir (choix d'un élément du menu). */
+function clickInDrawer(): void {
+  const drawer = document.getElementById('left-menu-drawer');
+  if (!drawer) throw new Error('tiroir introuvable');
+  fireEvent.click(drawer.firstElementChild ?? drawer);
+}
+
 /** Bouton hamburger (seul porteur d'aria-controls). */
 function hamburger(): HTMLElement {
   const el = document.querySelector('[aria-controls="left-menu-drawer"]');
@@ -91,5 +98,54 @@ describe('LeftMenuGroup', () => {
     if (!backdrop) throw new Error('voile introuvable');
     fireEvent.click(backdrop);
     expect(hamburger().getAttribute('aria-expanded')).toBe('false');
+  });
+  it("choisir un élément (titre mobile qui change) referme le tiroir", () => {
+    const { rerender } = renderGroup();
+    fireEvent.click(hamburger());
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
+    clickInDrawer();
+    rerender(
+      <LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="general" />
+    );
+    expect(hamburger().getAttribute('aria-expanded')).toBe('false');
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  it('selectionKey prime sur le titre : même titre, autre élément → tiroir refermé', () => {
+    const { rerender } = renderGroup({ mobileTitle: 'general', selectionKey: 1 });
+    fireEvent.click(hamburger());
+    clickInDrawer();
+    rerender(
+      <LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="general" selectionKey={2} />
+    );
+    expect(hamburger().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it("retour à l'accueil (aucun élément) laisse le tiroir ouvert", () => {
+    const { rerender } = renderGroup({ mobileTitle: 'general' });
+    fireEvent.click(hamburger());
+    clickInDrawer();
+    rerender(<LeftMenuGroup programMenu={<div />} courseMenu={<div />} />);
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('un changement sans clic dans le tiroir (restauration asynchrone) le laisse ouvert', () => {
+    const { rerender } = renderGroup();
+    fireEvent.click(hamburger());
+    rerender(
+      <LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="general" />
+    );
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it("un clic dans le tiroir n'arme qu'un seul changement de sélection", () => {
+    const { rerender } = renderGroup();
+    fireEvent.click(hamburger());
+    clickInDrawer();
+    rerender(<LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="a" />);
+    expect(hamburger().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(hamburger());
+    rerender(<LeftMenuGroup programMenu={<div />} courseMenu={<div />} mobileTitle="b" />);
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
   });
 });

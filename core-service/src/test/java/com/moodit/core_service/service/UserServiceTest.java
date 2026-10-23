@@ -28,7 +28,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -270,7 +269,6 @@ class UserServiceTest {
     // gérée par GlobalExceptionHandler → HTTP 500 au lieu de 404 (les autres méthodes du service
     // lèvent UserNotFoundException).
     @Test
-    @Disabled("bogue : getEnrollmentsByUser lève RuntimeException (HTTP 500) au lieu de UserNotFoundException (404)")
     @DisplayName("getEnrollmentsByUser : utilisateur inconnu → UserNotFoundException (404)")
     void getEnrollmentsByUser_inconnu_devrait_lancer_UserNotFound() {
       when(userRepository.findById(1)).thenReturn(Optional.empty());

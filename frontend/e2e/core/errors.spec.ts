@@ -278,7 +278,7 @@ test('rejoindre un programme puis ses cours : échecs de chargement et d’enreg
     page,
     '**/api/programs/users',
     'POST',
-    () => page.getByRole('button', { name: 'Enregister' }).click(),
+    () => page.getByRole('button', { name: 'Enregistrer' }).click(),
     async () => {
       await expectErrorAndClose(page, SAVE_ERROR);
       await expect(row).toHaveAttribute('aria-pressed', 'true');

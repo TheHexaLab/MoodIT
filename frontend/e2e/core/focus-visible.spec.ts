@@ -90,7 +90,6 @@ test('accueil : rail, sélecteur de cours, sections, canaux et compte', async ({
 });
 
 test('forum : actions, votes, tri et composeur', async ({ browser, baseURL }) => {
-  test.fail(true, 'focus invisible sur le champ « Titre du sujet » et l’éditeur Markdown (outline: none, seule la bordure change)');
   const { storageState } = await createEnrolledUser(baseURL!);
   const context = await browser.newContext({ storageState });
   const page = await context.newPage();

@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -752,8 +753,10 @@ public class QuizService {
         List<Integer> correctIds = options.stream()
                 .filter(o -> Boolean.TRUE.equals(o.getIsCorrect()))
                 .map(Answer::getId).toList();
+        // Dédoublonné : la requête vient du client. Sans ça, [1, 1] comptait deux bonnes réponses
+        // pour une seule cochée et donnait la note maximale au choix multiple.
         List<Integer> selectedIds = answer != null && answer.getAnswerIds() != null
-                ? answer.getAnswerIds() : List.of();
+                ? new ArrayList<>(new LinkedHashSet<>(answer.getAnswerIds())) : List.of();
         Set<Integer> correctSet = new HashSet<>(correctIds);
 
         double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;

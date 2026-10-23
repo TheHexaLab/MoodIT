@@ -808,9 +808,9 @@ describe('AddSubscriptionPopup', () => {
 
   // ── Libellés ──
 
-  // BOGUE : le libellé par défaut du bouton de la vue « rejoindre » est mal orthographié
-  // (« Enregister » au lieu de « Enregistrer », labels.ts). Ce test décrit le texte attendu.
-  it.fails('le bouton « rejoindre » est libellé « Enregistrer » (faute de frappe dans labels.ts)', () => {
+  // Garde : le libellé par défaut du bouton de la vue « rejoindre » était mal orthographié
+  // (« Enregister »).
+  it('le bouton « rejoindre » est libellé « Enregistrer »', () => {
     expect(defaultLabels.add).toBe('Enregistrer');
   });
 });

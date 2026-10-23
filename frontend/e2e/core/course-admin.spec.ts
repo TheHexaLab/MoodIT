@@ -198,7 +198,9 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
     // L'id (nettoyage en `finally`) est posé par le gestionnaire `response`, asynchrone : l'attendre.
     await expect.poll(() => courseId, { message: 'id du cours créé (réponse POST)' }).toBeDefined();
 
-    // Le cours apparaît dans le sélecteur ; on l'ouvre : il est vide.
+    // Le cours apparaît dans le sélecteur ; on l'ouvre : il est vide. Le programme est ouvert
+    // explicitement : le test ne doit pas dépendre du dernier emplacement enregistré du compte.
+    await programButton(page, PROGRAM_NAME).click();
     const sidebar = page.getByRole('navigation', { name: 'Cours' });
     await sidebar.getByRole('button', { name: 'MAT115', exact: true }).click();
     const picker = page.getByRole('listbox');

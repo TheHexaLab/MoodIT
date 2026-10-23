@@ -286,6 +286,45 @@ describe('QuizEditor — navigation question/harnais', () => {
   });
 });
 
+// Garde : le formulaire du quiz est démonté pendant l'édition d'une question ; le titre et les
+// interrupteurs saisis (non encore enregistrés) doivent survivre au retour.
+describe('QuizEditor — méta du quiz conservées pendant l’édition d’une question', () => {
+  const titleField = () => screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement;
+  const publishedSwitch = () => screen.getByRole('switch', { name: formT.published });
+
+  it('création : titre et « Publié » survivent à l’ajout d’une question', async () => {
+    renderEditor({ quizzes: [], handlers: { onFetchQuestionTypes: () => QUESTION_TYPES } });
+    fireEvent.click(screen.getByText(listT.create));
+    fireEvent.change(titleField(), { target: { value: 'Titre saisi en premier' } });
+    fireEvent.click(publishedSwitch());
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    await screen.findByText(editorT.newQuestionTitle);
+    fireEvent.change(promptField(), { target: { value: 'Une question.' } });
+    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
+    fireEvent.click(screen.getByText(qT.add));
+    await screen.findByText(editorT.newQuizTitle);
+    expect(screen.getByText('Une question.')).toBeTruthy();
+    expect(titleField().value).toBe('Titre saisi en premier');
+    expect(publishedSwitch().getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('édition : le chevron retour conserve la saisie ; « Annuler » la défait', async () => {
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q', isPublished: true })] });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.change(titleField(), { target: { value: 'Q renommé' } });
+    fireEvent.click(publishedSwitch());
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    await screen.findByText(editorT.newQuestionTitle);
+    fireEvent.click(screen.getByLabelText('Retour'));
+    expect(titleField().value).toBe('Q renommé');
+    expect(publishedSwitch().getAttribute('aria-checked')).toBe('false');
+    // « Annuler » restaure l'instantané : le titre d'origine revient dans la liste.
+    fireEvent.click(screen.getByText(formT.cancel));
+    expect(screen.getByLabelText(listT.editAria('Q'))).toBeTruthy();
+  });
+});
+
 describe('QuizEditor — suppressions via popup de confirmation', () => {
   it('supprimer un quiz : popup de confirmation puis onDeleteQuiz', async () => {
     const onDeleteQuiz = vi.fn(async () => {});

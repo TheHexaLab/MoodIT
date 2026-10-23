@@ -38,6 +38,13 @@ interface UpdateCoursePopupProps {
   course: CourseData;
   /** Programmes sélectionnables, fournis par le parent. */
   programs?: Program[];
+  /**
+   * Charge les ids de TOUS les programmes auxquels le cours est rattaché (le parent ne les
+   * connaît pas forcément : un cours ouvert depuis un programme peut appartenir à d'autres).
+   * Le résultat s'ajoute à `course.programIds` tant que l'utilisateur n'a pas modifié la
+   * sélection ; l'enregistrement est bloqué pendant le chargement (pas de liste amputée).
+   */
+  loadProgramIds?: () => MaybePromise<number[] | undefined>;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<UpdateCoursePopupLabels>;
 }
@@ -52,6 +59,7 @@ export function UpdateCoursePopup({
   onSave,
   course,
   programs = [],
+  loadProgramIds,
   labels,
 }: UpdateCoursePopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
@@ -61,6 +69,10 @@ export function UpdateCoursePopup({
   const [title, setTitle] = useState(course.title);
   /** Ids des programmes rattachés au cours. */
   const [programIds, setProgramIds] = useState<number[]>(course.programIds);
+  /** Chargement des programmes rattachés en cours (cf. loadProgramIds) ? */
+  const [loadingPrograms, setLoadingPrograms] = useState(loadProgramIds !== undefined);
+  /** L'utilisateur a-t-il déjà modifié la sélection ? (le chargement ne l'écrase pas) */
+  const programsTouchedRef = useRef(false);
   /** Menu déroulant ouvert ? */
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -85,6 +97,29 @@ export function UpdateCoursePopup({
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  // Charge (une fois, au montage) les programmes réellement rattachés au cours et les ajoute
+  // aux programmes pré-remplis. Le loader est lu au montage seulement : volontairement hors deps.
+  useEffect(() => {
+    if (!loadProgramIds) return;
+    let cancelled = false;
+    // new Promise : appel synchrone du loader, et une exception levée devient un rejet.
+    new Promise<number[] | undefined>((resolve) => resolve(loadProgramIds()))
+      .then((ids) => {
+        if (cancelled || programsTouchedRef.current || !ids) return;
+        setProgramIds((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))]);
+      })
+      .catch(() => {
+        if (!cancelled) setError(t.loadProgramsError);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrograms(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Ferme le menu quand on clique en dehors du champ.
@@ -123,15 +158,18 @@ export function UpdateCoursePopup({
   }
 
   function addProgram(id: number) {
+    programsTouchedRef.current = true;
     setProgramIds((prev) => [...prev, id]);
     setSearch('');
   }
 
   function removeProgram(id: number) {
+    programsTouchedRef.current = true;
     setProgramIds((prev) => prev.filter((pid) => pid !== id));
   }
 
-  const canSave = code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
+  const canSave =
+    !loadingPrograms && code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
 
   async function save() {
     if (!canSave || pending) return;

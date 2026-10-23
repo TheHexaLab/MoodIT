@@ -244,16 +244,12 @@ test('menu du compte : feuille basse ou popover, bascule du thème persistée', 
   await context.close();
 });
 
-// Défaut (disposition tiroir) : choisir un canal dans le tiroir ne le referme pas. Le contenu
-// reste caché derrière les 90 vw du tiroir ; le hamburger est masqué et sous le tiroir ; au
-// tactile il ne reste que la bande de 10 vw du fond (36 px sur un Galaxy S8) pour le refermer.
-// Attendu : le tiroir se referme dès qu'un canal est choisi (comme la barre mobile, qui affiche
-// déjà le nom du canal choisi). `test.fail` tant que ce n'est pas corrigé, sur les profils
-// ≤ 900 px ; sur barre fixe le test vérifie simplement que la barre reste en place.
+// Disposition tiroir : choisir un canal dans le tiroir le referme (sinon le contenu resterait
+// caché derrière ses 90 vw, avec pour seule sortie au tactile la bande de 10 vw du fond).
+// Sur barre fixe le test vérifie simplement que la barre reste en place.
 test('tiroir : choisir un canal le referme', async ({ browser, baseURL, hasTouch }) => {
   const { page, context } = await studentPage(browser, baseURL!);
   const { drawer: isDrawer } = layoutOf(page);
-  test.fail(isDrawer, 'le tiroir des menus reste ouvert après le choix d’un canal');
   await selectProgram(page, PROGRAM_NAME, hasTouch);
 
   await openDrawer(page, hasTouch);
@@ -261,7 +257,6 @@ test('tiroir : choisir un canal le referme', async ({ browser, baseURL, hasTouch
   const composer = mainContent(page).getByRole('textbox', { name: `Envoyer un message dans ${CHANNEL_NAME}` });
   await expect(composer).toBeVisible();
   if (isDrawer) {
-    // Délai court : tant que le défaut existe, ce test échoue à chaque exécution.
     await expectDrawerClosed(page, 3_000);
     await expectReachable(composer);
   } else {
@@ -271,19 +266,16 @@ test('tiroir : choisir un canal le referme', async ({ browser, baseURL, hasTouch
   await context.close();
 });
 
-// Défaut (disposition tiroir) : la barre mobile (fixe, 3.25rem, z-index 70) recouvre l'en-tête
-// du QuizView (même hauteur, en haut du panneau) : le titre y est repris, mais la progression
-// « Question i sur n » n'est jamais visible sur téléphone / tablette portrait (les points de
-// progression sont eux aussi masqués ≤ 900 px ; seule la fine barre reste). Attendu : le statut
-// est visible et non recouvert. `test.fail` ≤ 900 px ; vérifié tel quel sur barre fixe.
+// Disposition tiroir : la barre mobile (fixe, 3.25rem, z-index 70) est en haut de l'écran ; la
+// vue du quiz commence sous elle, donc la progression « Question i sur n » (seul indicateur
+// chiffré ≤ 900 px, les points étant masqués) est visible et non recouverte. Vérifié aussi sur
+// barre fixe.
 test('quiz : la progression « Question i sur n » n’est pas recouverte par la barre mobile', async ({
   browser,
   baseURL,
   hasTouch,
 }) => {
   const { page, context } = await studentPage(browser, baseURL!);
-  const { drawer: isDrawer } = layoutOf(page);
-  test.fail(isDrawer, 'l’en-tête du quiz (progression) est sous la barre mobile fixe');
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openSidebarItem(page, QUIZ_NAME, hasTouch);
   const status = mainContent(page).getByText('Question 1 sur 5', { exact: true });

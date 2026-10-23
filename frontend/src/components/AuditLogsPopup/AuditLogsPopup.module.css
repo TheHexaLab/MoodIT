@@ -37,6 +37,14 @@ div.audit-logs-popup > div {
     color: var(--text-muted);
 }
 .closeButton {
+    /* Cible tactile minimale de 24 px (WCAG 2.5.8) : sans elle, la hauteur venait de la
+       seule ligne de texte (23,1 px avec Inter). Le glyphe ✕ garde sa taille. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 1.5rem;
+    min-height: 1.5rem;
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 1.125rem;

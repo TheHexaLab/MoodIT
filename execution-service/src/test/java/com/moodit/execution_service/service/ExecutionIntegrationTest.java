@@ -95,6 +95,9 @@ class ExecutionIntegrationTest {
                         + "    m = re.search(r'MOODIT_OK_[0-9a-f]+', s)\n"
                         + "    sys.stderr.write(m.group() if m else 'X')\n    return 0",
                 "return doubler(5) == 10")).isFalse();
+        // Un print de premier niveau dont la sortie est du JSON valide ne fausse plus la correction.
+        assertThat(passes("Python", "def doubler(n):\n    return n * 2\n\nprint(doubler(5))\nprint([1, 2])",
+                "return doubler(5) == 10")).isTrue();
     }
 
     @Test

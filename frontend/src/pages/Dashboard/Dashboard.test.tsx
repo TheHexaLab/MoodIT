@@ -69,8 +69,10 @@ vi.mock('../../services/appSocket.ts', () => ({
 
 // ── Vues de contenu : doublures (testées ailleurs) ; on vérifie seulement laquelle s'affiche. ──
 vi.mock('../../components/MainPanel/ChannelView/ChannelView.tsx', () => ({
-  default: (props: { channel: { name: string } }) => (
-    <div data-testid="channel-view">{props.channel.name}</div>
+  default: (props: { channel: { name: string }; canModerate?: boolean }) => (
+    <div data-testid="channel-view" data-can-moderate={String(!!props.canModerate)}>
+      {props.channel.name}
+    </div>
   ),
 }));
 vi.mock('../../components/MainPanel/ForumView/ForumView.tsx', () => ({
@@ -346,9 +348,8 @@ describe('Dashboard', () => {
   });
 
   describe('restauration du dernier emplacement', () => {
-    // La restauration du cours/canal attend une transition coursesLoading true → false
-    // RENDUE. Un vrai appel réseau prend toujours au moins une tâche : on simule cette
-    // latence (sinon voir le test it.fails plus bas).
+    // Un vrai appel réseau prend toujours au moins une tâche : on simule cette latence
+    // (le cas d'une réponse instantanée est couvert par un test dédié plus bas).
     beforeEach(() => {
       vi.mocked(api.fetchCourses).mockImplementation(async (id: number) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -356,12 +357,11 @@ describe('Dashboard', () => {
       });
     });
 
-    // BOGUE : si les cours du programme restauré répondent avant que React n'ait rendu
-    // l'état « chargement » (cache, réponse instantanée), la transition true → false
-    // n'est jamais observée (coursesLoadedForRef reste null) : le cours et le canal
-    // sauvegardés ne sont pas restaurés ET restoreDoneRef reste false, ce qui bloque
-    // toute sauvegarde ultérieure de la localisation pour la session.
-    it.fails('restaure le cours même quand les cours répondent instantanément', async () => {
+    // Garde : si les cours du programme restauré répondent avant que React n'ait rendu
+    // l'état « chargement » (cache, réponse instantanée), la transition true → false n'est
+    // jamais rendue. La restauration ne doit pas en dépendre (cours restauré, et la
+    // sauvegarde de la localisation reste débloquée).
+    it('restaure le cours même quand les cours répondent instantanément', async () => {
       vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
         structuredClone(coursesByProgram[id] ?? [])
       );
@@ -622,6 +622,36 @@ describe('Dashboard', () => {
       // La sidebar n'est mise à jour qu'après succès.
       const nav = screen.getByRole('navigation', { name: 'Cours' });
       expect(within(nav).getByText('general')).toBeTruthy();
+    });
+  });
+
+  describe('droit de modération', () => {
+    // Le programme 2 (« Génie info ») a le rôle Enseignant : on lui donne un canal texte.
+    beforeEach(() => {
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 2
+          ? [{ id: 20, code: 'GIF200', title: 'Circuits', forums: [{ id: 8, title: 'labo', fType: 'Discussion' }] }]
+          : structuredClone(coursesByProgram[id] ?? [])
+      );
+    });
+
+    async function openTeacherChannel() {
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.click(screen.getByText('labo'));
+      return screen.getByTestId('channel-view');
+    }
+
+    // Garde : l'Enseignant gère le contenu (canManageContent) mais NE modère PAS ; seul
+    // l'admin global ou l'Administrateur du programme voit « Supprimer » sur le contenu d'autrui.
+    it('enseignant du programme : le canal ne reçoit pas canModerate', async () => {
+      renderDashboard();
+      expect((await openTeacherChannel()).dataset.canModerate).toBe('false');
+    });
+
+    it('admin global : le canal reçoit canModerate', async () => {
+      renderDashboard({ isAdmin: true });
+      expect((await openTeacherChannel()).dataset.canModerate).toBe('true');
     });
   });
 

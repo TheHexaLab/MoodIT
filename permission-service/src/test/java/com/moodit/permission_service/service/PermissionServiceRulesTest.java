@@ -418,9 +418,6 @@ class PermissionServiceRulesTest {
      * global, chaque programId du body doit être géré (Admin/Enseignant DU programme).
      */
     @Test
-    @Disabled(
-        "bogue : PATCH /courses/{courseId} ignore body.programIds — un enseignant du cours peut le"
-            + " rattacher à un programme qu'il ne gère pas")
     void modifierCours_enseignantRattacheAUnProgrammeNonGere_refuse() {
       loggedIn(user(5));
       lenient().when(membershipService.hasRoleInCourse(5, 1, RoleNames.ADMIN)).thenReturn(false);
@@ -995,9 +992,6 @@ class PermissionServiceRulesTest {
      * Comportement attendu : refuser l'attribution d'un rôle non attribuable en programme.
      */
     @Test
-    @Disabled(
-        "bogue : POST /roles/change ne vérifie pas le rôle ciblé — un admin de programme peut y"
-            + " attribuer le Gardien (program_assignable = FALSE)")
     void changerRoleProgramme_adminDuProgrammeAttribueGardien_refuse() {
       loggedIn(user(5));
       lenient().when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);

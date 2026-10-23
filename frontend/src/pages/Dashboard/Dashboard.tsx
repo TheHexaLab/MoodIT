@@ -119,6 +119,8 @@ export default function Dashboard() {
   // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
   // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
   const [activeProgramId, setActiveProgramId] = useState<number>(-1);
+  // Dernier programme dont les cours ont été chargés avec succès (cf. restauration).
+  const [coursesLoadedFor, setCoursesLoadedFor] = useState<number | null>(null);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
   // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
   // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
@@ -328,6 +330,10 @@ export default function Dashboard() {
     setDashboardPrograms((programs) =>
       programs.map((p) => (p.id === programId ? { ...p, courses } : p))
     );
+    // Repère « les cours de CE programme sont chargés » (posé dans le même lot que les
+    // cours) : la restauration de la localisation s'appuie dessus plutôt que sur la
+    // transition coursesLoading true → false, qui peut ne jamais être rendue.
+    setCoursesLoadedFor(programId);
   }, []);
 
   // Chaînage : on ne charge les cours qu'une fois la liste des programmes chargée
@@ -823,20 +829,6 @@ export default function Dashboard() {
   const restoreDoneRef = useRef(false); // cours + canal traités (débloque la sauvegarde)
   const restoreTargetRef = useRef<SavedLocation | null>(null);
 
-  // Programme dont le chargement des cours s'est EFFECTIVEMENT terminé (transition
-  // coursesLoading true→false). Indispensable pour l'étape 2 : juste après avoir posé le
-  // programme, `coursesLoading` est encore `false` (le loader n'a pas encore basculé) alors
-  // que la liste de cours est vide (fetchPrograms renvoie `courses: []`). Sans ce repère,
-  // l'étape 2 verrait une liste vide et abandonnerait la restauration du cours/canal.
-  const coursesLoadedForRef = useRef<number | null>(null);
-  const prevCoursesLoadingRef = useRef(false);
-  useEffect(() => {
-    if (prevCoursesLoadingRef.current && !coursesLoading) {
-      coursesLoadedForRef.current = activeProgramId;
-    }
-    prevCoursesLoadingRef.current = coursesLoading;
-  }, [coursesLoading, activeProgramId]);
-
   // Étape 1 : sélectionner le programme sauvegardé, une fois la liste chargée.
   useEffect(() => {
     if (restoreStartedRef.current) return;
@@ -864,10 +856,13 @@ export default function Dashboard() {
     if (restoreDoneRef.current || !restoreStartedRef.current) return;
     const target = restoreTargetRef.current;
     if (!target || activeProgramId !== target.programId) return;
-    // Attendre la FIN effective du chargement des cours de ce programme. On ne se fie PAS
-    // au seul instantané `coursesLoading` (false pendant la fenêtre initiale) : on exige
-    // qu'un chargement se soit terminé pour CE programme (coursesLoadedForRef).
-    if (coursesLoading || coursesLoadedForRef.current !== activeProgramId) return;
+    // Attendre que les cours de CE programme soient chargés (coursesLoadedFor). On ne se fie
+    // PAS au seul instantané `coursesLoading` (false pendant la fenêtre initiale, alors que la
+    // liste est encore vide), ni à sa transition true → false, qui n'est jamais rendue quand
+    // la réponse arrive avant le rendu de l'état « chargement ». En cas d'échec du
+    // chargement, on termine la restauration (liste vide → repli) pour débloquer la sauvegarde.
+    if (coursesLoading) return;
+    if (coursesLoadedFor !== activeProgramId && !coursesError) return;
 
     const courseList = dashboardPrograms.find((p) => p.id === activeProgramId)?.courses ?? [];
     if (target.courseId != null && courseList.some((c) => c.id === target.courseId)) {
@@ -878,7 +873,7 @@ export default function Dashboard() {
       if (target.channel) setSelectedChannelRef(target.channel);
     }
     restoreDoneRef.current = true;
-  }, [activeProgramId, coursesLoading, dashboardPrograms]);
+  }, [activeProgramId, coursesLoading, coursesLoadedFor, coursesError, dashboardPrograms]);
 
   // Sauvegarde debouncée à chaque changement de position (une fois la restauration
   // terminée, pour ne pas écraser la localisation sauvegardée par l'état par défaut).
@@ -1031,6 +1026,9 @@ export default function Dashboard() {
 
       <MainPanel
         isAdmin={permsForProgram(activeProgramId).canManageContent}
+        // Modération (supprimer le contenu d'autrui) : admin GLOBAL ou Administrateur du
+        // programme (déduit par MainPanel de roleName), jamais l'Enseignant.
+        isGlobalAdmin={isAdmin}
         program={mainPanelProgram}
         selectedCourse={effectiveSelectedCourseId ?? null}
         selectedChannel={selectedChannelRef ?? null}
@@ -1111,6 +1109,9 @@ export default function Dashboard() {
             code: editingCourse.code ?? '',
             programIds: [activeProgramId],
           }}
+          // Le cours peut être rattaché à d'autres programmes que l'actif : le popup les
+          // charge pour pré-remplir TOUS les programmes rattachés.
+          loadProgramIds={() => api.fetchCourseProgramIds(editingCourse.id)}
           onSave={(update) => handleUpdateCourse(editingCourse.id, update)}
         />
       )}

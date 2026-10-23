@@ -48,7 +48,11 @@ export function CodeInput({
       next[index + k] = c;
     });
     emit(next);
-    const focusAt = Math.min(index + chars.length, length - 1);
+    // La valeur émise est compacte (join('')) : un chiffre saisi après des cases vides
+    // « glisse » vers la gauche. Le focus suit donc la position réelle du dernier chiffre
+    // saisi dans la chaîne compactée (nombre de cases remplies jusqu'à lui), puis avance d'un.
+    const filledUpToLast = next.slice(0, index + chars.length).filter((d) => d !== '').length;
+    const focusAt = Math.min(filledUpToLast, length - 1);
     refs.current[focusAt]?.focus();
   };
 

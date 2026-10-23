@@ -216,22 +216,11 @@ test('copier le nom d’utilisateur', async ({ browser, browserName, baseURL }) 
 // session (autre navigateur) y revient directement.
 test('le dernier emplacement est restauré à la session suivante', async ({
   browser,
-  browserName,
   baseURL,
 }) => {
-  // Bogue (Dashboard.tsx, restauration « étape 2 ») révélé par WebKit : le cours et le canal ne
-  // sont restaurés que si un rendu avec `coursesLoading === true` a été observé avant le `false`.
-  // Si la réponse des cours (ici ~15 ms) arrive avant que React n'ait rendu `loading=true` (état
-  // posé depuis un effet, donc différé à une tâche de l'ordonnanceur, que WebKit retarde), les
-  // deux états sont fusionnés dans un même rendu, la transition n'est jamais vue et seul le
-  // programme est restauré (sélecteur sur MAT115). Vérifié : 6/6 échecs à vitesse réelle, 4/4
-  // succès avec la réponse retardée de 200 ms. Attendu : cours et canal restaurés quelle que soit
-  // la vitesse de la réponse. Le résultat dépend de la charge de la machine (succès dès que la
-  // réponse dépasse ~20 ms) : ni `fail` ni `pass` ne sont déterministes sur WebKit, d'où `fixme`.
-  test.fixme(
-    browserName === 'webkit',
-    'restauration du cours/canal abandonnée quand les cours chargent avant le rendu de loading=true'
-  );
+  // Garde (révélée par WebKit) : la restauration du cours et du canal ne doit pas dépendre de la
+  // vitesse de la réponse des cours (autrefois abandonnée quand elle arrivait avant le rendu de
+  // `coursesLoading === true`).
   const { user, storageState } = await createEnrolledUser(baseURL!);
   await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
 

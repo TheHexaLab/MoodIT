@@ -231,8 +231,19 @@ describe('MainPanel', () => {
 
   describe('droit de modération', () => {
     it('admin global : canModerate vrai', () => {
-      renderPanel({ isAdmin: true, selectedChannel: { type: 'text', id: 5 } });
+      renderPanel({ isGlobalAdmin: true, selectedChannel: { type: 'text', id: 5 } });
       expect(channelViewProps.mock.calls.at(-1)?.[0].canModerate).toBe(true);
+    });
+
+    // Garde : `isAdmin` (gestion du contenu, vrai pour un Enseignant) n'accorde PAS la
+    // modération ; sinon l'Enseignant voit « Supprimer » sur le contenu d'autrui.
+    it('enseignant gestionnaire du contenu (isAdmin) : canModerate faux', () => {
+      renderPanel({
+        isAdmin: true,
+        program: makeProgram({ roleName: ROLE.TEACHER }),
+        selectedChannel: { type: 'forum', id: 6 },
+      });
+      expect(forumViewProps.mock.calls.at(-1)?.[0].canModerate).toBe(false);
     });
 
     it('administrateur du programme : canModerate vrai', () => {

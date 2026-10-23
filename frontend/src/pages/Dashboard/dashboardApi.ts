@@ -630,6 +630,18 @@ export async function fetchProgramCourses(programId: number): Promise<JoinableCo
 }
 
 /**
+ * Programmes auxquels le cours est rattaché (GET /api/courses/{id} → programIds). Sert à
+ * pré-remplir TOUS les programmes du popup « Modifier le cours », y compris ceux que
+ * l'utilisateur ne suit pas (sinon l'enregistrement les retirerait sans le dire).
+ */
+export async function fetchCourseProgramIds(courseId: number): Promise<number[]> {
+  const res = await apiFetch(`/api/courses/${courseId}`);
+  if (!res.ok) throw new Error('Échec chargement des programmes du cours');
+  const data = (await res.json()) as { programIds?: number[] | null };
+  return Array.isArray(data.programIds) ? data.programIds : [];
+}
+
+/**
  * Lister les ids des cours d'un programme auxquels l'utilisateur est DÉJÀ inscrit. Sert à
  * pré-cocher le JoinCoursesPopup, indépendamment de l'état (lazy-loaded) du Dashboard.
  */
@@ -711,11 +723,13 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
   const data = await res.json();
 
   const userId = localStorage.getItem('moodit_user_id');
-  await apiFetch('/api/programs/users', {
+  const subRes = await apiFetch('/api/programs/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: Number(userId), programIds: [data.id] }),
   });
+  // Sans abonnement, le programme disparaîtrait au rechargement : on le signale.
+  if (!subRes.ok) throw new Error('Échec abonnement au programme créé');
 
   return { ...data, courses: [] };
 }

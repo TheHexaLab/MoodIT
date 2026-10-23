@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -206,11 +205,7 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @Disabled("bogue : QuizService.gradeChoice (choix multiple) compte les ids sélectionnés en LISTE, "
-                + "sans dédoublonner. Soumettre deux fois la même bonne option ([1, 1]) donne good = 2 "
-                + "→ ratio 2/2 → score PLEIN alors qu'une seule des deux bonnes réponses est cochée. "
-                + "Attendu : dédoublonner selectedIds (Set) avant le décompte → 2.5 / 5.")
-        @DisplayName("Bogue : une même bonne option envoyée deux fois ne doit compter qu'une fois")
+        @DisplayName("une même bonne option envoyée deux fois ne doit compter qu'une fois")
         void optionDupliquee_compteUneSeuleFois() {
             assertThat(gradeSingle(q, choice(20, 1, 1)).getEarned()).isEqualTo(2.5);
         }

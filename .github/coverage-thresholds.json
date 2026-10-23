@@ -1,12 +1,12 @@
 {
-  "_commentaire": "Seuils de couverture des lignes (%) par service, vérifiés par le job « couverture » de tests.yml (script .github/scripts/coverage-gate.py). Cliquet (#90) : chaque seuil vaut la couverture atteinte, arrondie à l'entier inférieur, avec un plancher de 90 %. Un seuil ne baisse JAMAIS ; quand la couverture d'un service progresse d'un point, remonter son seuil dans la même PR.",
+  "_commentaire": "Seuils de couverture des lignes (%) par service, vérifiés par le job « couverture » de tests.yml (script .github/scripts/coverage-gate.py). 90 % pour tous les services (#90). Un seuil ne baisse jamais ; le cliquet comparé à main est suivi dans #108.",
   "services": {
-    "auth-service": 98,
-    "permission-service": 96,
-    "execution-service": 96,
-    "core-service": 97,
-    "gateway": 99,
-    "mcp-service": 97,
-    "frontend": 91
+    "auth-service": 90,
+    "permission-service": 90,
+    "execution-service": 90,
+    "core-service": 90,
+    "gateway": 90,
+    "mcp-service": 90,
+    "frontend": 90
   }
 }

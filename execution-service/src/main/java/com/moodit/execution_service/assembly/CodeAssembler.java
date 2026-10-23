@@ -192,6 +192,9 @@ public class CodeAssembler {
                 + "        if not line: raise RuntimeError('processus etudiant termine')\n"
                 + "        try: r = __moodit_json.loads(line)\n"
                 + "        except Exception: continue\n"
+                // Le code étudiant partage stdout avec les réponses RPC : un print de premier niveau
+                // dont la sortie est du JSON valide (« 5 », « [1, 2] ») n'est pas une réponse.
+                + "        if not isinstance(r, dict) or 'ok' not in r: continue\n"
                 + "        if not r.get('ok'): raise RuntimeError(str(r.get('error')))\n"
                 + "        return r\n"
                 + proxies

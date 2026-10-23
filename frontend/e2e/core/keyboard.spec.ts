@@ -128,11 +128,9 @@ test.describe('formulaires d’authentification', () => {
     ]);
   });
 
-  // Bogue : la page d'inscription n'a pas de <form> (le bouton « Créer mon compte → » n'est qu'un
-  // onClick) : Entrée dans un champ ne soumet rien, alors que la connexion, elle, soumet.
-  // Attendu : la soumission (ici, la validation des champs requis) se déclenche à Entrée.
+  // Garde : la page d'inscription est un <form> ; Entrée dans un champ déclenche la soumission
+  // (ici, la validation des champs requis), comme sur la page de connexion.
   test('inscription : Entrée dans un champ soumet le formulaire', async ({ page }) => {
-    test.fail(true, 'inscription sans <form> : Entrée ne soumet pas (bouton onClick seulement)');
     await page.goto('/register');
     await page.getByPlaceholder('ex : RKarine').focus();
     await page.keyboard.type(newUser().username);
@@ -334,7 +332,7 @@ test.describe('menus', () => {
   // circulent, Entrée active. Obtenu : le focus reste sur le déclencheur et Tab part ailleurs dans
   // la page (le menu est porté en fin de document).
   test('menu du compte : flèches et Entrée', async ({ browser, baseURL }) => {
-    test.fail(true, 'menu du compte sans gestion du focus ni des flèches');
+    test.fail(true, '#110 menu du compte sans gestion du focus ni des flèches');
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     const trigger = page.getByRole('button', { name: 'Compte utilisateur' });
@@ -359,7 +357,7 @@ test.describe('menus', () => {
   }) => {
     test.fail(
       browserName !== 'chromium',
-      'menus contextuels ouverts seulement au clic droit : pas d’alternative clavier hors Chromium'
+      '#110 menus contextuels ouverts seulement au clic droit : pas d’alternative clavier hors Chromium'
     );
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
@@ -384,7 +382,7 @@ test.describe('menus', () => {
 
   // Attendu (flèches dans le menu, cf. ci-dessus). Obtenu : rien ne bouge.
   test('menu contextuel du programme : flèches', async ({ browser, baseURL, browserName }) => {
-    test.fail(true, 'menus contextuels sans navigation aux flèches');
+    test.fail(true, '#110 menus contextuels sans navigation aux flèches');
     test.skip(browserName !== 'chromium', 'Seul Chromium ouvre un menu contextuel au clavier.');
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
@@ -438,7 +436,7 @@ test.describe('menus', () => {
     browser,
     baseURL,
   }) => {
-    test.fail(true, 'listbox du sélecteur de cours : pas de flèches, Échap ignoré hors de la recherche, focus perdu à la fermeture');
+    test.fail(true, '#110 listbox du sélecteur de cours : pas de flèches, Échap ignoré hors de la recherche, focus perdu à la fermeture');
     const { user, storageState } = await createEnrolledUser(baseURL!);
     await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
     const { page } = await openHome(browser, storageState);
@@ -469,7 +467,7 @@ test.describe('menus', () => {
   // « Publier » / « Annuler » (WCAG 2.1.2 : il faut au moins annoncer la sortie). Les issues
   // existantes — Maj+Tab vers la barre d'outils, Ctrl+Entrée publie, Échap annule — sont vérifiées.
   test('éditeur Markdown : Tab mène au bouton « Publier »', async ({ browser, baseURL }) => {
-    test.fail(true, 'l’éditeur Markdown capture Tab (indentation) : « Publier » inatteignable en avançant');
+    test.fail(true, '#110 l’éditeur Markdown capture Tab (indentation) : « Publier » inatteignable en avançant');
     const { storageState } = await createEnrolledUser(baseURL!);
     const context = await browser.newContext({ storageState });
     const page = await context.newPage();
@@ -575,7 +573,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
   // Attendu (listbox) : flèches entre les options, Entrée valide, le focus revient au contrôle.
   // Obtenu : le menu est porté en fin de document, Tab part ailleurs et les flèches ne font rien.
   test('liste déroulante « Type de question » : flèches et Entrée', async ({ browser }) => {
-    test.fail(true, 'liste déroulante de l’éditeur sans flèches ni focus sur les options');
+    test.fail(true, '#110 liste déroulante de l’éditeur sans flèches ni focus sur les options');
     const { page } = await openHome(browser, fixture.admin.storageState);
     await openQuizForm(page);
     await page.getByRole('button', { name: 'Modifier la question' }).first().click();

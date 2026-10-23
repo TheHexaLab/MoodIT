@@ -336,14 +336,13 @@ test('tester une question : correction locale et évaluation du code par Piston'
   await page.getByRole('button', { name: 'Fermer' }).click();
 });
 
-// Bogue (execution-service, assemblage Python) : le noteur lit les réponses RPC du processus
-// étudiant ligne à ligne et saute les lignes non-JSON ; un print de PREMIER NIVEAU dont la sortie
-// est du JSON valide (ex. « 5 ») est pris pour une réponse RPC → exception → TOUS les harnais
-// échouent, même pour une solution juste. Attendu : le harnais réussit.
+// Garde (execution-service, assemblage Python) : le noteur lit les réponses RPC du processus
+// étudiant ligne à ligne ; un print de PREMIER NIVEAU dont la sortie est du JSON valide (ex. « 5 »)
+// ne doit pas être pris pour une réponse RPC (autrefois : exception → TOUS les harnais échouaient,
+// même pour une solution juste). Attendu : le harnais réussit.
 test('évaluation du code : un print au premier niveau ne fausse pas la correction', async ({
   browser,
 }) => {
-  test.fail(true, 'un print JSON-valide (ex. print(5)) du code étudiant fait échouer les harnais');
   const page = await profPage(browser);
   await openEditor(page);
   await page.getByRole('button', { name: 'Créer un quiz' }).click();
@@ -430,14 +429,10 @@ test('modifier un quiz, annuler, supprimer une question puis le quiz', async ({ 
   expect(titles).not.toContain(renamed);
 });
 
-// Bogue : le titre et les interrupteurs saisis dans « Nouveau quiz » / « Modifier le quiz » sont
-// perdus dès qu'on ouvre l'éditeur de question puis revient (QuizFormBody est démonté et repart de
-// quiz.title, non mis à jour avant l'enregistrement). Attendu : ils sont conservés.
+// Garde : le titre et les interrupteurs saisis dans « Nouveau quiz » / « Modifier le quiz » sont
+// conservés quand on ouvre l'éditeur de question puis revient (QuizFormBody est démonté ; ses méta
+// sont gardées en mémoire par QuizEditor via onStashMeta).
 test('les méta du quiz survivent à l’ajout d’une question', async ({ browser }) => {
-  test.fail(
-    true,
-    'titre et interrupteurs du quiz réinitialisés au retour de l’éditeur de question'
-  );
   const page = await profPage(browser);
   await openEditor(page);
   await page.getByRole('button', { name: 'Créer un quiz' }).click();

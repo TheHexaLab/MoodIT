@@ -113,11 +113,10 @@ describe('CodeInput', () => {
     expect(document.activeElement).toBe(boxes()[3]);
   });
 
-  // BOGUE : la valeur est une chaîne compacte (join('')), donc un chiffre saisi dans une case
-  // précédée de cases vides « glisse » vers la 1re case, mais le focus avance quand même
-  // depuis la case cliquée. Ici : chiffre saisi en case 4 → il s'affiche en case 1 et le
-  // focus part en case 5, laissant les cases 2 à 4 vides derrière le curseur.
-  it.fails('saisie après des cases vides : le focus suit la case où le chiffre s’affiche', () => {
+  // Garde : la valeur est une chaîne compacte (join('')), donc un chiffre saisi dans une case
+  // précédée de cases vides « glisse » vers la 1re case ; le focus doit suivre ce chiffre
+  // (case 2) et non avancer depuis la case cliquée (case 5).
+  it('saisie après des cases vides : le focus suit la case où le chiffre s’affiche', () => {
     render(<Host />);
     fireEvent.change(boxes()[3], { target: { value: '5' } });
     expect(boxes()[0].value).toBe('5');

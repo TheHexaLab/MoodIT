@@ -287,10 +287,6 @@ test('modération : l’enseignant ne voit pas « Supprimer » sur le message d�
   browser,
   baseURL,
 }) => {
-  test.fail(
-    true,
-    'Bogue : MainPanel reçoit isAdmin = canManageContent (Dashboard.tsx), donc canModerate est vrai pour un Enseignant'
-  );
   const content = `Chat E2E gating enseignant ${uniqueSuffix()}`;
   const author = await openChannel(browser, await createEnrolledUser(baseURL!));
   await send(author.page, content);

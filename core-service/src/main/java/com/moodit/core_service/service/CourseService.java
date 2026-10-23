@@ -23,6 +23,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -113,10 +115,16 @@ public class CourseService {
     return dto;
   }
 
+  @Transactional
   public CourseDTO findById(Integer id) {
     Course course = courseRepository.findById(id).orElseThrow(CourseNotFoundException::new);
 
-    return toCourseDTO(course);
+    CourseDTO dto = toCourseDTO(course);
+    dto.setProgramIds(
+        course.getPrograms() == null
+            ? List.of()
+            : course.getPrograms().stream().map(Program::getId).toList());
+    return dto;
   }
 
   public List<ForumDTO> getForumsByCourseId(Integer courseId) {
@@ -144,9 +152,7 @@ public class CourseService {
             .filter(f -> f.getId().equals(forumId))
             .findFirst()
             .orElseThrow(
-                () ->
-                    new RuntimeException(
-                        "Forum not found with id " + forumId + " in course " + courseId));
+                ForumNotFoundException::new); // 404 (et non 500) : forum absent de ce cours
     return forumService.findById(forum.getId());
   }
 
@@ -183,12 +189,31 @@ public class CourseService {
       course.setCode(dto.getCode());
     }
     if (dto.getProgramIds() != null) {
-      // Liste MUTABLE (pas .toList() immuable) : l'entité est managée (@Transactional),
-      // Hibernate synchronise la collection au flush et doit pouvoir la muter.
-      List<Program> programs =
-          dto.getProgramIds().stream()
-              .map(programService::findProgramById)
-              .collect(Collectors.toList());
+      // Course.programs est le côté INVERSE de la relation (mappedBy = "courses") : le modifier
+      // seul ne touche pas program_course, et le PATCH était ignoré. On met donc à jour le côté
+      // propriétaire (Program.courses) des programmes retirés et ajoutés, puis on garde le côté
+      // inverse cohérent pour la réponse et les événements temps réel.
+      Set<Integer> wanted = new LinkedHashSet<>(dto.getProgramIds());
+      List<Program> current =
+          course.getPrograms() == null ? new ArrayList<>() : new ArrayList<>(course.getPrograms());
+      Set<Integer> currentIds = new HashSet<>();
+      for (Program program : current) {
+        currentIds.add(program.getId());
+        if (!wanted.contains(program.getId()) && program.getCourses() != null) {
+          program.getCourses().remove(course);
+        }
+      }
+      List<Program> programs = new ArrayList<>();
+      for (Integer programId : wanted) {
+        Program program = programService.findProgramById(programId);
+        if (!currentIds.contains(programId)) {
+          if (program.getCourses() == null) {
+            program.setCourses(new ArrayList<>());
+          }
+          program.getCourses().add(course);
+        }
+        programs.add(program);
+      }
       course.setPrograms(programs);
     }
 

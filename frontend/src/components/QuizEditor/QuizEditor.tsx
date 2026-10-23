@@ -491,6 +491,9 @@ export function QuizEditor({
             labels={labels?.form}
             onCancel={cancelForm}
             onSaveMeta={(meta) => saveQuizMeta(view.quizId, view.isNew, meta)}
+            // Méta saisies gardées EN MÉMOIRE pendant l'édition d'une question (le formulaire
+            // est démonté) ; « Annuler » les défait via l'instantané, comme les questions.
+            onStashMeta={(meta) => upsertQuiz({ ...activeQuiz, ...meta })}
             onAddQuestion={() => openAddQuestion(view.quizId, view.isNew)}
             onEditQuestion={(q) => openEditQuestion(view.quizId, view.isNew, q)}
             onDeleteQuestion={(q) => setPendingDelete({ kind: 'question', quizId: view.quizId, id: q.id })}

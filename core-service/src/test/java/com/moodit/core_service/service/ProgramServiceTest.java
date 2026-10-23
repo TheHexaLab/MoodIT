@@ -697,7 +697,6 @@ public class ProgramServiceTest {
         // Bogue : sans établissement, les détails d'audit valent la chaîne « Établissement : null »
         // (concaténation d'un null) au lieu d'être null, comme le fait updateProgram pour le même cas.
         @Test
-        @Disabled("bogue : deleteProgram journalise « Établissement : null » quand le programme n'a pas d'établissement")
         @DisplayName("Sans établissement : détails d'audit null (pas « Établissement : null »)")
         void deleteProgram_sans_etablissement_details_null() {
             Program p = programIn(10, null);

@@ -247,9 +247,8 @@ describe('Register', () => {
     expect(screen.getByTestId('path').textContent).toBe('/login');
   });
 
-  // BOGUE : contrairement aux autres pages d'authentification, Register n'a pas de <form> (le
-  // bouton est type="button" avec onClick) : la touche Entrée dans un champ ne soumet rien.
-  it.fails('Entrée dans un champ soumet l’inscription', () => {
+  // Garde : Register est un <form> (bouton type="submit") ; Entrée dans un champ soumet.
+  it('Entrée dans un champ soumet l’inscription', () => {
     register.mockResolvedValueOnce({});
     renderRegister();
     fillValid();

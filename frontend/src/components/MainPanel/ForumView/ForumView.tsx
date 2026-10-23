@@ -758,7 +758,7 @@ const ForumView: React.FC<ForumViewProps> = ({
           <span>
             <ChannelTypeIcon type={channel.type} />
           </span>
-          {channel.name}
+          <span>{channel.name}</span>
         </p>
         <span />
         {courseLabel && <p>{courseLabel}</p>}
