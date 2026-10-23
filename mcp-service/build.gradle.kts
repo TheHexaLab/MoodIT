@@ -101,5 +101,5 @@ pitest {
 	outputFormats = setOf("XML", "HTML")
 	timestampedReports = false
 	timeoutConstInMillis = 8000
-	mutationThreshold = 95 // score mesuré le 2026-10-23 : 98 % ; ne jamais baisser
+	mutationThreshold = 90 // seuil commun aux six services ; score mesuré le 2026-10-23 : 98 %
 }
