@@ -7,6 +7,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "23 3 * * *"   # chaque nuit : Firefox et WebKit complets sur main
 
 # Un seul run par PR (ou par branche) : un nouveau push annule le run précédent, encore en cours.
 concurrency:
@@ -208,36 +210,35 @@ jobs:
           kill "$pid" || true
           exit 1
 
-  # ── Bout en bout : Playwright sur la pile Docker Compose ───────────────────────
-  # Vraies images (Dockerfile), en profil dev, courriels capturés par Mailpit, MCP en repli sans LLM,
-  # Piston avec Python (docker-compose-e2e.yml). Voir frontend/e2e/core/README.md.
-  # Seul `e2e/core` tourne ici : les tests vocaux (e2e/voice, branche vocale) exigent LiveKit.
-  # Un job par profil (frontend/playwright.core.config.ts) : la suite complète sur les trois moteurs
-  # en disposition de bureau, et la suite « responsive » sur tablettes et téléphones.
+  # ── Bout en bout : Playwright contre la pile complète ──────────────────────────
+  # Niveaux : sur une PR, Chromium desktop (en deux moitiés) et les cinq profils tablette/mobile
+  # dans un seul job ; Firefox et WebKit desktop s'ajoutent sur push vers main et chaque nuit.
+  # Chaque job démarre sa pile (images en cache de build gha, cf. docker-compose-ci-cache.yml)
+  # puis joue ses tests dans l'image officielle de Playwright.
   e2e:
-    name: e2e — Playwright (${{ matrix.project }})
+    name: e2e — Playwright (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { project: desktop-chromium, browser: chromium }
-          - { project: desktop-firefox, browser: firefox }
-          - { project: desktop-webkit, browser: webkit }
-          - { project: tablet-portrait, browser: webkit }
-          - { project: tablet-landscape, browser: webkit }
-          - { project: mobile-chromium, browser: chromium }
-          - { project: mobile-webkit, browser: webkit }
-          - { project: mobile-small, browser: chromium }
+        # `matrix` n'est pas disponible dans `jobs.<id>.if` : la liste des profils est choisie ici
+        # selon l'événement. PR : Chromium desktop en deux moitiés + les cinq profils tablette/mobile
+        # dans un job. Push sur main et nuit : Firefox et WebKit desktop en plus.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"desktop-chromium-1","args":"--project=desktop-chromium --shard=1/2"},{"name":"desktop-chromium-2","args":"--project=desktop-chromium --shard=2/2"},{"name":"responsive","args":"--project=tablet-portrait --project=tablet-landscape --project=mobile-chromium --project=mobile-webkit --project=mobile-small"}]' || '[{"name":"desktop-chromium-1","args":"--project=desktop-chromium --shard=1/2"},{"name":"desktop-chromium-2","args":"--project=desktop-chromium --shard=2/2"},{"name":"responsive","args":"--project=tablet-portrait --project=tablet-landscape --project=mobile-chromium --project=mobile-webkit --project=mobile-small"},{"name":"desktop-firefox-1","args":"--project=desktop-firefox --shard=1/2"},{"name":"desktop-firefox-2","args":"--project=desktop-firefox --shard=2/2"},{"name":"desktop-webkit-1","args":"--project=desktop-webkit --shard=1/2"},{"name":"desktop-webkit-2","args":"--project=desktop-webkit --shard=2/2"}]') }}
     env:
-      COMPOSE: docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml
+      COMPOSE: docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml -f docker-compose-ci-cache.yml
+      COMPOSE_BAKE: "true"   # compose build via buildx bake : requis pour le cache type=gha
       FRONTEND_PORT: "5173"
       GATEWAY_PORT: "8080"
       POSTGRES_USER: postgres
       POSTGRES_DB: moodit_db
     steps:
       - uses: actions/checkout@v4
+
+      # Cache de build Docker entre jobs : buildx + variables d'accès au cache GitHub (ACTIONS_*).
+      - uses: docker/setup-buildx-action@v3
+      - uses: crazy-max/ghaction-github-runtime@v3
 
       # Même script qu'en local : construction, BD, attente, Python dans Piston, comptes à rôles.
       - name: Démarrer et préparer la pile
@@ -288,7 +289,7 @@ jobs:
             -v "$PWD/.inter:/usr/share/fonts/truetype/inter:ro" \
             -e CI=true \
             mcr.microsoft.com/playwright:v${{ steps.pw.outputs.version }}-noble \
-            bash -c "fc-cache -f > /dev/null && npx playwright test e2e/core --config playwright.core.config.ts --project=${{ matrix.project }}"
+            bash -c "fc-cache -f > /dev/null && npx playwright test e2e/core --config playwright.core.config.ts ${{ matrix.args }}"
 
       - name: Logs des services (en cas d'échec)
         if: failure()
@@ -298,7 +299,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.name }}
           path: |
             frontend/e2e/report/
             frontend/e2e/results/

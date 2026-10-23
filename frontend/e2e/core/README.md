@@ -1,8 +1,10 @@
 # Tests E2E du frontend (Playwright)
 
 Tous les parcours du frontend, dans de vrais navigateurs, contre la pile **Docker Compose** (vraies
-images, profil dev). Ils tournent en CI à chaque PR (job `e2e` de `.github/workflows/tests.yml`,
-un job par profil de `playwright.core.config.ts`). Les tests vocaux (`e2e/voice`, branche vocale)
+images, profil dev). Ils tournent en CI (job `e2e` de `.github/workflows/tests.yml`) : sur une PR,
+Chromium desktop en deux moitiés (`--shard`) et les cinq profils tablette/mobile dans un seul job ;
+Firefox et WebKit desktop s'ajoutent sur push vers `main` et chaque nuit. Chaque job démarre sa pile
+(images en cache de build gha) et joue ses tests dans l'image officielle de Playwright. Les tests vocaux (`e2e/voice`, branche vocale)
 sont à part : ils exigent LiveKit.
 
 ## Profils (`playwright.core.config.ts`)
@@ -86,7 +88,8 @@ un compte **neuf**.
   chargement.
 - **La police change le layout** : l'app demande Inter sans la fournir. Sur Windows elle retombe
   sur Segoe UI, sur Linux sur DejaVu Sans (plus large) : le titre du forum déborde alors de 41 px
-  à 390 px. Le CI installe `fonts-inter` pour un rendu stable ; en cas de débordement, le message
+  à 390 px. En CI, les tests tournent dans l'image officielle de Playwright avec Inter montée comme
+  police système, pour un rendu stable ; en cas de débordement, le message
   d'erreur liste les éléments en cause et la police effective. Pour reproduire le rendu des
   runners : `docker run --rm -v "$PWD:/work" -w /work -e E2E_BASE_URL=http://host.docker.internal:5173
   mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test …`.

@@ -1,0 +1,47 @@
+# Surcouche CI : cache de build Docker partagé entre les jobs GitHub Actions (type=gha).
+# Les Dockerfiles Java isolent la résolution des dépendances Gradle dans une couche propre :
+# tant que build.gradle.kts ne change pas, cette couche (la plus longue) vient du cache et la
+# pile démarre en 1 à 2 min au lieu de 7. À utiliser avec COMPOSE_BAKE=true et les variables
+# ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL exposées dans le job (crazy-max/ghaction-github-runtime).
+# Jamais en local : sans ces variables, le cache gha est injoignable.
+services:
+  frontend:
+    build:
+      context: ./frontend
+      cache_from: ["type=gha,scope=moodit-frontend"]
+      cache_to: ["type=gha,scope=moodit-frontend,mode=max"]
+  gateway:
+    build:
+      context: ./gateway
+      cache_from: ["type=gha,scope=moodit-gateway"]
+      cache_to: ["type=gha,scope=moodit-gateway,mode=max"]
+  core-service:
+    build:
+      context: ./core-service
+      cache_from: ["type=gha,scope=moodit-core"]
+      cache_to: ["type=gha,scope=moodit-core,mode=max"]
+  auth-service:
+    build:
+      context: ./auth-service
+      cache_from: ["type=gha,scope=moodit-auth"]
+      cache_to: ["type=gha,scope=moodit-auth,mode=max"]
+  permission-service:
+    build:
+      context: ./permission-service
+      cache_from: ["type=gha,scope=moodit-permission"]
+      cache_to: ["type=gha,scope=moodit-permission,mode=max"]
+  mcp-service:
+    build:
+      context: ./mcp-service
+      cache_from: ["type=gha,scope=moodit-mcp"]
+      cache_to: ["type=gha,scope=moodit-mcp,mode=max"]
+  execution-service:
+    build:
+      context: ./execution-service
+      cache_from: ["type=gha,scope=moodit-execution"]
+      cache_to: ["type=gha,scope=moodit-execution,mode=max"]
+  piston:
+    build:
+      context: ./piston
+      cache_from: ["type=gha,scope=moodit-piston"]
+      cache_to: ["type=gha,scope=moodit-piston,mode=max"]
