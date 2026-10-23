@@ -134,18 +134,18 @@ jobs:
 
   # ── Mutation (PIT) : les tests détectent-ils vraiment une erreur ? ─────────────
   # PIT modifie le code (conditions inversées, retours changés…) et compte les modifications que
-  # les tests attrapent. Services critiques seulement (#90), la nuit et sur main : plusieurs minutes
+  # les tests attrapent. Les six services Java (#90), la nuit et sur main : plusieurs minutes
   # par service. Le seuil de score est dans le build.gradle.kts du service (mutationThreshold) :
   # sous ce seuil, Gradle échoue et le job est rouge.
   mutation:
     name: ${{ matrix.service }} — tests de mutation (PIT)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-    timeout-minutes: 30
+    timeout-minutes: 45 # core : ~1 300 mutants
     strategy:
       fail-fast: false
       matrix:
-        service: [auth-service, permission-service, execution-service]
+        service: [gateway, auth-service, core-service, permission-service, mcp-service, execution-service]
     defaults:
       run:
         working-directory: ${{ matrix.service }}

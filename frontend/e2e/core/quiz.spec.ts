@@ -1,3 +1,5 @@
+import { request } from '@playwright/test';
+import { TEST_COURSE_ID } from '../setup/accounts';
 import { expect, test, type Page } from './fixtures';
 import {
   QUIZ_NAME,
@@ -229,6 +231,117 @@ test('question de code et tentative unique', async ({ browser, baseURL }) => {
     await context.close();
   } finally {
     await deleteQuizzesMatching(api, title, baseURL);
+    await api.dispose();
+  }
+});
+
+// Contrat d'API (#90) : l'éditeur et la passation n'envoient jamais ces requêtes, mais l'API les
+// refuse quand même (requête fabriquée). Vérifié de bout en bout, à travers gateway et permissions.
+test('API : une question à choix sans bonne réponse est refusée, à la création comme à la modification', async ({
+  baseURL,
+}) => {
+  const { api } = await profSession(baseURL!);
+  const marker = '[e2e-contrat-choix]';
+  await deleteQuizzesMatching(api, marker);
+  const title = `${marker} ${uniqueSuffix()}`;
+  const choice = (correct: boolean) => ({
+    qType: 'single_choice' as const,
+    prompt: 'Capitale du Canada ?',
+    totalScore: 1,
+    answers: [
+      { content: 'Ottawa', isCorrect: correct },
+      { content: 'Toronto', isCorrect: false },
+    ],
+  });
+  try {
+    // Création refusée : 400 avec le motif, et aucun quiz créé.
+    const refused = await api.post(`/api/courses/${TEST_COURSE_ID}/quizzes`, {
+      data: { title, isPublished: false, isDaily: false, allowRetry: false, questions: [{ ...choice(false), orderIndex: 0 }] },
+    });
+    expect(refused.status()).toBe(400);
+    expect(await refused.text()).toBe('Question 1 : au moins une bonne réponse doit être cochée.');
+    const list = (await (await api.get(`/api/courses/${TEST_COURSE_ID}/quizzes/manage`)).json()) as { title: string }[];
+    expect(list.map((q) => q.title)).not.toContain(title);
+
+    // Modification qui décoche la dernière bonne réponse : refusée, le quiz reste intact.
+    const quizId = await createQuizApi(api, { title, isPublished: false, questions: [choice(true)] });
+    const edit = (await (await api.get(`/api/quizzes/${quizId}/edit`)).json()) as {
+      questions: { answers: { content: string; isCorrect: boolean }[] }[];
+    };
+    const unchecked = {
+      ...edit,
+      questions: edit.questions.map((q) => ({ ...q, answers: q.answers.map((a) => ({ ...a, isCorrect: false })) })),
+    };
+    const update = await api.put(`/api/quizzes/${quizId}`, { data: unchecked });
+    expect(update.status()).toBe(400);
+    const after = (await (await api.get(`/api/quizzes/${quizId}/edit`)).json()) as typeof edit;
+    expect(after.questions[0].answers.filter((a) => a.isCorrect).map((a) => a.content)).toEqual(['Ottawa']);
+  } finally {
+    await deleteQuizzesMatching(api, marker, baseURL);
+    await api.dispose();
+  }
+});
+
+test("API : une remise en ordre qui n'est pas une permutation est refusée sans consommer la tentative", async ({
+  baseURL,
+}) => {
+  const { api } = await profSession(baseURL!);
+  const marker = '[e2e-contrat-ordre]';
+  await deleteQuizzesMatching(api, marker);
+  const title = `${marker} ${uniqueSuffix()}`;
+  try {
+    const quizId = await createQuizApi(api, {
+      title,
+      allowRetry: false, // tentative unique : prouve que les refus ne la consomment pas
+      questions: [
+        {
+          qType: 'ordering',
+          prompt: 'Ordonne les étapes de compilation.',
+          totalScore: 3,
+          dragItems: [
+            { content: 'Prétraitement', correctOrder: 0 },
+            { content: 'Compilation', correctOrder: 1 },
+            { content: 'Édition des liens', correctOrder: 2 },
+          ],
+        },
+      ],
+    });
+    const { storageState } = await createEnrolledUser(baseURL!);
+    const student = await request.newContext({ baseURL, storageState });
+    try {
+      const quiz = (await (await student.get(`/api/quizzes/${quizId}`)).json()) as {
+        questions: { id: number; dragItems: { id: number }[] }[];
+      };
+      const q = quiz.questions[0];
+      const ids = q.dragItems.map((d) => d.id);
+      const submit = (order: (number | null)[]) =>
+        student.post(`/api/quizzes/${quizId}/submissions`, {
+          data: { quizId, answers: [{ questionId: q.id, orderedItemIds: order }] },
+        });
+
+      for (const [cas, order] of [
+        ['élément en trop', [...ids, 999_999]],
+        ['élément manquant', ids.slice(0, 2)],
+        ['doublon', [ids[0], ids[0], ids[1]]],
+        ['id null', [ids[0], null, ids[2]]],
+      ] as const) {
+        const res = await submit([...order]);
+        expect(res.status(), cas).toBe(400);
+        expect(await res.text(), cas).toBe(
+          "Question 1 : l'ordre soumis doit contenir chaque élément exactement une fois."
+        );
+      }
+
+      // Aucune tentative enregistrée : la soumission valide (permutation, même fausse) passe.
+      expect((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).toHaveLength(0);
+      expect((await submit([ids[2], ids[0], ids[1]])).status()).toBe(202);
+      // Et la tentative unique s'applique toujours ensuite.
+      await expect.poll(async () => (await submit([...ids])).status()).toBe(409);
+    } finally {
+      await student.dispose();
+    }
+  } finally {
+    await deleteQuizzesMatching(api, marker, baseURL);
     await api.dispose();
   }
 });
