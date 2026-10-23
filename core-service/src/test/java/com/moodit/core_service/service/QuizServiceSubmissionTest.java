@@ -110,6 +110,58 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
 
+        /** Quiz à une remise en ordre (éléments 100, 101, 102) pour les cas d'ordre soumis. */
+        private Quiz orderingQuiz() {
+            Question ordering = question(30, ORDERING, 3.0, 0);
+            drag(ordering, 100, "A", 0, null);
+            drag(ordering, 101, "B", 1, null);
+            drag(ordering, 102, "C", 2, null);
+            return quiz(4, course(1), ordering);
+        }
+
+        private SubmittedAnswerDTO ordered(Integer... ids) {
+            return SubmittedAnswerDTO.builder().questionId(30)
+                    .orderedItemIds(java.util.Arrays.asList(ids)).build();
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+        @org.junit.jupiter.params.provider.MethodSource("ordresMalFormes")
+        @DisplayName("Ordre soumis qui n'est pas une permutation des éléments → refusé (400), rien d'enregistré")
+        void ordreMalForme_refuse(String cas, Integer[] ids) {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(orderingQuiz()));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(ordered(ids)), EMAIL))
+                    .isInstanceOf(com.moodit.core_service.exception.InvalidQuizException.class)
+                    .hasMessage("Question 1 : l'ordre soumis doit contenir chaque élément exactement une fois.");
+            // La tentative n'est pas consommée : rien n'est écrit, aucune correction lancée.
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> ordresMalFormes() {
+            return java.util.stream.Stream.of(
+                    org.junit.jupiter.params.provider.Arguments.of("élément en trop", new Integer[] {100, 101, 102, 999}),
+                    org.junit.jupiter.params.provider.Arguments.of("élément manquant", new Integer[] {100, 101}),
+                    org.junit.jupiter.params.provider.Arguments.of("doublon", new Integer[] {100, 100, 101}),
+                    org.junit.jupiter.params.provider.Arguments.of("élément d'une autre question", new Integer[] {100, 101, 999}),
+                    org.junit.jupiter.params.provider.Arguments.of("id null", new Integer[] {100, null, 102}));
+        }
+
+        @Test
+        @DisplayName("Ordre complet (permutation, même fausse) ou absent → accepté")
+        void ordreValideOuAbsent_accepte() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(orderingQuiz()));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.submitQuiz(4, body(ordered(102, 100, 101)), EMAIL);
+            service.submitQuiz(4, body(ordered()), EMAIL);
+            service.submitQuiz(4, body(), EMAIL);
+
+            verify(attemptRepository, org.mockito.Mockito.times(3)).saveAndFlush(any(Attempt.class));
+        }
+
         @Test
         @DisplayName("Première tentative : pending n°1, une soumission par question, évènement publié après")
         void premiereTentative_persisteEtPublie() throws Exception {

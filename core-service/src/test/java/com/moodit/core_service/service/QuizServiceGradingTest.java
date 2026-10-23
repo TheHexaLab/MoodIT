@@ -266,11 +266,11 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Ordre soumis plus court que la liste → seules les positions fournies comptent")
-        void ordreIncomplet_positionsFourniesSeulement() {
+        @DisplayName("Ordre soumis plus court que la liste (mal formé) → 0")
+        void ordreIncomplet_malForme_zero() {
             QuestionResultDTO r = gradeSingle(q, order(101, 102));
 
-            assertThat(r.getEarned()).isEqualTo(2.0);
+            assertThat(r.getEarned()).isZero();
         }
 
         @Test
@@ -297,22 +297,19 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Ordre avec doublons : un élément répété ne compte qu'à SA position")
-        void ordreAvecDoublons_pasDePointsEnPlus() {
-            // 101 attendu en position 0 seulement : le répéter partout ne rapporte qu'un point.
-            assertThat(gradeSingle(q, order(101, 101, 101)).getEarned()).isEqualTo(1.0);
-            // 102 attendu en position 1 : idem, un seul point.
-            assertThat(gradeSingle(q, order(102, 102, 102)).getEarned()).isEqualTo(1.0);
+        @DisplayName("Ordre avec doublons (mal formé) → 0, aucun point même aux bonnes positions")
+        void ordreAvecDoublons_malForme_zero() {
+            assertThat(gradeSingle(q, order(101, 101, 101)).getEarned()).isZero();
+            assertThat(gradeSingle(q, order(102, 102, 102)).getEarned()).isZero();
         }
 
         @Test
-        @DisplayName("Ordre plus long que la liste : positions en trop ignorées, jamais plus que le barème")
-        void ordrePlusLong_positionsEnTropIgnorees() {
-            // Règle positionnelle : ajouter des éléments APRÈS l'ordre exact ne rapporte rien de plus.
+        @DisplayName("Ordre plus long que la liste (mal formé) → 0, même si le début est exact")
+        void ordrePlusLong_malForme_zero() {
+            // Refusé à la soumission (requireValidOrderings) ; une donnée antérieure vaut 0.
             QuestionResultDTO r = gradeSingle(q, order(101, 102, 100, 101, 999));
 
-            assertThat(r.getEarned()).isEqualTo(3.0);
-            assertThat(r.getEarned()).isLessThanOrEqualTo(r.getMax());
+            assertThat(r.getEarned()).isZero();
             assertThat(r.getSubmittedOrder()).containsExactly(101, 102, 100, 101, 999);
         }
 
@@ -329,12 +326,12 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Ordre contenant un id null → pas de plantage, la position est fausse")
+        @DisplayName("Ordre contenant un id null (mal formé) → pas de plantage, 0")
         void idNull_pasDePlantage() {
             SubmittedAnswerDTO a = SubmittedAnswerDTO.builder().questionId(30)
                     .orderedItemIds(java.util.Arrays.asList(101, null, 100)).build();
 
-            assertThat(gradeSingle(q, a).getEarned()).isEqualTo(2.0);
+            assertThat(gradeSingle(q, a).getEarned()).isZero();
         }
 
         @Test

@@ -357,6 +357,9 @@ public class QuizService {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
 
+        // Avant toute écriture : une réponse mal formée est refusée (400) sans consommer la tentative.
+        requireValidOrderings(quiz, byQuestion);
+
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
@@ -786,6 +789,35 @@ public class QuizService {
                 .build();
     }
 
+    /**
+     * Une remise en ordre soumise doit être une PERMUTATION des éléments de la question : chacun
+     * exactement une fois, aucun en trop ni d'une autre question. L'interface n'envoie que ça ; une
+     * autre liste vient d'une requête fabriquée. Liste absente ou vide = question non répondue (0).
+     */
+    private void requireValidOrderings(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        int index = 0;
+        for (Question q : sortedQuestions(quiz)) {
+            index++;
+            String slug = q.getQType() == null ? null : Q_TYPE_NAME_TO_SLUG.get(q.getQType().getName());
+            SubmittedAnswerDTO answer = byQuestion.get(q.getId());
+            if (!"ordering".equals(slug) || answer == null) continue;
+            if (!isPermutationOrEmpty(q, answer.getOrderedItemIds())) {
+                throw new InvalidQuizException("Question " + index
+                        + " : l'ordre soumis doit contenir chaque élément exactement une fois.");
+            }
+        }
+    }
+
+    /** Vrai si `submitted` est absent/vide, ou contient chaque élément de la question une seule fois. */
+    private static boolean isPermutationOrEmpty(Question question, List<Integer> submitted) {
+        if (submitted == null || submitted.isEmpty()) return true;
+        List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
+        Set<Integer> expected = items.stream().map(DragItem::getId).collect(Collectors.toSet());
+        return submitted.size() == expected.size()
+                && !submitted.contains(null)
+                && new HashSet<>(submitted).equals(expected);
+    }
+
     private QuestionResultDTO gradeOrdering(Question question, SubmittedAnswerDTO answer) {
         List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
         List<Integer> correctOrder = items.stream()
@@ -795,7 +827,9 @@ public class QuizService {
                 ? answer.getOrderedItemIds() : List.of();
 
         int correctCount = 0;
-        for (int i = 0; i < submittedOrder.size() && i < correctOrder.size(); i++) {
+        // Ordre mal formé (donnée antérieure à la validation, cf. requireValidOrderings) : 0.
+        int limit = isPermutationOrEmpty(question, submittedOrder) ? submittedOrder.size() : 0;
+        for (int i = 0; i < limit && i < correctOrder.size(); i++) {
             if (correctOrder.get(i).equals(submittedOrder.get(i))) correctCount++;
         }
         double ratio = items.isEmpty() ? 0 : (double) correctCount / items.size();
