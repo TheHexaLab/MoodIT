@@ -194,7 +194,7 @@ test('créer un cours : échec puis succès (enseignant)', async ({ browser, bas
     await courseSelector(page, fx.course.code).click();
     await expect(page.getByRole('listbox').getByRole('option', { name: `${code} ${title}` })).toBeVisible();
     await page.keyboard.press('Escape');
-    expect(courseId).toBeDefined();
+    await expect.poll(() => courseId, { message: 'id du cours créé (réponse POST)' }).toBeDefined();
   } finally {
     if (courseId !== undefined) await asGardien(baseURL!, (api) => deleteCourseApi(api, courseId!));
   }
@@ -573,7 +573,9 @@ test('établissements : chargement, création et suppression en panne (gardien)'
       }
     );
     await expect(row).toContainText(`${domain} · Aucun programme`);
-    expect(createdId).toBeDefined();
+    // L'id vient du gestionnaire `response` (asynchrone, après `res.json()`) : la ligne peut
+    // s'afficher avant qu'il soit posé sur un runner lent, on l'attend au lieu de le lire.
+    await expect.poll(() => createdId, { message: 'id de l’établissement créé (réponse POST)' }).toBeDefined();
 
     await underFaultsThenRecover(
       page,
