@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './UpdateCoursePopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
@@ -62,8 +65,8 @@ export function UpdateCoursePopup({
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  const [isClosing, setIsClosing] = useState(false);
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
   /** Conteneur du champ programmes (pour le click-outside du menu). */
   const fieldRef = useRef<HTMLElement | null>(null);
 
@@ -96,23 +99,6 @@ export function UpdateCoursePopup({
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [isOpen]);
-
-  /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
 
   /** Programmes rattachés (dans l'ordre de sélection). */
   function attachedPrograms(): Program[] {
@@ -169,144 +155,146 @@ export function UpdateCoursePopup({
 
   return (
     <>
-      <div
-        className={`${styles['update-course']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.Form}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['update-course']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button onClick={() => requestClose(onClose)}>✕</button>
-          </header>
+        <header>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
+          </div>
+          <button onClick={() => requestClose(onClose)}>✕</button>
+        </header>
 
-          <section className={styles.programs} ref={fieldRef}>
-            <span className={styles['field-label']}>{t.programsLabel}</span>
-            <div className={styles['field-control']}>
-              <div
-                className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}`}
-                onClick={toggleOpen}
-              >
-                {programIds.length === 0 ? (
-                  <span className={styles.placeholder}>{t.programsPlaceholder}</span>
-                ) : (
-                  attachedPrograms().map((program) => (
-                    <span
-                      key={program.id}
-                      className={styles.chip}
-                      style={{ ['--chip-color']: program.color } as React.CSSProperties}
-                      role="button"
+        <section className={styles.programs} ref={fieldRef}>
+          <span className={styles['field-label']}>{t.programsLabel}</span>
+          <div className={styles['field-control']}>
+            <div
+              className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}`}
+              onClick={toggleOpen}
+            >
+              {programIds.length === 0 ? (
+                <span className={styles.placeholder}>{t.programsPlaceholder}</span>
+              ) : (
+                attachedPrograms().map((program) => (
+                  <span
+                    key={program.id}
+                    className={styles.chip}
+                    style={{ ['--chip-color']: program.color } as React.CSSProperties}
+                    role="button"
+                    aria-label={`Retirer ${program.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeProgram(program.id);
+                    }}
+                  >
+                    <span>
+                      {program.code} - {program.cohort}
+                    </span>
+                    <button
+                      type="button"
                       aria-label={`Retirer ${program.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         removeProgram(program.id);
                       }}
                     >
-                      <span>
-                        {program.code} - {program.cohort}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`Retirer ${program.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeProgram(program.id);
-                        }}
-                      >
-                        ×
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <Chevron
+              className={`${styles.chevron}${isOpen ? ` ${styles['chevron-open']}` : ''}`}
+              width="1rem"
+              height="1rem"
+            />
+          </div>
+          {isOpen && (
+            <div className={styles.picker}>
+              <div className={styles['picker-search']}>
+                <MagnifyingGlass width="1rem" height="1rem" />
+                <input
+                  type="text"
+                  placeholder={t.searchPlaceholder}
+                  autoFocus
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation(); // ferme la liste, pas la popup
+                      setIsOpen(false);
+                    }
+                  }}
+                />
+              </div>
+              <ul>
+                {candidatePrograms().length === 0 ? (
+                  <li className={styles['picker-empty']}>
+                    {search.trim() === '' ? t.noCandidates : t.noResults}
+                  </li>
+                ) : (
+                  candidatePrograms().map((program) => (
+                    <li key={program.id}>
+                      <button type="button" onClick={() => addProgram(program.id)}>
+                        <span className={styles.swatch} style={{ background: program.color }}>
+                          <span style={{ color: contrastingTextColor(program.color) }}>
+                            {program.code}
+                          </span>
+                        </span>
+                        <div>
+                          <span>{program.name}</span>
+                          <span>Cohorte {program.cohort}</span>
+                        </div>
                       </button>
-                    </span>
+                    </li>
                   ))
                 )}
-              </div>
-              <Chevron
-                className={`${styles.chevron}${isOpen ? ` ${styles['chevron-open']}` : ''}`}
-                width="1rem"
-                height="1rem"
-              />
+              </ul>
             </div>
-            {isOpen && (
-              <div className={styles.picker}>
-                <div className={styles['picker-search']}>
-                  <MagnifyingGlass width="1rem" height="1rem" />
-                  <input
-                    type="text"
-                    placeholder={t.searchPlaceholder}
-                    autoFocus
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') setIsOpen(false);
-                    }}
-                  />
-                </div>
-                <ul>
-                  {candidatePrograms().length === 0 ? (
-                    <li className={styles['picker-empty']}>
-                      {search.trim() === '' ? t.noCandidates : t.noResults}
-                    </li>
-                  ) : (
-                    candidatePrograms().map((program) => (
-                      <li key={program.id}>
-                        <button type="button" onClick={() => addProgram(program.id)}>
-                          <span className={styles.swatch} style={{ background: program.color }}>
-                            <span style={{ color: contrastingTextColor(program.color) }}>
-                              {program.code}
-                            </span>
-                          </span>
-                          <div>
-                            <span>{program.name}</span>
-                            <span>Cohorte {program.cohort}</span>
-                          </div>
-                        </button>
-                      </li>
-                    ))
-                  )}
-                </ul>
-              </div>
-            )}
-          </section>
+          )}
+        </section>
 
-          <label className={styles.field}>
-            <span>{t.codeLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.codePlaceholder}
-                maxLength={CODE_MAX_LENGTH}
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.codeLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.codePlaceholder}
+              maxLength={CODE_MAX_LENGTH}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+            />
+          </div>
+        </label>
 
-          <label className={styles.field}>
-            <span>{t.titleLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.titlePlaceholder}
-                maxLength={NAME_MAX_LENGTH}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.titleLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.titlePlaceholder}
+              maxLength={NAME_MAX_LENGTH}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+        </label>
 
-          <footer>
-            <button type="button" onClick={() => requestClose(onClose)}>
-              {t.cancel}
-            </button>
-            <button type="button" onClick={save} disabled={!canSave || pending}>
-              {pending ? <Spinner /> : t.save}
-            </button>
-          </footer>
-        </div>
-      </div>
+        <footer>
+          <button type="button" onClick={() => requestClose(onClose)}>
+            {t.cancel}
+          </button>
+          <button type="button" onClick={save} disabled={!canSave || pending}>
+            {pending ? <Spinner /> : t.save}
+          </button>
+        </footer>
+      </Popup>
 
       {error && (
         <ErrorPopup

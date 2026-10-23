@@ -1,69 +1,18 @@
 /* Popup « Rejoindre des cours » : mêmes conventions visuelles que les autres popups
    (scrim, dialog animé, footer dégradé), liste de cours en multi-sélection. */
-.scrim {
-  position: fixed;
-  z-index: 90;
-  inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: var(--scrim);
-  animation: jc-fade-in 0.2s ease-out;
-}
 
 .dialog {
+  /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
   display: flex;
-  box-sizing: border-box;
-  width: min(28rem, 100% - 2rem);
-  max-height: calc(100dvh - 2rem);
   padding: 1rem;
-  margin: 1rem;
   user-select: none;
   flex-direction: column;
   gap: 0.88rem;
-  border-radius: 1rem;
-  background: var(--bg-surface);
-  box-shadow: 0 12px 32px var(--shadow-modal);
-  animation: jc-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (min-width: 768px) {
   .dialog {
-    padding: 1.25rem;
-    margin: 2.13rem;
-    max-height: calc(100dvh - 4.26rem);
-  }
-}
-
-.scrim.closing {
-  animation: jc-fade-out 0.2s ease-in forwards;
-}
-
-.scrim.closing .dialog {
-  animation: jc-pop-out 0.2s ease-in forwards;
-}
-
-@keyframes jc-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes jc-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-@keyframes jc-pop-in {
-  from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes jc-pop-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .scrim,
-  .dialog {
-    animation: none;
+      padding: 1.25rem;
   }
 }
 

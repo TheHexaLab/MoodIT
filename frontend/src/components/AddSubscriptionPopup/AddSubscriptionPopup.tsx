@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './AddSubscriptionPopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { Check } from '../../assets/Check.tsx';
@@ -192,8 +195,8 @@ export function AddSubscriptionPopup({
   const [estDomainTaken, setEstDomainTaken] = useState<string | null>(null);
   const [confirmDeleteEst, setConfirmDeleteEst] = useState<ManagedEstablishment | null>(null);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   /** Retour au menu (en nettoyant l'erreur). */
   function goMenu() {
@@ -501,23 +504,6 @@ export function AddSubscriptionPopup({
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [isEstablishmentOpen]);
 
-  /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
-
   // ── Vue « création » : dropdown + unicité du code ──────────────────
   /** Établissement sélectionné dans le formulaire (avec les codes de ses programmes). */
   const selectedEstablishment = createEstablishments.find((e) => e.id === establishmentId);
@@ -785,7 +771,10 @@ export function AddSubscriptionPopup({
                 value={establishmentSearch}
                 onChange={(e) => setEstablishmentSearch(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Escape') toggleEstablishment(false);
+                  if (e.key === 'Escape') {
+                    e.stopPropagation(); // ferme la liste, pas la popup
+                    toggleEstablishment(false);
+                  }
                 }}
               />
             </div>
@@ -1003,7 +992,10 @@ export function AddSubscriptionPopup({
               onChange={(e) => setEstName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEstablishment();
-                if (e.key === 'Escape') cancelEstEdit();
+                if (e.key === 'Escape') {
+                  e.stopPropagation(); // annule l'édition sans fermer la popup
+                  cancelEstEdit();
+                }
               }}
             />
           </div>
@@ -1016,7 +1008,10 @@ export function AddSubscriptionPopup({
               onChange={(e) => setEstDomain(e.target.value.toLowerCase())}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEstablishment();
-                if (e.key === 'Escape') cancelEstEdit();
+                if (e.key === 'Escape') {
+                  e.stopPropagation(); // annule l'édition sans fermer la popup
+                  cancelEstEdit();
+                }
               }}
             />
           </div>
@@ -1137,40 +1132,39 @@ export function AddSubscriptionPopup({
 
   return (
     <>
-      <div
-        className={`${styles['add-subscription']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.FormWide}
+        label={headerTitle}
+        onClose={onClose}
+        controller={popup}
+        className={styles['add-subscription']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div className={styles['header-main']}>
-              {headerBack && (
-                <button
-                  type="button"
-                  className={styles.back}
-                  aria-label={t.back}
-                  disabled={pending !== null}
-                  onClick={headerBack}
-                >
-                  <Chevron className={styles['back-chevron']} width="1.125rem" height="1.125rem" />
-                </button>
-              )}
-              <div>
-                <h1>{headerTitle}</h1>
-                <p>{headerSubtitle}</p>
-              </div>
+        <header>
+          <div className={styles['header-main']}>
+            {headerBack && (
+              <button
+                type="button"
+                className={styles.back}
+                aria-label={t.back}
+                disabled={pending !== null}
+                onClick={headerBack}
+              >
+                <Chevron className={styles['back-chevron']} width="1.125rem" height="1.125rem" />
+              </button>
+            )}
+            <div>
+              <h1>{headerTitle}</h1>
+              <p>{headerSubtitle}</p>
             </div>
-            <button type="button" onClick={() => requestClose(onClose)}>
-              ✕
-            </button>
-          </header>
-          <div className={styles.body} key={stepKey} data-dir={stepDirection}>
-            {stepContent}
           </div>
+          <button type="button" onClick={() => requestClose(onClose)}>
+            ✕
+          </button>
+        </header>
+        <div className={styles.body} key={stepKey} data-dir={stepDirection}>
+          {stepContent}
         </div>
-      </div>
+      </Popup>
 
       {error && (
         <ErrorPopup
