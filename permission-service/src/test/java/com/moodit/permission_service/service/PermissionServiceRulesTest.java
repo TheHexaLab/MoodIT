@@ -1148,18 +1148,12 @@ class PermissionServiceRulesTest {
      * attendu : décoder/normaliser le chemin avant la recherche de règle.
      */
     @Test
-    @Disabled(
-        "bogue : chemin non décodé avant le match — /api/audit%2Dlogs échappe à la règle et passe"
-            + " en default-allow (GET)")
     void cheminEncode_etudiant_refuse() {
       lenient().when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user(5)));
       assertThat(allowed("/api/audit%2Dlogs", "GET", null)).isFalse();
     }
 
     @Test
-    @Disabled(
-        "bogue : chemin non décodé avant le match — /api/quizzes/12/%65dit (vue éditeur avec"
-            + " correction) passe en default-allow pour un étudiant")
     void cheminEncode_vueEditeurQuiz_etudiant_refuse() {
       lenient().when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user(5)));
       lenient()
@@ -1169,6 +1163,28 @@ class PermissionServiceRulesTest {
           .when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER))
           .thenReturn(false);
       assertThat(allowed("/api/quizzes/12/%65dit", "GET", null)).isFalse();
+    }
+
+    @Test
+    void cheminEncode_gardien_garde_son_acces() {
+      // Le décodage ne doit pas casser l'accès légitime : le gardien lit le journal même encodé.
+      lenient()
+          .when(userRepository.findByEmail(EMAIL))
+          .thenReturn(Optional.of(user(5, RoleNames.GUARDIAN)));
+      assertThat(allowed("/api/audit%2Dlogs", "GET", null)).isTrue();
+    }
+
+    @Test
+    void cheminDoublementEncode_refuse() {
+      // %252D se décode en « %2D » : jamais légitime, refusé même pour une route sans règle.
+      assertThat(allowed("/api/audit%252Dlogs", "GET", null)).isFalse();
+      assertThat(allowed("/api/catalogue%2541", "GET", null)).isFalse();
+    }
+
+    @Test
+    void cheminEncodageInvalide_refuse() {
+      assertThat(allowed("/api/audit%ZZlogs", "GET", null)).isFalse();
+      assertThat(allowed("/api/audit-logs%", "GET", null)).isFalse();
     }
   }
 
