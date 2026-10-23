@@ -1,6 +1,7 @@
 plugins {
 	java
 	jacoco
+	id("info.solidsoft.pitest") version "1.19.0"
 	id("org.springframework.boot") version "4.0.6"
 	id("io.spring.dependency-management") version "1.1.7"
 }
@@ -57,4 +58,18 @@ tasks.jacocoTestReport {
 
 tasks.test {
 	finalizedBy(tasks.jacocoTestReport)
+}
+
+// Tests de mutation (#90) : `./gradlew pitest` (rapport build/reports/pitest/). PIT modifie le code
+// (conditions inversées, retours changés…) et vérifie que les tests le détectent. Lancé la nuit et
+// sur main, pas sur chaque PR (plusieurs minutes). Tests exigeant Postgres ou Piston exclus.
+pitest {
+	pitestVersion = "1.30.1"
+	junit5PluginVersion = "1.2.3"
+	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.piston.*")
+	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest")
+	threads = 4
+	outputFormats = setOf("XML", "HTML")
+	timestampedReports = false
+	mutationThreshold = 88 // score mesuré le 2026-10-23 : 91 % ; ne jamais baisser
 }

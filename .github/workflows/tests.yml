@@ -132,6 +132,66 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  # ── Mutation (PIT) : les tests détectent-ils vraiment une erreur ? ─────────────
+  # PIT modifie le code (conditions inversées, retours changés…) et compte les modifications que
+  # les tests attrapent. Services critiques seulement (#90), la nuit et sur main : plusieurs minutes
+  # par service. Le seuil de score est dans le build.gradle.kts du service (mutationThreshold) :
+  # sous ce seuil, Gradle échoue et le job est rouge.
+  mutation:
+    name: ${{ matrix.service }} — tests de mutation (PIT)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, permission-service, execution-service]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Tests de mutation
+        run: |
+          chmod +x ./gradlew
+          ./gradlew pitest --no-daemon --console=plain
+
+      - name: Score de mutation dans le résumé
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          p = 'build/reports/pitest/mutations.xml'
+          if os.path.exists(p):
+              muts = ET.parse(p).getroot().findall('mutation')
+              killed = sum(1 for m in muts if m.get('detected') == 'true')
+              score = 100 * killed / len(muts) if muts else 100
+              line = f"{os.environ['SERVICE']} : {killed}/{len(muts)} mutations détectées ({score:.0f} %)"
+          else:
+              line = f"{os.environ['SERVICE']} : rapport PIT absent"
+          print(line)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              out.write(f"## Mutation\n\n{line}\n")
+          PY
+        env:
+          SERVICE: ${{ matrix.service }}
+
+      - name: Publier le rapport PIT
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitest-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/pitest/
+          if-no-files-found: ignore
+
   # ── Couverture : une ligne verte ou rouge par service, selon son seuil ─────────
   # Seuils dans .github/coverage-thresholds.json (#90). Tourne même si un job de tests a échoué :
   # un rapport manquant compte alors comme un échec, en rouge.
