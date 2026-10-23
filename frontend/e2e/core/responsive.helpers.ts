@@ -138,6 +138,7 @@ export async function openSidebarItem(page: Page, name: string, hasTouch = false
 /** Change de cours par le sélecteur (listbox portée dans <body>) et referme le tiroir. */
 export async function pickCourse(page: Page, code: string, hasTouch = false) {
   await openDrawer(page, hasTouch);
+  await expect(coursePicker(page)).toBeVisible(); // le texte lu ensuite doit être celui du sélecteur rendu
   if ((await coursePicker(page).innerText()).trim() !== code) {
     await press(coursePicker(page), hasTouch);
     await press(page.getByRole('option', { name: new RegExp(`^${code} `) }), hasTouch);

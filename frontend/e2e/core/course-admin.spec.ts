@@ -195,6 +195,8 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
     await page.getByRole('textbox', { name: 'Titre du cours' }).fill(title);
     await page.getByRole('button', { name: 'Sauvegarder' }).click();
     await expect(page.getByRole('heading', { name: 'Ajouter un cours' })).toHaveCount(0);
+    // L'id (nettoyage en `finally`) est posé par le gestionnaire `response`, asynchrone : l'attendre.
+    await expect.poll(() => courseId, { message: 'id du cours créé (réponse POST)' }).toBeDefined();
 
     // Le cours apparaît dans le sélecteur ; on l'ouvre : il est vide.
     const sidebar = page.getByRole('navigation', { name: 'Cours' });
