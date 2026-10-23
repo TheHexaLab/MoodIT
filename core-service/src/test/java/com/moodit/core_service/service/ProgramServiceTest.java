@@ -476,5 +476,237 @@ public class ProgramServiceTest {
             verify(enrollmentRepository).deleteForUserLeavingProgram(5, 1);     // inscriptions retirées
         }
     }
+
+    // ── Chemins complémentaires (#90) : membres, candidats, synchro par établissement, échos WS ──
+
+    private static Establishment establishment(int id, String name) {
+        Establishment e = new Establishment();
+        e.setId(id);
+        e.setName(name);
+        return e;
+    }
+
+    private static Program programIn(int id, Establishment est) {
+        return Program.builder().id(id).name("P" + id).code("C" + id).cohort("71").color("#00000" + id)
+                .establishment(est).build();
+    }
+
+    @Nested
+    class getUsersByProgram {
+        @Test
+        @DisplayName("Chaque membre porte ses rôles DANS ce programme (vide s'il n'en a pas)")
+        void getUsersByProgram_roles_par_programme() {
+            User alice = User.builder().id(1).username("alice").email("a@test.ca").build();
+            User bob = User.builder().id(2).username("bob").build();
+            when(userProgramRoleRepository.findByProgramId(10)).thenReturn(List.of(
+                    new UserProgramRole(10, 1, 1), new UserProgramRole(10, 1, 2)));
+            when(userRepository.findDistinctByPrograms_Id(10)).thenReturn(List.of(alice, bob));
+
+            List<UserDTO> result = programService.getUsersByProgram(10);
+
+            assertEquals(2, result.size());
+            assertEquals("alice", result.get(0).getUsername());
+            assertEquals("a@test.ca", result.get(0).getEmail());
+            assertEquals(List.of(1, 2), result.get(0).getRoles());
+            assertEquals(List.of(), result.get(1).getRoles());
+        }
+    }
+
+    @Nested
+    class getProgramRoleCandidates {
+        @Test
+        @DisplayName("Normalise la recherche (trim + minuscules), borne page/taille et joint les rôles actuels")
+        void getProgramRoleCandidates_normalise_et_borne() {
+            User bob = User.builder().id(2).username("bob").build();
+            when(userProgramRoleRepository.findByProgramId(10)).thenReturn(List.of(new UserProgramRole(10, 2, 1)));
+            when(userRepository.findProgramRoleCandidates(eq(10), eq(2), any(), any())).thenReturn(List.of(bob));
+
+            List<UserDTO> first = programService.getProgramRoleCandidates(10, 2, "  BoB ", -1, 0);
+            programService.getProgramRoleCandidates(10, 2, null, 3, 999);
+
+            org.mockito.ArgumentCaptor<String> q = org.mockito.ArgumentCaptor.forClass(String.class);
+            org.mockito.ArgumentCaptor<org.springframework.data.domain.Pageable> page =
+                    org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+            verify(userRepository, times(2)).findProgramRoleCandidates(eq(10), eq(2), q.capture(), page.capture());
+            assertEquals(List.of("bob", ""), q.getAllValues());
+            assertEquals(0, page.getAllValues().get(0).getPageNumber());
+            assertEquals(10, page.getAllValues().get(0).getPageSize());
+            assertEquals(3, page.getAllValues().get(1).getPageNumber());
+            assertEquals(50, page.getAllValues().get(1).getPageSize());
+            assertEquals(List.of(1), first.get(0).getRoles());
+        }
+    }
+
+    @Nested
+    class addUserToProgramsParEtablissement {
+        @Test
+        @DisplayName("establishmentId fourni : retire les programmes déselectionnés de CET établissement seulement, ajoute les nouveaux, émet les deux")
+        void addUserToPrograms_synchro_scopee_a_l_etablissement() {
+            Establishment udes = establishment(1, "UdeS");
+            Establishment poly = establishment(2, "Poly");
+            Program p1 = programIn(1, udes);   // déselectionné → retiré
+            Program p2 = programIn(2, poly);   // autre établissement → conservé
+            Program p3 = programIn(3, udes);   // demandé → ajouté
+            User u = User.builder().id(5).username("alice").programs(new ArrayList<>(List.of(p1, p2))).build();
+            when(userRepository.findById(5)).thenReturn(Optional.of(u));
+            when(programRepository.findById(3)).thenReturn(Optional.of(p3));
+            UserCreateInProgramsDTO dto = UserCreateInProgramsDTO.builder()
+                    .id(5).programIds(List.of(3)).establishmentId(1).build();
+
+            programService.addUserToPrograms(dto);
+
+            assertEquals(List.of(p2, p3), u.getPrograms());
+            verify(userRepository).save(u);
+            verify(auditLogService).record("PROGRAM_MEMBER_ADD", "PROGRAM", 3,
+                    "Utilisateur alice ajouté au(x) programme(s) : P3", "Programme(s) : P3");
+            verify(realtimePublisher).subscriptionRemoved(5L, 1L);
+            verify(realtimePublisher).subscriptionAdded(5L,
+                    new com.moodit.core_service.realtime.dto.ProgramDto(3, "P3", "C3", "71", "#000003"));
+        }
+
+        @Test
+        @DisplayName("Programmes déjà suivis : rien n'est ajouté, l'audit replie sur les ids (entityId null si plusieurs)")
+        void addUserToPrograms_deja_suivis_repli_sur_les_ids() {
+            Program p1 = programIn(1, null);
+            Program p2 = programIn(2, null);
+            User u = User.builder().id(5).programs(new ArrayList<>(List.of(p1, p2))).build();
+            when(userRepository.findById(5)).thenReturn(Optional.of(u));
+
+            programService.addUserToPrograms(UserCreateInProgramsDTO.builder().id(5).programIds(List.of(1, 2)).build());
+
+            assertEquals(List.of(p1, p2), u.getPrograms());
+            verify(programRepository, never()).findById(any());
+            verify(auditLogService).record(eq("PROGRAM_MEMBER_ADD"), eq("PROGRAM"), isNull(),
+                    eq("Utilisateur #5 ajouté au(x) programme(s) : [1, 2]"), eq("Programme(s) : [1, 2]"));
+            verifyNoInteractions(realtimePublisher);
+        }
+    }
+
+    @Nested
+    class updateProgramComplet {
+        @Test
+        @DisplayName("Met à jour tous les champs, journalise l'établissement, émet programUpdated par abonné et republie le catalogue")
+        void updateProgram_tous_les_champs_et_echos() {
+            Establishment udes = establishment(1, "UdeS");
+            Program p = programIn(10, udes);
+            when(programRepository.findById(10)).thenReturn(Optional.of(p));
+            when(userRepository.findDistinctByPrograms_Id(10)).thenReturn(List.of(
+                    User.builder().id(100).build(), User.builder().id(101).build()));
+            when(programRepository.findByEstablishment_Id(1)).thenReturn(List.of(p));
+            ProgramUpdateDTO dto = ProgramUpdateDTO.builder()
+                    .name("Génie info").code("GIF").cohort("72").color("#abcdef").build();
+
+            ProgramDTO result = programService.updateProgram(10, dto);
+
+            assertEquals("Génie info", result.getName());
+            assertEquals("GIF", result.getCode());
+            assertEquals("72", result.getCohort());
+            assertEquals("#abcdef", result.getColor());
+            verify(auditLogService).record("PROGRAM_UPDATE", "PROGRAM", 10,
+                    "Programme « Génie info » mis à jour", "Établissement : UdeS");
+            com.moodit.core_service.realtime.dto.ProgramDto expected =
+                    new com.moodit.core_service.realtime.dto.ProgramDto(10, "Génie info", "GIF", "72", "#abcdef");
+            verify(realtimePublisher).programUpdated(100L, expected);
+            verify(realtimePublisher).programUpdated(101L, expected);
+            verify(realtimePublisher).establishmentUpdated(1L, List.of(expected));
+        }
+    }
+
+    @Nested
+    class catalogueEtRecherche {
+        @Test
+        @DisplayName("publishEstablishmentCatalog(null) ne fait rien")
+        void publishEstablishmentCatalog_null_sans_effet() {
+            programService.publishEstablishmentCatalog(null);
+
+            verifyNoInteractions(programRepository, realtimePublisher);
+        }
+
+        @Test
+        @DisplayName("Dans une transaction, l'écho du catalogue n'est émis qu'APRÈS le commit")
+        void publishEstablishmentCatalog_attend_le_commit() {
+            when(programRepository.findByEstablishment_Id(1)).thenReturn(List.of());
+            org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+            try {
+                programService.publishEstablishmentCatalog(1);
+                verify(realtimePublisher, never()).establishmentUpdated(anyLong(), any());
+
+                org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                        .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+                verify(realtimePublisher).establishmentUpdated(1L, List.of());
+            } finally {
+                org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            }
+        }
+
+        @Test
+        @DisplayName("findProgramById renvoie l'entité ou lance ProgramNotFoundException")
+        void findProgramById_trouve_ou_echoue() {
+            Program p = programIn(10, null);
+            when(programRepository.findById(10)).thenReturn(Optional.of(p));
+            when(programRepository.findById(99)).thenReturn(Optional.empty());
+
+            assertSame(p, programService.findProgramById(10));
+            assertThrows(ProgramNotFoundException.class, () -> programService.findProgramById(99));
+        }
+
+        @Test
+        @DisplayName("getCoursesByProgram(null) → IllegalArgumentException sans accès BD")
+        void getCoursesByProgram_id_null() {
+            assertThrows(IllegalArgumentException.class, () -> programService.getCoursesByProgram(null));
+            verifyNoInteractions(programRepository);
+        }
+    }
+
+    @Nested
+    class deleteProgramUnitaire {
+        @Test
+        @DisplayName("Supprime, purge les cours orphelins, journalise et émet programDeleted + catalogue")
+        void deleteProgram_purge_les_orphelins_et_emet() {
+            Establishment udes = establishment(1, "UdeS");
+            Program p = programIn(10, udes);
+            p.setCourses(List.of(Course.builder().id(20).build(), Course.builder().id(21).build()));
+            when(programRepository.findById(10)).thenReturn(Optional.of(p));
+            when(userRepository.findDistinctByPrograms_Id(10)).thenReturn(List.of(User.builder().id(100).build()));
+            when(programRepository.findByEstablishment_Id(1)).thenReturn(List.of());
+
+            programService.deleteProgram(10);
+
+            org.mockito.InOrder order = inOrder(programRepository, courseRepository);
+            order.verify(programRepository).delete(p);
+            order.verify(programRepository).flush();
+            order.verify(courseRepository).deleteOrphanedAmong(List.of(20, 21));
+            verify(auditLogService).record("PROGRAM_DELETE", "PROGRAM", 10,
+                    "Programme « P10 » (#10) supprimé", "Établissement : UdeS");
+            verify(realtimePublisher).programDeleted(100L, 10);
+            verify(realtimePublisher).establishmentUpdated(1L, List.of());
+        }
+
+        @Test
+        @DisplayName("Sans cours (courses null) : aucune purge d'orphelins")
+        void deleteProgram_sans_cours() {
+            Program p = programIn(10, establishment(1, "UdeS"));
+            when(programRepository.findById(10)).thenReturn(Optional.of(p));
+
+            programService.deleteProgram(10);
+
+            verify(programRepository).delete(p);
+            verify(courseRepository, never()).deleteOrphanedAmong(any());
+        }
+
+        // Bogue : sans établissement, les détails d'audit valent la chaîne « Établissement : null »
+        // (concaténation d'un null) au lieu d'être null, comme le fait updateProgram pour le même cas.
+        @Test
+        @Disabled("bogue : deleteProgram journalise « Établissement : null » quand le programme n'a pas d'établissement")
+        @DisplayName("Sans établissement : détails d'audit null (pas « Établissement : null »)")
+        void deleteProgram_sans_etablissement_details_null() {
+            Program p = programIn(10, null);
+            when(programRepository.findById(10)).thenReturn(Optional.of(p));
+
+            programService.deleteProgram(10);
+
+            verify(auditLogService).record(eq("PROGRAM_DELETE"), eq("PROGRAM"), eq(10), any(), isNull());
+        }
+    }
 }
 

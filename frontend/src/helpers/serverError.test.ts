@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { classifyServerError, publicServerError } from './serverError';
 
 /**
@@ -69,7 +69,7 @@ describe('classifyServerError', () => {
 
 /**
  * publicServerError : en PROD masque le détail technique, sinon renvoie le message brut.
- * import.meta.env.PROD vaut false sous Vitest → on teste la branche dev.
+ * import.meta.env.PROD vaut false sous Vitest ; la branche PROD est forcée via vi.stubEnv.
  */
 describe('publicServerError', () => {
   it('en dev (PROD=false) renvoie le message brut', () => {
@@ -82,5 +82,25 @@ describe('publicServerError', () => {
 
   it('confirme que import.meta.env.PROD est falsy sous Vitest', () => {
     expect(import.meta.env.PROD).toBeFalsy();
+  });
+
+  // Branche PROD : on force la variable d'environnement le temps du test.
+  describe('en production (PROD=true)', () => {
+    beforeEach(() => {
+      vi.stubEnv('PROD', true);
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('masque le détail technique derrière un message générique', () => {
+      expect(publicServerError('Erreur 403 Forbidden')).toBe(
+        'Une erreur est survenue. Veuillez réessayer plus tard.'
+      );
+    });
+
+    it('n’influence pas classifyServerError (le mapping par champ reste actif)', () => {
+      expect(classifyServerError('Mot de passe incorrect')).toBe('password');
+    });
   });
 });
