@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { expect, request, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { DEV_2FA_CODE, TEST_COURSE_ID, TEST_PASSWORD, TEST_PROGRAM_ID } from '../setup/accounts';
 
 /** Noms du seed d'init.sql pour le programme / cours de test (ids 1). */
@@ -162,14 +162,23 @@ export const mainContent = (page: Page) => page.getByRole('region', { name: 'Con
 export async function waitForPopupSettled(page: Page) {
   const dialog = page.getByRole('dialog').last();
   await expect(dialog).toBeVisible();
+  await waitForSettled(dialog, 'popup immobile (taille et position stables)');
+}
+
+/**
+ * Attend que `locator` garde la même boîte sur deux mesures espacées de 150 ms. Pour un élément
+ * qu'une action déplace (ex. un sujet de forum trié par popularité, qui change de place à chaque
+ * vote) : un clic lancé pendant le déplacement tombe à côté.
+ */
+export async function waitForSettled(locator: Locator, message = 'élément immobile') {
   await expect
     .poll(
       async () => {
-        const before = JSON.stringify(await dialog.boundingBox());
-        await page.waitForTimeout(150);
-        return before === JSON.stringify(await dialog.boundingBox());
+        const before = JSON.stringify(await locator.boundingBox());
+        await locator.page().waitForTimeout(150);
+        return before === JSON.stringify(await locator.boundingBox());
       },
-      { message: 'popup immobile (taille et position stables)' }
+      { message }
     )
     .toBe(true);
 }
