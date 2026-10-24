@@ -468,12 +468,23 @@ public class PermissionService {
                 "POST",
                 "/roles/change",
                 (user, vars, body) -> {
-                  if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
-                    return true;
-                  }
+                  // Le rôle ciblé doit être attribuable dans un programme (Enseignant,
+                  // Administrateur). Le Gardien est un rôle de plateforme
+                  // (program_assignable = FALSE) : jamais dans un programme, pour personne.
+                  boolean global = hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN);
                   long programId = longField(body, "programId");
-                  return programId > 0
-                      && membershipService.hasRoleInProgram(
+                  if (!global && programId <= 0) {
+                    return false; // court-circuit : aucune requête BD
+                  }
+                  long targetRoleId = longField(body, "roleId");
+                  if (targetRoleId > 0) {
+                    String target = membershipService.roleName(targetRoleId);
+                    if (!RoleNames.TEACHER.equals(target) && !RoleNames.ADMIN.equals(target)) {
+                      return false;
+                    }
+                  }
+                  return global
+                      || membershipService.hasRoleInProgram(
                           user.getId(), programId, RoleNames.ADMIN);
                 }),
             // Changer un role GLOBAL (User_Role) : reserve au Gardien (gere les administrateurs).
