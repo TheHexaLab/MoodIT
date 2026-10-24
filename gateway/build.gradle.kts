@@ -2,7 +2,7 @@ plugins {
     java
     jacoco
     id("info.solidsoft.pitest") version "1.19.0"
-    id("org.springframework.boot") version "4.0.6"
+    id("org.springframework.boot") version "4.0.9"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -20,16 +20,16 @@ repositories {
     mavenCentral()
 }
 
-extra["springCloudVersion"] = "2025.1.1"
+extra["springCloudVersion"] = "2025.1.4"
 
 dependencies {
     implementation("org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc")
     // Proxy WebSocket : le gateway webmvc ne sait pas relayer le ws nativement
     // (spring-cloud/spring-cloud-gateway#3442), on le fait nous-mêmes avec spring-websocket.
     implementation("org.springframework.boot:spring-boot-starter-websocket")
-    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
-    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
-    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+    implementation("io.jsonwebtoken:jjwt-api:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     implementation("org.springframework.boot:spring-boot-starter-security")
