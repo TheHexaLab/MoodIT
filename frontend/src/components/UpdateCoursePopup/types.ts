@@ -56,6 +56,8 @@ export interface UpdateCoursePopupLabels {
   errorTitle: string;
   /** Message d'erreur quand l'enregistrement échoue. */
   saveError: string;
+  /** Message d'erreur quand le chargement des programmes rattachés échoue. */
+  loadProgramsError: string;
   /** Bouton « fermer » du popup d'erreur. */
   errorClose: string;
 }

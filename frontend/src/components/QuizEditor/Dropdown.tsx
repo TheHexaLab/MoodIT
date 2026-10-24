@@ -106,7 +106,20 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
   }, [open]);
 
   return (
-    <div className={styles.dropdown} ref={wrapRef}>
+    <div
+      className={styles.dropdown}
+      ref={wrapRef}
+      onKeyDown={(e) => {
+        // Liste ouverte : Échap la referme et rend le focus au contrôle, sans fermer la popup
+        // (la coquille Popup ferme sur Échap non traité). Les options portées dans <body>
+        // remontent ici par l'arbre React.
+        if (e.key === 'Escape' && open) {
+          e.stopPropagation();
+          setOpen(false);
+          controlRef.current?.focus();
+        }
+      }}
+    >
       <button
         type="button"
         ref={controlRef}

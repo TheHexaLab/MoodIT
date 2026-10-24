@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styles from './QuizEditor.module.css';
-import { EditorFooter, Portal } from './EditorShell';
+import { EditorFooter } from './EditorShell';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { draftToQuestion, type QuestionDraft } from './editorTypes';
 import { QuestionCard } from '../MainPanel/QuizView/QuestionCard';
@@ -155,16 +155,14 @@ export function QuestionTestBody({
       {/* Échec d'évaluation du code : popup d'erreur (au-dessus du popup d'édition),
           avec « Réessayer » qui relance la correction. */}
       {error && (
-        <Portal>
-          <ErrorPopup
-            content={error}
-            onClose={() => setError(null)}
-            onRetry={() => {
-              setError(null);
-              void correct();
-            }}
-          />
-        </Portal>
+        <ErrorPopup
+          content={error}
+          onClose={() => setError(null)}
+          onRetry={() => {
+            setError(null);
+            void correct();
+          }}
+        />
       )}
     </>
   );

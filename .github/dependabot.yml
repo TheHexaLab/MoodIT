@@ -1,0 +1,72 @@
+# Mises à jour automatiques des dépendances (PR ouvertes par Dependabot contre main).
+#
+# Regroupement : UNE PR par écosystème et par service chaque semaine (au lieu d'une PR par
+# dépendance), pour garder la file de revue courte. Les mises à jour MAJEURES restent à part :
+# elles cassent plus souvent et méritent une PR dédiée.
+#
+# voice-service n'est pas listé : il n'existe pas encore sur main (branche vocale). L'ajouter
+# ici (gradle + docker) au moment de la fusion vocale.
+version: 2
+
+updates:
+  # ── Gradle (un dossier par service) ───────────────────────────────────────────
+  - package-ecosystem: gradle
+    directories:
+      - /auth-service
+      - /core-service
+      - /execution-service
+      - /gateway
+      - /mcp-service
+      - /permission-service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      gradle-mineures:
+        update-types: [minor, patch]
+    labels: [chore]
+
+  # ── npm (frontend) ────────────────────────────────────────────────────────────
+  # La branche vocale modifie aussi package.json / package-lock.json : en cas de conflit au
+  # moment de la fusion, régénérer le lock (`npm install`) plutôt que de le résoudre à la main.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-mineures:
+        update-types: [minor, patch]
+    labels: [chore]
+
+  # ── Images Docker de base (FROM des Dockerfile) ───────────────────────────────
+  - package-ecosystem: docker
+    directories:
+      - /auth-service
+      - /core-service
+      - /execution-service
+      - /frontend
+      - /gateway
+      - /mcp-service
+      - /permission-service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      docker:
+        patterns: ["*"]
+    labels: [chore]
+
+  # ── Actions GitHub utilisées par les workflows ────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [chore]

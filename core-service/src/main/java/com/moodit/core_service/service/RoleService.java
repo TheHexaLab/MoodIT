@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import com.moodit.core_service.dto.ChangeRoleRequest;
 import com.moodit.core_service.dto.RoleDTO;
 import com.moodit.core_service.dto.UserDTO;
+import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Role;
@@ -159,6 +160,16 @@ public class RoleService {
             throw new IllegalArgumentException("programId, userId et roleId sont requis");
         }
         if ("assign".equals(req.getType())) {
+            // Intégrité, comme pour changeGlobalRole : seul un rôle program_assignable s'attribue
+            // dans un programme (jamais le Gardien, rôle de plateforme). Défense en profondeur :
+            // permission-service le refuse déjà. Le retrait reste permis (nettoyage d'un lien erroné).
+            Role role =
+                    roleRepository
+                            .findById(req.getRoleId())
+                            .orElseThrow(() -> new IllegalArgumentException("Rôle introuvable"));
+            if (!role.isProgramAssignable()) {
+                throw new ForbiddenException("Ce rôle n'est pas attribuable dans un programme");
+            }
             if (!userProgramRoleRepository.existsByProgramIdAndUserIdAndRoleId(
                     req.getProgramId(), req.getUserId(), req.getRoleId())) {
                 userProgramRoleRepository.save(

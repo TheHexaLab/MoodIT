@@ -1,34 +1,14 @@
 /* Styles partagés des popups de l'éditeur de quiz. Couleurs via variables de
-   thème (clair/sombre automatiques). Patron d'overlay calqué sur UpdateCoursePopup. */
-
-.overlay {
-    position: fixed;
-    /* Au-dessus de tout (les autres popups sont à 90). */
-    z-index: 1000;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 1rem;
-    box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.35);
-    animation: editor-fade-in 0.2s ease-out;
-}
+   thème (clair/sombre automatiques). Conteneur fourni par la coquille Popup (variante Editor). */
 
 /* Boîte animée : sa taille (largeur + hauteur) est transitionnée au changement de
    vue. La hauteur est posée en inline par EditorShell (mesure du contenu). */
 .panel {
-    --panel-width: 30rem;
-    box-sizing: border-box;
+    /* Conteneur (voile, largeur, fond, ombre, animation d'entrée/sortie) : Popup.module.css,
+       variante Editor. Ici : colonne header / corps / pied, et transition de taille. La largeur
+       vient de --popup-width (posée en inline par EditorShell quand une vue la change). */
     display: flex;
     flex-direction: column;
-    width: min(var(--panel-width), 100%);
-    max-height: calc(100dvh - 2rem);
-    overflow: hidden;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
-    animation: editor-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
         height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -60,29 +40,6 @@
 }
 .panelFooter:not(:empty) {
     padding: 0.875rem 1.25rem 1.25rem;
-}
-
-@keyframes editor-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-@keyframes editor-pop-in {
-    from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes editor-fade-out {
-    from { opacity: 1; }
-    to { opacity: 0; }
-}
-@keyframes editor-pop-out {
-    from { opacity: 1; transform: translateY(0) scale(1); }
-    to { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
-}
-.closing { animation: editor-fade-out 0.2s ease-in forwards; }
-.closing .panel { animation: editor-pop-out 0.2s ease-in forwards; }
-
-@media (prefers-reduced-motion: reduce) {
-    .overlay, .panel { animation: none; }
 }
 
 /* ── En-tête (rangée fixe, hors défilement) ── */

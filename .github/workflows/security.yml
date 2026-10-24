@@ -1,0 +1,101 @@
+name: Sécurité
+
+# Analyses de sécurité automatisées. Les résultats CodeQL et Trivy remontent dans l'onglet
+# Security → Code scanning du dépôt (gratuit pour un dépôt public).
+#  - CodeQL  : analyse statique Java, TypeScript/JavaScript et des workflows eux-mêmes.
+#  - gitleaks : secrets committés, sur TOUT l'historique (~15 s). Faux positifs connus : .gitleaksignore.
+#  - Trivy   : CVE des images Docker construites (OS de base + JAR / node_modules embarqués).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"   # lundi matin : nouvelles CVE publiées sur du code qui n'a pas bougé
+
+# Un seul run par PR : un nouveau push annule le run précédent, encore en cours. Le type
+# d'évènement fait partie du groupe : le run planifié et un push sur main (même ref) ne
+# s'annulent plus l'un l'autre. Sur main, rien n'est annulé : chaque fusion est vérifiée.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL — ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # envoi des résultats à Code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        # build-mode none : analyse sans compiler (pas besoin de construire les 6 projets Gradle).
+        language: [java-kotlin, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+
+  gitleaks:
+    name: gitleaks — secrets dans l'historique
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # tout l'historique : un secret retiré au commit suivant reste exposé
+
+      # Image officielle épinglée par digest (pas l'action gitleaks-action, qui exige une licence
+      # payante pour les dépôts d'organisation). --redact : le secret n'apparaît jamais dans le log.
+      - name: Scanner l'historique
+        run: |
+          docker run --rm -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46 \
+            git /repo --no-banner --redact --verbose --gitleaks-ignore-path /repo/.gitleaksignore
+
+  # NON BLOQUANT pour l'instant : main embarque des CVE CRITICAL corrigeables (Tomcat, Spring MVC,
+  # via Spring Boot 4.0.6). Une fois la montée de Spring Boot fusionnée, passer `exit-code` à 1
+  # (avec --severity CRITICAL) et lancer ce job aussi sur les PR.
+  trivy:
+    name: Trivy — ${{ matrix.service }}
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, core-service, execution-service, frontend, gateway, mcp-service, permission-service]
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire l'image
+        run: docker build -t moodit/${{ matrix.service }}:ci ${{ matrix.service }}
+
+      # --ignore-unfixed : seules les CVE qui ont un correctif publié (donc actionnables).
+      # 1er passage : SARIF pour Code scanning. 2e : tableau lisible dans le log, avec la base de
+      # CVE déjà téléchargée (cache partagé via le volume trivy-cache).
+      - name: Scanner l'image
+        run: |
+          trivy() { docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache -v "$PWD:/out" "$TRIVY_IMAGE" "$@"; }
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
+            --format sarif --output /out/trivy.sarif moodit/${{ matrix.service }}:ci
+          trivy image -q --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --skip-db-update \
+            moodit/${{ matrix.service }}:ci
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ matrix.service }}

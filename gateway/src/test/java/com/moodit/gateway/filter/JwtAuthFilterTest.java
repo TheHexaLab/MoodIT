@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.jsonwebtoken.Jwts;
@@ -97,6 +98,23 @@ class JwtAuthFilterTest {
 
     assertThat(res.getStatus()).isEqualTo(200);
     assertThat(chain.getRequest()).isNotNull(); // a bien traversé
+  }
+
+  // Chemin protégé encodé : refusé avant tout (token, permission-service), sinon le contrôle
+  // d'accès et le service en aval liraient deux chemins différents (/api/audit%2Dlogs).
+  @Test
+  void encodedProtectedPath_returns400_beforeAnyCheck() throws Exception {
+    for (String uri : new String[] {"/api/audit%2Dlogs", "/api/quizzes/12/%65dit", "/api/x%252D"}) {
+      MockHttpServletRequest req = new MockHttpServletRequest("GET", uri);
+      req.addHeader("Authorization", "Bearer n-importe-quoi");
+      MockFilterChain chain = new MockFilterChain();
+
+      MockHttpServletResponse res = run(req, chain);
+
+      assertThat(res.getStatus()).as(uri).isEqualTo(400);
+      assertThat(res.getContentAsString()).contains("Chemin invalide");
+      assertThat(chain.getRequest()).as(uri).isNull(); // bloqué
+    }
   }
 
   @Test
@@ -359,5 +377,202 @@ class JwtAuthFilterTest {
     String forwardedBody =
         new String(forwarded.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     assertThat(forwardedBody).isEqualTo(json);
+  }
+
+  // ------------------------------------------------------------------ branches complémentaires
+
+  /** Corps transmis au permission-service pour une requête authentifiée. */
+  private String forwardedPermissionBody() {
+    ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+    verify(bodySpec).body(captor.capture());
+    return (String) ((Map<?, ?>) captor.getValue()).get("body");
+  }
+
+  @Test
+  void sousRoutePublique_passeSansToken() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/auth/register/confirm");
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    assertThat(chain.getRequest()).isNotNull();
+  }
+
+  @Test
+  void prefixeSansSlash_nEstPasPublic() throws Exception {
+    // "/auth/loginX" commence par "/auth/login" sans en être une sous-route : reste protégé.
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/auth/loginX");
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void bearerVide_returns401TokenManquant() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Bearer   ");
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(res.getContentAsString()).contains("Token manquant");
+    assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void headerAuthorizationNonBearer_ignore_returns401() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Basic " + validToken("user@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(res.getContentAsString()).contains("Token manquant");
+  }
+
+  @Test
+  void autreCookie_ignore_returns401() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.setCookies(new Cookie("autre_cookie", validToken("user@usherbrooke.ca")));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void tokenExpire_returns401SansAppelerAuthService() throws Exception {
+    stubValidate(true, false);
+    SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+    String expired =
+        Jwts.builder()
+            .subject("user@usherbrooke.ca")
+            .issuedAt(new Date(System.currentTimeMillis() - 7_200_000))
+            .expiration(new Date(System.currentTimeMillis() - 3_600_000))
+            .signWith(key)
+            .compact();
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Bearer " + expired);
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(res.getContentAsString()).contains("Token invalide");
+    verifyNoInteractions(restClient);
+  }
+
+  @Test
+  void reponsePermissionNulle_returns403() throws Exception {
+    stubValidate(true, false);
+    when(responseSpec.body(Map.class)).thenReturn(null); // corps vide : fail-closed
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(403);
+    assertThat(res.getContentAsString()).contains("Accès refusé");
+    assertThat(chain.getRequest()).isNull();
+  }
+
+  @Test
+  void putJson_bodyTransmisAuPermissionService() throws Exception {
+    assertJsonBodyForwardedFor("PUT");
+  }
+
+  @Test
+  void patchJson_bodyTransmisAuPermissionService() throws Exception {
+    assertJsonBodyForwardedFor("PATCH");
+  }
+
+  private void assertJsonBodyForwardedFor(String method) throws Exception {
+    stubValidate(true, false);
+    String json = "{\"courseId\":7}";
+    MockHttpServletRequest req = new MockHttpServletRequest(method, "/api/courses/7");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("APPLICATION/JSON;charset=UTF-8"); // casse indifférente
+    req.setContent(json.getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    assertThat(forwardedPermissionBody()).isEqualTo(json);
+  }
+
+  @Test
+  void postNonJson_bodyNonLuEtNonTransmis() throws Exception {
+    // Texte / multipart : pas de mise en cache, le flux reste intact pour core.
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/files");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("text/plain");
+    req.setContent("brut".getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    assertThat(forwardedPermissionBody()).isEmpty();
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(new String(forwarded.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+        .isEqualTo("brut");
+  }
+
+  @Test
+  void postSansContentType_bodyNonTransmis() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContent("{}".getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    run(req, chain);
+
+    assertThat(forwardedPermissionBody()).isEmpty();
+  }
+
+  @Test
+  void postJsonTropGros_bodyNonMisEnCache() throws Exception {
+    // Garde-fou mémoire : au-delà de 1 Mo, le body n'est ni bufferisé ni transmis.
+    stubValidate(true, false);
+    byte[] big = new byte[1024 * 1024 + 1];
+    java.util.Arrays.fill(big, (byte) 'a');
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(big);
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    assertThat(forwardedPermissionBody()).isEmpty();
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(forwarded.getInputStream().readAllBytes()).hasSize(big.length);
+  }
+
+  @Test
+  void deleteAvecBodyJson_bodyNonTransmis() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req = new MockHttpServletRequest("DELETE", "/api/courses/7");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent("{\"courseId\":7}".getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    run(req, chain);
+
+    assertThat(forwardedPermissionBody()).isEmpty();
   }
 }

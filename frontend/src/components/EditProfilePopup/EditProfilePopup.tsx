@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './EditProfilePopup.module.css';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Camera } from '../../assets/Camera.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
@@ -60,8 +63,8 @@ export function EditProfilePopup({
   /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
   const requestRef = useRef(0);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
   useEffect(() => {
@@ -70,23 +73,6 @@ export function EditProfilePopup({
       mountedRef.current = false;
     };
   }, []);
-
-  /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
 
   /** La couleur custom change seulement l'avatar (pas ajoutée à la palette). */
   function pickCustomColor(color: string) {
@@ -148,131 +134,130 @@ export function EditProfilePopup({
 
   return (
     <>
-      <div
-        className={`${styles['edit-profile']}${isClosing ? ` ${styles.closing}` : ''}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) requestClose(onClose);
-        }}
+      <Popup
+        variant={PopupVariant.Form}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['edit-profile']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button onClick={() => requestClose(onClose)}>✕</button>
-          </header>
+        <header>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
+          </div>
+          <button onClick={() => requestClose(onClose)}>✕</button>
+        </header>
 
-          <section className={styles.avatar}>
+        <section className={styles.avatar}>
+          <div>
+            <label className={styles['avatar-edit']}>
+              <span
+                className={styles.preview}
+                style={
+                  avatarPhoto
+                    ? {
+                        backgroundImage: `url(${avatarPhoto})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                      }
+                    : { background: avatarColor }
+                }
+              >
+                {!avatarPhoto && (
+                  <span style={{ color: contrastingTextColor(avatarColor) }}>{initials()}</span>
+                )}
+              </span>
+              <span className={styles['camera-badge']}>
+                <Camera width="0.875rem" height="0.875rem" />
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  pickPhoto(e.target.files?.[0] ?? null);
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <div>
-              <label className={styles['avatar-edit']}>
-                <span
-                  className={styles.preview}
-                  style={
-                    avatarPhoto
-                      ? {
-                          backgroundImage: `url(${avatarPhoto})`,
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center',
-                        }
-                      : { background: avatarColor }
-                  }
-                >
-                  {!avatarPhoto && (
-                    <span style={{ color: contrastingTextColor(avatarColor) }}>{initials()}</span>
-                  )}
-                </span>
-                <span className={styles['camera-badge']}>
-                  <Camera width="0.875rem" height="0.875rem" />
-                </span>
+              <p>
+                {firstName} {lastName}
+              </p>
+              <p>@{username}</p>
+              {avatarPhoto && (
+                <button type="button" className={styles['remove-photo']} onClick={removePhoto}>
+                  {t.removePhoto}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className={styles['palette-group']}>
+            <span className={styles['field-label']}>{t.paletteLabel}</span>
+            <div className={styles.palette}>
+              {palette.map((color, index) => {
+                const selected = color.toLowerCase() === avatarColor.toLowerCase();
+                return (
+                  <button
+                    key={`${color}-${index}`}
+                    type="button"
+                    className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
+                    style={
+                      { ['--swatch-color']: color, background: color } as React.CSSProperties
+                    }
+                    aria-label={color}
+                    aria-pressed={selected}
+                    onClick={() => setAvatarColor(color)}
+                  />
+                );
+              })}
+              <label className={styles['add-color']} aria-label={t.addColorLabel}>
+                +
                 <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    pickPhoto(e.target.files?.[0] ?? null);
-                    e.target.value = '';
-                  }}
+                  type="color"
+                  value={avatarColor}
+                  onChange={(e) => pickCustomColor(e.target.value)}
                 />
               </label>
-              <div>
-                <p>
-                  {firstName} {lastName}
-                </p>
-                <p>@{username}</p>
-                {avatarPhoto && (
-                  <button type="button" className={styles['remove-photo']} onClick={removePhoto}>
-                    {t.removePhoto}
-                  </button>
-                )}
-              </div>
             </div>
-            <div className={styles['palette-group']}>
-              <span className={styles['field-label']}>{t.paletteLabel}</span>
-              <div className={styles.palette}>
-                {palette.map((color, index) => {
-                  const selected = color.toLowerCase() === avatarColor.toLowerCase();
-                  return (
-                    <button
-                      key={`${color}-${index}`}
-                      type="button"
-                      className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
-                      style={
-                        { ['--swatch-color']: color, background: color } as React.CSSProperties
-                      }
-                      aria-label={color}
-                      aria-pressed={selected}
-                      onClick={() => setAvatarColor(color)}
-                    />
-                  );
-                })}
-                <label className={styles['add-color']} aria-label={t.addColorLabel}>
-                  +
-                  <input
-                    type="color"
-                    value={avatarColor}
-                    onChange={(e) => pickCustomColor(e.target.value)}
-                  />
-                </label>
-              </div>
-            </div>
-          </section>
+          </div>
+        </section>
 
-          <label className={styles.field}>
-            <span>{t.firstNameLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.firstNamePlaceholder}
-                maxLength={NAME_MAX_LENGTH}
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.firstNameLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.firstNamePlaceholder}
+              maxLength={NAME_MAX_LENGTH}
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+          </div>
+        </label>
 
-          <label className={styles.field}>
-            <span>{t.lastNameLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.lastNamePlaceholder}
-                maxLength={NAME_MAX_LENGTH}
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.lastNameLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.lastNamePlaceholder}
+              maxLength={NAME_MAX_LENGTH}
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </div>
+        </label>
 
-          <footer>
-            <button type="button" onClick={() => requestClose(onClose)}>
-              {t.cancel}
-            </button>
-            <button type="button" onClick={save} disabled={!canSave || pending}>
-              {pending ? <Spinner /> : t.save}
-            </button>
-          </footer>
-        </div>
-      </div>
+        <footer>
+          <button type="button" onClick={() => requestClose(onClose)}>
+            {t.cancel}
+          </button>
+          <button type="button" onClick={save} disabled={!canSave || pending}>
+            {pending ? <Spinner /> : t.save}
+          </button>
+        </footer>
+      </Popup>
 
       {error && (
         <ErrorPopup

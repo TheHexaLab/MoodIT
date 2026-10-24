@@ -187,6 +187,21 @@ services:
         for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
           echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
         done
+        # Réchauffage : la toute première exécution d'un langage compilé (JVM, mono, rustc…) lit
+        # son paquet à froid et peut dépasser la limite de 3 s d'exécution : une bonne réponse
+        # serait alors notée en échec. Une exécution jetable par langage, résultat ignoré.
+        for w in 'java|Main.java|public class Main { public static void main(String[] a) {} }' \
+                 'csharp|main.cs|class P { static void Main() {} }' \
+                 'rust|main.rs|fn main() {}' \
+                 'go|main.go|package main\nfunc main() {}' \
+                 'c|main.c|int main(void) { return 0; }' \
+                 'c++|main.cpp|int main() { return 0; }'; do
+          l=$${w%%|*}; rest=$${w#*|}; f=$${rest%%|*}; src=$${rest#*|};
+          echo "rechauffage $$l...";
+          curl -sS -m 60 -X POST http://piston:2000/api/v2/execute \
+            -H 'Content-Type: application/json' \
+            -d "{\"language\":\"$$l\",\"version\":\"*\",\"files\":[{\"name\":\"$$f\",\"content\":\"$$src\"}]}" >/dev/null || true;
+        done
         echo "piston pret (12 runtimes ; + JSON via node)";
     restart: "no"
     networks:

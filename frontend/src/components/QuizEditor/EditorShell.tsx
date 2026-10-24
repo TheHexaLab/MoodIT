@@ -9,15 +9,18 @@ import React, {
 import { createPortal } from 'react-dom';
 import styles from './QuizEditor.module.css';
 import { Chevron } from '../../assets/Chevron';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 
 interface EditorShellProps {
   title: string;
   subtitle?: string;
   /** Bouton retour (chevron) à gauche du titre — pour les vues empilées. */
   onBack?: () => void;
-  /** Fermeture (croix + clic sur le fond). */
+  /** Fermeture (croix, Échap, clic sur le fond). */
   onClose: () => void;
-  /** Largeur du panneau (défaut 30rem). Animée au changement de vue. */
+  /** Largeur du panneau (défaut : celle de la variante `Editor`, 30rem). Animée au changement de vue. */
   width?: string;
   /**
    * Corps défilant : si le contenu dépasse le viewport, seul le corps défile
@@ -37,6 +40,11 @@ interface EditorShellProps {
    * de la vue précédente (ex. harnais ouvert déjà défilé en bas).
    */
   scrollResetKey?: string | number;
+  /**
+   * Échap ferme l'éditeur (défaut : oui). À désactiver dans une vue de saisie : la fermeture
+   * ferait perdre le travail non enregistré, sans confirmation.
+   */
+  closeOnEscape?: boolean;
   children: React.ReactNode;
 }
 
@@ -62,12 +70,12 @@ export function EditorFooter({
 }
 
 /**
- * Coquille commune des popups de l'éditeur, portée dans `document.body`
- * (`createPortal`) pour passer AU-DESSUS de tout et rester centrée même sous un
- * ancêtre transformé (tiroir mobile). Disposition en colonne : header fixe / corps
- * (défilant si `scrollBody`) / pied fixe. Le panneau **anime sa taille** (largeur +
- * hauteur) au changement de contenu : la hauteur naturelle (header + corps + pied)
- * est mesurée (`ResizeObserver`) puis appliquée avec une transition.
+ * Coquille commune des popups de l'éditeur de quiz, bâtie sur `Popup` (variante `Editor`) :
+ * voile, sémantique de dialogue, focus, Échap et animation de sortie viennent de la coquille
+ * centrale. Ici : disposition en colonne header fixe / corps (défilant si `scrollBody`) / pied
+ * fixe, et **animation de la taille** du panneau (largeur + hauteur) au changement de vue : la
+ * hauteur naturelle (header + corps + pied) est mesurée (`ResizeObserver`) puis appliquée avec
+ * une transition.
  */
 export function EditorShell({
   title,
@@ -78,14 +86,10 @@ export function EditorShell({
   scrollBody = false,
   desktopMaxVh,
   scrollResetKey,
+  closeOnEscape = true,
   children,
 }: EditorShellProps): React.ReactElement {
-  const [isClosing, setIsClosing] = useState(false);
-  const pending = useRef<(() => void) | null>(null);
-  // Le clic de fond ne ferme que si le geste a COMMENCÉ sur le fond : sans ça, une sélection de
-  // texte démarrée DANS le popup et relâchée dehors déclenche un « click » sur l'overlay (ancêtre
-  // commun) et fermait le popup par erreur.
-  const backdropMouseDown = useRef(false);
+  const popup = usePopupController();
 
   // Hauteur animée : somme des trois rangées (header + corps + pied), bornée au
   // viewport. Le corps (`contentRef`) garde sa hauteur naturelle même borné, donc
@@ -120,10 +124,18 @@ export function EditorShell({
       if (desktopMaxVh && !isMobile) {
         max = Math.min(max, (window.innerHeight * desktopMaxVh) / 100);
       }
+      // Le panneau est en box-sizing border-box : ses bordures (variante Editor) font partie
+      // de la hauteur posée, sinon le bas du contenu est rogné.
+      const panel = headerRef.current?.parentElement;
+      const panelStyle = panel ? getComputedStyle(panel) : null;
+      const borders = panelStyle
+        ? (parseFloat(panelStyle.borderTopWidth) || 0) + (parseFloat(panelStyle.borderBottomWidth) || 0)
+        : 0;
       const natural =
         (headerRef.current?.offsetHeight ?? 0) +
         (contentRef.current?.offsetHeight ?? 0) +
-        (footerSlot?.offsetHeight ?? 0);
+        (footerSlot?.offsetHeight ?? 0) +
+        borders;
       setHeight(Math.min(natural, max));
       setClamped(natural > max);
     };
@@ -139,106 +151,63 @@ export function EditorShell({
     };
   }, [footerSlot, desktopMaxVh]);
 
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pending.current = action;
-    setIsClosing(true);
-  }
+  const panelStyle = {
+    ...(width ? { ['--popup-width']: width } : {}),
+    ...(height != null ? { height: `${height}px` } : {}),
+    // Le panneau clippe aux coins arrondis ; seul le corps défile (cf. `scrollBody`).
+    overflow: 'hidden',
+    // Transition de taille désactivée tant que le pop-in d'ouverture joue.
+    ...(animateSize ? {} : { transition: 'none' }),
+  } as React.CSSProperties;
 
-  function onAnimationEnd(e: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && e.target === e.currentTarget) {
-      pending.current?.();
-      pending.current = null;
-    }
-  }
-
-  const overlay = (
-    <div
-      className={`${styles.overlay}${isClosing ? ` ${styles.closing}` : ''}`}
-      onMouseDown={(e) => {
-        backdropMouseDown.current = e.target === e.currentTarget;
-      }}
-      onClick={(e) => {
-        // Ferme uniquement si le pointeur s'est ABAISSÉ ET relâché sur le fond (vrai clic de fond),
-        // pas si une sélection démarrée dans le popup se termine ici.
-        if (e.target === e.currentTarget && backdropMouseDown.current) requestClose(onClose);
-        backdropMouseDown.current = false;
-      }}
+  return (
+    <Popup
+      variant={PopupVariant.Editor}
+      label={title}
+      onClose={onClose}
+      controller={popup}
+      closeOnEscape={closeOnEscape}
+      panelClassName={styles.panel}
+      panelStyle={panelStyle}
     >
-      <div
-        className={styles.panel}
-        style={
-          {
-            ...(width ? { ['--panel-width']: width } : {}),
-            ...(height != null ? { height: `${height}px` } : {}),
-            // Transition de taille désactivée tant que le pop-in d'ouverture joue.
-            ...(animateSize ? {} : { transition: 'none' }),
-          } as React.CSSProperties
-        }
-        onAnimationEnd={onAnimationEnd}
-      >
-        <header className={styles.header} ref={headerRef}>
-          <div className={styles.headerTitle}>
-            {onBack && (
-              <button
-                type="button"
-                className={styles.backChevron}
-                aria-label="Retour"
-                onClick={onBack}
-              >
-                <Chevron width={16} height={16} style={{ transform: 'rotate(-90deg)' }} />
-              </button>
-            )}
-            <div className={styles.headerText}>
-              <h1>{title}</h1>
-              {subtitle && <p>{subtitle}</p>}
-            </div>
-          </div>
-          <button
-            type="button"
-            className={styles.closeButton}
-            aria-label="Fermer"
-            onClick={() => requestClose(onClose)}
-          >
-            ✕
-          </button>
-        </header>
-
-        <div
-          className={styles.panelBody}
-          ref={bodyRef}
-          style={{ overflowY: scrollBody && clamped ? 'auto' : 'hidden' }}
-        >
-          <div className={styles.panelBodyInner} ref={contentRef}>
-            <FooterSlotContext.Provider value={footerSlot}>{children}</FooterSlotContext.Provider>
+      <header className={styles.header} ref={headerRef}>
+        <div className={styles.headerTitle}>
+          {onBack && (
+            <button
+              type="button"
+              className={styles.backChevron}
+              aria-label="Retour"
+              onClick={onBack}
+            >
+              <Chevron width={16} height={16} style={{ transform: 'rotate(-90deg)' }} />
+            </button>
+          )}
+          <div className={styles.headerText}>
+            <h1>{title}</h1>
+            {subtitle && <p>{subtitle}</p>}
           </div>
         </div>
+        <button
+          type="button"
+          className={styles.closeButton}
+          aria-label="Fermer"
+          onClick={() => popup.requestClose(onClose)}
+        >
+          ✕
+        </button>
+      </header>
 
-        <div className={styles.panelFooter} ref={setFooterSlot} />
+      <div
+        className={styles.panelBody}
+        ref={bodyRef}
+        style={{ overflowY: scrollBody && clamped ? 'auto' : 'hidden' }}
+      >
+        <div className={styles.panelBodyInner} ref={contentRef}>
+          <FooterSlotContext.Provider value={footerSlot}>{children}</FooterSlotContext.Provider>
+        </div>
       </div>
-    </div>
-  );
 
-  return <Portal>{overlay}</Portal>;
-}
-
-/** Monte ses enfants dans `document.body` (au-dessus de tout, hors transformés). */
-export function Portal({ children }: { children: React.ReactNode }): React.ReactPortal | null {
-  const [host] = useState(() =>
-    typeof document !== 'undefined' ? document.createElement('div') : null
+      <div className={styles.panelFooter} ref={setFooterSlot} />
+    </Popup>
   );
-  // `useLayoutEffect` (et non `useEffect`) : l'hôte est attaché AVANT le paint, et
-  // avant la mesure de hauteur du parent (effets enfant → parent). Sinon le contenu
-  // serait détaché à la mesure → hauteur 0 puis correction animée à l'ouverture.
-  useLayoutEffect(() => {
-    if (!host) return;
-    document.body.appendChild(host);
-    return () => {
-      document.body.removeChild(host);
-    };
-  }, [host]);
-  return host ? createPortal(children, host) : null;
 }

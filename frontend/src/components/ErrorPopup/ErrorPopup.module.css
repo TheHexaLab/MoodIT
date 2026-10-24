@@ -1,76 +1,11 @@
-div.error-popup {
-    position: fixed;
-    inset: 0;
-    /* Erreur top-most : au-dessus de la chrome, de l'éditeur de quiz (1000) et des confirmations (1100). */
-    z-index: 1200;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: error-popup-fade-in 0.2s ease-out;
-}
-
 div.error-popup > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
-    box-sizing: border-box;
-    width: min(23rem, 100% - 2rem);
     padding: 1.25rem;
-    margin: 1rem;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.88rem;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
     user-select: none;
-    animation: error-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes error-popup-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes error-popup-pop-in {
-    from {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-@keyframes error-popup-fade-out {
-    from { opacity: 1; }
-    to { opacity: 0; }
-}
-
-@keyframes error-popup-pop-out {
-    from {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-}
-
-div.error-popup.closing {
-    animation: error-popup-fade-out 0.2s ease-in forwards;
-}
-
-div.error-popup.closing > div {
-    animation: error-popup-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.error-popup,
-    div.error-popup > div {
-        animation: none;
-    }
 }
 
 div.error-popup > div > * {

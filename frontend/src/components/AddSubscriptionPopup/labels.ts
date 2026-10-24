@@ -24,7 +24,7 @@ export const defaultLabels: AddSubscriptionPopupLabels = {
   noPrograms: 'Aucun programme pour cet établissement',
   programCount: (count) =>
     count === 0 ? 'Aucun programme' : `${count} programme${count > 1 ? 's' : ''}`,
-  add: 'Enregister',
+  add: 'Enregistrer',
   back: 'Retour',
   colorLabel: 'Couleur du programme',
   addColorLabel: 'Ajouter une couleur',

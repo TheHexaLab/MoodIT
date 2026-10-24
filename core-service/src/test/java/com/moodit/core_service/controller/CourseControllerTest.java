@@ -173,9 +173,23 @@ class CourseControllerTest {
             mockMvc.perform(post("/api/courses/forums")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(inputDto)))
-                    .andExpect(status().isOk()) // Ton contrôleur utilise ResponseEntity.ok() ici
-                    .andExpect(jsonPath("$.id").value(10))
-                    .andExpect(jsonPath("$.title").value("Entraide Algèbre"));
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(10));
+
+            // Le corps JSON est désérialisé et transmis tel quel au service (titre + cours parent).
+            verify(courseService).addForumToCourse(argThat(f ->
+                    "Entraide Algèbre".equals(f.getTitle()) && f.getCourseId() == 1 && f.getId() == null));
+        }
+
+        @Test
+        @DisplayName("Erroné → JSON mal formé retourne 400 sans appeler le service")
+        void devrait_retourner_400_si_json_mal_forme() throws Exception {
+            mockMvc.perform(post("/api/courses/forums")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\": "))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(courseService);
         }
 
         @Test
@@ -212,7 +226,22 @@ class CourseControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.title").value("Nouveau Titre Math"));
+                    .andExpect(jsonPath("$.id").value(1));
+
+            // Id du chemin + champs du corps ; les champs absents restent null (PATCH partiel).
+            verify(courseService).updateCourse(eq(1), argThat(u -> "Nouveau Titre Math".equals(u.getTitle())
+                    && u.getCode() == null && u.getProgramIds() == null));
+        }
+
+        @Test
+        @DisplayName("Erroné → id de cours non numérique retourne 400 sans appeler le service")
+        void devrait_retourner_400_si_id_non_numerique() throws Exception {
+            mockMvc.perform(patch("/api/courses/abc")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"x\"}"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(courseService);
         }
 
         @Test
@@ -236,8 +265,11 @@ class CourseControllerTest {
             mockMvc.perform(patch("/api/courses/1")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.title").value("Mathématiques"));
+                    .andExpect(status().isOk());
+
+            // Corps vide → DTO entièrement null transmis : c'est au service de ne rien modifier.
+            verify(courseService).updateCourse(eq(1), argThat(u ->
+                    u.getTitle() == null && u.getCode() == null && u.getProgramIds() == null));
         }
     }
 
