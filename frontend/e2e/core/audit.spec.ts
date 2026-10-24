@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures';
-import { ROLE_ACCOUNTS, uniqueSuffix } from './helpers';
+import { ROLE_ACCOUNTS, uniqueSuffix, waitForPopupSettled } from './helpers';
 import { openUserMenu, sessionFor } from './admin.helpers';
 
 // Journal d'audit (Gardien). L'action tracée est la création d'un établissement unique par le
@@ -27,9 +27,15 @@ test('le gardien retrouve, filtre et détaille une action dans le journal', asyn
       'true'
     );
 
-    // Recherche (debounce côté client) sur le nom unique.
+    // Recherche (debounce côté client) sur le nom unique. On attend la réponse FILTRÉE : l'entrée,
+    // toute récente, figure déjà dans la première page non filtrée, ce qui ferait passer le test
+    // avant que la recherche soit appliquée.
     const search = page.getByRole('textbox', { name: 'Rechercher (résumé, auteur, contexte)…' });
+    const searched = page.waitForResponse(
+      (res) => res.url().includes('/api/audit-logs') && res.url().includes(`q=${suffix}`)
+    );
     await search.fill(suffix);
+    await searched;
     const entry = page.getByRole('button').filter({ hasText: name });
     await expect(entry).toHaveCount(1);
     await expect(entry).toContainText(ROLE_ACCOUNTS.gardien); // auteur
@@ -46,8 +52,13 @@ test('le gardien retrouve, filtre et détaille une action dans le journal', asyn
       'false'
     );
     await expect(entry).toHaveCount(1);
+    // Chaque filtre recharge la liste : la popup change de taille et se recentre. On attend
+    // qu'elle soit immobile avant le clic suivant, sinon il tombe à côté.
+    await waitForPopupSettled(page);
     await filters.getByRole('button', { name: 'Quiz' }).click();
+    await expect(filters.getByRole('button', { name: 'Quiz' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText('Aucune action ne correspond à ce filtre.')).toBeVisible();
+    await waitForPopupSettled(page);
     await filters.getByRole('button', { name: 'Tout' }).click();
     await expect(entry).toHaveCount(1);
 

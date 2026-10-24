@@ -152,6 +152,28 @@ export async function openCourseItem(page: Page, itemName: string) {
 
 export const mainContent = (page: Page) => page.getByRole('region', { name: 'Contenu principal' });
 
+/**
+ * Attend que la popup ouverte (la dernière, s'il y en a plusieurs) ne bouge plus : même boîte sur
+ * deux mesures espacées. Une popup est centrée : quand son contenu change (chargement, retour d'une
+ * vue détaillée), elle change de taille et se recentre, et ses boutons se déplacent. Un clic lancé
+ * pendant ce mouvement tombe à côté (vu sur Firefox et WebKit). À appeler avant de cliquer dans une
+ * popup juste après un changement de vue ou un chargement.
+ */
+export async function waitForPopupSettled(page: Page) {
+  const dialog = page.getByRole('dialog').last();
+  await expect(dialog).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const before = JSON.stringify(await dialog.boundingBox());
+        await page.waitForTimeout(150);
+        return before === JSON.stringify(await dialog.boundingBox());
+      },
+      { message: 'popup immobile (taille et position stables)' }
+    )
+    .toBe(true);
+}
+
 /** API de Mailpit (faux SMTP de la pile E2E, docker-compose-e2e.yml). */
 const MAILPIT_URL = process.env.E2E_MAILPIT_URL ?? 'http://localhost:8025';
 
