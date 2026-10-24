@@ -299,13 +299,26 @@ test('vote : même sens retire le vote, sens opposé le bascule', async ({ brows
     - button "Voter contre"${downPressed ? ' [pressed]' : ''}
   `;
 
-  await up.click();
+  // Deux précautions, ce test vérifiant la logique du vote et non le pointeur ni la concurrence :
+  // - tri « Populaires » d'un forum PARTAGÉ : chaque vote, celui-ci ou ceux des tests en parallèle,
+  //   réordonne la liste à tout moment, et un clic positionné tombait parfois à côté (Firefox) ;
+  //   le clic est donc envoyé directement au bouton (dispatchEvent) ;
+  // - on attend la réponse du serveur avant le vote suivant, comme un utilisateur qui marque une
+  //   pause : deux votes simultanés sur un même sujet sont un autre cas (cf. #130).
+  const press = async (button: Locator) => {
+    const saved = reader.page.waitForResponse(
+      (res) => res.url().includes('/api/forums/posts/votes') && res.request().method() === 'POST'
+    );
+    await button.dispatchEvent('click');
+    expect((await saved).ok(), 'vote enregistré par le serveur').toBe(true);
+  };
+  await press(up);
   await expect(card).toMatchAriaSnapshot(state(1, true, false));
-  await up.click(); // même sens : retrait
+  await press(up); // même sens : retrait
   await expect(card).toMatchAriaSnapshot(state(0, false, false));
-  await down.click();
+  await press(down);
   await expect(card).toMatchAriaSnapshot(state(-1, false, true));
-  await up.click(); // sens opposé : bascule directe (-1 → +1)
+  await press(up); // sens opposé : bascule directe (-1 → +1)
   await expect(card).toMatchAriaSnapshot(state(1, true, false));
 
   // Persisté : même état après rechargement.
