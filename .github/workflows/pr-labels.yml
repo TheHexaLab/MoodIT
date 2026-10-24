@@ -17,6 +17,12 @@ permissions:
   contents: read
   pull-requests: write
 
+# Un seul run à la fois par PR : deux mises à jour rapprochées (ex. Dependabot qui reconstruit
+# une PR) se marchaient dessus et retiraient deux fois le même label. Le plus récent l'emporte.
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   service:
     runs-on: ubuntu-latest
@@ -32,7 +38,13 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
-            const current = new Set(pr.labels.map(l => l.name));
+            const { owner, repo } = context.repo;
+            // Labels ACTUELS, relus par l'API : ceux de l'évènement peuvent être périmés si un autre
+            // job (labeler) ou un autre run les a modifiés entre-temps.
+            const { data: labelsNow } = await github.rest.issues.listLabelsOnIssue({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const current = new Set(labelsNow.map(l => l.name));
 
             // ── Taille ────────────────────────────────────────────────────────────
             const lines = pr.additions + pr.deletions;
@@ -53,10 +65,14 @@ jobs:
             // ── Application ───────────────────────────────────────────────────────
             const wanted = [size, ...(type ? [type] : [])];
             const managed = [...TYPES, 'taille XS', 'taille S', 'taille M', 'taille L', 'taille XL'];
-            const { owner, repo } = context.repo;
             for (const name of managed) {
               if (current.has(name) && !wanted.includes(name)) {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name });
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name });
+                } catch (e) {
+                  // Déjà retiré entre la lecture et le retrait : rien à faire.
+                  if (e.status !== 404) throw e;
+                }
               }
             }
             const toAdd = wanted.filter(n => !current.has(n));
