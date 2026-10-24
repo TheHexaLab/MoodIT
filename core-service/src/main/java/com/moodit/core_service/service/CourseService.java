@@ -2,6 +2,7 @@ package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.CourseNotFoundException;
+import com.moodit.core_service.exception.InvalidCourseException;
 import com.moodit.core_service.exception.ForumNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
@@ -188,7 +189,17 @@ public class CourseService {
     if (dto.getCode() != null) {
       course.setCode(dto.getCode());
     }
+    // Programmes AVANT la modification : base du delta temps réel (retirés / ajoutés).
+    Set<Integer> programsBefore = new HashSet<>();
+    if (course.getPrograms() != null) {
+      course.getPrograms().forEach(p -> programsBefore.add(p.getId()));
+    }
     if (dto.getProgramIds() != null) {
+      // Un cours sans programme n'est plus visible de personne : refusé (le frontend le bloque
+      // déjà ; ici on protège l'API elle-même).
+      if (dto.getProgramIds().isEmpty()) {
+        throw new InvalidCourseException("Un cours doit rester rattaché à au moins un programme.");
+      }
       // Course.programs est le côté INVERSE de la relation (mappedBy = "courses") : le modifier
       // seul ne touche pas program_course, et le PATCH était ignoré. On met donc à jour le côté
       // propriétaire (Program.courses) des programmes retirés et ajoutés, puis on garde le côté
@@ -227,15 +238,25 @@ public class CourseService {
         AuditContext.ofCourse(saved));
 
     // ── Temps réel : le cours modifié est répercuté LIVE dans chaque programme (room program:<id>).
-    // Version simple : on émet courseEdited aux programmes ACTUELS (un changement d'appartenance
-    // via programIds n'émet pas de created/deleted sur le delta — cas admin rare, à raffiner). ──
+    // Programme gardé : courseEdited ; programme ajouté : courseCreated (le cours y apparaît) ;
+    // programme retiré : courseDeleted (le cours y disparaît, comme une suppression). ──
     long cId = saved.getId();
     String code = saved.getCode();
     String title = saved.getTitle();
     List<Integer> programIds =
         saved.getPrograms() == null ? List.of() : saved.getPrograms().stream().map(Program::getId).toList();
-    afterCommit(() ->
-        programIds.forEach(pid -> realtimePublisher.courseEdited(pid, CourseDto.of(cId, code, title))));
+    List<Integer> removed = programsBefore.stream().filter(pid -> !programIds.contains(pid)).toList();
+    afterCommit(() -> {
+      CourseDto payload = CourseDto.of(cId, code, title);
+      for (Integer pid : programIds) {
+        if (programsBefore.contains(pid)) {
+          realtimePublisher.courseEdited(pid, payload);
+        } else {
+          realtimePublisher.courseCreated(pid, payload);
+        }
+      }
+      removed.forEach(pid -> realtimePublisher.courseDeleted(pid, cId));
+    });
 
     return toCourseDTO(saved);
   }

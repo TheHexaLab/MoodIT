@@ -184,11 +184,39 @@ describe('UpdateCoursePopup', () => {
     expect((onSave.mock.calls[0][0] as CourseUpdate).programIds).toEqual([1, 3]);
   });
 
-  it('loadProgramIds en échec : ErrorPopup, programmes pré-remplis conservés', async () => {
-    renderPopup({ loadProgramIds: vi.fn().mockRejectedValue(new Error('panne')) });
+  it('loadProgramIds en échec : ErrorPopup, sélection verrouillée et enregistrement bloqué', async () => {
+    // Une liste partielle enregistrée retirerait en silence les programmes non affichés.
+    const { onSave } = renderPopup({ loadProgramIds: vi.fn().mockRejectedValue(new Error('panne')) });
     expect(await screen.findByText(t.loadProgramsError)).toBeTruthy();
     expect(screen.getByText('GIN - Promo 71')).toBeTruthy();
-    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.click(saveButton());
+    expect(onSave).not.toHaveBeenCalled();
+    const field = screen.getByText('GIN - Promo 71').closest('[aria-disabled]') as HTMLElement;
+    expect(field.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(field); // le menu ne s'ouvre pas
+    expect(screen.queryByPlaceholderText(t.searchPlaceholder)).toBeNull();
+  });
+
+  it('pendant le chargement, la sélection est verrouillée : ni ajout ni retrait possible', async () => {
+    let resolve!: (ids: number[]) => void;
+    const loadProgramIds = vi.fn(() => new Promise<number[]>((r) => (resolve = r)));
+    const { onSave } = renderPopup({ loadProgramIds });
+    const field = screen.getByText('GIN - Promo 71').closest('[aria-disabled]') as HTMLElement;
+    expect(field.getAttribute('aria-disabled')).toBe('true');
+    expect(field.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(field); // ouvrir le menu : sans effet
+    expect(screen.queryByPlaceholderText(t.searchPlaceholder)).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Retirer / })[0]); // retirer : sans effet
+    expect(screen.getByText('GIN - Promo 71')).toBeTruthy();
+
+    // Réponse reçue : tous les programmes rattachés sont là, la sélection se déverrouille.
+    resolve([1, 3]);
+    expect(await screen.findByText('MAT - 2026')).toBeTruthy();
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).toBe('false'));
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0][0] as CourseUpdate).programIds).toEqual([1, 3]);
   });
 
   it('onSave reçoit le cours modifié (rogné) puis onClose', async () => {

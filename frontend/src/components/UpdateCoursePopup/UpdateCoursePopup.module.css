@@ -203,6 +203,13 @@ div.update-course > div > section.programs > div.field-control > div.tags-input:
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
+/* Sélection verrouillée : programmes rattachés en cours de chargement, ou chargement échoué. */
+div.update-course > div > section.programs > div.field-control > div.tags-input.locked {
+    cursor: not-allowed;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 div.update-course > div > section.programs > div.field-control > div.tags-input.open {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);

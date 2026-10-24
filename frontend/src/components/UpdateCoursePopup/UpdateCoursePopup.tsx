@@ -71,8 +71,11 @@ export function UpdateCoursePopup({
   const [programIds, setProgramIds] = useState<number[]>(course.programIds);
   /** Chargement des programmes rattachés en cours (cf. loadProgramIds) ? */
   const [loadingPrograms, setLoadingPrograms] = useState(loadProgramIds !== undefined);
-  /** L'utilisateur a-t-il déjà modifié la sélection ? (le chargement ne l'écrase pas) */
-  const programsTouchedRef = useRef(false);
+  /** Le chargement des programmes rattachés a échoué ? La liste affichée serait partielle. */
+  const [programsLoadFailed, setProgramsLoadFailed] = useState(false);
+  // Sélection verrouillée tant que la liste réelle n'est pas connue : une modification faite
+  // avant (ou sans) elle retirerait en silence, à l'enregistrement, les programmes non affichés.
+  const programsLocked = loadingPrograms || programsLoadFailed;
   /** Menu déroulant ouvert ? */
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -107,11 +110,13 @@ export function UpdateCoursePopup({
     // new Promise : appel synchrone du loader, et une exception levée devient un rejet.
     new Promise<number[] | undefined>((resolve) => resolve(loadProgramIds()))
       .then((ids) => {
-        if (cancelled || programsTouchedRef.current || !ids) return;
+        if (cancelled || !ids) return;
         setProgramIds((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))]);
       })
       .catch(() => {
-        if (!cancelled) setError(t.loadProgramsError);
+        if (cancelled) return;
+        setProgramsLoadFailed(true);
+        setError(t.loadProgramsError);
       })
       .finally(() => {
         if (!cancelled) setLoadingPrograms(false);
@@ -153,23 +158,24 @@ export function UpdateCoursePopup({
   }
 
   function toggleOpen() {
+    if (programsLocked) return;
     setIsOpen((prev) => !prev);
     setSearch('');
   }
 
   function addProgram(id: number) {
-    programsTouchedRef.current = true;
+    if (programsLocked) return;
     setProgramIds((prev) => [...prev, id]);
     setSearch('');
   }
 
   function removeProgram(id: number) {
-    programsTouchedRef.current = true;
+    if (programsLocked) return;
     setProgramIds((prev) => prev.filter((pid) => pid !== id));
   }
 
   const canSave =
-    !loadingPrograms && code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
+    !programsLocked && code.trim() !== '' && title.trim() !== '' && programIds.length > 0;
 
   async function save() {
     if (!canSave || pending) return;
@@ -212,8 +218,12 @@ export function UpdateCoursePopup({
           <span className={styles['field-label']}>{t.programsLabel}</span>
           <div className={styles['field-control']}>
             <div
-              className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}`}
+              className={`${styles['tags-input']}${isOpen ? ` ${styles.open}` : ''}${
+                programsLocked ? ` ${styles.locked}` : ''
+              }`}
               onClick={toggleOpen}
+              aria-disabled={programsLocked}
+              aria-busy={loadingPrograms}
             >
               {programIds.length === 0 ? (
                 <span className={styles.placeholder}>{t.programsPlaceholder}</span>

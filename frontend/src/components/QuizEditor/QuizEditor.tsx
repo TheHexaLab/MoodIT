@@ -465,6 +465,9 @@ export function QuizEditor({
         subtitle={shell.subtitle}
         onBack={shell.onBack}
         onClose={onClose}
+        // Échap ferme l'éditeur seulement depuis la liste des quiz : ailleurs (formulaire, question,
+        // harnais, test), il ferait perdre la saisie en cours sans confirmation.
+        closeOnEscape={view.kind === 'list'}
         width={shell.width}
         scrollBody={shell.scrollBody}
         desktopMaxVh={shell.desktopMaxVh}

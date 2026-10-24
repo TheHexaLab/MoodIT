@@ -16,6 +16,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -45,7 +47,12 @@ public class McpAnalysisRunner {
     /**
      * Job refusé par l'exécuteur (file pleine) : sans ça, la ligne resterait PENDING pour toujours
      * et bloquerait le verrou (cours, utilisateur). Marque FAILED et notifie le lanceur.
+     *
+     * <p>REQUIRES_NEW : appelé depuis afterCommit (McpService), où la transaction d'origine est
+     * déjà validée mais encore liée au fil. Sans nouvelle transaction, l'écriture la rejoindrait
+     * et ne serait jamais enregistrée : la ligne resterait PENDING.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markRejected(Integer responseId) {
         McpResponse response = mcpResponseRepository.findById(responseId).orElse(null);
         if (response == null || response.getStatus() != McpStatus.PENDING) return;

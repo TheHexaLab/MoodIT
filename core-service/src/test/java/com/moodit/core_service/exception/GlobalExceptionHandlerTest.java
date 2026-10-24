@@ -74,6 +74,13 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Cours incohérent → 400 avec le message")
+    void coursInvalide_400() {
+        assertResponse(handler.handleInvalidCourse(new InvalidCourseException("Un cours doit…")),
+                HttpStatus.BAD_REQUEST, "Un cours doit…");
+    }
+
+    @Test
     @DisplayName("Quiz incohérent → 400 avec le message")
     void quizInvalide_400() {
         assertResponse(handler.handleInvalidQuiz(new InvalidQuizException("Question 1 : …")),

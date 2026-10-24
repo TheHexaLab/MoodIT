@@ -10,10 +10,12 @@ on:
   schedule:
     - cron: "23 3 * * *"   # chaque nuit : Firefox et WebKit complets sur main
 
-# Un seul run par PR (ou par branche) : un nouveau push annule le run précédent, encore en cours.
+# Un seul run par PR : un nouveau push annule le run précédent, encore en cours. Le type
+# d'évènement fait partie du groupe : le run planifié et un push sur main (même ref) ne
+# s'annulent plus l'un l'autre. Sur main, rien n'est annulé : chaque fusion est vérifiée.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Jeton GITHUB_TOKEN en lecture seule pour tous les jobs (aucun n'écrit dans le dépôt).
 permissions:

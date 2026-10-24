@@ -40,6 +40,11 @@ interface EditorShellProps {
    * de la vue précédente (ex. harnais ouvert déjà défilé en bas).
    */
   scrollResetKey?: string | number;
+  /**
+   * Échap ferme l'éditeur (défaut : oui). À désactiver dans une vue de saisie : la fermeture
+   * ferait perdre le travail non enregistré, sans confirmation.
+   */
+  closeOnEscape?: boolean;
   children: React.ReactNode;
 }
 
@@ -81,6 +86,7 @@ export function EditorShell({
   scrollBody = false,
   desktopMaxVh,
   scrollResetKey,
+  closeOnEscape = true,
   children,
 }: EditorShellProps): React.ReactElement {
   const popup = usePopupController();
@@ -160,6 +166,7 @@ export function EditorShell({
       label={title}
       onClose={onClose}
       controller={popup}
+      closeOnEscape={closeOnEscape}
       panelClassName={styles.panel}
       panelStyle={panelStyle}
     >

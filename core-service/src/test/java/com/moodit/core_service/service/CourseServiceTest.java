@@ -380,11 +380,16 @@ class CourseServiceTest {
   class UpdateCourse {
 
     @Test
-    @DisplayName("Met à jour titre, code et programmes, journalise et émet courseEdited par programme")
+    @DisplayName("Met à jour titre, code et programmes, journalise ; temps réel : gardé → edited, ajouté → created, retiré → deleted")
     void met_a_jour_journalise_et_emet() {
       Course c = course(1);
       Program p10 = program(10, "Informatique");
       Program p11 = program(11, "Électrique");
+      Program p12 = program(12, "Mécanique");
+      p10.setCourses(new java.util.ArrayList<>(List.of(c)));
+      p12.setCourses(new java.util.ArrayList<>(List.of(c)));
+      c.getPrograms().add(p10);
+      c.getPrograms().add(p12);
       when(courseRepository.findById(1)).thenReturn(Optional.of(c));
       when(courseRepository.save(c)).thenReturn(c);
       when(programService.findProgramById(10)).thenReturn(p10);
@@ -400,11 +405,32 @@ class CourseServiceTest {
       verify(auditLogService).record(eq("COURSE_UPDATE"), eq("COURSE"), eq(1),
           contains("Nouveau titre"), contains("Informatique"));
       ArgumentCaptor<CourseDto> captor = ArgumentCaptor.forClass(CourseDto.class);
-      verify(realtimePublisher).courseEdited(eq(10L), captor.capture());
-      verify(realtimePublisher).courseEdited(eq(11L), any());
+      verify(realtimePublisher).courseEdited(eq(10L), captor.capture()); // gardé
+      verify(realtimePublisher).courseCreated(eq(11L), any());            // ajouté : le cours y apparaît
+      verify(realtimePublisher).courseDeleted(12L, 1L);                   // retiré : le cours y disparaît
+      verify(realtimePublisher, org.mockito.Mockito.never()).courseEdited(eq(11L), any());
+      verify(realtimePublisher, org.mockito.Mockito.never()).courseEdited(eq(12L), any());
       assertThat(captor.getValue().id()).isEqualTo(1L);
       assertThat(captor.getValue().code()).isEqualTo("IFT999");
       assertThat(captor.getValue().title()).isEqualTo("Nouveau titre");
+    }
+
+    @Test
+    @DisplayName("programIds vide → refusé (400) : le cours resterait sans programme, rien n'est écrit ni émis")
+    void programIds_vide_refuse() {
+      Course c = course(1);
+      Program p10 = program(10, "Informatique");
+      p10.setCourses(new java.util.ArrayList<>(List.of(c)));
+      c.getPrograms().add(p10);
+      when(courseRepository.findById(1)).thenReturn(Optional.of(c));
+
+      org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+              courseService.updateCourse(1, CourseUpdateDTO.builder().programIds(List.of()).build()))
+          .isInstanceOf(com.moodit.core_service.exception.InvalidCourseException.class)
+          .hasMessage("Un cours doit rester rattaché à au moins un programme.");
+      assertThat(p10.getCourses()).containsExactly(c);
+      verify(courseRepository, org.mockito.Mockito.never()).save(any());
+      verifyNoInteractions(auditLogService, realtimePublisher);
     }
 
     @Test

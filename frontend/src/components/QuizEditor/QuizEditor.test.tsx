@@ -68,6 +68,41 @@ describe('QuizEditor — vue liste', () => {
     fireEvent.click(screen.getByLabelText('Fermer'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('Échap ferme l\'éditeur depuis la liste (rien en cours de saisie)', () => {
+    const { onClose } = renderEditor();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('QuizEditor — Échap ne fait pas perdre la saisie', () => {
+  it('dans le formulaire d\'un quiz, Échap ne ferme pas et la saisie reste', () => {
+    const { onClose } = renderEditor({ quizzes: [] });
+    fireEvent.click(screen.getByText(listT.create));
+    const title = screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement;
+    fireEvent.change(title, { target: { value: 'Quiz en cours' } });
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(editorT.newQuizTitle)).toBeTruthy();
+    expect((screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement).value).toBe(
+      'Quiz en cours'
+    );
+  });
+
+  it('dans l\'éditeur d\'une question, Échap ne ferme pas et l\'énoncé reste', async () => {
+    const { onClose } = renderEditor({ quizzes: [makeQuiz({ title: 'Quiz A' })] });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
+    fireEvent.click(await screen.findByText(formT.addQuestion));
+    fireEvent.change(promptField(), { target: { value: 'Énoncé en cours' } });
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(promptField().value).toBe('Énoncé en cours');
+  });
 });
 
 describe('QuizEditor — navigation liste → formulaire', () => {
