@@ -72,6 +72,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       }
     }
 
+    // Chemin protégé encodé (%xx) : refusé. Aucun client légitime n'encode le chemin d'une route
+    // protégée (ids numériques, texte en query string), et un chemin encodé est lu différemment
+    // par le contrôle d'accès et par le service qui l'exécute (/api/audit%2Dlogs). Le
+    // permission-service décode aussi de son côté : deux barrières indépendantes.
+    if (path.indexOf('%') >= 0) {
+      response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+      response.getWriter().write("Chemin invalide");
+      return;
+    }
+
     // Chemin protégé : on met le body en cache si c'est une écriture JSON, pour pouvoir
     // le transmettre au permission-service ET que core puisse le relire intact.
     HttpServletRequest base = shouldCacheBody(request) ? new CachedBodyRequest(request) : request;

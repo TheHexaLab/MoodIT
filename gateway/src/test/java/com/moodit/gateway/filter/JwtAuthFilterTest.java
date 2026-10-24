@@ -99,6 +99,23 @@ class JwtAuthFilterTest {
     assertThat(chain.getRequest()).isNotNull(); // a bien traversé
   }
 
+  // Chemin protégé encodé : refusé avant tout (token, permission-service), sinon le contrôle
+  // d'accès et le service en aval liraient deux chemins différents (/api/audit%2Dlogs).
+  @Test
+  void encodedProtectedPath_returns400_beforeAnyCheck() throws Exception {
+    for (String uri : new String[] {"/api/audit%2Dlogs", "/api/quizzes/12/%65dit", "/api/x%252D"}) {
+      MockHttpServletRequest req = new MockHttpServletRequest("GET", uri);
+      req.addHeader("Authorization", "Bearer n-importe-quoi");
+      MockFilterChain chain = new MockFilterChain();
+
+      MockHttpServletResponse res = run(req, chain);
+
+      assertThat(res.getStatus()).as(uri).isEqualTo(400);
+      assertThat(res.getContentAsString()).contains("Chemin invalide");
+      assertThat(chain.getRequest()).as(uri).isNull(); // bloqué
+    }
+  }
+
   @Test
   void missingToken_returns401() throws Exception {
     MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");
