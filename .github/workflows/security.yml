@@ -35,14 +35,14 @@ jobs:
         # build-mode none : analyse sans compiler (pas besoin de construire les 6 projets Gradle).
         language: [java-kotlin, javascript-typescript, actions]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: none
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
 
@@ -50,7 +50,7 @@ jobs:
     name: gitleaks — secrets dans l'historique
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0       # tout l'historique : un secret retiré au commit suivant reste exposé
 
@@ -79,7 +79,7 @@ jobs:
     env:
       TRIVY_IMAGE: aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Construire l'image
         run: docker build -t moodit/${{ matrix.service }}:ci ${{ matrix.service }}
@@ -95,7 +95,7 @@ jobs:
           trivy image -q --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --skip-db-update \
             moodit/${{ matrix.service }}:ci
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
           category: trivy-${{ matrix.service }}
