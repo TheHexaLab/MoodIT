@@ -2,7 +2,7 @@ plugins {
 	java
 	jacoco
 	id("info.solidsoft.pitest") version "1.19.0"
-	id("org.springframework.boot") version "4.0.6"
+	id("org.springframework.boot") version "4.1.1"
 	id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -30,9 +30,9 @@ dependencies {
 
 	// Sécurité & JWT
 	implementation("org.springframework.boot:spring-boot-starter-security")
-	implementation("io.jsonwebtoken:jjwt-api:0.12.6")
-	runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
-	runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+	implementation("io.jsonwebtoken:jjwt-api:0.13.0")
+	runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
+	runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
 
 	// Validation
 	implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -61,8 +61,8 @@ dependencies {
 	// BD embarquée pour les tests JPA (@DataJpaTest) : schéma généré depuis les entités.
 	testRuntimeOnly("com.h2database:h2")
 	// Testcontainers : IT sur un VRAI Postgres (garde de non-régression du plan de recherche trgm).
-	testImplementation("org.testcontainers:junit-jupiter:1.20.4")
-	testImplementation("org.testcontainers:postgresql:1.20.4")
+	testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+	testImplementation("org.testcontainers:postgresql:1.21.4")
 	testRuntimeOnly("org.postgresql:postgresql")
 }
 
