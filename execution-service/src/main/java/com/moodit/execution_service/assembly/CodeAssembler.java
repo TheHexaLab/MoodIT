@@ -383,7 +383,9 @@ public class CodeAssembler {
                 + "    $line = fgets($__moodit_pipes[1]);\n"
                 + "    if ($line === false) throw new Exception('serveur termine');\n"
                 + "    $r = json_decode($line, true);\n"
-                + "    if ($r === null) continue;\n"
+                // Le code étudiant partage stdout avec les réponses : un echo de premier niveau
+                // (« 5 », « [1,2] ») n'est pas une réponse (même correctif que pour Python).
+                + "    if (!is_array($r) || !array_key_exists('ok', $r)) continue;\n"
                 + "    if (empty($r['ok'])) throw new Exception($r['error']);\n"
                 + "    return $r;\n"
                 + "  }\n"
@@ -407,7 +409,8 @@ public class CodeAssembler {
                 + "    elseif ($__moodit_op === 'method') $__moodit_r = ['ok'=>true,'value'=>call_user_func_array([$__moodit_objs[$__moodit_m['handle']], $__moodit_m['name']], $__moodit_m['args'])];\n"
                 + "    else $__moodit_r = ['ok'=>false,'error'=>'op inconnu'];\n"
                 + "  } catch (\\Throwable $__moodit_e) { $__moodit_r = ['ok'=>false,'error'=>$__moodit_e->getMessage()]; }\n"
-                + "  fwrite(STDOUT, json_encode($__moodit_r).\"\\n\");\n"
+                // Retour à la ligne AVANT la réponse : un echo sans « \n » ne s'y colle pas.
+                + "  fwrite(STDOUT, \"\\n\".json_encode($__moodit_r).\"\\n\");\n"
                 + "}\n";
         return new Assembled("php", List.of(
                 new PistonClient.File("grader.php", grader),

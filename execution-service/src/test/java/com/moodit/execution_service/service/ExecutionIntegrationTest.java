@@ -127,6 +127,11 @@ class ExecutionIntegrationTest {
                 "<?php\nfunction doubler($n){ $s = file_get_contents(__FILE__);"
                         + " if (preg_match('/MOODIT_OK_[0-9a-f]+/', $s, $m)) fwrite(STDERR, $m[0]); return 0; }",
                 "return doubler(5) === 10;")).isFalse();
+        // Un echo de premier niveau (avec ou sans retour à la ligne) ne fausse plus la correction.
+        assertThat(passes("PHP", "<?php\nfunction doubler($n){ return $n * 2; }\necho 5;",
+                "return doubler(5) === 10;")).isTrue();
+        assertThat(passes("PHP", "<?php\nfunction doubler($n){ return $n * 2; }\necho \"[1,2]\\n\";",
+                "return doubler(5) === 10;")).isTrue();
     }
 
     @Test
