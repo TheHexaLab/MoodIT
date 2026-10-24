@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './AddSubscriptionPopup.module.css';
 import { Popup } from '../Popup/Popup';
 import { PopupVariant } from '../Popup/popupVariant';
@@ -425,8 +425,11 @@ export function AddSubscriptionPopup({
   }, []);
 
   // Ref de l'établissement dont on consulte les programmes (lue par le handler WS, stable).
+  // useLayoutEffect : le ref est à jour dès l'affichage de la liste. Avec useEffect, il l'était
+  // après coup, et un événement temps réel arrivé entre les deux était ignoré pour la liste
+  // ouverte (vu en CI, sous charge, avec React 19.3).
   const joinEstablishmentIdRef = useRef(joinEstablishmentId);
-  useEffect(() => {
+  useLayoutEffect(() => {
     joinEstablishmentIdRef.current = joinEstablishmentId;
   });
 
