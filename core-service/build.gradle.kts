@@ -38,7 +38,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 
 	// Documentation API
-	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.8")
+	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1")
 
 	// Lombok
 	compileOnly("org.projectlombok:lombok")
