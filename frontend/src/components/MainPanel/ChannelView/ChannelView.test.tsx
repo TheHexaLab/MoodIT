@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import ChannelView from './ChannelView';
 import type { Course } from '../../CourseMenu/CourseMenu';
@@ -180,5 +180,320 @@ describe('ChannelView', () => {
     // La barre « Répondre à <auteur> » apparaît (bouton d'annulation propre à la barre).
     expect(screen.getByLabelText('Annuler la réponse')).toBeTruthy();
     expect(screen.getByText(/Répondre à/)).toBeTruthy();
+  });
+});
+
+describe('ChannelView — réponses et références au message parent', () => {
+  it('une réponse affiche un aperçu tronqué du parent et y fait défiler au clic', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const longParent = `Ligne un\n   ${'x'.repeat(80)}`;
+    renderChannel([msg(1, other, longParent), { ...msg(2, me, 'Ma réponse'), postParentId: 1 }]);
+
+    // Aperçu sur une ligne (espaces normalisés) coupé à 64 caractères + ellipse.
+    const expected = `${`Ligne un ${'x'.repeat(80)}`.slice(0, 64)}…`;
+    const ref = screen.getByText(expected).closest('button') as HTMLButtonElement;
+    expect(ref.disabled).toBe(false);
+    // Initiales de l'auteur du parent dans la référence.
+    expect(ref.textContent).toContain('RH');
+
+    fireEvent.click(ref);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    // L'élément défilé est bien le <li> du message parent.
+    expect((scrollIntoView.mock.contexts[0] as HTMLElement).textContent).toContain('Ligne un');
+  });
+
+  it('un aperçu court n’est pas tronqué', () => {
+    renderChannel([msg(1, other, 'Court'), { ...msg(2, me, 'Rép'), postParentId: 1 }]);
+    const ref = screen.getAllByText('Court').find((el) => el.closest('button'));
+    expect(ref?.textContent).toBe('Court');
+  });
+
+  it('parent introuvable : référence désactivée « Message original supprimé »', () => {
+    renderChannel([{ ...msg(2, me, 'Orpheline'), postParentId: 999 }]);
+    const ref = screen.getByText('Message original supprimé').closest('button') as HTMLButtonElement;
+    expect(ref.disabled).toBe(true);
+  });
+
+  it('répondre puis envoyer transmet l’id du parent et ferme la barre de réponse', async () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(7, other, 'Question ?')], { onSendMessage });
+    fireEvent.click(screen.getByLabelText('Répondre au message'));
+    const input = screen.getByLabelText('Envoyer un message dans general') as HTMLInputElement;
+    // Le composer reçoit le focus à l'ouverture de la réponse.
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByText('Rosie HG', { selector: 'strong' })).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: 'Voici' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() =>
+      expect(onSendMessage).toHaveBeenCalledWith(5, 'Voici', 7, expect.any(String))
+    );
+    expect(screen.queryByLabelText('Annuler la réponse')).toBeNull();
+  });
+
+  it('le ✕ de la barre annule la réponse (envoi suivant sans parent)', async () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(7, other, 'Question ?')], { onSendMessage });
+    fireEvent.click(screen.getByLabelText('Répondre au message'));
+    fireEvent.click(screen.getByLabelText('Annuler la réponse'));
+    expect(screen.queryByText(/Répondre à/)).toBeNull();
+
+    const input = screen.getByLabelText('Envoyer un message dans general');
+    fireEvent.change(input, { target: { value: 'Racine' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() =>
+      expect(onSendMessage).toHaveBeenCalledWith(5, 'Racine', null, expect.any(String))
+    );
+  });
+
+  it('Maj+Entrée n’envoie pas le message', () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(1, me, 'Hi')], { onSendMessage });
+    const input = screen.getByLabelText('Envoyer un message dans general');
+    fireEvent.change(input, { target: { value: 'Pas encore' } });
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChannelView — échec d’envoi', () => {
+  it('restaure le brouillon et la réponse, puis affiche une erreur en popup refermable', async () => {
+    const onSendMessage = vi.fn().mockRejectedValue(new Error('500'));
+    renderChannel([msg(7, other, 'Question ?')], { onSendMessage });
+    fireEvent.click(screen.getByLabelText('Répondre au message'));
+    const input = screen.getByLabelText('Envoyer un message dans general') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Raté' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer le message' }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Le message n'a pas pu être envoyé. Réessayez.")).toBeTruthy()
+    );
+    expect(input.value).toBe('Raté');
+    expect(screen.getByLabelText('Annuler la réponse')).toBeTruthy();
+    // Le message optimiste a été retiré de la liste.
+    expect(screen.queryAllByText('Raté').length).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+    await waitFor(() =>
+      expect(screen.queryByText("Le message n'a pas pu être envoyé. Réessayez.")).toBeNull()
+    );
+  });
+});
+
+describe('ChannelView — édition inline', () => {
+  function openEditor() {
+    const onEditMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(1, me, 'Original')], { onEditMessage });
+    fireEvent.click(screen.getByRole('button', { name: 'Modifier le message' }));
+    const input = screen.getByLabelText('Modifier le message') as HTMLInputElement;
+    return { onEditMessage, input };
+  }
+
+  it('pré-remplit l’éditeur avec le contenu et masque les actions du message', () => {
+    const { input } = openEditor();
+    expect(input.value).toBe('Original');
+    expect(screen.queryByLabelText('Répondre au message')).toBeNull();
+  });
+
+  it('Entrée valide la modification (contenu nettoyé)', async () => {
+    const { onEditMessage, input } = openEditor();
+    fireEvent.change(input, { target: { value: '  Corrigé  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(onEditMessage).toHaveBeenCalledWith(1, 'Corrigé'));
+    expect(screen.queryByRole('editor')).toBeNull();
+  });
+
+  it('Échap annule sans appeler onEditMessage', () => {
+    const { onEditMessage, input } = openEditor();
+    fireEvent.change(input, { target: { value: 'Brouillon' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('editor')).toBeNull();
+    expect(screen.getByText('Original')).toBeTruthy();
+    expect(onEditMessage).not.toHaveBeenCalled();
+  });
+
+  it('Maj+Entrée ne valide pas', () => {
+    const { onEditMessage, input } = openEditor();
+    fireEvent.change(input, { target: { value: 'Autre' } });
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(screen.getByRole('editor')).toBeTruthy();
+    expect(onEditMessage).not.toHaveBeenCalled();
+  });
+
+  it('le bouton Annuler ferme l’éditeur', () => {
+    const { onEditMessage } = openEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+    expect(screen.queryByRole('editor')).toBeNull();
+    expect(onEditMessage).not.toHaveBeenCalled();
+  });
+
+  it('contenu inchangé ou vide : ferme l’éditeur sans appel réseau', () => {
+    const { onEditMessage, input } = openEditor();
+    fireEvent.keyDown(input, { key: 'Enter' }); // inchangé
+    expect(screen.queryByRole('editor')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Modifier le message' }));
+    const again = screen.getByLabelText('Modifier le message');
+    fireEvent.change(again, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(screen.queryByRole('editor')).toBeNull();
+    expect(onEditMessage).not.toHaveBeenCalled();
+  });
+
+  it('dépassement de limite : erreur sous le champ, Enregistrer désactivé et Entrée sans effet', () => {
+    const { onEditMessage, input } = openEditor();
+    fireEvent.change(input, { target: { value: 'b'.repeat(MAX_POST_CONTENT_LENGTH + 1) } });
+    expect(screen.getByText(/limite de .* dépassée/i)).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Enregistrer' }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    // L'éditeur reste ouvert, rien n'est envoyé.
+    expect(screen.getByRole('editor')).toBeTruthy();
+    expect(onEditMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChannelView — suppression', () => {
+  it('Annuler dans la confirmation ferme le popup sans supprimer', async () => {
+    const onDeleteMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(1, me, 'Gardé')], { onDeleteMessage });
+    fireEvent.click(screen.getByLabelText('Supprimer le message'));
+    expect(screen.getByText('Ce message sera définitivement supprimé. Continuer ?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+    await waitFor(() =>
+      expect(screen.queryByText('Ce message sera définitivement supprimé. Continuer ?')).toBeNull()
+    );
+    expect(onDeleteMessage).not.toHaveBeenCalled();
+    expect(screen.getByText('Gardé')).toBeTruthy();
+  });
+});
+
+describe('ChannelView — dates et actions tactiles', () => {
+  it('un horodatage invalide n’empêche pas le rendu (heure et séparateur vides)', () => {
+    renderChannel([{ ...msg(1, me, 'Sans date'), createdAt: 'pas-une-date' }]);
+    expect(screen.getByText('Sans date')).toBeTruthy();
+    expect(screen.queryByText(/Invalid/)).toBeNull();
+    expect(screen.getByRole('separator').textContent).toBe('');
+  });
+
+  it('un séparateur de date par jour distinct', () => {
+    renderChannel([
+      { ...msg(1, me, 'Lundi'), createdAt: '2026-06-01T10:00:00' },
+      { ...msg(2, me, 'Lundi bis'), createdAt: '2026-06-01T11:00:00' },
+      { ...msg(3, me, 'Mardi'), createdAt: '2026-06-02T10:00:00' },
+    ]);
+    const separators = screen.getAllByRole('separator').map((el) => el.textContent);
+    expect(separators).toEqual(['1 juin 2026', '2 juin 2026']);
+  });
+
+  it('un tap sur un message ouvre puis referme ses actions', () => {
+    renderChannel([msg(1, other, 'Tap')]);
+    const item = screen.getByText('Tap').closest('li') as HTMLLIElement;
+    fireEvent.click(item);
+    expect(item.getAttribute('data-actions')).toBe('open');
+    fireEvent.click(item);
+    expect(item.getAttribute('data-actions')).toBeNull();
+  });
+});
+
+describe('ChannelView — chargement et pagination', () => {
+  /** Page de `count` messages d'ids consécutifs à partir de `firstId`. */
+  function page(firstId: number, count: number): ChannelMessage[] {
+    return Array.from({ length: count }, (_, i) => ({
+      ...msg(firstId + i, other, `m${firstId + i}`),
+      createdAt: `2026-06-07T10:${String(i).padStart(2, '0')}:00`,
+    }));
+  }
+
+  /** Installe des métriques de scroll pilotables sur la liste (jsdom n'a pas de layout). */
+  function mockScrollMetrics(list: HTMLElement, metrics: { height: number; client: number }) {
+    let top = 0;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => metrics.height });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => metrics.client });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+  }
+
+  it('affiche le chargement puis l’erreur, et Réessayer relance le chargement', async () => {
+    const onFetchMessages = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('503'))
+      .mockResolvedValueOnce([msg(1, other, 'Revenu')]);
+    renderChannel([], { onFetchMessages });
+    expect(screen.getByText('Chargement en cours…')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText('Impossible de charger les messages. Réessayez.')).toBeTruthy()
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    await waitFor(() => expect(screen.getByText('Revenu')).toBeTruthy());
+    expect(onFetchMessages).toHaveBeenNthCalledWith(2, 5, undefined, 30);
+  });
+
+  it('défiler près du haut charge la page plus ancienne et conserve la position de lecture', async () => {
+    let resolveOlder: (m: ChannelMessage[]) => void = () => {};
+    const onFetchMessages = vi
+      .fn()
+      .mockResolvedValueOnce(page(100, 30))
+      .mockReturnValueOnce(new Promise((r) => (resolveOlder = r)));
+    renderChannel([], { onFetchMessages });
+    await waitFor(() => expect(screen.getByText('m100')).toBeTruthy());
+
+    const list = screen.getByText('m100').closest('ul') as HTMLUListElement;
+    const metrics = { height: 1000, client: 300 };
+    mockScrollMetrics(list, metrics);
+
+    // Loin du haut : rien n'est chargé.
+    list.scrollTop = 500;
+    fireEvent.scroll(list);
+    expect(onFetchMessages).toHaveBeenCalledTimes(1);
+
+    // Près du haut : chargement de la page précédente (curseur = plus petit id).
+    list.scrollTop = 20;
+    fireEvent.scroll(list);
+    expect(onFetchMessages).toHaveBeenLastCalledWith(5, 100, 30);
+    // Indicateur de chargement en haut de liste.
+    await waitFor(() => expect(list.querySelector('li[aria-live="polite"]')).not.toBeNull());
+
+    // Un second scroll pendant le chargement ne relance pas de requête.
+    fireEvent.scroll(list);
+    expect(onFetchMessages).toHaveBeenCalledTimes(2);
+
+    // Le prepend ajoute 400 px en haut : la position est décalée d'autant.
+    metrics.height = 1400;
+    await act(async () => resolveOlder(page(70, 5)));
+    expect(screen.getByText('m70')).toBeTruthy();
+    expect(list.scrollTop).toBe(1400 - 1000 + 20);
+    expect(list.querySelector('li[aria-live="polite"]')).toBeNull();
+
+    // Page incomplète (5 < 30) : plus rien à charger.
+    list.scrollTop = 0;
+    fireEvent.scroll(list);
+    expect(onFetchMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('envoyer son message ramène en bas même si l’utilisateur avait remonté la liste', async () => {
+    const onSendMessage = vi.fn().mockResolvedValue(undefined);
+    renderChannel([msg(1, other, 'Premier')], { onSendMessage });
+    const list = screen.getByText('Premier').closest('ul') as HTMLUListElement;
+    const metrics = { height: 1000, client: 300 };
+    mockScrollMetrics(list, metrics);
+
+    // Remonté loin du bas (1000 - 200 - 300 = 500 ≥ 80) : l'auto-scroll est suspendu.
+    list.scrollTop = 200;
+    fireEvent.scroll(list);
+    const input = screen.getByLabelText('Envoyer un message dans general');
+    fireEvent.change(input, { target: { value: 'Le mien' } });
+    metrics.height = 1100;
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByText('Le mien')).toBeTruthy());
+    expect(list.scrollTop).toBe(1100);
   });
 });
