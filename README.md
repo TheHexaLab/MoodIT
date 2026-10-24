@@ -128,7 +128,7 @@ Inspiré de :
 | Couche | Technologies |
 |---|---|
 | 🎨 Frontend | React 18, Vite, React Router, Axios, STOMP.js, SockJS |
-| ⚙️ Services | Spring Boot 4.0.6, Java 25, Gradle |
+| ⚙️ Services | Spring Boot 4.0.9, Java 25, Gradle |
 | 🔒 Auth | Spring Security + JWT (JJWT 0.12) |
 | 🔌 Temps réel | Spring WebSocket + STOMP |
 | 🗄️ Base de données | PostgreSQL 17 |

@@ -1,6 +1,6 @@
 # MoodIT — instructions pour Claude
 
-Plateforme d'entraide étudiante (UdeS). Microservices Spring Boot 4.0.6 / Java 25 + frontend React 19 / Vite / TypeScript, une base PostgreSQL 16 partagée.
+Plateforme d'entraide étudiante (UdeS). Microservices Spring Boot 4.0.9 / Java 25 + frontend React 19 / Vite / TypeScript, une base PostgreSQL 16 partagée.
 La documentation complète est dans le [wiki](https://github.com/TheHexaLab/MoodIT/wiki) : s'y référer plutôt que de deviner, et ne pas la recopier ici.
 
 ## Structure
