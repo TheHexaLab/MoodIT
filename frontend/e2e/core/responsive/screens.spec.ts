@@ -6,6 +6,7 @@ import {
   mainContent,
   newUser,
   uniqueSuffix,
+  waitForPopupSettled,
 } from '../helpers';
 import { clickCourseMenu, clickProgramMenu, openUserMenu } from '../admin.helpers';
 import {
@@ -475,6 +476,9 @@ test('popups de gestion : cours, programme, sections, rôles, MCP', async ({ bro
       }
       await expectReachable(page.getByText(/^Sources : \d+ quiz/));
       await press(page.getByRole('button', { name: 'Retour' }), hasTouch);
+      // Retour à la liste : la popup rapetisse et se recentre ; ✕ bouge pendant ce temps.
+      await expect(page.getByText('HISTORIQUE DES ANALYSES')).toBeVisible();
+      await waitForPopupSettled(page);
     }
     await press(page.getByRole('button', { name: '✕' }), hasTouch);
     await expect(page.getByRole('heading', { name: 'Gestion MCP' })).toHaveCount(0);
