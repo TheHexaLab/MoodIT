@@ -46,6 +46,11 @@ updates:
     ignore:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # TypeScript suit la plage acceptée par typescript-eslint (ESLint) : jusqu'à 6.0.x aujourd'hui
+      # (peer « >=4.8.4 <6.1.0 » en 8.72). Au-delà, npm refuse l'installation (PR #139, TypeScript 7).
+      # Relever cette borne quand typescript-eslint accepte une version plus récente.
+      - dependency-name: "typescript"
+        versions: [">= 6.1.0"]
     groups:
       # vitest et @vitest/* exigent la même version entre eux : une seule PR, majeures comprises
       # (séparées, npm refuse l'installation). Groupe déclaré avant npm-mineures : il est prioritaire.
