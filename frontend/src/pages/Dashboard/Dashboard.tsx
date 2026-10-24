@@ -945,6 +945,13 @@ export default function Dashboard() {
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
         mobileTitle={selectedChannel ? selectedChannel.name : undefined}
+        // Identifiant unique de l'élément ouvert : cours, type et id. Le nom seul confondrait deux
+        // « general » de cours différents, et le tiroir ne se refermerait pas en passant de l'un à l'autre.
+        selectionKey={
+          selectedChannel
+            ? `${effectiveSelectedCourseId ?? ''}:${selectedChannel.type}:${selectedChannel.id}`
+            : undefined
+        }
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
           <UserMenu

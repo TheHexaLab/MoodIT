@@ -158,16 +158,21 @@ export function RoleEditorPopup({
     }
   }
 
+  /** Ferme le sélecteur d'ajout et réinitialise sa recherche. */
+  function closePicker() {
+    setAddingRoleId(null);
+    setSearch('');
+    setCandidates([]);
+    setCandPage(0);
+    setCandHasMore(false);
+  }
+
   // Ferme le sélecteur d'ajout quand on clique en dehors de sa section.
   useEffect(() => {
     if (addingRoleId === null) return;
     function onPointerDown(event: MouseEvent) {
       if (openSectionRef.current && !openSectionRef.current.contains(event.target as Node)) {
-        setAddingRoleId(null);
-        setSearch('');
-        setCandidates([]);
-        setCandPage(0);
-        setCandHasMore(false);
+        closePicker();
       }
     }
     document.addEventListener('mousedown', onPointerDown);
@@ -338,7 +343,16 @@ export function RoleEditorPopup({
                 </button>
               )}
               {addingRoleId === role.id && (
-                <div className={styles.picker}>
+                <div
+                  className={styles.picker}
+                  onKeyDown={(e) => {
+                    // Échap ferme la liste, pas la popup (même règle qu'AddCoursePopup).
+                    if (e.key !== 'Escape') return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    closePicker();
+                  }}
+                >
                   <div className={styles['picker-search']}>
                     <MagnifyingGlass width="1rem" height="1rem" />
                     <input

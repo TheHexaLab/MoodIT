@@ -273,6 +273,29 @@ class RoleServiceTest {
     }
 
     @Test
+    @DisplayName("assign d'un rôle non attribuable dans un programme (Gardien) → refusé, rien d'écrit ni émis")
+    void assign_role_non_attribuable_refuse() {
+      when(roleRepository.findById(3)).thenReturn(Optional.of(GUARDIAN));
+
+      assertThatThrownBy(() -> roleService.changeRole(req("assign", 3, 7, 10)))
+          .isInstanceOf(com.moodit.core_service.exception.ForbiddenException.class)
+          .hasMessage("Ce rôle n'est pas attribuable dans un programme");
+      verify(userProgramRoleRepository, org.mockito.Mockito.never()).save(any());
+      verifyNoInteractions(auditLogService, realtimePublisher);
+    }
+
+    @Test
+    @DisplayName("assign d'un rôle inconnu → refusé, rien d'écrit")
+    void assign_role_inconnu_refuse() {
+      when(roleRepository.findById(99)).thenReturn(Optional.empty());
+
+      assertThatThrownBy(() -> roleService.changeRole(req("assign", 99, 7, 10)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Rôle introuvable");
+      verify(userProgramRoleRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
     @DisplayName("Dans une transaction, programRoleChanged n'est émis qu'APRÈS le commit")
     void echo_differe_apres_commit() {
       stubAuditLookups();

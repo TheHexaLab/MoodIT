@@ -772,7 +772,8 @@ public class QuizService {
         } else if ("multiple_choice".equals(slug)) {
             long good = selectedIds.stream().filter(correctSet::contains).count();
             long bad = selectedIds.stream().filter(id -> !correctSet.contains(id)).count();
-            double ratio = correctIds.isEmpty() ? 0 : (double) (good - bad) / correctIds.size();
+            // correctIds n'est jamais vide ici : le cas est traité juste au-dessus.
+            double ratio = (double) (good - bad) / correctIds.size();
             earned = scaled(total, ratio);
         } else {
             Set<Integer> selectedSet = new HashSet<>(selectedIds);
@@ -798,7 +799,7 @@ public class QuizService {
         int index = 0;
         for (Question q : sortedQuestions(quiz)) {
             index++;
-            String slug = q.getQType() == null ? null : Q_TYPE_NAME_TO_SLUG.get(q.getQType().getName());
+            String slug = slugFor(q);
             SubmittedAnswerDTO answer = byQuestion.get(q.getId());
             if (!"ordering".equals(slug) || answer == null) continue;
             if (!isPermutationOrEmpty(q, answer.getOrderedItemIds())) {
@@ -942,7 +943,7 @@ public class QuizService {
      * plein à une réponse vide. L'éditeur le bloque déjà ; ici on protège l'API elle-même.
      */
     private static void requireCorrectOption(Question q, int index) {
-        String slug = q.getQType() == null ? null : Q_TYPE_NAME_TO_SLUG.get(q.getQType().getName());
+        String slug = slugFor(q);
         boolean choice = "true_false".equals(slug) || "single_choice".equals(slug)
                 || "multiple_choice".equals(slug);
         if (!choice) return;
@@ -1167,7 +1168,7 @@ public class QuizService {
                 .build();
     }
 
-    private String slugFor(Question question) {
+    private static String slugFor(Question question) {
         if (question.getQType() == null) return null;
         return Q_TYPE_NAME_TO_SLUG.get(question.getQType().getName());
     }

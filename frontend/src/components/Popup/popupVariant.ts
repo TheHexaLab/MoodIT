@@ -7,8 +7,8 @@
  * interdit le mot-clé `enum`. L'usage est le même (`PopupVariant.Form`) et le type `PopupVariant`
  * n'accepte que ces valeurs.
  *
- * Empilement (z-index) : les formulaires et éditeurs partagent le rang 90 (au-dessus du tiroir
- * mobile, 80) ; une confirmation (1100) passe au-dessus de l'éditeur de quiz (1000) ; une erreur
+ * Empilement (z-index) : les formulaires et éditeurs, éditeur de quiz compris, partagent le rang
+ * 90 (au-dessus du tiroir mobile, 80) ; une confirmation (1100) passe au-dessus d'eux ; une erreur
  * (1200) passe au-dessus de tout.
  */
 export const PopupVariant = {

@@ -161,6 +161,26 @@ describe('RoleEditorPopup', () => {
     expect(screen.getByText(t.noCandidates)).toBeTruthy();
   });
 
+  it('Échap dans le sélecteur ferme seulement la liste, pas la popup, et vide la recherche', () => {
+    const { onClose } = renderPopup();
+    fireEvent.click(addButton(1) as HTMLButtonElement);
+    const search = screen.getByPlaceholderText(t.searchPlaceholder);
+    fireEvent.change(search, { target: { value: 'roy' } });
+
+    fireEvent.keyDown(search, { key: 'Escape' });
+
+    expect(screen.queryByPlaceholderText(t.searchPlaceholder)).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.click(addButton(1) as HTMLButtonElement);
+    expect((screen.getByPlaceholderText(t.searchPlaceholder) as HTMLInputElement).value).toBe('');
+
+    // Liste fermée : Échap ferme alors la popup, comme ailleurs.
+    fireEvent.mouseDown(document.body);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('re-cliquer « + » ou cliquer en dehors ferme le sélecteur et vide la recherche', () => {
     renderPopup();
     fireEvent.click(addButton(1) as HTMLButtonElement);
