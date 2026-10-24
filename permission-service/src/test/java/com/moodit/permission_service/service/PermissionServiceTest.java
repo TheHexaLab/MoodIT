@@ -164,6 +164,50 @@ class PermissionServiceTest {
     assertThat(service().isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7}")).isFalse();
   }
 
+  // Le rôle attribué dans un programme doit être Enseignant ou Administrateur : le Gardien est un
+  // rôle de plateforme, jamais attribuable dans un programme, pour personne (même un admin global).
+
+  @Test
+  void rolesChange_programAdminAssignsGuardian_denied() {
+    loggedIn(user(5));
+    when(membershipService.roleName(3)).thenReturn(RoleNames.GUARDIAN);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7,\"roleId\":3}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesChange_globalAdminAssignsGuardian_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.roleName(3)).thenReturn(RoleNames.GUARDIAN);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7,\"roleId\":3}"))
+        .isFalse();
+  }
+
+  @Test
+  void rolesChange_programAdminAssignsTeacher_allowed() {
+    loggedIn(user(5));
+    when(membershipService.roleName(1)).thenReturn(RoleNames.TEACHER);
+    when(membershipService.hasRoleInProgram(5, 7, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7,\"roleId\":1}"))
+        .isTrue();
+  }
+
+  @Test
+  void rolesChange_unknownRole_denied() {
+    loggedIn(user(5));
+    when(membershipService.roleName(99)).thenReturn(null);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/roles/change", "POST", "{\"programId\":7,\"roleId\":99}"))
+        .isFalse();
+  }
+
   // ── Changement de rôle GLOBAL (POST /roles/global/change) ───────────────────────────
   // AJOUT (type=assign) selon le rôle ciblé : Gardien → Gardien ET Admin ; Admin → Admin seul.
   // RETRAIT (type=unassign) : Gardien UNIQUEMENT, quel que soit le rôle. Body : type + roleId ;
