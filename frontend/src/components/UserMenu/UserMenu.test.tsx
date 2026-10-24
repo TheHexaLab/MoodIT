@@ -293,7 +293,11 @@ describe('UserMenu', () => {
       const onUnhandled = (e: PromiseRejectionEvent) => e.preventDefault();
       window.addEventListener('unhandledrejection', onUnhandled);
       const swallow = () => {};
-      process.on('unhandledRejection', swallow);
+      // Process Node du lanceur de tests (les types de Node ne sont pas chargés côté application).
+      const nodeProcess = (globalThis as unknown as {
+        process: { on(event: string, fn: () => void): void; off(event: string, fn: () => void): void };
+      }).process;
+      nodeProcess.on('unhandledRejection', swallow);
       try {
         renderMenu({ props: { onLogout } });
         openMenu();
@@ -302,7 +306,7 @@ describe('UserMenu', () => {
         expect(onLogout).toHaveBeenCalledTimes(1);
       } finally {
         await new Promise((r) => setTimeout(r, 0));
-        process.off('unhandledRejection', swallow);
+        nodeProcess.off('unhandledRejection', swallow);
         window.removeEventListener('unhandledrejection', onUnhandled);
       }
     });

@@ -16,6 +16,8 @@ import { defaultLabels as courseLabels } from '../../components/CourseMenu/label
 import { defaultLabels as profileLabels } from '../../components/EditProfilePopup/labels';
 import { defaultLabels as joinCoursesLabels } from '../../components/JoinCoursesPopup/labels';
 import { defaultLabels as auditLabels } from '../../components/AuditLogsPopup/labels';
+import { defaultLabels as addCourseLabels } from '../../components/AddCoursePopup/labels';
+import type { ItemChange } from '../../components/SectionEditorPopup/types';
 
 // ── Couche API : chaque export fonction devient un vi.fn (implémentations posées par test). ──
 vi.mock('./dashboardApi.ts', async (importOriginal) => {
@@ -32,6 +34,9 @@ interface CapturedHandlers {
   courses?: Record<string, (...args: never[]) => void>;
   programsUserId?: number;
   coursesProgramId?: number;
+  adminRoles?: (users: unknown[]) => void;
+  mcp?: Record<string, (...args: never[]) => void>;
+  mcpCourseId?: number;
 }
 const ws = vi.hoisted(() => ({
   captured: {} as CapturedHandlers,
@@ -46,9 +51,20 @@ vi.mock('../../services/appSocket.ts', () => ({
       close: ws.close,
       channels: { subscribe: noopSub },
       forums: { subscribe: noopSub },
-      mcp: { subscribe: noopSub },
+      mcp: {
+        subscribe: (courseId: number, handlers: CapturedHandlers['mcp']) => {
+          ws.captured.mcpCourseId = courseId;
+          ws.captured.mcp = handlers;
+          return () => {};
+        },
+      },
       establishments: { subscribe: noopSub },
-      adminRoles: { subscribe: noopSub },
+      adminRoles: {
+        subscribe: (handler: (users: unknown[]) => void) => {
+          ws.captured.adminRoles = handler;
+          return () => {};
+        },
+      },
       programs: {
         subscribe: (userId: number, handlers: CapturedHandlers['programs']) => {
           ws.captured.programsUserId = userId;
@@ -67,22 +83,64 @@ vi.mock('../../services/appSocket.ts', () => ({
   },
 }));
 
-// ── Vues de contenu : doublures (testées ailleurs) ; on vérifie seulement laquelle s'affiche. ──
+// ── Vues de contenu : doublures (testées ailleurs) ; on vérifie laquelle s'affiche, et des
+// boutons « sonde » invoquent les callbacks reçus pour vérifier leur routage vers l'API.
+type Callback = (...args: unknown[]) => unknown;
+interface ViewProps {
+  channel: { id: number; name: string };
+  canModerate?: boolean;
+  staleNotice?: boolean;
+  attemptOutcome?: unknown;
+  onReloadStale?: () => void;
+  [handler: string]: unknown;
+}
+function probe(props: ViewProps, label: string, handler: string, ...args: unknown[]) {
+  return (
+    <button type="button" onClick={() => (props[handler] as Callback)(...args)}>
+      {label}
+    </button>
+  );
+}
 vi.mock('../../components/MainPanel/ChannelView/ChannelView.tsx', () => ({
-  default: (props: { channel: { name: string }; canModerate?: boolean }) => (
-    <div data-testid="channel-view" data-can-moderate={String(!!props.canModerate)}>
-      {props.channel.name}
-    </div>
+  default: (props: ViewProps) => (
+    <>
+      <div data-testid="channel-view" data-can-moderate={String(!!props.canModerate)}>
+        {props.channel.name}
+      </div>
+      {probe(props, 'chat:fetch', 'onFetchMessages', props.channel.id, 40, 20)}
+      {probe(props, 'chat:send', 'onSendMessage', props.channel.id, 'Bonjour', null, 'c-1')}
+      {probe(props, 'chat:edit', 'onEditMessage', 11, 'Modifié')}
+      {probe(props, 'chat:delete', 'onDeleteMessage', 11)}
+    </>
   ),
 }));
 vi.mock('../../components/MainPanel/ForumView/ForumView.tsx', () => ({
-  default: (props: { channel: { name: string } }) => (
-    <div data-testid="forum-view">{props.channel.name}</div>
+  default: (props: ViewProps) => (
+    <>
+      <div data-testid="forum-view">{props.channel.name}</div>
+      {probe(props, 'forum:threads', 'onFetchThreads', props.channel.id, 3, 10)}
+      {probe(props, 'forum:replies', 'onFetchReplies', props.channel.id, 12)}
+      {probe(props, 'forum:create', 'onCreatePost', props.channel.id, 'Contenu', null, 'p-1', 'Titre')}
+      {probe(props, 'forum:edit', 'onEditPost', 12, 'Nouveau', 'T')}
+      {probe(props, 'forum:delete', 'onDeletePost', 12)}
+      {probe(props, 'forum:vote', 'onVotePost', 12, -1)}
+    </>
   ),
 }));
 vi.mock('../../components/MainPanel/QuizView/QuizView.tsx', () => ({
-  default: (props: { channel: { name: string } }) => (
-    <div data-testid="quiz-view">{props.channel.name}</div>
+  default: (props: ViewProps) => (
+    <>
+      <div
+        data-testid="quiz-view"
+        data-stale={String(!!props.staleNotice)}
+        data-outcome={props.attemptOutcome ? JSON.stringify(props.attemptOutcome) : ''}
+      >
+        {props.channel.name}
+      </div>
+      <button type="button" onClick={() => props.onReloadStale?.()}>
+        quiz:reload
+      </button>
+    </>
   ),
 }));
 
@@ -895,6 +953,698 @@ describe('Dashboard', () => {
       renderDashboard();
       type(['8', '3', 'x', '3', '9', '!']);
       expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    });
+  });
+});
+
+describe('Dashboard — compléments', () => {
+  /** Ouvre « Génie logiciel » (IFT101 sélectionné). */
+  async function openGlo(setup: Setup = {}) {
+    const utils = renderDashboard(setup);
+    await selectProgram('Génie logiciel');
+    await waitForCourseSelector('IFT101');
+    return utils;
+  }
+
+  /** Barre latérale des cours (canaux, forums, quiz). */
+  function nav() {
+    return screen.getByRole('navigation', { name: 'Cours' });
+  }
+
+  /** Ordre d'apparition de libellés dans la barre latérale. */
+  function orderInNav(...names: string[]) {
+    const text = nav().textContent ?? '';
+    return [...names].sort((a, b) => text.indexOf(a) - text.indexOf(b));
+  }
+
+  function courses() {
+    return ws.captured.courses as unknown as {
+      onSectionChange: (courseId: number, type: string, change: ItemChange) => void;
+      onQuizUpdated: (courseId: number, quizId: number) => void;
+      onQuizReordered: (courseId: number) => void;
+      onQuizCreated: (courseId: number) => void;
+      onQuizDeleted: (courseId: number, quizId: number) => void;
+      onResync: () => void;
+    };
+  }
+
+  function programsWs() {
+    return ws.captured.programs as unknown as {
+      onProgramRemove: (id: number) => void;
+      onQuizAttemptGraded: (quizId: number, attemptId: number) => void;
+      onQuizAttemptFailed: (quizId: number, attemptId: number, reason?: string) => void;
+    };
+  }
+
+  describe('temps réel : quiz', () => {
+    it('verdict de correction reçu via WS : transmis à la vue de quiz ouverte', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      act(() => programsWs().onQuizAttemptGraded(7, 99));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 7,
+        attemptId: 99,
+        ok: true,
+      });
+      act(() => programsWs().onQuizAttemptFailed(7, 100, 'délai dépassé'));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 7,
+        attemptId: 100,
+        ok: false,
+        reason: 'délai dépassé',
+      });
+    });
+
+    it('quiz ouvert modifié via WS : liste rechargée, bannière affichée puis retirée au rechargement', async () => {
+      vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([{ id: 7, title: 'Quiz intro v2' }]);
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      expect(screen.getByTestId('quiz-view').dataset.stale).toBe('false');
+
+      act(() => courses().onQuizUpdated(10, 7));
+      expect(screen.getByTestId('quiz-view').dataset.stale).toBe('true');
+      expect(api.fetchPublishedQuizzes).toHaveBeenCalledWith(10);
+      await waitFor(() => expect(within(nav()).getByText('Quiz intro v2')).toBeTruthy());
+
+      fireEvent.click(screen.getByRole('button', { name: 'quiz:reload' }));
+      expect(screen.getByTestId('quiz-view').dataset.stale).toBe('false');
+    });
+
+    it('un autre quiz modifié via WS : pas de bannière sur la vue ouverte', async () => {
+      vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([{ id: 7, title: 'Quiz intro' }]);
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      act(() => courses().onQuizUpdated(10, 8));
+      expect(screen.getByTestId('quiz-view').dataset.stale).toBe('false');
+    });
+
+    it('quiz réordonnés via WS : la liste suit le nouvel ordre renvoyé par l’API', async () => {
+      vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([
+        { id: 8, title: 'Quiz deux' },
+        { id: 7, title: 'Quiz intro' },
+      ]);
+      await openGlo();
+      act(() => courses().onQuizReordered(10));
+      await waitFor(() => expect(within(nav()).getByText('Quiz deux')).toBeTruthy());
+      expect(api.fetchPublishedQuizzes).toHaveBeenCalledWith(10);
+      expect(orderInNav('Quiz intro', 'Quiz deux')).toEqual(['Quiz deux', 'Quiz intro']);
+    });
+
+    it('échec du rechargement des quiz : la liste garde son état courant', async () => {
+      vi.mocked(api.fetchPublishedQuizzes).mockRejectedValue(new Error('panne'));
+      await openGlo();
+      act(() => courses().onQuizCreated(10));
+      await waitFor(() => expect(api.fetchPublishedQuizzes).toHaveBeenCalledWith(10));
+      expect(within(nav()).getByText('Quiz intro')).toBeTruthy();
+    });
+
+    it('resync avec un quiz ouvert : recharge les cours et marque la vue à recharger', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      act(() => courses().onResync());
+      expect(screen.getByTestId('quiz-view').dataset.stale).toBe('true');
+      await waitFor(() => expect(api.fetchCourses).toHaveBeenCalledTimes(2));
+      expect(api.fetchCourses).toHaveBeenLastCalledWith(1);
+    });
+
+    it('quiz supprimé via WS alors qu’un canal est ouvert : le canal reste affiché', async () => {
+      vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([]);
+      await openGlo();
+      fireEvent.click(screen.getByText('general'));
+      act(() => courses().onQuizDeleted(10, 7));
+      await waitFor(() => expect(within(nav()).queryByText('Quiz intro')).toBeNull());
+      expect(screen.getByTestId('channel-view').textContent).toBe('general');
+    });
+  });
+
+  describe('temps réel : sections', () => {
+    it('quiz : renommage, création (id suivant), réordre puis suppression', async () => {
+      await openGlo();
+      act(() => courses().onSectionChange(10, 'quiz', { type: 'rename', id: '7', name: 'Quiz renommé' }));
+      expect(within(nav()).getByText('Quiz renommé')).toBeTruthy();
+
+      act(() =>
+        courses().onSectionChange(10, 'quiz', { type: 'create', item: { id: '', name: 'Quiz neuf' } })
+      );
+      expect(within(nav()).getByText('Quiz neuf')).toBeTruthy();
+      expect(orderInNav('Quiz neuf', 'Quiz renommé')).toEqual(['Quiz renommé', 'Quiz neuf']);
+      // Le quiz créé reçoit l'id max + 1 (= 8) : il est ouvrable et réordonnable par cet id.
+      act(() => courses().onSectionChange(10, 'quiz', { type: 'reorder', orderedIds: ['8', '7'] }));
+      expect(orderInNav('Quiz neuf', 'Quiz renommé')).toEqual(['Quiz neuf', 'Quiz renommé']);
+
+      act(() => courses().onSectionChange(10, 'quiz', { type: 'delete', id: '7' }));
+      expect(within(nav()).queryByText('Quiz renommé')).toBeNull();
+      expect(within(nav()).getByText('Quiz neuf')).toBeTruthy();
+    });
+
+    it('forum : création avec l’id réel, dédupliquée si l’écho WS arrive deux fois', async () => {
+      await openGlo();
+      const change: ItemChange = { type: 'create', item: { id: '42', name: 'annonces' } };
+      act(() => courses().onSectionChange(10, 'forum', change));
+      act(() => courses().onSectionChange(10, 'forum', change));
+      expect(within(nav()).getAllByText('annonces')).toHaveLength(1);
+      // Ouvrable comme forum (fType 'Thread') avec l'id réel.
+      fireEvent.click(within(nav()).getByText('annonces'));
+      expect(screen.getByTestId('forum-view').textContent).toBe('annonces');
+    });
+
+    it('forum : création sans id → id temporaire, puis réordre limité à la section', async () => {
+      await openGlo();
+      act(() =>
+        courses().onSectionChange(10, 'forum', { type: 'create', item: { id: '', name: 'aide-tp' } })
+      );
+      expect(within(nav()).getByText('aide-tp')).toBeTruthy();
+      expect(orderInNav('entraide', 'aide-tp')).toEqual(['entraide', 'aide-tp']);
+      // Id temporaire = max(5, 6) + 1 = 7 ; un id absent de orderedIds est ré-ajouté en fin.
+      act(() => courses().onSectionChange(10, 'forum', { type: 'reorder', orderedIds: ['7'] }));
+      expect(orderInNav('entraide', 'aide-tp')).toEqual(['aide-tp', 'entraide']);
+      // Le canal texte (autre section) n'a pas bougé.
+      expect(within(nav()).getByText('general')).toBeTruthy();
+    });
+
+    it('forum : un renommage visant un id de la section canaux est ignoré', async () => {
+      await openGlo();
+      act(() => courses().onSectionChange(10, 'forum', { type: 'rename', id: '5', name: 'pirate' }));
+      expect(within(nav()).getByText('general')).toBeTruthy();
+      expect(within(nav()).queryByText('pirate')).toBeNull();
+    });
+  });
+
+  describe('tiroir mobile (selectionKey)', () => {
+    beforeEach(() => {
+      // Deux éléments du MÊME nom dans le cours : un canal texte et un forum « general ».
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 1
+          ? [
+              {
+                id: 10,
+                code: 'IFT101',
+                title: 'Programmation',
+                forums: [
+                  { id: 5, title: 'general', fType: 'Discussion' },
+                  { id: 6, title: 'general', fType: 'Thread' },
+                ],
+              },
+            ]
+          : structuredClone(coursesByProgram[id] ?? [])
+      );
+    });
+
+    function drawerToggle() {
+      return document.querySelector<HTMLButtonElement>('[aria-controls="left-menu-drawer"]')!;
+    }
+
+    it('passer d’un « general » à un autre du même nom referme le tiroir', async () => {
+      await openGlo();
+      const [textGeneral, forumGeneral] = within(nav()).getAllByText('general');
+
+      fireEvent.click(drawerToggle());
+      expect(drawerToggle().getAttribute('aria-expanded')).toBe('true');
+      fireEvent.click(textGeneral);
+      expect(screen.getByTestId('channel-view')).toBeTruthy();
+      expect(drawerToggle().getAttribute('aria-expanded')).toBe('false');
+      // Titre mobile = nom de l'élément ouvert.
+      expect(document.querySelector('[role="title"]')?.textContent).toBe('general');
+
+      // Même nom, autre élément : la clé (cours:type:id) change → le tiroir se referme.
+      fireEvent.click(drawerToggle());
+      fireEvent.click(within(nav()).getAllByText('general')[1] ?? forumGeneral);
+      expect(screen.getByTestId('forum-view')).toBeTruthy();
+      expect(drawerToggle().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('sans élément ouvert : titre « Accueil »', async () => {
+      await openGlo();
+      expect(document.querySelector('[role="title"]')?.textContent).toBe('Accueil');
+    });
+  });
+
+  describe('délégation des actions de contenu à l’API', () => {
+    it('chat : chargement, envoi, édition et suppression routés vers le canal ouvert', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('general'));
+      fireEvent.click(screen.getByRole('button', { name: 'chat:fetch' }));
+      expect(api.fetchMessages).toHaveBeenCalledWith(5, 40, 20);
+      fireEvent.click(screen.getByRole('button', { name: 'chat:send' }));
+      expect(api.sendMessage).toHaveBeenCalledWith(5, 'Bonjour', null, 'c-1');
+      fireEvent.click(screen.getByRole('button', { name: 'chat:edit' }));
+      expect(api.editMessage).toHaveBeenCalledWith(5, 11, 'Modifié');
+      fireEvent.click(screen.getByRole('button', { name: 'chat:delete' }));
+      expect(api.deleteMessage).toHaveBeenCalledWith(5, 11);
+    });
+
+    it('forum : sujets, réponses, création, édition, suppression et vote routés vers le forum ouvert', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('entraide'));
+      const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+      click('forum:threads');
+      expect(api.fetchThreads).toHaveBeenCalledWith(6, 3, 10);
+      click('forum:replies');
+      expect(api.fetchReplies).toHaveBeenCalledWith(6, 12);
+      click('forum:create');
+      expect(api.createPost).toHaveBeenCalledWith(6, 'Contenu', null, 'p-1', 'Titre');
+      click('forum:edit');
+      expect(api.editPost).toHaveBeenCalledWith(6, 12, 'Nouveau', 'T');
+      click('forum:delete');
+      expect(api.deletePost).toHaveBeenCalledWith(6, 12);
+      click('forum:vote');
+      expect(api.votePost).toHaveBeenCalledWith(6, 12, -1);
+    });
+  });
+
+  describe('confirmations annulées', () => {
+    const confirmText = {
+      leaveProgram: 'Quitter le programme ?',
+      deleteProgram: 'Supprimer le programme ?',
+    };
+
+    it('« Annuler » sur « Quitter le programme » : rien n’est appelé', async () => {
+      renderDashboard();
+      await waitFor(() => expect(programButton('Mathématiques')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Quitter le programme' })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+      expect(screen.queryByText(confirmText.leaveProgram)).toBeNull();
+      expect(api.leaveProgram).not.toHaveBeenCalled();
+    });
+
+    it('« Annuler » sur « Supprimer le programme » : rien n’est appelé', async () => {
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Mathématiques')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Supprimer le programme' })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+      expect(screen.queryByText(confirmText.deleteProgram)).toBeNull();
+      expect(api.deleteProgram).not.toHaveBeenCalled();
+    });
+
+    it('« Annuler » sur « Quitter le cours » puis « Supprimer le cours » : rien n’est appelé', async () => {
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.contextMenu(courseSelector()!);
+      fireEvent.click(screen.getByRole('menuitem', { name: courseLabels.contextLeaveCourse }));
+      expect(screen.getByText(/Tu ne verras plus les canaux, quiz et forums de « GIF200 »/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+      expect(screen.queryByText('Quitter le cours ?')).toBeNull();
+
+      fireEvent.contextMenu(courseSelector()!);
+      fireEvent.click(screen.getByRole('menuitem', { name: courseLabels.contextDeleteCourse }));
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+      expect(screen.queryByText('Supprimer le cours ?')).toBeNull();
+      expect(api.leaveCourse).not.toHaveBeenCalled();
+      expect(api.deleteCourse).not.toHaveBeenCalled();
+      expect(courseSelector()!.textContent).toBe('GIF200');
+    });
+  });
+
+  describe('suppression / retrait du programme actif', () => {
+    it('supprimer le programme actif bascule sur un autre programme', async () => {
+      vi.mocked(api.deleteProgram).mockResolvedValue(undefined);
+      await openGlo({ isAdmin: true });
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Supprimer le programme' })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+      await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
+      expect(api.deleteProgram).toHaveBeenCalledWith(1);
+      await waitForCourseSelector('GIF200');
+    });
+
+    it('tous les programmes retirés via WS : aucune localisation fantôme n’est sauvegardée', async () => {
+      const { saveSettings } = await openGlo();
+      act(() => {
+        programsWs().onProgramRemove(2);
+        programsWs().onProgramRemove(3);
+      });
+      saveSettings.mockClear();
+      act(() => programsWs().onProgramRemove(1));
+      expect(screen.queryByRole('button', { name: 'Génie logiciel' })).toBeNull();
+      expect(screen.getByRole('heading', { name: noProgramLabels.title })).toBeTruthy();
+      for (const [arg] of saveSettings.mock.calls) expect(arg.location.programId).toBeGreaterThan(0);
+    });
+  });
+
+  describe('popups d’édition', () => {
+    it('modifier le programme : api.updateProgram puis le rail affiche le nouveau nom', async () => {
+      vi.mocked(api.updateProgram).mockResolvedValue(undefined);
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Modifier le programme' })
+      );
+      fireEvent.change(screen.getByDisplayValue('Génie logiciel'), { target: { value: 'Génie logiciel avancé' } });
+      fireEvent.change(screen.getByPlaceholderText('Ex. Promo 71'), { target: { value: 'Promo 72' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+      await waitFor(() => expect(programButton('Génie logiciel avancé')).toBeTruthy());
+      expect(api.updateProgram).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ name: 'Génie logiciel avancé', code: 'GLO', cohort: 'Promo 72' })
+      );
+      expect(screen.queryByText('Mets à jour les informations du programme.')).toBeNull();
+    });
+
+    it('modifier le programme : les codes des AUTRES programmes sont réservés', async () => {
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Modifier le programme' })
+      );
+      fireEvent.change(screen.getByDisplayValue('GLO'), { target: { value: 'GIF' } });
+      expect(screen.getByText('Ce code existe déjà dans cet établissement')).toBeTruthy();
+    });
+
+    it('modifier le cours : charge les programmes rattachés, api.updateCourse puis le sélecteur suit', async () => {
+      vi.mocked(api.fetchCourseProgramIds).mockResolvedValue([2]);
+      vi.mocked(api.updateCourse).mockResolvedValue(undefined);
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.contextMenu(courseSelector()!);
+      fireEvent.click(screen.getByRole('menuitem', { name: courseLabels.contextEditCourse }));
+      await waitFor(() => expect(api.fetchCourseProgramIds).toHaveBeenCalledWith(20));
+      fireEvent.change(screen.getByDisplayValue('GIF200'), { target: { value: 'GIF201' } });
+      const save = screen.getByRole('button', { name: 'Enregistrer' }) as HTMLButtonElement;
+      await waitFor(() => expect(save.disabled).toBe(false));
+      fireEvent.click(save);
+      await waitForCourseSelector('GIF201');
+      expect(api.updateCourse).toHaveBeenCalledWith(20, {
+        title: 'Circuits',
+        code: 'GIF201',
+        programIds: [2],
+      });
+    });
+
+    it('rejoindre des cours : api.joinCourses puis rechargement des cours du programme', async () => {
+      vi.mocked(api.fetchProgramCourses).mockResolvedValue([{ id: 30, code: 'MAT100', title: 'Algèbre' }]);
+      vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
+      vi.mocked(api.joinCourses).mockResolvedValue([]);
+      renderDashboard();
+      await selectProgram('Mathématiques');
+      await screen.findByText(noCourseLabels.joinCourse);
+      vi.mocked(api.fetchCourses).mockResolvedValue([{ id: 30, code: 'MAT100', title: 'Algèbre' }]);
+
+      fireEvent.click(
+        within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Rejoindre des cours' })
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /Algèbre/ }));
+      fireEvent.click(screen.getByRole('button', { name: joinCoursesLabels.join }));
+      await waitForCourseSelector('MAT100');
+      expect(api.joinCourses).toHaveBeenCalledWith(3, [30]);
+      expect(api.fetchCourses).toHaveBeenLastCalledWith(3);
+    });
+
+    it('ajouter un cours (enseignant) : api.createCourse puis le cours apparaît dans le sélecteur', async () => {
+      vi.mocked(api.fetchEstablishments).mockResolvedValue([{ id: 1, name: 'UdeS' }] as never);
+      vi.mocked(api.fetchManageableProgramsInEstablishment).mockResolvedValue([
+        { id: 2, name: 'Programme GIF', code: 'GIF', cohort: 'P1', color: '#000000' },
+      ] as never);
+      vi.mocked(api.createCourse).mockResolvedValue({ id: 21, code: 'GIF201', title: 'Structures' });
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.click(
+        within(openProgramContextMenu('Génie info')).getByRole('menuitem', { name: 'Ajouter un cours' })
+      );
+      const control = (label: string) =>
+        screen.getByText(label).nextElementSibling?.firstElementChild as HTMLElement;
+      fireEvent.click(control(addCourseLabels.establishmentLabel));
+      fireEvent.click(await screen.findByText('UdeS'));
+      fireEvent.click(control(addCourseLabels.programsLabel));
+      fireEvent.click(await screen.findByText('Programme GIF'));
+      fireEvent.change(screen.getByPlaceholderText(addCourseLabels.codePlaceholder), { target: { value: 'gif201' } });
+      fireEvent.change(screen.getByPlaceholderText(addCourseLabels.titlePlaceholder), { target: { value: 'Structures' } });
+      fireEvent.click(screen.getByText(addCourseLabels.save).closest('button')!);
+
+      await waitFor(() =>
+        expect(api.createCourse).toHaveBeenCalledWith({ code: 'GIF201', title: 'Structures', programIds: [2] })
+      );
+      await waitFor(() => expect(screen.queryByText('Ajoute ce cours à un ou plusieurs programmes')).toBeNull());
+      fireEvent.click(courseSelector()!);
+      expect(within(screen.getByRole('listbox')).getByRole('option', { name: /GIF201/ })).toBeTruthy();
+    });
+
+    it('programme sans cours (enseignant) : « Créer un cours » ouvre l’ajout, Échap le ferme', async () => {
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 2 ? [] : structuredClone(coursesByProgram[id] ?? [])
+      );
+      vi.mocked(api.fetchEstablishments).mockResolvedValue([]);
+      renderDashboard();
+      await selectProgram('Génie info');
+      fireEvent.click(await screen.findByText(noCourseLabels.addCourse));
+      expect(await screen.findByText('Ajoute ce cours à un ou plusieurs programmes')).toBeTruthy();
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByText('Ajoute ce cours à un ou plusieurs programmes')).toBeNull());
+    });
+
+    it('cours vide (enseignant) : créer un canal persiste via api.changeSection et l’ajoute à la sidebar', async () => {
+      vi.mocked(api.changeSection).mockResolvedValue({ type: 'create', item: { id: '55', name: 'labo-1' } });
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.click(screen.getByText(emptyCourseLabels.createChannel));
+      fireEvent.click(screen.getByText('Ajouter un canal'));
+      const input = within(screen.getByRole('dialog')).getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'labo-1' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() =>
+        expect(api.changeSection).toHaveBeenCalledWith(20, 'text', {
+          type: 'create',
+          item: { id: expect.any(String), name: 'labo-1' },
+        })
+      );
+      await waitFor(() => expect(within(nav()).getByText('labo-1')).toBeTruthy());
+      // Fermer l'éditeur : il disparaît.
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByText('Modifier les canaux')).toBeNull());
+      // Le canal créé porte l'id réel renvoyé par le backend.
+      fireEvent.click(within(nav()).getByText('labo-1'));
+      expect(screen.getByTestId('channel-view').textContent).toBe('labo-1');
+    });
+
+    it('cours vide (enseignant) : « Créer un Forum » ouvre l’éditeur des forums', async () => {
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.click(screen.getByText(emptyCourseLabels.createForum));
+      expect(screen.getByText('Modifier les forums')).toBeTruthy();
+    });
+
+    it('profil : « Annuler » ferme le popup', async () => {
+      renderDashboard();
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Modifier le profil' }));
+      expect(screen.getByDisplayValue('Jean')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: profileLabels.cancel }));
+      await waitFor(() => expect(screen.queryByText(profileLabels.subtitle)).toBeNull());
+    });
+
+    it('journal d’audit : charge les entrées via l’API et se ferme avec Échap', async () => {
+      vi.mocked(api.fetchAuditLogs).mockResolvedValue([]);
+      renderDashboard({ isAdmin: true, isGuardian: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Journalisation' }));
+      await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalled());
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByText(auditLabels.title)).toBeNull());
+    });
+  });
+
+  describe('gestion des rôles', () => {
+    const globalRoles = {
+      roles: [
+        { id: 1, name: ROLE.ADMIN },
+        { id: 2, name: ROLE.GUARDIAN },
+      ],
+      users: [
+        { id: 4, username: 'jdoe', firstName: 'Jean', lastName: 'Doe', email: 'j@x.ca', avatarColor: '#123456', role_ids: [2] },
+        { id: 8, username: 'ali', firstName: 'Ali', lastName: 'Ba', email: 'a@x.ca', avatarColor: '#654321', role_ids: [1] },
+      ],
+    };
+
+    async function openGlobalRoles(setup: Setup) {
+      vi.mocked(api.fetchGlobalRoles).mockResolvedValue(structuredClone(globalRoles) as never);
+      renderDashboard(setup);
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
+      await screen.findByText('Administrateurs généraux et gardiens de la plateforme.');
+    }
+
+    function section(roleId: number) {
+      return document.querySelector<HTMLElement>(`section[data-role-id="${roleId}"]`)!;
+    }
+    function trashButtons(roleId: number) {
+      return section(roleId).querySelectorAll('ul > li > button');
+    }
+
+    it('admin général : n’attribue que le rôle Administrateur et ne retire personne', async () => {
+      await openGlobalRoles({ isAdmin: true });
+      expect(within(section(1)).getByText('Ajouter')).toBeTruthy();
+      expect(within(section(2)).queryByText('Ajouter')).toBeNull();
+      expect(trashButtons(1)).toHaveLength(0);
+      expect(trashButtons(2)).toHaveLength(0);
+    });
+
+    it('gardien : attribue tout, retire autrui mais pas son propre rôle gardien', async () => {
+      vi.mocked(api.changeGlobalRole).mockResolvedValue(undefined);
+      await openGlobalRoles({ isAdmin: true, isGuardian: true });
+      expect(within(section(1)).getByText('Ajouter')).toBeTruthy();
+      expect(within(section(2)).getByText('Ajouter')).toBeTruthy();
+      // Anti-lockout : pas de corbeille sur soi-même (Jean, gardien).
+      expect(trashButtons(2)).toHaveLength(0);
+      expect(trashButtons(1)).toHaveLength(1);
+      fireEvent.click(trashButtons(1)[0]);
+      await waitFor(() =>
+        expect(api.changeGlobalRole).toHaveBeenCalledWith({ type: 'unassign', roleId: 1, userId: 8 })
+      );
+    });
+
+    it('gardien : les candidats sont chargés côté serveur avec les paramètres du sélecteur', async () => {
+      vi.mocked(api.fetchGlobalRoleCandidates).mockResolvedValue([]);
+      await openGlobalRoles({ isAdmin: true, isGuardian: true });
+      fireEvent.click(within(section(1)).getByText('Ajouter'));
+      await waitFor(() =>
+        expect(api.fetchGlobalRoleCandidates).toHaveBeenCalledWith(1, '', expect.any(Number), expect.any(Number))
+      );
+    });
+
+    it('liste des administrateurs poussée via WS : rôles mappés vers role_ids', async () => {
+      await openGlobalRoles({ isAdmin: true });
+      const push = ws.captured.adminRoles as (users: unknown[]) => void;
+      act(() =>
+        push([
+          { id: 9, username: 'zoe', firstName: 'Zoé', lastName: 'Zed', email: 'z@x.ca', avatarColor: '#111111', roles: [1] },
+          { id: 10, username: 'sans', firstName: 'Sans', lastName: 'Rôle', email: 's@x.ca', avatarColor: '#222222' },
+        ])
+      );
+      expect(within(section(1)).getByText('Zoé Zed')).toBeTruthy();
+      expect(within(section(1)).queryByText('Ali Ba')).toBeNull();
+      // `roles` absent → aucun rôle (n'apparaît dans aucune section).
+      expect(screen.queryByText('Sans Rôle')).toBeNull();
+    });
+
+    it('échec du chargement des administrateurs : « Fermer » referme l’erreur', async () => {
+      vi.mocked(api.fetchGlobalRoles).mockRejectedValue(new Error('refus'));
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
+      await screen.findByText('Impossible de charger les administrateurs. Réessaie.');
+      fireEvent.click(screen.getByRole('button', { name: errorLabels.close }));
+      await waitFor(() =>
+        expect(screen.queryByText('Impossible de charger les administrateurs. Réessaie.')).toBeNull()
+      );
+    });
+
+    it('rôles d’un programme : changements et candidats routés vers le programme ciblé', async () => {
+      vi.mocked(api.fetchProgramRoles).mockResolvedValue({
+        roles: [{ id: 3, name: ROLE.TEACHER }],
+        users: [{ id: 8, username: 'ali', firstName: 'Ali', lastName: 'Ba', email: 'a@x.ca', avatarColor: '#654321', role_ids: [3] }],
+      } as never);
+      vi.mocked(api.fetchProgramRoleCandidates).mockResolvedValue([]);
+      vi.mocked(api.changeRole).mockResolvedValue(undefined);
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Gérer les rôles' })
+      );
+      await screen.findByText('Gestion des rôles');
+      fireEvent.click(trashButtons(3)[0]);
+      await waitFor(() =>
+        expect(api.changeRole).toHaveBeenCalledWith(1, { type: 'unassign', roleId: 3, userId: 8 })
+      );
+      fireEvent.click(within(section(3)).getByText('Ajouter'));
+      await waitFor(() =>
+        expect(api.fetchProgramRoleCandidates).toHaveBeenCalledWith(1, 3, '', expect.any(Number), expect.any(Number))
+      );
+    });
+
+    it('rôles d’un programme : « Fermer » referme l’erreur de chargement', async () => {
+      vi.mocked(api.fetchProgramRoles).mockRejectedValue(new Error('refus'));
+      renderDashboard({ isAdmin: true });
+      await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Gérer les rôles' })
+      );
+      await screen.findByText('Impossible de charger les membres du programme. Réessaie.');
+      fireEvent.click(screen.getByRole('button', { name: errorLabels.close }));
+      await waitFor(() =>
+        expect(screen.queryByText('Impossible de charger les membres du programme. Réessaie.')).toBeNull()
+      );
+    });
+  });
+
+  describe('gestion MCP d’un cours', () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          disconnect() {}
+          unobserve() {}
+        }
+      );
+    });
+
+    async function openMcp() {
+      vi.mocked(api.fetchCourseAnalyses).mockResolvedValue([]);
+      vi.mocked(api.fetchPendingAnalysis).mockResolvedValue(true);
+      renderDashboard();
+      await selectProgram('Génie info');
+      await waitForCourseSelector('GIF200');
+      fireEvent.contextMenu(courseSelector()!);
+      fireEvent.click(screen.getByRole('menuitem', { name: courseLabels.contextMcpManagement }));
+      await waitFor(() => expect(api.fetchPendingAnalysis).toHaveBeenCalledWith(20));
+      expect(api.fetchCourseAnalyses).toHaveBeenCalledWith(20);
+      expect(ws.captured.mcpCourseId).toBe(20);
+      return ws.captured.mcp as unknown as {
+        onAnalysisFailed: (launcherId: number, reason?: string) => void;
+        onAnalysisProgress: (launcherId: number, step: string) => void;
+      };
+    }
+
+    it('progression et échec : seuls ceux de l’utilisateur courant (lanceur) sont affichés', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const mcp = await openMcp();
+      act(() => mcp.onAnalysisProgress(99, 'collecting'));
+      expect(screen.queryByText('Collecte des données du cours…')).toBeNull();
+      act(() => mcp.onAnalysisProgress(me.id, 'collecting'));
+      expect(screen.getByText('Collecte des données du cours…')).toBeTruthy();
+
+      act(() => mcp.onAnalysisFailed(99, 'autre'));
+      expect(screen.queryByText(/L’analyse n’a pas pu être générée/)).toBeNull();
+      act(() => mcp.onAnalysisFailed(me.id, 'Service MCP indisponible'));
+      expect(screen.getByText(/L’analyse n’a pas pu être générée/)).toBeTruthy();
+      warn.mockRestore();
+    });
+
+    it('« Analyser » déclenche api.requestCourseAnalysis pour le cours ciblé', async () => {
+      vi.mocked(api.requestCourseAnalysis).mockResolvedValue(undefined);
+      const mcp = await openMcp();
+      // Débloque l'action (le job en cours échoue) puis relance l'analyse.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      act(() => mcp.onAnalysisFailed(me.id));
+      fireEvent.click(screen.getByRole('button', { name: errorLabels.close }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Analyser' }));
+      await waitFor(() => expect(api.requestCourseAnalysis).toHaveBeenCalledWith(20));
+      warn.mockRestore();
+    });
+  });
+
+  describe('easter egg sans thème explicite', () => {
+    it('sans data-theme initial : le second « 8339! » retire l’attribut', () => {
+      document.documentElement.removeAttribute('data-theme');
+      renderDashboard();
+      const type = (keys: string[]) => keys.forEach((key) => fireEvent.keyDown(window, { key }));
+      type(['8', '3', '3', '9', '!']);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('twee');
+      type(['8', '3', '3', '9', '!']);
+      expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
     });
   });
 });

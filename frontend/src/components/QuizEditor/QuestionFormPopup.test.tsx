@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { QuestionFormBody } from './QuestionFormPopup';
 import { EditorShell } from './EditorShell';
 import { defaultQuestionFormLabels } from './questionFormLabels';
@@ -349,5 +349,187 @@ describe('QuestionFormBody', () => {
     fireEvent.click(screen.getByLabelText(t.typeLabel));
     expect(screen.getByRole('option', { name: 'MON CHOIX' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'MON CODE' })).toBeTruthy();
+  });
+});
+
+describe('QuestionFormBody — remise en ordre (éléments)', () => {
+  // jsdom n'implémente pas elementFromPoint : on le stubbe pour cibler une rangée.
+  function setElementFromPoint(el: Element | null) {
+    (document as unknown as { elementFromPoint: (x: number, y: number) => Element | null })
+      .elementFromPoint = () => el;
+  }
+
+  function orderingDraft(): QuestionDraft {
+    return {
+      qType: 'ordering',
+      prompt: 'Q',
+      totalScore: 1,
+      dragItems: [
+        { content: 'un', correctOrder: 0 },
+        { content: 'deux', correctOrder: 1 },
+        { content: 'trois', correctOrder: 2 },
+      ],
+    };
+  }
+
+  it('glisser un élément par sa poignée réordonne et renumérote (correctOrder)', () => {
+    const { onSave } = renderForm(orderingDraft(), { isNew: true });
+    // Les rangées sont rendues dans un Portal (EditorShell) → requête sur le document.
+    const row0 = document.querySelector('[data-reorder-id="0"]') as HTMLElement;
+    const row2 = document.querySelector('[data-reorder-id="2"]') as HTMLElement;
+    const grip = row0.querySelector('[class*="grip"]') as HTMLElement;
+    (grip as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+
+    fireEvent.pointerDown(grip, { button: 0, pointerType: 'mouse', pointerId: 1 });
+    // Pendant le glissé, la rangée saisie est marquée.
+    expect(row0.className).toContain('listRowDragging');
+    setElementFromPoint(row2);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 0, clientY: 60 }));
+    });
+    act(() => {
+      window.dispatchEvent(new Event('pointerup'));
+    });
+
+    const inputs = screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[];
+    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois', 'un']);
+    fireEvent.click(saveButton(t.add));
+    const saved = onSave.mock.calls[0][0] as QuestionDraft;
+    expect(saved.dragItems?.map((d) => [d.content, d.correctOrder])).toEqual([
+      ['deux', 0],
+      ['trois', 1],
+      ['un', 2],
+    ]);
+  });
+
+  it('supprimer un élément renumérote les suivants', () => {
+    const { onSave } = renderForm(orderingDraft(), { isNew: true });
+    fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
+    const inputs = screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[];
+    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois']);
+    fireEvent.click(saveButton(t.add));
+    const saved = onSave.mock.calls[0][0] as QuestionDraft;
+    expect(saved.dragItems?.map((d) => [d.content, d.correctOrder])).toEqual([
+      ['deux', 0],
+      ['trois', 1],
+    ]);
+  });
+
+  it('un seul élément restant → enregistrement bloqué', () => {
+    renderForm(orderingDraft(), { isNew: true });
+    expect(saveButton(t.add).disabled).toBe(false);
+    fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
+    fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
+    expect(saveButton(t.add).disabled).toBe(true);
+  });
+});
+
+describe('QuestionFormBody — associations (ligne active mobile)', () => {
+  function matchingDraft(): QuestionDraft {
+    return {
+      qType: 'matching',
+      prompt: 'Q',
+      totalScore: 1,
+      dragItems: [
+        { content: 'chien', correctOrder: 0, groupName: 'animal' },
+        { content: 'rose', correctOrder: 0, groupName: 'fleur' },
+      ],
+    };
+  }
+
+  /** Bouton central (flèche / poubelle) de chaque ligne. */
+  function slots(): HTMLButtonElement[] {
+    return [...document.querySelectorAll('button[data-active]')] as HTMLButtonElement[];
+  }
+
+  function elements(): string[] {
+    return (screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[]).map((i) => i.value);
+  }
+
+  it('le bouton central active la ligne (flèche → poubelle) puis la supprime', () => {
+    renderForm(matchingDraft());
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['false', 'false']);
+    expect(slots()[1].getAttribute('aria-label')).toBe(t.associationOptionsAria);
+
+    fireEvent.click(slots()[1]);
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['false', 'true']);
+    expect(slots()[1].getAttribute('aria-label')).toBe(t.deleteAssociationAria);
+
+    fireEvent.click(slots()[1]);
+    expect(elements()).toEqual(['chien']);
+    // Après suppression, aucune ligne active.
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['false']);
+  });
+
+  it('focaliser un champ ou cliquer la ligne l’active', () => {
+    renderForm(matchingDraft());
+    fireEvent.focus(screen.getAllByPlaceholderText(t.categoryPlaceholder)[1]);
+    expect(slots()[1].getAttribute('data-active')).toBe('true');
+    fireEvent.focus(screen.getAllByPlaceholderText(t.elementPlaceholder)[0]);
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['true', 'false']);
+    // Clic sur la ligne (hors champ) : la ligne 2 devient active.
+    fireEvent.click(slots()[1].closest('[class*="matchingRow"]') as HTMLElement);
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['false', 'true']);
+  });
+
+  it('un clic hors de la liste désactive la ligne ; un clic dedans non', () => {
+    renderForm(matchingDraft());
+    fireEvent.click(slots()[0]);
+    expect(slots()[0].getAttribute('data-active')).toBe('true');
+    fireEvent.pointerDown(screen.getAllByPlaceholderText(t.elementPlaceholder)[1]);
+    expect(slots()[0].getAttribute('data-active')).toBe('true');
+    fireEvent.pointerDown(screen.getByText(t.matchingSection));
+    expect(slots()[0].getAttribute('data-active')).toBe('false');
+  });
+
+  it('la poubelle de bout de ligne supprime sans activer de ligne', () => {
+    const { onSave } = renderForm(matchingDraft(), { isNew: true });
+    // Ligne 1 inactive : seule sa poubelle de bout porte le libellé de suppression.
+    const trashes = screen.getAllByLabelText(t.deleteAssociationAria);
+    expect(trashes).toHaveLength(2);
+    fireEvent.click(trashes[0]);
+    expect(elements()).toEqual(['rose']);
+    expect(slots().map((s) => s.getAttribute('data-active'))).toEqual(['false']);
+    // Un seul élément → invalide.
+    expect(saveButton(t.add).disabled).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('« Ajouter une association » ajoute une ligne vide (invalide tant que vide)', () => {
+    renderForm(matchingDraft(), { isNew: true });
+    expect(saveButton(t.add).disabled).toBe(false);
+    fireEvent.click(screen.getByText(`+ ${t.addAssociation}`));
+    expect(elements()).toEqual(['chien', 'rose', '']);
+    expect((screen.getAllByPlaceholderText(t.categoryPlaceholder)[2] as HTMLInputElement).value).toBe('');
+    expect(saveButton(t.add).disabled).toBe(true);
+  });
+});
+
+describe('QuestionFormBody — code de départ et enregistrement', () => {
+  it('éditer le code de départ le transmet à onSave', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      languageId: 1,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    // L'étiquette du langage courant est affichée dans la barre de l'éditeur.
+    expect(screen.getAllByText('Python').length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText(t.startCodeAria), { target: { value: 'print(1)' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).startCode).toBe('print(1)');
+  });
+
+  it('pendant l’enregistrement (saving), le bouton est désactivé et sans libellé', () => {
+    const draft: QuestionDraft = { ...emptyQuestionDraft('true_false'), prompt: 'Q' };
+    const { onSave } = renderForm(draft, { isNew: true, saving: true });
+    expect(screen.queryByText(t.add)).toBeNull();
+    // Le bouton primaire (dernier du pied) est désactivé.
+    const cancel = screen.getByText(t.cancel).closest('button') as HTMLButtonElement;
+    const primary = cancel.nextElementSibling as HTMLButtonElement;
+    expect(primary.disabled).toBe(true);
+    fireEvent.click(primary);
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
