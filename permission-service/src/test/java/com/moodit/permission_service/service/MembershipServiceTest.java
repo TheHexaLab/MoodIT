@@ -198,27 +198,11 @@ class MembershipServiceTest {
   }
 
   @Test
-  void isEnrolledInCourse_delegatesTrueAndFalse() {
-    when(membershipRepository.isEnrolledInCourse(5, 1)).thenReturn(true);
-    when(membershipRepository.isEnrolledInCourse(5, 2)).thenReturn(false);
-    assertThat(service.isEnrolledInCourse(5, 1)).isTrue();
-    assertThat(service.isEnrolledInCourse(5, 2)).isFalse();
-  }
-
-  @Test
   void isPostAuthor_delegatesTrueAndFalse() {
     when(membershipRepository.isPostAuthor(5, 40)).thenReturn(true);
     when(membershipRepository.isPostAuthor(5, 41)).thenReturn(false);
     assertThat(service.isPostAuthor(5, 40)).isTrue();
     assertThat(service.isPostAuthor(5, 41)).isFalse();
-  }
-
-  @Test
-  void isVoteOwner_delegatesTrueAndFalse() {
-    when(membershipRepository.isVoteOwner(5, 70)).thenReturn(true);
-    when(membershipRepository.isVoteOwner(5, 71)).thenReturn(false);
-    assertThat(service.isVoteOwner(5, 70)).isTrue();
-    assertThat(service.isVoteOwner(5, 71)).isFalse();
   }
 
   @Test
@@ -259,34 +243,6 @@ class MembershipServiceTest {
     when(membershipRepository.hasGlobalRole(6)).thenReturn(false);
     assertThat(service.hasGlobalRole(5)).isTrue();
     assertThat(service.hasGlobalRole(6)).isFalse();
-  }
-
-  // ── isResourceOwner : aiguillage par type, fail-closed ─────────────────────────────
-
-  @Test
-  void isResourceOwner_post_routedToPostAuthor() {
-    when(membershipRepository.isPostAuthor(5, 40)).thenReturn(true);
-    assertThat(service.isResourceOwner(5, "post", 40)).isTrue();
-  }
-
-  @Test
-  void isResourceOwner_postNotAuthor_denied() {
-    when(membershipRepository.isPostAuthor(5, 40)).thenReturn(false);
-    assertThat(service.isResourceOwner(5, "post", 40)).isFalse();
-  }
-
-  @Test
-  void isResourceOwner_vote_routedToVoteOwner() {
-    when(membershipRepository.isVoteOwner(5, 70)).thenReturn(true);
-    assertThat(service.isResourceOwner(5, "vote", 70)).isTrue();
-  }
-
-  @Test
-  void isResourceOwner_unknownTypeOrWrongCase_deniedWithoutQuery() {
-    // Type inconnu ou casse différente : refus SANS requête (fail-closed).
-    assertThat(service.isResourceOwner(5, "quiz", 1)).isFalse();
-    assertThat(service.isResourceOwner(5, "Post", 40)).isFalse();
-    verifyNoInteractions(membershipRepository);
   }
 
   // ── canJoin : identité absente / vide, rooms restantes ─────────────────────────────

@@ -78,26 +78,12 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
   @Query(value = "SELECT program_id FROM program_course WHERE course_id = :courseId", nativeQuery = true)
   java.util.List<Number> findProgramIdsByCourse(@Param("courseId") long courseId);
 
-  // L'utilisateur est-il inscrit a ce cours ? (inscription directe, table Enrollment)
-  @Query(
-      value =
-          "SELECT EXISTS(SELECT 1 FROM Enrollment WHERE user_id = :userId AND course_id = :courseId)",
-      nativeQuery = true)
-  boolean isEnrolledInCourse(@Param("userId") long userId, @Param("courseId") long courseId);
-
   // L'utilisateur est-il le createur (auteur) de ce post ? (colonne Post.user_id)
   @Query(
       value =
           "SELECT EXISTS(SELECT 1 FROM Post WHERE id = :postId AND user_id = :userId)",
       nativeQuery = true)
   boolean isPostAuthor(@Param("userId") long userId, @Param("postId") long postId);
-
-  // Le vote appartient-il a cet utilisateur ? (colonne Vote.user_id)
-  @Query(
-      value =
-          "SELECT EXISTS(SELECT 1 FROM Vote WHERE id = :voteId AND user_id = :userId)",
-      nativeQuery = true)
-  boolean isVoteOwner(@Param("userId") long userId, @Param("voteId") long voteId);
 
   // L'utilisateur a-t-il le role (nomme) DANS ce programme ? (table User_Program_Role)
   // A distinguer du role GLOBAL (user_role) porte par l'entite User / hasRole.
