@@ -329,6 +329,51 @@ test('vote : même sens retire le vote, sens opposé le bascule', async ({ brows
   await reader.context.close();
 });
 
+// Votes rapprochés (#130) : contrairement au test précédent, aucun clic n'attend la réponse du
+// précédent. Le frontend les met en file par sujet et le serveur les sérialise : aucune requête
+// refusée (409), et l'état enregistré est celui affiché, après rechargement.
+test('votes rapprochés sans attendre les réponses : aucun refus, état enregistré = état affiché', async ({
+  browser,
+  baseURL,
+}) => {
+  const title = `Sujet E2E votes rapides ${uniqueSuffix()}`;
+  const author = await openForum(browser, await newStudent(baseURL!));
+  await publishThread(author.page, title);
+
+  const reader = await openForum(browser, await newStudent(baseURL!));
+  const card = thread(reader.page, title);
+  const up = ownButton(card, 'Voter pour');
+  const down = ownButton(card, 'Voter contre');
+  const state = (score: number, upPressed: boolean, downPressed: boolean) => `
+    - button "Voter pour"${upPressed ? ' [pressed]' : ''}
+    - text: "${score}"
+    - button "Voter contre"${downPressed ? ' [pressed]' : ''}
+  `;
+  const statuses: number[] = [];
+  reader.page.on('response', (res) => {
+    if (res.url().includes('/api/forums/posts/votes') && res.request().method() === 'POST') {
+      statuses.push(res.status());
+    }
+  });
+
+  // Clic envoyé directement au bouton (tri « Populaires » d'un forum partagé, cf. test précédent).
+  // Double-clic sur « Voter pour » (+1 puis retrait), puis « Voter contre » : −1 au final.
+  await up.dispatchEvent('click');
+  await up.dispatchEvent('click');
+  await down.dispatchEvent('click');
+  await expect(card).toMatchAriaSnapshot(state(-1, false, true));
+  await expect.poll(() => statuses.length, { message: 'les 3 votes ont reçu une réponse' }).toBe(3);
+  expect(statuses, 'aucun vote refusé (204 = enregistré)').toEqual([204, 204, 204]);
+  await expect(reader.page.getByText("Votre vote n'a pas pu être enregistré. Réessayez.")).toHaveCount(0);
+
+  // Persisté : même état après rechargement.
+  await openCourseItem(reader.page, FORUM_NAME);
+  await expect(card).toMatchAriaSnapshot(state(-1, false, true));
+
+  await author.context.close();
+  await reader.context.close();
+});
+
 test('un non-auteur ne peut ni modifier ni supprimer le sujet d’un autre', async ({
   browser,
   baseURL,

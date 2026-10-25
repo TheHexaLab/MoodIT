@@ -286,6 +286,16 @@ export function useForumThreads({
     fetchRef.current = onFetchThreads;
     fetchRepliesRef.current = onFetchReplies;
   });
+  /**
+   * Files de votes PAR SUJET (#130). Un vote n'est envoyé qu'après la réponse du précédent sur le
+   * même sujet : le serveur bascule par rapport à l'état qu'il lit, il doit donc recevoir les
+   * bascules dans l'ordre des clics. `confirmed` = dernière valeur de l'utilisateur acceptée par le
+   * serveur (rétablie si un vote échoue) ; `generation` change à chaque échec, ce qui annule les
+   * votes encore en attente (calculés en supposant que le vote échoué avait réussi).
+   */
+  const voteQueuesRef = useRef(
+    new Map<number, { tail: Promise<void>; confirmed: VoteValue; generation: number; pending: number }>()
+  );
   /** Dernière liste de sujets (ref stable → loadMore lit sans se recréer). */
   const threadsRef = useRef(threads);
   useEffect(() => {
@@ -430,17 +440,47 @@ export function useForumThreads({
     if (!post) return;
     const current = post.votes.find((v) => v.userId === currentUser.id)?.value ?? 0;
     const nextValue: VoteValue = current === direction ? 0 : direction;
-    const previousVotes = post.votes;
     // Affichage optimiste : `nextValue` (0 = vote retiré localement).
     setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, currentUser.id, nextValue)));
+    setError(null);
 
-    runMutation(
-      // API : on envoie la DIRECTION cliquée (±1), pas `nextValue`. Le backend applique
-      // le toggle (même direction re-cliquée → annule) et la table Vote interdit 0.
-      () => (onVotePost ? onVotePost(postId, direction) : undefined),
-      () => setThreads((prev) => mapPost(prev, postId, (p) => ({ ...p, votes: previousVotes }))),
-      "Votre vote n'a pas pu être enregistré. Réessayez."
-    );
+    const queues = voteQueuesRef.current;
+    let queue = queues.get(postId);
+    if (!queue) {
+      // File vide : l'affichage courant est l'état confirmé par le serveur.
+      queue = { tail: Promise.resolve(), confirmed: current, generation: 0, pending: 0 };
+      queues.set(postId, queue);
+    }
+    const entry = queue;
+    const generation = entry.generation;
+    entry.pending += 1;
+    const send = async () => {
+      try {
+        // Un vote précédent a échoué : celui-ci supposait qu'il avait réussi → abandonné.
+        if (entry.generation !== generation) return;
+        try {
+          // API : on envoie la DIRECTION cliquée (±1), pas `nextValue`. Le backend applique
+          // le toggle (même direction re-cliquée → annule) et la table Vote interdit 0.
+          await (onVotePost ? onVotePost(postId, direction) : undefined);
+          entry.confirmed = nextValue;
+        } catch {
+          entry.generation += 1;
+          if (!mountedRef.current) return;
+          // Retour au dernier état confirmé : seul le vote de l'utilisateur change (les votes
+          // des autres, reçus en direct entre-temps, sont conservés).
+          const confirmed = entry.confirmed;
+          setThreads((prev) => mapPost(prev, postId, (p) => withVote(p, currentUser.id, confirmed)));
+          setError("Votre vote n'a pas pu être enregistré. Réessayez.");
+        }
+      } finally {
+        entry.pending -= 1;
+        // File vidée : le prochain vote repartira de l'affichage (qui peut avoir reçu entre-temps
+        // le vote de l'utilisateur depuis un autre onglet).
+        if (entry.pending === 0 && queues.get(postId) === entry) queues.delete(postId);
+      }
+    };
+    // File vide : envoi immédiat. Sinon, après la réponse du vote précédent sur ce sujet.
+    entry.tail = entry.pending === 1 ? send() : entry.tail.then(send);
   }
 
   async function addThread(title: string, content: string): Promise<boolean> {
