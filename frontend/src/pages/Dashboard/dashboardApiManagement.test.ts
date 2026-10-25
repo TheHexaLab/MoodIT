@@ -452,17 +452,14 @@ describe('createCourse', () => {
 });
 
 describe('createProgram', () => {
-  it('crée le programme puis y abonne l’utilisateur courant', async () => {
-    mockedApiFetch
-      .mockResolvedValueOnce(res({ id: 30, name: 'Génie' }, { status: 201 }))
-      .mockResolvedValueOnce(res({}, { status: 201 }));
+  it('une SEULE requête : le serveur crée le programme et y abonne le créateur', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({ id: 30, name: 'Génie' }, { status: 201 }));
     const out = await createProgram({ name: 'Génie' } as never);
+    expect(mockedApiFetch).toHaveBeenCalledTimes(1);
     expect(callArgs(0)[0]).toBe('/api/establishments/programs');
     expect(callArgs(0)[1]?.method).toBe('POST');
+    // Aucun id d'utilisateur dans le corps : le serveur prend l'identité du token.
     expect(bodyOf(0)).toEqual({ name: 'Génie' });
-    expect(callArgs(1)[0]).toBe('/api/programs/users');
-    expect(callArgs(1)[1]?.method).toBe('POST');
-    expect(bodyOf(1)).toEqual({ id: 7, programIds: [30] });
     expect(out).toEqual({ id: 30, name: 'Génie', courses: [] });
   });
 
@@ -472,13 +469,11 @@ describe('createProgram', () => {
     expect(mockedApiFetch).toHaveBeenCalledTimes(1);
   });
 
-  // Garde : si l'abonnement (POST /api/programs/users) échoue, createProgram doit lever une
-  // erreur, sinon le programme s'affiche mais disparaît au rechargement.
-  it('throw si l’abonnement au programme créé échoue', async () => {
-    mockedApiFetch
-      .mockResolvedValueOnce(res({ id: 30, name: 'Génie' }, { status: 201 }))
-      .mockResolvedValueOnce(errRes(500));
-    await expect(createProgram({ name: 'Génie' } as never)).rejects.toThrow();
+  it('ne dépend pas de localStorage (identité absente : la requête part quand même, sans id)', async () => {
+    localStorage.removeItem('moodit_user_id');
+    mockedApiFetch.mockResolvedValueOnce(res({ id: 30, name: 'Génie' }, { status: 201 }));
+    await createProgram({ name: 'Génie' } as never);
+    expect(bodyOf(0)).toEqual({ name: 'Génie' });
   });
 });
 
@@ -487,17 +482,18 @@ describe('joinPrograms', () => {
     mockedApiFetch
       .mockResolvedValueOnce(res({}, { status: 201 }))
       .mockResolvedValueOnce(res([{ id: 1, name: 'P1' }]));
-    const out = await joinPrograms({ programIds: [1, 2], establishmentId: 5 } as never);
+    // L'id vient de l'appelant (utilisateur courant du contexte), pas de localStorage (7).
+    const out = await joinPrograms({ programIds: [1, 2], establishmentId: 5 } as never, 42);
     expect(callArgs(0)[0]).toBe('/api/programs/users');
     expect(callArgs(0)[1]?.method).toBe('POST');
-    expect(bodyOf(0)).toEqual({ id: 7, programIds: [1, 2], establishmentId: 5 });
+    expect(bodyOf(0)).toEqual({ id: 42, programIds: [1, 2], establishmentId: 5 });
     expect(callArgs(1)[0]).toBe('/api/users/7/programs');
     expect(out).toEqual([{ id: 1, name: 'P1', courses: [] }]);
   });
 
   it('throw sans recharger si l’adhésion échoue', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
-    await expect(joinPrograms({ programIds: [], establishmentId: 1 } as never)).rejects.toThrow(
+    await expect(joinPrograms({ programIds: [], establishmentId: 1 } as never, 42)).rejects.toThrow(
       'Échec adhésion aux programmes'
     );
     expect(mockedApiFetch).toHaveBeenCalledTimes(1);
@@ -822,7 +818,7 @@ describe('requêtes à corps JSON : en-tête Content-Type', () => {
     ['updateEstablishment', () => updateEstablishment(1, { name: 'E' }), { id: 1 }],
     ['createCourse', () => createCourse({ code: 'C', title: 'T' } as never), { id: 1 }],
     ['createProgram', () => createProgram({ name: 'P' } as never), { id: 1 }],
-    ['joinPrograms', () => joinPrograms({ programIds: [1], establishmentId: 1 }), []],
+    ['joinPrograms', () => joinPrograms({ programIds: [1], establishmentId: 1 }, 42), []],
     ['updateCourse', () => updateCourse(1, { title: 'T' } as never), {}],
     ['updateProgram', () => updateProgram(1, { name: 'P' } as never), {}],
     ['joinCourses', () => joinCourses(1, [2]), []],

@@ -710,7 +710,9 @@ export async function createCourse(course: NewCourse): Promise<Course> {
 }
 
 /**
- * Créer un nouveau programme et y abonner l'utilisateur d'office. Renvoie le programme
+ * Créer un nouveau programme. Le serveur y abonne le créateur dans la MÊME transaction (identité
+ * lue dans le token) : une seule requête, et un échec n'en laisse aucune trace (avant, une
+ * seconde requête d'abonnement pouvait échouer après la création, #117). Renvoie le programme
  * persisté (id attribué par le serveur) pour l'ajouter à la liste.
  */
 export async function createProgram(program: NewProgram): Promise<DemoProgram> {
@@ -721,33 +723,23 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
   });
   if (!res.ok) throw new Error('Échec création du programme');
   const data = await res.json();
-
-  const userId = localStorage.getItem('moodit_user_id');
-  const subRes = await apiFetch('/api/programs/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: Number(userId), programIds: [data.id] }),
-  });
-  // Sans abonnement, le programme disparaîtrait au rechargement : on le signale.
-  if (!subRes.ok) throw new Error('Échec abonnement au programme créé');
-
   return { ...data, courses: [] };
 }
 
 /**
  * Abonner l'utilisateur aux programmes sélectionnés du catalogue. Renvoie les programmes
- * ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion.
+ * ajoutés ; le Dashboard les dédoublonne contre sa liste avant insertion. `userId` = utilisateur
+ * courant (contexte), et non `localStorage`, où il peut manquer : on enverrait alors `id: 0`,
+ * refusé en 403 par la règle « soi-même seulement ».
  */
-export async function joinPrograms(selection: JoinSelection): Promise<DemoProgram[]> {
-  const userId = localStorage.getItem('moodit_user_id');
-
+export async function joinPrograms(selection: JoinSelection, userId: number): Promise<DemoProgram[]> {
   const res = await apiFetch(`/api/programs/users`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      id: Number(userId),
+      id: userId,
       programIds: selection.programIds,
       establishmentId: selection.establishmentId,
     }),
