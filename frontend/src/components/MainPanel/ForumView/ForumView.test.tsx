@@ -723,6 +723,31 @@ describe('ForumView — tri, votes et affichage', () => {
     );
   });
 
+  it('Populaires : un vote met le score à jour sans déplacer le sujet ; changer de tri reclasse', async () => {
+    const onVotePost = vi.fn(async () => undefined);
+    await renderLoaded(
+      [
+        thread(1, { title: 'Premier', author: other, othersVoteTotal: 1 }),
+        thread(2, { title: 'Second', author: other, othersVoteTotal: 1 }),
+      ],
+      { onVotePost },
+      'Premier'
+    );
+    expect(threadTitles()).toEqual(['Premier', 'Second']);
+
+    // « Second » passe à 2 et dépasse « Premier » : il reste pourtant à sa place (pas de saut
+    // sous le pointeur), seul son score change.
+    const second = screen.getByText('Second').closest('li') as HTMLElement;
+    fireEvent.click(within(second).getAllByLabelText('Voter pour')[0]);
+    expect(threadTitles()).toEqual(['Premier', 'Second']);
+    expect(second.querySelector('[role="up-voted"]')?.textContent).toBe('2');
+
+    // Action explicite (changement de tri) : la liste est reclassée.
+    fireEvent.click(screen.getByRole('button', { name: 'Récents' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Populaires' }));
+    expect(threadTitles()).toEqual(['Second', 'Premier']);
+  });
+
   it('score = votes des autres + vote propre ; voter met à jour le score et aria-pressed', async () => {
     const onVotePost = vi.fn(async () => undefined);
     await renderLoaded([thread(101, { author: other, othersVoteTotal: 4 })], { onVotePost });

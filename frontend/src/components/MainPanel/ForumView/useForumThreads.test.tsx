@@ -511,10 +511,14 @@ describe('useForumThreads — votes (compléments)', () => {
     await act(async () => {
       result.current.vote(1, 1);
     });
-    expect(result.current.threads[0].votes).toEqual([
-      { userId: 1, value: -1 },
-      { userId: 9, value: 1 },
-    ]);
+    // L'ordre des votes n'a pas d'importance : seul le vote de l'utilisateur est rétabli.
+    expect(result.current.threads[0].votes).toHaveLength(2);
+    expect(result.current.threads[0].votes).toEqual(
+      expect.arrayContaining([
+        { userId: 1, value: -1 },
+        { userId: 9, value: 1 },
+      ])
+    );
   });
 
   it('vote sur une réponse imbriquée', async () => {
@@ -837,5 +841,100 @@ describe('useForumThreads — entrants WebSocket (compléments)', () => {
     });
     // L'auteur d'un autre utilisateur n'est pas touché.
     expect(root.replies![1].author.firstName).toBe('Rosie');
+  });
+});
+
+// Votes rapprochés sur un même sujet (#130) : envoyés l'un après l'autre, dans l'ordre des clics.
+describe('useForumThreads — file de votes par sujet', () => {
+  /** Réponse serveur contrôlée par le test : `resolve()` / `reject()` au moment voulu. */
+  function deferred() {
+    let resolve!: () => void;
+    let reject!: (e: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const ownVote = (threads: ForumPost[], id = 1) =>
+    threads.find((t) => t.id === id)?.votes.find((v) => v.userId === user.id)?.value ?? 0;
+
+  it('deux clics rapprochés : la 2e requête ne part qu’après la réponse de la 1re', async () => {
+    const first = deferred();
+    const second = deferred();
+    const onVotePost = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result } = mount({ initialThreads: [post(1)], onVotePost });
+
+    act(() => result.current.vote(1, 1));
+    act(() => result.current.vote(1, 1));
+    // Affichage optimiste des deux clics (+1 puis retrait), mais une seule requête partie.
+    expect(ownVote(result.current.threads)).toBe(0);
+    expect(onVotePost).toHaveBeenCalledTimes(1);
+
+    await act(async () => first.resolve());
+    expect(onVotePost).toHaveBeenCalledTimes(2);
+    expect(onVotePost).toHaveBeenNthCalledWith(2, 1, 1);
+    await act(async () => second.resolve());
+    expect(ownVote(result.current.threads)).toBe(0);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('échec du 1er vote : retour à l’état confirmé, le vote en attente n’est pas envoyé', async () => {
+    const first = deferred();
+    const onVotePost = vi.fn().mockReturnValueOnce(first.promise);
+    const { result } = mount({
+      initialThreads: [post(1, { votes: [{ userId: 1, value: -1 }] })],
+      onVotePost,
+    });
+
+    act(() => result.current.vote(1, 1)); // −1 → +1
+    act(() => result.current.vote(1, -1)); // +1 → −1, calculé en supposant le 1er réussi
+    await act(async () => first.reject(new Error('net')));
+
+    expect(onVotePost).toHaveBeenCalledTimes(1);
+    expect(ownVote(result.current.threads)).toBe(-1); // valeur d'avant les deux clics
+    expect(result.current.error).toBe("Votre vote n'a pas pu être enregistré. Réessayez.");
+  });
+
+  it('échec du 2e vote seulement : le 1er, accepté par le serveur, reste affiché', async () => {
+    const onVotePost = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('net'));
+    const { result } = mount({ initialThreads: [post(1)], onVotePost });
+
+    await act(async () => {
+      result.current.vote(1, 1); // 0 → +1 (accepté)
+      result.current.vote(1, -1); // +1 → −1 (refusé)
+    });
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(onVotePost).toHaveBeenCalledTimes(2);
+    expect(ownVote(result.current.threads)).toBe(1);
+  });
+
+  it('après un échec, un nouveau vote repart de l’état affiché et est bien envoyé', async () => {
+    const onVotePost = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('net'))
+      .mockResolvedValueOnce(undefined);
+    const { result } = mount({ initialThreads: [post(1)], onVotePost });
+
+    await act(async () => result.current.vote(1, 1));
+    expect(ownVote(result.current.threads)).toBe(0);
+    await act(async () => result.current.vote(1, 1));
+    expect(onVotePost).toHaveBeenCalledTimes(2);
+    expect(ownVote(result.current.threads)).toBe(1);
+  });
+
+  it('deux sujets différents : leurs votes ne s’attendent pas', () => {
+    const pending = deferred();
+    const onVotePost = vi.fn().mockReturnValue(pending.promise);
+    const { result } = mount({ initialThreads: [post(1), post(2)], onVotePost });
+
+    act(() => result.current.vote(1, 1));
+    act(() => result.current.vote(2, 1));
+    expect(onVotePost).toHaveBeenCalledTimes(2);
+    expect(onVotePost).toHaveBeenNthCalledWith(2, 2, 1);
   });
 });

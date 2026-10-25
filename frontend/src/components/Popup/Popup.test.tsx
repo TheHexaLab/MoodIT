@@ -20,11 +20,13 @@ function Host({
   onClose,
   variant = PopupVariant.Form,
   closeOnEscape,
+  closeGuard,
   nested,
 }: {
   onClose: () => void;
   variant?: PopupVariant;
   closeOnEscape?: boolean;
+  closeGuard?: (proceed: () => void) => void;
   nested?: React.ReactNode;
 }) {
   const popup = usePopupController();
@@ -35,6 +37,7 @@ function Host({
       onClose={onClose}
       controller={popup}
       closeOnEscape={closeOnEscape}
+      closeGuard={closeGuard}
     >
       <h1>Titre du test</h1>
       <input placeholder="Nom" />
@@ -522,5 +525,63 @@ describe('Popup — animation de fermeture', () => {
     unmount();
     vi.advanceTimersByTime(1000);
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// Garde de fermeture (`closeGuard`) : Échap et le voile passent par lui AVANT l'animation ; il
+// décide d'appeler `proceed` (la fermeture réelle) ou non, par exemple après une confirmation.
+describe('Popup — garde de fermeture', () => {
+  const overlay = () => screen.getByRole('dialog').parentElement as HTMLElement;
+  const clickBackdrop = () => {
+    fireEvent.mouseDown(overlay());
+    fireEvent.click(overlay());
+  };
+
+  it('Échap : le garde est appelé, et la popup ne ferme qu’à l’appel de proceed', () => {
+    const onClose = vi.fn();
+    let proceed: (() => void) | undefined;
+    const closeGuard = vi.fn((p: () => void) => {
+      proceed = p;
+    });
+    render(<Host onClose={onClose} closeGuard={closeGuard} />);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(closeGuard).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    proceed?.();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('clic sur le voile : même passage par le garde', () => {
+    const onClose = vi.fn();
+    const closeGuard = vi.fn((proceed: () => void) => proceed());
+    render(<Host onClose={onClose} closeGuard={closeGuard} />);
+    clickBackdrop();
+    expect(closeGuard).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('un garde qui n’appelle pas proceed garde la popup ouverte', () => {
+    const onClose = vi.fn();
+    render(<Host onClose={onClose} closeGuard={() => {}} />);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    clickBackdrop();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(overlay().className).not.toMatch(/closing/);
+  });
+
+  it('une fermeture demandée par le contenu (contrôleur) ne passe pas par le garde', () => {
+    const onClose = vi.fn();
+    const closeGuard = vi.fn();
+    render(<Host onClose={onClose} closeGuard={closeGuard} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+    expect(closeGuard).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Échap désactivé : le garde n’est pas appelé', () => {
+    const closeGuard = vi.fn();
+    render(<Host onClose={() => {}} closeOnEscape={false} closeGuard={closeGuard} />);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(closeGuard).not.toHaveBeenCalled();
   });
 });
