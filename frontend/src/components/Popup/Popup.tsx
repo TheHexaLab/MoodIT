@@ -26,6 +26,13 @@ export interface PopupProps {
   /** Un clic qui commence ET finit sur le voile ferme la popup (défaut : oui). */
   closeOnBackdrop?: boolean;
   /**
+   * Intercepte la fermeture par Échap ou par le voile AVANT l'animation : reçoit `proceed`, la
+   * fermeture animée réelle. Permet d'afficher une confirmation (perte de données) et de
+   * n'appeler `proceed` qu'après validation. Une fermeture demandée par le contenu
+   * (`controller.requestClose`) n'y passe pas : le contenu appelle le garde lui-même.
+   */
+  closeGuard?: (proceed: () => void) => void;
+  /**
    * `'visible'` : le panneau ne défile pas et laisse déborder son contenu flottant (liste de
    * recherche ancrée sous un champ). Par défaut, la variante décide (les formulaires défilent).
    */
@@ -67,6 +74,7 @@ export function Popup({
   panelStyle,
   closeOnEscape = true,
   closeOnBackdrop = true,
+  closeGuard,
   overflow,
   children,
 }: PopupProps): React.ReactElement {
@@ -144,13 +152,19 @@ export function Popup({
     };
   }, [opener]);
 
+  // Fermeture par Échap ou par le voile : passe par le garde s'il y en a un.
+  function attemptClose() {
+    if (closeGuard) closeGuard(() => requestClose());
+    else requestClose();
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented) return;
     if (event.key === 'Escape') {
       if (!closeOnEscape) return;
       event.preventDefault();
       event.stopPropagation(); // une popup imbriquée ne ferme pas sa parente
-      requestClose();
+      attemptClose();
       return;
     }
     if (event.key !== 'Tab') return;
@@ -197,7 +211,7 @@ export function Popup({
         }}
         onClick={(event) => {
           if (closeOnBackdrop && event.target === event.currentTarget && backdropMouseDown.current) {
-            requestClose();
+            attemptClose();
           }
           backdropMouseDown.current = false;
         }}

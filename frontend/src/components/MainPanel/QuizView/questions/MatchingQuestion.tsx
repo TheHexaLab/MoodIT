@@ -13,6 +13,17 @@ const POOL = '__pool__';
 /** Hash déterministe d'un id (Knuth) : ordonne le pool de façon pseudo-aléatoire mais STABLE. */
 const shuffleKey = (id: number): number => Math.imul(id, 0x9e3779b1) >>> 0;
 
+/** Ancêtre défilant verticalement le plus proche (ou null → on défilera la fenêtre). */
+function getScrollableParent(el: HTMLElement | null): HTMLElement | null {
+  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return null;
+}
+
 /**
  * Association : l'étudiant glisse chaque étiquette depuis la réserve vers la
  * catégorie qui convient (drag & drop natif). Les catégories disponibles sont les
@@ -104,11 +115,40 @@ export function MatchingQuestion({
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     setDrag({ id, x: e.clientX, y: e.clientY });
+
+    // Auto-scroll : quand le pointeur approche du bord haut/bas du conteneur défilant, on le
+    // fait défiler (vitesse proportionnelle à la proximité). Une boucle rAF entretient le
+    // défilement même si le pointeur reste immobile près du bord.
+    const scroller = getScrollableParent(e.currentTarget as HTMLElement);
+    const EDGE = 64; // zone sensible (px) depuis chaque bord
+    const MAX_SPEED = 16; // vitesse max (px / frame)
+    let px = e.clientX;
+    let py = e.clientY;
+    let raf = 0;
+    const autoScroll = () => {
+      const top = scroller ? scroller.getBoundingClientRect().top : 0;
+      const bottom = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
+      let dy = 0;
+      if (py < top + EDGE) dy = -MAX_SPEED * Math.min(1, (top + EDGE - py) / EDGE);
+      else if (py > bottom - EDGE) dy = MAX_SPEED * Math.min(1, (py - (bottom - EDGE)) / EDGE);
+      if (dy !== 0) {
+        if (scroller) scroller.scrollTop += dy;
+        else window.scrollBy(0, dy);
+        // Le contenu défile sous le pointeur → la zone survolée peut changer.
+        setOverZone(zoneAt(px, py));
+      }
+      raf = requestAnimationFrame(autoScroll);
+    };
+    raf = requestAnimationFrame(autoScroll);
+
     const onMove = (ev: PointerEvent) => {
+      px = ev.clientX;
+      py = ev.clientY;
       setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY } : d));
       setOverZone(zoneAt(ev.clientX, ev.clientY));
     };
     const onUp = (ev: PointerEvent) => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);

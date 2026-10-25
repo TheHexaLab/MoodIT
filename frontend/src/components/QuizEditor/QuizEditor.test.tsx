@@ -351,7 +351,16 @@ describe('QuizEditor — méta du quiz conservées pendant l’édition d’une 
     fireEvent.click(publishedSwitch());
     fireEvent.click(screen.getByText(formT.addQuestion));
     await screen.findByText(editorT.newQuestionTitle);
+    // Session modifiée : le chevron demande confirmation avant de quitter la question.
     fireEvent.click(screen.getByLabelText('Retour'));
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    // « Continuer l'édition » : on reste sur la question.
+    fireEvent.click(screen.getByText(editorT.discardCancel));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(screen.getByText(editorT.newQuestionTitle)).toBeTruthy();
+    // « Quitter sans enregistrer » : retour au formulaire, dont la saisie est conservée.
+    fireEvent.click(screen.getByLabelText('Retour'));
+    fireEvent.click(screen.getByText(editorT.discardConfirm));
     expect(titleField().value).toBe('Q renommé');
     expect(publishedSwitch().getAttribute('aria-checked')).toBe('false');
     // « Annuler » restaure l'instantané : le titre d'origine revient dans la liste.
@@ -459,6 +468,9 @@ describe('QuizEditor — réordonnancement (échec de persistance)', () => {
     act(() => {
       window.dispatchEvent(new Event('pointerup'));
     });
+    // « click » envoyé par le navigateur au relâchement : le hook l'avale après un vrai glissé.
+    // Sans lui, l'écouteur resterait armé et avalerait le premier clic du test suivant.
+    fireEvent.click(gripA);
 
     // La persistance a été tentée avec le nouvel ordre…
     await waitFor(() => expect(onReorderQuizzes).toHaveBeenCalledWith(42, [2, 1]));
@@ -467,5 +479,71 @@ describe('QuizEditor — réordonnancement (échec de persistance)', () => {
     // …et l'ordre a été REVERTÉ (dernier commit vers la sidebar = ordre initial [1, 2]).
     const lastCommit = onQuizzesChange.mock.calls.at(-1)?.[0] as Quiz[];
     expect(lastCommit.map((q) => q.id)).toEqual([1, 2]);
+  });
+});
+
+// Confirmation de perte de données (garde de fermeture) : la croix et le voile demandent
+// confirmation dès que la session d'édition contient une modification non enregistrée.
+describe('QuizEditor — fermeture avec des modifications non enregistrées', () => {
+  const titleField = () => screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement;
+  const overlay = () => screen.getByRole('dialog').parentElement as HTMLElement;
+
+  async function openForm(onClose?: () => void) {
+    const utils = renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })], ...(onClose ? { onClose } : {}) });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    await screen.findByPlaceholderText(formT.titlePlaceholder);
+    return utils;
+  }
+
+  it('sans modification : la croix ferme directement, sans confirmation', async () => {
+    const { onClose } = await openForm();
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('titre modifié : la croix demande confirmation ; « Continuer l’édition » garde la saisie', async () => {
+    const { onClose } = await openForm();
+    fireEvent.change(titleField(), { target: { value: 'Q modifié' } });
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(editorT.discardCancel));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(titleField().value).toBe('Q modifié');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('« Quitter sans enregistrer » ferme vraiment l’éditeur', async () => {
+    const { onClose } = await openForm();
+    fireEvent.click(screen.getByRole('switch', { name: formT.daily }));
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    fireEvent.click(screen.getByText(editorT.discardConfirm));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('un clic sur le voile passe aussi par la confirmation', async () => {
+    const { onClose } = await openForm();
+    fireEvent.click(screen.getByRole('switch', { name: formT.allowRetry }));
+    fireEvent.mouseDown(overlay());
+    fireEvent.click(overlay());
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('sans modification : le chevron revient à la liste sans confirmation', async () => {
+    await openForm();
+    fireEvent.click(screen.getByLabelText('Retour'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(screen.getByText(editorT.listTitle)).toBeTruthy();
+  });
+
+  it('après « Annuler », la session n’est plus modifiée : la croix ferme directement', async () => {
+    const { onClose } = await openForm();
+    fireEvent.change(titleField(), { target: { value: 'Q modifié' } });
+    fireEvent.click(screen.getByText(formT.cancel));
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

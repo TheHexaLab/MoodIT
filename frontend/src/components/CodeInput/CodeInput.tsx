@@ -36,24 +36,31 @@ export function CodeInput({
 
   const handleChange = (index: number, raw: string) => {
     const clean = raw.replace(/\D/g, '');
-    const next = digits.slice();
     if (clean.length === 0) {
+      const next = digits.slice();
       next[index] = '';
       emit(next);
       return;
     }
-    // Saisie rapide / autofill : plusieurs chiffres arrivent d'un coup → on les répartit.
-    const chars = clean.slice(0, length - index).split('');
-    chars.forEach((c, k) => {
-      next[index + k] = c;
-    });
+    // Collage / autofill : plusieurs chiffres arrivent d'un coup. Quelle que soit la case où ils
+    // atterrissent, on remplit TOUT le code depuis le DÉBUT (comme un vrai champ OTP), et non à
+    // partir de la case courante. Couvre le collage mobile (l'évènement `paste` ne se déclenche
+    // souvent pas → tout passe par ce `onChange`).
+    if (clean.length > 1) {
+      const code = clean.slice(0, length);
+      onChange(code);
+      refs.current[Math.min(code.length, length - 1)]?.focus();
+      return;
+    }
+    // Un seul chiffre : saisie normale → on le place dans la case courante et on avance.
+    const next = digits.slice();
+    next[index] = clean;
     emit(next);
     // La valeur émise est compacte (join('')) : un chiffre saisi après des cases vides
-    // « glisse » vers la gauche. Le focus suit donc la position réelle du dernier chiffre
-    // saisi dans la chaîne compactée (nombre de cases remplies jusqu'à lui), puis avance d'un.
-    const filledUpToLast = next.slice(0, index + chars.length).filter((d) => d !== '').length;
-    const focusAt = Math.min(filledUpToLast, length - 1);
-    refs.current[focusAt]?.focus();
+    // « glisse » vers la gauche. Le focus suit donc la position réelle du chiffre saisi dans
+    // la chaîne compactée (nombre de cases remplies jusqu'à lui), puis avance d'un.
+    const filledUpToIndex = next.slice(0, index + 1).filter((d) => d !== '').length;
+    refs.current[Math.min(filledUpToIndex, length - 1)]?.focus();
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -94,7 +101,12 @@ export function CodeInput({
           type="text"
           inputMode="numeric"
           autoComplete={i === 0 ? 'one-time-code' : 'off'}
-          maxLength={1}
+          // PAS maxLength=1 : sur mobile l'évènement `paste` ne se déclenche souvent pas, et
+          // maxLength=1 tronquerait le collage à un seul chiffre AVANT `onChange`. En laissant
+          // passer toute la chaîne, `handleChange` la répartit sur les cases (comme l'autofill).
+          // La saisie normale reste à 1 chiffre : le focus avance à chaque frappe + `onFocus`
+          // sélectionne le contenu (une nouvelle frappe le remplace).
+          maxLength={length}
           value={digit}
           disabled={disabled}
           autoFocus={autoFocus && i === 0}

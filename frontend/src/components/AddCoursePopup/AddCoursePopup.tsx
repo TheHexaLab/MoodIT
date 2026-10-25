@@ -8,6 +8,7 @@ import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Chevron } from '../../assets/Chevron.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { isTouchDevice } from '../../helpers/viewport';
 import { CODE_MAX_LENGTH, NAME_MAX_LENGTH, defaultLabels } from './labels.ts';
 import type {
   AddCoursePopupLabels,
@@ -267,7 +268,7 @@ export function AddCoursePopup({
                 <input
                   type="text"
                   placeholder={t.establishmentSearchPlaceholder}
-                  autoFocus
+                  autoFocus={!isTouchDevice()}
                   value={estSearch}
                   onChange={(e) => setEstSearch(e.target.value)}
                   onKeyDown={(e) => {
@@ -367,7 +368,7 @@ export function AddCoursePopup({
                 <input
                   type="text"
                   placeholder={t.searchPlaceholder}
-                  autoFocus
+                  autoFocus={!isTouchDevice()}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => {

@@ -8,7 +8,11 @@
     top: 0;
     left: 0;
     width: 100vw;
+    /* Hauteur = viewport VISIBLE (dynamique). En 100vh (viewport large, barre d'URL comprise),
+       `justify-content: flex-end` collait la feuille au bas de 100vh → sous la zone visible sur
+       mobile, coupant le bas (bouton Déconnexion). 100dvh la colle au bas de l'écran visible. */
     height: 100vh;
+    height: 100dvh;
 }
 
 /* Conteneur positionnant : ancre le popover au-dessus du déclencheur. */

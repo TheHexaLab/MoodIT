@@ -82,10 +82,12 @@ test('envoyer un message : Entrée ou bouton, reçu en direct, persisté', async
   // Le lecteur le reçoit par WebSocket, sans recharger.
   await expect(message(reader.page, first)).toBeVisible();
 
-  // Maj+Entrée n'envoie pas (le composeur est un champ d'une ligne : rien n'est inséré).
+  // Maj+Entrée n'envoie pas : il insère un saut de ligne (composeur multiligne). Le message est
+  // rogné à l'envoi, le saut de ligne final ne le change donc pas.
   await composer(author.page).fill(second);
   await composer(author.page).press('Shift+Enter');
-  await expect(composer(author.page)).toHaveValue(second);
+  await expect(composer(author.page)).toHaveValue(`${second}
+`);
   await expect(message(author.page, second)).toHaveCount(0);
 
   await author.page.getByRole('button', { name: 'Envoyer le message' }).click();

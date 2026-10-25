@@ -15,6 +15,7 @@ import { contrastingTextColor } from '../../helpers/color.ts';
 import type { ManagedEstablishment } from '../../types/domain.ts';
 import type { EstablishmentEvent } from '../../services/appSocket.ts';
 import { byName, normalize } from './helpers.ts';
+import { isTouchDevice } from '../../helpers/viewport';
 import { DEFAULT_COLOR, DEFAULT_PALETTE, FIELD_MAX_LENGTH, defaultLabels } from './labels.ts';
 import type {
   AddSubscriptionPopupLabels,
@@ -770,7 +771,7 @@ export function AddSubscriptionPopup({
               <input
                 type="text"
                 placeholder={t.searchPlaceholder}
-                autoFocus
+                autoFocus={!isTouchDevice()}
                 value={establishmentSearch}
                 onChange={(e) => setEstablishmentSearch(e.target.value)}
                 onKeyDown={(e) => {
@@ -873,7 +874,7 @@ export function AddSubscriptionPopup({
         <input
           type="text"
           placeholder={t.searchPlaceholder}
-          autoFocus
+          autoFocus={!isTouchDevice()}
           value={joinSearch}
           onChange={(e) => setJoinSearch(e.target.value)}
         />
@@ -917,7 +918,7 @@ export function AddSubscriptionPopup({
           <input
             type="text"
             placeholder={t.programSearchPlaceholder}
-            autoFocus
+            autoFocus={!isTouchDevice()}
             value={programSearch}
             onChange={(e) => setProgramSearch(e.target.value)}
           />

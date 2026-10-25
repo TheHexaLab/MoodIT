@@ -20,6 +20,12 @@ interface EditorShellProps {
   onBack?: () => void;
   /** Fermeture (croix, Échap, clic sur le fond). */
   onClose: () => void;
+  /**
+   * Intercepte la fermeture (croix, Échap, clic sur le fond) AVANT l'animation : reçoit
+   * `proceed`, la fermeture animée réelle. Permet au parent d'afficher une confirmation (perte de
+   * données) et de n'appeler `proceed` qu'après validation.
+   */
+  onCloseGuard?: (proceed: () => void) => void;
   /** Largeur du panneau (défaut : celle de la variante `Editor`, 30rem). Animée au changement de vue. */
   width?: string;
   /**
@@ -82,6 +88,7 @@ export function EditorShell({
   subtitle,
   onBack,
   onClose,
+  onCloseGuard,
   width,
   scrollBody = false,
   desktopMaxVh,
@@ -167,6 +174,7 @@ export function EditorShell({
       onClose={onClose}
       controller={popup}
       closeOnEscape={closeOnEscape}
+      closeGuard={onCloseGuard}
       panelClassName={styles.panel}
       panelStyle={panelStyle}
     >
@@ -191,7 +199,11 @@ export function EditorShell({
           type="button"
           className={styles.closeButton}
           aria-label="Fermer"
-          onClick={() => popup.requestClose(onClose)}
+          onClick={() => {
+            const proceed = () => popup.requestClose(onClose);
+            if (onCloseGuard) onCloseGuard(proceed);
+            else proceed();
+          }}
         >
           ✕
         </button>

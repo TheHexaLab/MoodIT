@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { isTouchDevice } from '../../helpers/viewport';
 import { createPortal } from 'react-dom';
 import styles from './CourseMenu.module.css';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -190,7 +191,11 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     width: number;
   } | null>(null);
   /** Position du menu contextuel (clic droit sur le sélecteur) ; null si fermé. */
-  const [ctxMenuPos, setCtxMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxMenuPos, setCtxMenuPos] = useState<{
+    x: number;
+    y: number;
+    anchor: HTMLElement;
+  } | null>(null);
   /** Conteneur du sélecteur de cours (pour le click-outside du menu). */
   const selectRef = useRef<HTMLDivElement | null>(null);
   /** Liste déroulante portée vers <body> (pour le click-outside). */
@@ -372,7 +377,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   function openCourseContextMenu(anchor: HTMLElement) {
     closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
     const rect = anchor.getBoundingClientRect();
-    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4 });
+    setCtxMenuPos({ x: rect.left, y: rect.bottom + 4, anchor });
   }
 
   // Clic droit sur le sélecteur de cours → menu contextuel. Si aucun item n'est applicable,
@@ -472,7 +477,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
                   <input
                     type="text"
                     placeholder={dropdownLabels.searchPlaceholder}
-                    autoFocus
+                    autoFocus={!isTouchDevice()}
                     value={courseSearch}
                     onChange={(event) => setCourseSearch(event.target.value)}
                     onKeyDown={(event) => {
@@ -602,6 +607,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         <CourseContextMenu
           x={ctxMenuPos.x}
           y={ctxMenuPos.y}
+          anchor={ctxMenuPos.anchor}
           courseCode={selectedCourse.code}
           onEditCourse={
             isAdmin && onEditCourse

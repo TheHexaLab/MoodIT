@@ -9,6 +9,7 @@ import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { initials } from './helpers.ts';
+import { isTouchDevice } from '../../helpers/viewport';
 import { defaultLabels } from './labels.ts';
 import type { MaybePromise, Role, RoleChange, RoleEditorPopupLabels, User } from './types.ts';
 
@@ -358,7 +359,7 @@ export function RoleEditorPopup({
                     <input
                       type="text"
                       placeholder={t.searchPlaceholder}
-                      autoFocus
+                      autoFocus={!isTouchDevice()}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                     />

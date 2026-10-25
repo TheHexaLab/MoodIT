@@ -5,7 +5,14 @@
 
 .overlay {
     position: fixed;
-    inset: 0;
+    /* Hauteur = viewport VISIBLE (dynamique). `inset: 0` vaudrait 100vh (barre d'URL comprise) :
+       sur mobile, une popup centrée et plafonnée à 100dvh dépassait sous la zone visible et son
+       pied était coupé. On borne donc le voile à 100dvh (repli 100vh). */
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100vh;
+    height: 100dvh;
     z-index: 90;
     display: flex;
     justify-content: center;

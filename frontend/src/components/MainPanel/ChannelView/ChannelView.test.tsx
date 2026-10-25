@@ -263,7 +263,7 @@ describe('ChannelView — échec d’envoi', () => {
     const onSendMessage = vi.fn().mockRejectedValue(new Error('500'));
     renderChannel([msg(7, other, 'Question ?')], { onSendMessage });
     fireEvent.click(screen.getByLabelText('Répondre au message'));
-    const input = screen.getByLabelText('Envoyer un message dans general') as HTMLInputElement;
+    const input = screen.getByLabelText('Envoyer un message dans general') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'Raté' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer le message' }));
 
@@ -272,8 +272,9 @@ describe('ChannelView — échec d’envoi', () => {
     );
     expect(input.value).toBe('Raté');
     expect(screen.getByLabelText('Annuler la réponse')).toBeTruthy();
-    // Le message optimiste a été retiré de la liste.
-    expect(screen.queryAllByText('Raté').length).toBe(0);
+    // Le message optimiste a été retiré de la liste (le brouillon restauré dans le champ
+    // multiligne, un <textarea>, ne compte pas).
+    expect(screen.queryAllByText('Raté', { ignore: 'textarea, script, style' }).length).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
     await waitFor(() =>
@@ -495,5 +496,141 @@ describe('ChannelView — chargement et pagination', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(screen.getByText('Le mien')).toBeTruthy());
     expect(list.scrollTop).toBe(1100);
+  });
+});
+
+// Champ d'édition multiligne : hauteur ajustée au contenu (barre de défilement seulement sur un
+// vrai débordement) et zone d'édition gardée visible dans le fil pendant la frappe.
+describe('ChannelView — hauteur et suivi du champ d’édition', () => {
+  const realGetComputedStyle = window.getComputedStyle;
+
+  function stubTextareaLayout(scrollHeight: number, maxHeight: string) {
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) =>
+      el instanceof HTMLTextAreaElement
+        ? ({ maxHeight } as CSSStyleDeclaration)
+        : realGetComputedStyle(el, pseudo)
+    );
+  }
+
+  function openEditor() {
+    renderChannel([msg(1, me, 'Original')], { onEditMessage: vi.fn().mockResolvedValue(undefined) });
+    fireEvent.click(screen.getByRole('button', { name: 'Modifier le message' }));
+    return screen.getByLabelText('Modifier le message') as HTMLTextAreaElement;
+  }
+
+  afterEach(() => {
+    delete (HTMLTextAreaElement.prototype as unknown as { scrollHeight?: number }).scrollHeight;
+    vi.restoreAllMocks();
+  });
+
+  it('le contenu tient sous la hauteur max : hauteur = contenu, pas de barre de défilement', () => {
+    stubTextareaLayout(60, '160px');
+    const input = openEditor();
+    expect(input.style.height).toBe('60px');
+    expect(input.style.overflowY).toBe('hidden');
+  });
+
+  it('le contenu déborde : hauteur plafonnée et défilement activé', () => {
+    stubTextareaLayout(300, '160px');
+    const input = openEditor();
+    expect(input.style.height).toBe('160px');
+    expect(input.style.overflowY).toBe('auto');
+  });
+
+  it('composer : texte court → hauteur du contenu, pas de barre de défilement', () => {
+    stubTextareaLayout(40, '144px');
+    renderChannel([msg(1, me, 'Hi')]);
+    const composer = screen.getByLabelText('Envoyer un message dans general') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'Court' } });
+    expect(composer.style.height).toBe('40px');
+    expect(composer.style.overflowY).toBe('hidden');
+  });
+
+  it('composer : texte trop long → hauteur plafonnée et barre de défilement visible', () => {
+    stubTextareaLayout(400, '144px');
+    renderChannel([msg(1, me, 'Hi')]);
+    const composer = screen.getByLabelText('Envoyer un message dans general') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'Très long '.repeat(80) } });
+    expect(composer.style.height).toBe('144px');
+    expect(composer.style.overflowY).toBe('auto');
+  });
+
+  it('pendant la frappe, le fil défile pour garder le bas du champ visible', () => {
+    stubTextareaLayout(60, '160px');
+    const input = openEditor();
+    const list = input.closest('ul') as HTMLUListElement;
+    list.scrollTop = 100;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return (this === input ? { top: 380, bottom: 450 } : { top: 0, bottom: 400 }) as DOMRect;
+    });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Original\nplus long' } });
+    expect(list.scrollTop).toBe(100 + 50 + 8); // dépassement + marge de 8 px
+  });
+
+  it('champ au-dessus du fil visible : le fil remonte jusqu’à lui', () => {
+    stubTextareaLayout(60, '160px');
+    const input = openEditor();
+    const list = input.closest('ul') as HTMLUListElement;
+    list.scrollTop = 100;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return (this === input ? { top: 20, bottom: 80 } : { top: 50, bottom: 400 }) as DOMRect;
+    });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Original !' } });
+    expect(list.scrollTop).toBe(100 - 30 - 8);
+  });
+});
+
+// Clavier virtuel (iOS) : la portion du viewport masquée est exposée en `--keyboard-inset` pour
+// remonter la zone de saisie au-dessus du clavier.
+describe('ChannelView — décalage du clavier mobile', () => {
+  function stubVisualViewport(height: number) {
+    const listeners: Record<string, () => void> = {};
+    const vv = {
+      height,
+      offsetTop: 0,
+      addEventListener: vi.fn((type: string, cb: () => void) => {
+        listeners[type] = cb;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal('visualViewport', vv);
+    return { vv, listeners };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('expose la hauteur masquée par le clavier, la suit, puis la retire au démontage', () => {
+    const { vv, listeners } = stubVisualViewport(window.innerHeight - 300);
+    const { unmount } = renderChannel([msg(1, me, 'Hi')]);
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue('--keyboard-inset')).toBe('300px');
+
+    // Le clavier se ferme : plus de décalage.
+    vv.height = window.innerHeight;
+    act(() => listeners.resize());
+    expect(root.style.getPropertyValue('--keyboard-inset')).toBe('0px');
+
+    unmount();
+    expect(root.style.getPropertyValue('--keyboard-inset')).toBe('');
+    expect(vv.removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(vv.removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+  });
+
+  it('sans l’API visualViewport (desktop) : aucun décalage', () => {
+    vi.stubGlobal('visualViewport', undefined);
+    renderChannel([msg(1, me, 'Hi')]);
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('');
   });
 });

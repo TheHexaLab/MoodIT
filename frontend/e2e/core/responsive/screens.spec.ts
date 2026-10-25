@@ -610,8 +610,16 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
     await expectReachable(page.getByText(/^[01] \/ 1 pts$/));
     await expectActionable(page.getByRole('button', { name: 'Réessayer' }), hasTouch);
 
-    // Rien n'est persisté : fermeture.
+    // Rien n'est persisté : fermeture. La question saisie n'est pas enregistrée, l'éditeur demande
+    // donc confirmation avant de la perdre.
     await press(page.getByRole('button', { name: 'Fermer', exact: true }), hasTouch);
+    await expect(page.getByRole('heading', { name: 'Modifications non enregistrées' })).toBeVisible();
+    await expectActionable(page.getByRole('button', { name: "Continuer l'édition" }), hasTouch);
+    await press(page.getByRole('button', { name: "Continuer l'édition" }), hasTouch);
+    await expect(page.getByRole('heading', { name: 'Tester la question' })).toBeVisible();
+    await press(page.getByRole('button', { name: 'Fermer', exact: true }), hasTouch);
+    await expectActionable(page.getByRole('button', { name: 'Quitter sans enregistrer' }), hasTouch);
+    await press(page.getByRole('button', { name: 'Quitter sans enregistrer' }), hasTouch);
     await expect(page.getByRole('heading', { name: 'Tester la question' })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   } finally {

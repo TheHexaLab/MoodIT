@@ -2,6 +2,10 @@
     display: flex;
     width: 100%;
     height: 100vh;
+    /* Hauteur DYNAMIQUE : sur mobile, 100vh inclut la barre d'URL du navigateur → la zone
+       réellement visible est plus courte et le bas (barre de message) passait sous le pli.
+       100dvh suit la zone visible → le composer reste au bas de l'écran. */
+    height: 100dvh;
     overflow: hidden;
     background: var(--bg-main);
 }

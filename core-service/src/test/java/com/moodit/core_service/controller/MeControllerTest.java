@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,6 +69,9 @@ class MeControllerTest {
 
         mockMvc.perform(get("/me").principal(PRINCIPAL))
                 .andExpect(status().isOk())
+                // Profil propre au cookie, absent de la clé de cache HTTP : jamais mis en cache,
+                // sinon un cache resservirait le profil de la session précédente.
+                .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.id").value(12))
                 .andExpect(jsonPath("$.username").value("rosie"))
                 .andExpect(jsonPath("$.email").value(EMAIL))
@@ -95,6 +99,7 @@ class MeControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"firstName\":\"Rosalie\",\"lastName\":\"Tremblay\",\"avatarColor\":\"#0a5cc0\"}"))
                 .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.firstName").value("Rosalie"));
 
         ArgumentCaptor<Author> author = ArgumentCaptor.forClass(Author.class);
@@ -197,7 +202,8 @@ class MeControllerTest {
 
         mockMvc.perform(put("/me/settings").principal(PRINCIPAL)
                         .contentType("application/json;charset=UTF-8").content(atLimit))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"));
 
         verify(users).updateSettingsByEmail(EMAIL, atLimit);
     }

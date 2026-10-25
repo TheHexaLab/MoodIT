@@ -1,0 +1,133 @@
+:root {
+  /* Palette du document Excel (thème sombre). */
+  --bg: #0f1117;
+  --panel: #1c1f28;
+  --cell-bg: #14161d;      /* fond de cellule par défaut (majoritaire dans le xlsx) */
+  --cell-fg: #b4b4c6;      /* texte de cellule par défaut */
+  --ink: #ececf1;
+  --muted: #9a9ab2;
+  --line: #2a2e3a;
+  --accent: #14b8a6;
+  --accent-ink: #5eead4;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--cell-fg);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+#bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+#bar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+#tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+
+.tab {
+  border: 1px solid var(--line);
+  background: var(--cell-bg);
+  color: var(--cell-fg);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+
+.tab:hover { border-color: var(--accent); color: var(--ink); }
+
+.tab[aria-selected="true"] {
+  background: var(--accent);
+  color: #06201d;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+#download {
+  margin-left: auto;
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#download:hover { text-decoration: underline; }
+
+#status {
+  padding: 24px 16px;
+  color: var(--muted);
+}
+
+#status.error { color: #ff8585; }
+
+#sheet {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0 16px 40px;
+}
+
+table {
+  border-collapse: collapse;
+  background: var(--cell-bg);
+  box-shadow: var(--shadow);
+  min-width: 100%;
+}
+
+th, td {
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 480px;
+  /* défauts ; les couleurs propres à chaque cellule (issues du xlsx) sont
+     appliquées en style inline par plan-de-test.js et priment sur ceci. */
+  background: var(--cell-bg);
+  color: var(--cell-fg);
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-weight: 700;
+  border-bottom: 2px solid var(--line);
+}
+
+tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }

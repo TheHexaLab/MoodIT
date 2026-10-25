@@ -3,6 +3,7 @@ import styles from './SectionEditorPopup.module.css';
 import { Popup } from '../Popup/Popup';
 import { PopupVariant } from '../Popup/popupVariant';
 import { usePopupController } from '../Popup/popupController';
+import { usePointerReorder } from '../../hooks/usePointerReorder';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
@@ -43,10 +44,6 @@ export function SectionEditorPopup({
 }: SectionEditorPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
   const [items, setItems] = useState<Item[]>(itemList);
-  const dragIndex = useRef<number | null>(null);
-  const orderBeforeDrag = useRef<string[] | null>(null);
-  const [handleHeldId, setHandleHeldId] = useState<string | null>(null);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -179,46 +176,23 @@ export function SectionEditorPopup({
     }
   }
 
-  function handleDragStart(index: number) {
-    dragIndex.current = index;
-    orderBeforeDrag.current = items.map((item) => item.id);
-    setDraggingId(items[index].id);
-  }
+  // Réordonnancement souris + tactile via Pointer Events (comme le quiz) : PAS d'image
+  // fantôme du drag natif HTML5. Le hook n'appelle handleReorder qu'au relâchement, et
+  // seulement si l'ordre a changé.
+  const { order, draggingId, onGripPointerDown, onRowPointerDown } = usePointerReorder(
+    items.map((item) => item.id),
+    handleReorder
+  );
 
-  function handleDragEnter(overIndex: number) {
-    const from = dragIndex.current;
-    if (from === null || from === overIndex) return;
-    setItems((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(overIndex, 0, moved);
-      return next;
-    });
-    dragIndex.current = overIndex;
-  }
-
-  function handleDragEnd() {
-    dragIndex.current = null;
-    setDraggingId(null);
-    setHandleHeldId(null);
-
-    const before = orderBeforeDrag.current;
-    orderBeforeDrag.current = null;
-    if (!before) return;
-
-    const orderedIds = items.map((item) => item.id);
-    // On notifie seulement si l'ordre a réellement changé.
-    if (before.join(' ') !== orderedIds.join(' ')) {
-      // Réordonnancement optimiste : on rétablit l'ordre d'avant le drag si l'appel échoue.
-      runChange({ type: 'reorder', orderedIds }, () => {
-        setItems((prev) => {
-          const byId = new Map(prev.map((item) => [item.id, item]));
-          return before
-            .map((id) => byId.get(id))
-            .filter((item): item is Item => item !== undefined);
-        });
-      });
-    }
+  // Applique l'ordre glissé de façon optimiste, puis persiste (rollback si l'appel échoue).
+  function handleReorder(orderedIds: string[]) {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const before = items;
+    const reordered = orderedIds
+      .map((id) => byId.get(id))
+      .filter((item): item is Item => item !== undefined);
+    setItems(reordered);
+    runChange({ type: 'reorder', orderedIds }, () => setItems(before));
   }
 
   const draftTrimmed = draftName.trim();
@@ -227,6 +201,8 @@ export function SectionEditorPopup({
   const draftHasError = isDraftInvalid || isDraftDuplicate;
   const draftHint = isDraftDuplicate ? t.hintDuplicate : isDraftInvalid ? t.hintInvalid : t.hint;
   const deletingItem = items.find((item) => item.id === deletingId) ?? null;
+  // Rendu piloté par `order` (état du hook pendant un glissement) → item par id.
+  const itemsById = new Map(items.map((item) => [item.id, item]));
 
   function editRowInner(titleText: string) {
     return (
@@ -239,7 +215,7 @@ export function SectionEditorPopup({
               type="text"
               value={draftName}
               autoFocus
-              onChange={(e) => setDraftName(e.target.value.toLowerCase())}
+              onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveEdit();
                 if (e.key === 'Escape') {
@@ -284,26 +260,25 @@ export function SectionEditorPopup({
             <p className={styles.empty}>{t.emptyMessage}</p>
           ) : (
             <ol>
-              {items.map((item, index) =>
-                editingId === item.id ? (
+              {order.map((id) => {
+                const item = itemsById.get(id);
+                if (!item) return null;
+                return editingId === item.id ? (
                   <li key={item.id} className={styles['edit-row']}>
                     {editRowInner(t.editTitle)}
                   </li>
                 ) : (
                   <li
                     key={item.id}
-                    draggable={handleHeldId === item.id}
-                    onDragStart={() => handleDragStart(index)}
-                    onDragEnter={() => handleDragEnter(index)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDragEnd={handleDragEnd}
+                    data-reorder-id={item.id}
+                    onPointerDown={(e) => onRowPointerDown(e, item.id)}
                     className={draggingId === item.id ? styles.dragging : undefined}
                   >
                     <div>
                       <span
                         className={styles.handle}
-                        onMouseDown={() => setHandleHeldId(item.id)}
-                        onMouseUp={() => setHandleHeldId(null)}
+                        aria-hidden="true"
+                        onPointerDown={(e) => onGripPointerDown(e, item.id)}
                       >
                         ⠿
                       </span>
@@ -312,13 +287,15 @@ export function SectionEditorPopup({
                         <span>{item.name}</span>
                       </span>
                     </div>
-                    <div>
+                    {/* data-no-drag : presser une action n'arme pas le drag → le clic
+                        (renommer / supprimer) passe toujours. */}
+                    <div data-no-drag>
                       <Pencil onClick={() => startEdit(item)} />
                       <TrashCan onClick={() => setDeletingId(item.id)} />
                     </div>
                   </li>
-                )
-              )}
+                );
+              })}
             </ol>
           )}
         </main>

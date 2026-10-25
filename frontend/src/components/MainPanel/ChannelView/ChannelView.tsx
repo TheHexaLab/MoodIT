@@ -16,6 +16,7 @@ import { Reply } from '../../../assets/Reply';
 import { Send } from '../../../assets/Send';
 import { TrashCan } from '../../../assets/TrashCan';
 import { contrastingTextColor } from '../../../helpers/color';
+import { avatarInitials } from '../../../helpers/text';
 import {
   useChannelMessages,
   type ChannelSocket,
@@ -105,8 +106,7 @@ function getAuthorName(author: ChannelMessageAuthor): string {
 
 /** Deux initiales affichées dans l'avatar (firstName + lastName). */
 function getInitials(author: ChannelMessageAuthor): string {
-  const initials = `${author.firstName[0] ?? ''}${author.lastName[0] ?? ''}`.trim();
-  return (initials || author.username[0] || '?').toUpperCase();
+  return avatarInitials(author.firstName, author.lastName, author.username);
 }
 
 /** Apercu court (une ligne) du contenu d'un message, pour la reference de réponse. */
@@ -151,7 +151,9 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   /** Conteneur scrollable de la liste (pour l'auto-scroll vers le bas). */
   const listRef = useRef<HTMLUListElement>(null);
   /** Champ de saisie du composer (focus auto à l'ouverture d'une réponse). */
-  const composerRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  /** Champ d'édition inline d'un message (auto-hauteur, multi-ligne). */
+  const editRef = useRef<HTMLTextAreaElement>(null);
   /** L'utilisateur est-il (proche du) bas de la liste ? Pilote l'auto-scroll. */
   const atBottomRef = useRef(true);
   /**
@@ -196,6 +198,81 @@ const ChannelView: React.FC<ChannelViewProps> = ({
   const draftOverLimit = draft.length > MAX_POST_CONTENT_LENGTH;
   const editOverLimit = editDraft.length > MAX_POST_CONTENT_LENGTH;
   const canSend = draft.trim() !== '' && !pending && !draftOverLimit;
+
+  // Auto-hauteur du composer : le textarea grandit avec le contenu (retour à la ligne OU
+  // saut de ligne explicite) jusqu'à un plafond CSS (max-height), au-delà duquel il scrolle.
+  // On repart de 'auto' pour laisser scrollHeight refléter le contenu réel (rétrécit aussi
+  // quand on efface / après envoi, quand `draft` redevient vide).
+  useLayoutEffect(() => {
+    const ta = composerRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    // Si le composer est masqué au montage (état de chargement → display:none), scrollHeight
+    // vaut 0 : on NE fixe PAS height:0px (sinon le champ reste écrasé, texte coupé + scrollbar).
+    // Le plancher CSS `min-height` (une ligne) prend le relais tant que c'est masqué.
+    if (ta.scrollHeight > 0) {
+      // Comme le champ d'édition : barre de défilement seulement sur un vrai débordement (au-delà
+      // de max-height), pour signaler que du texte est caché ; sinon overflow:hidden, ce qui évite
+      // une barre parasite due à l'arrondi au pixel.
+      const maxH = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
+      const capped = ta.scrollHeight > maxH;
+      ta.style.height = capped ? `${maxH}px` : `${ta.scrollHeight}px`;
+      ta.style.overflowY = capped ? 'auto' : 'hidden';
+    }
+  }, [draft, loading, loadError]);
+
+  // Auto-hauteur du champ d'édition inline (même principe que le composer) : s'ajuste au montage
+  // (ouverture de l'édition) et à chaque frappe, pour afficher les sauts de ligne existants.
+  useLayoutEffect(() => {
+    const ta = editRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    if (ta.scrollHeight > 0) {
+      // La barre de scroll ne doit apparaître QUE sur un vrai débordement : tant que le contenu
+      // tient sous max-height, on met overflow:hidden (sinon l'arrondi au pixel affiche une barre
+      // parasite) ; au-delà, on plafonne la hauteur et on active le scroll.
+      const maxH = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
+      const capped = ta.scrollHeight > maxH;
+      ta.style.height = capped ? `${maxH}px` : `${ta.scrollHeight}px`;
+      ta.style.overflowY = capped ? 'auto' : 'hidden';
+    }
+
+    // Suivre le curseur : tant qu'on édite (champ focus), on garde la zone d'édition visible dans
+    // le feed. Quand le textarea grandit vers le bas, on scrolle la liste du minimum nécessaire
+    // pour que son bas (là où on tape) reste dans le viewport, sans jamais dépasser.
+    const list = listRef.current;
+    if (!list || document.activeElement !== ta) return;
+    const taRect = ta.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    const margin = 8;
+    if (taRect.bottom > listRect.bottom) {
+      list.scrollTop += taRect.bottom - listRect.bottom + margin;
+    } else if (taRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - taRect.top + margin;
+    }
+  }, [editDraft, editingId]);
+
+  // Décalage clavier mobile : sur iOS, le clavier virtuel recouvre le bas de page sans réduire
+  // `innerHeight` → le composer était masqué. On mesure la portion occultée via l'API
+  // visualViewport et on l'expose en variable CSS `--keyboard-inset` (consommée en padding-bottom
+  // du composer, cf. CSS) pour faire remonter la barre juste au-dessus du clavier.
+  useLayoutEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return; // desktop / navigateurs sans l'API : rien à décaler.
+    const root = document.documentElement;
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty('--keyboard-inset', `${inset}px`);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      root.style.removeProperty('--keyboard-inset'); // pas de décalage résiduel après démontage.
+    };
+  }, []);
 
   /** Fait defiler jusqu'au message cible (clic sur une reference de réponse). */
   function scrollToMessage(messageId: number) {
@@ -397,11 +474,13 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                         </p>
                         {editingId === message.id ? (
                           <div>
-                            <input
-                              type="text"
+                            <textarea
+                              ref={editRef}
+                              rows={1}
                               value={editDraft}
                               onChange={(event) => setEditDraft(event.target.value)}
                               onKeyDown={(event) => {
+                                // Entrée = enregistrer ; Maj+Entrée = saut de ligne ; Échap = annuler.
                                 if (event.key === 'Enter' && !event.shiftKey) {
                                   event.preventDefault();
                                   submitEdit(message.id, message.content);
@@ -504,12 +583,13 @@ const ChannelView: React.FC<ChannelViewProps> = ({
               <button type="button" aria-label={t.addAttachment}>
                 +
               </button>
-              <input
+              <textarea
                 ref={composerRef}
-                type="text"
+                rows={1}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
+                  // Entrée = envoyer ; Maj+Entrée = saut de ligne (le textarea grandit).
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     handleSend();
