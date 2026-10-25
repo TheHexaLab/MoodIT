@@ -2,8 +2,61 @@
 # Remplacer moodit.example.com par ton vrai domaine (DNS A/AAAA -> IP du VPS).
 # Caddy gère seul l'obtention et le renouvellement du certificat TLS.
 
+# --- En-têtes de sécurité, appliqués à TOUTES les réponses (statiques + proxy) --
+# Caddy étant l'unique point d'entrée navigateur, c'est ici qu'on durcit tout.
+(security_headers) {
+	header {
+		# Anti-clickjacking : interdit toute mise en <iframe> de MoodIT.
+		# frame-ancestors (CSP niveau 2) + X-Frame-Options (navigateurs anciens).
+		X-Frame-Options "DENY"
+
+		# Content-Security-Policy stricte.
+		#  - script-src : 'self' + hash du script inline de bootstrap thème dans
+		#    index.html (pas de 'unsafe-inline' JS). Si ce script change, recalculer
+		#    le hash (openssl dgst -sha256 -binary | openssl base64 sur son contenu).
+		#  - styles : split fin pour minimiser 'unsafe-inline'.
+		#      * style-src-elem 'self' : seules les feuilles CSS bundlées (app +
+		#        katex.min.css) sont autorisées ; AUCUNE balise <style> inline
+		#        (le build Vite de prod extrait tout en .css liés, pas d'injection).
+		#      * style-src-attr 'unsafe-inline' : autorise les attributs style="..."
+		#        inline, REQUIS par KaTeX (formules maths du forum, valeurs
+		#        dynamiques -> ni hash ni nonce possibles) et les style={{}} React.
+		#      * style-src 'self' 'unsafe-inline' : fallback pour les navigateurs
+		#        qui ignorent style-src-elem/attr (KaTeX reste fonctionnel).
+		#    N'autorise AUCUN script (script-src reste strict) => risque marginal.
+		#  - img-src : PAS de wildcard 'https:' (aucune image externe en prod ;
+		#    seule une page de test chargeait une photo LinkedIn). data:/blob:
+		#    conservés pour favicons et aperçus d'images générés côté client.
+		#  - connect-src 'self' : couvre le WebSocket same-origin wss://moodit.ca/ws.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-jiVY1wMx7/ZirDhELvxOE4hml8jraFv+QvVD/aAicy4='; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
+		# Empêche le MIME-sniffing et fuite du Referer complet vers l'extérieur.
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Force HTTPS pendant 1 an (Caddy n'ajoute pas HSTS par défaut).
+		Strict-Transport-Security "max-age=31536000"
+
+		# Anti fuite de version : on retire les en-têtes qui révèlent le serveur.
+		-Server
+		-X-Powered-By
+	}
+}
+
+# Redirection HTTP -> HTTPS EXPLICITE (port 80). Sans ce bloc, Caddy génère une
+# redirection 308 automatique qui NE porte PAS les en-têtes de sécurité -> les
+# scanners signalent "HSTS Header Not Set" sur ces réponses. On y attache donc
+# security_headers avant de rediriger. (Les navigateurs ignorent HSTS reçu en
+# HTTP par la RFC 6797 ; c'est surtout pour la conformité scanner.) Caddy sert
+# toujours les challenges ACME /.well-known/ sur le port 80 malgré ce bloc.
+http://moodit.ca, http://www.moodit.ca {
+	import security_headers
+	redir https://{host}{uri} permanent
+}
+
 moodit.ca, www.moodit.ca {
 	encode gzip zstd
+	import security_headers
 
 	# Le frontend (nginx) sert les statiques ET proxy /api, /mcp, /exec, /auth,
 	# /gateway, /ws vers le gateway. Caddy n'a donc qu'un seul upstream.
@@ -17,5 +70,6 @@ moodit.ca, www.moodit.ca {
 #
 # :443 {
 # 	tls internal
+# 	import security_headers
 # 	reverse_proxy frontend:5173
 # }

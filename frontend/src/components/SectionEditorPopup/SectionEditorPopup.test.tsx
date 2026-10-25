@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { SectionEditorPopup } from './SectionEditorPopup';
 import { defaultLabels } from './labels';
 import { defaultLabels as deleteLabels } from '../DeleteConfirmationPopup/labels';
@@ -66,6 +66,29 @@ function listedNames() {
     .map((li) => li.querySelector('span > span:last-child')?.textContent ?? '')
     .filter((n) => n !== '');
 }
+/**
+ * Glissé à la souris (Pointer Events, cf. usePointerReorder) : pression sur la poignée de
+ * `from`, survol de `over` (jsdom n'a pas de géométrie : `elementFromPoint` est simulé), puis
+ * relâchement et le « click » que le navigateur envoie ensuite.
+ */
+function pointerDrag(from: string, over: string) {
+  const grip = row(from).querySelector('span') as HTMLElement;
+  (grip as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+  fireEvent.pointerDown(grip, { button: 0, pointerType: 'mouse', pointerId: 1 });
+  const target = row(over);
+  (document as unknown as { elementFromPoint: () => Element }).elementFromPoint = () => target;
+  act(() => {
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 0, clientY: 0 }));
+  });
+  return {
+    release() {
+      act(() => {
+        window.dispatchEvent(new Event('pointerup'));
+      });
+      fireEvent.click(grip);
+    },
+  };
+}
 function draftInput() {
   return document.querySelector('input[type="text"]') as HTMLInputElement;
 }
@@ -93,14 +116,16 @@ describe('SectionEditorPopup', () => {
 
   // ── Ajout ──
 
-  it('ajout : saisie en minuscules, indices de validation, enregistrement désactivé si vide/doublon', () => {
+  it('ajout : majuscules conservées, indices de validation, enregistrement désactivé si vide/doublon', () => {
     renderPopup();
     fireEvent.click(screen.getByText(t.addButton));
     expect(screen.getByText(t.addTitle)).toBeTruthy();
     expect(screen.getByText(t.hintInvalid, RAW)).toBeTruthy(); // vide → invalide
     expect(saveButton().disabled).toBe(true);
-    fireEvent.change(draftInput(), { target: { value: 'DEVOIRS' } });
-    expect(draftInput().value).toBe('devoirs');
+    fireEvent.change(draftInput(), { target: { value: 'Devoirs' } });
+    expect(draftInput().value).toBe('Devoirs'); // pas de forçage en minuscules
+    expect(screen.getByText(t.hint)).toBeTruthy();
+    fireEvent.change(draftInput(), { target: { value: 'devoirs' } });
     expect(screen.getByText(t.hintDuplicate, RAW)).toBeTruthy();
     expect(saveButton().disabled).toBe(true);
     fireEvent.change(draftInput(), { target: { value: 'projets' } });
@@ -231,25 +256,22 @@ describe('SectionEditorPopup', () => {
 
   it('glisser-déposer : onChange { reorder, orderedIds } avec le nouvel ordre', async () => {
     const { onChange } = renderPopup();
-    const first = row('general');
-    fireEvent.mouseDown(first.querySelector('span') as HTMLElement); // poignée → draggable
-    expect(first.getAttribute('draggable')).toBe('true');
-    fireEvent.dragStart(first);
-    fireEvent.dragEnter(row('examens'));
+    const drag = pointerDrag('general', 'examens');
+    // Pendant le glissé : la rangée saisie est marquée et l'ordre suit le pointeur.
+    expect(row('general').className).toContain('dragging');
     expect(listedNames()).toEqual(['devoirs', 'examens', 'general']);
-    fireEvent.dragEnd(row('general'));
+    expect(onChange).not.toHaveBeenCalled(); // rien n'est envoyé avant le relâchement
+    drag.release();
     await waitFor(() =>
       expect(onChange).toHaveBeenCalledWith({ type: 'reorder', orderedIds: ['b', 'c', 'a'] })
     );
-    expect(row('general').getAttribute('draggable')).toBe('false');
+    expect(row('general').className).not.toContain('dragging');
+    expect(listedNames()).toEqual(['devoirs', 'examens', 'general']);
   });
 
   it('glisser-déposer sans changement d’ordre : aucun onChange', () => {
     const { onChange } = renderPopup();
-    const first = row('general');
-    fireEvent.dragStart(first);
-    fireEvent.dragEnter(first);
-    fireEvent.dragEnd(first);
+    pointerDrag('general', 'general').release();
     expect(onChange).not.toHaveBeenCalled();
     expect(listedNames()).toEqual(['general', 'devoirs', 'examens']);
   });
@@ -257,12 +279,19 @@ describe('SectionEditorPopup', () => {
   it('glisser-déposer : si onChange rejette, l’ordre initial est rétabli', async () => {
     const onChange = vi.fn().mockRejectedValue(new Error('boom'));
     renderPopup({ onChange });
-    fireEvent.dragStart(row('general'));
-    fireEvent.dragEnter(row('devoirs'));
-    fireEvent.dragEnd(row('general'));
+    pointerDrag('general', 'devoirs').release();
     expect(listedNames()).toEqual(['devoirs', 'general', 'examens']);
     expect(await screen.findByText(t.saveError)).toBeTruthy();
     expect(listedNames()).toEqual(['general', 'devoirs', 'examens']);
+  });
+
+  it('presser le crayon ou la corbeille n’arme pas le glissé : l’action passe', () => {
+    const { onChange } = renderPopup();
+    fireEvent.pointerDown(rowActions('general').trash, { button: 0, pointerType: 'mouse' });
+    expect(row('general').className).not.toContain('dragging');
+    fireEvent.click(rowActions('general').pencil);
+    expect(draftInput().value).toBe('general');
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   // ── Fermeture / libellés ──

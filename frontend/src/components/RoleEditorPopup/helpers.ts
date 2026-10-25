@@ -1,6 +1,7 @@
 import type { User } from './types.ts';
+import { avatarInitials } from '../../helpers/text.ts';
 
-/** Initiales d'un utilisateur (première lettre du prénom + du nom), en majuscules. */
+/** Initiales d'un utilisateur (prénom + nom), unifiées et sûres pour les emojis. */
 export function initials(user: User): string {
-  return `${user.firstName[0] ?? ''}${user.lastName[0] ?? ''}`.toUpperCase();
+  return avatarInitials(user.firstName, user.lastName, user.username);
 }

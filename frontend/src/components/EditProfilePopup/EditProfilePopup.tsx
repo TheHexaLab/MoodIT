@@ -7,6 +7,7 @@ import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { Camera } from '../../assets/Camera.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { avatarInitials } from '../../helpers/text.ts';
 import { DEFAULT_PALETTE, NAME_MAX_LENGTH, defaultLabels } from './labels.ts';
 import type { EditProfilePopupLabels, MaybePromise, ProfileUpdate, ProfileUser } from './types.ts';
 
@@ -101,7 +102,7 @@ export function EditProfilePopup({
   }
 
   function initials(): string {
-    return `${firstName[0] ?? ''}${lastName[0] ?? ''}`.toUpperCase();
+    return avatarInitials(firstName, lastName);
   }
 
   const canSave = firstName.trim() !== '' && lastName.trim() !== '';

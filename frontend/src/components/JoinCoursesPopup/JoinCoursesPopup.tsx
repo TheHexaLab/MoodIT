@@ -8,6 +8,7 @@ import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { Check } from '../../assets/Check.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
+import { isTouchDevice } from '../../helpers/viewport';
 import { defaultLabels } from './labels.ts';
 import type { JoinableCourse, JoinCoursesPopupLabels, MaybePromise } from './types.ts';
 
@@ -177,7 +178,7 @@ export function JoinCoursesPopup({
             <input
               type="text"
               placeholder={t.searchPlaceholder}
-              autoFocus
+              autoFocus={!isTouchDevice()}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />

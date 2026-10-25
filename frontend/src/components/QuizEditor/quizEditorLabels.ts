@@ -32,6 +32,14 @@ export interface QuizEditorLabels {
   deleteQuizBody: string;
   deleteQuestionTitle: string;
   deleteQuestionBody: string;
+
+  // ── Confirmation de perte de modifications non enregistrées ──
+  discardTitle: string;
+  discardBody: string;
+  /** Bouton « rester » (annule la fermeture). */
+  discardCancel: string;
+  /** Bouton « quitter sans enregistrer » (confirme la perte). */
+  discardConfirm: string;
 }
 
 /** Textes par défaut (FR) de l'orchestrateur. */
@@ -57,6 +65,12 @@ export const defaultQuizEditorLabels: QuizEditorLabels = {
   deleteQuestionTitle: 'Supprimer la question ?',
   deleteQuestionBody:
     'La question et ses réponses seront définitivement supprimées. Cette action est irréversible.',
+
+  discardTitle: 'Modifications non enregistrées',
+  discardBody:
+    'Des modifications non enregistrées seront perdues. Voulez-vous vraiment quitter sans enregistrer ?',
+  discardCancel: "Continuer l'édition",
+  discardConfirm: 'Quitter sans enregistrer',
 };
 
 /**

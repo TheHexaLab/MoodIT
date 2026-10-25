@@ -201,26 +201,32 @@ describe('CodeInput', () => {
     expect(document.activeElement).toBe(b[1]);
   });
 
-  it('saisie multiple depuis une case du milieu : répartie à partir de cette case', () => {
+  it('saisie multiple depuis une case du milieu : remplace tout le code depuis le début (comme le collage)', () => {
     render(<Host initial="12" />);
     fireEvent.change(boxes()[2], { target: { value: '345' } });
-    expect(currentValue()).toBe('12345');
-    expect(document.activeElement).toBe(boxes()[5]);
+    expect(currentValue()).toBe('345');
+    expect(document.activeElement).toBe(boxes()[3]);
   });
 
-  it('saisie multiple près de la fin : tronquée aux cases restantes', () => {
+  it('saisie multiple près de la fin : le code saisi remplace tout, depuis la 1re case', () => {
     const onChange = vi.fn();
     render(<CodeInput value="1234" onChange={onChange} />);
     fireEvent.change(boxes()[4], { target: { value: '9876' } });
-    expect(onChange).toHaveBeenLastCalledWith('123498');
-    expect(document.activeElement).toBe(boxes()[5]);
+    expect(onChange).toHaveBeenLastCalledWith('9876');
+    expect(document.activeElement).toBe(boxes()[4]);
   });
 
   it('la valeur émise ne dépasse jamais la longueur, même avec une longueur réduite', () => {
     const onChange = vi.fn();
     render(<CodeInput value="12" onChange={onChange} length={4} />);
     fireEvent.change(screen.getByLabelText('Chiffre 2'), { target: { value: '99999' } });
-    expect(onChange).toHaveBeenLastCalledWith('1999');
+    expect(onChange).toHaveBeenLastCalledWith('9999');
+    expect(document.activeElement).toBe(screen.getByLabelText('Chiffre 4'));
+  });
+
+  it('chaque case accepte tout le code (maxLength = longueur) : le collage mobile n’est pas tronqué', () => {
+    render(<CodeInput value="" onChange={() => {}} length={4} />);
+    for (const box of screen.getAllByRole('textbox')) expect((box as HTMLInputElement).maxLength).toBe(4);
   });
 
   it('collage depuis une case du milieu : remplace tout le code depuis le début', () => {

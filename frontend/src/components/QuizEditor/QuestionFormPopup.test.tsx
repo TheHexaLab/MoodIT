@@ -390,6 +390,9 @@ describe('QuestionFormBody — remise en ordre (éléments)', () => {
     act(() => {
       window.dispatchEvent(new Event('pointerup'));
     });
+    // Le navigateur envoie un « click » au relâchement : après un vrai glissé, le hook l'avale
+    // (pas d'action déclenchée par erreur sur la rangée relâchée).
+    fireEvent.click(grip);
 
     const inputs = screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[];
     expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois', 'un']);

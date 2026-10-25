@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
-import { usePointerReorder } from './usePointerReorder';
+import { usePointerReorder } from '../../hooks/usePointerReorder';
 import { GripVertical } from '../../assets/GripVertical';
 import { Pencil } from '../../assets/Pencil';
 import { TrashCan } from '../../assets/TrashCan';
@@ -59,8 +59,9 @@ export function QuizListBody({
   onReorder,
 }: QuizListBodyProps): React.ReactElement {
   const t = { ...defaultQuizListLabels, ...labels };
-  // Réordonnancement souris + tactile (poignée), cf. usePointerReorder.
-  const { order, draggingId, onGripPointerDown } = usePointerReorder(
+  // Réordonnancement souris + tactile, cf. usePointerReorder. La rangée entière se
+  // saisit à la souris (onRowPointerDown) ; la poignée couvre aussi le tactile.
+  const { order, draggingId, onGripPointerDown, onRowPointerDown } = usePointerReorder(
     quizzes.map((q) => q.id),
     onReorder
   );
@@ -126,6 +127,7 @@ export function QuizListBody({
             ]
               .filter(Boolean)
               .join(' ')}
+            onPointerDown={(e) => onRowPointerDown(e, quiz.id)}
             onClick={() => setRevealedId((id) => (id === quiz.id ? null : quiz.id))}
           >
             <span

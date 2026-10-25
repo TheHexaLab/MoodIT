@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from './fixtures';
 import { storageStatePath } from '../setup/accounts';
 import { PROGRAM_NAME, ROLE_ACCOUNTS, mainContent, uniqueSuffix } from './helpers';
+import { pointerDrag } from './quiz.helpers';
 import {
   apiAs,
   assignProgramRoleApi,
@@ -107,18 +108,19 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
 }) => {
   const { teacher, student, close } = await setup(browser, baseURL!);
   const page = teacher.page;
-  const a = `alpha-${uniqueSuffix()}`;
+  const a = `Alpha-${uniqueSuffix()}`;
   const b = `beta-${uniqueSuffix()}`;
 
-  // Création depuis l'état vide du cours ; le nom est passé en minuscules à la saisie.
+  // Création depuis l'état vide du cours ; les majuscules du nom sont conservées.
   await mainContent(page).getByRole('button', { name: '+ Créer un canal' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toBeVisible();
   await page.getByRole('button', { name: '+ Ajouter un canal' }).click();
   await expect(page.getByRole('heading', { name: 'Nouveau canal' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeDisabled();
-  await nameField(page).fill(a.toUpperCase());
+  await expect(page.getByText('⚠  Le nom ne peut pas être vide')).toBeVisible();
+  await nameField(page).fill(a);
   await expect(nameField(page)).toHaveValue(a);
-  await expect(page.getByText('Lettres minuscules, chiffres et tirets uniquement')).toBeVisible();
+  await expect(page.getByText('Le nom doit être unique')).toBeVisible();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(editorRow(page, a)).toBeVisible();
 
@@ -154,16 +156,9 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
   await expect(editorRows(page)).toHaveText([`⠿${renamed}`, `⠿${b}`]);
   await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([renamed, b]);
 
-  // Réordonner par glisser-déposer natif depuis la poignée. Le dépôt n'est relâché qu'une fois la
-  // liste du popup réordonnée en direct (dragenter) : sur WebKit, Playwright enchaîne sinon le
-  // dragend avant que React ait appliqué cet état, et l'ordre (lu périmé, inchangé) n'est pas
-  // persisté. Deux déplacements : dragenter/dragover sont émis sur tous les moteurs.
-  await editorRow(page, b).getByText('⠿').hover();
-  await page.mouse.down();
-  await editorRow(page, renamed).hover();
-  await editorRow(page, renamed).hover();
-  await expect(editorRows(page)).toHaveText([`⠿${b}`, `⠿${renamed}`]);
-  await page.mouse.up();
+  // Réordonner en glissant depuis la poignée (Pointer Events, cf. usePointerReorder) : glissé
+  // progressif, avec un rendu React entre deux déplacements (comme pour les quiz).
+  await pointerDrag(page, editorRow(page, b).getByText('⠿'), editorRow(page, renamed));
   await expect(editorRows(page)).toHaveText([`⠿${b}`, `⠿${renamed}`]);
   await expect(sidebarItems(page, 'CANAUX')).toHaveText([b, renamed]);
   await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([b, renamed]);

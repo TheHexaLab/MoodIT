@@ -289,6 +289,9 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-
     font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
     line-height: 1.45;
     overflow-wrap: anywhere;
+    /* Préserve les sauts de ligne saisis via Maj+Entrée (sinon le HTML réduit les \n à une
+       espace) tout en continuant de wrapper les lignes trop longues. */
+    white-space: pre-wrap;
 }
 
 /* Actions d'un message (repondre / modifier / supprimer) : revelees au survol. */
@@ -347,7 +350,7 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     margin-top: 0.125rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > input {
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid var(--border);
@@ -357,11 +360,59 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
+    line-height: 1.4;
     outline: none;
     transition: border-color 0.2s ease;
+    /* Multi-ligne : préserve/affiche les sauts de ligne (Maj+Entrée), wrappe, et s'auto-agrandit
+       (hauteur pilotée en JS) jusqu'à un plafond puis scroll. Barre de scroll VISIBLE ici
+       (contrairement au composer) pour bien signaler le débordement pendant l'édition. */
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    resize: none;
+    min-height: calc(1.4em + 0.8rem);
+    max-height: 12rem;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > input:focus {
+/* Firefox UNIQUEMENT (pas de support ::-webkit-scrollbar). Important : ne PAS définir
+   scrollbar-width sur Chrome — depuis Chrome 121+, cela lui fait IGNORER les règles
+   ::-webkit-scrollbar ci-dessous → il réafficherait sa scrollbar native (avec flèches).
+   Même pattern que la liste de messages. */
+@supports not selector(::-webkit-scrollbar) {
+    div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
+
+/* WebKit : même style de scrollbar que la liste de messages (fine, thumb arrondi, sans boutons). */
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar {
+    width: 4px;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-track {
+    background: transparent;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:start,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:end,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:start,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:end,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:increment,
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:decrement {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea:focus {
     border-color: var(--border-strong);
 }
 
@@ -486,15 +537,24 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > button:hover
     color: var(--text);
 }
 
-/* Zone de saisie (mock non fonctionnel pour l'instant). */
+/* Zone de saisie. Hauteur flexible : la barre grandit avec le composer (textarea
+   auto-extensible) au lieu d'une hauteur fixe. `center` garde le champ centré
+   verticalement quand il tient sur une ligne (sinon, vide, il se collait en bas
+   → placeholder décalé) ; quand il grandit, la barre grandit avec (min-height). */
 div.channel-view > div > div:last-child {
     position: relative;
     flex-shrink: 0;
     display: flex;
+    align-items: center;
     padding: 0.625rem 1rem;
-    height: 4rem;
+    min-height: 4rem;
     box-sizing: border-box;
     border-top: 1px solid rgba(0, 0, 0, 0.18);
+    /* Le décalage clavier n'est PLUS géré ici (padding) : c'est la HAUTEUR du panneau qui est
+       réduite de --keyboard-inset (cf. MainPanel), donc le composer est déjà au-dessus du
+       clavier sans padding parasite (qui provoquait un débordement → 2e scrollbar). On garde
+       juste la marge de sécurité iOS (encoche / barre home) quand le clavier est fermé. */
+    padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Pendant le chargement / l'erreur de chargement : on masque la barre de saisie. */
@@ -502,13 +562,14 @@ div.channel-view > div[data-loading] > div:last-child {
     display: none;
 }
 
-/* Champ de saisie : la bordure englobe l'input et les deux boutons. */
+/* Champ de saisie : la bordure englobe le textarea et les deux boutons. `flex-start` garde
+   les boutons (+ / envoi) alignés en HAUT quand le textarea s'étend sur plusieurs lignes. */
 div.channel-view > div > div:last-child > div {
     position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.25rem;
     padding: 0.375rem 0.5rem;
     border: 1px solid var(--border);
@@ -550,7 +611,7 @@ div.channel-view > div > div[role="reply"]:last-child > div > div {
     transition: border-color 0.15s ease;
 }
 
-div.channel-view > div > div:last-child > div > input {
+div.channel-view > div > div:last-child > div > textarea {
     flex: 1;
     min-width: 0;
     border: none;
@@ -558,8 +619,46 @@ div.channel-view > div > div:last-child > div > input {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
+    line-height: 1.4;
     padding: 0.55rem 0.25rem;
     outline: none;
+    /* Plancher d'UNE ligne (1.4em de texte + padding vertical). Indispensable : si l'effet
+       d'auto-resize se mesure pendant que le composer est masqué (chargement), la hauteur JS
+       serait nulle → texte coupé + scrollbar. `border-box` rend le calcul height=scrollHeight
+       cohérent. */
+    box-sizing: border-box;
+    min-height: calc(1.4em + 1.1rem);
+    /* Retour à la ligne : le texte qui dépasse la largeur wrappe (et fait grandir la
+       hauteur via le JS) au lieu de scroller horizontalement. `overflow-x: hidden` est
+       indispensable — sans lui, `overflow-y: auto` fait calculer `overflow-x: auto`, et
+       un contenu non cassé scrollerait à l'horizontale sans jamais wrapper. */
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    /* Auto-extensible : hauteur pilotée en JS (scrollHeight), sans poignée de resize.
+       Plafond ~6 lignes puis scroll interne. `rows=1` fixe la hauteur de départ. */
+    resize: none;
+    max-height: 9rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    /* Le défilement reste actif (au-delà de max-height), mais la barre de scroll est masquée. */
+    scrollbar-width: none;        /* Firefox */
+    -ms-overflow-style: none;     /* IE / ancien Edge */
+}
+
+/* Masque la barre de scroll du composer (WebKit : Chrome, Safari, Edge). Le scroll fonctionne
+   toujours (molette / tactile / clavier). */
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar {
+    display: none;
+}
+
+/* Placeholder sur UNE seule ligne (comme l'ancien <input>). Un textarea wrappe son
+   placeholder par défaut : le libellé long (« Envoyer un message dans #canal ») débordait
+   sur 2 lignes sur écran étroit → tronqué, et gonflait la hauteur de départ. Le CONTENU
+   saisi, lui, wrappe toujours (white-space: pre-wrap du textarea ci-dessus). */
+div.channel-view > div > div:last-child > div > textarea::placeholder {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Boutons d'action a l'interieur du champ (+ a gauche, envoi a droite). */
@@ -570,6 +669,9 @@ div.channel-view > div > div:last-child > div > button {
     justify-content: center;
     width: 2rem;
     height: 2rem;
+    /* Léger décalage vers le bas (1.595px) : recentre verticalement les boutons face au textarea
+       sur une ligne (le champ est aligné en haut — align-items: flex-start — pour la croissance). */
+    margin-top: 0.0997rem;
     padding: 0;
     border: none;
     cursor: pointer;
@@ -579,6 +681,10 @@ div.channel-view > div > div:last-child > div > button {
 div.channel-view > div > div:last-child > div > button:first-of-type {
     background: transparent;
     color: var(--text-muted);
+    /* Même taille visuelle que le bouton d'envoi (34x34 ; l'envoi l'obtient via son ::before
+       inset:-1px qui étend son fond de 32→34px). */
+    width: 2.125rem;
+    height: 2.125rem;
 }
 
 div.channel-view > div > div:last-child > div > button:first-of-type {
