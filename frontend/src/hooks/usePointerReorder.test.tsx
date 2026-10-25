@@ -331,3 +331,60 @@ describe('usePointerReorder — défilement automatique', () => {
     expect(cancelAnimationFrame).toHaveBeenCalled();
   });
 });
+
+// Nettoyage : rien de ce qu'un glissement arme sur window (écouteurs, boucle de défilement,
+// minuteur du garde de clic) ne doit survivre au composant. Un minuteur orphelin visait sinon une
+// page déjà partie (« window is not defined » à la fin d'un fichier de tests, en CI).
+describe('usePointerReorder — nettoyage', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function dragAndRelease(result: { current: ReturnType<typeof usePointerReorder<number>> }) {
+    const { rowById } = buildRows([1, 2, 3]);
+    const { event } = makeGripEvent('mouse', 0);
+    act(() => result.current.onGripPointerDown(event, 1));
+    pointElementAt(rowById, 3);
+    act(() => firePointerMove(10, 30));
+    act(() => firePointerUp());
+  }
+
+  it('le clic avalé annule aussi le minuteur de secours', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => usePointerReorder<number>([1, 2, 3], vi.fn()));
+    dragAndRelease(result);
+    expect(vi.getTimerCount()).toBe(1); // garde armé (300 ms)
+    window.dispatchEvent(new MouseEvent('click'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('démonté dans les 300 ms après un glissement : minuteur annulé, clics de nouveau libres', () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => usePointerReorder<number>([1, 2, 3], vi.fn()));
+    dragAndRelease(result);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    const onClick = vi.fn();
+    window.addEventListener('click', onClick);
+    window.dispatchEvent(new MouseEvent('click'));
+    window.removeEventListener('click', onClick);
+    expect(onClick).toHaveBeenCalledTimes(1); // le garde ne l'avale plus
+  });
+
+  it('démonté PENDANT un glissement : écouteurs retirés, boucle arrêtée, aucun commit', () => {
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const onReorder = vi.fn();
+    const { result, unmount } = renderHook(() => usePointerReorder([1, 2, 3], onReorder));
+    const { event } = makeGripEvent('mouse', 0);
+    act(() => result.current.onGripPointerDown(event, 1));
+
+    unmount();
+    expect(cancel).toHaveBeenCalled();
+    const removed = remove.mock.calls.map(([type]) => type);
+    expect(removed).toEqual(expect.arrayContaining(['pointermove', 'pointerup', 'pointercancel']));
+    firePointerUp(); // plus personne n'écoute : pas de commit tardif
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+});
