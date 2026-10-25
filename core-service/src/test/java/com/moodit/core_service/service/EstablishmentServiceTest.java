@@ -16,7 +16,9 @@ import com.moodit.core_service.dto.EstablishmentDTO;
 import com.moodit.core_service.dto.EstablishmentUpdateDTO;
 import com.moodit.core_service.dto.ProgramCreateInEstablishmentDTO;
 import com.moodit.core_service.dto.ProgramDTO;
+import com.moodit.core_service.dto.UserCreateInProgramsDTO;
 import com.moodit.core_service.exception.EstablishmentNotFoundException;
+import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Establishment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.User;
@@ -145,11 +147,18 @@ class EstablishmentServiceTest {
   @Nested
   class AddProgramToEstablishment {
 
+    private static final String CREATOR = "admin@test.ca";
+
+    private User creator() {
+      return User.builder().id(7).username("admin").email(CREATOR).build();
+    }
+
     @Test
-    @DisplayName("Crée le programme rattaché, journalise PROGRAM_CREATE et republie le catalogue")
+    @DisplayName("Crée le programme rattaché, y abonne le créateur, journalise et republie le catalogue")
     void cree_le_programme() {
       Establishment udes = establishment(1, "UdeS", "usherbrooke.ca", new ArrayList<>());
       when(establishmentRepository.findById(1)).thenReturn(Optional.of(udes));
+      when(userRepository.findByEmail(CREATOR)).thenReturn(Optional.of(creator()));
       when(programRepository.saveAndFlush(any())).thenAnswer(inv -> {
         Program p = inv.getArgument(0);
         p.setId(20);
@@ -160,7 +169,7 @@ class EstablishmentServiceTest {
       ProgramCreateInEstablishmentDTO dto = ProgramCreateInEstablishmentDTO.builder()
           .establishmentId(1).name("Génie logiciel").code("GLO").cohort("72").color("#123456").build();
 
-      ProgramDTO result = establishmentService.addProgramToEstablishment(dto);
+      ProgramDTO result = establishmentService.addProgramToEstablishment(dto, CREATOR);
 
       ArgumentCaptor<Program> captor = ArgumentCaptor.forClass(Program.class);
       verify(programRepository).saveAndFlush(captor.capture());
@@ -174,6 +183,52 @@ class EstablishmentServiceTest {
       verify(auditLogService).record(eq("PROGRAM_CREATE"), eq("PROGRAM"), eq(20),
           eq("Programme « Génie logiciel » créé"), eq("Établissement : UdeS"));
       verify(programService).publishEstablishmentCatalog(1);
+
+      // Le créateur (identité du token, pas un id de la requête) est abonné au programme créé,
+      // APRÈS sa création et dans le même appel de service (même transaction).
+      ArgumentCaptor<UserCreateInProgramsDTO> sub = ArgumentCaptor.forClass(UserCreateInProgramsDTO.class);
+      org.mockito.InOrder ordre = org.mockito.Mockito.inOrder(programRepository, programService);
+      ordre.verify(programRepository).saveAndFlush(any());
+      ordre.verify(programService).addUserToPrograms(sub.capture());
+      assertThat(sub.getValue().getId()).isEqualTo(7);
+      assertThat(sub.getValue().getProgramIds()).containsExactly(20);
+      assertThat(sub.getValue().getEstablishmentId()).isNull(); // ajout seul, aucun désabonnement
+    }
+
+    @Test
+    @DisplayName("Créateur inconnu → UserNotFoundException, rien n'est créé")
+    void createur_inconnu() {
+      when(establishmentRepository.findById(1))
+          .thenReturn(Optional.of(establishment(1, "UdeS", "usherbrooke.ca", new ArrayList<>())));
+      when(userRepository.findByEmail(CREATOR)).thenReturn(Optional.empty());
+      ProgramCreateInEstablishmentDTO dto =
+          ProgramCreateInEstablishmentDTO.builder().establishmentId(1).name("X").code("X").build();
+
+      assertThatThrownBy(() -> establishmentService.addProgramToEstablishment(dto, CREATOR))
+          .isInstanceOf(UserNotFoundException.class);
+      verify(programRepository, never()).saveAndFlush(any());
+      verifyNoInteractions(auditLogService);
+    }
+
+    @Test
+    @DisplayName("Abonnement en échec → l'exception remonte (transaction annulée), catalogue non republié")
+    void abonnement_en_echec() {
+      when(establishmentRepository.findById(1))
+          .thenReturn(Optional.of(establishment(1, "UdeS", "usherbrooke.ca", new ArrayList<>())));
+      when(userRepository.findByEmail(CREATOR)).thenReturn(Optional.of(creator()));
+      when(programRepository.saveAndFlush(any())).thenAnswer(inv -> {
+        Program p = inv.getArgument(0);
+        p.setId(20);
+        return p;
+      });
+      org.mockito.Mockito.doThrow(new RuntimeException("boom"))
+          .when(programService).addUserToPrograms(any());
+      ProgramCreateInEstablishmentDTO dto =
+          ProgramCreateInEstablishmentDTO.builder().establishmentId(1).name("X").code("X").build();
+
+      assertThatThrownBy(() -> establishmentService.addProgramToEstablishment(dto, CREATOR))
+          .hasMessage("boom");
+      verify(programService, never()).publishEstablishmentCatalog(any());
     }
 
     @Test
@@ -183,7 +238,7 @@ class EstablishmentServiceTest {
       ProgramCreateInEstablishmentDTO dto =
           ProgramCreateInEstablishmentDTO.builder().establishmentId(1).build();
 
-      assertThatThrownBy(() -> establishmentService.addProgramToEstablishment(dto))
+      assertThatThrownBy(() -> establishmentService.addProgramToEstablishment(dto, CREATOR))
           .isInstanceOf(EstablishmentNotFoundException.class);
       verify(programRepository, never()).saveAndFlush(any());
       verifyNoInteractions(auditLogService);

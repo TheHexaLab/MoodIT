@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.List;
 
 @RestController
@@ -58,12 +59,13 @@ public class EstablishmentController {
         );
     }
 
+    // Crée le programme ET y abonne l'appelant (identité du token, pas du corps), en une requête.
     @PostMapping("/programs")
     public ResponseEntity<ProgramDTO> addProgramToEstablishment(
-            @RequestBody ProgramCreateInEstablishmentDTO request) {
+            @RequestBody ProgramCreateInEstablishmentDTO request, Principal principal) {
 
         return ResponseEntity.status(201).body(
-                establishmentService.addProgramToEstablishment(request)
+                establishmentService.addProgramToEstablishment(request, principal.getName())
         );
     }
 

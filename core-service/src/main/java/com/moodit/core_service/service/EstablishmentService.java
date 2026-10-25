@@ -2,6 +2,7 @@ package com.moodit.core_service.service;
 
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.EstablishmentNotFoundException;
+import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Establishment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.User;
@@ -117,11 +118,19 @@ public class EstablishmentService {
         return establishmentToDTO(saved);
     }
 
+    /**
+     * Crée un programme dans un établissement ET y abonne son créateur, dans UNE transaction :
+     * si l'abonnement échoue, rien n'est créé (avant, le frontend enchaînait deux requêtes et un
+     * échec de la seconde laissait un programme sans abonné, #117). Le créateur est l'utilisateur
+     * authentifié (email issu du token, via le gateway), jamais un id lu dans la requête.
+     */
     @Transactional
-    public ProgramDTO addProgramToEstablishment(ProgramCreateInEstablishmentDTO dto) {
+    public ProgramDTO addProgramToEstablishment(ProgramCreateInEstablishmentDTO dto, String creatorEmail) {
 
         Establishment est = establishmentRepository.findById(dto.getEstablishmentId())
                 .orElseThrow(EstablishmentNotFoundException::new);
+        User creator = userRepository.findByEmail(creatorEmail)
+                .orElseThrow(UserNotFoundException::new);
 
         Program program = new Program();
         program.setName(dto.getName());
@@ -135,6 +144,13 @@ public class EstablishmentService {
         auditLogService.record("PROGRAM_CREATE", "PROGRAM", saved.getId(),
                 "Programme « " + saved.getName() + " » créé",
                 "Établissement : " + est.getName());
+
+        // Abonnement du créateur, dans la même transaction (audit et temps réel compris : la barre
+        // latérale du créateur reçoit le programme après le commit). Une exception annule tout.
+        programService.addUserToPrograms(UserCreateInProgramsDTO.builder()
+                .id(creator.getId())
+                .programIds(List.of(saved.getId()))
+                .build());
 
         // ── Temps réel (GLOBAL) : le catalogue de l'établissement change → le popup « Ajouter un
         // programme » met à jour la liste des programmes LIVE (nombre, codes, liste détaillée). ──

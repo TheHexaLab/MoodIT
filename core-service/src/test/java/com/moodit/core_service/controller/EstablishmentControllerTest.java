@@ -177,18 +177,20 @@ class EstablishmentControllerTest {
                     .code("420")
                     .build();
 
-            when(establishmentService.addProgramToEstablishment(any(ProgramCreateInEstablishmentDTO.class)))
+            when(establishmentService.addProgramToEstablishment(any(ProgramCreateInEstablishmentDTO.class), eq("admin@test.ca")))
                     .thenReturn(programDTO);
 
             mockMvc.perform(post("/api/establishments/programs")
+                            .principal(() -> "admin@test.ca")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.id").value(1));
 
-            // L'établissement parent vient du CORPS (pas du chemin) : il doit être transmis.
+            // L'établissement parent vient du CORPS (pas du chemin) : il doit être transmis. Le
+            // créateur, lui, vient du principal (token), jamais du corps.
             verify(establishmentService).addProgramToEstablishment(argThat(p -> p.getEstablishmentId() == 1
-                    && "Informatique".equals(p.getName()) && "420".equals(p.getCode())));
+                    && "Informatique".equals(p.getName()) && "420".equals(p.getCode())), eq("admin@test.ca"));
         }
 
         @Test
@@ -199,10 +201,11 @@ class EstablishmentControllerTest {
                     .name("Informatique")
                     .build();
 
-            when(establishmentService.addProgramToEstablishment(any(ProgramCreateInEstablishmentDTO.class)))
+            when(establishmentService.addProgramToEstablishment(any(ProgramCreateInEstablishmentDTO.class), any()))
                     .thenThrow(new EstablishmentNotFoundException());
 
             mockMvc.perform(post("/api/establishments/programs")
+                            .principal(() -> "admin@test.ca")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isNotFound());

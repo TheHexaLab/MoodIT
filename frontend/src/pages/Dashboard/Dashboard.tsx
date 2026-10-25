@@ -610,7 +610,7 @@ export default function Dashboard() {
   // Adhésion → synchronise les programmes suivis (ajout ET désabonnement). `api.joinPrograms`
   // renvoie la liste à jour ; on la réconcilie en conservant les cours déjà chargés.
   const handleJoinPrograms = async (selection: JoinSelection) => {
-    const updated = await api.joinPrograms(selection);
+    const updated = await api.joinPrograms(selection, currentUser.id);
     setDashboardPrograms((programs) => {
       const byId = new Map(programs.map((p) => [p.id, p]));
       return updated.map((p) => byId.get(p.id) ?? p);
