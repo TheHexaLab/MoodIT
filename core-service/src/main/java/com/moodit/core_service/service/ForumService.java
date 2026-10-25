@@ -388,19 +388,22 @@ public class ForumService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(UserNotFoundException::new);
 
-        Optional<Vote> existingVote = voteRepository.findByUserIdAndPostId(user.getId(), voteCreateInPostDTO.getPostId());
+        // Verrou sur la ligne du post AVANT de lire le vote existant : deux votes simultanés sur
+        // ce post (double-clic, deux onglets) s'exécutent l'un après l'autre, et le second lit le
+        // vote écrit par le premier. Sans lui : 409 sur UNIQUE(user_id, post_id), ou bascule
+        // appliquée sur un état périmé (#130). Vérifie aussi que le post est dans ce forum.
+        Post post = postRepository
+                .findByIdAndForumIdForUpdate(voteCreateInPostDTO.getPostId(), voteCreateInPostDTO.getForumId())
+                .orElseThrow(() -> forumRepository.existsById(voteCreateInPostDTO.getForumId())
+                        ? new PostNotFoundException()
+                        : new ForumNotFoundException());
+
+        Optional<Vote> existingVote = voteRepository.findByUserIdAndPostId(user.getId(), post.getId());
 
         // Valeur RÉSULTANTE du vote de l'utilisateur après l'opération (0 = retiré) : c'est
         // ce que les autres abonnés appliquent (withVote côté front).
         int result;
         if (existingVote.isEmpty()) {
-            Post post = forumRepository.findById(voteCreateInPostDTO.getForumId())
-                    .orElseThrow(ForumNotFoundException::new)
-                    .getPosts().stream()
-                    .filter(p -> p.getId().equals(voteCreateInPostDTO.getPostId()))
-                    .findFirst()
-                    .orElseThrow(PostNotFoundException::new);
-
             Vote vote = new Vote();
             vote.setPost(post);
             vote.setUser(user);
