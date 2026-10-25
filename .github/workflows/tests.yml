@@ -6,13 +6,16 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: [main]
+    # deploiement : la prod tourne sur cette branche (main + le vocal, #42). Une fusion qui y arrive
+    # repasse toute la CI, Firefox et WebKit compris, pour qu'une régression n'y passe pas
+    # inaperçue (#117). PIT reste réservé à main et à la nuit (voir le job `mutation`).
+    branches: [main, deploiement]
   schedule:
     - cron: "23 3 * * *"   # chaque nuit : Firefox et WebKit complets sur main
 
 # Un seul run par PR : un nouveau push annule le run précédent, encore en cours. Le type
 # d'évènement fait partie du groupe : le run planifié et un push sur main (même ref) ne
-# s'annulent plus l'un l'autre. Sur main, rien n'est annulé : chaque fusion est vérifiée.
+# s'annulent plus l'un l'autre. Sur main et deploiement, rien n'est annulé : chaque fusion est vérifiée.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -142,7 +145,8 @@ jobs:
   mutation:
     name: ${{ matrix.service }} — tests de mutation (PIT)
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    # main et la nuit seulement : sur deploiement, le code est celui de main (+ le vocal, sans PIT).
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
     timeout-minutes: 45 # core : ~1 300 mutants
     strategy:
       fail-fast: false

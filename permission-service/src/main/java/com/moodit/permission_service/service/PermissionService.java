@@ -984,33 +984,6 @@ public class PermissionService {
     return requestUserId == user.getId();
   }
 
-  // ── PREDICAT GENERIQUE : le cours fait partie du programme ────────────────────────
-  // Verifie le lien structurel program_course (independant de l'utilisateur). Generique :
-  // on passe le nom des variables de PATH ou se trouvent les ids.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("GET", "/programs/{programId}/courses/{courseId}",
-  //       (user, vars, body) -> courseInProgram(vars, "courseId", "programId")),
-  private boolean courseInProgram(Map<String, String> vars, String courseVar, String programVar) {
-    long courseId = longVar(vars, courseVar);
-    long programId = longVar(vars, programVar);
-    return courseId > 0 && programId > 0
-        && membershipService.isCourseInProgram(courseId, programId);
-  }
-
-  // ── PREDICAT GENERIQUE : le cours fait partie des cours de l'utilisateur ───────────
-  // "Les cours d'un utilisateur" = inscription directe (Enrollment) de l'utilisateur
-  // AUTHENTIFIE (identite issue du token, pas un id arbitraire de la requete). courseId
-  // lu dans une variable de PATH.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("GET", "/users/{userId}/courses/{courseId}",
-  //       (user, vars, body) -> userHasCourse(user, vars, "courseId")),
-  private boolean userHasCourse(User user, Map<String, String> vars, String courseVar) {
-    long courseId = longVar(vars, courseVar);
-    return courseId > 0 && membershipService.isEnrolledInCourse(user.getId(), courseId);
-  }
-
   // ── PREDICAT GENERIQUE : l'utilisateur est le createur du post ─────────────────────
   // Verifie que le post vise a bien ete cree par l'utilisateur AUTHENTIFIE (Post.user_id).
   // Sert aux actions reservees a l'auteur (editer / supprimer son propre post). postId lu
@@ -1057,36 +1030,6 @@ public class PermissionService {
     return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
   }
 
-  // ── PREDICAT GENERIQUE : le vote appartient a l'utilisateur ────────────────────────
-  // Verifie que le vote vise appartient a l'utilisateur AUTHENTIFIE (Vote.user_id). Sert
-  // aux actions reservees au votant (modifier / retirer son propre vote). voteId lu dans
-  // une variable de PATH.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("DELETE", "/forums/posts/votes/{voteId}",
-  //       (user, vars, body) -> isVoteOwner(user, vars, "voteId")),
-  private boolean isVoteOwner(User user, Map<String, String> vars, String voteVar) {
-    long voteId = longVar(vars, voteVar);
-    return voteId > 0 && membershipService.isVoteOwner(user.getId(), voteId);
-  }
-
-  // ── PREDICAT GENERIQUE : "c'est l'user qui l'a cree" ──────────────────────────────
-  // Verification de propriete generique, tous types de ressources confondus : l'utilisateur
-  // AUTHENTIFIE est-il le createur de la ressource visee ? On passe le type (aiguille vers la
-  // bonne table cote MembershipService, fail-closed) et le nom de la variable de PATH portant
-  // l'id. Unifie les cas isPostAuthor / isVoteOwner sous un seul point d'appel.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("DELETE", "/forums/{forumId}/posts/{postId}",
-  //       (user, vars, body) -> isCreator(user, vars, "post", "postId")),
-  //   rule("DELETE", "/forums/posts/votes/{voteId}",
-  //       (user, vars, body) -> isCreator(user, vars, "vote", "voteId")),
-  private boolean isCreator(
-      User user, Map<String, String> vars, String resourceType, String idVar) {
-    long id = longVar(vars, idVar);
-    return id > 0 && membershipService.isResourceOwner(user.getId(), resourceType, id);
-  }
-
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.
   private static long longVar(Map<String, String> vars, String name) {
     try {
@@ -1124,20 +1067,5 @@ public class PermissionService {
   private static boolean hasRole(User user, String roleName) {
     Set<String> roles = user.getRoles().stream().map(Role::getName).collect(Collectors.toSet());
     return roles.contains(roleName);
-  }
-
-  // ── PREDICAT GENERIQUE : role SUR UN COURS (ex. "prof du cours") ───────────────────
-  // Verifie que l'utilisateur AUTHENTIFIE possede le role nomme sur le cours vise : role
-  // scope-programme (User_Program_Role) ET cours rattache a ce programme (program_course).
-  // Avec roleName = RoleNames.TEACHER -> "est-ce le prof du cours ?". courseId lu dans une
-  // variable de PATH.
-  //
-  // EXEMPLE dans buildRules() :
-  //   rule("PUT", "/courses/{courseId}",
-  //       (user, vars, body) -> hasRoleInCourse(user, vars, RoleNames.TEACHER, "courseId")),
-  private boolean hasRoleInCourse(
-      User user, Map<String, String> vars, String roleName, String courseVar) {
-    long courseId = longVar(vars, courseVar);
-    return courseId > 0 && membershipService.hasRoleInCourse(user.getId(), courseId, roleName);
   }
 }

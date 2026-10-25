@@ -327,26 +327,6 @@ public class CodeAssembler {
 
     // ── PHP ──────────────────────────────────────────────────────────────────────
 
-    /**
-     * PHP : le code étudiant ouvre déjà {@code <?php} ; on ajoute à la suite (même mode PHP) le
-     * harnais dans une fonction, exécutée : retour booléen → exit 0/1, {@code Throwable} → exit 1.
-     */
-    private Assembled assemblePhp(String studentCode, String harnessCode, String nonce) {
-        String program = studentCode
-                + "\n\nfunction __moodit_harness() {\n"
-                + harnessCode
-                + "\n}\n"
-                + "try {\n"
-                + "  $__moodit_result = __moodit_harness();\n"
-                + "  if ($__moodit_result) fwrite(STDERR, \"" + nonce + "\");\n"
-                + "  exit($__moodit_result ? 0 : 1);\n"
-                + "} catch (\\Throwable $__moodit_e) {\n"
-                + "  fwrite(STDERR, (string) $__moodit_e);\n"
-                + "  exit(1);\n"
-                + "}\n";
-        return new Assembled("php", List.of(new PistonClient.File("main.php", program)));
-    }
-
     /** Symboles PHP de premier niveau (colonne 0) : fonctions et classes. */
     private static final Pattern PHP_FUNC = Pattern.compile("(?m)^function\\s+([A-Za-z_]\\w*)");
     private static final Pattern PHP_CLASS = Pattern.compile("(?m)^(?:abstract\\s+|final\\s+)?class\\s+([A-Za-z_]\\w*)");
@@ -418,21 +398,6 @@ public class CodeAssembler {
     }
 
     // ── Bash ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Bash : le script étudiant définit ses fonctions ; le harnais qui suit produit un CODE DE
-     * SORTIE (0 = réussi), capturé dans {@code $?}. Le nonce n'est émis que si ce code vaut 0, et on
-     * termine sur ce même code — le verdict ne dépend donc pas d'un {@code exit} anticipé de l'étudiant.
-     */
-    private Assembled assembleBash(String studentCode, String harnessCode, String nonce) {
-        String program = studentCode
-                + "\n\n# --- harnais ---\n"
-                + harnessCode
-                + "\n__moodit_rc=$?\n"
-                + "[ \"$__moodit_rc\" -eq 0 ] && printf '%s' '" + nonce + "' >&2\n"
-                + "exit \"$__moodit_rc\"\n";
-        return new Assembled("bash", List.of(new PistonClient.File("main.sh", program)));
-    }
 
     /** Fonctions bash de premier niveau : {@code nom()} ou {@code function nom}. */
     private static final Pattern BASH_FUNC = Pattern.compile("(?m)^(?:function\\s+)?([A-Za-z_]\\w*)\\s*\\(\\s*\\)");

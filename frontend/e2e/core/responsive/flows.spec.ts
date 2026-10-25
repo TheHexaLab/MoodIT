@@ -71,6 +71,9 @@ test('tiroir → programme → cours → canal → message envoyé et persisté'
   await press(listbox.getByRole('option', { name: new RegExp(`^${SECOND_COURSE.code} `) }), hasTouch);
   await expect(courseSelector(page, SECOND_COURSE.code)).toBeVisible();
   await expect(courseNav(page).getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
+  // Changer de cours ne referme PAS le tiroir (seul le choix d'un canal le fait) : on peut y
+  // choisir un canal du nouveau cours sans le rouvrir.
+  if (isDrawer) await expect(drawer(page)).toBeInViewport();
   await press(coursePicker(page), hasTouch);
   await press(listbox.getByRole('option', { name: /^MAT115 / }), hasTouch);
   await expect(courseSelector(page, 'MAT115')).toBeVisible();
