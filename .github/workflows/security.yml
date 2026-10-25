@@ -8,13 +8,14 @@ name: Sécurité
 on:
   pull_request:
   push:
-    branches: [main]
+    # deploiement : le code réellement en prod (main + le vocal, #42) est analysé à chaque fusion.
+    branches: [main, deploiement]
   schedule:
     - cron: "17 6 * * 1"   # lundi matin : nouvelles CVE publiées sur du code qui n'a pas bougé
 
 # Un seul run par PR : un nouveau push annule le run précédent, encore en cours. Le type
 # d'évènement fait partie du groupe : le run planifié et un push sur main (même ref) ne
-# s'annulent plus l'un l'autre. Sur main, rien n'est annulé : chaque fusion est vérifiée.
+# s'annulent plus l'un l'autre. Sur main et deploiement, rien n'est annulé : chaque fusion est vérifiée.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
