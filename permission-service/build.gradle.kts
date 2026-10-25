@@ -73,5 +73,5 @@ pitest {
     threads = 4
     outputFormats = setOf("XML", "HTML")
     timestampedReports = false
-    mutationThreshold = 90 // seuil commun aux six services ; score mesuré le 2026-10-23 : 93 %
+    mutationThreshold = 90 // seuil commun aux six services ; score mesuré le 2026-10-25 : 98 % (code mort retiré, #117)
 }

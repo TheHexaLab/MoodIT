@@ -282,20 +282,6 @@ class ForumServiceTest {
     }
 
     @Test
-    @DisplayName("addVoteToPost vote sur le post demandé")
-    void addVoteToPost_bonPost() {
-      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
-      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
-
-      forumService.addVoteToPost(
-          VoteCreateInPostDTO.builder().forumId(5).postId(7).voteValue(1).build(), "alice@test.ca");
-
-      ArgumentCaptor<Vote> saved = ArgumentCaptor.forClass(Vote.class);
-      verify(voteRepository).save(saved.capture());
-      assertThat(saved.getValue().getPost()).isSameAs(cible);
-    }
-
-    @Test
     @DisplayName("updatePost modifie le post demandé, le leurre reste intact")
     void updatePost_bonPost() {
       PostDTO result = forumService.updatePost(5, 7, ForumUpdatePostDTO.builder().isPinned(true).build());
@@ -617,15 +603,25 @@ class ForumServiceTest {
       return VoteCreateInPostDTO.builder().forumId(5).postId(7).voteValue(value).build();
     }
 
+    private Post sujet;
+
+    @BeforeEach
+    void postVerrouille() {
+      sujet = post(7, bob, "sujet");
+    }
+
+    /** Le post 7 du forum 5, chargé ET verrouillé (SELECT … FOR UPDATE). */
+    private void postTrouve() {
+      when(postRepository.findByIdAndForumIdForUpdate(7, 5)).thenReturn(Optional.of(sujet));
+    }
+
     @Test
     @DisplayName("Premier vote : crée le vote sur le post et diffuse la valeur résultante")
     void premier_vote_cree() {
-      Forum f = forum(5, "Thread");
-      Post p = post(7, bob, "sujet");
-      f.getPosts().add(p);
+      Post p = sujet;
+      postTrouve();
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
-      when(forumRepository.findById(5)).thenReturn(Optional.of(f));
 
       forumService.addVoteToPost(dto(1), "alice@test.ca");
 
@@ -635,11 +631,27 @@ class ForumServiceTest {
       assertThat(saved.getValue().getUser()).isSameAs(alice);
       assertThat(saved.getValue().getValue()).isEqualTo(1);
       verify(realtimePublisher).postVoted(5L, 7L, 1L, 1);
+      verifyNoInteractions(forumRepository); // post trouvé : pas de chargement du forum
+    }
+
+    @Test
+    @DisplayName("Le post est verrouillé AVANT de lire le vote existant (sérialise les votes simultanés)")
+    void verrou_avant_lecture_du_vote() {
+      postTrouve();
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
+
+      forumService.addVoteToPost(dto(1), "alice@test.ca");
+
+      org.mockito.InOrder ordre = org.mockito.Mockito.inOrder(postRepository, voteRepository);
+      ordre.verify(postRepository).findByIdAndForumIdForUpdate(7, 5);
+      ordre.verify(voteRepository).findByUserIdAndPostId(1, 7);
     }
 
     @Test
     @DisplayName("Dans une transaction, postVoted n'est émis qu'APRÈS le commit")
     void echo_differe_apres_commit() {
+      postTrouve();
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.of(vote(alice, 1)));
       org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
@@ -659,6 +671,7 @@ class ForumServiceTest {
     @DisplayName("Même valeur qu'avant : le vote est annulé (supprimé) et la valeur diffusée est 0")
     void meme_valeur_annule() {
       Vote existing = vote(alice, 1);
+      postTrouve();
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.of(existing));
 
@@ -673,6 +686,7 @@ class ForumServiceTest {
     @DisplayName("Valeur opposée : le vote existant est modifié en place")
     void valeur_opposee_modifie() {
       Vote existing = vote(alice, 1);
+      postTrouve();
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.of(existing));
 
@@ -689,10 +703,11 @@ class ForumServiceTest {
     @DisplayName("Post absent du forum ou utilisateur inconnu → exception, aucun vote ni écho")
     void post_absent_ou_utilisateur_inconnu() {
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
-      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
-      when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
+      when(postRepository.findByIdAndForumIdForUpdate(7, 5)).thenReturn(Optional.empty());
+      when(forumRepository.existsById(5)).thenReturn(true);
       assertThatThrownBy(() -> forumService.addVoteToPost(dto(1), "alice@test.ca"))
           .isInstanceOf(PostNotFoundException.class);
+      verify(voteRepository, never()).findByUserIdAndPostId(any(), any());
 
       when(userRepository.findByEmail("x@test.ca")).thenReturn(Optional.empty());
       assertThatThrownBy(() -> forumService.addVoteToPost(dto(1), "x@test.ca"))
@@ -700,6 +715,18 @@ class ForumServiceTest {
 
       verify(voteRepository, never()).save(any());
       verifyNoInteractions(realtimePublisher);
+    }
+
+    @Test
+    @DisplayName("Forum inexistant → ForumNotFoundException, aucun vote ni écho")
+    void forum_inexistant() {
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(postRepository.findByIdAndForumIdForUpdate(7, 5)).thenReturn(Optional.empty());
+      when(forumRepository.existsById(5)).thenReturn(false);
+
+      assertThatThrownBy(() -> forumService.addVoteToPost(dto(1), "alice@test.ca"))
+          .isInstanceOf(ForumNotFoundException.class);
+      verifyNoInteractions(voteRepository, realtimePublisher);
     }
   }
 

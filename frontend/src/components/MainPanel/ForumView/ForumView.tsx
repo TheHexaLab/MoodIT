@@ -94,6 +94,18 @@ const INDENT_PLATEAU_DEPTH = 3;
 /** Sens de tri des sujets affiches. */
 type SortMode = 'top' | 'recent';
 
+/** Ids des sujets racines triés : épinglés d'abord, puis selon le mode (score ou date). */
+function sortedThreadIds(threads: ForumPost[], sort: SortMode): number[] {
+  const compare = (a: ForumPost, b: ForumPost): number => {
+    if (Boolean(a.isPinned) !== Boolean(b.isPinned)) return a.isPinned ? -1 : 1;
+    if (sort === 'recent') {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    }
+    return scoreOf(b) - scoreOf(a);
+  };
+  return [...threads].sort(compare).map((t) => t.id);
+}
+
 /** Nom affiche d'un auteur (firstName + lastName). */
 function getAuthorName(author: ForumAuthor): string {
   return `${author.firstName} ${author.lastName}`.trim() || author.username;
@@ -395,16 +407,22 @@ const ForumView: React.FC<ForumViewProps> = ({
   }
 
   // Sujets racines tries : epingles d'abord, puis selon le mode choisi.
+  // L'ordre est FIGÉ entre deux actions explicites (#130) : il n'est recalculé qu'au changement de
+  // tri, à l'apparition ou à la disparition d'un sujet, ou à son (dés)épinglage. Un vote (le sien
+  // ou celui d'un autre, reçu en direct) met le score à jour sur place sans déplacer le sujet : en
+  // « Populaires », la liste ne saute plus sous le pointeur au moment d'un clic.
+  const orderKey = `${sort}|${threads.map((t) => `${t.id}:${t.isPinned ? 1 : 0}`).join(',')}`;
+  const [frozenOrder, setFrozenOrder] = useState(() => ({
+    key: orderKey,
+    ids: sortedThreadIds(threads, sort),
+  }));
+  if (frozenOrder.key !== orderKey) {
+    setFrozenOrder({ key: orderKey, ids: sortedThreadIds(threads, sort) });
+  }
   const visibleThreads = useMemo(() => {
-    const compare = (a: ForumPost, b: ForumPost): number => {
-      if (Boolean(a.isPinned) !== Boolean(b.isPinned)) return a.isPinned ? -1 : 1;
-      if (sort === 'recent') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-      return getScore(b) - getScore(a);
-    };
-    return [...threads].sort(compare);
-  }, [threads, sort]);
+    const byId = new Map(threads.map((t) => [t.id, t]));
+    return frozenOrder.ids.map((id) => byId.get(id)).filter((t): t is ForumPost => t !== undefined);
+  }, [threads, frozenOrder]);
 
   // Les helpers ci-dessous retournent du JSX et sont APPELES (renderX(...)),
   // non montes comme des composants (<X/>), pour ne pas remonter l'arbre a
