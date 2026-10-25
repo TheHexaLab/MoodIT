@@ -74,6 +74,10 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       nativeQuery = true)
   boolean isCourseInProgram(@Param("courseId") long courseId, @Param("programId") long programId);
 
+  // Programmes auxquels le cours est actuellement rattache (table de jointure program_course).
+  @Query(value = "SELECT program_id FROM program_course WHERE course_id = :courseId", nativeQuery = true)
+  java.util.List<Number> findProgramIdsByCourse(@Param("courseId") long courseId);
+
   // L'utilisateur est-il inscrit a ce cours ? (inscription directe, table Enrollment)
   @Query(
       value =

@@ -1,0 +1,82 @@
+name: Labels de PR
+
+# Pose automatiquement sur chaque PR :
+#  - le service touché (frontend, core-service, ci, migration BD…), selon les fichiers modifiés (.github/labeler.yml) ;
+#  - la taille (taille XS à XL), selon le nombre de lignes ajoutées + supprimées ;
+#  - le type de changement (feat, fix, refactor, docs, test, chore), d'après le titre de la PR
+#    (« feat: … », « fix(core): … ») ou, à défaut, le préfixe de la branche (feat/…, fix/…).
+# Les labels d'état de revue (prêt pour revue, changements demandés, bloqué, ne pas fusionner) restent manuels.
+#
+# pull_request_target : nécessaire pour pouvoir écrire des labels ; aucun code de la PR n'est récupéré ni exécuté.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Un seul run à la fois par PR : deux mises à jour rapprochées (ex. Dependabot qui reconstruit
+# une PR) se marchaient dessus et retiraient deux fois le même label. Le plus récent l'emporte.
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v7
+        with:
+          sync-labels: true   # retire un label de service si les fichiers concernés ne sont plus modifiés
+
+  taille-et-type:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            // Labels ACTUELS, relus par l'API : ceux de l'évènement peuvent être périmés si un autre
+            // job (labeler) ou un autre run les a modifiés entre-temps.
+            const { data: labelsNow } = await github.rest.issues.listLabelsOnIssue({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const current = new Set(labelsNow.map(l => l.name));
+
+            // ── Taille ────────────────────────────────────────────────────────────
+            const lines = pr.additions + pr.deletions;
+            const size = lines < 10 ? 'taille XS'
+                       : lines < 100 ? 'taille S'
+                       : lines < 500 ? 'taille M'
+                       : lines < 1000 ? 'taille L'
+                       : 'taille XL';
+
+            // ── Type de changement ────────────────────────────────────────────────
+            const TYPES = ['feat', 'fix', 'refactor', 'docs', 'test', 'chore'];
+            const ALIASES = { feature: 'feat', bugfix: 'fix', hotfix: 'fix', ci: 'chore', build: 'chore', perf: 'refactor', style: 'chore', tests: 'test', doc: 'docs' };
+            const norm = t => (t = (t || '').toLowerCase(), TYPES.includes(t) ? t : ALIASES[t]);
+            const fromTitle = norm((pr.title.match(/^\s*([a-zA-Z]+)(\([^)]*\))?!?:/) || [])[1]);
+            const fromBranch = norm((pr.head.ref.match(/^([a-zA-Z]+)[\/-]/) || [])[1]);
+            const type = fromTitle || fromBranch;
+
+            // ── Application ───────────────────────────────────────────────────────
+            const wanted = [size, ...(type ? [type] : [])];
+            const managed = [...TYPES, 'taille XS', 'taille S', 'taille M', 'taille L', 'taille XL'];
+            for (const name of managed) {
+              if (current.has(name) && !wanted.includes(name)) {
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name });
+                } catch (e) {
+                  // Déjà retiré entre la lecture et le retrait : rien à faire.
+                  if (e.status !== 404) throw e;
+                }
+              }
+            }
+            const toAdd = wanted.filter(n => !current.has(n));
+            if (toAdd.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: toAdd });
+            }
+            core.info(`${lines} lignes → ${size} ; type : ${type || 'non détecté'}`);

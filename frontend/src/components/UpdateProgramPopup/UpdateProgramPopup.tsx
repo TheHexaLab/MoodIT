@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './UpdateProgramPopup.module.css';
-import { useBackdropClose } from '../../hooks/useBackdropClose';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
@@ -71,9 +73,8 @@ export function UpdateProgramPopup({
   /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
   const requestRef = useRef(0);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const backdrop = useBackdropClose(() => requestClose(onClose));
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   // Marque le composant comme démonté : les callbacks async résolus ensuite sont ignorés.
   useEffect(() => {
@@ -82,23 +83,6 @@ export function UpdateProgramPopup({
       mountedRef.current = false;
     };
   }, []);
-
-  /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
 
   /** Le code saisi existe-t-il déjà dans l'établissement (hors programme édité) ? */
   const trimmedCode = code.trim();
@@ -134,103 +118,104 @@ export function UpdateProgramPopup({
 
   return (
     <>
-      <div
-        className={`${styles['update-program']}${isClosing ? ` ${styles.closing}` : ''}`}
-        {...backdrop}
+      <Popup
+        variant={PopupVariant.FormWide}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['update-program']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button onClick={() => requestClose(onClose)}>✕</button>
-          </header>
+        <header>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
+          </div>
+          <button onClick={() => requestClose(onClose)}>✕</button>
+        </header>
 
-          <section className={styles['color-group']}>
-            <span className={styles.preview} style={{ background: color }} aria-hidden="true">
-              <span style={{ color: contrastingTextColor(color) }}>
-                {code.trim().slice(0, 3) || '?'}
-              </span>
+        <section className={styles['color-group']}>
+          <span className={styles.preview} style={{ background: color }} aria-hidden="true">
+            <span style={{ color: contrastingTextColor(color) }}>
+              {code.trim().slice(0, 3) || '?'}
             </span>
-            <div className={styles['palette-group']}>
-              <span className={styles['field-label']}>{t.colorLabel}</span>
-              <div className={styles.palette}>
-                {palette.map((swatch, index) => {
-                  const selected = swatch.toLowerCase() === color.toLowerCase();
-                  return (
-                    <button
-                      key={`${swatch}-${index}`}
-                      type="button"
-                      className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
-                      style={
-                        { ['--swatch-color']: swatch, background: swatch } as React.CSSProperties
-                      }
-                      aria-label={swatch}
-                      aria-pressed={selected}
-                      onClick={() => setColor(swatch)}
-                    />
-                  );
-                })}
-                <label className={styles['add-color']} aria-label={t.addColorLabel}>
-                  +
-                  <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-                </label>
-              </div>
+          </span>
+          <div className={styles['palette-group']}>
+            <span className={styles['field-label']}>{t.colorLabel}</span>
+            <div className={styles.palette}>
+              {palette.map((swatch, index) => {
+                const selected = swatch.toLowerCase() === color.toLowerCase();
+                return (
+                  <button
+                    key={`${swatch}-${index}`}
+                    type="button"
+                    className={`${styles.swatch}${selected ? ` ${styles.selected}` : ''}`}
+                    style={
+                      { ['--swatch-color']: swatch, background: swatch } as React.CSSProperties
+                    }
+                    aria-label={swatch}
+                    aria-pressed={selected}
+                    onClick={() => setColor(swatch)}
+                  />
+                );
+              })}
+              <label className={styles['add-color']} aria-label={t.addColorLabel}>
+                +
+                <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+              </label>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
-            <span>{t.codeLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.codePlaceholder}
-                maxLength={FIELD_MAX_LENGTH}
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                aria-invalid={codeTaken}
-              />
-            </div>
-            {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
-          </label>
+        <label className={`${styles.field}${codeTaken ? ` ${styles.invalid}` : ''}`}>
+          <span>{t.codeLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.codePlaceholder}
+              maxLength={FIELD_MAX_LENGTH}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              aria-invalid={codeTaken}
+            />
+          </div>
+          {codeTaken && <span className={styles['field-error']}>{t.codeTaken}</span>}
+        </label>
 
-          <label className={styles.field}>
-            <span>{t.nameLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.namePlaceholder}
-                maxLength={FIELD_MAX_LENGTH}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.nameLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.namePlaceholder}
+              maxLength={FIELD_MAX_LENGTH}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+        </label>
 
-          <label className={styles.field}>
-            <span>{t.cohortLabel}</span>
-            <div>
-              <input
-                type="text"
-                placeholder={t.cohortPlaceholder}
-                maxLength={FIELD_MAX_LENGTH}
-                value={cohort}
-                onChange={(e) => setCohort(e.target.value)}
-              />
-            </div>
-          </label>
+        <label className={styles.field}>
+          <span>{t.cohortLabel}</span>
+          <div>
+            <input
+              type="text"
+              placeholder={t.cohortPlaceholder}
+              maxLength={FIELD_MAX_LENGTH}
+              value={cohort}
+              onChange={(e) => setCohort(e.target.value)}
+            />
+          </div>
+        </label>
 
-          <footer>
-            <button type="button" onClick={() => requestClose(onClose)}>
-              {t.cancel}
-            </button>
-            <button type="button" onClick={save} disabled={!canSave || pending}>
-              {pending ? <Spinner /> : t.save}
-            </button>
-          </footer>
-        </div>
-      </div>
+        <footer>
+          <button type="button" onClick={() => requestClose(onClose)}>
+            {t.cancel}
+          </button>
+          <button type="button" onClick={save} disabled={!canSave || pending}>
+            {pending ? <Spinner /> : t.save}
+          </button>
+        </footer>
+      </Popup>
 
       {error && (
         <ErrorPopup

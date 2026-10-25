@@ -1,6 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import styles from './DeleteConfirmationPopup.module.css';
-import { useBackdropClose } from '../../hooks/useBackdropClose';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { defaultLabels } from './labels.ts';
 import type { DeleteConfirmationPopupLabels } from './types.ts';
 
@@ -25,41 +27,25 @@ export function DeleteConfirmationPopup({
 }: DeleteConfirmationPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
 
-  const [isClosing, setIsClosing] = useState(false);
-  const backdrop = useBackdropClose(() => requestClose(onClose));
-  const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
-
-  function requestClose(action: (...args: unknown[]) => unknown) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
+  const popup = usePopupController();
+  const { requestClose } = popup;
 
   return (
-    <div
-      className={`${styles['delete-confirmation-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-      {...backdrop}
+    <Popup
+      variant={PopupVariant.Confirm}
+      label={title}
+      onClose={onClose}
+      controller={popup}
+      className={styles['delete-confirmation-popup']}
     >
-      <div onAnimationEnd={handleAnimationEnd}>
-        <div>
-          <h1>{title}</h1>
-          <p>{content}</p>
-        </div>
-        <div>
-          <button onClick={() => requestClose(onClose)}>{t.cancel}</button>
-          <button onClick={() => requestClose(onDeleteConfirmation)}>{t.confirm}</button>
-        </div>
+      <div>
+        <h1>{title}</h1>
+        <p>{content}</p>
       </div>
-    </div>
+      <div>
+        <button onClick={() => requestClose(onClose)}>{t.cancel}</button>
+        <button onClick={() => requestClose(onDeleteConfirmation)}>{t.confirm}</button>
+      </div>
+    </Popup>
   );
 }

@@ -1,87 +1,13 @@
-div.section-editor-popup {
-    position: fixed;
-    z-index: 90;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: section-editor-popup-fade-in 0.2s ease-out;
-}
-
 div.section-editor-popup > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
     flex-direction: column;
     gap: 0.875rem;
-    width: 30rem;
-    /* Flex-item : sans min-width:0, un nom long (nowrap) pousse le min-content de la
-       carte au-delà de 30rem et la fait grandir au lieu de laisser l'ellipsis agir. */
-    min-width: 0;
-    margin: 1.25rem;
-    background: var(--bg-surface);
     padding: 1.25rem;
-    border-radius: 1rem;
-    border: 1px solid var(--border);
-    box-shadow: 0 12px 32px var(--shadow-modal);
     user-select: none;
-    animation: section-editor-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes section-editor-popup-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes section-editor-popup-pop-in {
-    from {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
 }
 
 /* Animation de sortie (classe ajoutée par le composant pendant la fermeture) */
-@keyframes section-editor-popup-fade-out {
-    from {
-        opacity: 1;
-    }
-    to {
-        opacity: 0;
-    }
-}
-
-@keyframes section-editor-popup-pop-out {
-    from {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-}
-
-div.section-editor-popup.closing {
-    animation: section-editor-popup-fade-out 0.2s ease-in forwards;
-}
-
-div.section-editor-popup.closing > div {
-    animation: section-editor-popup-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.section-editor-popup,
-    div.section-editor-popup > div {
-        animation: none;
-    }
-}
 
 div.section-editor-popup > div > header {
     display: flex;
@@ -533,7 +459,6 @@ div.section-editor-popup .edit-row > div:last-of-type > button:disabled {
 
 @media (min-width: 768px) {
     div.section-editor-popup > div {
-        margin: 2.13rem;
         gap: 1rem;
         padding: 1.5rem;
     }

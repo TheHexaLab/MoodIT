@@ -1,0 +1,12 @@
+{
+  "_commentaire": "Seuils de couverture des lignes (%) par service, vérifiés par le job « couverture » de tests.yml (script .github/scripts/coverage-gate.py). 90 % pour tous les services (#90). Frontend mesuré avec Vitest 5, qui compte les instructions exécutables et non chaque ligne physique (#134). Un seuil ne baisse jamais ; le cliquet comparé à main est suivi dans #108.",
+  "services": {
+    "auth-service": 90,
+    "permission-service": 90,
+    "execution-service": 90,
+    "core-service": 90,
+    "gateway": 90,
+    "mcp-service": 90,
+    "frontend": 90
+  }
+}

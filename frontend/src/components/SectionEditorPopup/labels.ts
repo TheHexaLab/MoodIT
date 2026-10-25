@@ -13,8 +13,9 @@ export const defaultLabels: SectionEditorPopupLabels = {
     `L'élément « ${item.name} » et tous ses messages seront définitivement supprimés. Cette action est irréversible.`,
   cancel: 'Annuler',
   save: 'Enregistrer',
-  hint: 'Lettres minuscules, chiffres et tirets uniquement',
-  hintInvalid: '⚠  Lettres minuscules, chiffres et tirets uniquement',
+  // Seules règles vérifiées (formulaire et serveur) : un nom non vide, unique dans la liste.
+  hint: 'Le nom doit être unique',
+  hintInvalid: '⚠  Le nom ne peut pas être vide',
   hintDuplicate: '⚠  Ce nom existe déjà',
   errorTitle: 'Une erreur est survenue',
   saveError: "Échec de l'enregistrement. Réessaie.",

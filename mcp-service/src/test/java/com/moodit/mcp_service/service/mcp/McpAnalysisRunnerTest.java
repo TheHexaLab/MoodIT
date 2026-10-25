@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
@@ -137,5 +139,75 @@ class McpAnalysisRunnerTest {
         runner.run(1);
 
         verifyNoInteractions(realtimeGateway, analysisClient, coreQuizStatsClient);
+    }
+
+    @Test
+    void markRejected_passeEnFailed_etNotifieLeLanceur() {
+        McpResponse response = pending();
+        when(mcpResponseRepository.findById(1)).thenReturn(Optional.of(response));
+
+        runner.markRejected(1);
+
+        assertThat(response.getStatus()).isEqualTo(McpStatus.FAILED);
+        verify(mcpResponseRepository).save(response);
+        verify(realtimeGateway).analysisFailed(10L, 5L, McpAnalysisRunner.UNAVAILABLE);
+    }
+
+    @Test
+    void markRejected_ignoreUneAnalyseDejaTermineeOuAbsente() {
+        McpResponse done = pending();
+        done.setStatus(McpStatus.DONE);
+        when(mcpResponseRepository.findById(1)).thenReturn(Optional.of(done));
+        when(mcpResponseRepository.findById(2)).thenReturn(Optional.empty());
+
+        runner.markRejected(1);
+        runner.markRejected(2);
+
+        assertThat(done.getStatus()).isEqualTo(McpStatus.DONE);
+        verify(mcpResponseRepository, never()).save(any());
+        verifyNoInteractions(realtimeGateway);
+    }
+
+    @Test
+    void auDemarrage_lesPendingOrphelinesPassentEnFailed() {
+        McpResponse a = pending();
+        McpResponse b = pending();
+        b.setId(2);
+        when(mcpResponseRepository.findByStatus(McpStatus.PENDING)).thenReturn(List.of(a, b));
+
+        runner.failOrphanedPending();
+
+        assertThat(a.getStatus()).isEqualTo(McpStatus.FAILED);
+        assertThat(b.getStatus()).isEqualTo(McpStatus.FAILED);
+        verify(mcpResponseRepository).saveAll(List.of(a, b));
+    }
+
+    @Test
+    void auDemarrage_sansOrphelines_rienNestEcrit() {
+        when(mcpResponseRepository.findByStatus(McpStatus.PENDING)).thenReturn(List.of());
+
+        runner.failOrphanedPending();
+
+        verify(mcpResponseRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void progression_collecteAnalysePuisResultat_dansCetOrdre() {
+        McpResponse response = pending();
+        when(mcpResponseRepository.findById(1)).thenReturn(Optional.of(response));
+        stubStats();
+        when(analysisClient.analyze(any())).thenReturn(analysis());
+
+        runner.run(1);
+
+        // Le lanceur affiche l'étape courante : « collecting » avant la lecture des stats,
+        // « analyzing » juste avant l'appel au LLM, puis l'événement de création.
+        InOrder ordre = inOrder(realtimeGateway, courseStatsRepository, analysisClient);
+        ordre.verify(realtimeGateway).analysisProgress(10L, 5L, "collecting");
+        ordre.verify(courseStatsRepository).countQuizzes(10);
+        ordre.verify(realtimeGateway).analysisProgress(10L, 5L, "analyzing");
+        ordre.verify(analysisClient).analyze(any());
+        ordre.verify(realtimeGateway).analysisCreated(eq(10L), any(McpResponseSummaryDto.class));
+        verify(realtimeGateway, never()).analysisProgress(10L, 5L, "fallback");
     }
 }

@@ -251,8 +251,11 @@ export function CodeEditor({
     // on retire un niveau entier — jusqu'au taquet précédent (multiple de 4).
     if (e.key === 'Backspace' && start === end && !e.nativeEvent.isComposing) {
       // Paire vide autour du curseur ({|}, (|), "|") : on supprime les deux côtés.
+      // `pair` défini exigé : en fin de texte, `value[start]` vaut undefined, comme
+      // `OPEN_PAIRS[prev]` pour un caractère qui n'ouvre rien.
       const prev = value[start - 1];
-      if (prev && OPEN_PAIRS[prev] === value[start]) {
+      const pair = prev ? OPEN_PAIRS[prev] : undefined;
+      if (pair !== undefined && pair === value[start]) {
         e.preventDefault();
         applyEdit(ta, start - 1, start + 1, '', start - 1);
         return;

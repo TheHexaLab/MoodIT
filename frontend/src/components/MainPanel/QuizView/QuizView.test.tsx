@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import QuizView from './QuizView';
 import type { Course, CourseChannel, Quiz } from '../../../types/domain';
-import type { AttemptSummary, QuizResult } from './quizAttempt';
+import type { AttemptSummary, QuizResult, SubmitQuizHandler } from './quizAttempt';
 
 /**
  * Coquille de la vue quiz (côté étudiant) : en-tête, barre de progression, corps
@@ -68,7 +68,7 @@ function renderView(opts: RenderOpts = {}) {
       onFetchQuiz={onFetchQuiz}
       onFetchAttempts={onFetchAttempts}
       onFetchAttemptResult={onFetchAttemptResult}
-      onSubmitQuiz={onSubmitQuiz}
+      onSubmitQuiz={onSubmitQuiz as SubmitQuizHandler | undefined}
       staleNotice={opts.staleNotice ?? false}
       onReloadStale={onReloadStale}
     />

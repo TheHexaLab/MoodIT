@@ -16,4 +16,7 @@ public interface McpResponseRepository extends JpaRepository<McpResponse, Intege
 
     /** L'utilisateur a-t-il une analyse à ce statut (PENDING) sur ce cours ? (verrou / réhydratation) */
     boolean existsByCourse_IdAndUser_IdAndStatus(Integer courseId, Integer userId, McpStatus status);
+
+    /** Toutes les analyses à ce statut (PENDING orphelines au démarrage). */
+    List<McpResponse> findByStatus(McpStatus status);
 }

@@ -7,6 +7,19 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "23 3 * * *"   # chaque nuit : Firefox et WebKit complets sur main
+
+# Un seul run par PR : un nouveau push annule le run précédent, encore en cours. Le type
+# d'évènement fait partie du groupe : le run planifié et un push sur main (même ref) ne
+# s'annulent plus l'un l'autre. Sur main, rien n'est annulé : chaque fusion est vérifiée.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Jeton GITHUB_TOKEN en lecture seule pour tous les jobs (aucun n'écrit dans le dépôt).
+permissions:
+  contents: read
 
 jobs:
   gradle:
@@ -15,10 +28,10 @@ jobs:
     strategy:
       fail-fast: false          # un service qui casse ne masque pas le résultat des autres
       matrix:
-        service: [auth-service, core-service, execution-service, gateway, mcp-service]
+        service: [auth-service, core-service, execution-service, gateway, mcp-service, permission-service]
 
-    # Postgres requis par CoreServiceApplicationTests (@SpringBootTest démarre tout le
-    # contexte, qui ouvre la datasource au boot). Aligné sur les valeurs par défaut de
+    # Postgres requis par Core/PermissionServiceApplicationTests (@SpringBootTest démarre tout
+    # le contexte, qui ouvre la datasource au boot). Aligné sur les valeurs par défaut de
     # l'appli (localhost:5432 / moodit_db / postgres / postgres) → aucun env à surcharger.
     # Idle pour les autres services (auth/gateway/mcp/execution ne s'y connectent pas).
     services:
@@ -41,10 +54,10 @@ jobs:
         working-directory: ${{ matrix.service }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -65,11 +78,19 @@ jobs:
 
       - name: Publier le rapport de tests
         if: always()             # même en cas d'échec, on veut voir quels tests ont cassé
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.service }}
           path: ${{ matrix.service }}/build/reports/tests/test/
           if-no-files-found: ignore
+
+      # Rapport JaCoCo (produit après `test`) : lu par le job « couverture ».
+      - name: Publier le rapport de couverture
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/jacoco/test/jacocoTestReport.xml
+          if-no-files-found: error
 
   # ── Frontend : typecheck + tests unitaires (Vitest) ───────────────────────────
   # Le Dockerfile frontend fait `tsc -b && vite build` (typecheck au build) mais NE lance NI les
@@ -81,28 +102,312 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Installer les dépendances
         run: npm ci
 
-      - name: Typecheck (tsc)
-        run: npx tsc --noEmit -p tsconfig.json
+      # `tsc -b` (et non `tsc -p tsconfig.json`) : tsconfig.json est une solution (`files: []` +
+      # références app/node), donc `-p` ne vérifiait AUCUN fichier. Même commande que le Dockerfile.
+      - name: Typecheck + build (tsc -b && vite build)
+        run: npm run build
 
-      - name: Tests unitaires (Vitest)
-        run: npm run test
+      - name: Tests unitaires avec couverture (Vitest)
+        run: npm run test:coverage
+
+      - name: Publier le rapport de couverture
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: error
 
       # Lint BLOQUANT et strict (`--max-warnings 0` via le script) : la dette ESLint a été résorbée,
       # ce gate empêche toute nouvelle erreur OU warning d'être fusionnée.
       - name: Lint
         run: npm run lint
+
+  # ── Mutation (PIT) : les tests détectent-ils vraiment une erreur ? ─────────────
+  # PIT modifie le code (conditions inversées, retours changés…) et compte les modifications que
+  # les tests attrapent. Les six services Java (#90), la nuit et sur main : plusieurs minutes
+  # par service. Le seuil de score est dans le build.gradle.kts du service (mutationThreshold) :
+  # sous ce seuil, Gradle échoue et le job est rouge.
+  mutation:
+    name: ${{ matrix.service }} — tests de mutation (PIT)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 45 # core : ~1 300 mutants
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, auth-service, core-service, permission-service, mcp-service, execution-service]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Tests de mutation
+        run: |
+          chmod +x ./gradlew
+          ./gradlew pitest --no-daemon --console=plain
+
+      - name: Score de mutation dans le résumé
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          p = 'build/reports/pitest/mutations.xml'
+          if os.path.exists(p):
+              muts = ET.parse(p).getroot().findall('mutation')
+              killed = sum(1 for m in muts if m.get('detected') == 'true')
+              score = 100 * killed / len(muts) if muts else 100
+              line = f"{os.environ['SERVICE']} : {killed}/{len(muts)} mutations détectées ({score:.0f} %)"
+          else:
+              line = f"{os.environ['SERVICE']} : rapport PIT absent"
+          print(line)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              out.write(f"## Mutation\n\n{line}\n")
+          PY
+        env:
+          SERVICE: ${{ matrix.service }}
+
+      - name: Publier le rapport PIT
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pitest-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/pitest/
+          if-no-files-found: ignore
+
+  # ── Couverture : une ligne verte ou rouge par service, selon son seuil ─────────
+  # Seuils dans .github/coverage-thresholds.json (#90). Tourne même si un job de tests a échoué :
+  # un rapport manquant compte alors comme un échec, en rouge.
+  coverage:
+    name: couverture — seuils par service
+    runs-on: ubuntu-latest
+    needs: [gradle, frontend]
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Récupérer les rapports de couverture
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: coverage-reports
+
+      # download-artifact range chaque artefact dans coverage-reports/<nom> : on retire le préfixe.
+      - name: Ranger les rapports par service
+        run: |
+          cd coverage-reports
+          for d in coverage-*; do [ -d "$d" ] && mv "$d" "${d#coverage-}"; done
+          ls -R
+
+      - name: Vérifier les seuils
+        run: python3 .github/scripts/coverage-gate.py coverage-reports .github/coverage-thresholds.json
+
+  # ── Schéma : chaque service JPA démarre en profil prod contre le VRAI schéma ─────
+  # Les tests unitaires tournent sur H2 avec un schéma généré depuis les entités : un écart entre
+  # init.sql et le code n'y casse jamais rien. Ici, Postgres est monté avec init.sql (comme le
+  # docker-entrypoint de prod), puis migrations/*.sql sont rejouées (idempotentes : elles doivent
+  # passer sans erreur sur une base à jour). Le VRAI JAR démarre ensuite en profil prod, donc en
+  # `ddl-auto=validate` : une table ou colonne manquante empêche le démarrage → job rouge.
+  # mcp-service n'est pas listé : JDBC brut, `ddl-auto=none`, rien à valider côté Hibernate.
+  schema:
+    name: ${{ matrix.service }} — démarrage prod (vrai schéma)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, core-service, permission-service]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: moodit_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Construire le JAR
+        working-directory: ${{ matrix.service }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew bootJar --no-daemon --console=plain
+
+      - name: Créer le schéma (init.sql puis migrations/)
+        env:
+          PGPASSWORD: postgres
+          PGOPTIONS: "-c client_min_messages=warning"   # masque les NOTICE « already exists » des migrations rejouées
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f init.sql
+          for f in migrations/*.sql; do
+            echo "→ $f"
+            psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f "$f"
+          done
+
+      # Lancé depuis la racine du dépôt : `optional:file:../.env` pointe alors hors du workspace
+      # (aucun .env ne vient surcharger le profil). Secrets bidons : seuls les placeholders sans
+      # valeur de repli du profil prod doivent se résoudre ; aucun mail n'est envoyé.
+      - name: Démarrer en profil prod
+        env:
+          SPRING_PROFILES_ACTIVE: prod
+          JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else-0123456789abcdef0123456789abcdef0123456789
+          APP_SECURITY_PEPPER: ci-only-pepper
+          INTERNAL_TOKEN: ci-only-internal-token
+          MAIL_USERNAME: ci@example.invalid
+          MAIL_PASSWORD: ci
+        run: |
+          jar=$(find "${{ matrix.service }}/build/libs" -name '*.jar' ! -name '*-plain.jar')
+          java -jar "$jar" --server.port=18080 > boot.log 2>&1 &
+          pid=$!
+          # Démarré = le port HTTP répond (n'importe quel code, même 401/404). Le processus qui
+          # meurt avant (ex. SchemaManagementException) fait échouer le job avec son log.
+          for i in $(seq 1 90); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::${{ matrix.service }} s'est arrêté au démarrage (schéma ou configuration prod)."
+              cat boot.log
+              exit 1
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/ || true)
+            if [ "$code" != "000" ]; then
+              echo "${{ matrix.service }} a démarré en profil prod (HTTP $code après ${i}s)."
+              kill "$pid"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::${{ matrix.service }} n'a pas démarré en 90 s."
+          cat boot.log
+          kill "$pid" || true
+          exit 1
+
+  # ── Bout en bout : Playwright contre la pile complète ──────────────────────────
+  # Niveaux : sur une PR, Chromium desktop (en deux moitiés) et les cinq profils tablette/mobile
+  # dans un seul job ; Firefox et WebKit desktop s'ajoutent sur push vers main et chaque nuit.
+  # Chaque job démarre sa pile (images en cache de build gha, cf. docker-compose-ci-cache.yml)
+  # puis joue ses tests dans l'image officielle de Playwright.
+  e2e:
+    name: e2e — Playwright (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # `matrix` n'est pas disponible dans `jobs.<id>.if` : la liste des profils est choisie ici
+        # selon l'événement. PR : Chromium desktop en deux moitiés + les cinq profils tablette/mobile
+        # dans un job. Push sur main et nuit : Firefox et WebKit desktop en plus.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"desktop-chromium-1","args":"--project=desktop-chromium --shard=1/2"},{"name":"desktop-chromium-2","args":"--project=desktop-chromium --shard=2/2"},{"name":"responsive","args":"--project=tablet-portrait --project=tablet-landscape --project=mobile-chromium --project=mobile-webkit --project=mobile-small"}]' || '[{"name":"desktop-chromium-1","args":"--project=desktop-chromium --shard=1/2"},{"name":"desktop-chromium-2","args":"--project=desktop-chromium --shard=2/2"},{"name":"responsive","args":"--project=tablet-portrait --project=tablet-landscape --project=mobile-chromium --project=mobile-webkit --project=mobile-small"},{"name":"desktop-firefox-1","args":"--project=desktop-firefox --shard=1/2"},{"name":"desktop-firefox-2","args":"--project=desktop-firefox --shard=2/2"},{"name":"desktop-webkit-1","args":"--project=desktop-webkit --shard=1/2"},{"name":"desktop-webkit-2","args":"--project=desktop-webkit --shard=2/2"}]') }}
+    env:
+      COMPOSE: docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml -f docker-compose-ci-cache.yml
+      COMPOSE_BAKE: "true"   # compose build via buildx bake : requis pour le cache type=gha
+      FRONTEND_PORT: "5173"
+      GATEWAY_PORT: "8080"
+      POSTGRES_USER: postgres
+      POSTGRES_DB: moodit_db
+    steps:
+      - uses: actions/checkout@v7
+
+      # Cache de build Docker entre jobs : buildx + variables d'accès au cache GitHub (ACTIONS_*).
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
+
+      # Même script qu'en local : construction, BD, attente, Python dans Piston, comptes à rôles.
+      - name: Démarrer et préparer la pile
+        run: sh frontend/e2e/core/start-stack.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installer les dépendances
+        working-directory: frontend
+        run: npm ci
+
+      # Les tests tournent dans l'image officielle de Playwright, à la version exacte de
+      # @playwright/test : navigateurs, dépendances système et polices déjà dedans. Plus d'apt sur
+      # le chemin critique : le miroir Ubuntu des runners a bloqué ou bridé (93 ko/s) quatre jobs
+      # en une soirée. La pile, elle, tourne sur l'hôte ; le conteneur la joint par `--network host`.
+      - name: Version de Playwright
+        id: pw
+        working-directory: frontend
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Police Inter : l'app la demande sans la fournir. Sans elle, le repli (DejaVu Sans, plus
+      # large) fait déborder des titres (forum : +41 px à 390 px). Récupérée depuis la release
+      # GitHub (CDN, pas apt) et mise en cache ; montée dans le conteneur comme police système.
+      - name: Cache de la police Inter
+        id: inter
+        uses: actions/cache@v6
+        with:
+          path: .inter
+          key: inter-4.1
+
+      - name: Télécharger la police Inter
+        if: steps.inter.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .inter
+          curl -sSL --retry 5 --retry-all-errors -o /tmp/inter.zip \
+            https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+          unzip -q -j /tmp/inter.zip Inter.ttc -d .inter
+
+      - name: Tests Playwright
+        run: |
+          docker run --rm --network host --ipc=host \
+            -v "$PWD/frontend:/work" -w /work \
+            -v "$PWD/.inter:/usr/share/fonts/truetype/inter:ro" \
+            -e CI=true \
+            mcr.microsoft.com/playwright:v${{ steps.pw.outputs.version }}-noble \
+            bash -c "fc-cache -f > /dev/null && npx playwright test e2e/core --config playwright.core.config.ts ${{ matrix.args }}"
+
+      - name: Logs des services (en cas d'échec)
+        if: failure()
+        run: $COMPOSE logs --no-color --tail=300
+
+      - name: Publier le rapport Playwright
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ matrix.name }}
+          path: |
+            frontend/e2e/report/
+            frontend/e2e/results/
+          if-no-files-found: ignore
 
   # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
@@ -113,10 +418,10 @@ jobs:
     name: execution-service — intégration (Piston réel)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -162,7 +467,7 @@ jobs:
 
       - name: Publier le rapport
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-results
           path: execution-service/build/reports/tests/test/

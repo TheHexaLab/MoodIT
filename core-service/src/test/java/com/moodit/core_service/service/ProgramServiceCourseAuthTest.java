@@ -81,6 +81,19 @@ class ProgramServiceCourseAuthTest {
     }
 
     @Test
+    void manageablePrograms_roleGlobalNonAdmin_neVoitQueSesProgrammes() {
+        // Un rôle global qui n'est NI Administrateur NI Gardien ne donne pas accès à tout.
+        when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(userWith(5, "Enseignant")));
+        when(programRepository.findManageableInEstablishment(5, 1))
+                .thenReturn(List.of(program(1, "P1")));
+
+        List<ProgramDTO> res = service.getManageableProgramsInEstablishment(1, "a@a");
+
+        assertThat(res).extracting(ProgramDTO::getId).containsExactly(1);
+        org.mockito.Mockito.verify(programRepository, org.mockito.Mockito.never()).findByEstablishment_Id(1);
+    }
+
+    @Test
     void manageablePrograms_nonAdmin_returnsOnlyManaged() {
         when(userRepository.findByEmail("a@a")).thenReturn(Optional.of(userWith(5)));
         when(programRepository.findManageableInEstablishment(5, 1))

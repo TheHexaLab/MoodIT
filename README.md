@@ -128,7 +128,7 @@ Inspiré de :
 | Couche | Technologies |
 |---|---|
 | 🎨 Frontend | React 18, Vite, React Router, Axios, STOMP.js, SockJS |
-| ⚙️ Services | Spring Boot 4.0.6, Java 25, Gradle |
+| ⚙️ Services | Spring Boot 4.0.9, Java 25, Gradle |
 | 🔒 Auth | Spring Security + JWT (JJWT 0.12) |
 | 🔌 Temps réel | Spring WebSocket + STOMP |
 | 🗄️ Base de données | PostgreSQL 17 |
@@ -158,7 +158,7 @@ cd MoodIT
 
 Une tâche est considérée complétée uniquement si :
 
-- Le code respecte les exigences Jira
+- Le code respecte les critères d'acceptation de l'issue GitHub
 - Le code est documenté
 - Les tests ont été réalisés
 - La Pull Request possède 2 approbations
@@ -175,7 +175,7 @@ Une tâche est considérée complétée uniquement si :
 3. Documenter le code
 4. Ouvrir une PR
 5. Obtenir **2 approbations**
-6. Fermer le ticket Jira associé
+6. L'issue liée se ferme à la fusion (`Closes #…` dans la description)
 
 ---
 
@@ -211,7 +211,7 @@ vibe-coded
 
 | Outil | Utilisation |
 |---|---|
-| 🗂️ Jira | Gestion Agile & sprints |
+| 🗂️ GitHub Issues & Projects | Tickets, Kanban & sprints |
 | 🐙 GitHub | Code source & PR |
 | 💬 Teams | Réunions & documents |
 | ⚡ Messenger | Communication rapide |

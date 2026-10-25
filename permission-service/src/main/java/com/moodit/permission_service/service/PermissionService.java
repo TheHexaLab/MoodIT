@@ -37,6 +37,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -245,7 +246,13 @@ public class PermissionService {
             rule(
                     "PATCH",
                     "/courses/{courseId}",
-                    (user, vars, body) -> canManageCourseContent(user, vars, "courseId")),
+                    // Gérer le contenu du cours, ET, si le body change ses programmes (programIds),
+                    // gérer chaque programme ajouté ou retiré : sans ça, un enseignant du cours
+                    // pouvait le publier dans le catalogue d'un programme qu'il ne gère pas ou le
+                    // retirer de celui d'autrui (même exigence que POST /programs/courses).
+                    (user, vars, body) ->
+                        canManageCourseContent(user, vars, "courseId")
+                            && canChangeCoursePrograms(user, longVar(vars, "courseId"), body)),
 
             rule(
                     "DELETE",
@@ -874,6 +881,28 @@ public class PermissionService {
     }
     List<Long> programIds = longArrayField(body, "programIds");
     return !programIds.isEmpty() && programIds.stream().allMatch(pid -> managesProgram(user, pid));
+  }
+
+  // Changement des programmes d'un cours (PATCH /courses/{id}, body.programIds) : chaque programme
+  // AJOUTÉ ou RETIRÉ doit être géré par l'utilisateur. programIds absent : rien ne change.
+  private boolean canChangeCoursePrograms(User user, long courseId, JsonNode body) {
+    if (body == null || !body.has("programIds") || body.get("programIds").isNull()) {
+      return true;
+    }
+    if (hasRole(user, RoleNames.ADMIN) || hasRole(user, RoleNames.GUARDIAN)) {
+      return true;
+    }
+    if (!body.get("programIds").isArray()) {
+      return false;
+    }
+    Set<Long> requested = new HashSet<>(longArrayField(body, "programIds"));
+    Set<Long> current = new HashSet<>(membershipService.courseProgramIds(courseId));
+    Set<Long> changed = new HashSet<>(requested);
+    changed.addAll(current);
+    Set<Long> kept = new HashSet<>(requested);
+    kept.retainAll(current);
+    changed.removeAll(kept);
+    return changed.stream().allMatch(pid -> managesProgram(user, pid));
   }
 
   // L'utilisateur est-il Administrateur ou Enseignant DANS ce programme (User_Program_Role) ?

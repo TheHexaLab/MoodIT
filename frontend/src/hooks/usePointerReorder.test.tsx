@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import { usePointerReorder } from './usePointerReorder';
 
@@ -251,5 +251,83 @@ describe('usePointerReorder', () => {
     const { event } = makeRowEvent('mouse', button);
     act(() => result.current.onRowPointerDown(event, 1));
     expect(result.current.draggingId).toBeNull();
+  });
+});
+
+// Défilement automatique pendant un glissé : près d'un bord (64 px) de la zone qui défile, la
+// liste défile d'elle-même, d'autant plus vite que le pointeur est proche du bord.
+describe('usePointerReorder — défilement automatique', () => {
+  let frames: FrameRequestCallback[];
+
+  function runFrame() {
+    const cb = frames.shift();
+    act(() => cb?.(0));
+  }
+
+  // Glissé démarré avec le pointeur en (0, y), depuis une poignée placée dans `parent`.
+  function startDragAt(y: number, parent: HTMLElement = document.body) {
+    const onReorder = vi.fn();
+    const { result } = renderHook(() => usePointerReorder([1, 2, 3], onReorder));
+    const { event, handle } = makeGripEvent('mouse', 0);
+    parent.appendChild(handle);
+    Object.assign(event, { clientX: 0, clientY: y });
+    act(() => result.current.onGripPointerDown(event, 1));
+    return { result, onReorder };
+  }
+
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    window.scrollBy = vi.fn();
+  });
+
+  afterEach(() => {
+    act(() => firePointerUp());
+    vi.unstubAllGlobals();
+  });
+
+  it('sans zone défilante : près du haut de la fenêtre, la page remonte', () => {
+    startDragAt(16);
+    runFrame();
+    expect(window.scrollBy).toHaveBeenCalledWith(0, -12); // 16 × (64 − 16) / 64
+    expect(frames).toHaveLength(1); // l'image suivante est programmée
+  });
+
+  it('sans zone défilante : près du bas de la fenêtre, la page descend', () => {
+    startDragAt(window.innerHeight);
+    runFrame();
+    expect(window.scrollBy).toHaveBeenCalledWith(0, 16); // vitesse maximale au bord
+  });
+
+  it('loin des bords : aucun défilement, mais la boucle continue', () => {
+    startDragAt(window.innerHeight / 2);
+    runFrame();
+    expect(window.scrollBy).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(1);
+  });
+
+  it('dans une zone défilante : c’est elle qui défile, et la rangée survolée est recalculée', () => {
+    const { rowById } = buildRows([1, 2, 3]);
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { value: 200 });
+    scroller.getBoundingClientRect = () => ({ top: 100, bottom: 300 }) as DOMRect;
+    document.body.appendChild(scroller);
+
+    const { result } = startDragAt(290, scroller);
+    pointElementAt(rowById, 3);
+    runFrame();
+    expect(scroller.scrollTop).toBe(16 * (290 - (300 - 64)) / 64);
+    expect(window.scrollBy).not.toHaveBeenCalled();
+    // Le défilement amène une autre rangée sous le pointeur immobile : l'ordre suit.
+    expect(result.current.order).toEqual([2, 3, 1]);
+  });
+
+  it('le relâchement arrête la boucle', () => {
+    startDragAt(16);
+    act(() => firePointerUp());
+    expect(cancelAnimationFrame).toHaveBeenCalled();
   });
 });

@@ -42,8 +42,11 @@ public class InternalExecutionController {
         return ResponseEntity.ok(executionService.evaluate(request));
     }
 
-    /** Jeton partagé requis dès qu'il est configuré (vide → contrôle désactivé). */
+    /**
+     * Jeton partagé toujours requis. Jeton non configuré (vide) : tout est refusé plutôt que
+     * d'ouvrir l'endpoint, comme côté core (fail-closed).
+     */
     private boolean unauthorized(String token) {
-        return internalToken != null && !internalToken.isBlank() && !internalToken.equals(token);
+        return internalToken == null || internalToken.isBlank() || !internalToken.equals(token);
     }
 }

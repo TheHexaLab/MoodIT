@@ -1,0 +1,96 @@
+# Mises à jour automatiques des dépendances (PR ouvertes par Dependabot contre main).
+#
+# Regroupement : UNE PR par écosystème et par service chaque semaine (au lieu d'une PR par
+# dépendance), pour garder la file de revue courte. Les mises à jour MAJEURES restent à part :
+# elles cassent plus souvent et méritent une PR dédiée.
+#
+# voice-service n'est pas listé : il n'existe pas encore sur main (branche vocale). L'ajouter
+# ici (gradle + docker) au moment de la fusion vocale.
+version: 2
+
+updates:
+  # ── Gradle (un dossier par service) ───────────────────────────────────────────
+  - package-ecosystem: gradle
+    directories:
+      - /auth-service
+      - /core-service
+      - /execution-service
+      - /gateway
+      - /mcp-service
+      - /permission-service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Spring Boot 4.1+ : refusé par Spring Cloud 2025.1 (gateway), qui ne supporte que Boot 4.0 ;
+    # la ligne qui le supporte (Spring Cloud 2026.0) n'a pas encore de version stable. Retirer
+    # cette exclusion en montant Spring Boot et Spring Cloud ensemble (#134).
+    ignore:
+      - dependency-name: "org.springframework.boot*"
+        versions: [">= 4.1.0"]
+    groups:
+      gradle-mineures:
+        update-types: [minor, patch]
+    labels: [chore]
+
+  # ── npm (frontend) ────────────────────────────────────────────────────────────
+  # La branche vocale modifie aussi package.json / package-lock.json : en cas de conflit au
+  # moment de la fusion, régénérer le lock (`npm install`) plutôt que de le résoudre à la main.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # @types/node suit la version de Node exécutée (24 LTS) : sa majeure monte à la main, avec Node.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript suit la plage acceptée par typescript-eslint (ESLint) : jusqu'à 6.0.x aujourd'hui
+      # (peer « >=4.8.4 <6.1.0 » en 8.72). Au-delà, npm refuse l'installation (PR #139, TypeScript 7).
+      # Relever cette borne quand typescript-eslint accepte une version plus récente.
+      - dependency-name: "typescript"
+        versions: [">= 6.1.0"]
+    groups:
+      # vitest et @vitest/* exigent la même version entre eux : une seule PR, majeures comprises
+      # (séparées, npm refuse l'installation). Groupe déclaré avant npm-mineures : il est prioritaire.
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
+      npm-mineures:
+        update-types: [minor, patch]
+    labels: [chore]
+
+  # ── Images Docker de base (FROM des Dockerfile) ───────────────────────────────
+  - package-ecosystem: docker
+    directories:
+      - /auth-service
+      - /core-service
+      - /execution-service
+      - /frontend
+      - /gateway
+      - /mcp-service
+      - /permission-service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Node : uniquement des LTS (versions paires), montées à la main. Dependabot proposait Node 25,
+    # version impaire sans support à long terme (#134).
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker:
+        patterns: ["*"]
+    labels: [chore]
+
+  # ── Actions GitHub utilisées par les workflows ────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [chore]

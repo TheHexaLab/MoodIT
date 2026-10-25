@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './AuditLogsPopup.module.css';
-import { useBackdropClose } from '../../hooks/useBackdropClose';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
@@ -91,9 +93,8 @@ export function AuditLogsPopup({
   const [reloadKey, setReloadKey] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const backdrop = useBackdropClose(() => requestClose(onClose));
-  const pendingAction = useRef<((...args: unknown[]) => unknown) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
   const mountedRef = useRef(true);
   // Jeton de la requête de PREMIÈRE page : invalide les réponses (page 1 ou suivantes) périmées.
   const reqRef = useRef(0);
@@ -182,163 +183,148 @@ export function AuditLogsPopup({
     setReloadKey((k) => k + 1);
   }
 
-  function requestClose(action: (...args: unknown[]) => unknown) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
-
   const entityLabel = (code: string): string => t.entityTypes[code] ?? code;
   const filtering = debouncedQuery.trim() !== '' || type !== ALL;
 
   return (
     <>
-      <div
-        className={`${styles['audit-logs-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        {...backdrop}
+      <Popup
+        variant={PopupVariant.Browser}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['audit-logs-popup']}
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <div className={styles.header}>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button
-              type="button"
-              className={styles.closeButton}
-              aria-label={t.close}
-              onClick={() => requestClose(onClose)}
-            >
-              ✕
-            </button>
+        <div className={styles.header}>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
           </div>
+          <button
+            type="button"
+            className={styles.closeButton}
+            aria-label={t.close}
+            onClick={() => requestClose(onClose)}
+          >
+            ✕
+          </button>
+        </div>
 
-          <div className={styles.toolbar}>
-            <div className={styles.search}>
-              <MagnifyingGlass className={styles.searchIcon} width="0.9rem" height="0.9rem" aria-hidden="true" />
-              <input
-                type="text"
-                className={styles.searchInput}
-                placeholder={t.searchPlaceholder}
-                aria-label={t.searchPlaceholder}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              {query && (
-                <button
-                  type="button"
-                  className={styles.clearBtn}
-                  aria-label={t.searchClear}
-                  onClick={() => setQuery('')}
-                >
-                  <X width="0.8rem" height="0.8rem" aria-hidden="true" />
-                </button>
-              )}
-            </div>
-
-            <div className={styles.filters} role="group" aria-label={t.title}>
+        <div className={styles.toolbar}>
+          <div className={styles.search}>
+            <MagnifyingGlass className={styles.searchIcon} width="0.9rem" height="0.9rem" aria-hidden="true" />
+            <input
+              type="text"
+              className={styles.searchInput}
+              placeholder={t.searchPlaceholder}
+              aria-label={t.searchPlaceholder}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query && (
               <button
                 type="button"
-                className={`${styles.chip}${type === ALL ? ` ${styles.chipActive}` : ''}`}
-                aria-label={t.filterAll}
-                aria-pressed={type === ALL}
-                onClick={() => setType(ALL)}
+                className={styles.clearBtn}
+                aria-label={t.searchClear}
+                onClick={() => setQuery('')}
               >
-                {t.filterAll}
+                <X width="0.8rem" height="0.8rem" aria-hidden="true" />
               </button>
-              {Object.keys(t.entityTypes).map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  className={`${styles.chip}${type === code ? ` ${styles.chipActive}` : ''}`}
-                  style={badgeStyle(code)}
-                  aria-label={entityLabel(code)}
-                  aria-pressed={type === code}
-                  onClick={() => setType(code)}
-                >
-                  {entityLabel(code)}
-                </button>
-              ))}
-            </div>
+            )}
           </div>
 
-          {phase === 'loading' ? (
-            <div className={styles.centered} role="status" aria-busy="true">
-              <BaseSpinner tone="current" size={18} />
-              <span>{t.loading}</span>
-            </div>
-          ) : phase === 'error' ? null : entries.length === 0 ? (
-            <p className={styles.centered}>{filtering ? t.emptyFiltered : t.empty}</p>
-          ) : (
-            <ul className={styles.list} onScroll={onListScroll}>
-              {entries.map((entry) => {
-                const open = openId === entry.id;
-                return (
-                  <li key={entry.id} className={styles.entry}>
-                    <button
-                      type="button"
-                      className={styles.entryButton}
-                      aria-expanded={open}
-                      onClick={() => setOpenId(open ? null : entry.id)}
-                    >
-                      <span className={styles.entryMain}>
-                        <span className={styles.badge} style={badgeStyle(entry.entityType)}>
-                          {entityLabel(entry.entityType)}
-                        </span>
-                        <span className={styles.summary}>{entry.summary}</span>
-                        <span className={styles.meta}>
-                          <span>{entry.actorEmail ?? t.unknownActor}</span>
-                          <span className={styles.metaDot}>•</span>
-                          <span>{formatWhen(entry.createdAt)}</span>
-                          <span className={styles.metaDot}>•</span>
-                          <code className={styles.action}>{entry.action}</code>
-                        </span>
-                      </span>
-                      <Chevron
-                        className={`${styles.caret}${open ? ` ${styles.caretOpen}` : ''}`}
-                        width="0.85rem"
-                        height="0.85rem"
-                        aria-hidden="true"
-                      />
-                    </button>
-                    {open && (
-                      <div className={styles.details}>
-                        {entry.details &&
-                          entry.details.split('\n').map((part, i) => (
-                            <span key={i} className={styles.detailPart}>
-                              {part}
-                            </span>
-                          ))}
-                        {entry.entityId !== null && (
-                          <span className={styles.detailPart}>
-                            {t.entityIdLabel} : #{entry.entityId}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-              {loadingMore && (
-                <li className={styles.loadingMore} role="status" aria-busy="true">
-                  <BaseSpinner tone="current" size={16} />
-                  <span>{t.loadingMore}</span>
-                </li>
-              )}
-            </ul>
-          )}
+          <div className={styles.filters} role="group" aria-label={t.title}>
+            <button
+              type="button"
+              className={`${styles.chip}${type === ALL ? ` ${styles.chipActive}` : ''}`}
+              aria-label={t.filterAll}
+              aria-pressed={type === ALL}
+              onClick={() => setType(ALL)}
+            >
+              {t.filterAll}
+            </button>
+            {Object.keys(t.entityTypes).map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={`${styles.chip}${type === code ? ` ${styles.chipActive}` : ''}`}
+                style={badgeStyle(code)}
+                aria-label={entityLabel(code)}
+                aria-pressed={type === code}
+                onClick={() => setType(code)}
+              >
+                {entityLabel(code)}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+
+        {phase === 'loading' ? (
+          <div className={styles.centered} role="status" aria-busy="true">
+            <BaseSpinner tone="current" size={18} />
+            <span>{t.loading}</span>
+          </div>
+        ) : phase === 'error' ? null : entries.length === 0 ? (
+          <p className={styles.centered}>{filtering ? t.emptyFiltered : t.empty}</p>
+        ) : (
+          <ul className={styles.list} onScroll={onListScroll}>
+            {entries.map((entry) => {
+              const open = openId === entry.id;
+              return (
+                <li key={entry.id} className={styles.entry}>
+                  <button
+                    type="button"
+                    className={styles.entryButton}
+                    aria-expanded={open}
+                    onClick={() => setOpenId(open ? null : entry.id)}
+                  >
+                    <span className={styles.entryMain}>
+                      <span className={styles.badge} style={badgeStyle(entry.entityType)}>
+                        {entityLabel(entry.entityType)}
+                      </span>
+                      <span className={styles.summary}>{entry.summary}</span>
+                      <span className={styles.meta}>
+                        <span>{entry.actorEmail ?? t.unknownActor}</span>
+                        <span className={styles.metaDot}>•</span>
+                        <span>{formatWhen(entry.createdAt)}</span>
+                        <span className={styles.metaDot}>•</span>
+                        <code className={styles.action}>{entry.action}</code>
+                      </span>
+                    </span>
+                    <Chevron
+                      className={`${styles.caret}${open ? ` ${styles.caretOpen}` : ''}`}
+                      width="0.85rem"
+                      height="0.85rem"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  {open && (
+                    <div className={styles.details}>
+                      {entry.details &&
+                        entry.details.split('\n').map((part, i) => (
+                          <span key={i} className={styles.detailPart}>
+                            {part}
+                          </span>
+                        ))}
+                      {entry.entityId !== null && (
+                        <span className={styles.detailPart}>
+                          {t.entityIdLabel} : #{entry.entityId}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+            {loadingMore && (
+              <li className={styles.loadingMore} role="status" aria-busy="true">
+                <BaseSpinner tone="current" size={16} />
+                <span>{t.loadingMore}</span>
+              </li>
+            )}
+          </ul>
+        )}
+      </Popup>
 
       {phase === 'error' && (
         <ErrorPopup

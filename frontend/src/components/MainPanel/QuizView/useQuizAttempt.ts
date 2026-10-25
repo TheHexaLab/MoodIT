@@ -84,6 +84,14 @@ function writeDraft(quizId: number, draft: DraftState): void {
     // quota / mode privé : la persistance est un bonus, on ignore l'échec.
   }
 }
+/**
+ * Brouillon vierge : aucune question touchée, première question affichée. Il n'apporte rien à
+ * restaurer, et ne doit surtout pas primer sur le résumé d'une tentative déjà faite (un montage
+ * interrompu, ex. restauration du dernier emplacement puis clic ailleurs, en écrivait un).
+ */
+function isPristineDraft(draft: DraftState): boolean {
+  return (draft.touched?.length ?? 0) === 0 && (draft.currentIndex ?? 0) === 0;
+}
 function clearDraft(quizId: number): void {
   try {
     localStorage.removeItem(DRAFT_KEY(quizId));
@@ -388,7 +396,9 @@ export function useQuizAttempt({
       // Brouillon de passation restauré (réponses + position) : l'étudiant était en train de
       // répondre avant le rechargement. On le rétablit et on reste en passation — SAUF si la
       // tentative unique est déjà consommée OU si une soumission vient d'aboutir (brouillon obsolète).
-      const draft = submissionLanded ? null : readDraft(initialQuiz.id);
+      const stored = submissionLanded ? null : readDraft(initialQuiz.id);
+      const draft = stored && !isPristineDraft(stored) ? stored : null;
+      if (stored && !draft) clearDraft(initialQuiz.id);
       const consumed = !fetched.allowRetry && history.length > 0;
       if (draft && !consumed) {
         setAnswers(mergeAnswers(fetched, draft.answers));
@@ -442,6 +452,8 @@ export function useQuizAttempt({
   // rien n'est écrit : le brouillon d'une tentative en cours reste intact jusqu'à sa soumission.
   useEffect(() => {
     if (!hydratedRef.current || phase !== 'taking') return;
+    // Rien de saisi ni de parcouru : pas de brouillon (cf. isPristineDraft).
+    if (touched.size === 0 && currentIndex === 0) return;
     // Clé = `initialQuiz.id` (l'id de la REQUÊTE, stable et identique à celui lu par `reload`).
     // NE PAS utiliser `quiz.id` (l'id du quiz FETCHÉ) : il peut différer (quiz du jour /
     // normalisation de canal), et on écrirait alors sous une clé que la restauration ne relit pas.
