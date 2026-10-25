@@ -75,10 +75,23 @@ test('le gardien crée, modifie et supprime un programme ; un abonné le voit en
     await expect(page.getByRole('textbox', { name: 'Code du programme' })).toHaveValue(
       identity.code
     );
+    // Création ATOMIQUE (#117) : une seule requête, le serveur abonne le créateur dans la même
+    // transaction ; plus aucun appel séparé à l'abonnement.
+    const subscriptionCalls: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/programs/users')) {
+        subscriptionCalls.push(req.url());
+      }
+    });
+    const created = page.waitForResponse(
+      (res) => res.request().method() === 'POST' && res.url().includes('/api/establishments/programs')
+    );
     await page.getByRole('button', { name: 'Créer', exact: true }).click();
+    expect((await created).status(), 'programme créé').toBe(201);
 
     // Le créateur est abonné d'office : la pastille apparaît (et survit au rechargement).
     await expect(programButton(page, identity.name)).toBeVisible();
+    expect(subscriptionCalls, 'aucune requête d’abonnement séparée').toEqual([]);
     programId = await programIdByCode(gardienApi, identity.code);
     expect(programId).toBeDefined();
     await page.reload();

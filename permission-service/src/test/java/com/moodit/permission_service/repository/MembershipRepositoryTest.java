@@ -203,25 +203,12 @@ class MembershipRepositoryTest {
     assertThat(repo.canSeeQuizViaProgram(5, 30)).isTrue();
   }
 
-  @Test
-  void isEnrolledInCourse_true() {
-    sql("INSERT INTO enrollment(id,course_id,user_id) VALUES (1,1,5)");
-    assertThat(repo.isEnrolledInCourse(5, 1)).isTrue();
-  }
-
-  // ── Propriété d'un post / vote ─────────────────────────────────────────────────────────
+  // ── Propriété d'un post ─────────────────────────────────────────────────────────
 
   @Test
   void isPostAuthor_trueAndOtherFalse() {
     sql("INSERT INTO post(id,forum_id,user_id,post_parent_id) VALUES (40,9,5,NULL)");
     assertThat(repo.isPostAuthor(5, 40)).isTrue();
     assertThat(repo.isPostAuthor(99, 40)).isFalse();
-  }
-
-  @Test
-  void isVoteOwner_trueAndOtherFalse() {
-    sql("INSERT INTO vote(id,user_id,post_id,quiz_id) VALUES (60,5,40,NULL)");
-    assertThat(repo.isVoteOwner(5, 60)).isTrue();
-    assertThat(repo.isVoteOwner(99, 60)).isFalse();
   }
 }

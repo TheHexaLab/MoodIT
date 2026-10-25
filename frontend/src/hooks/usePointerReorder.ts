@@ -71,6 +71,18 @@ export function usePointerReorder<Id extends string | number = number>(
     onReorderRef.current = onReorder;
   });
 
+  // Ce que le glissement en cours (ou son garde de fin) a armé sur window : écouteurs, boucle de
+  // défilement, minuteur. Défait au démontage : sinon un composant retiré pendant un glissement,
+  // ou dans les 300 ms qui suivent, laissait des écouteurs et un minuteur viser une page partie.
+  const teardownRef = useRef(new Set<() => void>());
+  useEffect(() => {
+    const teardowns = teardownRef.current;
+    return () => {
+      teardowns.forEach((undo) => undo());
+      teardowns.clear();
+    };
+  }, []);
+
   // Cœur commun : arme le glissement de `id` et capture le pointeur sur `captureEl`.
   // Appelé par la poignée comme par la rangée entière ; renvoie sans effet si l'appui
   // n'est pas un clic gauche (souris).
@@ -145,6 +157,7 @@ export function usePointerReorder<Id extends string | number = number>(
       detectOver(ev.clientX, ev.clientY);
     };
     const onUp = () => {
+      teardownRef.current.delete(abortDrag);
       cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
@@ -156,18 +169,33 @@ export function usePointerReorder<Id extends string | number = number>(
       // il déclencherait le onClick de la rangée (ex. révéler/masquer les actions). Le garde
       // se retire au premier click ; filet de sécurité si le navigateur n'en émet aucun.
       if (moved) {
+        let timer = 0;
+        const unswallow = () => {
+          window.clearTimeout(timer);
+          window.removeEventListener('click', swallow, true);
+          teardownRef.current.delete(unswallow);
+        };
         const swallow = (ce: Event) => {
           ce.stopPropagation();
-          window.removeEventListener('click', swallow, true);
+          unswallow();
         };
         window.addEventListener('click', swallow, true);
-        window.setTimeout(() => window.removeEventListener('click', swallow, true), 300);
+        timer = window.setTimeout(unswallow, 300);
+        teardownRef.current.add(unswallow);
       }
       // Ne persiste que si l'ordre a réellement changé (évite un commit sur simple clic).
       const changed =
         finalOrder.length !== startIds.length || finalOrder.some((v, i) => v !== startIds[i]);
       if (changed) onReorderRef.current(finalOrder);
     };
+    // Démontage pendant le glissement : boucle et écouteurs retirés (sans commit de l'ordre).
+    const abortDrag = () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    teardownRef.current.add(abortDrag);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
