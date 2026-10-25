@@ -101,3 +101,45 @@ describe('refresh après une soumission ABOUTIE (quiz avec reprise)', () => {
     expect(localStorage.getItem(`moodit:quiz-draft:${REQUEST_ID}`)).toBeNull();
   });
 });
+
+describe('brouillon vierge (aucune réponse)', () => {
+  const attempt = [{ id: 7, attemptNo: 1, earned: 1, max: 2 }];
+  const attemptResult = vi.fn(async () => ({
+    quizId: REQUEST_ID, attemptId: 7, attemptNo: 1, earned: 1, max: 2, questions: [],
+  }));
+  const retryQuiz = { ...fetchedQuiz, id: REQUEST_ID, allowRetry: true } as Quiz;
+
+  it("ne prime pas sur le résumé d'une tentative existante, et il est jeté", async () => {
+    // Régression e2e (WebKit) : un montage interrompu écrivait un brouillon vierge, et la
+    // réouverture d'un quiz terminé affichait une passation vide au lieu du résumé.
+    localStorage.setItem(
+      `moodit:quiz-draft:${REQUEST_ID}`,
+      JSON.stringify({ answers: { 101: { kind: 'choice', answerIds: [] } }, touched: [], currentIndex: 0 })
+    );
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz: retryQuiz,
+        onFetchQuiz: vi.fn(async () => retryQuiz),
+        onFetchAttempts: vi.fn(async () => attempt),
+        onFetchAttemptResult: attemptResult,
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.phase).toBe('summary');
+    expect(result.current.result?.attemptId).toBe(7);
+    expect(localStorage.getItem(`moodit:quiz-draft:${REQUEST_ID}`)).toBeNull();
+  });
+
+  it("n'est jamais écrit tant que rien n'est saisi ni parcouru", async () => {
+    const first = mount();
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    await act(async () => { await Promise.resolve(); });
+    expect(localStorage.getItem(`moodit:quiz-draft:${REQUEST_ID}`)).toBeNull();
+
+    // Changer de question suffit à mériter un brouillon (position à retrouver).
+    act(() => first.result.current.goTo(1));
+    await waitFor(() => expect(localStorage.getItem(`moodit:quiz-draft:${REQUEST_ID}`)).toBeTruthy());
+  });
+});

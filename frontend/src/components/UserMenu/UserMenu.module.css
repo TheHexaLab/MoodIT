@@ -72,7 +72,8 @@
     font-family: Inter, sans-serif;
     font-size: clamp(0.6875rem, 0.63rem + 0.2vw, 0.75rem);
     font-weight: 700;
-    user-select: none;}
+    user-select: none;
+}
 
 .userInfo {
     display: flex;
@@ -342,7 +343,8 @@
     font-family: Inter, sans-serif;
     font-size: 1rem;
     font-weight: 700;
-    user-select: none;}
+    user-select: none;
+}
 
 .identityText {
     display: flex;

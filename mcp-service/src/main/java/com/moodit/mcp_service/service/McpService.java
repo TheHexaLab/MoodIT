@@ -21,6 +21,7 @@ import com.moodit.mcp_service.repository.UserRepository;
 import com.moodit.mcp_service.service.mcp.McpAnalysisRunner;
 import com.moodit.mcp_service.util.Timestamps;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -129,7 +130,14 @@ public class McpService {
         auditLogRepository.save(audit);
 
         Integer responseId = saved.getId();
-        afterCommit(() -> analysisRunner.run(responseId));
+        afterCommit(() -> {
+            try {
+                analysisRunner.run(responseId);
+            } catch (TaskRejectedException e) {
+                // File d'analyse pleine : la ligne PENDING ne doit pas rester bloquée.
+                analysisRunner.markRejected(responseId);
+            }
+        });
     }
 
     // ── Interne ──────────────────────────────────────────────────────────────

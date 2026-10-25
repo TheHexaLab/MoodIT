@@ -105,6 +105,14 @@ public class MembershipService {
     return membershipRepository.canSeeQuizViaProgram(userId, quizId);
   }
 
+  /** Programmes auxquels le cours est actuellement rattaché. */
+  @Transactional(readOnly = true)
+  public java.util.List<Long> courseProgramIds(long courseId) {
+    return membershipRepository.findProgramIdsByCourse(courseId).stream()
+        .map(Number::longValue)
+        .toList();
+  }
+
   /**
    * Le cours fait-il (structurellement) partie du programme ? Lien de la table de jointure
    * program_course, independant de tout utilisateur.

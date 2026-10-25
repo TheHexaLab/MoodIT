@@ -7,6 +7,7 @@ import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.exception.CourseNotFoundException;
+import com.moodit.core_service.exception.InvalidQuizException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
@@ -36,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -354,6 +356,9 @@ public class QuizService {
                 .orElseThrow(QuizNotFoundException::new);
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
+
+        // Avant toute écriture : une réponse mal formée est refusée (400) sans consommer la tentative.
+        requireValidOrderings(quiz, byQuestion);
 
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
@@ -752,16 +757,23 @@ public class QuizService {
         List<Integer> correctIds = options.stream()
                 .filter(o -> Boolean.TRUE.equals(o.getIsCorrect()))
                 .map(Answer::getId).toList();
+        // Dédoublonné : la requête vient du client. Sans ça, [1, 1] comptait deux bonnes réponses
+        // pour une seule cochée et donnait la note maximale au choix multiple.
         List<Integer> selectedIds = answer != null && answer.getAnswerIds() != null
-                ? answer.getAnswerIds() : List.of();
+                ? new ArrayList<>(new LinkedHashSet<>(answer.getAnswerIds())) : List.of();
         Set<Integer> correctSet = new HashSet<>(correctIds);
 
         double total = question.getTotalScore() != null ? question.getTotalScore() : 0.0;
         double earned;
-        if ("multiple_choice".equals(slug)) {
+        if (correctIds.isEmpty()) {
+            // Question mal configurée (antérieure à la validation, cf. requireCorrectOption) :
+            // aucun point à gagner, plutôt que le score plein pour une réponse vide.
+            earned = 0.0;
+        } else if ("multiple_choice".equals(slug)) {
             long good = selectedIds.stream().filter(correctSet::contains).count();
             long bad = selectedIds.stream().filter(id -> !correctSet.contains(id)).count();
-            double ratio = correctIds.isEmpty() ? 0 : (double) (good - bad) / correctIds.size();
+            // correctIds n'est jamais vide ici : le cas est traité juste au-dessus.
+            double ratio = (double) (good - bad) / correctIds.size();
             earned = scaled(total, ratio);
         } else {
             Set<Integer> selectedSet = new HashSet<>(selectedIds);
@@ -778,6 +790,35 @@ public class QuizService {
                 .build();
     }
 
+    /**
+     * Une remise en ordre soumise doit être une PERMUTATION des éléments de la question : chacun
+     * exactement une fois, aucun en trop ni d'une autre question. L'interface n'envoie que ça ; une
+     * autre liste vient d'une requête fabriquée. Liste absente ou vide = question non répondue (0).
+     */
+    private void requireValidOrderings(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        int index = 0;
+        for (Question q : sortedQuestions(quiz)) {
+            index++;
+            String slug = slugFor(q);
+            SubmittedAnswerDTO answer = byQuestion.get(q.getId());
+            if (!"ordering".equals(slug) || answer == null) continue;
+            if (!isPermutationOrEmpty(q, answer.getOrderedItemIds())) {
+                throw new InvalidQuizException("Question " + index
+                        + " : l'ordre soumis doit contenir chaque élément exactement une fois.");
+            }
+        }
+    }
+
+    /** Vrai si `submitted` est absent/vide, ou contient chaque élément de la question une seule fois. */
+    private static boolean isPermutationOrEmpty(Question question, List<Integer> submitted) {
+        if (submitted == null || submitted.isEmpty()) return true;
+        List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
+        Set<Integer> expected = items.stream().map(DragItem::getId).collect(Collectors.toSet());
+        return submitted.size() == expected.size()
+                && !submitted.contains(null)
+                && new HashSet<>(submitted).equals(expected);
+    }
+
     private QuestionResultDTO gradeOrdering(Question question, SubmittedAnswerDTO answer) {
         List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
         List<Integer> correctOrder = items.stream()
@@ -787,7 +828,9 @@ public class QuizService {
                 ? answer.getOrderedItemIds() : List.of();
 
         int correctCount = 0;
-        for (int i = 0; i < submittedOrder.size() && i < correctOrder.size(); i++) {
+        // Ordre mal formé (donnée antérieure à la validation, cf. requireValidOrderings) : 0.
+        int limit = isPermutationOrEmpty(question, submittedOrder) ? submittedOrder.size() : 0;
+        for (int i = 0; i < limit && i < correctOrder.size(); i++) {
             if (correctOrder.get(i).equals(submittedOrder.get(i))) correctCount++;
         }
         double ratio = items.isEmpty() ? 0 : (double) correctCount / items.size();
@@ -860,6 +903,7 @@ public class QuizService {
             q.setQType(resolveQType(qd));
             q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
+            requireCorrectOption(q, index);
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
             q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
@@ -888,8 +932,27 @@ public class QuizService {
         q.setQType(resolveQType(qd));
         q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
+        requireCorrectOption(q, index);
         applyDragItems(q, qd.getDragItems());
         applyTestCases(q, qd.getTestCases());
+    }
+
+    /**
+     * Une question à choix (Vrai/Faux, choix unique, choix multiple) doit avoir au moins une bonne
+     * réponse. Sans elle, la notation n'a pas de sens : l'ensemble vide attendu donnait le score
+     * plein à une réponse vide. L'éditeur le bloque déjà ; ici on protège l'API elle-même.
+     */
+    private static void requireCorrectOption(Question q, int index) {
+        String slug = slugFor(q);
+        boolean choice = "true_false".equals(slug) || "single_choice".equals(slug)
+                || "multiple_choice".equals(slug);
+        if (!choice) return;
+        boolean hasCorrect = q.getAnswers() != null
+                && q.getAnswers().stream().anyMatch(a -> Boolean.TRUE.equals(a.getIsCorrect()));
+        if (!hasCorrect) {
+            throw new InvalidQuizException(
+                    "Question " + (index + 1) + " : au moins une bonne réponse doit être cochée.");
+        }
     }
 
     /** Résout le langage d'une question Code depuis le DTO (id imbriqué). null si absent/non-code. */
@@ -1105,7 +1168,7 @@ public class QuizService {
                 .build();
     }
 
-    private String slugFor(Question question) {
+    private static String slugFor(Question question) {
         if (question.getQType() == null) return null;
         return Q_TYPE_NAME_TO_SLUG.get(question.getQType().getName());
     }

@@ -182,7 +182,8 @@ div.channel-view > div > ul > li[role="message"] > button > .replyRefAvatar {
     font-size: 0.5rem;
     font-weight: 700;
     line-height: 1;
-    user-select: none;}
+    user-select: none;
+}
 
 div.channel-view > div > ul > li[role="message"] > button > .replyRefName {
     flex-shrink: 0;
@@ -245,7 +246,8 @@ div.channel-view > div > ul > li[role="message"] > span:first-of-type {
     line-height: normal;
     text-box-trim: trim-both;
     text-box-edge: cap alphabetic;
-    user-select: none;}
+    user-select: none;
+}
 
 div.channel-view > div > ul > li[role="message"] > div:first-of-type {
     flex: 1;
@@ -363,7 +365,7 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     transition: border-color 0.2s ease;
     /* Multi-ligne : préserve/affiche les sauts de ligne (Maj+Entrée), wrappe, et s'auto-agrandit
        (hauteur pilotée en JS) jusqu'à un plafond puis scroll. Barre de scroll VISIBLE ici
-       (contrairement au composer) pour bien signaler le débordement pendant l'édition. */
+       (comme le composer) pour bien signaler le débordement pendant l'édition. */
     white-space: pre-wrap;
     overflow-wrap: break-word;
     resize: none;
@@ -637,16 +639,43 @@ div.channel-view > div > div:last-child > div > textarea {
     resize: none;
     max-height: 9rem;
     overflow-x: hidden;
+    /* Le JS passe à `auto` seulement si le contenu dépasse max-height : la barre de défilement
+       n'apparaît que lorsque du texte est réellement caché. */
     overflow-y: auto;
-    /* Le défilement reste actif (au-delà de max-height), mais la barre de scroll est masquée. */
-    scrollbar-width: none;        /* Firefox */
-    -ms-overflow-style: none;     /* IE / ancien Edge */
 }
 
-/* Masque la barre de scroll du composer (WebKit : Chrome, Safari, Edge). Le scroll fonctionne
-   toujours (molette / tactile / clavier). */
+/* Barre de défilement du composer : même style que la liste de messages et le champ d'édition
+   (fine, sans flèches). Firefox UNIQUEMENT pour scrollbar-width : sur Chrome 121+, il ferait
+   ignorer les règles ::-webkit-scrollbar ci-dessous. */
+@supports not selector(::-webkit-scrollbar) {
+    div.channel-view > div > div:last-child > div > textarea {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong) transparent;
+    }
+}
 div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar {
+    width: 4px;
+}
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-track {
+    background: transparent;
+}
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:start,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:end,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:vertical:start,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:vertical:end,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:vertical:increment,
+div.channel-view > div > div:last-child > div > textarea::-webkit-scrollbar-button:vertical:decrement {
     display: none;
+    width: 0;
+    height: 0;
 }
 
 /* Placeholder sur UNE seule ligne (comme l'ancien <input>). Un textarea wrappe son

@@ -1,0 +1,9 @@
+# Faux positifs connus de gitleaks, ignorés par empreinte exacte (commit:fichier:règle:ligne) :
+# un NOUVEAU secret, même dans ces fichiers, reste détecté.
+#  - *.example : valeurs de remplacement (« remplacer… », « mot_de_passe… »), pas de vrais secrets.
+#  - bruno/ : JWT de test signés avec le secret de DEV, expirés depuis le 2026-07-13.
+69b2d2814f778c0b37930d727ed02b655ee63c5c:deploy/env.docker.example:generic-api-key:26
+378c4b10ae6bdca13cde8bd827e3fe91353fdfc9:bruno/tests_core-service/Programs/programs-courses.yml:jwt:20
+70bfb3b2e991db7cfea453520e5441ebca5af456:bruno/tests_core-service/forums/forums-posts.yml:jwt:19
+70bfb3b2e991db7cfea453520e5441ebca5af456:bruno/tests_core-service/forums/forums-posts-votes.yml:jwt:19
+7964ef13d4f34a3e4ec5460cacd2a29c1a6dcac2:.env.example:generic-api-key:10

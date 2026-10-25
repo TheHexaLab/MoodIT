@@ -1,32 +1,11 @@
 /* Modale « Gestion MCP » (feedback automatisé d'un cours) — vues liste + détail.
    Conventions visuelles des autres popups (scrim, dialog animé) ; thème via variables. */
-.scrim {
-  position: fixed;
-  z-index: 90;
-  inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: var(--scrim);
-  animation: mcp-fade-in 0.2s ease-out;
-}
 
 .dialog {
+  /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
   display: flex;
-  box-sizing: border-box;
-  width: min(47.5rem, 100% - 2rem);
-  /* Fallback vh pour les navigateurs sans dvh (sinon pas de max-height → pas de scroll). */
-  max-height: calc(100vh - 2rem);
-  max-height: calc(100dvh - 2rem);
-  /* .dialog ne défile pas lui-même (il clippe aux coins arrondis) : c'est .scrollArea,
-     SOUS le header, qui porte le défilement → la scrollbar ne court que sur le contenu. */
-  overflow: hidden;
   flex-direction: column;
   user-select: none;
-  border-radius: 1rem;
-  background: var(--bg-surface);
-  box-shadow: 0 12px 32px var(--shadow-modal);
-  animation: mcp-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 /* Zone de défilement, SOUS le header : la scrollbar ne recouvre donc jamais le header.
    flex + min-height:0 pour pouvoir défiler à l'intérieur du flex column .dialog. */
@@ -50,28 +29,6 @@
 .scrollArea::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 .scrollArea::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
-.scrim.closing {
-  animation: mcp-fade-out 0.2s ease-in forwards;
-}
-.scrim.closing .dialog {
-  animation: mcp-pop-out 0.2s ease-in forwards;
-}
-
-@keyframes mcp-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes mcp-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes mcp-pop-in {
-  from { opacity: 0; transform: translateY(0.75rem) scale(0.97); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes mcp-pop-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(0.75rem) scale(0.97); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .scrim,
-  .dialog { animation: none; }
-}
-
 /* ── Transition de page (liste ↔ détail) + taille animée ─── */
 /* Viewport : clippe le contenu et anime sa hauteur quand la page/onglet change.
    Vit à l'intérieur de .scrollArea, qui porte le défilement. */
@@ -85,14 +42,6 @@
 }
 .view[data-dir='back'] {
   animation-name: mcp-step-back;
-}
-@keyframes mcp-step-forward {
-  from { opacity: 0; transform: translateX(1.5rem); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes mcp-step-back {
-  from { opacity: 0; transform: translateX(-1.5rem); }
-  to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .viewport { transition: none; }

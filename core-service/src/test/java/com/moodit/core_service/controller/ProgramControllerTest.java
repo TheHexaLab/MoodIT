@@ -205,6 +205,9 @@ class ProgramControllerTest {
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.title").value("Programmation"));
+
+            verify(programService).addCourseToPrograms(argThat(c -> "Programmation".equals(c.getTitle())
+                    && "PROG101".equals(c.getCode()) && List.of(1).equals(c.getProgramIds())));
         }
 
         @Test
@@ -238,7 +241,22 @@ class ProgramControllerTest {
             mockMvc.perform(post("/api/programs/users")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
-                    .andExpect(status().isCreated());
+                    .andExpect(status().isCreated())
+                    .andExpect(content().string(""));
+
+            verify(programService).addUserToPrograms(argThat(u -> u.getId() == 1
+                    && List.of(1).equals(u.getProgramIds()) && u.getEstablishmentId() == null));
+        }
+
+        @Test
+        @DisplayName("Erroné → JSON mal formé retourne 400 sans appeler le service")
+        void devrait_retourner_400_si_json_mal_forme() throws Exception {
+            mockMvc.perform(post("/api/programs/users")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"id\":"))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(programService);
         }
 
         @Test
@@ -273,6 +291,9 @@ class ProgramControllerTest {
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.name").value("Nouveau nom"));
+
+            verify(programService).updateProgram(eq(1), argThat(u -> "Nouveau nom".equals(u.getName())
+                    && u.getCode() == null && u.getCohort() == null && u.getColor() == null));
         }
 
         @Test

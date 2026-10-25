@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styles from './LeftMenuGroup.module.css';
 
 interface LeftMenuGroupProps {
@@ -6,20 +6,19 @@ interface LeftMenuGroupProps {
   programMenu: React.ReactNode;
   /** Second panneau (menu cours). */
   courseMenu: React.ReactNode;
-  /** Titre affiche dans la barre mobile. */
+  /** Titre affiche dans la barre mobile (absent : « Accueil »). */
   mobileTitle?: string;
+  /**
+   * Identifiant de l'élément ouvert (canal, forum, quiz). Quand il change vers un élément
+   * défini, le tiroir mobile se referme. Absent : le titre mobile sert d'identifiant.
+   */
+  selectionKey?: string | number;
   /** Icône/préfixe du titre (ex. `<ChannelTypeIcon />`). */
   mobileTitlePrefix?: React.ReactNode;
   /** Initiale affichée dans l'avatar mobile (repli si aucun menu fourni). */
   mobileUserInitial?: string;
   /** Menu du compte rendu dans la barre mobile (avatar cliquable en haut à droite). */
   mobileUserMenu?: React.ReactNode;
-  /**
-   * Ferme le tiroir mobile chaque fois que cette valeur change (hors montage initial).
-   * Sert à replier le menu quand on ouvre un canal : sur mobile, la sélection navigue
-   * vers le panneau principal, qu'il faut donc révéler.
-   */
-  collapseKey?: string | number;
 }
 
 /**
@@ -29,25 +28,29 @@ interface LeftMenuGroupProps {
 export default function LeftMenuGroup({
   programMenu,
   courseMenu,
-  mobileTitle = 'Accueil',
+  mobileTitle,
+  selectionKey,
   mobileTitlePrefix = '',
   mobileUserInitial = 'U',
   mobileUserMenu,
-  collapseKey,
 }: LeftMenuGroupProps): React.ReactElement {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const isFirstCollapseRun = useRef(true);
 
-  // Referme le tiroir quand `collapseKey` change (ex. ouverture d'un canal). On saute
-  // le montage initial : refermer un tiroir déjà fermé est sans effet, mais l'intention
-  // est de ne réagir qu'aux changements ultérieurs.
-  useEffect(() => {
-    if (isFirstCollapseRun.current) {
-      isFirstCollapseRun.current = false;
-      return;
-    }
-    setIsDrawerOpen(false);
-  }, [collapseKey]);
+  // Choisir un élément dans le tiroir le referme (sinon le contenu reste caché derrière ses
+  // 90 vw). Seul un choix fait dans le tiroir compte : un clic dans le tiroir arme la
+  // fermeture, et le prochain changement de sélection la déclenche. Un changement asynchrone
+  // (restauration du dernier emplacement après rechargement) ne referme donc pas un tiroir
+  // que l'utilisateur vient d'ouvrir. Ajustement pendant le rendu plutôt qu'un effet : pas
+  // de rendu intermédiaire où le tiroir recouvre encore le nouvel élément. Retour à
+  // l'accueil (aucun élément, ex. changement de programme) : le tiroir reste ouvert.
+  const selection = selectionKey ?? mobileTitle;
+  const [lastSelection, setLastSelection] = useState(selection);
+  const [pickedInDrawer, setPickedInDrawer] = useState(false);
+  if (selection !== lastSelection) {
+    setLastSelection(selection);
+    setPickedInDrawer(false);
+    if (pickedInDrawer && selection !== undefined) setIsDrawerOpen(false);
+  }
 
   useEffect(() => {
     if (!isDrawerOpen) return;
@@ -89,7 +92,7 @@ export default function LeftMenuGroup({
           {mobileTitlePrefix && (
             <span role="prefix">{mobileTitlePrefix}</span>
           )}
-          <span role="title">{mobileTitle}</span>
+          <span role="title">{mobileTitle ?? 'Accueil'}</span>
         </h2>
 
         {mobileUserMenu ?? (
@@ -103,6 +106,9 @@ export default function LeftMenuGroup({
         id="left-menu-drawer"
         className={`${styles.sidebarShell} ${isDrawerOpen ? styles.sidebarShellOpen : ''}`}
         aria-label="Menus lateraux"
+        onClick={() => {
+          if (isDrawerOpen) setPickedInDrawer(true);
+        }}
       >
         <div className={styles.sidebarMenus}>
           {programMenu}

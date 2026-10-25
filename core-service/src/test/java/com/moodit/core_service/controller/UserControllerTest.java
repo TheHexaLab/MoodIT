@@ -204,8 +204,10 @@ class UserControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.firstName").value("NouveauPrénom"))
-                    .andExpect(jsonPath("$.lastName").value("Doe")); // Inchangé
+                    .andExpect(jsonPath("$.id").value(1));
+
+            verify(userService).updateUser(eq(1), argThat(u -> "NouveauPrénom".equals(u.getFirstName())
+                    && u.getLastName() == null && u.getAvatarColor() == null));
         }
 
         @Test
@@ -229,8 +231,11 @@ class UserControllerTest {
             mockMvc.perform(patch("/api/users/1")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.firstName").value("John")); // Nom d'origine intact
+                    .andExpect(status().isOk());
+
+            // Corps vide → DTO entièrement null : le service ne doit rien écraser.
+            verify(userService).updateUser(eq(1), argThat(u ->
+                    u.getFirstName() == null && u.getLastName() == null && u.getAvatarColor() == null));
         }
     }
 }

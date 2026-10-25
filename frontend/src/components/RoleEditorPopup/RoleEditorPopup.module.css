@@ -1,90 +1,16 @@
-div.role-editor-popup {
-    position: fixed;
-    z-index: 90;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    animation: role-editor-popup-fade-in 0.2s ease-out;
-}
-
 div.role-editor-popup  > div {
+    /* Conteneur (voile, largeur, hauteur, fond, animation) : Popup.module.css. */
     display: flex;
-    box-sizing: border-box;
-    /* Largeur fluide : plafonne à 25.75rem mais se réduit avec une gouttière sur petits écrans. */
-    width: min(25.75rem, 100% - 2rem);
     padding: 1rem;
-    margin: 1rem;
     user-select: none;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.88rem;
-    border-radius: 1rem;
-    background: var(--bg-surface);
-    box-shadow: 0 12px 32px var(--shadow-modal);
-    animation: role-editor-popup-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (min-width: 768px) {
     div.role-editor-popup > div {
         padding: 1.25rem;
-        margin: 2.13rem;
-    }
-}
-
-@keyframes role-editor-popup-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes role-editor-popup-pop-in {
-    from {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-@keyframes role-editor-popup-fade-out {
-    from {
-        opacity: 1;
-    }
-    to {
-        opacity: 0;
-    }
-}
-
-@keyframes role-editor-popup-pop-out {
-    from {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateY(0.75rem) scale(0.96);
-    }
-}
-
-div.role-editor-popup.closing {
-    animation: role-editor-popup-fade-out 0.2s ease-in forwards;
-}
-
-div.role-editor-popup.closing > div {
-    animation: role-editor-popup-pop-out 0.2s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    div.role-editor-popup,
-    div.role-editor-popup > div {
-        animation: none;
     }
 }
 
@@ -384,7 +310,8 @@ div.role-editor-popup > div > section > header > div.picker > ul > li > button >
     font-weight: 500;
     line-height: normal;
     text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;}
+    text-box-edge: cap alphabetic;
+}
 
 div.role-editor-popup > div > section > header > div.picker > ul > li > button > div {
     display: flex;
@@ -497,7 +424,8 @@ div.role-editor-popup > div > section > ul > li {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-grow: 1;
+    /* Une ligne par membre : sans base de largeur, deux noms courts tenaient côte à côte. */
+    flex: 1 0 100%;
     gap: 0.625rem;
     padding: 0.375rem 0;
     box-sizing: border-box;
@@ -529,7 +457,8 @@ div.role-editor-popup > div > section > ul > li > div > span > span {
     font-weight: 500;
     line-height: normal;
     text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;}
+    text-box-edge: cap alphabetic;
+}
 
 @supports not (text-box-trim: trim-both) {
     div.role-editor-popup > div > section > ul > li > div > span > span {

@@ -56,7 +56,11 @@ export function CodeInput({
     const next = digits.slice();
     next[index] = clean;
     emit(next);
-    if (index < length - 1) refs.current[index + 1]?.focus();
+    // La valeur émise est compacte (join('')) : un chiffre saisi après des cases vides
+    // « glisse » vers la gauche. Le focus suit donc la position réelle du chiffre saisi dans
+    // la chaîne compactée (nombre de cases remplies jusqu'à lui), puis avance d'un.
+    const filledUpToIndex = next.slice(0, index + 1).filter((d) => d !== '').length;
+    refs.current[Math.min(filledUpToIndex, length - 1)]?.focus();
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {

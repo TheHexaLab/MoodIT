@@ -501,7 +501,7 @@ public class ForumService {
                 .stream()
                 .filter(p -> p.getId().equals(postId))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Post not found"));
+                .orElseThrow(PostNotFoundException::new);
 
         // Capturé AVANT delete (f_type du forum encore accessible) ; émis après commit.
         long fId = forum.getId();
@@ -531,7 +531,7 @@ public class ForumService {
             postRepository.detachDirectChildren(postId);
             entityManager.clear();
             Post toDelete = postRepository.findById(postId)
-                    .orElseThrow(() -> new RuntimeException("Post not found"));
+                    .orElseThrow(PostNotFoundException::new);
             postRepository.delete(toDelete);
         } else {
             // Thread : supprimer le post supprime tout son sous-fil (cascade JPA + BD conservée).

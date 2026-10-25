@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './RoleEditorPopup.module.css';
-import { isTouchDevice } from '../../helpers/viewport';
-import { useBackdropClose } from '../../hooks/useBackdropClose';
+import { Popup } from '../Popup/Popup';
+import { PopupVariant } from '../Popup/popupVariant';
+import { usePopupController } from '../Popup/popupController';
 import { Spinner as BaseSpinner } from '../Spinner/Spinner.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { initials } from './helpers.ts';
+import { isTouchDevice } from '../../helpers/viewport';
 import { defaultLabels } from './labels.ts';
 import type { MaybePromise, Role, RoleChange, RoleEditorPopupLabels, User } from './types.ts';
 
@@ -115,9 +117,8 @@ export function RoleEditorPopup({
   /** Jeton de la dernière requête async : ignore les réponses périmées (race conditions). */
   const requestRef = useRef(0);
 
-  const [isClosing, setIsClosing] = useState(false);
-  const backdrop = useBackdropClose(() => requestClose(onClose));
-  const pendingAction = useRef<(() => void) | null>(null);
+  const popup = usePopupController();
+  const { requestClose } = popup;
   /** Header de la section dont le sélecteur est ouvert (pour le click-outside). */
   const openSectionRef = useRef<HTMLElement | null>(null);
 
@@ -158,38 +159,26 @@ export function RoleEditorPopup({
     }
   }
 
+  /** Ferme le sélecteur d'ajout et réinitialise sa recherche. */
+  function closePicker() {
+    setAddingRoleId(null);
+    setSearch('');
+    setCandidates([]);
+    setCandPage(0);
+    setCandHasMore(false);
+  }
+
   // Ferme le sélecteur d'ajout quand on clique en dehors de sa section.
   useEffect(() => {
     if (addingRoleId === null) return;
     function onPointerDown(event: MouseEvent) {
       if (openSectionRef.current && !openSectionRef.current.contains(event.target as Node)) {
-        setAddingRoleId(null);
-        setSearch('');
-        setCandidates([]);
-        setCandPage(0);
-        setCandHasMore(false);
+        closePicker();
       }
     }
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [addingRoleId]);
-
-  /** Joue l'animation de sortie puis exécute l'action (fermeture immédiate si reduced-motion). */
-  function requestClose(action: () => void) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      action();
-      return;
-    }
-    pendingAction.current = action;
-    setIsClosing(true);
-  }
-
-  function handleAnimationEnd(event: React.AnimationEvent<HTMLDivElement>) {
-    if (isClosing && event.target === event.currentTarget) {
-      pendingAction.current?.();
-      pendingAction.current = null;
-    }
-  }
 
   /** Utilisateurs d'une section = ceux dont les role_ids contiennent ce rôle. */
   function usersFor(roleId: number): User[] {
@@ -327,131 +316,142 @@ export function RoleEditorPopup({
 
   return (
     <>
-      <div
-        className={`${styles['role-editor-popup']}${isClosing ? ` ${styles.closing}` : ''}`}
-        {...backdrop}
+      <Popup
+        variant={PopupVariant.Form}
+        label={t.title}
+        onClose={onClose}
+        controller={popup}
+        className={styles['role-editor-popup']}
+        overflow="visible"
       >
-        <div onAnimationEnd={handleAnimationEnd}>
-          <header>
-            <div>
-              <h1>{t.title}</h1>
-              <p>{t.subtitle}</p>
-            </div>
-            <button onClick={() => requestClose(onClose)}>✕</button>
-          </header>
-          {roles.length === 0 && <p className={styles.empty}>{t.emptyRoles}</p>}
-          {roles.map((role) => (
-            <section key={role.id} data-role-id={role.id}>
-              <header ref={addingRoleId === role.id ? openSectionRef : undefined}>
-                <h2>
-                  {role.name} · {usersFor(role.id).length}
-                </h2>
-                {canAssign(role.id) && (
-                  <button className={styles.add} onClick={() => toggleAdding(role.id)}>
-                    +<span>{t.addButton}</span>
-                  </button>
-                )}
-                {addingRoleId === role.id && (
-                  <div className={styles.picker}>
-                    <div className={styles['picker-search']}>
-                      <MagnifyingGlass width="1rem" height="1rem" />
-                      <input
-                        type="text"
-                        placeholder={t.searchPlaceholder}
-                        autoFocus={!isTouchDevice()}
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                      />
-                    </div>
-                    <ul onScroll={handleCandidatesScroll}>
-                      {pickerCandidates(role.id).length === 0 ? (
-                        // Mode serveur : pendant le 1er chargement, on affiche un spinner plutôt
-                        // que le message « aucun candidat » (qui serait trompeur).
-                        serverMode && candLoading ? (
-                          <li className={styles['picker-empty']}>
-                            <Spinner />
-                          </li>
-                        ) : (
-                          <li className={styles['picker-empty']}>
-                            {search.trim() === '' ? t.noCandidates : t.noResults}
-                          </li>
-                        )
-                      ) : (
-                        <>
-                          {pickerCandidates(role.id).map((user) => (
-                            <li key={user.id}>
-                              <button
-                                disabled={pending !== null}
-                                onClick={() => addUser(role.id, user)}
-                              >
-                                <span style={{ background: user.avatarColor }}>
-                                  <span style={{ color: contrastingTextColor(user.avatarColor) }}>
-                                    {initials(user)}
-                                  </span>
-                                </span>
-                                <div>
-                                  <span>
-                                    {user.firstName} {user.lastName}
-                                  </span>
-                                  <span>{user.email}</span>
-                                </div>
-                              </button>
-                            </li>
-                          ))}
-                          {/* Chargement d'une page supplémentaire (infinite scroll). */}
-                          {serverMode && candLoading && (
-                            <li className={styles['picker-empty']}>
-                              <Spinner />
-                            </li>
-                          )}
-                        </>
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </header>
-              {usersFor(role.id).length === 0 ? (
-                <p className={styles.empty}>{t.emptyRole}</p>
-              ) : (
-                <ul>
-                  {usersFor(role.id).map((user) => (
-                    <li key={user.id}>
-                      <div>
-                        <span style={{ background: user.avatarColor }}>
-                          <span style={{ color: contrastingTextColor(user.avatarColor) }}>
-                            {initials(user)}
-                          </span>
-                        </span>
-                        <div>
-                          <span>
-                            {user.firstName} {user.lastName}
-                          </span>
-                          <span>{user.email}</span>
-                        </div>
-                      </div>
-                      {canUnassign(role.id, user.id) && (
-                        <button
-                          className={styles.delete}
-                          disabled={pending !== null}
-                          onClick={() => removeUser(role.id, user.id)}
-                        >
-                          {pending?.type === 'unassign' &&
-                          pending.roleId === role.id &&
-                          pending.userId === user.id ? (
-                            <Spinner />
-                          ) : (
-                            <TrashCan width="1rem" height="1rem" />
-                          )}
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+        <header>
+          <div>
+            <h1>{t.title}</h1>
+            <p>{t.subtitle}</p>
+          </div>
+          <button onClick={() => requestClose(onClose)}>✕</button>
+        </header>
+        {roles.length === 0 && <p className={styles.empty}>{t.emptyRoles}</p>}
+        {roles.map((role) => (
+          <section key={role.id} data-role-id={role.id}>
+            <header ref={addingRoleId === role.id ? openSectionRef : undefined}>
+              <h2>
+                {role.name} · {usersFor(role.id).length}
+              </h2>
+              {canAssign(role.id) && (
+                <button className={styles.add} onClick={() => toggleAdding(role.id)}>
+                  +<span>{t.addButton}</span>
+                </button>
               )}
-            </section>
-          ))}
-        </div>
-      </div>
+              {addingRoleId === role.id && (
+                <div
+                  className={styles.picker}
+                  onKeyDown={(e) => {
+                    // Échap ferme la liste, pas la popup (même règle qu'AddCoursePopup).
+                    if (e.key !== 'Escape') return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    closePicker();
+                  }}
+                >
+                  <div className={styles['picker-search']}>
+                    <MagnifyingGlass width="1rem" height="1rem" />
+                    <input
+                      type="text"
+                      placeholder={t.searchPlaceholder}
+                      autoFocus={!isTouchDevice()}
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+                  <ul onScroll={handleCandidatesScroll}>
+                    {pickerCandidates(role.id).length === 0 ? (
+                      // Mode serveur : pendant le 1er chargement, on affiche un spinner plutôt
+                      // que le message « aucun candidat » (qui serait trompeur).
+                      serverMode && candLoading ? (
+                        <li className={styles['picker-empty']}>
+                          <Spinner />
+                        </li>
+                      ) : (
+                        <li className={styles['picker-empty']}>
+                          {search.trim() === '' ? t.noCandidates : t.noResults}
+                        </li>
+                      )
+                    ) : (
+                      <>
+                        {pickerCandidates(role.id).map((user) => (
+                          <li key={user.id}>
+                            <button
+                              disabled={pending !== null}
+                              onClick={() => addUser(role.id, user)}
+                            >
+                              <span style={{ background: user.avatarColor }}>
+                                <span style={{ color: contrastingTextColor(user.avatarColor) }}>
+                                  {initials(user)}
+                                </span>
+                              </span>
+                              <div>
+                                <span>
+                                  {user.firstName} {user.lastName}
+                                </span>
+                                <span>{user.email}</span>
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                        {/* Chargement d'une page supplémentaire (infinite scroll). */}
+                        {serverMode && candLoading && (
+                          <li className={styles['picker-empty']}>
+                            <Spinner />
+                          </li>
+                        )}
+                      </>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </header>
+            {usersFor(role.id).length === 0 ? (
+              <p className={styles.empty}>{t.emptyRole}</p>
+            ) : (
+              <ul>
+                {usersFor(role.id).map((user) => (
+                  <li key={user.id}>
+                    <div>
+                      <span style={{ background: user.avatarColor }}>
+                        <span style={{ color: contrastingTextColor(user.avatarColor) }}>
+                          {initials(user)}
+                        </span>
+                      </span>
+                      <div>
+                        <span>
+                          {user.firstName} {user.lastName}
+                        </span>
+                        <span>{user.email}</span>
+                      </div>
+                    </div>
+                    {canUnassign(role.id, user.id) && (
+                      <button
+                        className={styles.delete}
+                        disabled={pending !== null}
+                        onClick={() => removeUser(role.id, user.id)}
+                      >
+                        {pending?.type === 'unassign' &&
+                        pending.roleId === role.id &&
+                        pending.userId === user.id ? (
+                          <Spinner />
+                        ) : (
+                          <TrashCan width="1rem" height="1rem" />
+                        )}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ))}
+      </Popup>
 
       {error && (
         <ErrorPopup

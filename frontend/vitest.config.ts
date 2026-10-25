@@ -10,5 +10,15 @@ export default defineConfig({
     globals: true,
     css: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Couverture (#90) : `npm run test:coverage` → coverage/ (texte, HTML, lcov, résumé JSON pour la CI).
+    // Mesurée sur tout src/ (fichiers non importés par un test compris), hors tests, types et mocks.
+    coverage: {
+      provider: 'v8',
+      all: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.{test,spec}.{ts,tsx}', 'src/**/*.d.ts', 'src/mocks/**', 'src/main.tsx', 'src/pages/PopupTests.tsx'],
+      reporter: ['text-summary', 'html', 'lcov', 'json-summary'],
+      reportsDirectory: 'coverage',
+    },
   },
 });

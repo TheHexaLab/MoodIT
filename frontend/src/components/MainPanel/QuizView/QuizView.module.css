@@ -629,16 +629,15 @@
     cursor: pointer;
 }
 
-/* ─── Compensation de la barre supérieure MOBILE (viewport, pas conteneur) ───
-   Sous 56.25rem, LeftMenuGroup affiche une barre fixe de 3.25rem (z-index 70) qui
-   recouvre le haut du panneau. L'en-tête du quiz (normalement `calc(3.25rem - 3px)`)
-   passe alors derrière elle ; sa hauteur étant pile celle de la barre moins le ruban
-   de progression, ce dernier se retrouve masqué sous le bord de la barre.
-   → On donne à l'en-tête la hauteur PLEINE (3.25rem) : il remplit exactement la zone
-   cachée, et la barre de progression descend juste sous la barre mobile → visible. */
+/* ─── Barre supérieure MOBILE (viewport, pas conteneur) ───
+   Sous 56.25rem, LeftMenuGroup affiche une barre fixe de 3.25rem (z-index 70) en haut
+   de l'écran, par-dessus le panneau. La vue commence donc SOUS cette barre (padding-top
+   de la même hauteur) : l'en-tête du quiz, et avec lui la progression « Question i
+   sur n », reste entièrement visible au lieu de passer derrière la barre. */
 @media (max-width: 56.25rem) {
-    .header {
-        height: 3.25rem;
+    .view {
+        box-sizing: border-box;
+        padding-top: 3.25rem;
     }
     /* Mobile : on masque les points de progression (la barre du haut suffit à indiquer
        l'avancement) → plus de place pour les boutons de navigation. */

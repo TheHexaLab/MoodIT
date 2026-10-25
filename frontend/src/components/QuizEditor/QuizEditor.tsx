@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfirmationPopup';
-import { EditorShell, Portal } from './EditorShell';
+import { EditorShell } from './EditorShell';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { QuizListBody } from './QuizListPopup';
 import { QuizFormBody } from './QuizFormPopup';
@@ -486,12 +486,24 @@ export function QuizEditor({
       <EditorShell
         title={shell.title}
         subtitle={shell.subtitle}
+        // Chevron présent dans toutes les vues sauf la liste. `shell.onBack` n'est lu qu'au clic :
+        // certaines actions de retour lisent une ref (instantané « Annuler »), ce qui est interdit
+        // pendant le rendu (react-hooks/refs).
         onBack={
-          shell.onBack
-            ? () => (backLosesData ? requestDiscard(shell.onBack!) : shell.onBack!())
-            : undefined
+          view.kind === 'list'
+            ? undefined
+            : () => {
+                const back = shell.onBack;
+                if (!back) return;
+                if (backLosesData) requestDiscard(back);
+                else back();
+              }
         }
         onClose={onClose}
+        // Échap ferme l'éditeur seulement depuis la liste des quiz : ailleurs (formulaire, question,
+        // harnais, test), il ferait perdre la saisie en cours sans confirmation.
+        closeOnEscape={view.kind === 'list'}
+        // Croix et clic sur le fond : confirmation si des modifications ne sont pas enregistrées.
         onCloseGuard={requestDiscard}
         width={shell.width}
         scrollBody={shell.scrollBody}
@@ -520,6 +532,9 @@ export function QuizEditor({
             onCancel={cancelForm}
             onDirty={markDirty}
             onSaveMeta={(meta) => saveQuizMeta(view.quizId, view.isNew, meta)}
+            // Méta saisies gardées EN MÉMOIRE pendant l'édition d'une question (le formulaire
+            // est démonté) ; « Annuler » les défait via l'instantané, comme les questions.
+            onStashMeta={(meta) => upsertQuiz({ ...activeQuiz, ...meta })}
             onAddQuestion={() => openAddQuestion(view.quizId, view.isNew)}
             onEditQuestion={(q) => openEditQuestion(view.quizId, view.isNew, q)}
             onDeleteQuestion={(q) => setPendingDelete({ kind: 'question', quizId: view.quizId, id: q.id })}
@@ -610,54 +625,46 @@ export function QuizEditor({
       </EditorShell>
 
       {pendingDelete && (
-        <Portal>
-          <DeleteConfirmationPopup
-            title={pendingDelete.kind === 'quiz' ? t.deleteQuizTitle : t.deleteQuestionTitle}
-            content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
-            onDeleteConfirmation={confirmDelete}
-            onClose={() => setPendingDelete(null)}
-          />
-        </Portal>
+        <DeleteConfirmationPopup
+          title={pendingDelete.kind === 'quiz' ? t.deleteQuizTitle : t.deleteQuestionTitle}
+          content={pendingDelete.kind === 'quiz' ? t.deleteQuizBody : t.deleteQuestionBody}
+          onDeleteConfirmation={confirmDelete}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
 
       {/* Confirmation de PERTE DE DONNÉES : fermeture (X / clic extérieur) ou retour (chevron)
           alors que des modifications ne sont pas enregistrées. */}
       {pendingDiscard && (
-        <Portal>
-          <DeleteConfirmationPopup
-            title={t.discardTitle}
-            content={t.discardBody}
-            labels={{ cancel: t.discardCancel, confirm: t.discardConfirm }}
-            onDeleteConfirmation={() => {
-              const action = pendingDiscard;
-              setPendingDiscard(null);
-              action();
-            }}
-            onClose={() => setPendingDiscard(null)}
-          />
-        </Portal>
+        <DeleteConfirmationPopup
+          title={t.discardTitle}
+          content={t.discardBody}
+          labels={{ cancel: t.discardCancel, confirm: t.discardConfirm }}
+          onDeleteConfirmation={() => {
+            const action = pendingDiscard;
+            setPendingDiscard(null);
+            action();
+          }}
+          onClose={() => setPendingDiscard(null)}
+        />
       )}
 
       {loadFailedQuiz && (
-        <Portal>
-          <ErrorPopup
-            content={t.loadError}
-            onClose={() => setLoadFailedQuiz(null)}
-            onRetry={() => {
-              const quiz = loadFailedQuiz;
-              setLoadFailedQuiz(null);
-              void openEdit(quiz);
-            }}
-          />
-        </Portal>
+        <ErrorPopup
+          content={t.loadError}
+          onClose={() => setLoadFailedQuiz(null)}
+          onRetry={() => {
+            const quiz = loadFailedQuiz;
+            setLoadFailedQuiz(null);
+            void openEdit(quiz);
+          }}
+        />
       )}
 
       {/* Erreurs de sauvegarde / suppression (quiz ou question) : en POPUP, pas en inline dans
           le formulaire. Le formulaire reste ouvert dessous → l'utilisateur peut réessayer. */}
       {error && (
-        <Portal>
-          <ErrorPopup content={error} onClose={() => setError(null)} />
-        </Portal>
+        <ErrorPopup content={error} onClose={() => setError(null)} />
       )}
     </>
   );

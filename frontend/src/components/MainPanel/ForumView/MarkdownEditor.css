@@ -202,6 +202,14 @@ div[role^="markdown-editor"]:focus-within div[role="preview"]{
     border-bottom-color: var(--border-strong);
 }
 
+/* Indicateur de focus visible de la zone de saisie (WCAG 2.4.7) : contour teal tracé à
+   l'intérieur (offset négatif), pour ne pas passer sous la barre d'outils collée au-dessus.
+   Mode « champ » (quiz) exclu : son hôte entoure déjà tout l'éditeur d'un halo. */
+div[role^="markdown-editor"]:not([data-embedded]) textarea:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: -2px;
+}
+
 /* ─── Apercu (rendu Markdown). ─── */
 div[role^="markdown-editor"] div[role="preview"] {
     min-height: 3.5rem;
@@ -253,6 +261,11 @@ div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-st
 
 div[role^="markdown-editor"] > div[role="editor-actions"] > button {
     display: flex;
+    align-items: center;
+    /* Cible tactile minimale de 24 px (WCAG 2.5.8) : sans elle, la hauteur venait de la
+       seule ligne de texte (23,6 px avec Inter). */
+    box-sizing: border-box;
+    min-height: 1.5rem;
     border: none;
     border-radius: 0.375rem;
     padding: 0.3rem 0.7rem;

@@ -112,32 +112,39 @@ div[role="markdown-container"] div[role="math-block"] {
 }
 
 /* Scrollbar horizontale alignée sur la convention de l'app (cf. AddCoursePopup) :
-   fine, pouce arrondi discret, piste transparente, sans flèches. */
+   fine, pouce arrondi discret, piste transparente, sans flèches. Vaut pour les équations
+   ET les blocs de code. */
 @supports not selector(::-webkit-scrollbar) {
-    div[role="markdown-container"] div[role="math-block"] {
+    div[role="markdown-container"] div[role="math-block"],
+    div[role="code-block"] > pre {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar {
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar,
+div[role="code-block"] > pre::-webkit-scrollbar {
     height: 4px;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-track {
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-track,
+div[role="code-block"] > pre::-webkit-scrollbar-track {
     background: transparent;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb {
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb,
+div[role="code-block"] > pre::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb:hover {
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb:hover,
+div[role="code-block"] > pre::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-button {
+div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-button,
+div[role="code-block"] > pre::-webkit-scrollbar-button {
     display: none;
     width: 0;
     height: 0;

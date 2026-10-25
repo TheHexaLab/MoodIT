@@ -23,6 +23,12 @@ interface QuizFormBodyProps {
   /** Signalé au 1er changement de méta (titre / interrupteurs) → suivi « modifié ». */
   onDirty?: () => void;
   onSaveMeta: (meta: QuizMetaDraft) => void;
+  /**
+   * Méta en cours de saisie (non enregistrées), remontées juste avant d'ouvrir l'éditeur de
+   * question : ce corps est alors démonté, et le parent les garde en mémoire pour que le titre
+   * et les interrupteurs survivent au retour (ils ne sont persistés qu'à « Enregistrer »).
+   */
+  onStashMeta?: (meta: QuizMetaDraft) => void;
   onAddQuestion: () => void;
   onEditQuestion: (question: Question) => void;
   onDeleteQuestion: (question: Question) => void;
@@ -69,6 +75,7 @@ export function QuizFormBody({
   onCancel,
   onDirty,
   onSaveMeta,
+  onStashMeta,
   onAddQuestion,
   onEditQuestion,
   onDeleteQuestion,
@@ -92,6 +99,12 @@ export function QuizFormBody({
 
   const byId = new Map(questions.map((q) => [q.id, q]));
   const ordered = order.map((id) => byId.get(id)).filter((q): q is Question => !!q);
+
+  /** Quitte vers l'éditeur de question en conservant d'abord les méta saisies (cf. onStashMeta). */
+  const leaveToQuestion = (open: () => void) => {
+    onStashMeta?.({ title, isPublished, isDaily, allowRetry });
+    open();
+  };
 
   const totalPoints = questions.reduce((s, q) => s + q.totalScore, 0);
   const canSave = title.trim() !== '';
@@ -145,7 +158,7 @@ export function QuizFormBody({
         <span className={styles.sectionTitle}>
           {t.questionsSection} <span className={styles.sectionMeta}>{t.points(totalPoints)}</span>
         </span>
-        <button type="button" className={styles.addLinkButton} onClick={onAddQuestion}>
+        <button type="button" className={styles.addLinkButton} onClick={() => leaveToQuestion(onAddQuestion)}>
           <Plus width={14} height={14} /> {t.addQuestion}
         </button>
       </div>
@@ -198,7 +211,7 @@ export function QuizFormBody({
                 aria-label={t.editQuestionAria}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onEditQuestion(question);
+                  leaveToQuestion(() => onEditQuestion(question));
                 }}
               >
                 <Pencil width={15} height={15} />

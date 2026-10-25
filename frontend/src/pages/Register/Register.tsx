@@ -1,6 +1,6 @@
 import styles from './Register.module.css';
 import { useTheme } from '../../helpers/theme';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { register } from '../../helpers/api';
 import { Lightanddark } from '../../assets/light-dark-btn';
 import { EyeIcon } from '../../assets/eye';
@@ -60,7 +60,9 @@ export default function Register() {
     }
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    // Soumission via le <form> (bouton ou touche Entrée) : pas de rechargement de page.
+    e.preventDefault();
     setServerError('');
     setFieldErrors({});
 
@@ -115,7 +117,8 @@ export default function Register() {
       </aside>
 
       <main className={styles.formSide}>
-        <div className={styles.card}>
+        {/* noValidate : la validation est faite par handleSubmit (messages par champ). */}
+        <form className={styles.card} onSubmit={handleSubmit} noValidate>
               <header className={styles.cardHeader}>
                 <h2>Créer un compte</h2>
                 <p>Rejoignez votre espace MoodIT</p>
@@ -314,12 +317,7 @@ export default function Register() {
               </label>
               {fieldErrors.terms && <p className={styles.error}>⚠ {fieldErrors.terms}</p>}
 
-              <button
-                type="button"
-                className={styles.submit}
-                onClick={handleSubmit}
-                disabled={submitting}
-              >
+              <button type="submit" className={styles.submit} disabled={submitting}>
                 {submitting ? 'Création...' : 'Créer mon compte →'}
               </button>
 
@@ -330,7 +328,7 @@ export default function Register() {
               <p className={styles.loginLink}>
                 Déjà un compte ? <Link to="/login">Se connecter</Link>
               </p>
-        </div>
+        </form>
 
         <footer className={styles.pageFooter}>
           © 2026 MoodIT ·{' '}

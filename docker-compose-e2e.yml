@@ -1,0 +1,85 @@
+# Override pour les tests E2E Playwright (frontend/e2e/core/README.md) : la pile de prod
+# (images construites par les Dockerfile), mais en PROFIL DEV avec des valeurs bidons.
+#
+#   docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml \
+#     up -d --build --no-deps --wait postgres mailpit auth-service core-service permission-service \
+#     mcp-service piston execution-service gateway frontend
+#
+# Profil dev : requis par l'endpoint de validation /auth/verify/{username} et par le code 2FA fixe
+# (DEV_FIXED_2FA_CODE, refusé hors dev). `environment:` l'emporte sur le `.env.docker` des services
+# (qui doit exister, même vide) : aucun secret, aucune clé LLM, aucun compte mail réel n'est utilisé.
+# Noms de conteneurs propres à l'E2E : ne percute pas une pile de dev déjà lancée.
+#
+# Différences avec la prod :
+#  - Courriels : capturés par Mailpit (faux SMTP, API http://localhost:8025) au lieu de Gmail ; les
+#    tests y lisent les codes de validation / réinitialisation.
+#  - MCP : LLM_API_KEY vide → repli déterministe de mcp-service, sans Ollama ni réseau.
+#  - Piston : démarré sans piston-init (12 langages) ; la CI n'installe que Python.
+
+x-e2e-env: &e2e-env
+  SPRING_PROFILES_ACTIVE: dev
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: moodit_db
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  JWT_SECRET: e2e-only-jwt-secret-not-used-anywhere-else-0123456789abcdef0123456789abcdef01234567
+  APP_SECURITY_PEPPER: e2e-only-pepper
+  INTERNAL_TOKEN: e2e-only-internal-token
+  DEV_FIXED_2FA_CODE: "000000"
+  MAIL_USERNAME: e2e@example.invalid
+  MAIL_PASSWORD: e2e
+  SPRING_MAIL_HOST: mailpit
+  SPRING_MAIL_PORT: "1025"
+  SPRING_APPLICATION_JSON: '{"spring.mail.properties.mail.smtp.auth":false,"spring.mail.properties.mail.smtp.starttls.enable":false}'
+  LLM_API_KEY: ""
+  FRONT_ORIGIN: http://localhost:5173
+  GATEWAY_HOST: gateway
+  GATEWAY_PORT: "8080"
+  CORE_SERVICE_HOST: core-service
+  CORE_SERVICE_PORT: "8081"
+  AUTH_SERVICE_HOST: auth-service
+  AUTH_SERVICE_PORT: "8083"
+  MCP_SERVICE_HOST: mcp-service
+  MCP_SERVICE_PORT: "8082"
+  PERMISSION_SERVICE_HOST: permission-service
+  PERMISSION_SERVICE_PORT: "8084"
+  EXEC_SERVICE_HOST: execution-service
+  EXEC_SERVICE_PORT: "8085"
+
+services:
+  postgres:
+    container_name: moodit_e2e_postgres
+    environment: *e2e-env
+  mailpit:
+    image: axllent/mailpit:v1.21.8@sha256:81370195cd4a0eab9604d17c2617a7525b0486f9365555253b6c5376c6350f1a
+    container_name: moodit_e2e_mailpit
+    ports:
+      - "8025:8025"    # API + interface web des courriels capturés
+    networks:
+      - internal
+  auth-service:
+    container_name: moodit_e2e_auth
+    environment: *e2e-env
+  core-service:
+    container_name: moodit_e2e_core
+    environment: *e2e-env
+  permission-service:
+    container_name: moodit_e2e_permission
+    environment: *e2e-env
+  mcp-service:
+    container_name: moodit_e2e_mcp
+    environment: *e2e-env
+  piston:
+    container_name: moodit_e2e_piston
+    ports:
+      - "2000:2000"    # installation de Python par la CI (curl), comme docker-compose-ci.yml
+  execution-service:
+    container_name: moodit_e2e_execution
+    environment: *e2e-env
+  gateway:
+    container_name: moodit_e2e_gateway
+    environment: *e2e-env
+  frontend:
+    container_name: moodit_e2e_frontend
+    environment: *e2e-env

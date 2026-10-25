@@ -41,8 +41,17 @@ import EmptyCourseState from './states/EmptyCourseState/EmptyCourseState.tsx';
 import NoActiveChannelState from './states/NoActiveChannelState/NoActiveChannelState.tsx';
 
 interface MainPanelProps {
-  /** Utilisateur administrateur : débloque les actions de creation dans les états vides. */
+  /**
+   * Gestion du CONTENU du programme actif (Enseignant / Administrateur / admin global) :
+   * débloque les actions de création dans les états vides. N'accorde PAS la modération.
+   */
   isAdmin?: boolean;
+  /**
+   * Administrateur / Gardien GLOBAL de la plateforme. Avec le rôle Administrateur DU
+   * programme, c'est la seule source du droit de modération (supprimer les messages / sujets
+   * d'autrui) : un Enseignant gère le contenu mais ne modère pas.
+   */
+  isGlobalAdmin?: boolean;
   /** Programme actif (null → état 1 ; sans cours → état 2). */
   program: Program | null;
   /** Id du cours sélectionné dans le programme actif. */
@@ -123,6 +132,7 @@ interface MainPanelProps {
  */
 const MainPanel: React.FC<MainPanelProps> = ({
   isAdmin = false,
+  isGlobalAdmin = false,
   program,
   selectedCourse,
   selectedChannel,
@@ -158,9 +168,10 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onVoicePresence,
 }) => {
   // Modérateur : peut supprimer (jamais éditer) les messages/posts d'autrui. Admin/Gardien
-  // GLOBAL (isAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est PAS
-  // modérateur. Gating COSMÉTIQUE : l'autorisation réelle est tranchée par le permission-service.
-  const canModerate = isAdmin || program?.roleName === ROLE.ADMIN;
+  // GLOBAL (isGlobalAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est
+  // PAS modérateur : on ne se base donc PAS sur `isAdmin` (gestion du contenu, vrai pour lui).
+  // Gating COSMÉTIQUE : l'autorisation réelle est tranchée par le permission-service.
+  const canModerate = isGlobalAdmin || program?.roleName === ROLE.ADMIN;
 
   const content = ((): React.ReactElement => {
     // 1 — aucun programme rejoint.

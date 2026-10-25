@@ -29,17 +29,28 @@ div.forum-view > header > * {
     line-height: normal;
 }
 
+/* Nom du forum : se tronque (ellipse) plutôt que de déborder du panneau étroit. Il ne se
+   compresse qu'en dernier : le contexte du cours (flex-shrink bien plus fort) cède avant. */
 div.forum-view > header > p:first-of-type {
     display: flex;
     align-items: center;
     gap: 0.31rem;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
     color: var(--text);
     font-weight: 700;
     font-size: 1rem;
 }
 
-div.forum-view > header > p:first-of-type > span {
+div.forum-view > header > p:first-of-type > span:last-of-type {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+div.forum-view > header > p:first-of-type > span:first-of-type {
+    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     color: var(--text-muted);
@@ -48,12 +59,14 @@ div.forum-view > header > p:first-of-type > span {
 }
 
 div.forum-view > header > span {
+    flex-shrink: 0;
     width: 0.0625rem;
     height: 1.5rem;
     background: var(--border);
 }
 
 div.forum-view > header > p:nth-of-type(2) {
+    flex: 0 100 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -269,6 +282,14 @@ div.forum-view > div[role="body"] > div[role="new-thread"] > input:focus {
     border-color: var(--border-strong);
 }
 
+/* Indicateur de focus visible (WCAG 2.4.7), comme les autres contrôles de l'app : un simple
+   changement de bordure ne suffit pas. */
+div.forum-view > div[role="body"] > div[role="new-thread"] > input:focus-visible,
+div.forum-view [role="edit-title"]:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 1px;
+}
+
 /* Champ titre de l'éditeur d'ÉDITION d'un sujet racine (même style que le titre de
    création, ajouté au-dessus de l'éditeur Markdown). */
 div.forum-view [role="edit-title"] {
@@ -329,12 +350,18 @@ div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] 
     background: var(--bg-input);
 }
 
+/* Cible tactile de 1.5rem (24 px, WCAG 2.5.8) pour une empreinte visuelle inchangée de
+   0.9375rem : la marge négative (-(1.5 - 0.9375) / 2) rend l'excédent à la mise en page,
+   et `position: relative` garde le bouton au-dessus du score voisin qu'il chevauche. */
 div.forum-view > div[role="body"] > ul > li div[role$="-vote-actions"] > button {
+    position: relative;
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    width: 0.9375rem;
-    height: 0.9375rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin: -0.28125rem;
     padding: 0;
     border: none;
     border-radius: 0.375rem;
@@ -349,7 +376,8 @@ div.forum-view > div[role="body"] > ul > li div[role="vertical-vote-actions"] > 
     height: 1.25rem;
 }
 
-div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] > button {
+/* Icône à sa taille d'origine (le bouton, lui, fait 1.5rem). */
+div.forum-view > div[role="body"] > ul > li div[role="horizontal-vote-actions"] > button > svg {
     width: 0.9375rem;
     height: 0.9375rem;
 }
@@ -435,7 +463,8 @@ div.forum-view div[role="header"] > span[role="avatar"] {
 div.forum-view div[role="header"] > span[role="avatar"] > span {
     line-height: 1;
     text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;}
+    text-box-edge: cap alphabetic;
+}
 
 div.forum-view div[role="header"] > span[role="author"] {
     color: var(--text);

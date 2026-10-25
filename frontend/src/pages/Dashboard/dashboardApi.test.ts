@@ -205,6 +205,18 @@ describe('fetchQuiz', () => {
     });
   });
 
+  it('tolère une question sans answers ni dragItems (champs laissés undefined)', async () => {
+    const bare: Record<string, unknown> = { ...quizDetailResponse.questions[0] };
+    delete bare.answers;
+    delete bare.dragItems;
+    mockedApiFetch.mockResolvedValueOnce(res({ ...quizDetailResponse, questions: [bare] }));
+    const out = await fetchQuiz(5);
+    const [question] = out.questions ?? [];
+    expect(question.answers).toBeUndefined();
+    expect(question.dragItems).toBeUndefined();
+    expect(question.id).toBe(50);
+  });
+
   it('tolère questions absentes (défaut [])', async () => {
     mockedApiFetch.mockResolvedValueOnce(
       res({ id: 6, title: 'T', position: 0, isPublished: false, isDaily: false, allowRetry: false })

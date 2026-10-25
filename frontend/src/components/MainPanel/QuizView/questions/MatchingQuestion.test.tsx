@@ -1,10 +1,38 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
 import { MatchingQuestion } from './MatchingQuestion';
 import { type Question } from '../../../../types/domain';
 import { type QuestionAnswer, type QuestionResult } from '../quizAttempt';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setElementFromPoint(null);
+});
+
+// jsdom n'implémente pas elementFromPoint : on l'installe pour cibler une zone de dépôt.
+function setElementFromPoint(el: Element | null) {
+  (document as unknown as { elementFromPoint: (x: number, y: number) => Element | null })
+    .elementFromPoint = () => el;
+}
+
+/** Puce (étiquette glissable) d'un item par son texte. */
+function chip(text: string): HTMLElement {
+  return screen.getByText(text).closest('[class*="chip"]') as HTMLElement;
+}
+
+/** Déplacement / relâchement du pointeur (écoutés sur window pendant le glissement). */
+function firePointer(type: 'pointermove' | 'pointerup' | 'pointercancel', x = 0, y = 0) {
+  const ev = new Event(type) as PointerEvent;
+  Object.assign(ev, { clientX: x, clientY: y });
+  act(() => {
+    window.dispatchEvent(ev);
+  });
+}
+
+/** Fantôme qui suit le pointeur pendant le glissement. */
+function ghost(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[class*="dragGhost"]');
+}
 
 function matchingQuestion(overrides: Partial<Question> = {}): Question {
   return {
@@ -255,5 +283,143 @@ describe('MatchingQuestion — mode review', () => {
       />
     );
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('MatchingQuestion — glisser-déposer (Pointer Events)', () => {
+  function renderAnswer(answer: QuestionAnswer | undefined = undefined) {
+    const onChange = vi.fn();
+    const utils = render(
+      <MatchingQuestion question={matchingQuestion()} mode="answer" answer={answer} onChange={onChange} />
+    );
+    return { onChange, ...utils };
+  }
+
+  it('glisser une étiquette de la réserve vers une catégorie la place', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0, clientX: 5, clientY: 6 });
+    // Fantôme affiché à la position du pointeur, avec le contenu de l'étiquette.
+    const g = ghost(container)!;
+    expect(g).toBeTruthy();
+    expect(g.textContent).toBe('Chien');
+    expect(g.style.left).toBe('5px');
+    expect(g.style.top).toBe('6px');
+    // La puce d'origine est marquée « en cours de glissement ».
+    const dragging = zone(container, '__pool__')!.querySelectorAll('[class*="chipDragging"]');
+    expect(dragging).toHaveLength(1);
+    expect(dragging[0].textContent).toBe('Chien');
+
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointerup', 50, 60);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ kind: 'matching', placement: { 200: 'Animaux' } });
+    // Fin du geste : plus de fantôme.
+    expect(ghost(container)).toBeNull();
+  });
+
+  it('le survol met en évidence la zone et le fantôme suit le pointeur', () => {
+    const { container } = renderAnswer();
+    fireEvent.pointerDown(chip('Rose'), { pointerType: 'mouse', button: 0, clientX: 0, clientY: 0 });
+    // Un élément enfant de la zone suffit (closest('[data-zone]')).
+    setElementFromPoint(zone(container, 'Plantes')!.querySelector('[class*="groupLabel"]'));
+    firePointer('pointermove', 120, 80);
+    expect(zone(container, 'Plantes')!.className).toContain('groupOver');
+    expect(zone(container, 'Animaux')!.className).not.toContain('groupOver');
+    expect(ghost(container)!.style.left).toBe('120px');
+    expect(ghost(container)!.style.top).toBe('80px');
+
+    setElementFromPoint(zone(container, '__pool__'));
+    firePointer('pointermove', 10, 10);
+    expect(zone(container, '__pool__')!.className).toContain('poolOver');
+    expect(zone(container, 'Plantes')!.className).not.toContain('groupOver');
+  });
+
+  it('conserve les autres placements lors d’un nouveau dépôt', () => {
+    const { onChange, container } = renderAnswer({ kind: 'matching', placement: { 201: 'Plantes' } });
+    fireEvent.pointerDown(chip('Chat'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointerup');
+    expect(onChange).toHaveBeenCalledWith({
+      kind: 'matching',
+      placement: { 201: 'Plantes', 202: 'Animaux' },
+    });
+  });
+
+  it('déposer une étiquette classée dans la réserve la retire de sa catégorie (null)', () => {
+    const { onChange, container } = renderAnswer({
+      kind: 'matching',
+      placement: { 200: 'Animaux', 201: 'Plantes' },
+    });
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(zone(container, '__pool__'));
+    firePointer('pointerup');
+    expect(onChange).toHaveBeenCalledWith({
+      kind: 'matching',
+      placement: { 200: null, 201: 'Plantes' },
+    });
+  });
+
+  it('relâcher dans la zone actuelle ne réécrit pas la réponse (tap)', () => {
+    const { onChange, container } = renderAnswer({ kind: 'matching', placement: { 200: 'Animaux' } });
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointerup');
+    expect(onChange).not.toHaveBeenCalled();
+    // Idem pour un item non classé relâché dans la réserve.
+    fireEvent.pointerDown(chip('Rose'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(zone(container, '__pool__'));
+    firePointer('pointerup');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(ghost(container)).toBeNull();
+  });
+
+  it('relâcher hors de toute zone annule le glissement', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(null);
+    firePointer('pointerup');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(ghost(container)).toBeNull();
+  });
+
+  it('pointercancel termine aussi le glissement', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'touch' });
+    expect(ghost(container)).toBeTruthy();
+    setElementFromPoint(null);
+    firePointer('pointercancel');
+    expect(ghost(container)).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('au toucher (tactile), le glissement fonctionne quel que soit le bouton', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Rose'), { pointerType: 'touch', button: 2 });
+    setElementFromPoint(zone(container, 'Plantes'));
+    firePointer('pointerup');
+    expect(onChange).toHaveBeenCalledWith({ kind: 'matching', placement: { 201: 'Plantes' } });
+  });
+
+  it('ignore le clic droit de la souris', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 2 });
+    expect(ghost(container)).toBeNull();
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointerup');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('après le relâchement, les écouteurs globaux sont retirés', () => {
+    const { onChange, container } = renderAnswer();
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0 });
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointerup');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // Mouvements / relâchements ultérieurs : plus aucun effet.
+    firePointer('pointermove', 30, 30);
+    expect(ghost(container)).toBeNull();
+    expect(zone(container, 'Animaux')!.className).not.toContain('groupOver');
+    firePointer('pointerup');
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

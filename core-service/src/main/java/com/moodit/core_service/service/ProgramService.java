@@ -542,7 +542,7 @@ public class ProgramService {
         "PROGRAM",
         programId,
         "Programme « " + programName + " » (#" + programId + ") supprimé",
-        "Établissement : " + establishmentName);
+        establishmentName != null ? "Établissement : " + establishmentName : null);
 
     // ── Temps réel : chaque abonné (room user:<id>) retire le programme de sa liste. ──
     afterCommit(() -> subscriberIds.forEach(uid -> realtimePublisher.programDeleted(uid, programId)));
