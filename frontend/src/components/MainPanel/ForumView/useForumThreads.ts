@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type ForumAuthor, type ForumPost } from './forumThreads';
 import { type AuthorUpdate } from '../../../types/domain.ts';
 
@@ -296,9 +296,14 @@ export function useForumThreads({
   const voteQueuesRef = useRef(
     new Map<number, { tail: Promise<void>; confirmed: VoteValue; generation: number; pending: number }>()
   );
-  /** Dernière liste de sujets (ref stable → loadMore lit sans se recréer). */
+  /**
+   * Dernière liste de sujets (ref stable → loadMore lit sans se recréer). Recopiée dans un effet de
+   * MISE EN PAGE, exécuté pendant le commit : un `useEffect` part après l'affichage et React peut le
+   * reporter, si bien qu'un défilement juste après le chargement lisait une liste vide et
+   * redemandait la première page (curseur absent ; vu en CI dans ForumView.test.tsx).
+   */
   const threadsRef = useRef(threads);
-  useEffect(() => {
+  useLayoutEffect(() => {
     threadsRef.current = threads;
   });
 
