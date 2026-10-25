@@ -210,7 +210,15 @@ const ChannelView: React.FC<ChannelViewProps> = ({
     // Si le composer est masqué au montage (état de chargement → display:none), scrollHeight
     // vaut 0 : on NE fixe PAS height:0px (sinon le champ reste écrasé, texte coupé + scrollbar).
     // Le plancher CSS `min-height` (une ligne) prend le relais tant que c'est masqué.
-    if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
+    if (ta.scrollHeight > 0) {
+      // Comme le champ d'édition : barre de défilement seulement sur un vrai débordement (au-delà
+      // de max-height), pour signaler que du texte est caché ; sinon overflow:hidden, ce qui évite
+      // une barre parasite due à l'arrondi au pixel.
+      const maxH = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
+      const capped = ta.scrollHeight > maxH;
+      ta.style.height = capped ? `${maxH}px` : `${ta.scrollHeight}px`;
+      ta.style.overflowY = capped ? 'auto' : 'hidden';
+    }
   }, [draft, loading, loadError]);
 
   // Auto-hauteur du champ d'édition inline (même principe que le composer) : s'ajuste au montage

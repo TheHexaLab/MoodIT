@@ -541,6 +541,24 @@ describe('ChannelView — hauteur et suivi du champ d’édition', () => {
     expect(input.style.overflowY).toBe('auto');
   });
 
+  it('composer : texte court → hauteur du contenu, pas de barre de défilement', () => {
+    stubTextareaLayout(40, '144px');
+    renderChannel([msg(1, me, 'Hi')]);
+    const composer = screen.getByLabelText('Envoyer un message dans general') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'Court' } });
+    expect(composer.style.height).toBe('40px');
+    expect(composer.style.overflowY).toBe('hidden');
+  });
+
+  it('composer : texte trop long → hauteur plafonnée et barre de défilement visible', () => {
+    stubTextareaLayout(400, '144px');
+    renderChannel([msg(1, me, 'Hi')]);
+    const composer = screen.getByLabelText('Envoyer un message dans general') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'Très long '.repeat(80) } });
+    expect(composer.style.height).toBe('144px');
+    expect(composer.style.overflowY).toBe('auto');
+  });
+
   it('pendant la frappe, le fil défile pour garder le bas du champ visible', () => {
     stubTextareaLayout(60, '160px');
     const input = openEditor();
