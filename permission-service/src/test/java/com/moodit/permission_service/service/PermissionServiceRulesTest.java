@@ -1144,7 +1144,7 @@ class PermissionServiceRulesTest {
      * FAILLE PROBABLE (contournement par encodage) : le gateway transmet getRequestURI(), donc le
      * chemin BRUT non décodé, et le moteur le compare tel quel (AntPathMatcher). Or Spring MVC
      * côté core décode les segments avant le routage : "/api/audit%2Dlogs" atteint le contrôleur
-     * /api/audit-logs, alors qu'ici il ne matche AUCUNE règle → GET → default-ALLOW. Le pare-feu
+     * /api/audit-logs, alors qu'ici il ne matche AUCUNE règle → GET → default-ALLOW (avant #111). Le pare-feu
      * Spring Security du gateway rejette %2F, %25, %3B, %5C, %2E… mais pas %2D ni une lettre
      * encodée (%65). Toute règle GET restrictive (journal d'audit, /quizzes/{id}/edit avec la
      * correction, /users/{id}, analyses MCP…) serait contournable ; les écritures restent
@@ -1220,15 +1220,17 @@ class PermissionServiceRulesTest {
       verifyNoInteractions(userRepository);
     }
 
+    // Depuis #111, refus par défaut pour TOUTES les méthodes (aucune règle HEAD / OPTIONS).
     @Test
-    void headSansRegle_defaultAllow() {
-      assertThat(allowed("/api/anything", "HEAD", null)).isTrue();
+    void headSansRegle_defaultDeny() {
+      assertThat(allowed("/api/anything", "HEAD", null)).isFalse();
       verifyNoInteractions(userRepository);
     }
 
     @Test
-    void optionsSansRegle_defaultAllow() {
-      assertThat(allowed("/api/anything", "options", null)).isTrue();
+    void optionsSansRegle_defaultDeny() {
+      assertThat(allowed("/api/anything", "options", null)).isFalse();
+      verifyNoInteractions(userRepository);
     }
 
     @Test

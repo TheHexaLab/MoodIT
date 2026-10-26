@@ -7,21 +7,27 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.server.PathContainer;
+import org.springframework.web.util.pattern.PathPattern;
+import org.springframework.web.util.pattern.PathPatternParser;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * GARDE-FOU de couverture des routes. Croise les routes MUTANTES (POST/PUT/PATCH/DELETE) des
- * services core/mcp/execution avec les règles de {@link PermissionService#buildRules()}, et échoue
- * si une route n'a PAS de règle.
+ * GARDE-FOU de couverture des routes. Croise les routes (écritures et lectures) des services
+ * core/mcp/execution avec les règles de {@link PermissionService#buildRules()}, et échoue si une
+ * route n'a PAS de règle, ou si la règle qui décide n'est pas celle de la route que Spring sert.
  *
- * <p>Pourquoi : le moteur est en default-DENY sur les écritures. Une route mutante SANS règle est
- * donc refusée (403) — pas un trou de sécurité, mais une FONCTION cassée silencieusement. Ce test
- * force une décision EXPLICITE (ajouter une règle — un vrai gate, ou {@code -> true} pour ouvrir)
- * dès qu'un contrôleur mutant apparaît.
+ * <p>Pourquoi : le moteur est en default-DENY, en lecture comme en écriture (#111). Une route SANS
+ * règle est donc refusée (403) : pas un trou de sécurité, mais une FONCTION cassée silencieusement.
+ * Ce test force une décision EXPLICITE (ajouter une règle — un vrai gate, ou {@code -> true} pour
+ * ouvrir) dès qu'un contrôleur apparaît.
  *
  * <p>Source des routes : les MANIFESTES {@code <service>/src/test/resources/mutating-routes.txt},
  * générés par INTROSPECTION SPRING dans chaque service (voir {@code MutatingRouteManifestTest}).
@@ -55,32 +61,23 @@ class RouteCoverageTest {
           "execution-service/src/test/resources/readable-routes.txt");
 
   /**
-   * Lectures (GET) DÉLIBÉRÉMENT ouvertes à tout authentifié (default-allow) : catalogue, données de
-   * référence, ou profil propre. Toute AUTRE route GET doit porter une règle dans
-   * {@link PermissionService#buildRules()}. Motifs normalisés ({@code {var}} → {@code {}}).
-   *
-   * <p>Ajouter une route ICI est une décision EXPLICITE « donnée non sensible ». Le pendant lecture
-   * du {@link #INTENTIONALLY_UNGUARDED} des mutations : sans ça, un GET sensible oublié serait servi
-   * silencieusement (default-allow) à n'importe quel authentifié.
+   * Manifestes par SERVICE : chaque service route ses requêtes seul, parmi SES routes. La
+   * comparaison avec le choix de Spring se fait donc service par service.
    */
-  private static final Set<String> PUBLIC_READS =
-      Set.of(
-          // Profil propre / self
-          "GET /api/me",
-          // Données de référence
-          "GET /api/languages",
-          "GET /api/question-types",
-          // Catalogue programmes (navigation + flux d'adhésion)
-          "GET /api/programs",
-          "GET /api/programs/{}",
-          "GET /api/programs/{}/courses",
-          "GET /api/programs/{}/courses/{}",
-          // Catalogue établissements (alimente création/adhésion, non-gardien)
-          "GET /api/establishments",
-          "GET /api/establishments/{}/programs",
-          "GET /api/establishments/{}/manageable-programs",
-          // Détail d'un cours (métadonnées) — à revoir si jugé sensible : le passer en règle.
-          "GET /api/courses/{}");
+  private static final Map<String, List<String>> SERVICE_MANIFESTS =
+      Map.of(
+          "core-service",
+          List.of(MANIFESTS.get(0), READABLE_MANIFESTS.get(0)),
+          "mcp-service",
+          List.of(MANIFESTS.get(1), READABLE_MANIFESTS.get(1)),
+          "execution-service",
+          List.of(MANIFESTS.get(2), READABLE_MANIFESTS.get(2)));
+
+  /**
+   * Valeurs d'essai des variables de chemin, telles qu'envoyées sur le fil : un id numérique, et un
+   * texte non ASCII encodé (« élève »), le seul encodage que le gateway laisse passer (#111).
+   */
+  private static final List<String> SAMPLE_VALUES = List.of("7", "%C3%A9l%C3%A8ve");
 
   @Test
   void everyMutatingRouteHasARule() {
@@ -123,7 +120,7 @@ class RouteCoverageTest {
   }
 
   @Test
-  void everyReadableRouteIsGatedOrExplicitlyPublic() {
+  void everyReadableRouteHasARule() {
     Path repoRoot = findRepoRoot();
     assertThat(repoRoot)
         .as("racine du repo (dossier contenant core-service ET permission-service) introuvable")
@@ -150,16 +147,99 @@ class RouteCoverageTest {
     List<String> unclassified =
         reads.stream()
             .filter(sig -> !ruleSet.contains(sig))
-            .filter(sig -> !PUBLIC_READS.contains(sig))
             .sorted()
             .toList();
 
     assertThat(unclassified)
         .as(
-            "GET NON CLASSÉ (default-allow → servi à TOUT authentifié). Décide : ajoute une règle "
-                + "dans PermissionService.buildRules() si la donnée est SENSIBLE (appartenance / "
-                + "rôle), sinon ajoute la route à PUBLIC_READS (catalogue / référence / self).")
+            "GET SANS règle de permission (default-deny → 403). Ajoute une règle dans "
+                + "PermissionService.buildRules() : un vrai gate si la donnée est SENSIBLE "
+                + "(appartenance / rôle), sinon (user,vars,body) -> true dans le bloc des lectures "
+                + "ouvertes (catalogue / référence / self).")
         .isEmpty();
+  }
+
+  /**
+   * La décision d'autorisation porte sur la MÊME route que celle que le service exécute (#111). Pour
+   * chaque route des manifestes, on fabrique un chemin concret (brut, tel que transmis par le
+   * gateway), on laisse le moteur de Spring MVC ({@link PathPatternParser}, avec son ordre de
+   * spécificité) choisir la route parmi celles du service, et on exige que {@link
+   * PermissionService#matchingRuleSignature} retienne une règle de même motif. Un écart (règle
+   * générique placée avant une route plus précise, décodage différent…) appliquerait la règle d'une
+   * autre route que celle servie.
+   */
+  @Test
+  void permissionRuleMatchesTheRouteSpringServes() {
+    Path repoRoot = findRepoRoot();
+    assertThat(repoRoot).as("racine du repo introuvable").isNotNull();
+    PermissionService service = new PermissionService(null, null, new ObjectMapper());
+
+    List<String> mismatches = new ArrayList<>();
+    int checked = 0;
+    for (Map.Entry<String, List<String>> entry : SERVICE_MANIFESTS.entrySet()) {
+      List<String> routes =
+          entry.getValue().stream()
+              .flatMap(rel -> readManifest(repoRoot.resolve(rel)).stream())
+              .distinct()
+              .toList();
+      for (String route : routes) {
+        for (String sample : SAMPLE_VALUES) {
+          String method = route.substring(0, route.indexOf(' '));
+          String rawPath = route.substring(route.indexOf(' ') + 1).replaceAll("\\{[^}]+}", sample);
+          String served = springChoice(routes, method, rawPath);
+          String decided = service.matchingRuleSignature(method, rawPath);
+          checked++;
+          if (served == null
+              || decided == null
+              || !normalizeSignature(served).equals(normalizeSignature(decided))) {
+            mismatches.add(
+                entry.getKey()
+                    + " : "
+                    + method
+                    + " "
+                    + rawPath
+                    + " → Spring sert "
+                    + served
+                    + ", la règle appliquée est "
+                    + decided);
+          }
+        }
+      }
+    }
+
+    assertThat(checked).as("aucun chemin vérifié — manifestes vides ?").isPositive();
+    // Le gateway n'accepte que l'encodage de caractères NON ASCII : ils ne peuvent correspondre
+    // qu'à une variable si chaque littéral de route est en ASCII. Une route au littéral accentué
+    // romprait cette hypothèse.
+    assertThat(
+            SERVICE_MANIFESTS.values().stream()
+                .flatMap(List::stream)
+                .flatMap(rel -> readManifest(repoRoot.resolve(rel)).stream())
+                .filter(r -> !r.replaceAll("\\{[^}]+}", "").chars().allMatch(c -> c < 0x80)))
+        .as("routes dont un littéral n'est pas en ASCII")
+        .isEmpty();
+    assertThat(mismatches)
+        .as(
+            "La règle de permission appliquée n'est pas celle de la route servie par Spring. "
+                + "Placer la règle la plus précise AVANT la règle générique dans buildRules().")
+        .isEmpty();
+  }
+
+  /**
+   * Route que Spring MVC sert pour ce chemin brut : parmi les routes du service de même verbe,
+   * celles dont le motif correspond (segments décodés par {@link PathContainer}), la plus
+   * spécifique selon {@link PathPattern#SPECIFICITY_COMPARATOR}. Null si aucune.
+   */
+  private static String springChoice(List<String> routes, String method, String rawPath) {
+    PathContainer path = PathContainer.parsePath(rawPath);
+    return routes.stream()
+        .filter(r -> r.startsWith(method + " "))
+        .map(r -> Map.entry(r, PathPatternParser.defaultInstance.parse(r.substring(r.indexOf(' ') + 1))))
+        .filter(e -> e.getValue().matches(path))
+        .sorted(Comparator.comparing(Map.Entry::getValue, PathPattern.SPECIFICITY_COMPARATOR))
+        .map(Map.Entry::getKey)
+        .findFirst()
+        .orElse(null);
   }
 
   private static List<String> readManifest(Path manifest) {

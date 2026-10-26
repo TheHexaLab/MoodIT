@@ -17,8 +17,13 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.SecretKey;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -72,11 +77,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       }
     }
 
-    // Chemin protégé encodé (%xx) : refusé. Aucun client légitime n'encode le chemin d'une route
-    // protégée (ids numériques, texte en query string), et un chemin encodé est lu différemment
-    // par le contrôle d'accès et par le service qui l'exécute (/api/audit%2Dlogs). Le
+    // Chemin protégé : seul l'encodage d'un caractère NON ASCII (UTF-8 valide) est accepté, pour
+    // un paramètre texte dans le chemin (ex. un nom accentué, #111). Tout caractère ASCII doit
+    // être écrit tel quel : un ASCII encodé est lu différemment par le contrôle d'accès et par le
+    // service qui l'exécute (/api/audit%2Dlogs). Les littéraux des routes sont en ASCII, donc un
+    // caractère non ASCII ne peut correspondre qu'à une variable, des deux côtés. Le
     // permission-service décode aussi de son côté : deux barrières indépendantes.
-    if (path.indexOf('%') >= 0) {
+    if (!hasOnlyNonAsciiEncodings(path)) {
       response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
       response.getWriter().write("Chemin invalide");
       return;
@@ -175,6 +182,43 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     // On enveloppe `sanitized` pour que toute valeur cliente soit déjà écrasée.
     HttpServletRequest authenticated = new WrappedRequest(sanitized, claims.getSubject());
     filterChain.doFilter(authenticated, response);
+  }
+
+  // Vrai si chaque %xx du chemin encode un octet >= 0x80 et si le chemin décodé est de l'UTF-8
+  // valide. Un chemin sans '%' passe ; un %xx incomplet, non hexadécimal ou ASCII est refusé.
+  static boolean hasOnlyNonAsciiEncodings(String path) {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    for (int i = 0; i < path.length(); i++) {
+      char c = path.charAt(i);
+      if (c != '%') {
+        bytes.write(c); // URI brute : caractères ASCII seulement
+        continue;
+      }
+      if (i + 2 >= path.length()) {
+        return false;
+      }
+      int b;
+      try {
+        b = HexFormat.fromHexDigits(path, i + 1, i + 3);
+      } catch (IllegalArgumentException e) {
+        return false; // non hexadécimal
+      }
+      if (b < 0x80) {
+        return false;
+      }
+      bytes.write(b);
+      i += 2;
+    }
+    try {
+      StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .decode(ByteBuffer.wrap(bytes.toByteArray()));
+      return true;
+    } catch (CharacterCodingException e) {
+      return false;
+    }
   }
 
   // Faut-il mettre le body en cache ? Seulement les écritures JSON de taille raisonnable

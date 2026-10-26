@@ -117,6 +117,36 @@ class JwtAuthFilterTest {
     }
   }
 
+  // Paramètre texte non ASCII dans le chemin (nom accentué, #111) : la barrière le laisse passer,
+  // la requête suit le parcours normal (ici : pas de token → 401, et non 400).
+  @Test
+  void nonAsciiEncodedPath_passesTheBarrier() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/users/%C3%A9l%C3%A8ve");
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(res.getContentAsString()).contains("Token manquant");
+  }
+
+  @Test
+  void hasOnlyNonAsciiEncodings_acceptsValidUtf8Only() {
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/courses/12")).isTrue();
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%C3%A9")).isTrue();
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%c3%a9")).isTrue(); // hexa minuscule
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%C2%80")).isTrue(); // 1er non ASCII
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%E2%82%AC")).isTrue(); // €
+
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%7F")).isFalse(); // dernier ASCII
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%C3")).isFalse(); // UTF-8 tronqué
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%C3%A")).isFalse(); // %xx incomplet
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%G9")).isFalse(); // non hexadécimal
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%9G")).isFalse();
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%A9")).isFalse(); // UTF-8 invalide
+    assertThat(JwtAuthFilter.hasOnlyNonAsciiEncodings("/api/u/%C3x%A9")).isFalse(); // séquence coupée
+  }
+
   @Test
   void missingToken_returns401() throws Exception {
     MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/courses");

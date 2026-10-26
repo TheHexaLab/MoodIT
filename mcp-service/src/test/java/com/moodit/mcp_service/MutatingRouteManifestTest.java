@@ -50,7 +50,7 @@ class MutatingRouteManifestTest {
   private static final String READABLE_HEADER =
       "# Routes de LECTURE (GET) exposées via le gateway. GÉNÉRÉ par\n"
           + "# MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.\n"
-          + "# Lu par le RouteCoverageTest : chaque GET doit être GATÉ (règle) ou PUBLIC.\n";
+          + "# Lu par le RouteCoverageTest : chaque GET doit avoir une règle (refus par défaut).\n";
 
   @Test
   void manifestMatchesActualMutatingRoutes() throws IOException {

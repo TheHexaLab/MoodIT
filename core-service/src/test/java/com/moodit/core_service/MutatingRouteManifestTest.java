@@ -32,9 +32,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
  * <ul>
  *   <li>{@code mutating-routes.txt} : POST/PUT/PATCH/DELETE. Moteur en default-DENY → chaque
  *       mutation DOIT avoir une règle (sinon 403 silencieux = fonction cassée).
- *   <li>{@code readable-routes.txt} : GET. Moteur en default-ALLOW sur les lectures → chaque GET
- *       doit être GATÉ (règle) OU déclaré PUBLIC (allowlist du RouteCoverageTest), pour qu'un GET
- *       SENSIBLE oublié ne soit pas servi silencieusement à tout authentifié.
+ *   <li>{@code readable-routes.txt} : GET. Moteur en default-DENY sur les lectures aussi (#111)
+ *       → chaque GET DOIT avoir une règle, même {@code -> true} pour une lecture ouverte.
  * </ul>
  *
  * <p>Chaque test ÉCHOUE si le manifeste committé est périmé : il le régénère → il suffit de
@@ -64,7 +63,7 @@ class MutatingRouteManifestTest {
   private static final String READABLE_HEADER =
       "# Routes de LECTURE (GET) exposées via le gateway. GÉNÉRÉ par\n"
           + "# MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.\n"
-          + "# Lu par le RouteCoverageTest : chaque GET doit être GATÉ (règle) ou PUBLIC.\n";
+          + "# Lu par le RouteCoverageTest : chaque GET doit avoir une règle (refus par défaut).\n";
 
   @Test
   void manifestMatchesActualMutatingRoutes() throws IOException {

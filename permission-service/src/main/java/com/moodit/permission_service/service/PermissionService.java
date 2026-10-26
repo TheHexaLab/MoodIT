@@ -1,9 +1,9 @@
 // Point de decision (PDP) pour les requetes REST (consulte par le gateway, JwtAuthFilter).
 //
 // Moteur de regles : une regle = (methode, motif de route avec {variables}, predicat).
-// La 1re regle qui matche tranche. Aucune regle ne matche => acces autorise
-// (default-allow) : on ne restreint QUE les routes explicitement listees ; l'identite
-// est deja garantie par le gateway (JWT) + l'auth-service.
+// La 1re regle qui matche tranche. Aucune regle ne matche => acces REFUSE (default-deny, en
+// lecture comme en ecriture depuis #111) : chaque route, meme ouverte a tous, porte une regle
+// explicite. L'identite est deja garantie par le gateway (JWT) + l'auth-service.
 //
 // ⚠️ HYPOTHESE DE CONFIANCE (IMPORTANTE) : depuis la centralisation de l'autorisation ici,
 // les services aval (core, mcp) ne re-verifient PLUS les roles ; ils font confiance au header
@@ -13,8 +13,7 @@
 // gateway serait sans controle d'acces. Les appels service-a-service internes passent, eux, par
 // le header partage X-Internal-Token (endpoints /internal/**), hors de ce moteur.
 //
-// NB (403 vs 404) : le default-allow-sur-absence-de-regle implique qu'une regle qui refuse
-// renvoie un 403 AVANT que le service n'ait pu constater une eventuelle absence de ressource
+// NB (403 vs 404) : une regle qui refuse renvoie un 403 AVANT que le service n'ait pu constater une eventuelle absence de ressource
 // (404). Un non-gestionnaire recoit donc 403 meme pour une ressource inexistante (on ne divulgue
 // pas son existence), la ou un admin global atteint le service et obtient le 404. Asymetrie
 // assumee (pas de fuite d'existence cote non-autorise).
@@ -145,8 +144,9 @@ public class PermissionService {
   //
   //  RAPPELS sur le moteur (voir aussi l'en-tete de la classe) :
   //    - La 1re regle qui matche (methode + motif) tranche ; l'ordre compte.
-  //    - AUCUNE regle ne matche => acces AUTORISE (default-allow). On ne liste donc QUE
-  //      les routes a restreindre ; l'identite est deja garantie par le gateway (JWT).
+  //    - AUCUNE regle ne matche => acces REFUSE (default-deny, lecture comme ecriture). Une
+  //      route ouverte a tous porte donc une regle (user, vars, body) -> true ; RouteCoverageTest
+  //      echoue si une route des manifestes n'a pas de regle.
   //    - Un predicat qui renvoie false => 403 cote gateway. Toute exception => refus.
   //    - Toujours valider que l'id est > 0 avant d'interroger la BD (voir exemples).
   //
@@ -166,6 +166,26 @@ public class PermissionService {
             rule("PUT", "/me/settings", (user, vars, body) -> true),
             execRule("POST", "/evaluate", (user, vars, body) -> true),
             execRule("POST", "/run", (user, vars, body) -> true),
+
+            // ── Lectures VOLONTAIREMENT ouvertes (tout authentifie) ───────────────────────
+            // Depuis le default-DENY sur les lectures aussi (#111), chaque GET doit porter une
+            // regle : celles-ci renvoient true parce que la donnee n'est pas propre a un compte
+            // (catalogue des programmes et etablissements, referentiels) ou est celle du demandeur
+            // (/me). Une nouvelle lecture sans regle est refusee (403) au lieu d'etre servie a tous.
+            rule("GET", "/me", (user, vars, body) -> true),
+            rule("GET", "/languages", (user, vars, body) -> true),
+            rule("GET", "/question-types", (user, vars, body) -> true),
+            rule("GET", "/programs", (user, vars, body) -> true),
+            rule("GET", "/programs/{programId}", (user, vars, body) -> true),
+            rule("GET", "/programs/{programId}/courses", (user, vars, body) -> true),
+            rule("GET", "/programs/{programId}/courses/{courseId}", (user, vars, body) -> true),
+            rule("GET", "/establishments", (user, vars, body) -> true),
+            rule("GET", "/establishments/{establishmentId}/programs", (user, vars, body) -> true),
+            rule(
+                "GET",
+                "/establishments/{establishmentId}/manageable-programs",
+                (user, vars, body) -> true),
+            rule("GET", "/courses/{courseId}", (user, vars, body) -> true),
 
             // ── Establishment ───────────────────────────────────────────────────────────
             /* Lister les établissements dans lesquels l'usager peut en crééer un programme
@@ -719,54 +739,65 @@ public class PermissionService {
       return false;
     }
 
-    // 0) Le gateway transmet le chemin BRUT (getRequestURI), alors que core le decode avant de
-    //    router : /api/audit%2Dlogs atteint le controleur du journal d'audit. Comparer le chemin
-    //    brut aux regles laissait donc echapper toute route a une lettre encodee pres (puis
-    //    default-allow en lecture). On decode une fois, comme core ; un encodage invalide est refuse.
-    try {
-      path = UriUtils.decode(path, StandardCharsets.UTF_8);
-    } catch (IllegalArgumentException e) {
+    // 1) Chercher une regle applicable AVANT toute requete BD / tout parsing.
+    String decoded = decodePath(path);
+    Rule rule = decoded == null ? null : findRule(method, decoded);
+
+    // Aucune regle ne matche : REFUS, en lecture comme en ecriture (#111). Une route oubliee
+    // echoue en fail-closed (403) au lieu d'etre servie a tout compte authentifie. Les routes
+    // volontairement ouvertes portent une regle explicite renvoyant true (cf. buildRules).
+    // HEAD et OPTIONS n'ont aucune regle : le frontend ne les emploie pas, ils sont refuses.
+    if (rule == null) {
       return false;
     }
-    if (path.indexOf('%') >= 0) {
-      return false; // double encodage (%252D...) : jamais legitime ici, refuse plutot que deviner.
-    }
 
-    // 1) Chercher une regle applicable AVANT toute requete BD / tout parsing.
-    for (Rule rule : rules) {
-      if (method.equalsIgnoreCase(rule.method()) && matcher.match(rule.pattern(), path)) {
-        // 2) Une regle s'applique : on charge le user et on parse body/query seulement maintenant.
-        User user = userRepository.findByEmail(email).orElse(null);
-        if (user == null) {
-          return false; // identite inconnue : fail-closed.
-        }
-        Map<String, String> vars = matcher.extractUriTemplateVariables(rule.pattern(), path);
-        JsonNode bodyJson = parseBody(body);
-        Map<String, String> queryParams = parseQuery(query);
-        try {
-          return rule.check().allow(user, vars, bodyJson, queryParams);
-        } catch (Exception e) {
-          return false; // donnee de path/body/query invalide : refus.
-        }
-      }
+    // 2) Une regle s'applique : on charge le user et on parse body/query seulement maintenant.
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null) {
+      return false; // identite inconnue : fail-closed.
     }
-
-    // 3) Aucune regle ne matche. On distingue lecture et ecriture (fail-safe) :
-    //    - LECTURE (GET/HEAD/OPTIONS) : default-ALLOW — les GET non listes (catalogue, reference,
-    //      /me...) restent ouverts sans avoir a tout enumerer. ZERO requete BD.
-    //    - ECRITURE (POST/PUT/PATCH/DELETE) : default-DENY. Une route MUTANTE non explicitement
-    //      autorisee est REFUSEE : un nouvel endpoint d'ecriture oublie echoue en fail-closed
-    //      (403) au lieu d'etre silencieusement ouvert. Les mutations volontairement ouvertes
-    //      (ex. PATCH /me, POST /exec/*) portent une regle explicite renvoyant true.
-    return isSafeMethod(method);
+    Map<String, String> vars = matcher.extractUriTemplateVariables(rule.pattern(), decoded);
+    JsonNode bodyJson = parseBody(body);
+    Map<String, String> queryParams = parseQuery(query);
+    try {
+      return rule.check().allow(user, vars, bodyJson, queryParams);
+    } catch (Exception e) {
+      return false; // donnee de path/body/query invalide : refus.
+    }
   }
 
-  // Methodes HTTP "sures" (lecture, sans effet de bord) : seules elles beneficient du
-  // default-allow quand aucune regle ne matche. Tout le reste est refuse par defaut.
-  private static boolean isSafeMethod(String method) {
-    return "GET".equalsIgnoreCase(method)
-        || "HEAD".equalsIgnoreCase(method)
-        || "OPTIONS".equalsIgnoreCase(method);
+  // Signature ("VERB /pattern") de la regle qui decide pour ce chemin BRUT, ou null si aucune.
+  // Meme chemin de code que isAllowed (decodage puis 1re regle) : RouteCoverageTest s'en sert pour
+  // verifier que la regle choisie est celle de la route que Spring choisit dans le service (#111).
+  String matchingRuleSignature(String method, String rawPath) {
+    String decoded = decodePath(rawPath);
+    Rule rule = decoded == null ? null : findRule(method, decoded);
+    return rule == null
+        ? null
+        : rule.method().toUpperCase(java.util.Locale.ROOT) + " " + rule.pattern();
+  }
+
+  // Le gateway transmet le chemin BRUT (getRequestURI), alors que les services le decodent avant
+  // de router. On decode une fois, comme eux ; un encodage invalide ou un double encodage (un '%'
+  // restant apres decodage) renvoie null, donc un refus.
+  private static String decodePath(String rawPath) {
+    String decoded;
+    try {
+      decoded = UriUtils.decode(rawPath, StandardCharsets.UTF_8);
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+    return decoded.contains("%") ? null : decoded;
+  }
+
+  // 1re regle (ordre de buildRules) dont la methode et le motif correspondent au chemin decode.
+  private Rule findRule(String method, String decodedPath) {
+    for (Rule rule : rules) {
+      if (method.equalsIgnoreCase(rule.method()) && matcher.match(rule.pattern(), decodedPath)) {
+        return rule;
+      }
+    }
+    return null;
   }
 
   // Parse une query string brute ("a=1&b=2") en map parametre -> valeur (decodage %xx). Renvoie
