@@ -547,3 +547,288 @@ describe('QuizEditor — fermeture avec des modifications non enregistrées', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+// Parcours relevés par Stryker (#117) : chacun correspond à un comportement que les tests ne
+// vérifiaient pas (chargement, nouvel essai, état « modifié », questions éditées en place…).
+describe('QuizEditor — parcours complémentaires', () => {
+  const titleField = () => screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement;
+
+  async function addTrueFalse(prompt: string) {
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    await screen.findByText(editorT.newQuestionTitle);
+    fireEvent.change(promptField(), { target: { value: prompt } });
+    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
+  }
+
+  it('liste : indicateur de chargement tant que le serveur n’a pas répondu', async () => {
+    let resolve!: (quizzes: Quiz[]) => void;
+    const onFetchQuizzes = vi.fn(() => new Promise<Quiz[]>((res) => (resolve = res)));
+    renderEditor({ quizzes: [], handlers: { onFetchQuizzes } });
+    expect(screen.getByText(listT.loading)).toBeTruthy();
+    expect(screen.queryByText(listT.empty)).toBeNull();
+    await act(async () => resolve([makeQuiz({ id: 3, title: 'Chargé' })]));
+    expect(screen.queryByText(listT.loading)).toBeNull();
+    expect(screen.getByText('Chargé')).toBeTruthy();
+  });
+
+  it('ouverture en échec : « Réessayer » relance le chargement et ouvre le formulaire', async () => {
+    const onFetchQuiz = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(makeQuiz({ id: 1, title: 'Quiz A' }));
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Quiz A' })], handlers: { onFetchQuiz } });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
+    await screen.findByText(editorT.loadError);
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
+    expect(onFetchQuiz).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(editorT.loadError)).toBeNull();
+  });
+
+  it('après un enregistrement réussi, la session n’est plus modifiée : la croix ferme directement', async () => {
+    const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
+    const { onClose } = renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: { onUpdateQuiz },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.change(titleField(), { target: { value: 'Q renommé' } });
+    fireEvent.click(screen.getByText(formT.save));
+    await waitFor(() => expect(onUpdateQuiz).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('supprimer une question rend la session modifiée : la croix demande confirmation', async () => {
+    const { onClose } = renderEditor({
+      quizzes: [
+        makeQuiz({ id: 1, title: 'Q', questions: [{ id: 7, qType: 'true_false', prompt: 'X', totalScore: 1 }] }),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByLabelText(formT.deleteQuestionAria));
+    expect(screen.getByText(editorT.deleteQuestionBody)).toBeTruthy(); // texte propre aux questions
+    fireEvent.click(screen.getByText('Supprimer'));
+    await waitFor(() => expect(screen.queryByText(editorT.deleteQuestionTitle)).toBeNull());
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('supprimer un quiz : la confirmation porte le texte propre aux quiz', () => {
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })] });
+    fireEvent.click(screen.getByLabelText(listT.deleteAria('Q')));
+    expect(screen.getByText(editorT.deleteQuizBody)).toBeTruthy();
+    expect(screen.queryByText(editorT.deleteQuestionBody)).toBeNull();
+  });
+
+  it('modifier une question existante la remplace en place (pas de doublon)', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q', questions: [] })],
+      handlers: { onFetchQuestionTypes: () => QUESTION_TYPES },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    await addTrueFalse('Première version');
+    fireEvent.click(screen.getByText(qT.add));
+    await screen.findByText('Première version');
+    fireEvent.click(screen.getByLabelText(formT.editQuestionAria));
+    await screen.findByText(editorT.editQuestionTitle);
+    fireEvent.change(promptField(), { target: { value: 'Version corrigée' } });
+    fireEvent.click(screen.getByText(qT.save));
+    await screen.findByText('Version corrigée');
+    expect(screen.queryByText('Première version')).toBeNull();
+    expect(screen.getAllByLabelText(formT.editQuestionAria)).toHaveLength(1);
+  });
+
+  it('sous-titre de l’éditeur de question : position dans le quiz (« Question n »)', async () => {
+    renderEditor({
+      quizzes: [
+        makeQuiz({
+          id: 1,
+          title: 'Q',
+          questions: [
+            { id: 7, qType: 'true_false', prompt: 'Un', totalScore: 1 },
+            { id: 8, qType: 'true_false', prompt: 'Deux', totalScore: 1 },
+          ],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getAllByLabelText(formT.editQuestionAria)[1]);
+    expect(await screen.findByText(editorT.questionSubtitle(2))).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Retour')); // rien de modifié : retour direct
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    expect(await screen.findByText(editorT.questionSubtitle(3))).toBeTruthy();
+  });
+
+  it('retour depuis la vue « Tester » : aucune confirmation, on revient à la question', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q', questions: [] })],
+      handlers: { onFetchQuestionTypes: () => QUESTION_TYPES },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    await addTrueFalse('À tester'); // session modifiée
+    fireEvent.click(screen.getByText(qT.test));
+    await screen.findByText(editorT.testTitle);
+    fireEvent.click(screen.getByLabelText('Retour'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(await screen.findByText(editorT.newQuestionTitle)).toBeTruthy();
+    expect(promptField().value).toBe('À tester');
+  });
+});
+
+// Deuxième passe Stryker (#117) : parcours encore non vérifiés (réordonnancements réussis,
+// création puis modification, indicateurs d'attente, identifiants temporaires).
+describe('QuizEditor — parcours complémentaires (2)', () => {
+  function setElementFromPoint(el: Element | null) {
+    (
+      document as unknown as { elementFromPoint: (x: number, y: number) => Element | null }
+    ).elementFromPoint = () => el;
+  }
+
+  /** Glisse la rangée `from` (par sa poignée) sur la rangée `over`, puis relâche. */
+  function dragRow(from: string, over: string) {
+    const src = document.querySelector(`[data-reorder-id="${from}"]`) as HTMLElement;
+    const dst = document.querySelector(`[data-reorder-id="${over}"]`) as HTMLElement;
+    const grip = src.querySelector('span') as HTMLElement;
+    (grip as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+    fireEvent.pointerDown(grip, { button: 0, pointerType: 'mouse', pointerId: 1 });
+    setElementFromPoint(dst);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 0, clientY: 30 }));
+    });
+    act(() => {
+      window.dispatchEvent(new Event('pointerup'));
+    });
+    fireEvent.click(grip); // clic de fin de geste, avalé par le hook
+  }
+
+  const twoQuestions = () =>
+    makeQuiz({
+      id: 1,
+      title: 'Q',
+      questions: [
+        { id: 7, qType: 'true_false', prompt: 'Première', totalScore: 1 },
+        { id: 8, qType: 'true_false', prompt: 'Seconde', totalScore: 1 },
+      ],
+    });
+
+  it('réordonner les questions du formulaire : nouvel ordre enregistré, session modifiée', async () => {
+    const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
+    const { onClose } = renderEditor({ quizzes: [twoQuestions()], handlers: { onUpdateQuiz } });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    dragRow('8', '7');
+    // Session modifiée : la croix demande confirmation.
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    fireEvent.click(screen.getByText(editorT.discardCancel));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(formT.save));
+    await waitFor(() => expect(onUpdateQuiz).toHaveBeenCalled());
+    const payload = onUpdateQuiz.mock.calls[0][1];
+    expect(payload.questions!.map((q) => q.id)).toEqual([8, 7]);
+  });
+
+  it('réordonner les quiz (succès) : persisté avec le nouvel ordre et remonté à la barre latérale', async () => {
+    const onReorderQuizzes = vi.fn(async () => {});
+    const onQuizzesChange = vi.fn();
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Quiz A' }), makeQuiz({ id: 2, title: 'Quiz B' })],
+      handlers: { onReorderQuizzes },
+      onQuizzesChange,
+    });
+    dragRow('2', '1');
+    await waitFor(() => expect(onReorderQuizzes).toHaveBeenCalledWith(42, [2, 1]));
+    const last = onQuizzesChange.mock.calls.at(-1)?.[0] as Quiz[];
+    expect(last.map((q) => q.id)).toEqual([2, 1]);
+    expect(screen.queryByText(editorT.reorderError)).toBeNull();
+  });
+
+  it('réordonner les quiz sans persistance (mode mémoire) : ordre local seulement', () => {
+    const onQuizzesChange = vi.fn();
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Quiz A' }), makeQuiz({ id: 2, title: 'Quiz B' })],
+      onQuizzesChange,
+    });
+    dragRow('2', '1');
+    const last = onQuizzesChange.mock.calls.at(-1)?.[0] as Quiz[];
+    expect(last.map((q) => q.id)).toEqual([2, 1]);
+  });
+
+  it('créer puis enregistrer à nouveau : le formulaire passe en modification, le 2e appel met à jour', async () => {
+    const onCreateQuiz = vi.fn(async (_c: number, quiz: Quiz) => ({ ...quiz, id: 999 }));
+    const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
+    renderEditor({ quizzes: [], handlers: { onCreateQuiz, onUpdateQuiz } });
+    fireEvent.click(screen.getByText(listT.create));
+    // Quiz neuf : rien de coché par défaut.
+    expect(screen.getByRole('switch', { name: formT.daily }).getAttribute('aria-checked')).toBe('false');
+    fireEvent.change(screen.getByPlaceholderText(formT.titlePlaceholder), { target: { value: 'Nouveau' } });
+    fireEvent.click(screen.getByText(formT.create));
+    await screen.findByText(editorT.editQuizTitle);
+    expect(screen.getByText(formT.save)).toBeTruthy();
+    fireEvent.click(screen.getByText(formT.save));
+    await waitFor(() =>
+      expect(onUpdateQuiz).toHaveBeenCalledWith(999, expect.objectContaining({ title: 'Nouveau' }))
+    );
+    expect(onCreateQuiz).toHaveBeenCalledTimes(1);
+  });
+
+  it('créer sans persistance (mode mémoire) : le formulaire passe aussi en modification', async () => {
+    renderEditor({ quizzes: [] });
+    fireEvent.click(screen.getByText(listT.create));
+    fireEvent.change(screen.getByPlaceholderText(formT.titlePlaceholder), { target: { value: 'Local' } });
+    fireEvent.click(screen.getByText(formT.create));
+    expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
+    expect(screen.queryByText(formT.create)).toBeNull();
+  });
+
+  it('pendant l’enregistrement, le bouton est désactivé ; il revient après la réponse', async () => {
+    let resolve!: () => void;
+    const onUpdateQuiz = vi.fn(() => new Promise<void>((res) => (resolve = res)));
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })], handlers: { onUpdateQuiz } });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByText(formT.save));
+    const lastButton = () => screen.getAllByRole('button').at(-1) as HTMLButtonElement;
+    await waitFor(() => expect(lastButton().disabled).toBe(true));
+    await act(async () => resolve());
+    expect(screen.getByText(formT.save).closest('button')!.disabled).toBe(false);
+  });
+
+  it('ouverture en cours : le crayon du quiz est marqué occupé jusqu’à la réponse', async () => {
+    let resolve!: (q: Quiz) => void;
+    const onFetchQuiz = vi.fn(() => new Promise<Quiz>((res) => (resolve = res)));
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })], handlers: { onFetchQuiz } });
+    const pencil = screen.getByLabelText(listT.editAria('Q'));
+    fireEvent.click(pencil);
+    expect(pencil.getAttribute('aria-busy')).toBe('true');
+    await act(async () => resolve(makeQuiz({ id: 1, title: 'Q' })));
+    expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
+  });
+
+  it('deux nouvelles questions reçoivent des identifiants distincts (aucune n’écrase l’autre)', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q', questions: [] })],
+      handlers: { onFetchQuestionTypes: () => QUESTION_TYPES },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    for (const prompt of ['Alpha', 'Bêta']) {
+      fireEvent.click(screen.getByText(formT.addQuestion));
+      await screen.findByText(editorT.newQuestionTitle);
+      fireEvent.change(promptField(), { target: { value: prompt } });
+      fireEvent.click(screen.getByLabelText(qT.typeLabel));
+      fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
+      fireEvent.click(screen.getByText(qT.add));
+      await screen.findByText(prompt);
+    }
+    expect(screen.getByText('Alpha')).toBeTruthy();
+    expect(screen.getByText('Bêta')).toBeTruthy();
+    const ids = [...document.querySelectorAll('[data-reorder-id]')].map((el) =>
+      el.getAttribute('data-reorder-id')
+    );
+    expect(new Set(ids).size).toBe(2);
+    // Identifiants temporaires (négatifs) tant que les questions ne sont pas enregistrées.
+    expect(ids.every((id) => Number(id) < 0)).toBe(true);
+  });
+});
