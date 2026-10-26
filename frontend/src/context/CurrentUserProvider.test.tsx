@@ -451,3 +451,30 @@ describe('CurrentUserProvider — saveProfile et applyGlobalRoles', () => {
     expect(localStorage.getItem('moodit_user_id')).toBeNull();
   });
 });
+
+// Un enfant qui enregistre dès que le profil est chargé, dans son propre useEffect : React
+// exécute les effets des enfants AVANT celui du fournisseur. La fusion doit quand même partir
+// des réglages du profil (sinon le thème enregistré était effacé par le PUT).
+describe('CurrentUserProvider — enregistrement juste après le chargement du profil', () => {
+  function EarlySaver() {
+    const { status, saveSettings } = useCurrentUser();
+    useEffect(() => {
+      if (status === 'authed') saveSettings({ location: { programId: 5 } });
+    }, [status, saveSettings]);
+    return null;
+  }
+
+  it('la fusion conserve les réglages du profil (thème) et le PUT les envoie tous', async () => {
+    getMe.mockResolvedValue({ ...baseUser, settings: JSON.stringify({ theme: 'light' }) });
+    renderProvider(
+      <>
+        <EarlySaver />
+        <Driver />
+      </>
+    );
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('authed'));
+    expect(settingsBlob()).toEqual({ theme: 'light', location: { programId: 5 } });
+    await waitFor(() => expect(updateMeSettings).toHaveBeenCalled(), { timeout: 2500 });
+    expect(updateMeSettings).toHaveBeenLastCalledWith({ theme: 'light', location: { programId: 5 } });
+  });
+});

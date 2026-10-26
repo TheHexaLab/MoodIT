@@ -4,7 +4,7 @@
 // s'en sert comme validation forte, et le Dashboard récupère le profil déjà chargé :
 // un seul appel réseau au lieu de deux.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getMe, updateMe, updateMeSettings } from '../helpers/api.ts';
 import { ROLE } from '../helpers/roles.ts';
 import type { Role, User } from '../types/domain.ts';
@@ -52,9 +52,12 @@ export default function CurrentUserProvider({ children }: { children: ReactNode 
     [currentUser.settings]
   );
   // Copie « live » des settings pour fusionner sans dépendre d'une closure figée
-  // (plusieurs saveSettings peuvent s'enchaîner dans le même tick).
+  // (plusieurs saveSettings peuvent s'enchaîner dans le même tick). Recopiée dans un effet de
+  // MISE EN PAGE : les `useEffect` des enfants s'exécutent AVANT celui de ce fournisseur, et un
+  // enfant qui enregistre juste après le chargement du profil (ex. dernier emplacement)
+  // fusionnait sinon dans une copie encore vide, et le PUT effaçait le thème enregistré.
   const settingsRef = useRef<UserSettings>(settings);
-  useEffect(() => {
+  useLayoutEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
   // Minuteur de debounce du PUT /api/me/settings.
