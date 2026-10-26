@@ -201,3 +201,33 @@ describe('JoinCoursesPopup', () => {
     expect(await screen.findByText('Go')).toBeTruthy();
   });
 });
+
+// Écran tactile (pointeur « grossier ») : la recherche n'est pas focalisée d'office, pour ne pas
+// ouvrir le clavier virtuel à l'ouverture. À la souris, elle l'est (saisie immédiate).
+describe('JoinCoursesPopup — focus de la recherche selon le pointeur', () => {
+  function stubPointer(coarse: boolean) {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: query.includes('reduce') || (query === '(pointer: coarse)' && coarse),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }))
+    );
+  }
+
+  it('souris : la recherche prend le focus une fois les cours chargés', async () => {
+    stubPointer(false);
+    renderPopup();
+    const search = await screen.findByPlaceholderText(t.searchPlaceholder);
+    expect(document.activeElement).toBe(search);
+  });
+
+  it('tactile : la recherche ne prend pas le focus (pas de clavier virtuel)', async () => {
+    stubPointer(true);
+    renderPopup();
+    const search = await screen.findByPlaceholderText(t.searchPlaceholder);
+    expect(document.activeElement).not.toBe(search);
+  });
+});
