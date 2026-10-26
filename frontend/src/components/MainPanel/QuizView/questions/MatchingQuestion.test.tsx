@@ -423,3 +423,82 @@ describe('MatchingQuestion — glisser-déposer (Pointer Events)', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 });
+
+// Défilement automatique pendant un glissement : près d'un bord (64 px) de la zone qui défile, la
+// liste défile d'elle-même, et la zone survolée est recalculée (le contenu bouge sous le pointeur).
+describe('MatchingQuestion — défilement automatique pendant le glissement', () => {
+  let frames: FrameRequestCallback[];
+
+  function runFrame() {
+    const cb = frames.shift();
+    act(() => cb?.(0));
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function setup(scrollable: boolean) {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    window.scrollBy = vi.fn();
+    const onChange = vi.fn();
+    const utils = render(
+      <div data-testid="scroller" style={scrollable ? { overflowY: 'auto' } : undefined}>
+        <MatchingQuestion question={matchingQuestion()} mode="answer" answer={undefined} onChange={onChange} />
+      </div>
+    );
+    const scroller = screen.getByTestId('scroller');
+    if (scrollable) {
+      Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+      Object.defineProperty(scroller, 'clientHeight', { value: 200 });
+      scroller.getBoundingClientRect = () => ({ top: 100, bottom: 300 }) as DOMRect;
+    }
+    return { onChange, scroller, ...utils };
+  }
+
+  it('sans zone défilante : près du haut de la fenêtre, la page remonte', () => {
+    setup(false);
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0, clientX: 0, clientY: 16 });
+    runFrame();
+    expect(window.scrollBy).toHaveBeenCalledWith(0, -12); // 16 × (64 − 16) / 64
+    expect(frames).toHaveLength(1); // la boucle continue
+    firePointer('pointerup', 0, 16);
+  });
+
+  it('sans zone défilante : près du bas, la page descend ; loin des bords, rien', () => {
+    setup(false);
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0, clientX: 0, clientY: window.innerHeight / 2 });
+    runFrame();
+    expect(window.scrollBy).not.toHaveBeenCalled();
+    firePointer('pointermove', 0, window.innerHeight);
+    runFrame();
+    expect(window.scrollBy).toHaveBeenCalledWith(0, 16); // vitesse maximale au bord
+    firePointer('pointerup', 0, window.innerHeight);
+  });
+
+  it('dans une zone défilante : c’est elle qui défile, et la zone survolée est recalculée', () => {
+    const { scroller, container } = setup(true);
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0, clientX: 0, clientY: 290 });
+    setElementFromPoint(zone(container, 'Plantes'));
+    runFrame();
+    expect(scroller.scrollTop).toBe((16 * (290 - (300 - 64))) / 64);
+    expect(window.scrollBy).not.toHaveBeenCalled();
+    expect(zone(container, 'Plantes')!.className).toContain('groupOver');
+    firePointer('pointerup', 0, 290);
+  });
+
+  it('le relâchement arrête la boucle ; hors de toute zone, rien n’est placé et la mise en évidence disparaît', () => {
+    const { onChange, container } = setup(false);
+    fireEvent.pointerDown(chip('Chien'), { pointerType: 'mouse', button: 0, clientX: 0, clientY: 400 });
+    setElementFromPoint(zone(container, 'Animaux'));
+    firePointer('pointermove', 0, 400);
+    expect(zone(container, 'Animaux')!.className).toContain('groupOver');
+    setElementFromPoint(null);
+    firePointer('pointerup', 0, 400);
+    expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(zone(container, 'Animaux')!.className).not.toContain('groupOver');
+  });
+});

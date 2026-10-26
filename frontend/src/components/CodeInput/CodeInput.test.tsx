@@ -39,9 +39,14 @@ function currentValue(): string {
   return screen.getByTestId('value').textContent ?? '';
 }
 
-/** Déclenche un collage avec le texte donné sur la case `el`. */
-function paste(el: HTMLElement, text: string) {
-  fireEvent.paste(el, { clipboardData: { getData: () => text } });
+/**
+ * Déclenche un collage avec le texte donné sur la case `el`. Le presse-papiers ne répond qu'au
+ * format `text` (comme un navigateur), et renvoie `false` si le collage par défaut est annulé.
+ */
+function paste(el: HTMLElement, text: string): boolean {
+  return fireEvent.paste(el, {
+    clipboardData: { getData: (format: string) => (format === 'text' ? text : '') },
+  });
 }
 
 describe('CodeInput', () => {
@@ -273,5 +278,12 @@ describe('CodeInput', () => {
     fireEvent.focus(first);
     expect(first.selectionStart).toBe(0);
     expect(first.selectionEnd).toBe(1);
+  });
+
+  it('le collage remplace le comportement du navigateur (pas d’insertion brute dans la case)', () => {
+    render(<Host />);
+    // fireEvent renvoie false quand le gestionnaire appelle preventDefault().
+    expect(paste(boxes()[0], '123456')).toBe(false);
+    expect(currentValue()).toBe('123456');
   });
 });

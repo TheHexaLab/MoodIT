@@ -547,3 +547,134 @@ describe('QuizEditor — fermeture avec des modifications non enregistrées', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+// Parcours relevés par Stryker (#117) : chacun correspond à un comportement que les tests ne
+// vérifiaient pas (chargement, nouvel essai, état « modifié », questions éditées en place…).
+describe('QuizEditor — parcours complémentaires', () => {
+  const titleField = () => screen.getByPlaceholderText(formT.titlePlaceholder) as HTMLInputElement;
+
+  async function addTrueFalse(prompt: string) {
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    await screen.findByText(editorT.newQuestionTitle);
+    fireEvent.change(promptField(), { target: { value: prompt } });
+    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
+  }
+
+  it('liste : indicateur de chargement tant que le serveur n’a pas répondu', async () => {
+    let resolve!: (quizzes: Quiz[]) => void;
+    const onFetchQuizzes = vi.fn(() => new Promise<Quiz[]>((res) => (resolve = res)));
+    renderEditor({ quizzes: [], handlers: { onFetchQuizzes } });
+    expect(screen.getByText(listT.loading)).toBeTruthy();
+    expect(screen.queryByText(listT.empty)).toBeNull();
+    await act(async () => resolve([makeQuiz({ id: 3, title: 'Chargé' })]));
+    expect(screen.queryByText(listT.loading)).toBeNull();
+    expect(screen.getByText('Chargé')).toBeTruthy();
+  });
+
+  it('ouverture en échec : « Réessayer » relance le chargement et ouvre le formulaire', async () => {
+    const onFetchQuiz = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(makeQuiz({ id: 1, title: 'Quiz A' }));
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Quiz A' })], handlers: { onFetchQuiz } });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
+    await screen.findByText(editorT.loadError);
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
+    expect(onFetchQuiz).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(editorT.loadError)).toBeNull();
+  });
+
+  it('après un enregistrement réussi, la session n’est plus modifiée : la croix ferme directement', async () => {
+    const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
+    const { onClose } = renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: { onUpdateQuiz },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.change(titleField(), { target: { value: 'Q renommé' } });
+    fireEvent.click(screen.getByText(formT.save));
+    await waitFor(() => expect(onUpdateQuiz).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('supprimer une question rend la session modifiée : la croix demande confirmation', async () => {
+    const { onClose } = renderEditor({
+      quizzes: [
+        makeQuiz({ id: 1, title: 'Q', questions: [{ id: 7, qType: 'true_false', prompt: 'X', totalScore: 1 }] }),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByLabelText(formT.deleteQuestionAria));
+    expect(screen.getByText(editorT.deleteQuestionBody)).toBeTruthy(); // texte propre aux questions
+    fireEvent.click(screen.getByText('Supprimer'));
+    await waitFor(() => expect(screen.queryByText(editorT.deleteQuestionTitle)).toBeNull());
+    fireEvent.click(screen.getByLabelText('Fermer'));
+    expect(screen.getByText(editorT.discardTitle)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('supprimer un quiz : la confirmation porte le texte propre aux quiz', () => {
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })] });
+    fireEvent.click(screen.getByLabelText(listT.deleteAria('Q')));
+    expect(screen.getByText(editorT.deleteQuizBody)).toBeTruthy();
+    expect(screen.queryByText(editorT.deleteQuestionBody)).toBeNull();
+  });
+
+  it('modifier une question existante la remplace en place (pas de doublon)', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q', questions: [] })],
+      handlers: { onFetchQuestionTypes: () => QUESTION_TYPES },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    await addTrueFalse('Première version');
+    fireEvent.click(screen.getByText(qT.add));
+    await screen.findByText('Première version');
+    fireEvent.click(screen.getByLabelText(formT.editQuestionAria));
+    await screen.findByText(editorT.editQuestionTitle);
+    fireEvent.change(promptField(), { target: { value: 'Version corrigée' } });
+    fireEvent.click(screen.getByText(qT.save));
+    await screen.findByText('Version corrigée');
+    expect(screen.queryByText('Première version')).toBeNull();
+    expect(screen.getAllByLabelText(formT.editQuestionAria)).toHaveLength(1);
+  });
+
+  it('sous-titre de l’éditeur de question : position dans le quiz (« Question n »)', async () => {
+    renderEditor({
+      quizzes: [
+        makeQuiz({
+          id: 1,
+          title: 'Q',
+          questions: [
+            { id: 7, qType: 'true_false', prompt: 'Un', totalScore: 1 },
+            { id: 8, qType: 'true_false', prompt: 'Deux', totalScore: 1 },
+          ],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getAllByLabelText(formT.editQuestionAria)[1]);
+    expect(await screen.findByText(editorT.questionSubtitle(2))).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Retour')); // rien de modifié : retour direct
+    fireEvent.click(screen.getByText(formT.addQuestion));
+    expect(await screen.findByText(editorT.questionSubtitle(3))).toBeTruthy();
+  });
+
+  it('retour depuis la vue « Tester » : aucune confirmation, on revient à la question', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q', questions: [] })],
+      handlers: { onFetchQuestionTypes: () => QUESTION_TYPES },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    await addTrueFalse('À tester'); // session modifiée
+    fireEvent.click(screen.getByText(qT.test));
+    await screen.findByText(editorT.testTitle);
+    fireEvent.click(screen.getByLabelText('Retour'));
+    expect(screen.queryByText(editorT.discardTitle)).toBeNull();
+    expect(await screen.findByText(editorT.newQuestionTitle)).toBeTruthy();
+    expect(promptField().value).toBe('À tester');
+  });
+});
