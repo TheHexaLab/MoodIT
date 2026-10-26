@@ -389,7 +389,7 @@ describe('fetchCourseProgramIds', () => {
 
   it('throw si le cours ne répond pas', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
-    await expect(fetchCourseProgramIds(4)).rejects.toThrow();
+    await expect(fetchCourseProgramIds(4)).rejects.toThrow('Échec chargement des programmes du cours');
   });
 });
 

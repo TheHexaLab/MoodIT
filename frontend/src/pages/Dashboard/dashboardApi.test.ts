@@ -420,6 +420,7 @@ describe('runCode', () => {
     const out = await runCode({ language: 'Python', code: 'print(1)' });
     const [url, init] = callArgs();
     expect(url).toBe('/exec/run');
+    expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ language: 'Python', code: 'print(1)' });
     expect(out).toEqual(runResult);
   });
@@ -503,6 +504,7 @@ describe('createEstablishment', () => {
     const out = await createEstablishment('E', 'e.com');
     const [url, init] = callArgs();
     expect(url).toBe('/api/establishments');
+    expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ name: 'E', domainEmail: 'e.com' });
     expect(out).toEqual({ id: 1, name: 'E', domainEmail: 'e.com' });
   });
@@ -629,6 +631,7 @@ describe('votePost', () => {
     await votePost(4, 1, -1);
     const [url, init] = callArgs();
     expect(url).toBe('/api/forums/posts/votes');
+    expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ forumId: 4, postId: 1, voteValue: -1 });
   });
 
@@ -652,6 +655,7 @@ describe('sendMessage', () => {
     const out = await sendMessage(4, 'salut', null, 'cid-1');
     const [url, init] = callArgs();
     expect(url).toBe('/api/forums/messages');
+    expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({
       forumId: 4,
       parentPostId: null,
