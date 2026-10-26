@@ -473,6 +473,9 @@ describe('CurrentUserProvider — enregistrement juste après le chargement du p
       </>
     );
     await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('authed'));
+    // L'enregistrement de l'enfant a lieu dans SON useEffect, qui peut passer après l'affichage
+    // de « authed » : on attend qu'il soit appliqué, puis on vérifie que rien n'a été perdu.
+    await waitFor(() => expect(settingsBlob().location).toEqual({ programId: 5 }));
     expect(settingsBlob()).toEqual({ theme: 'light', location: { programId: 5 } });
     await waitFor(() => expect(updateMeSettings).toHaveBeenCalled(), { timeout: 2500 });
     expect(updateMeSettings).toHaveBeenLastCalledWith({ theme: 'light', location: { programId: 5 } });
