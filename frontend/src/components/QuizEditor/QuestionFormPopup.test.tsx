@@ -661,3 +661,42 @@ describe('QuestionFormBody — règles de validité et saisie par ligne', () => 
     expect(onRequestLanguages).not.toHaveBeenCalled();
   });
 });
+
+// Le bouton d'ajout est dans le pied (hors de la zone qui défile) : la ligne ajoutée est amenée
+// dans la vue et son champ reçoit le focus, pour saisir sans chercher la nouvelle ligne.
+describe('QuestionFormBody — ligne ajoutée amenée dans la vue et focalisée', () => {
+  it('ajouter une réponse : son champ défile jusqu’à l’écran et reçoit le focus', () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    renderForm(
+      {
+        qType: 'single_choice',
+        prompt: 'Q',
+        totalScore: 1,
+        answers: [
+          { content: 'A', isCorrect: true },
+          { content: 'B', isCorrect: false },
+        ],
+      },
+      { isNew: true }
+    );
+    fireEvent.click(screen.getByText(`+ ${t.addAnswer}`));
+    const added = screen.getAllByPlaceholderText(t.answerPlaceholder)[2];
+    expect(document.activeElement).toBe(added);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    delete (HTMLElement.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it('ajouter un élément de remise en ordre : le nouvel élément reçoit le focus', () => {
+    renderForm({ ...emptyQuestionDraft('ordering'), prompt: 'Q' }, { isNew: true });
+    fireEvent.click(screen.getByText(`+ ${t.addItem}`));
+    const items = screen.getAllByPlaceholderText(t.elementPlaceholder);
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it('à l’ouverture (sans ajout), aucune ligne n’est focalisée d’office par ce mécanisme', () => {
+    renderForm({ ...emptyQuestionDraft('ordering'), prompt: 'Q' }, { isNew: true });
+    const items = screen.getAllByPlaceholderText(t.elementPlaceholder);
+    expect(items).not.toContain(document.activeElement);
+  });
+});
