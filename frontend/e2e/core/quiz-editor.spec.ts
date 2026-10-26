@@ -396,7 +396,14 @@ test('modifier un quiz, annuler, supprimer une question puis le quiz', async ({ 
   await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
   await expect(page.getByText('Seconde question')).toBeHidden();
   await expect(page.getByText('1 pts', { exact: true }).first()).toBeVisible();
+  // On attend la réponse de l'enregistrement avant « Retour », comme un utilisateur qui voit
+  // l'indicateur : tant qu'elle n'est pas arrivée, la session est encore « modifiée » et le
+  // retour demande confirmation (garde de fermeture, #145).
+  const saved = page.waitForResponse(
+    (res) => res.request().method() === 'PUT' && /\/api\/quizzes\/\d+$/.test(res.url())
+  );
   await page.getByRole('button', { name: 'Enregistrer' }).click();
+  expect((await saved).ok(), 'quiz enregistré par le serveur').toBe(true);
   await page.getByRole('button', { name: 'Retour' }).click();
   await expect(quizRow(page, renamed)).toContainText('1 questions');
 
