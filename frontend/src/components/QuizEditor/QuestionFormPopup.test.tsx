@@ -536,3 +536,128 @@ describe('QuestionFormBody — code de départ et enregistrement', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+// Deuxième passe Stryker (#117) : règles de validité et saisies ligne par ligne, vérifiées au cas
+// limite près (une seule réponse, un champ seulement blanc, l'édition d'UNE ligne parmi plusieurs).
+describe('QuestionFormBody — règles de validité et saisie par ligne', () => {
+  const choice = (answers: { content: string; isCorrect: boolean }[]): QuestionDraft => ({
+    qType: 'single_choice',
+    prompt: 'Q',
+    totalScore: 1,
+    answers,
+  });
+
+  it('choix : une seule réponse, même remplie et correcte → enregistrement bloqué', () => {
+    renderForm(choice([{ content: 'Seule', isCorrect: true }]), { isNew: true });
+    expect(saveButton(t.add).disabled).toBe(true);
+  });
+
+  it('choix : une réponse blanche parmi d’autres remplies → bloqué ; une fois remplie → possible', () => {
+    renderForm(
+      choice([
+        { content: 'A', isCorrect: true },
+        { content: '   ', isCorrect: false },
+      ]),
+      { isNew: true }
+    );
+    expect(saveButton(t.add).disabled).toBe(true);
+    fireEvent.change(screen.getAllByPlaceholderText(t.answerPlaceholder)[1], { target: { value: 'B' } });
+    expect(saveButton(t.add).disabled).toBe(false);
+  });
+
+  it('énoncé seulement blanc → bloqué', () => {
+    renderForm({ ...emptyQuestionDraft('true_false'), prompt: '   ' }, { isNew: true });
+    expect(saveButton(t.add).disabled).toBe(true);
+  });
+
+  it('modifier une réponse ne touche que celle-là ; une réponse ajoutée n’est pas correcte', () => {
+    const { onSave } = renderForm(
+      choice([
+        { content: 'A', isCorrect: true },
+        { content: 'B', isCorrect: false },
+      ]),
+      { isNew: true }
+    );
+    fireEvent.change(screen.getAllByPlaceholderText(t.answerPlaceholder)[1], { target: { value: 'B2' } });
+    fireEvent.click(screen.getByText(`+ ${t.addAnswer}`));
+    fireEvent.change(screen.getAllByPlaceholderText(t.answerPlaceholder)[2], { target: { value: 'C' } });
+    fireEvent.click(saveButton(t.add));
+    const saved = onSave.mock.calls[0][0] as QuestionDraft;
+    expect(saved.answers).toEqual([
+      { content: 'A', isCorrect: true },
+      { content: 'B2', isCorrect: false },
+      { content: 'C', isCorrect: false },
+    ]);
+  });
+
+  it('remise en ordre : un élément blanc → bloqué ; modifier un élément ne touche que lui ; numéros 1..n', () => {
+    const { onSave } = renderForm(
+      {
+        qType: 'ordering',
+        prompt: 'Q',
+        totalScore: 1,
+        dragItems: [
+          { content: 'un', correctOrder: 0 },
+          { content: '  ', correctOrder: 1 },
+          { content: 'trois', correctOrder: 2 },
+        ],
+      } as QuestionDraft,
+      { isNew: true }
+    );
+    expect(saveButton(t.add).disabled).toBe(true);
+    const items = screen.getAllByPlaceholderText(t.elementPlaceholder);
+    fireEvent.change(items[1], { target: { value: 'deux' } });
+    expect(saveButton(t.add).disabled).toBe(false);
+    const numbers = [...document.querySelectorAll('[class*="orderNum"]')].map((el) => el.textContent);
+    expect(numbers).toEqual(['1', '2', '3']);
+    fireEvent.click(saveButton(t.add));
+    const saved = onSave.mock.calls[0][0] as QuestionDraft;
+    expect(saved.dragItems?.map((d) => d.content)).toEqual(['un', 'deux', 'trois']);
+  });
+
+  it('association : catégorie ou élément seulement blanc → bloqué ; modifier une ligne ne touche que elle', () => {
+    const { onSave } = renderForm(
+      {
+        qType: 'matching',
+        prompt: 'Q',
+        totalScore: 1,
+        dragItems: [
+          { content: 'chien', groupName: 'animal' },
+          { content: 'rose', groupName: '   ' },
+        ],
+      } as QuestionDraft,
+      { isNew: true }
+    );
+    expect(saveButton(t.add).disabled).toBe(true);
+    const cats = screen.getAllByPlaceholderText(t.categoryPlaceholder);
+    fireEvent.change(cats[1], { target: { value: 'fleur' } });
+    expect(saveButton(t.add).disabled).toBe(false);
+    const elements = screen.getAllByPlaceholderText(t.elementPlaceholder);
+    fireEvent.change(elements[0], { target: { value: '  ' } });
+    expect(saveButton(t.add).disabled).toBe(true);
+    fireEvent.change(elements[0], { target: { value: 'chat' } });
+    fireEvent.click(saveButton(t.add));
+    const saved = onSave.mock.calls[0][0] as QuestionDraft;
+    expect(saved.dragItems?.map((d) => [d.content, d.groupName])).toEqual([
+      ['chat', 'animal'],
+      ['rose', 'fleur'],
+    ]);
+  });
+
+  it('barème : la valeur saisie est transmise ; au blur, sous 0,1 elle remonte à 0,1', () => {
+    const { onSave } = renderForm({ ...emptyQuestionDraft('true_false'), prompt: 'Q' }, { isNew: true });
+    const points = screen.getByLabelText(t.pointsLabel) as HTMLInputElement;
+    fireEvent.change(points, { target: { value: '3' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).totalScore).toBe(3);
+    fireEvent.change(points, { target: { value: '0.04' } });
+    fireEvent.blur(points);
+    expect(points.value).toBe('0.1');
+  });
+
+  it('une question autre que Code ne demande pas les langages au montage', () => {
+    const onRequestLanguages = vi.fn();
+    renderForm({ ...emptyQuestionDraft('single_choice'), prompt: 'Q' }, { onRequestLanguages });
+    expect(onRequestLanguages).not.toHaveBeenCalled();
+  });
+});
