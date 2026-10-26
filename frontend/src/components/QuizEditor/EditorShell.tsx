@@ -51,6 +51,13 @@ interface EditorShellProps {
    * ferait perdre le travail non enregistré, sans confirmation.
    */
   closeOnEscape?: boolean;
+  /**
+   * Opération en cours (ex. enregistrement du quiz) : aucune sortie possible tant qu'elle n'a
+   * pas répondu. Le chevron et la croix sont désactivés, Échap et le clic sur le fond sont
+   * ignorés. Sinon, quitter pendant l'enregistrement affichait « Modifications non
+   * enregistrées » alors que l'enregistrement était en cours.
+   */
+  busy?: boolean;
   children: React.ReactNode;
 }
 
@@ -94,6 +101,7 @@ export function EditorShell({
   desktopMaxVh,
   scrollResetKey,
   closeOnEscape = true,
+  busy = false,
   children,
 }: EditorShellProps): React.ReactElement {
   const popup = usePopupController();
@@ -173,7 +181,8 @@ export function EditorShell({
       label={title}
       onClose={onClose}
       controller={popup}
-      closeOnEscape={closeOnEscape}
+      closeOnEscape={closeOnEscape && !busy}
+      closeOnBackdrop={!busy}
       closeGuard={onCloseGuard}
       panelClassName={styles.panel}
       panelStyle={panelStyle}
@@ -185,6 +194,7 @@ export function EditorShell({
               type="button"
               className={styles.backChevron}
               aria-label="Retour"
+              disabled={busy}
               onClick={onBack}
             >
               <Chevron width={16} height={16} style={{ transform: 'rotate(-90deg)' }} />
@@ -199,6 +209,7 @@ export function EditorShell({
           type="button"
           className={styles.closeButton}
           aria-label="Fermer"
+          disabled={busy}
           onClick={() => {
             const proceed = () => popup.requestClose(onClose);
             if (onCloseGuard) onCloseGuard(proceed);
