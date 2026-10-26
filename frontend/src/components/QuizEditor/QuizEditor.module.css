@@ -90,6 +90,8 @@
 .backChevron:active { opacity: 0.55; }
 .closeButton { font-size: 1.125rem; }
 .closeButton:hover { color: var(--text); }
+/* Enregistrement en cours (EditorShell `busy`) : sortie impossible, l'apparence le montre. */
+.backChevron:disabled, .closeButton:disabled { opacity: 0.4; cursor: default; color: var(--text-muted); }
 .closeButton:active { opacity: 0.55; }
 
 /* ── Champs (label + contrôle) ── */

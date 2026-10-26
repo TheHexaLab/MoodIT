@@ -503,6 +503,9 @@ export function QuizEditor({
         // Échap ferme l'éditeur seulement depuis la liste des quiz : ailleurs (formulaire, question,
         // harnais, test), il ferait perdre la saisie en cours sans confirmation.
         closeOnEscape={view.kind === 'list'}
+        // Enregistrement en cours : aucune sortie avant la réponse (pas de fausse alerte
+        // « Modifications non enregistrées » pendant qu'elles sont justement enregistrées).
+        busy={saving}
         // Croix et clic sur le fond : confirmation si des modifications ne sont pas enregistrées.
         onCloseGuard={requestDiscard}
         width={shell.width}
