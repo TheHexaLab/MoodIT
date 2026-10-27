@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.moodit.core_service.internal.InternalTokenValidator;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -26,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(controllers = RealtimeInternalController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)
 @TestPropertySource(properties = "app.internal.token=jeton-de-test")
+@Import(InternalTokenValidator.class)
 class RealtimeInternalControllerTest {
 
     private static final String TOKEN = "jeton-de-test";

@@ -3,6 +3,7 @@ package com.moodit.gateway.filter;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.http.HttpServletRequest;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -102,7 +103,7 @@ class RequestWrappersTest {
   @Test
   void cached_bodyRelisablePlusieursFois() throws Exception {
     byte[] json = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);
-    CachedBodyRequest cached = new CachedBodyRequest(jsonRequest(json, null));
+    CachedBodyRequest cached = (CachedBodyRequest) CachedBodyRequest.read(jsonRequest(json, null), 1024);
 
     assertThat(cached.getInputStream().readAllBytes()).isEqualTo(json);
     assertThat(cached.getInputStream().readAllBytes()).isEqualTo(json);
@@ -112,7 +113,7 @@ class RequestWrappersTest {
   @Test
   void cached_flux_finiEtPretSelonLaLecture() throws Exception {
     CachedBodyRequest cached =
-        new CachedBodyRequest(jsonRequest(new byte[] {'x'}, null));
+        (CachedBodyRequest) CachedBodyRequest.read(jsonRequest(new byte[] {'x'}, null), 1024);
     ServletInputStream in = cached.getInputStream();
 
     assertThat(in.isReady()).isTrue();
@@ -128,7 +129,9 @@ class RequestWrappersTest {
   void cached_lecteur_respecteLEncodageDeLaRequete() throws Exception {
     String text = "{\"titre\":\"élève\"}";
     CachedBodyRequest cached =
-        new CachedBodyRequest(jsonRequest(text.getBytes(StandardCharsets.ISO_8859_1), "ISO-8859-1"));
+        (CachedBodyRequest)
+            CachedBodyRequest.read(
+                jsonRequest(text.getBytes(StandardCharsets.ISO_8859_1), "ISO-8859-1"), 1024);
 
     try (BufferedReader reader = cached.getReader()) {
       assertThat(reader.readLine()).isEqualTo(text);
@@ -142,11 +145,68 @@ class RequestWrappersTest {
     MockHttpServletRequest req = jsonRequest(text.getBytes(StandardCharsets.UTF_8), null);
     req.setCharacterEncoding((String) null);
     assertThat(req.getCharacterEncoding()).isNull(); // précondition : aucun encodage déclaré
-    CachedBodyRequest cached = new CachedBodyRequest(req);
+    CachedBodyRequest cached = (CachedBodyRequest) CachedBodyRequest.read(req, 1024);
 
     assertThat(cached.getBodyAsString()).isEqualTo(text);
     try (BufferedReader reader = cached.getReader()) {
       assertThat(reader.readLine()).isEqualTo(text);
     }
+  }
+
+  @Test
+  void read_corpsALaBorne_misEnCache() throws Exception {
+    byte[] body = "abcd".getBytes(StandardCharsets.UTF_8);
+
+    HttpServletRequest read = CachedBodyRequest.read(jsonRequest(body, null), 4);
+
+    assertThat(read).isInstanceOf(CachedBodyRequest.class);
+    assertThat(((CachedBodyRequest) read).getBodyAsString()).isEqualTo("abcd");
+  }
+
+  // Corps au-delà de la borne (#31) : rien n'est gardé en cache, mais le service en aval reçoit
+  // le corps INTACT (octets déjà lus, puis le reste du flux d'origine).
+  @Test
+  void read_corpsTropGros_rejoueSansCache() throws Exception {
+    byte[] body = "abcdefgh".getBytes(StandardCharsets.UTF_8);
+
+    HttpServletRequest read = CachedBodyRequest.read(jsonRequest(body, null), 4);
+
+    assertThat(read).isNotInstanceOf(CachedBodyRequest.class);
+    ServletInputStream in = read.getInputStream();
+    assertThat(in.isReady()).isTrue();
+    assertThat(in.isFinished()).isFalse();
+    assertThat(in.read()).isEqualTo('a');
+    byte[] rest = new byte[16];
+    assertThat(in.read(rest, 0, rest.length)).isEqualTo(4); // fin des octets déjà lus
+    assertThat(new String(rest, 0, 4, StandardCharsets.UTF_8)).isEqualTo("bcde");
+    assertThat(in.isFinished()).isFalse();
+    assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("fgh");
+    assertThat(in.read()).isEqualTo(-1);
+    assertThat(in.isFinished()).isTrue();
+  }
+
+  @Test
+  void read_corpsTropGros_lecteurRespecteLEncodage() throws Exception {
+    String text = "{\"titre\":\"élève\"}";
+
+    HttpServletRequest read =
+        CachedBodyRequest.read(jsonRequest(text.getBytes(StandardCharsets.ISO_8859_1), "ISO-8859-1"), 4);
+
+    try (BufferedReader reader = read.getReader()) {
+      assertThat(reader.readLine()).isEqualTo(text);
+    }
+  }
+
+  // Un octet nul n'est pas la fin du flux, une lecture de longueur nulle non plus : seul -1 l'est.
+  @Test
+  void read_corpsTropGros_octetNulEtLectureVide_neTerminentPasLeFlux() throws Exception {
+    byte[] body = {0, 0, 0, 0, 0, 1};
+
+    ServletInputStream in = CachedBodyRequest.read(jsonRequest(body, null), 4).getInputStream();
+
+    assertThat(in.read()).isZero();
+    assertThat(in.isFinished()).isFalse();
+    assertThat(in.read(new byte[4], 0, 0)).isZero();
+    assertThat(in.isFinished()).isFalse();
   }
 }

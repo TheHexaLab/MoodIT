@@ -10,6 +10,7 @@
 
 package com.moodit.gateway.ws;
 
+import com.moodit.gateway.config.HttpClients;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,7 +41,8 @@ public class AuthHandshakeInterceptor implements HandshakeInterceptor {
   @Value("${app.auth.allow-legacy-token:true}")
   private boolean allowLegacyToken;
 
-  private final RestClient restClient = RestClient.create();
+  // Délais explicites (#31), comme le filtre REST.
+  private final RestClient restClient = HttpClients.internal();
 
   @Override
   public boolean beforeHandshake(

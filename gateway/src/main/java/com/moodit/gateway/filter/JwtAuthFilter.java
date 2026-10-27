@@ -3,6 +3,7 @@
 
 package com.moodit.gateway.filter;
 
+import com.moodit.gateway.config.HttpClients;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -48,14 +49,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   @Value("${app.auth.allow-legacy-token:true}")
   private boolean allowLegacyToken;
 
-  private final RestClient restClient = RestClient.create();
+  // Délais explicites (#31) : un auth ou permission bloqué ne doit pas immobiliser le gateway.
+  private final RestClient restClient = HttpClients.internal();
 
   // Nom du cookie porteur du JWT (aligné avec auth-service AuthCookie.NAME).
   private static final String TOKEN_COOKIE = "moodit_token";
 
   // Taille max d'un body mis en cache pour transmission au permission-service (garde-fou
   // memoire : on ne bufferise pas un payload geant).
-  private static final long MAX_CACHED_BODY = 1024 * 1024; // 1 Mo
+  private static final int MAX_CACHED_BODY = 1024 * 1024; // 1 Mo
 
   private List<String> getPublicRoutes() {
     return List.of(publicRoutesConfig.split(","));
@@ -89,16 +91,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       return;
     }
 
-    // Chemin protégé : on met le body en cache si c'est une écriture JSON, pour pouvoir
-    // le transmettre au permission-service ET que core puisse le relire intact.
-    HttpServletRequest base = shouldCacheBody(request) ? new CachedBodyRequest(request) : request;
-
-    // Empêche un client d'injecter lui-même l'identité : on neutralise tout X-User-Email entrant.
-    HttpServletRequest sanitized = new StrippedHeaderRequest(base, "X-User-Email");
-
     // Récupérer le token : cookie moodit_token d'abord (nouveau mécanisme), à défaut le
     // header Authorization: Bearer (ancien mécanisme — retiré à la fin de la bascule).
-    String token = extractToken(sanitized);
+    String token = extractToken(request);
     if (token == null || token.isBlank()) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       response.getWriter().write("Token manquant");
@@ -141,6 +136,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       response.getWriter().write("Token invalide");
       return;
     }
+
+    // Le body n'est lu qu'une fois l'appelant authentifié (#31). Écriture JSON : mis en cache,
+    // lecture bornée à MAX_CACHED_BODY, pour le transmettre au permission-service ET que core
+    // puisse le relire intact.
+    HttpServletRequest base =
+        shouldCacheBody(request) ? CachedBodyRequest.read(request, MAX_CACHED_BODY) : request;
+
+    // Empêche un client d'injecter lui-même l'identité : on neutralise tout X-User-Email entrant.
+    HttpServletRequest sanitized = new StrippedHeaderRequest(base, "X-User-Email");
 
     // 3) Autorisation : le permission-service décide si ce user a le droit d'accéder à
     //    cette route (rôles + appartenance). L'identité vient du JWT, pas du client. Pour
@@ -221,18 +225,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
   }
 
-  // Faut-il mettre le body en cache ? Seulement les écritures JSON de taille raisonnable
-  // (pas de GET/DELETE, pas de multipart/upload, pas de payload géant).
+  // Faut-il mettre le body en cache ? Seulement les écritures JSON (pas de GET/DELETE, pas de
+  // multipart/upload). La taille n'est pas vérifiée ici : la lecture est bornée par
+  // CachedBodyRequest.read, quel que soit le Content-Length annoncé (#31).
   private boolean shouldCacheBody(HttpServletRequest request) {
     String method = request.getMethod();
     if (!"POST".equals(method) && !"PUT".equals(method) && !"PATCH".equals(method)) {
       return false;
     }
     String contentType = request.getContentType();
-    if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
-      return false;
-    }
-    return request.getContentLengthLong() <= MAX_CACHED_BODY;
+    return contentType != null && contentType.toLowerCase().startsWith("application/json");
   }
 
   // Extraction du token :

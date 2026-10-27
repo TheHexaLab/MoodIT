@@ -25,24 +25,43 @@ public class ExecutionClient {
 
     private static final Logger log = LoggerFactory.getLogger(ExecutionClient.class);
 
-    private final RestClient restClient;
     private final String baseUrl;
     private final String internalToken;
+    private final long connectTimeoutMs;
+    private final long baseReadTimeoutMs;
+    private final long perTestReadTimeoutMs;
 
     public ExecutionClient(
             @Value("${app.execution-service.internal-url:http://localhost:8084}") String baseUrl,
             @Value("${app.internal.token:}") String internalToken,
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
-            @Value("${app.execution-service.read-timeout-ms:30000}") long readTimeoutMs) {
+            @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
+            @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
-        // Timeouts explicites : la vérification est SYNCHRONE à la soumission (bloque la requête).
-        // Un sandbox injoignable / bloqué doit échouer proprement (→ null → 503) plutôt que de
-        // faire traîner le thread indéfiniment.
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.baseReadTimeoutMs = baseReadTimeoutMs;
+        this.perTestReadTimeoutMs = perTestReadTimeoutMs;
+    }
+
+    /**
+     * Délai d'attente de la réponse pour {@code testCount} harnais (#31) : execution-service les
+     * exécute L'UN APRÈS L'AUTRE, chacun pouvant prendre jusqu'au délai d'un appel Piston
+     * ({@code app.piston.http-timeout-ms}, 20 s par défaut). Un délai fixe faisait échouer la
+     * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
+     * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
+     */
+    long readTimeoutMs(int testCount) {
+        return baseReadTimeoutMs + (long) Math.max(testCount, 1) * perTestReadTimeoutMs;
+    }
+
+    // Client par appel : le délai de lecture dépend du nombre de harnais. Un sandbox injoignable
+    // ou bloqué échoue proprement (→ null) plutôt que de faire traîner le thread indéfiniment.
+    private RestClient restClient(int testCount) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
-        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
-        this.restClient = RestClient.builder().requestFactory(factory).build();
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs(testCount)));
+        return RestClient.builder().requestFactory(factory).build();
     }
 
     /** Un harnais à exécuter (nom + code + poids). */
@@ -64,7 +83,7 @@ public class ExecutionClient {
                         .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
                         .toList());
         try {
-            Verdict[] verdicts = restClient.post()
+            Verdict[] verdicts = restClient(harnesses.size()).post()
                     .uri(baseUrl + "/internal/exec/evaluate")
                     .header("X-Internal-Token", internalToken)
                     .contentType(MediaType.APPLICATION_JSON)

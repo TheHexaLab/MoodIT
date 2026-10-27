@@ -59,7 +59,7 @@ class WebSocketProxyHandlerTest {
 
   @BeforeEach
   void setUp() {
-    handler = new WebSocketProxyHandler(CORE_WS_URL);
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 5_000);
 
     attributes = new HashMap<>();
     client = mock(WebSocketSession.class);
@@ -167,6 +167,20 @@ class WebSocketProxyHandlerTest {
     handler.afterConnectionEstablished(client);
 
     verify(client).close(CloseStatus.SERVER_ERROR);
+  }
+
+  // Core qui n'achève jamais le handshake (#31) : le délai expire, l'ouverture est abandonnée
+  // et le client fermé, au lieu de bloquer le thread indéfiniment.
+  @Test
+  void ouverture_handshakeAvalSansReponse_delaiDepasse_fermeLeClient() throws Exception {
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 50);
+    CompletableFuture<WebSocketSession> never = new CompletableFuture<>();
+    stubDownstream(never);
+
+    handler.afterConnectionEstablished(client);
+
+    verify(client).close(CloseStatus.SERVER_ERROR);
+    assertThat(never.isCancelled()).isTrue();
   }
 
   @Test

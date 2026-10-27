@@ -9,7 +9,9 @@ package com.moodit.gateway.ws;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,11 +36,20 @@ public class WebSocketProxyHandler extends AbstractWebSocketHandler {
   /** URL du endpoint WebSocket de core-service (ex. ws://core:8081/ws). */
   private final String coreWsUrl;
 
+  /**
+   * Délai d'ouverture de la connexion aval (#31) : sans lui, un core qui n'achève pas le handshake
+   * bloquerait le thread du client indéfiniment.
+   */
+  private final long downstreamConnectTimeoutMs;
+
   /** session client (id) → session aval vers core-service. */
   private final Map<String, WebSocketSession> downstreamByClient = new ConcurrentHashMap<>();
 
-  public WebSocketProxyHandler(@Value("${app.core-service.ws-url}") String coreWsUrl) {
+  public WebSocketProxyHandler(
+      @Value("${app.core-service.ws-url}") String coreWsUrl,
+      @Value("${app.core-service.ws-connect-timeout-ms:5000}") long downstreamConnectTimeoutMs) {
     this.coreWsUrl = coreWsUrl;
+    this.downstreamConnectTimeoutMs = downstreamConnectTimeoutMs;
   }
 
   @Override
@@ -54,14 +65,16 @@ public class WebSocketProxyHandler extends AbstractWebSocketHandler {
       headers.add("Authorization", "Bearer " + token);
     }
 
+    CompletableFuture<WebSocketSession> pending =
+        new StandardWebSocketClient()
+            .execute(new DownstreamRelayHandler(client), headers, URI.create(coreWsUrl));
     try {
-      WebSocketSession downstream =
-          new StandardWebSocketClient()
-              .execute(new DownstreamRelayHandler(client), headers, URI.create(coreWsUrl))
-              .get();
+      WebSocketSession downstream = pending.get(downstreamConnectTimeoutMs, TimeUnit.MILLISECONDS);
       downstreamByClient.put(clientRaw.getId(), downstream);
     } catch (Exception e) {
-      // Core indisponible / token refusé au handshake aval : on ferme le client.
+      // Core indisponible, token refusé au handshake aval ou délai dépassé : on abandonne
+      // l'ouverture et on ferme le client.
+      pending.cancel(true);
       log.warn("Proxy WS : impossible d'ouvrir la connexion aval vers {}", coreWsUrl, e);
       clientRaw.close(CloseStatus.SERVER_ERROR);
     }

@@ -592,6 +592,69 @@ class JwtAuthFilterTest {
     assertThat(forwarded.getInputStream().readAllBytes()).hasSize(big.length);
   }
 
+  // Requête chunked (aucun Content-Length) au-delà de 1 Mo (#31) : la lecture est bornée, le
+  // body n'est pas transmis au permission-service, et core le reçoit intact.
+  @Test
+  void postJsonChunkedTropGros_lectureBornee_bodyIntactEnAval() throws Exception {
+    stubValidate(true, false);
+    byte[] big = new byte[1024 * 1024 + 1];
+    java.util.Arrays.fill(big, (byte) 'a');
+    MockHttpServletRequest req = chunked("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(big);
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(200);
+    assertThat(forwardedPermissionBody()).isEmpty();
+    HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+    assertThat(forwarded.getInputStream().readAllBytes()).isEqualTo(big);
+  }
+
+  @Test
+  void postJsonChunkedPetit_bodyTransmis() throws Exception {
+    stubValidate(true, false);
+    String json = "{\"forumId\":3}";
+    MockHttpServletRequest req = chunked("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(json.getBytes(StandardCharsets.UTF_8));
+
+    run(req, new MockFilterChain());
+
+    assertThat(forwardedPermissionBody()).isEqualTo(json);
+  }
+
+  // Le body n'est lu qu'après l'authentification (#31) : sans token valide, il reste intact.
+  @Test
+  void tokenAbsent_bodyJamaisLu() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.setContentType("application/json");
+    req.setContent("{\"forumId\":3}".getBytes(StandardCharsets.UTF_8));
+
+    MockHttpServletResponse res = run(req, new MockFilterChain());
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(req.getInputStream().readAllBytes()).hasSize(13);
+  }
+
+  /** Requête sans Content-Length annoncé, comme un envoi chunked. */
+  private static MockHttpServletRequest chunked(String method, String uri) {
+    return new MockHttpServletRequest(method, uri) {
+      @Override
+      public long getContentLengthLong() {
+        return -1;
+      }
+
+      @Override
+      public int getContentLength() {
+        return -1;
+      }
+    };
+  }
+
   @Test
   void deleteAvecBodyJson_bodyNonTransmis() throws Exception {
     stubValidate(true, false);
