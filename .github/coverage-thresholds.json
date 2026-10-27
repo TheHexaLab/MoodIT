@@ -1,5 +1,6 @@
 {
-  "_commentaire": "Seuils de couverture des lignes (%) par service, vérifiés par le job « couverture » de tests.yml (script .github/scripts/coverage-gate.py). 90 % pour tous les services (#90). Frontend mesuré avec Vitest 5, qui compte les instructions exécutables et non chaque ligne physique (#134). Un seuil ne baisse jamais ; le cliquet comparé à main est suivi dans #108.",
+  "_commentaire": "Seuils de couverture des lignes (%), vérifiés par le job « couverture » de tests.yml. services : par service (script .github/scripts/coverage-gate.py), 90 % pour tous (#90) ; un seuil ne baisse jamais, et sur une PR la couverture ne doit pas non plus baisser de plus de 0,1 point par rapport à main (cliquet, #108). Frontend mesuré avec Vitest 5, qui compte les instructions exécutables et non chaque ligne physique (#134). changed_lines : part des lignes ajoutées ou modifiées par une PR qui doit être couverte (script coverage-changed.py, #108).",
+  "changed_lines": 90,
   "services": {
     "auth-service": 90,
     "permission-service": 90,
