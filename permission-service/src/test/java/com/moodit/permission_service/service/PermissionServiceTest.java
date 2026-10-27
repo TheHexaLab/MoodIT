@@ -13,6 +13,8 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -680,7 +682,8 @@ class PermissionServiceTest {
 
   @Test
   void listEstablishments_openToAnyAuthenticated() {
-    // La LECTURE reste ouverte (default-allow) : aucun chargement de user requis.
+    // Lecture ouverte à tout compte authentifié, par une règle explicite (#111).
+    loggedIn(user(5));
     assertThat(service().isAllowed(EMAIL, "/api/establishments", "GET", null)).isTrue();
   }
 
@@ -721,9 +724,9 @@ class PermissionServiceTest {
   // ── Comportement du moteur ─────────────────────────────────────────────────────────
 
   @Test
-  void noMatchingRule_defaultAllow_withoutLoadingUser() {
-    // Aucune règle → autorisé SANS charger le user (zéro requête BD).
-    assertThat(service().isAllowed(EMAIL, "/api/unlisted/route", "GET", null)).isTrue();
+  void noMatchingRule_defaultDeny_withoutLoadingUser() {
+    // Aucune règle → refusé SANS charger le user (zéro requête BD), lecture comprise (#111).
+    assertThat(service().isAllowed(EMAIL, "/api/unlisted/route", "GET", null)).isFalse();
     verifyNoInteractions(userRepository);
   }
 
@@ -823,10 +826,40 @@ class PermissionServiceTest {
   }
 
   @Test
-  void readNoRule_defaultAllow() {
-    // Lecture (GET) sans règle → default-ALLOW (catalogue/référence), sans charger le user.
-    assertThat(service().isAllowed(EMAIL, "/api/whatever/catalog", "GET", null)).isTrue();
+  void readNoRule_defaultDeny() {
+    // #111 : une lecture (GET) sans règle est REFUSÉE (403), sans charger le user. Une route de
+    // lecture ajoutée sans règle n'est donc plus servie à tout compte authentifié.
+    assertThat(service().isAllowed(EMAIL, "/api/whatever/catalog", "GET", null)).isFalse();
     verifyNoInteractions(userRepository);
+  }
+
+  // ── Lectures volontairement ouvertes (règle explicite depuis le default-deny, #111) ─────
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "/api/me",
+        "/api/languages",
+        "/api/question-types",
+        "/api/programs",
+        "/api/programs/7",
+        "/api/programs/7/courses",
+        "/api/programs/7/courses/3",
+        "/api/establishments",
+        "/api/establishments/2/programs",
+        "/api/establishments/2/manageable-programs",
+        "/api/courses/3"
+      })
+  void openReads_allowedForAnyAuthenticatedUser(String path) {
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, path, "GET", null)).isTrue();
+  }
+
+  @Test
+  void openRead_unknownUser_denied() {
+    // Une règle s'applique : l'identité est chargée, et une identité inconnue est refusée.
+    when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+    assertThat(service().isAllowed(EMAIL, "/api/languages", "GET", null)).isFalse();
   }
 
   // ── Mutations volontairement ouvertes (règle explicite depuis le default-deny) ───────
