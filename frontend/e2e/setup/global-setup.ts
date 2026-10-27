@@ -76,9 +76,11 @@ async function ensureAccount(baseURL: string, account: TestAccount): Promise<voi
 
     // 6. Révocation des appareils des runs précédents : chaque contexte Playwright est un
     //    navigateur neuf (= un nouvel appareil), on resterait sinon bloqué au plafond de 20.
-    //    404 = pile sans le vocal chiffré (ex. main avant la fusion vocale) : rien à révoquer.
+    //    Pile sans le vocal chiffré (ex. main avant la fusion vocale, #42) : rien à révoquer. La
+    //    route n'y existe pas : le gateway la refuse (403, aucune règle depuis #111), ou core
+    //    répond 404 sur une pile plus ancienne.
     const devices = await ctx.get('/api/keys/my-devices');
-    if (devices.status() !== 404) {
+    if (devices.status() !== 403 && devices.status() !== 404) {
       await expectOk(devices, `appareils de ${account.email}`);
       for (const d of (await devices.json()) as { deviceId: string; revokedAt: string | null }[]) {
         if (!d.revokedAt) {
