@@ -1,6 +1,6 @@
 # Routes de LECTURE (GET) exposées via le gateway. GÉNÉRÉ par
 # MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.
-# Lu par le RouteCoverageTest : chaque GET doit être GATÉ (règle) ou PUBLIC.
+# Lu par le RouteCoverageTest : chaque GET doit avoir une règle (refus par défaut).
 GET /api/audit-logs
 GET /api/courses/{courseId}
 GET /api/courses/{courseId}/forums

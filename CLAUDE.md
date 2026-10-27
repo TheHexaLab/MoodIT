@@ -38,8 +38,8 @@ docker compose -f docker-compose-dev.yml up -d   # Postgres + pgAdmin pour le de
 
 ## Règles à respecter
 
-- **Autorisations** : toute nouvelle route d'écriture (POST/PUT/PATCH/DELETE) doit avoir sa règle dans `permission-service` (`PermissionService`). Pas de vérification de rôle codée en dur dans un autre service.
-- **Manifestes de routes** : après avoir ajouté ou modifié une route dans core, mcp ou execution, lancer `./gradlew test --tests '*MutatingRouteManifestTest'`. Le test réécrit `src/test/resources/mutating-routes.txt` / `readable-routes.txt` et échoue une fois ; relancer, puis committer ces fichiers. `RouteCoverageTest` (permission-service) vérifie que chaque route a une règle.
+- **Autorisations** : toute nouvelle route, lecture comme écriture, doit avoir sa règle dans `permission-service` (`PermissionService`) ; sans règle, le gateway répond 403. Une lecture ouverte à tout authentifié porte une règle `-> true`. Pas de vérification de rôle codée en dur dans un autre service.
+- **Manifestes de routes** : après avoir ajouté ou modifié une route dans core, mcp ou execution, lancer `./gradlew test --tests '*MutatingRouteManifestTest'`. Le test réécrit `src/test/resources/mutating-routes.txt` / `readable-routes.txt` et échoue une fois ; relancer, puis committer ces fichiers. `RouteCoverageTest` (permission-service) vérifie que chaque route a une règle, et que la règle appliquée est celle de la route que Spring sert.
 - **Endpoints internes** : appels service-à-service sous `/internal/**`, protégés par le header `X-Internal-Token` (`INTERNAL_TOKEN`). Ils ne passent pas par le gateway.
 - **Schéma de BD** : pas de Flyway pour l'instant ([#96](https://github.com/TheHexaLab/MoodIT/issues/96)). Tout changement se fait **à deux endroits** : `init.sql` (bases neuves) **et** un nouveau script idempotent `migrations/AAAA-MM-JJ_sujet.sql` (bases existantes).
 - **Secrets** : le dépôt est public. Ne jamais committer `.env`, de clés ou de jetons. Les secrets de prod (`application-prod.properties`) n'ont pas de valeur de repli.
