@@ -62,11 +62,24 @@ async function openEditor(page: Page) {
 const quizRow = (page: Page, title: string) =>
   page.locator('[data-reorder-id]').filter({ hasText: title });
 
+/**
+ * Saisit l'énoncé de la question et vérifie qu'il est pris. Sous WebKit, un `fill` lancé juste
+ * après l'affichage de la vue « question » peut être perdu (le champ reste vide, #165) : on
+ * relit la valeur et on ressaisit tant qu'elle n'est pas là.
+ */
+async function fillPrompt(page: Page, prompt: string) {
+  const field = page.getByRole('textbox', { name: 'Éditeur Markdown' });
+  await expect(async () => {
+    await field.fill(prompt);
+    await expect(field).toHaveValue(prompt, { timeout: 1_000 });
+  }).toPass();
+}
+
 /** Ouvre « Nouvelle question », saisit l'énoncé, le type et le barème. */
 async function startQuestion(page: Page, type: string, prompt: string, points: number) {
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Nouvelle question' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill(prompt);
+  await fillPrompt(page, prompt);
   if (type !== 'Choix unique') await pickOption(page, 'Type de question', type);
   await expect(page.getByRole('button', { name: 'Type de question' })).toHaveText(type);
   await page.getByRole('spinbutton', { name: 'Points' }).fill(String(points));
@@ -206,7 +219,7 @@ test('validations de l’éditeur de question', async ({ browser }) => {
   // Choix unique : énoncé, 2 réponses non vides, une bonne réponse.
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await expect(addButton(page)).toBeDisabled();
-  await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill('Question de validation');
+  await fillPrompt(page, 'Question de validation');
   await expect(addButton(page)).toBeDisabled(); // réponses vides
   await answerFields(page).nth(0).fill('A');
   await answerFields(page).nth(1).fill('B');
@@ -386,7 +399,7 @@ test('modifier un quiz, annuler, supprimer une question puis le quiz', async ({ 
   await expect(page.getByRole('heading', { name: 'Modifier le quiz' })).toBeVisible();
   await page.getByRole('button', { name: 'Modifier la question' }).nth(0).click();
   await expect(page.getByRole('heading', { name: 'Modifier la question' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill('Première question modifiée');
+  await fillPrompt(page, 'Première question modifiée');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByText('Première question modifiée')).toBeVisible();
   // Titre modifié après le passage par l'éditeur de question (cf. test « méta conservées »).
@@ -519,7 +532,7 @@ test('temps réel : l’étudiant voit la mise à jour puis la suppression du qu
   await openEditor(page);
   await page.getByRole('button', { name: `Modifier ${title}`, exact: true }).click();
   await page.getByRole('button', { name: 'Modifier la question' }).nth(0).click();
-  await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill('Énoncé mis à jour en direct');
+  await fillPrompt(page, 'Énoncé mis à jour en direct');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
