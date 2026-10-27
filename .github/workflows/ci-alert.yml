@@ -1,0 +1,59 @@
+name: Alerte CI
+
+# Ouvre une issue « CI en échec : <workflow> sur <branche> » quand un run de Tests ou de Sécurité
+# échoue sur main, deploiement ou la nuit, et la ferme au run vert suivant (#113). Sans ça, ces
+# échecs ne sont vus par personne. Règles : .github/scripts/ci_alert.py.
+#
+# `workflow_run` exécute toujours la version de ce fichier présente sur main : il ne se teste pas
+# depuis une branche. Le déclenchement manuel rejoue la logique sur un run existant (rouge ou vert).
+on:
+  workflow_run:
+    workflows: [Tests, Sécurité]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Identifiant du run à traiter (dans l'URL : …/actions/runs/<id>)"
+        required: true
+      dry_run:
+        description: "Simulation (n'écrit rien)"
+        type: boolean
+        default: false
+
+# Un seul traitement à la fois : deux runs qui finissent ensemble ne créent pas deux issues.
+concurrency:
+  group: ci-alert
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  alert:
+    name: Alerte sur le run
+    # Filtre grossier ici (évite de démarrer un runner pour chaque PR) ; le script refiltre.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      ((github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule') &&
+       (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'deploiement'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read    # jobs du run
+      issues: write    # création, commentaire, fermeture
+    steps:
+      # Branche par défaut uniquement (jamais le code du run déclencheur), scripts seulement.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Ouvrir, commenter ou fermer l'issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+          # Personnes assignées (donc notifiées). Variable de dépôt CI_ALERT_ASSIGNEES pour changer.
+          ASSIGNEES: ${{ vars.CI_ALERT_ASSIGNEES || 'MikeyPopIt' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 .github/scripts/ci_alert.py
