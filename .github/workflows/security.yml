@@ -36,14 +36,14 @@ jobs:
         # build-mode none : analyse sans compiler (pas besoin de construire les 6 projets Gradle).
         language: [java-kotlin, javascript-typescript, actions]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           build-mode: none
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: /language:${{ matrix.language }}
 
@@ -51,7 +51,7 @@ jobs:
     name: gitleaks — secrets dans l'historique
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0       # tout l'historique : un secret retiré au commit suivant reste exposé
 
@@ -62,6 +62,28 @@ jobs:
           docker run --rm -v "$PWD:/repo" \
             ghcr.io/gitleaks/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46 \
             git /repo --no-banner --redact --verbose --gitleaks-ignore-path /repo/.gitleaksignore
+
+  # BLOQUANT (#114) : chaque action est épinglée par SHA complet, version en commentaire
+  # (`uses: actions/checkout@<sha> # v7.0.1`). Une étiquette (`@v7`) peut être déplacée vers du
+  # code inconnu, qui tournerait avec le jeton du dépôt. Dependabot met à jour SHA et commentaire.
+  actions-pinned:
+    name: Actions épinglées par SHA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Refuser les actions non épinglées
+        run: |
+          # Toute ligne `uses:` hors action locale (./…) et image docker:// doit viser un SHA de 40 caractères.
+          bad=$(grep -rnE '^\s*-?\s*uses:' .github \
+            | grep -vE 'uses:\s*["'"'"']?(\./|docker://)' \
+            | grep -vE 'uses:\s*["'"'"']?[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Actions non épinglées par SHA (#114) :"
+            echo "$bad"
+            exit 1
+          fi
+          echo "Toutes les actions sont épinglées par SHA."
 
   # BLOQUANT sur les CVE CRITICAL qui ont un correctif publié (#112), sur les PR comme sur main :
   # une dépendance qui en introduit une est arrêtée avant la fusion. Les HIGH restent visibles
@@ -80,7 +102,7 @@ jobs:
     env:
       TRIVY_IMAGE: aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Construire l'image
         run: docker build -t moodit/${{ matrix.service }}:ci ${{ matrix.service }}
@@ -104,7 +126,7 @@ jobs:
             moodit/${{ matrix.service }}:ci
 
       # Publié même si l'étape bloquante échoue : le détail reste consultable dans Code scanning.
-      - uses: github/codeql-action/upload-sarif@v4
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: always()
         with:
           sarif_file: trivy.sarif
