@@ -55,8 +55,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   // Nom du cookie porteur du JWT (aligné avec auth-service AuthCookie.NAME).
   private static final String TOKEN_COOKIE = "moodit_token";
 
-  // Taille max d'un body mis en cache pour transmission au permission-service (garde-fou
-  // memoire : on ne bufferise pas un payload geant).
+  // Taille max d'un body d'écriture JSON (garde-fou mémoire : on ne bufferise pas un payload
+  // géant). Au-delà : 413, jamais transmis (#31). Même limite que le nginx du frontend
+  // (client_max_body_size par défaut), donc aucune requête légitime n'est perdue.
   private static final int MAX_CACHED_BODY = 1024 * 1024; // 1 Mo
 
   private List<String> getPublicRoutes() {
@@ -139,9 +140,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     // Le body n'est lu qu'une fois l'appelant authentifié (#31). Écriture JSON : mis en cache,
     // lecture bornée à MAX_CACHED_BODY, pour le transmettre au permission-service ET que core
-    // puisse le relire intact.
-    HttpServletRequest base =
-        shouldCacheBody(request) ? CachedBodyRequest.read(request, MAX_CACHED_BODY) : request;
+    // puisse le relire intact. Trop gros : refusé, car l'autorisation dépend du body et ne peut
+    // pas être décidée sans lui (le Content-Length annoncé est vérifié avant toute lecture, la
+    // lecture bornée couvre une requête chunked qui n'en annonce aucun).
+    HttpServletRequest base = request;
+    if (shouldCacheBody(request)) {
+      CachedBodyRequest body =
+          request.getContentLengthLong() <= MAX_CACHED_BODY
+              ? CachedBodyRequest.read(request, MAX_CACHED_BODY)
+              : null;
+      if (body == null) {
+        response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+        response.getWriter().write("Corps de requête trop volumineux");
+        return;
+      }
+      base = body;
+    }
 
     // Empêche un client d'injecter lui-même l'identité : on neutralise tout X-User-Email entrant.
     HttpServletRequest sanitized = new StrippedHeaderRequest(base, "X-User-Email");
@@ -226,8 +240,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
   }
 
   // Faut-il mettre le body en cache ? Seulement les écritures JSON (pas de GET/DELETE, pas de
-  // multipart/upload). La taille n'est pas vérifiée ici : la lecture est bornée par
-  // CachedBodyRequest.read, quel que soit le Content-Length annoncé (#31).
+  // multipart/upload). La taille est vérifiée par l'appelant (#31).
   private boolean shouldCacheBody(HttpServletRequest request) {
     String method = request.getMethod();
     if (!"POST".equals(method) && !"PUT".equals(method) && !"PATCH".equals(method)) {

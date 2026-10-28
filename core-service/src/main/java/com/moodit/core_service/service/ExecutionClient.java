@@ -33,10 +33,10 @@ public class ExecutionClient {
 
     public ExecutionClient(
             @Value("${app.execution-service.internal-url:http://localhost:8084}") String baseUrl,
-            @Value("${app.internal.token:}") String internalToken,
+            @Value("${app.internal.token}") String internalToken,
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
-            @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs) {
+            @Value("${app.execution-service.per-test-timeout-ms:${PISTON_HTTP_TIMEOUT_MS:20000}}") long perTestReadTimeoutMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
@@ -47,7 +47,9 @@ public class ExecutionClient {
     /**
      * Délai d'attente de la réponse pour {@code testCount} harnais (#31) : execution-service les
      * exécute L'UN APRÈS L'AUTRE, chacun pouvant prendre jusqu'au délai d'un appel Piston
-     * ({@code app.piston.http-timeout-ms}, 20 s par défaut). Un délai fixe faisait échouer la
+     * ({@code app.piston.http-timeout-ms}, 20 s par défaut). Le délai par harnais suit donc par
+     * défaut {@code PISTON_HTTP_TIMEOUT_MS}, la variable du {@code .env} partagé qui règle ce
+     * délai côté execution-service. Un délai fixe faisait échouer la
      * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
      * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
      */

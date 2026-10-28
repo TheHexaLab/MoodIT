@@ -73,8 +73,10 @@ public class WebSocketProxyHandler extends AbstractWebSocketHandler {
       downstreamByClient.put(clientRaw.getId(), downstream);
     } catch (Exception e) {
       // Core indisponible, token refusé au handshake aval ou délai dépassé : on abandonne
-      // l'ouverture et on ferme le client.
-      pending.cancel(true);
+      // l'ouverture et on ferme le client. Annuler le future n'interrompt pas un handshake en
+      // cours : si core l'achève après le délai, la session aval (authentifiée avec le jeton du
+      // client) est fermée dès son ouverture au lieu de rester orpheline.
+      pending.thenAccept(WebSocketProxyHandler::closeQuietly);
       log.warn("Proxy WS : impossible d'ouvrir la connexion aval vers {}", coreWsUrl, e);
       clientRaw.close(CloseStatus.SERVER_ERROR);
     }
@@ -97,6 +99,14 @@ public class WebSocketProxyHandler extends AbstractWebSocketHandler {
     WebSocketSession downstream = downstreamByClient.get(clientRaw.getId());
     if (downstream != null && downstream.isOpen()) {
       downstream.sendMessage(message);
+    }
+  }
+
+  private static void closeQuietly(WebSocketSession downstream) {
+    try {
+      downstream.close(CloseStatus.GOING_AWAY);
+    } catch (Exception e) {
+      log.debug("Proxy WS : fermeture de la connexion aval abandonnée impossible", e);
     }
   }
 

@@ -1,11 +1,12 @@
 package com.moodit.core_service.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** Jeton interne : comparaison exacte, et fail-closed si aucun jeton n'est configuré (#31). */
+/** Jeton interne : comparaison exacte, et démarrage refusé si aucun jeton n'est configuré (#31). */
 class InternalTokenValidatorTest {
 
     @Test
@@ -26,12 +27,13 @@ class InternalTokenValidatorTest {
     }
 
     @Test
-    @DisplayName("Aucun jeton configuré (vide ou null) → tout est refusé, même un jeton vide")
-    void jetonNonConfigure_toutRefuse() {
-        assertThat(new InternalTokenValidator("").isValid("")).isFalse();
-        assertThat(new InternalTokenValidator("").isValid("n-importe-quoi")).isFalse();
-        assertThat(new InternalTokenValidator(null).isValid("")).isFalse();
-        assertThat(new InternalTokenValidator(null).isValid(null)).isFalse();
+    @DisplayName("Jeton configuré vide, blanc ou absent → le démarrage échoue")
+    void jetonNonConfigure_demarrageEchoue() {
+        for (String token : new String[] {"", "   ", null}) {
+            assertThatThrownBy(() -> new InternalTokenValidator(token))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("INTERNAL_TOKEN");
+        }
     }
 
     @Test

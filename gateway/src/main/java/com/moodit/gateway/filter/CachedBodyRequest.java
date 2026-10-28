@@ -16,9 +16,7 @@ import jakarta.servlet.http.HttpServletRequestWrapper;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.SequenceInputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
@@ -26,25 +24,20 @@ public class CachedBodyRequest extends HttpServletRequestWrapper {
 
   private final byte[] cachedBody;
 
-  CachedBodyRequest(HttpServletRequest request, byte[] body) {
+  private CachedBodyRequest(HttpServletRequest request, byte[] body) {
     super(request);
     this.cachedBody = body;
   }
 
   /**
    * Lit au plus {@code maxBytes + 1} octets du corps. S'il tient dans {@code maxBytes}, renvoie
-   * une {@link CachedBodyRequest} (corps relisable, transmis au permission-service). Sinon, renvoie
-   * une requête qui rejoue les octets déjà lus puis le reste du flux, sans rien garder en mémoire
-   * au-delà de la borne : le service en aval reçoit le corps intact, le permission-service n'en
-   * reçoit aucun (comme pour un Content-Length annoncé trop gros).
+   * une {@link CachedBodyRequest} (corps relisable, transmis au permission-service) ; sinon
+   * {@code null} : la requête doit être refusée, car l'autorisation ne peut pas être décidée sans
+   * le corps que le service en aval recevrait.
    */
-  static HttpServletRequest read(HttpServletRequest request, int maxBytes) throws IOException {
-    ServletInputStream in = request.getInputStream();
-    byte[] head = in.readNBytes(maxBytes + 1);
-    if (head.length <= maxBytes) {
-      return new CachedBodyRequest(request, head);
-    }
-    return new ReplayedBodyRequest(request, new SequenceInputStream(new ByteArrayInputStream(head), in));
+  static CachedBodyRequest read(HttpServletRequest request, int maxBytes) throws IOException {
+    byte[] body = request.getInputStream().readNBytes(maxBytes + 1);
+    return body.length <= maxBytes ? new CachedBodyRequest(request, body) : null;
   }
 
   /** Le corps mis en cache, decode en chaine (pour l'envoi au permission-service). */
@@ -53,48 +46,22 @@ public class CachedBodyRequest extends HttpServletRequestWrapper {
   }
 
   private Charset charset() {
-    return charsetOf(this);
-  }
-
-  private static Charset charsetOf(HttpServletRequest request) {
-    String enc = request.getCharacterEncoding();
+    String enc = getCharacterEncoding();
     return enc != null ? Charset.forName(enc) : StandardCharsets.UTF_8;
   }
 
   @Override
   public ServletInputStream getInputStream() {
-    return servletStream(new ByteArrayInputStream(cachedBody));
-  }
-
-  @Override
-  public BufferedReader getReader() {
-    return new BufferedReader(new InputStreamReader(getInputStream(), charset()));
-  }
-
-  /** Flux servlet synchrone au-dessus de {@code source}. */
-  private static ServletInputStream servletStream(InputStream source) {
+    ByteArrayInputStream source = new ByteArrayInputStream(cachedBody);
     return new ServletInputStream() {
-      private boolean finished;
-
       @Override
-      public int read() throws IOException {
-        int b = source.read();
-        finished = b < 0;
-        return b;
+      public int read() {
+        return source.read();
       }
 
-      @Override
-      public int read(byte[] buf, int off, int len) throws IOException {
-        int n = source.read(buf, off, len);
-        finished = n < 0;
-        return n;
-      }
-
-      // En memoire, available() == 0 signale la fin ; sinon (flux rejoue) seule une lecture
-      // renvoyant -1 le prouve.
       @Override
       public boolean isFinished() {
-        return finished || source instanceof ByteArrayInputStream bytes && bytes.available() == 0;
+        return source.available() == 0;
       }
 
       @Override
@@ -109,24 +76,8 @@ public class CachedBodyRequest extends HttpServletRequestWrapper {
     };
   }
 
-  /** Corps trop gros pour le cache : les octets deja lus, puis le reste du flux d'origine. */
-  private static final class ReplayedBodyRequest extends HttpServletRequestWrapper {
-
-    private final ServletInputStream stream;
-
-    ReplayedBodyRequest(HttpServletRequest request, InputStream body) {
-      super(request);
-      this.stream = servletStream(body);
-    }
-
-    @Override
-    public ServletInputStream getInputStream() {
-      return stream;
-    }
-
-    @Override
-    public BufferedReader getReader() {
-      return new BufferedReader(new InputStreamReader(stream, charsetOf(this)));
-    }
+  @Override
+  public BufferedReader getReader() {
+    return new BufferedReader(new InputStreamReader(getInputStream(), charset()));
   }
 }

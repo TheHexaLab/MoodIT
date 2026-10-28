@@ -127,16 +127,10 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void interne_jeton_non_configure_refuse_tout() throws Exception {
-        InternalExecutionController closed =
-                new InternalExecutionController(service, new InternalTokenValidator(""));
-        MockMvc closedMvc = MockMvcBuilders.standaloneSetup(closed).build();
-
-        // Ni sans en-tête, ni avec un en-tête vide : un jeton absent de la config n'ouvre rien.
-        closedMvc.perform(post("/internal/exec/evaluate")
-                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
-                .andExpect(status().isForbidden());
-        closedMvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "")
+    void interne_en_tete_vide_refuse() throws Exception {
+        // Un jeton vide ne peut pas être configuré (démarrage refusé, #31) : un en-tête vide
+        // ne correspond donc jamais au jeton attendu.
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "")
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isForbidden());
         verify(service, never()).evaluate(any());

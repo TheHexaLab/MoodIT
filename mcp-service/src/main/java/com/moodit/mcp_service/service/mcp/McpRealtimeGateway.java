@@ -1,17 +1,17 @@
 package com.moodit.mcp_service.service.mcp;
 
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import java.time.Duration;
 import com.moodit.mcp_service.dto.McpResponseSummaryDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -30,16 +30,16 @@ public class McpRealtimeGateway {
     private final String baseUrl;
     private final String internalToken;
 
-    /** Délais par défaut des appels vers core (#31), en millisecondes. */
+    /** Délais par défaut des appels vers core (#31), en millisecondes ; repris par les @Value. */
     static final long DEFAULT_CONNECT_TIMEOUT_MS = 3_000;
     static final long DEFAULT_READ_TIMEOUT_MS = 10_000;
 
     @Autowired
     public McpRealtimeGateway(
             @Value("${app.core-service.internal-url:http://localhost:8081}") String baseUrl,
-            @Value("${app.internal.token:}") String internalToken,
-            @Value("${app.core-service.connect-timeout-ms:3000}") long connectTimeoutMs,
-            @Value("${app.core-service.read-timeout-ms:10000}") long readTimeoutMs) {
+            @Value("${app.internal.token}") String internalToken,
+            @Value("${app.core-service.connect-timeout-ms:" + DEFAULT_CONNECT_TIMEOUT_MS + "}") long connectTimeoutMs,
+            @Value("${app.core-service.read-timeout-ms:" + DEFAULT_READ_TIMEOUT_MS + "}") long readTimeoutMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         // Délais explicites (#31) : un core bloqué ne doit pas immobiliser le thread de
