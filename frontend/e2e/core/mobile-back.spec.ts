@@ -16,12 +16,29 @@ const AUTH_SCREEN = /\/(login|verify-code|register)$/;
 const accountButton = (page: Page) => page.getByRole('button', { name: 'Compte utilisateur' });
 const mobileTitle = (page: Page) => page.getByRole('banner').getByRole('heading');
 
-/** Ouvre un élément du cours de test depuis le tiroir mobile (qui se referme ensuite). */
+const drawer = (page: Page) => page.getByRole('complementary', { name: 'Menus lateraux' });
+
+/**
+ * Ouvre le tiroir mobile s'il est fermé. Choisir un programme le laisse ouvert (seul le choix d'un
+ * canal, d'un forum ou d'un quiz le referme) : le bouton s'appelle alors « Fermer le menu ».
+ */
+async function openDrawer(page: Page) {
+  const toggle = page.getByRole('banner').getByRole('button', { name: /(Ouvrir|Fermer) le menu/ });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(drawer(page)).toBeInViewport();
+}
+
+/** Ouvre le programme de test depuis le tiroir (qui reste ouvert). */
+async function openProgram(page: Page) {
+  await openDrawer(page);
+  await drawer(page).getByRole('button', { name: PROGRAM_NAME }).click();
+  await expect(page).toHaveURL(/\/home\/p\/\d+(\/c\/\d+)?$/);
+}
+
+/** Ouvre un élément du cours de test depuis le tiroir (qui se referme ensuite). */
 async function openFromDrawer(page: Page, name: string) {
-  await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
-  const drawer = page.getByRole('complementary', { name: 'Menus lateraux' });
-  await expect(drawer).toBeInViewport();
-  await drawer.getByRole('button', { name }).click();
+  await openDrawer(page);
+  await drawer(page).getByRole('button', { name }).click();
   await expect(mobileTitle(page)).toContainText(name);
 }
 
@@ -49,12 +66,7 @@ test('« back » entre deux vues : retour à la vue précédente, toujours conne
   await loginThroughUi(page, user.email);
 
   // Programme (depuis le tiroir), puis un canal, puis un forum : trois entrées d'historique.
-  await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
-  await page
-    .getByRole('complementary', { name: 'Menus lateraux' })
-    .getByRole('button', { name: PROGRAM_NAME })
-    .click();
-  await expect(page).toHaveURL(/\/home\/p\/\d+(\/c\/\d+)?$/);
+  await openProgram(page);
   await openFromDrawer(page, CHANNEL_NAME);
   await expect(page).toHaveURL(/\/home\/p\/\d+\/c\/\d+\/text\/\d+$/);
   await openFromDrawer(page, FORUM_NAME);
@@ -82,11 +94,7 @@ test('lien vers un forum : la vue s’ouvre directement, même après rechargeme
 }) => {
   const { user } = await createEnrolledUser(baseURL!);
   await loginThroughUi(page, user.email);
-  await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
-  await page
-    .getByRole('complementary', { name: 'Menus lateraux' })
-    .getByRole('button', { name: PROGRAM_NAME })
-    .click();
+  await openProgram(page);
   await openFromDrawer(page, FORUM_NAME);
   const forumUrl = page.url();
 
