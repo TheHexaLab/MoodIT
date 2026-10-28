@@ -69,7 +69,7 @@ un compte **neuf**.
 | `scrolling`, `details` | défilements infinis ; Markdown complet, validations, longueurs max, quiz du jour, hors-ligne |
 | `a11y`, `keyboard`, `focus-visible` | audit axe (WCAG 2.1 AA, clair + sombre), navigation clavier, indicateur de focus |
 | `responsive/` | disposition par largeur, débordements, parcours tactiles, rotation, cibles tactiles |
-| `mobile-back` | bogue #63 |
+| `mobile-back` | bouton « back » : vue dans l'URL, jamais de retour à l'authentification (#63) |
 | `*.helpers.ts`, `fixtures.ts` | helpers par domaine ; `test` commun (ferme les contextes ouverts) |
 
 ## Pièges à connaître
@@ -85,7 +85,10 @@ un compte **neuf**.
 - **Les menus contextuels se ferment au moindre défilement** (y compris un message WS qui arrive) :
   `clickProgramMenu` / `clickCourseMenu` d'`admin.helpers.ts` réessaient.
 - **Le dernier emplacement est restauré par compte** : ne pas supposer qu'un cours est ouvert au
-  chargement.
+  chargement. La vue est dans l'URL (`/home/p/<programme>/c/<cours>/<type>/<id>`, #63) : à l'arrivée
+  sur `/home`, l'URL passe à la vue restaurée. Tester l'arrivée avec `toHaveURL(/\/home(\/|$)/)`.
+- **Les pages d'authentification renvoient vers `/home` une session active** (#63) : pour tester
+  `/login` ou `/register`, partir d'un contexte sans cookie.
 - **La police change le layout** : l'app demande Inter sans la fournir. Sur Windows elle retombe
   sur Segoe UI, sur Linux sur DejaVu Sans (plus large) : le titre du forum déborde alors de 41 px
   à 390 px. En CI, les tests tournent dans l'image officielle de Playwright avec Inter montée comme
@@ -108,7 +111,7 @@ un compte **neuf**.
   `<label>` ; CSS seulement pour les éléments sans nom accessible.
 - Chemins d'erreur : `injectFault` de `faults.helpers.ts` (500 ou `abort`), puis `restore()`.
 - Un bogue connu de l'app : écrire le test attendu et le marquer `test.fail(true, '…')` avec la
-  référence de l'issue (ex. `mobile-back.spec.ts`, #63). Le test passe au rouge quand le bogue est
+  référence de l'issue (ex. `keyboard.spec.ts`, #110). Le test passe au rouge quand le bogue est
   corrigé : retirer `test.fail` dans la PR qui le corrige.
 
 ## Non testable (non branché dans l'UI)

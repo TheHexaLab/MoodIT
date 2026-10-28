@@ -110,7 +110,7 @@ test.describe('renvoi de code', () => {
 
     await expect.poll(() => countMails(user.email, subject)).toBe(2);
     await enterCode(page, await readCodeFromMail(user.email, subject));
-    await expect(page).toHaveURL(/\/home$/);
+    await expect(page).toHaveURL(/\/home(\/|$)/);
   });
 
   // Anti-énumération : la réponse est la même que le compte existe ou non ; un e-mail inconnu
@@ -346,7 +346,7 @@ test.describe('redirections du routeur', () => {
     const context = await browser.newContext({ storageState });
     const page = await context.newPage();
     await page.goto('/');
-    await expect(page).toHaveURL(/\/home$/);
+    await expect(page).toHaveURL(/\/home(\/|$)/);
     await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
     await context.close();
   });

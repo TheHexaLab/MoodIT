@@ -55,9 +55,10 @@ export default function VerifyCode() {
     try {
       // email → auto-login (verifyEmail), 2fa → verify2FA : dans les deux cas l'auth-service
       // pose le cookie HttpOnly `moodit_token` (credentials:'include'). Rien à stocker côté
-      // JS, on redirige directement vers le dashboard.
+      // JS, on redirige directement vers le dashboard. En REMPLAÇANT l'entrée de cet écran
+      // (#63) : le bouton « back » ne doit pas y ramener une fois connecté.
       await (isEmailVerification ? verifyEmail : verify2FA)(email, theCode);
-      navigate('/');
+      navigate('/home', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de connexion au serveur');
     } finally {

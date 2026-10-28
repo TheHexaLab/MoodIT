@@ -48,6 +48,21 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
 }
 
 /**
+ * Session active ? (GET /api/me, SANS la redirection de {@link apiFetch} sur un 401.) Sert aux
+ * pages d'authentification, qui renvoient vers /home un utilisateur déjà connecté (#63) : un
+ * visiteur en cours d'inscription ou de vérification ne doit pas être renvoyé vers /login.
+ * Toute erreur (réseau, 401, 503) vaut « pas de session » : la page d'authentification reste.
+ */
+export async function hasActiveSession(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/me', { cache: 'no-store', credentials: 'include' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Profil de l'utilisateur connecté (GET /api/me). L'identité vient du JWT côté
  * gateway ; aucune donnée n'est passée en paramètre. Le gateway route /api/** vers
  * core-service. Un 401 est géré par apiFetch (purge du token + redirection /login).

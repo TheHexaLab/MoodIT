@@ -182,7 +182,7 @@ test.describe('formulaires d’authentification', () => {
 
     await pasteFromClipboard(page, codeBoxes(page).first(), '000000');
     // Les 6 cases sont remplies et le code est soumis de lui-même : session ouverte.
-    await expect(page).toHaveURL(/\/home$/);
+    await expect(page).toHaveURL(/\/home(\/|$)/);
     await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toContainText(
       `@${user.username}`
     );
