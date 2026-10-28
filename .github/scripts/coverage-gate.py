@@ -11,7 +11,17 @@ Un service est rouge s'il est sous son seuil, si son rapport manque (tests en é
 ou, avec --baseline, si sa couverture baisse de plus de TOLERANCE point par rapport à la
 référence de main. Le seuil, arrondi à l'entier, laissait passer une baisse de moins d'un point ;
 la référence, elle, suit la progression sans édition manuelle. Un service absent de la référence
-(nouveau service, première mesure) n'est comparé qu'à son seuil.
+(nouveau service, première mesure) n'est comparé qu'à son seuil. Une référence demandée mais
+absente ou vide (cache expiré, par exemple) est signalée par un avertissement : le cliquet ne se
+coupe pas sans prévenir.
+
+Choix assumé : la référence est la DERNIÈRE mesure de main, pas la meilleure. Conséquences :
+  - les baisses tolérées s'additionnent : deux PR vertes sur la même référence peuvent faire
+    perdre 2 × TOLERANCE point, et chaque PR fusionnée abaisse la référence suivante ;
+  - une PR qui supprime du code COUVERT fait baisser le pourcentage (les lignes non couvertes
+    restantes pèsent plus) et peut être rouge, surtout dans un petit service où une ligne pèse
+    0,2 à 0,4 point. Recours : ajouter des tests, ou fusionner avec le contournement admin.
+Une référence qui ne baisse jamais empêcherait au contraire toute suppression de code couvert.
 
 Affiche une ligne par service, écrit un tableau dans le résumé du job GitHub et sort en erreur
 si au moins un service est rouge. --write enregistre la couverture mesurée (JSON
@@ -92,9 +102,16 @@ def main():
     with open(args.thresholds_file, encoding="utf-8") as f:
         thresholds = json.load(f)["services"]
     baseline = load_baseline(args.baseline)
+    # Référence demandée mais introuvable : normal à la toute première mesure, anormal ensuite
+    # (cache expiré ou supprimé). Le cliquet est alors inactif : on le dit, sans échouer.
+    no_baseline = bool(args.baseline) and not baseline
     if args.baseline:
         known = ", ".join(f"{k} {v:.2f} %" for k, v in sorted(baseline.items()))
         print(f"Référence de main : {known or 'aucune (première mesure : seuils seulement)'}")
+    if no_baseline:
+        print("::warning title=Cliquet de couverture inactif::Référence de main introuvable "
+              f"({args.baseline}) : seuls les seuils sont vérifiés. Normal à la première mesure ; "
+              "sinon, relancer le job de couverture sur main pour la recréer.")
 
     rows, failures, measured = [], [], {}
     print(f"{BOLD}Couverture des lignes par service (seuils : {os.path.basename(args.thresholds_file)}){RESET}")
@@ -134,6 +151,9 @@ def main():
                           f"{threshold} % | {fmt(branches)} |\n")
             out.write("\n" + ("Tous les services atteignent leur seuil, sans baisse par rapport à main.\n"
                               if not failures else f"En échec : {', '.join(failures)}.\n"))
+            if no_baseline:
+                out.write("\n⚠️ **Cliquet inactif** : référence de main introuvable, seuls les seuils "
+                          "sont vérifiés.\n")
 
     if args.write:
         with open(args.write, "w", encoding="utf-8") as out:

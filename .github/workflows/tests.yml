@@ -234,8 +234,10 @@ jobs:
           ls -R
 
       # Référence de main la plus récente (clé unique par run : on prend la dernière créée).
+      # Cliquet réservé aux PR vers main : une PR vers deploiement (main + vocal) lirait aussi
+      # cette référence, mais la comparer à main seul n'aurait pas de sens.
       - name: Récupérer la référence de main
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: coverage-baseline.json
@@ -247,9 +249,10 @@ jobs:
         run: |
           python3 .github/scripts/coverage-gate.py coverage-reports .github/coverage-thresholds.json \
             --write coverage-current.json \
-            ${{ github.event_name == 'pull_request' && '--baseline coverage-baseline.json' || '' }}
+            ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && '--baseline coverage-baseline.json' || '' }}
 
-      # Même si les seuils échouent : la liste des lignes non couvertes aide à corriger.
+      # Même si les seuils échouent : la liste des lignes non couvertes aide à corriger. Toutes les
+      # PR, deploiement compris : le diff est pris contre la vraie base de la PR (HEAD^1).
       - name: Couverture du code modifié
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: python3 .github/scripts/coverage-changed.py coverage-reports .github/coverage-thresholds.json
