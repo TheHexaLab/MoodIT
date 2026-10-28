@@ -2,10 +2,10 @@ package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.TestResult;
+import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionService;
 
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -26,12 +26,12 @@ import java.util.List;
 public class InternalExecutionController {
 
     private final ExecutionService executionService;
+    private final InternalTokenValidator tokenValidator;
 
-    @Value("${app.internal.token:}")
-    private String internalToken;
-
-    public InternalExecutionController(ExecutionService executionService) {
+    public InternalExecutionController(
+            ExecutionService executionService, InternalTokenValidator tokenValidator) {
         this.executionService = executionService;
+        this.tokenValidator = tokenValidator;
     }
 
     @PostMapping("/evaluate")
@@ -42,11 +42,7 @@ public class InternalExecutionController {
         return ResponseEntity.ok(executionService.evaluate(request));
     }
 
-    /**
-     * Jeton partagé toujours requis. Jeton non configuré (vide) : tout est refusé plutôt que
-     * d'ouvrir l'endpoint, comme côté core (fail-closed).
-     */
     private boolean unauthorized(String token) {
-        return internalToken == null || internalToken.isBlank() || !internalToken.equals(token);
+        return !tokenValidator.isValid(token);
     }
 }

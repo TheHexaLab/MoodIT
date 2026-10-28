@@ -118,4 +118,41 @@ class CoreQuizStatsClientTest {
         assertThat(new CoreQuizStatsClient("http://localhost:" + freePort, TOKEN).averageScorePercent(10))
                 .isNull();
     }
+
+    /** Stub qui ne répond qu'après {@code delayMs} (core bloqué). */
+    private String startSlowStub(long delayMs) throws IOException {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/internal", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            try {
+                exchange.sendResponseHeaders(200, -1);
+            } catch (IOException ignored) {
+                // client déjà parti (délai dépassé)
+            }
+            exchange.close();
+        });
+        server.start();
+        return "http://localhost:" + server.getAddress().getPort();
+    }
+
+    @Test
+    void coreBloque_delaiDeLectureDepasse_null() throws Exception {
+        // #31 : un core bloqué ne doit pas immobiliser l'analyse ; dépassement = « non disponible ».
+        String url = startSlowStub(3_000);
+
+        long start = System.nanoTime();
+        assertThat(new CoreQuizStatsClient(url, TOKEN, 2_000, 100).averageScorePercent(10)).isNull();
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofSeconds(2));
+    }
+
+    @Test
+    void delaisParDefaut() {
+        assertThat(CoreQuizStatsClient.DEFAULT_CONNECT_TIMEOUT_MS).isEqualTo(3_000);
+        assertThat(CoreQuizStatsClient.DEFAULT_READ_TIMEOUT_MS).isEqualTo(10_000);
+    }
 }

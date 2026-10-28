@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -572,9 +573,10 @@ class JwtAuthFilterTest {
     assertThat(forwardedPermissionBody()).isEmpty();
   }
 
+  // Au-delà de 1 Mo (#31) : l'autorisation dépend du body et ne peut pas être décidée sans lui.
+  // La requête est donc refusée (413), sans appel au permission-service ni transmission à core.
   @Test
-  void postJsonTropGros_bodyNonMisEnCache() throws Exception {
-    // Garde-fou mémoire : au-delà de 1 Mo, le body n'est ni bufferisé ni transmis.
+  void postJsonTropGros_413_sansAutorisationNiTransmission() throws Exception {
     stubValidate(true, false);
     byte[] big = new byte[1024 * 1024 + 1];
     java.util.Arrays.fill(big, (byte) 'a');
@@ -586,10 +588,116 @@ class JwtAuthFilterTest {
 
     MockHttpServletResponse res = run(req, chain);
 
+    assertThat(res.getStatus()).isEqualTo(413);
+    assertThat(res.getContentAsString()).isEqualTo("Corps de requête trop volumineux");
+    assertThat(chain.getRequest()).isNull();
+    verify(bodySpec, never()).body(any(Object.class));
+  }
+
+  // Content-Length annoncé trop gros : refusé avant toute lecture du body.
+  @Test
+  void postJsonContentLengthAnnonceTropGros_413_bodyJamaisLu() throws Exception {
+    stubValidate(true, false);
+    MockHttpServletRequest req =
+        new MockHttpServletRequest("POST", "/api/forums/posts") {
+          @Override
+          public long getContentLengthLong() {
+            return 1024 * 1024 + 1;
+          }
+        };
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent("{\"forumId\":3}".getBytes(StandardCharsets.UTF_8));
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(413);
+    assertThat(chain.getRequest()).isNull();
+    assertThat(req.getInputStream().readAllBytes()).hasSize(13);
+  }
+
+  // Requête chunked (aucun Content-Length) au-delà de 1 Mo (#31) : la lecture bornée détecte
+  // le dépassement, la requête est refusée de la même façon.
+  @Test
+  void postJsonChunkedTropGros_413_sansAutorisationNiTransmission() throws Exception {
+    stubValidate(true, false);
+    byte[] big = new byte[1024 * 1024 + 1];
+    java.util.Arrays.fill(big, (byte) 'a');
+    MockHttpServletRequest req = chunked("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(big);
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
+    assertThat(res.getStatus()).isEqualTo(413);
+    assertThat(chain.getRequest()).isNull();
+    verify(bodySpec, never()).body(any(Object.class));
+  }
+
+  // Exactement 1 Mo (Content-Length annoncé égal à la limite) : encore accepté, transmis au
+  // permission-service et intact pour core.
+  @Test
+  void postJsonALaLimite_bodyTransmisEtIntact() throws Exception {
+    stubValidate(true, false);
+    byte[] max = new byte[1024 * 1024];
+    java.util.Arrays.fill(max, (byte) 'a');
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(max);
+    MockFilterChain chain = new MockFilterChain();
+
+    MockHttpServletResponse res = run(req, chain);
+
     assertThat(res.getStatus()).isEqualTo(200);
-    assertThat(forwardedPermissionBody()).isEmpty();
+    assertThat(forwardedPermissionBody()).hasSize(max.length);
     HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
-    assertThat(forwarded.getInputStream().readAllBytes()).hasSize(big.length);
+    assertThat(forwarded.getInputStream().readAllBytes()).isEqualTo(max);
+  }
+
+  @Test
+  void postJsonChunkedPetit_bodyTransmis() throws Exception {
+    stubValidate(true, false);
+    String json = "{\"forumId\":3}";
+    MockHttpServletRequest req = chunked("POST", "/api/forums/posts");
+    req.addHeader("Authorization", "Bearer " + validToken("user@usherbrooke.ca"));
+    req.setContentType("application/json");
+    req.setContent(json.getBytes(StandardCharsets.UTF_8));
+
+    run(req, new MockFilterChain());
+
+    assertThat(forwardedPermissionBody()).isEqualTo(json);
+  }
+
+  // Le body n'est lu qu'après l'authentification (#31) : sans token valide, il reste intact.
+  @Test
+  void tokenAbsent_bodyJamaisLu() throws Exception {
+    MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/forums/posts");
+    req.setContentType("application/json");
+    req.setContent("{\"forumId\":3}".getBytes(StandardCharsets.UTF_8));
+
+    MockHttpServletResponse res = run(req, new MockFilterChain());
+
+    assertThat(res.getStatus()).isEqualTo(401);
+    assertThat(req.getInputStream().readAllBytes()).hasSize(13);
+  }
+
+  /** Requête sans Content-Length annoncé, comme un envoi chunked. */
+  private static MockHttpServletRequest chunked(String method, String uri) {
+    return new MockHttpServletRequest(method, uri) {
+      @Override
+      public long getContentLengthLong() {
+        return -1;
+      }
+
+      @Override
+      public int getContentLength() {
+        return -1;
+      }
+    };
   }
 
   @Test

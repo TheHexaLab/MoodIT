@@ -1,12 +1,10 @@
 package com.moodit.core_service.realtime.internal;
 
+import com.moodit.core_service.internal.InternalTokenValidator;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.McpResponseSummaryDto;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,9 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class RealtimeInternalController {
 
     private final RealtimeEventPublisher publisher;
-
-    @Value("${app.internal.token:}")
-    private String internalToken;
+    private final InternalTokenValidator tokenValidator;
 
     /** Relaie mcp:analysis-created à la room mcp:<courseId>. */
     @PostMapping("/analysis-created")
@@ -68,14 +64,8 @@ public class RealtimeInternalController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Jeton partagé requis dès qu'il est configuré (vide → contrôle désactivé).
-     *  Comparaison en temps CONSTANT (MessageDigest.isEqual) pour ne pas fuir le jeton
-     *  via le timing. En prod, le jeton est obligatoire (cf. application-prod.properties). */
     private boolean unauthorized(String token) {
-        if (internalToken == null || internalToken.isBlank()) return false;
-        if (token == null) return true;
-        return !MessageDigest.isEqual(
-                internalToken.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8));
+        return !tokenValidator.isValid(token);
     }
 
     public record AnalysisCreatedRequest(
