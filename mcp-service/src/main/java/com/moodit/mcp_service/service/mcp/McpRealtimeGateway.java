@@ -3,12 +3,15 @@ package com.moodit.mcp_service.service.mcp;
 import com.moodit.mcp_service.dto.McpResponseSummaryDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,12 +30,30 @@ public class McpRealtimeGateway {
     private final String baseUrl;
     private final String internalToken;
 
+    /** Délais par défaut des appels vers core (#31), en millisecondes ; repris par les @Value. */
+    static final long DEFAULT_CONNECT_TIMEOUT_MS = 3_000;
+    static final long DEFAULT_READ_TIMEOUT_MS = 10_000;
+
+    @Autowired
     public McpRealtimeGateway(
             @Value("${app.core-service.internal-url:http://localhost:8081}") String baseUrl,
-            @Value("${app.internal.token:}") String internalToken) {
+            @Value("${app.internal.token}") String internalToken,
+            @Value("${app.core-service.connect-timeout-ms:" + DEFAULT_CONNECT_TIMEOUT_MS + "}") long connectTimeoutMs,
+            @Value("${app.core-service.read-timeout-ms:" + DEFAULT_READ_TIMEOUT_MS + "}") long readTimeoutMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
-        this.restClient = RestClient.create();
+        // Délais explicites (#31) : un core bloqué ne doit pas immobiliser le thread de
+        // l'analyse. Dépassement = panne, traitée comme les autres (journalisée, sans effet
+        // sur l'analyse).
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+        this.restClient = RestClient.builder().requestFactory(factory).build();
+    }
+
+    /** Délais par défaut (tests). */
+    McpRealtimeGateway(String baseUrl, String internalToken) {
+        this(baseUrl, internalToken, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
     }
 
     /** Notifie une analyse terminée (→ event WS mcp:analysis-created à la room mcp:<courseId>). */

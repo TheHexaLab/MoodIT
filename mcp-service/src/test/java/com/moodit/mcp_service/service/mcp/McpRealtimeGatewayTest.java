@@ -137,25 +137,23 @@ class McpRealtimeGatewayTest {
     @Test
     void jetonLuDepuisAppInternalToken_etEnvoyeTelQuel() throws Exception {
         // Câblage réel par Spring (@Value) : c'est bien app.internal.token qui alimente l'en-tête.
-        // En dev, application.properties le fixe à ${INTERNAL_TOKEN:dev-internal-token-change-me} ;
-        // en prod (application-prod.properties) il n'a AUCUN repli : démarrage refusé s'il manque.
+        // ${INTERNAL_TOKEN} n'a de repli dans aucun profil (#31) : démarrage refusé s'il manque.
         String url = startStub(200);
         new ApplicationContextRunner()
                 .withBean(McpRealtimeGateway.class)
                 .withPropertyValues("app.core-service.internal-url=" + url,
-                        "app.internal.token=dev-internal-token-change-me")
+                        "app.internal.token=jeton-configure")
                 .run(ctx -> ctx.getBean(McpRealtimeGateway.class).analysisProgress(1L, 2L, "collecting"));
 
         assertThat(received).hasSize(1);
-        assertThat(received.getFirst().token()).isEqualTo("dev-internal-token-change-me");
+        assertThat(received.getFirst().token()).isEqualTo("jeton-configure");
         assertThat(received.getFirst().path()).isEqualTo("/internal/realtime/mcp/analysis-progress");
     }
 
     @Test
     void jetonInterneVide_estEnvoyeVide_etLeRefusDeCoreEstAvale() throws Exception {
-        // Cas dégradé : INTERNAL_TOKEN défini mais vide (ou propriété absente → repli "" du @Value ;
-        // le défaut des fichiers de config est dev-internal-token-change-me, pas ""). L'en-tête part
-        // vide (présent, pas omis), core refuse (401) et le pont ne propage rien au job.
+        // Cas dégradé : INTERNAL_TOKEN défini mais vide. L'en-tête part vide (présent, pas omis),
+        // core refuse et le pont ne propage rien au job.
         McpRealtimeGateway gateway = new McpRealtimeGateway(startStub(401), "");
 
         assertThatCode(() -> gateway.analysisProgress(1L, 1L, "collecting")).doesNotThrowAnyException();
@@ -189,5 +187,42 @@ class McpRealtimeGatewayTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> gateway.analysisFailed(10L, 5L, "motif")).doesNotThrowAnyException();
         assertThatCode(() -> gateway.analysisProgress(10L, 5L, "collecting")).doesNotThrowAnyException();
+    }
+
+    /** Stub qui ne répond qu'après {@code delayMs} (core bloqué). */
+    private String startSlowStub(long delayMs) throws IOException {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/internal", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            try {
+                exchange.sendResponseHeaders(200, -1);
+            } catch (IOException ignored) {
+                // client déjà parti (délai dépassé)
+            }
+            exchange.close();
+        });
+        server.start();
+        return "http://localhost:" + server.getAddress().getPort();
+    }
+
+    @Test
+    void coreBloque_delaiDeLectureDepasse_appelAbandonneSansPropager() throws Exception {
+        // #31 : sans délai, un core bloqué immobilisait le thread de l'analyse indéfiniment.
+        McpRealtimeGateway gateway = new McpRealtimeGateway(startSlowStub(3_000), TOKEN, 2_000, 100);
+
+        long start = System.nanoTime();
+        assertThatCode(() -> gateway.analysisProgress(10L, 5L, "collecting")).doesNotThrowAnyException();
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofSeconds(2));
+    }
+
+    @Test
+    void delaisParDefaut() {
+        assertThat(McpRealtimeGateway.DEFAULT_CONNECT_TIMEOUT_MS).isEqualTo(3_000);
+        assertThat(McpRealtimeGateway.DEFAULT_READ_TIMEOUT_MS).isEqualTo(10_000);
     }
 }

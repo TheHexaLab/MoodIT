@@ -102,7 +102,7 @@ class RequestWrappersTest {
   @Test
   void cached_bodyRelisablePlusieursFois() throws Exception {
     byte[] json = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);
-    CachedBodyRequest cached = new CachedBodyRequest(jsonRequest(json, null));
+    CachedBodyRequest cached = CachedBodyRequest.read(jsonRequest(json, null), 1024);
 
     assertThat(cached.getInputStream().readAllBytes()).isEqualTo(json);
     assertThat(cached.getInputStream().readAllBytes()).isEqualTo(json);
@@ -112,7 +112,7 @@ class RequestWrappersTest {
   @Test
   void cached_flux_finiEtPretSelonLaLecture() throws Exception {
     CachedBodyRequest cached =
-        new CachedBodyRequest(jsonRequest(new byte[] {'x'}, null));
+        CachedBodyRequest.read(jsonRequest(new byte[] {'x'}, null), 1024);
     ServletInputStream in = cached.getInputStream();
 
     assertThat(in.isReady()).isTrue();
@@ -128,7 +128,8 @@ class RequestWrappersTest {
   void cached_lecteur_respecteLEncodageDeLaRequete() throws Exception {
     String text = "{\"titre\":\"élève\"}";
     CachedBodyRequest cached =
-        new CachedBodyRequest(jsonRequest(text.getBytes(StandardCharsets.ISO_8859_1), "ISO-8859-1"));
+        CachedBodyRequest.read(
+            jsonRequest(text.getBytes(StandardCharsets.ISO_8859_1), "ISO-8859-1"), 1024);
 
     try (BufferedReader reader = cached.getReader()) {
       assertThat(reader.readLine()).isEqualTo(text);
@@ -142,11 +143,29 @@ class RequestWrappersTest {
     MockHttpServletRequest req = jsonRequest(text.getBytes(StandardCharsets.UTF_8), null);
     req.setCharacterEncoding((String) null);
     assertThat(req.getCharacterEncoding()).isNull(); // précondition : aucun encodage déclaré
-    CachedBodyRequest cached = new CachedBodyRequest(req);
+    CachedBodyRequest cached = CachedBodyRequest.read(req, 1024);
 
     assertThat(cached.getBodyAsString()).isEqualTo(text);
     try (BufferedReader reader = cached.getReader()) {
       assertThat(reader.readLine()).isEqualTo(text);
     }
+  }
+
+  @Test
+  void read_corpsALaBorne_misEnCache() throws Exception {
+    byte[] body = "abcd".getBytes(StandardCharsets.UTF_8);
+
+    CachedBodyRequest read = CachedBodyRequest.read(jsonRequest(body, null), 4);
+
+    assertThat(read).isNotNull();
+    assertThat(read.getBodyAsString()).isEqualTo("abcd");
+  }
+
+  // Corps au-delà de la borne (#31) : rien n'est mis en cache, l'appelant refuse la requête.
+  @Test
+  void read_corpsTropGros_null() throws Exception {
+    byte[] body = "abcde".getBytes(StandardCharsets.UTF_8);
+
+    assertThat(CachedBodyRequest.read(jsonRequest(body, null), 4)).isNull();
   }
 }

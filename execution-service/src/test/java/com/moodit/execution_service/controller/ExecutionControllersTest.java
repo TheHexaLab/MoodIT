@@ -7,11 +7,11 @@ import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonException;
+import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -43,8 +43,8 @@ class ExecutionControllersTest {
 
     @BeforeEach
     void setUp() {
-        InternalExecutionController internal = new InternalExecutionController(service);
-        ReflectionTestUtils.setField(internal, "internalToken", "secret-interne");
+        InternalExecutionController internal =
+                new InternalExecutionController(service, new InternalTokenValidator("secret-interne"));
         mvc = MockMvcBuilders.standaloneSetup(new ExecutionController(service), internal)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -127,16 +127,10 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void interne_jeton_non_configure_refuse_tout() throws Exception {
-        InternalExecutionController closed = new InternalExecutionController(service);
-        ReflectionTestUtils.setField(closed, "internalToken", "");
-        MockMvc closedMvc = MockMvcBuilders.standaloneSetup(closed).build();
-
-        // Ni sans en-tête, ni avec un en-tête vide : un jeton absent de la config n'ouvre rien.
-        closedMvc.perform(post("/internal/exec/evaluate")
-                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
-                .andExpect(status().isForbidden());
-        closedMvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "")
+    void interne_en_tete_vide_refuse() throws Exception {
+        // Un jeton vide ne peut pas être configuré (démarrage refusé, #31) : un en-tête vide
+        // ne correspond donc jamais au jeton attendu.
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "")
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isForbidden());
         verify(service, never()).evaluate(any());

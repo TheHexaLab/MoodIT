@@ -4,7 +4,8 @@
 // et core recevrait un corps vide.
 //
 // Objet a portee requete : aucune reference long-terme, recupere par le GC en fin de
-// requete (pas de fuite memoire). La taille est bornee en amont par JwtAuthFilter.
+// requete (pas de fuite memoire). La lecture est BORNEE ici (#31), quel que soit le
+// Content-Length annonce : une requete chunked n'en annonce aucun.
 
 package com.moodit.gateway.filter;
 
@@ -23,9 +24,20 @@ public class CachedBodyRequest extends HttpServletRequestWrapper {
 
   private final byte[] cachedBody;
 
-  public CachedBodyRequest(HttpServletRequest request) throws IOException {
+  private CachedBodyRequest(HttpServletRequest request, byte[] body) {
     super(request);
-    this.cachedBody = request.getInputStream().readAllBytes();
+    this.cachedBody = body;
+  }
+
+  /**
+   * Lit au plus {@code maxBytes + 1} octets du corps. S'il tient dans {@code maxBytes}, renvoie
+   * une {@link CachedBodyRequest} (corps relisable, transmis au permission-service) ; sinon
+   * {@code null} : la requête doit être refusée, car l'autorisation ne peut pas être décidée sans
+   * le corps que le service en aval recevrait.
+   */
+  static CachedBodyRequest read(HttpServletRequest request, int maxBytes) throws IOException {
+    byte[] body = request.getInputStream().readNBytes(maxBytes + 1);
+    return body.length <= maxBytes ? new CachedBodyRequest(request, body) : null;
   }
 
   /** Le corps mis en cache, decode en chaine (pour l'envoi au permission-service). */
