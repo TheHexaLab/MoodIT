@@ -161,7 +161,7 @@ Une tâche est considérée complétée uniquement si :
 - Le code respecte les critères d'acceptation de l'issue GitHub
 - Le code est documenté
 - Les tests ont été réalisés
-- La Pull Request possède 2 approbations
+- La Pull Request possède 1 approbation
 - Aucun conflit non résolu
 
 ---
@@ -174,7 +174,7 @@ Une tâche est considérée complétée uniquement si :
 2. Développer proprement
 3. Documenter le code
 4. Ouvrir une PR
-5. Obtenir **2 approbations**
+5. Obtenir **1 approbation**
 6. L'issue liée se ferme à la fusion (`Closes #…` dans la description)
 
 ---

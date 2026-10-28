@@ -3,6 +3,7 @@ package com.moodit.gateway.ws;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
@@ -59,7 +60,7 @@ class WebSocketProxyHandlerTest {
 
   @BeforeEach
   void setUp() {
-    handler = new WebSocketProxyHandler(CORE_WS_URL);
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 5_000);
 
     attributes = new HashMap<>();
     client = mock(WebSocketSession.class);
@@ -167,6 +168,49 @@ class WebSocketProxyHandlerTest {
     handler.afterConnectionEstablished(client);
 
     verify(client).close(CloseStatus.SERVER_ERROR);
+  }
+
+  // Core qui n'achève pas le handshake à temps (#31) : le délai expire, l'ouverture est
+  // abandonnée et le client fermé, au lieu de bloquer le thread indéfiniment.
+  @Test
+  void ouverture_handshakeAvalSansReponse_delaiDepasse_fermeLeClient() throws Exception {
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 50);
+    stubDownstream(new CompletableFuture<>());
+
+    handler.afterConnectionEstablished(client);
+
+    verify(client).close(CloseStatus.SERVER_ERROR);
+  }
+
+  // Handshake achevé APRÈS le délai : la session aval, authentifiée avec le jeton du client, est
+  // fermée aussitôt, et rien n'est relayé (aucune session aval enregistrée).
+  @Test
+  void ouverture_handshakeAvalTardif_sessionAvalFermee() throws Exception {
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 50);
+    CompletableFuture<WebSocketSession> late = new CompletableFuture<>();
+    stubDownstream(late);
+    handler.afterConnectionEstablished(client);
+    verify(downstream, never()).close(any());
+
+    late.complete(downstream);
+
+    verify(downstream).close(CloseStatus.GOING_AWAY);
+    handler.handleMessage(client, new TextMessage("hello"));
+    verify(downstream, never()).sendMessage(any());
+  }
+
+  // La fermeture tardive échoue (session déjà fermée par core) : l'erreur est absorbée.
+  @Test
+  void ouverture_handshakeAvalTardif_echecDeFermeture_absorbe() throws Exception {
+    handler = new WebSocketProxyHandler(CORE_WS_URL, 50);
+    CompletableFuture<WebSocketSession> late = new CompletableFuture<>();
+    stubDownstream(late);
+    handler.afterConnectionEstablished(client);
+    doThrow(new java.io.IOException("déjà fermée")).when(downstream).close(any());
+
+    late.complete(downstream);
+
+    verify(downstream).close(CloseStatus.GOING_AWAY);
   }
 
   @Test
