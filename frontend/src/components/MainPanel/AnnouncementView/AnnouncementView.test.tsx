@@ -58,7 +58,7 @@ describe('AnnouncementView', () => {
       post(1, { title: 'Bienvenue' }),
     ]);
     render(
-      <AnnouncementView course={COURSE} channel={CHANNEL} onFetchAnnouncements={fetch} />
+      <AnnouncementView course={COURSE} channel={CHANNEL} canPost onFetchAnnouncements={fetch} />
     );
 
     const cards = await screen.findAllByRole('listitem');
@@ -69,8 +69,8 @@ describe('AnnouncementView', () => {
     expect(cards[1].textContent).toContain(t.noExpiry);
   });
 
-  it('étudiant : ne demande pas les expirées, n’a ni bouton de publication ni suppression', async () => {
-    const fetch = vi.fn().mockResolvedValue([post(1)]);
+  it('étudiant : ne demande pas les expirées, ne voit ni l’expiration ni les boutons', async () => {
+    const fetch = vi.fn().mockResolvedValue([post(1, { expiresAt: NEXT_WEEK }), post(2)]);
     render(
       <AnnouncementView course={COURSE} channel={CHANNEL} onFetchAnnouncements={fetch} />
     );
@@ -79,6 +79,9 @@ describe('AnnouncementView', () => {
     expect(fetch).toHaveBeenCalledWith(11, false);
     expect(screen.queryByText(t.newAnnouncement)).toBeNull();
     expect(screen.queryByLabelText(t.delete)).toBeNull();
+    expect(screen.queryByLabelText(t.edit)).toBeNull();
+    expect(screen.queryByText(new RegExp(t.expires))).toBeNull();
+    expect(screen.queryByText(t.noExpiry)).toBeNull();
   });
 
   it('personnel : peut supprimer toute annonce du cours, même publiée par un autre', async () => {
@@ -312,6 +315,7 @@ describe('AnnouncementView', () => {
       <AnnouncementView
         course={COURSE}
         channel={CHANNEL}
+        canPost
         onFetchAnnouncements={vi.fn().mockResolvedValue([post(1)])}
         socket={socket}
       />

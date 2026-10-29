@@ -191,15 +191,20 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
           <span>{authorName(post.author)}</span>
           <span aria-hidden="true">·</span>
           <time dateTime={post.createdAt}>{shortDate.format(new Date(post.createdAt))}</time>
-          <span aria-hidden="true">·</span>
-          {expired ? (
-            <span className={styles.badge}>{t.expired}</span>
-          ) : post.expiresAt ? (
-            <span>
-              {t.expires} {shortDate.format(new Date(post.expiresAt))}
-            </span>
-          ) : (
-            <span>{t.noExpiry}</span>
+          {/* L'expiration est un réglage du personnel : les étudiants ne la voient pas. */}
+          {canPost && (
+            <>
+              <span aria-hidden="true">·</span>
+              {expired ? (
+                <span className={styles.badge}>{t.expired}</span>
+              ) : post.expiresAt ? (
+                <span>
+                  {t.expires} {shortDate.format(new Date(post.expiresAt))}
+                </span>
+              ) : (
+                <span>{t.noExpiry}</span>
+              )}
+            </>
           )}
         </p>
       </li>
