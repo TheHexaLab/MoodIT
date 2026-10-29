@@ -82,6 +82,14 @@ describe('useViewLocation', () => {
     expect(screen.getByTestId('navigation').textContent).toBe('POP'); // entrée initiale intacte
   });
 
+  it('le setter garde la même identité après une navigation', () => {
+    renderAt('/home/p/2');
+    const first = setView;
+    act(() => setView({ programId: 3, courseId: 6 }));
+    expect(path()).toBe('/home/p/3/c/6');
+    expect(setView).toBe(first);
+  });
+
   it('deux mises à jour dans le même tick se composent', () => {
     renderAt('/home/p/2/c/4');
     act(() => {

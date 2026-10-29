@@ -48,6 +48,12 @@ export type ViewUpdate = ViewLocation | ((previous: ViewLocation) => ViewLocatio
  * Vue lue dans l'URL, et son setter. Le setter part de la DERNIÈRE vue demandée, même si
  * l'URL n'est pas encore rendue : deux mises à jour dans le même tick se composent. Une vue
  * identique à l'actuelle n'ajoute rien à l'historique.
+ *
+ * Le setter est STABLE (même fonction pour toute la vie du composant). `navigate` de React Router,
+ * lui, change à chaque navigation (hors routeur de données, il dépend du chemin courant) : un
+ * setter qui en dépendait changeait à chaque clic, et chaque effet qui le liste se rejouait. Celui
+ * de l'abonnement WebSocket à la room de l'utilisateur se désabonnait et se réabonnait alors à
+ * chaque changement de vue, avec un trou où un évènement pouvait être manqué.
  */
 export function useViewLocation(): [
   ViewLocation,
@@ -57,20 +63,19 @@ export function useViewLocation(): [
   const navigate = useNavigate();
   const view = useMemo(() => parseViewPath(pathname), [pathname]);
   const latestRef = useRef(view);
+  const navigateRef = useRef(navigate);
   useLayoutEffect(() => {
     latestRef.current = view;
-  }, [view]);
+    navigateRef.current = navigate;
+  }, [view, navigate]);
 
-  const setView = useCallback(
-    (update: ViewUpdate, options?: { replace?: boolean }) => {
-      const next = typeof update === 'function' ? update(latestRef.current) : update;
-      const path = viewPath(next);
-      if (path === viewPath(latestRef.current)) return;
-      latestRef.current = parseViewPath(path);
-      navigate(path, { replace: options?.replace ?? false });
-    },
-    [navigate]
-  );
+  const setView = useCallback((update: ViewUpdate, options?: { replace?: boolean }) => {
+    const next = typeof update === 'function' ? update(latestRef.current) : update;
+    const path = viewPath(next);
+    if (path === viewPath(latestRef.current)) return;
+    latestRef.current = parseViewPath(path);
+    navigateRef.current(path, { replace: options?.replace ?? false });
+  }, []);
 
   return [view, setView];
 }

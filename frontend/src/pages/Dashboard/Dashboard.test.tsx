@@ -42,6 +42,8 @@ const ws = vi.hoisted(() => ({
   captured: {} as CapturedHandlers,
   open: vi.fn(),
   close: vi.fn(),
+  /** Abonnements à la room de l'utilisateur (programmes, rôles, corrections de quiz). */
+  programsSubscriptions: 0,
 }));
 vi.mock('../../services/appSocket.ts', () => ({
   createAppSocket: () => {
@@ -67,6 +69,7 @@ vi.mock('../../services/appSocket.ts', () => ({
       },
       programs: {
         subscribe: (userId: number, handlers: CapturedHandlers['programs']) => {
+          ws.programsSubscriptions += 1;
           ws.captured.programsUserId = userId;
           ws.captured.programs = handlers;
           return () => {};
@@ -276,6 +279,7 @@ beforeEach(() => {
   localStorage.clear();
   document.documentElement.setAttribute('data-theme', 'light');
   ws.captured = {};
+  ws.programsSubscriptions = 0;
   ws.open.mockClear();
   ws.close.mockClear();
   // Animations réduites : les popups se ferment / confirment de façon synchrone sous jsdom.
@@ -452,6 +456,21 @@ describe('Dashboard', () => {
       fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /IFT102/ }));
       await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
       expect(lastNavigation()).toBe('PUSH');
+    });
+
+    // Revue de #176 : `navigate` change à chaque navigation ; un setView qui en dépendait faisait
+    // désabonner puis réabonner la room de l'utilisateur à chaque clic (évènements manqués).
+    it('naviguer entre les vues ne réabonne pas la room de l’utilisateur', async () => {
+      renderDashboard();
+      await selectProgram('Génie logiciel');
+      await waitForCourseSelector('IFT101');
+      const subscriptions = ws.programsSubscriptions;
+      expect(subscriptions).toBeGreaterThan(0);
+      fireEvent.click(screen.getByText('general'));
+      fireEvent.click(screen.getByText('Quiz intro'));
+      goBack();
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/text/5'));
+      expect(ws.programsSubscriptions).toBe(subscriptions);
     });
 
     it('« back » revient à la vue précédente, sans quitter le dashboard', async () => {
