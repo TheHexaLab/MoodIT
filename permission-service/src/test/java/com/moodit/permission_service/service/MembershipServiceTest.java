@@ -190,6 +190,14 @@ class MembershipServiceTest {
   }
 
   @Test
+  void isAnnouncementForum_delegatesTrueAndFalse() {
+    when(membershipRepository.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipRepository.isAnnouncementForum(9)).thenReturn(false);
+    assertThat(service.isAnnouncementForum(11)).isTrue();
+    assertThat(service.isAnnouncementForum(9)).isFalse();
+  }
+
+  @Test
   void isCourseInProgram_delegatesTrueAndFalse() {
     when(membershipRepository.isCourseInProgram(10, 3)).thenReturn(true);
     when(membershipRepository.isCourseInProgram(99, 3)).thenReturn(false);
