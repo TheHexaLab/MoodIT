@@ -91,6 +91,17 @@ public class RealtimeEventPublisher {
             "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title));
   }
 
+  /** Annonce modifiée : même évènement `post:edited`, avec sa couleur et son expiration. */
+  public void announcementEdited(
+      long forumId, long postId, String content, String title, String color, String expiresAt) {
+    emit(
+        "forum",
+        forumId,
+        event(
+            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title,
+            "color", color, "expiresAt", expiresAt));
+  }
+
   public void postDeleted(long forumId, long postId) {
     emit("forum", forumId, event("post:deleted", "forumId", forumId, "postId", postId));
   }

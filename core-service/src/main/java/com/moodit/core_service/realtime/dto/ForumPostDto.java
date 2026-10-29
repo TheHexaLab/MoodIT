@@ -17,4 +17,7 @@ public record ForumPostDto(
     List<PostVoteDto> votes,
     List<ForumPostDto> replies,
     Integer replyCount,
-    String clientPostId) {}
+    String clientPostId,
+    // Annonce seulement (omis sinon, NON_NULL) : couleur et expiration ISO-8601 UTC.
+    String color,
+    String expiresAt) {}

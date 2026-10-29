@@ -139,6 +139,15 @@ class MembershipRepositoryTest {
   }
 
   @Test
+  void isAnnouncementForum_parNomDeType() {
+    sql("INSERT INTO f_type(id,name) VALUES (1,'Discussion'),(3,'Announcement')");
+    sql("INSERT INTO forum(id,course_id,f_type_id) VALUES (9,1,1),(11,1,3)");
+    assertThat(repo.isAnnouncementForum(11)).isTrue();
+    assertThat(repo.isAnnouncementForum(9)).isFalse();
+    assertThat(repo.isAnnouncementForum(404)).isFalse();
+  }
+
+  @Test
   void hasRoleInAnalysisCourse_true() {
     seedTeacherOfCourse(5, 7, 1);
     sql("INSERT INTO mcp_response(id,user_id,course_id) VALUES (50,99,1)");

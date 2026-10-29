@@ -10,6 +10,7 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.EnrollmentRepository;
+import com.moodit.core_service.repository.FTypeRepository;
 import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -40,6 +41,7 @@ class ProgramServiceCourseAuthTest {
     @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
     @Mock private AuditLogService auditLogService;
+    @Mock private FTypeRepository fTypeRepository;
 
     private ProgramService service;
 
@@ -47,7 +49,8 @@ class ProgramServiceCourseAuthTest {
     void setUp() {
         service = new ProgramService(
                 programRepository, courseRepository, userRepository,
-                userProgramRoleRepository, enrollmentRepository, realtimePublisher, auditLogService);
+                userProgramRoleRepository, enrollmentRepository, realtimePublisher, auditLogService,
+                fTypeRepository);
     }
 
     private static User userWith(int id, String... roleNames) {

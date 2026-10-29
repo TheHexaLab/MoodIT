@@ -1031,6 +1031,8 @@ function toForumPost(p: PostVoteUserDTO): ForumPost {
     othersVoteTotal: (p.voteTotalValue ?? 0) - myVote,
     replyCount: p.childrenCount,
     replies: undefined,
+    color: p.color ?? undefined,
+    expiresAt: p.expiresAt ?? undefined,
   };
 }
 
@@ -1125,6 +1127,62 @@ export async function editPost(
 }
 
 /** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
+// ── Annonces ('Announcement') ─────────────────────────────────────────────
+// Une annonce est un post racine du canal d'annonces du cours : mêmes routes que le forum.
+
+/** Champs saisis dans le formulaire d'annonce. `expiresAt` ISO UTC, null = jamais. */
+export interface AnnouncementDraft {
+  title: string;
+  content: string;
+  color: string;
+  expiresAt: string | null;
+}
+
+/**
+ * Annonces d'un canal, de la plus récente à la plus ancienne. Sans `includeExpired`, le
+ * backend écarte les expirées ; avec, il les renvoie (réservé au personnel du cours).
+ */
+export async function fetchAnnouncements(
+  forumId: number,
+  includeExpired = false
+): Promise<ForumPost[]> {
+  const params = new URLSearchParams({ limit: '100' });
+  if (includeExpired) params.set('includeExpired', 'true');
+  const res = await apiFetch(`/api/forums/${forumId}/posts?${params.toString()}`);
+  if (!res.ok) throw new Error('Échec du chargement des annonces');
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map(toForumPost);
+}
+
+/** Publier une annonce ; renvoie l'annonce persistée (id réel). */
+export async function createAnnouncement(
+  forumId: number,
+  draft: AnnouncementDraft
+): Promise<ForumPost> {
+  const res = await apiFetch('/api/forums/posts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forumId, parentPostId: null, ...draft }),
+  });
+  if (!res.ok) throw new Error("Échec de la publication de l'annonce");
+  const saved: PostVoteUserDTO = await res.json();
+  return toForumPost(saved);
+}
+
+/** Modifier une annonce : tous ses champs sont remplacés (`expiresAt` null = jamais). */
+export async function updateAnnouncement(
+  forumId: number,
+  postId: number,
+  draft: AnnouncementDraft
+): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) throw new Error("Échec de la modification de l'annonce");
+}
+
 export async function deletePost(forumId: number, postId: number): Promise<void> {
   const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
     method: 'DELETE',

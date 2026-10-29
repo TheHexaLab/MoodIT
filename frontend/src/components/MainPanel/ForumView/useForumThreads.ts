@@ -62,7 +62,13 @@ export interface IncomingForumHandlers {
   /** Un post a ete cree (par soi ou un autre utilisateur), sous `parentId`. */
   onPost: (post: ForumPost, parentId: number | null) => void;
   /** Un post a ete modifie (contenu, et titre pour un sujet racine). */
-  onEdit: (postId: number, content: string, title?: string | null) => void;
+  onEdit: (
+    postId: number,
+    content: string,
+    title?: string | null,
+    /** Annonce seulement : nouvelle couleur et expiration (null = jamais). */
+    announcement?: { color?: string; expiresAt: string | null }
+  ) => void;
   /** Un post a ete supprime (avec son sous-fil). */
   onDelete: (postId: number) => void;
   /** Un vote a change : `userId` met son vote a `value` sur `postId`. */

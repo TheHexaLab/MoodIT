@@ -15,7 +15,7 @@
 import type { ProgramRoleName } from '../helpers/roles.ts';
 
 /** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses. */
-export type ForumType = 'Discussion' | 'Thread';
+export type ForumType = 'Discussion' | 'Thread' | 'Announcement';
 
 /** Établissement (table Establishment). */
 export interface Establishment {
@@ -399,6 +399,9 @@ export interface ForumPost {
   replyCount?: number;
   /** Nonce de réconciliation optimiste ↔ écho WS. */
   clientPostId?: string;
+  /** Annonce seulement : clé de la palette et expiration ISO UTC (null = jamais). */
+  color?: string;
+  expiresAt?: string | null;
 }
 
 // ── Formes de réponse brutes du backend (DTO) ──────────────────────────────────
@@ -488,6 +491,9 @@ export interface PostVoteUserDTO {
   createdAt: string;
   title?: string;
   isPinned?: boolean;
+  /** Annonce seulement : clé de la palette et expiration ISO UTC (null = jamais). */
+  color?: string | null;
+  expiresAt?: string | null;
   postParentId?: number | null;
   author: User;
   voteTotalValue?: number;

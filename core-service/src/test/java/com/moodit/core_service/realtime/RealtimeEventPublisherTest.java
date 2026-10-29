@@ -110,7 +110,9 @@ class RealtimeEventPublisherTest {
             List.of(),
             List.of(),
             0,
-            "client-post-1");
+            "client-post-1",
+            null,
+            null);
 
     publisher.postCreated(9, post, null);
 
@@ -121,6 +123,21 @@ class RealtimeEventPublisherTest {
     assertThat(event.has("parentId")).isTrue();
     assertThat(event.get("parentId").isNull()).isTrue();
     assertThat(event.get("post").get("clientPostId").asText()).isEqualTo("client-post-1");
+  }
+
+  @Test
+  void announcementEdited_postEditedAvecCouleurEtExpiration() throws IOException {
+    WebSocketSession session = joinedSession("forum", 11);
+
+    publisher.announcementEdited(11, 40, "", "Examen", "red", null);
+
+    JsonNode event = capturePayload(session);
+    assertThat(event.get("type").asText()).isEqualTo("post:edited");
+    assertThat(event.get("title").asText()).isEqualTo("Examen");
+    assertThat(event.get("color").asText()).isEqualTo("red");
+    // expiresAt DOIT être présent et null : « n'expire jamais » (≠ champ absent d'un post ordinaire).
+    assertThat(event.has("expiresAt")).isTrue();
+    assertThat(event.get("expiresAt").isNull()).isTrue();
   }
 
   @Test

@@ -156,6 +156,9 @@ CREATE TABLE Post(
    user_id INTEGER NOT NULL,
    post_parent_id INTEGER,
    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+   -- Annonce (forum 'Announcement') : couleur de la palette et date d'expiration (NULL = jamais).
+   color VARCHAR(16),
+   expires_at TIMESTAMP,
    PRIMARY KEY(id),
    FOREIGN KEY(forum_id) REFERENCES Forum(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE,
@@ -494,7 +497,8 @@ INSERT INTO Course (title, code) VALUES
 -- ------------------------------------------------------------
 INSERT INTO F_Type (name) VALUES
   ('Discussion'),
-  ('Thread');
+  ('Thread'),
+  ('Announcement');   -- canal d'annonces : un par cours, seul le personnel publie
 
 -- ------------------------------------------------------------
 -- Forum  (un forum Q&R et un forum Annonces par cours)
@@ -511,6 +515,14 @@ SELECT
     'Thread — ' || c.title,
     2,   -- Post + réponses
     c.id, 1
+FROM Course c;
+
+-- Canal d'annonces : exactement un par cours (créé aussi à la création d'un cours, côté core).
+INSERT INTO Forum (title, f_type_id, course_id, position)
+SELECT
+    'Annonces',
+    3,   -- 'Announcement'
+    c.id, 0
 FROM Course c;
 
 -- ------------------------------------------------------------

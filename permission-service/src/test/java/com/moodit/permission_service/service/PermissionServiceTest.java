@@ -918,6 +918,131 @@ class PermissionServiceTest {
         .isFalse();
   }
 
+  // ── Canal d'annonces : seul le personnel du cours publie ──────────────────────
+
+  private static final String ANNOUNCEMENT = "{\"forumId\":11,\"title\":\"Examen\",\"color\":\"red\"}";
+
+  private void subscribedToAnnouncements(int userId) {
+    when(membershipService.canAccessForum(userId, 11)).thenReturn(true);
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+  }
+
+  @Test
+  void announcement_student_cannotPost() {
+    loggedIn(user(5)); // abonné, aucun rôle
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcement_student_cannotReplyAsMessage() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcement_student_cannotVote() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/forums/posts/votes", "POST", "{\"forumId\":11,\"postId\":1}"))
+        .isFalse();
+  }
+
+  @Test
+  void announcement_courseTeacher_canPost() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_courseAdmin_canPost() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_globalAdmin_canPost() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_notSubscribed_teacherElsewhere_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcement_authorNoLongerStaff_cannotDeleteOrEdit() {
+    loggedIn(user(5)); // auteur de l'annonce, mais plus aucun rôle dans le cours
+    lenient().when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "DELETE", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void announcement_teacher_deletesAnyAnnouncement() {
+    loggedIn(user(5)); // pas l'auteur
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void announcement_teacher_editsAnyAnnouncement() {
+    loggedIn(user(5)); // pas l'auteur
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void ordinaryPost_editStillAuthorOnly() {
+    loggedIn(user(5, RoleNames.ADMIN)); // admin global, mais pas l'auteur
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void announcements_student_readsUnexpiredOnly() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "limit=20")).isTrue();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
+        .isFalse();
+  }
+
+  @Test
+  void announcements_teacher_readsExpired() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
+        .isTrue();
+  }
+
+  @Test
+  void announcements_expired_notSubscribed_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
+        .isFalse();
+  }
+
   // ── Forums : édition/suppression (auteur) — l'autre moitié des combinaisons ──────────
 
   @Test

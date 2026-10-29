@@ -19,4 +19,7 @@ public class PostDTO {
     /** Titre d'un sujet racine de forum 'Thread' (null sinon). */
     private String title;
     private Boolean isPinned;
+    /** Annonce seulement (null sinon) : couleur de la palette et expiration UTC (null = jamais). */
+    private String color;
+    private Instant expiresAt;
 }

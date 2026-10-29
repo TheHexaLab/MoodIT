@@ -76,10 +76,13 @@ public class ForumController {
             @RequestParam(defaultValue = "false") boolean loadChildren,
             @RequestParam(required = false) Integer before,
             @RequestParam(defaultValue = "20") int limit,
+            // Canal d'annonces : inclure les annonces expirées (personnel du cours seulement,
+            // contrôlé par le permission-service).
+            @RequestParam(defaultValue = "false") boolean includeExpired,
             @RequestHeader(value = "X-User-Email", required = false) String email) {
 
         return ResponseEntity.ok(
-                forumService.getRootPostsPage(forumId, before, limit, loadChildren, email)
+                forumService.getRootPostsPage(forumId, before, limit, loadChildren, includeExpired, email)
         );
     }
     //endregion

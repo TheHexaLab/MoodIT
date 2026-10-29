@@ -5,6 +5,7 @@ import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Enrollment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Course;
+import com.moodit.core_service.model.Forum;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
 import java.time.LocalDateTime;
@@ -20,6 +21,7 @@ import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.EnrollmentRepository;
+import com.moodit.core_service.repository.FTypeRepository;
 import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -51,6 +53,7 @@ public class ProgramService {
   private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
   private final AuditLogService auditLogService;
+  private final FTypeRepository fTypeRepository;
   //private final UserService userService;
 
   /** DTO temps réel d'un programme (scope user:<id>). */
@@ -255,9 +258,19 @@ public class ProgramService {
         Course.builder()
             .code(courseCreateDTO.getCode())
             .title(courseCreateDTO.getTitle())
-            .forums(List.of())
+            .forums(new ArrayList<>())
             .programs(List.of())
             .build();
+
+    // Chaque cours a son canal « Annonces », enregistré avec lui (cascade Course.forums).
+    fTypeRepository.findByName("Announcement").ifPresent(type -> {
+      Forum announcements = new Forum();
+      announcements.setTitle("Annonces");
+      announcements.setFType(type);
+      announcements.setCourse(course);
+      announcements.setPosition(0);
+      course.getForums().add(announcements);
+    });
 
     courseRepository.save(course);
 

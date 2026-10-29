@@ -80,6 +80,12 @@ public class MembershipService {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
   }
 
+  /** Le forum est-il le canal d'annonces de son cours ? Seul le personnel y publie. */
+  @Transactional(readOnly = true)
+  public boolean isAnnouncementForum(long forumId) {
+    return membershipRepository.isAnnouncementForum(forumId);
+  }
+
   /**
    * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
    * l'abonnement. Sert a autoriser l'inscription a des cours d'un programme (POST /courses/users) :

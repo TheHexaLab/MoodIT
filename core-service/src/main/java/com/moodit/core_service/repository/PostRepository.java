@@ -1,6 +1,7 @@
 package com.moodit.core_service.repository;
 
 import jakarta.persistence.LockModeType;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
@@ -56,6 +57,18 @@ public interface PostRepository extends JpaRepository<Post, Integer> {
             + " ORDER BY p.id DESC")
     List<Post> findRootPostsPage(
         @Param("forumId") Integer forumId, @Param("before") Integer before, Pageable pageable);
+
+    /** Comme findRootPostsPage, sans les annonces expirées (expiresAt null = jamais). */
+    @Query(
+        "SELECT p FROM Post p WHERE p.forum.id = :forumId AND p.parent IS NULL"
+            + " AND (p.expiresAt IS NULL OR p.expiresAt > :now)"
+            + " AND (:before IS NULL OR p.id < :before)"
+            + " ORDER BY p.id DESC")
+    List<Post> findUnexpiredRootPostsPage(
+        @Param("forumId") Integer forumId,
+        @Param("before") Integer before,
+        @Param("now") LocalDateTime now,
+        Pageable pageable);
 
     /**
      * Nombre de réponses directes GROUPÉ par post parent, pour un lot de posts. Évite le N+1

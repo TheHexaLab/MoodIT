@@ -37,6 +37,20 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       nativeQuery = true)
   boolean canSeeForumViaProgram(@Param("userId") long userId, @Param("forumId") long forumId);
 
+  // Le forum est-il le canal d'ANNONCES de son cours (F_Type 'Announcement') ?
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM Forum f
+            JOIN F_Type t ON t.id = f.f_type_id
+            WHERE f.id = :forumId AND t.name = 'Announcement'
+          )
+          """,
+      nativeQuery = true)
+  boolean isAnnouncementForum(@Param("forumId") long forumId);
+
   // Le cours appartient a un programme auquel l'utilisateur est abonne (scope MCP).
   @Query(
       value =
