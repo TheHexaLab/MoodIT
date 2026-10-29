@@ -44,6 +44,7 @@ docker compose -f docker-compose-dev.yml up -d   # Postgres + pgAdmin pour le de
 - **Schéma de BD** : pas de Flyway pour l'instant ([#96](https://github.com/TheHexaLab/MoodIT/issues/96)). Tout changement se fait **à deux endroits** : `init.sql` (bases neuves) **et** un nouveau script idempotent `migrations/AAAA-MM-JJ_sujet.sql` (bases existantes).
 - **Secrets** : le dépôt est public. Ne jamais committer `.env`, de clés ou de jetons. `JWT_SECRET`, `APP_SECURITY_PEPPER` et `INTERNAL_TOKEN` n'ont de valeur de repli dans aucun profil : un service démarre seulement s'ils sont définis (`.env` en local). Les tests prennent les leurs dans `src/test/resources/config/application.properties`.
 - **Analyse MCP** : si le LLM est injoignable, `mcp-service` produit une analyse déterministe de repli. Ne pas casser ce repli.
+- **Vue du dashboard dans l'URL** : `/home/p/:programId/c/:courseId/:type/:id` (`frontend/src/pages/Dashboard/viewLocation.ts`, #63). Un choix de l'utilisateur ajoute une entrée d'historique (`setView(vue)`), un repli automatique la remplace (`setView(vue, { replace: true })`). Ne pas remettre la vue dans un état React local. Les pages d'authentification passent par `GuestRoute`.
 - **Popups frontend** : toute fenêtre modale passe par `frontend/src/components/Popup` (`<Popup variant={PopupVariant.…}>`), qui fournit le voile, le conteneur selon la variante, le rôle `dialog`, le focus, Échap et l'animation de sortie. Ne pas réécrire d'overlay dans un composant ; un gestionnaire Échap interne (liste déroulante, édition en ligne) doit appeler `stopPropagation()`.
 
 ## Conventions
@@ -52,6 +53,7 @@ docker compose -f docker-compose-dev.yml up -d   # Postgres + pgAdmin pour le de
 - Branches : `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/` (ou `ci/`) + numéro d'issue, ex. `feat/43-systeme-amis`.
 - Titres de commits et de PR : commits conventionnels, `type(portée): description` (ex. `fix(core): …`). Les labels de PR sont posés automatiquement à partir du titre et des fichiers touchés.
 - Description de PR : remplir `.github/pull_request_template.md` (proposé automatiquement par GitHub) et lier l'issue (`Closes #43`). Code assisté par IA : label `vibe-coded`.
+- Sous-issues : on utilise les **sous-issues GitHub** pour structurer le travail, aussi bien pour grouper (épopée → issues de feature) que pour découper une grosse issue. Rattacher via l'API : `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<id>`, où `<id>` est l'`id` numérique de la sous-issue (`gh api repos/<owner>/<repo>/issues/<num> --jq .id`), pas son numéro.
 - Avant d'ouvrir une PR : tests des services touchés + `npm run lint` si le frontend est touché.
 
 ## CI

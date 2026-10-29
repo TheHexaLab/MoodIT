@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiFetch } from './api';
+import { apiFetch, hasActiveSession } from './api';
 
 /**
  * Tests de la couche réseau bas niveau (apiFetch : wrapper de fetch).
@@ -113,5 +113,40 @@ describe('apiFetch', () => {
 
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(assignSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('hasActiveSession (#63)', () => {
+  beforeEach(() => localStorage.clear());
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('GET /api/me réussi : session active, cookie envoyé, sans cache', async () => {
+    const fetchMock = vi.fn(async () => fakeResponse({ ok: true, status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    localStorage.setItem(TOKEN_KEY, 'résidu');
+
+    await expect(hasActiveSession()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/api/me', { cache: 'no-store', credentials: 'include' });
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('résidu');
+  });
+
+  it('401 : pas de session, ni purge ni redirection (la page d’inscription reste)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse({ ok: false, status: 401 })));
+    localStorage.setItem(TOKEN_KEY, 'résidu');
+    const before = window.location.href;
+
+    await expect(hasActiveSession()).resolves.toBe(false);
+    expect(window.location.href).toBe(before);
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('résidu');
+  });
+
+  it('erreur réseau : pas de session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+
+    await expect(hasActiveSession()).resolves.toBe(false);
   });
 });
