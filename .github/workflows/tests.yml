@@ -275,14 +275,14 @@ jobs:
   # docker-entrypoint de prod), puis migrations/*.sql sont rejouées (idempotentes : elles doivent
   # passer sans erreur sur une base à jour). Le VRAI JAR démarre ensuite en profil prod, donc en
   # `ddl-auto=validate` : une table ou colonne manquante empêche le démarrage → job rouge.
-  # mcp-service n'est pas listé : JDBC brut, `ddl-auto=none`, rien à valider côté Hibernate.
+  # execution-service et gateway n'ont pas de base : rien à valider.
   schema:
     name: ${{ matrix.service }} — démarrage prod (vrai schéma)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service: [auth-service, core-service, permission-service]
+        service: [auth-service, core-service, mcp-service, permission-service]
 
     services:
       postgres:
