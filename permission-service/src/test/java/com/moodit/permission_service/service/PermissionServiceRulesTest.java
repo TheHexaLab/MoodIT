@@ -15,6 +15,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.moodit.permission_service.model.ForumAccess;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
@@ -493,14 +494,14 @@ class PermissionServiceRulesTest {
     @Test
     void publierPost_abonne_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isTrue();
     }
 
     @Test
     void publierPost_nonAbonne_refuse() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isFalse();
     }
 
@@ -508,14 +509,14 @@ class PermissionServiceRulesTest {
     void publierPost_nonAbonneMemeGardien_refuse() {
       // L'écriture dans un forum suit l'APPARTENANCE, pas le rôle global.
       loggedIn(user(5, RoleNames.GUARDIAN));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isFalse();
     }
 
     @Test
     void publierPost_forumIdEnChaine_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":\" 9 \"}")).isTrue();
     }
 
@@ -549,7 +550,7 @@ class PermissionServiceRulesTest {
     @Test
     void voter_abonne_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts/votes", "POST", "{\"forumId\":9,\"postId\":40}"))
           .isTrue();
     }
@@ -557,7 +558,7 @@ class PermissionServiceRulesTest {
     @Test
     void voter_nonAbonne_refuse() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts/votes", "POST", "{\"forumId\":9,\"postId\":40}"))
           .isFalse();
     }

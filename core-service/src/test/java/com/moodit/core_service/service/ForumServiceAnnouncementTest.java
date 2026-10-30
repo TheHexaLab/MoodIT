@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -115,6 +116,23 @@ class ForumServiceAnnouncementTest {
   }
 
   @Test
+  void annonce_sansCouleurNiTexte_creeeEnBleu() {
+    service.addPostToForum(announcement("Bienvenue", null, null), EMAIL);
+
+    ArgumentCaptor<Post> saved = ArgumentCaptor.forClass(Post.class);
+    verify(postRepository).saveAndFlush(saved.capture());
+    assertThat(saved.getValue().getContent()).isEmpty();
+    assertThat(saved.getValue().getColor()).isEqualTo("blue");
+  }
+
+  @Test
+  void annonce_titreTropLong_refusee() {
+    String tooLong = "a".repeat(ForumService.MAX_TITLE_LENGTH + 1);
+    assertThatThrownBy(() -> service.addPostToForum(announcement(tooLong, "", "blue"), EMAIL))
+        .isInstanceOf(InvalidPostException.class);
+  }
+
+  @Test
   void annonce_sansTitre_refusee() {
     assertThatThrownBy(() -> service.addPostToForum(announcement("  ", "texte", "blue"), EMAIL))
         .isInstanceOf(InvalidPostException.class);
@@ -169,10 +187,10 @@ class ForumServiceAnnouncementTest {
   }
 
   @Test
-  void modification_remplaceTousLesChamps_expirationNullEgaleJamais() {
+  void modification_complete_clearExpiresAtRetireLExpiration() {
     Post p = existing();
     ForumUpdatePostDTO dto =
-        ForumUpdatePostDTO.builder().title("Nouveau").content("").color("green").expiresAt(null).build();
+        ForumUpdatePostDTO.builder().title("Nouveau").content("").color("green").clearExpiresAt(true).build();
 
     PostDTO out = service.updatePost(11, 40, dto);
 
@@ -181,7 +199,41 @@ class ForumServiceAnnouncementTest {
     assertThat(p.getColor()).isEqualTo("green");
     assertThat(p.getExpiresAt()).isNull();
     assertThat(out.getColor()).isEqualTo("green");
-    verify(realtime).announcementEdited(11L, 40L, "", "Nouveau", "green", null);
+    verify(realtime).postEdited(11L, 40L, "", "Nouveau", "green", null);
+  }
+
+  @Test
+  void modification_partielle_titreSeul_gardeTexteEtExpiration() {
+    Post p = existing();
+
+    service.updatePost(11, 40, ForumUpdatePostDTO.builder().title("Renommée").build());
+
+    assertThat(p.getTitle()).isEqualTo("Renommée");
+    assertThat(p.getContent()).isEqualTo("vieux texte");
+    assertThat(p.getColor()).isEqualTo("red");
+    assertThat(p.getExpiresAt()).isEqualTo(LocalDateTime.of(2026, 11, 1, 0, 0));
+  }
+
+  @Test
+  void modification_partielle_isPinnedSeul_neTouchePasAuReste() {
+    Post p = existing();
+
+    service.updatePost(11, 40, ForumUpdatePostDTO.builder().isPinned(true).build());
+
+    assertThat(p.getIsPinned()).isTrue();
+    assertThat(p.getTitle()).isEqualTo("Ancien");
+    assertThat(p.getContent()).isEqualTo("vieux texte");
+    assertThat(p.getExpiresAt()).isEqualTo(LocalDateTime.of(2026, 11, 1, 0, 0));
+    verify(realtime, never()).postEdited(anyLong(), anyLong(), any(), any(), any(), any());
+  }
+
+  @Test
+  void modification_titreTropLong_refusee() {
+    existing();
+    String tooLong = "a".repeat(ForumService.MAX_TITLE_LENGTH + 1);
+
+    assertThatThrownBy(() -> service.updatePost(11, 40, ForumUpdatePostDTO.builder().title(tooLong).build()))
+        .isInstanceOf(InvalidPostException.class);
   }
 
   @Test

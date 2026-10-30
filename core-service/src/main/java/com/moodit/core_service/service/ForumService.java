@@ -7,6 +7,7 @@ import com.moodit.core_service.exception.InvalidPostException;
 import com.moodit.core_service.exception.PostNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Forum;
+import com.moodit.core_service.model.ForumKind;
 import com.moodit.core_service.model.Post;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.model.Vote;
@@ -73,23 +74,42 @@ public class ForumService {
     // détachement en masse de ses réponses (cf. deletePost, cas Discussion).
     @PersistenceContext private EntityManager entityManager;
 
+    /** Longueur MAX d'un titre (colonne Post.title VARCHAR(256)) : au-delà, 400 plutôt que 500. */
+    public static final int MAX_TITLE_LENGTH = 256;
+
     /** Couleurs autorisées d'une annonce : clés de la palette du front (ANNOUNCEMENT_COLORS). */
     public static final Set<String> ANNOUNCEMENT_COLORS =
             Set.of("blue", "red", "orange", "green", "purple", "pink");
 
-    /** Canal d'annonces du cours (un par cours, cf. ProgramService.addCourseToPrograms). */
-    static boolean isAnnouncement(Forum forum) {
-        return forum.getFType() != null && "Announcement".equals(forum.getFType().getName());
+    private void validateTitle(String title) {
+        if (title != null && title.length() > MAX_TITLE_LENGTH) {
+            throw new InvalidPostException(
+                    "Le titre dépasse la limite de " + MAX_TITLE_LENGTH + " caractères.");
+        }
     }
 
     /**
-     * Annonce (création ou modification) : titre obligatoire, texte facultatif, couleur de la
-     * palette. Remplace validateContent pour ce type de forum.
+     * Validation d'un NOUVEAU post selon le type de son forum. Annonce : titre obligatoire,
+     * texte facultatif, couleur de la palette, pas de réponse. Autres : texte obligatoire.
      */
-    private void validateAnnouncement(String title, String content, String color) {
-        if (title == null || title.isBlank()) {
-            throw new InvalidPostException("Le titre de l'annonce ne peut pas être vide.");
+    private void validateNewPost(ForumKind kind, PostCreateInForumDTO dto) {
+        validateTitle(dto.getTitle());
+        switch (kind) {
+            case ANNOUNCEMENT -> {
+                if (dto.getTitle() == null || dto.getTitle().isBlank()) {
+                    throw new InvalidPostException("Le titre de l'annonce ne peut pas être vide.");
+                }
+                validateAnnouncementFields(dto.getContent(), dto.getColor());
+                if (dto.getParentPostId() != null) {
+                    throw new InvalidPostException("On ne peut pas répondre à une annonce.");
+                }
+            }
+            case DISCUSSION, THREAD -> validateContent(dto.getContent());
         }
+    }
+
+    /** Texte facultatif (borné) et couleur de la palette d'une annonce (null = non fournis). */
+    private void validateAnnouncementFields(String content, String color) {
         if (content != null && content.length() > MAX_CONTENT_LENGTH) {
             throw new InvalidPostException(
                     "Le contenu dépasse la limite de " + MAX_CONTENT_LENGTH + " caractères.");
@@ -100,9 +120,9 @@ public class ForumService {
     }
 
     // ── Temps réel ───────────────────────────────────────────────────────────────
-    /** Un canal 'Discussion' (chat) ⇒ room `channel:` ; sinon 'Thread' ⇒ room `forum:`. */
+    /** Un canal 'Discussion' (chat) ⇒ room `channel:` ; sinon ⇒ room `forum:`. */
     private boolean isDiscussion(Forum forum) {
-        return "Discussion".equals(forum.getFType().getName());
+        return ForumKind.of(forum) == ForumKind.DISCUSSION;
     }
 
     /** Auteur embarqué dans un évènement temps réel (sous-ensemble de User_). */
@@ -171,6 +191,12 @@ public class ForumService {
     /** Le timestamp BD (TIMESTAMP sans zone, stocké en UTC) → Instant UTC pour le client. */
     private Instant toUtcInstant(LocalDateTime dateTime) {
         return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
+    }
+
+    /** Idem, sérialisé en ISO-8601 pour un évènement temps réel (null conservé). */
+    private String toUtcIso(LocalDateTime dateTime) {
+        Instant instant = toUtcInstant(dateTime);
+        return instant == null ? null : instant.toString();
     }
 
     /** Inverse de toUtcInstant : un Instant du client → TIMESTAMP BD en UTC. */
@@ -341,14 +367,9 @@ public class ForumService {
     /**
      * PAGE de sujets RACINES d'un forum, par CURSEUR : les `limit` sujets les plus récents AVANT
      * `before` (id ; null = derniers sujets). Du plus RÉCENT au plus ANCIEN (le front les append
-     * en scrollant vers le bas).
+     * en scrollant vers le bas). Dans un canal d'annonces, les expirées sont exclues sauf si
+     * `includeExpired`.
      */
-    public List<PostVoteUserDTO> getRootPostsPage(
-            Integer forumId, Integer before, int limit, boolean loadChildren, String email) {
-        return getRootPostsPage(forumId, before, limit, loadChildren, false, email);
-    }
-
-    /** Idem ; dans un canal d'annonces, les expirées sont exclues sauf si `includeExpired`. */
     public List<PostVoteUserDTO> getRootPostsPage(
             Integer forumId, Integer before, int limit, boolean loadChildren,
             boolean includeExpired, String email) {
@@ -357,7 +378,7 @@ public class ForumService {
         int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
 
         PageRequest pageable = PageRequest.of(0, safeLimit);
-        List<Post> page = isAnnouncement(forum) && !includeExpired
+        List<Post> page = ForumKind.of(forum) == ForumKind.ANNOUNCEMENT && !includeExpired
                 ? postRepository.findUnexpiredRootPostsPage(
                         forumId, before, LocalDateTime.now(ZoneOffset.UTC), pageable)
                 : postRepository.findRootPostsPage(forumId, before, pageable);
@@ -373,24 +394,12 @@ public class ForumService {
     //region POST
     @Transactional
     public PostVoteUserDTO addPostToForum(PostCreateInForumDTO postCreateInForumDTO, String email) {
-        // Post ordinaire : contenu validé AVANT tout accès BD. Une annonce (couleur fournie) a un
-        // texte facultatif : elle est validée une fois le type du forum connu.
-        boolean colored = postCreateInForumDTO.getColor() != null;
-        if (!colored) {
-            validateContent(postCreateInForumDTO.getContent());
-        }
+        // Le TYPE du forum décide des règles : on le lit avant de valider.
         Forum forum = forumRepository.findById(postCreateInForumDTO.getForumId())
                 .orElseThrow(ForumNotFoundException::new);
-        boolean announcement = isAnnouncement(forum);
-        if (announcement) {
-            validateAnnouncement(postCreateInForumDTO.getTitle(), postCreateInForumDTO.getContent(),
-                    postCreateInForumDTO.getColor());
-            if (postCreateInForumDTO.getParentPostId() != null) {
-                throw new InvalidPostException("On ne peut pas répondre à une annonce.");
-            }
-        } else if (colored) {
-            validateContent(postCreateInForumDTO.getContent());
-        }
+        ForumKind kind = ForumKind.of(forum);
+        validateNewPost(kind, postCreateInForumDTO);
+        boolean announcement = kind == ForumKind.ANNOUNCEMENT;
         User user = userRepository.findByEmail(email)
                 .orElseThrow(UserNotFoundException::new);
 
@@ -401,7 +410,7 @@ public class ForumService {
         post.setTitle(postCreateInForumDTO.getTitle());
         post.setIsPinned(false);
         if (announcement) {
-            post.setColor(colored ? postCreateInForumDTO.getColor() : "blue");
+            post.setColor(postCreateInForumDTO.getColor() == null ? "blue" : postCreateInForumDTO.getColor());
             post.setExpiresAt(toUtcDateTime(postCreateInForumDTO.getExpiresAt()));
         }
         // createdAt est généré par la BD (@CreationTimestamp source=DB) → ordre cohérent.
@@ -424,16 +433,14 @@ public class ForumService {
         long forumId = forum.getId();
         long postId = saved.getId();
         String content = saved.getContent();
-        Instant createdInstant = toUtcInstant(saved.getCreatedAt());
-        String createdAt = createdInstant == null ? null : createdInstant.toString();
+        String createdAt = toUtcIso(saved.getCreatedAt());
         Author author = toAuthor(user);
         Long parentId = saved.getParent() != null ? saved.getParent().getId().longValue() : null;
-        boolean discussion = isDiscussion(forum);
+        boolean discussion = kind == ForumKind.DISCUSSION;
         String title = saved.getTitle();
         Boolean isPinned = saved.getIsPinned();
         String color = saved.getColor();
-        Instant expiresInstant = toUtcInstant(saved.getExpiresAt());
-        String expiresAt = expiresInstant == null ? null : expiresInstant.toString();
+        String expiresAt = toUtcIso(saved.getExpiresAt());
         // Le front envoie clientMessageId (chat) ou clientPostId (forum) selon le cas.
         String clientId = discussion
                 ? postCreateInForumDTO.getClientMessageId()
@@ -516,7 +523,7 @@ public class ForumService {
         return toForumDTO(forum);
     }
     @Transactional
-    public PostDTO updatePost(Integer forumId, Integer postId, ForumUpdatePostDTO forumUpdatePostDTO) {
+    public PostDTO updatePost(Integer forumId, Integer postId, ForumUpdatePostDTO dto) {
     Forum forum = forumRepository.findById(forumId)
             .orElseThrow(ForumNotFoundException::new);
     Post post = forum.getPosts()
@@ -525,44 +532,56 @@ public class ForumService {
             .findFirst()
             .orElseThrow(PostNotFoundException::new);
 
-        boolean announcement = isAnnouncement(forum);
-        if (announcement) {
-            // Une annonce est modifiée en entier (le formulaire renvoie tous ses champs) : une
-            // expiration null signifie « jamais », pas « inchangée ».
-            validateAnnouncement(forumUpdatePostDTO.getTitle(), forumUpdatePostDTO.getContent(),
-                    forumUpdatePostDTO.getColor());
-            post.setTitle(forumUpdatePostDTO.getTitle());
-            post.setContent(forumUpdatePostDTO.getContent() == null ? "" : forumUpdatePostDTO.getContent());
-            if (forumUpdatePostDTO.getColor() != null) post.setColor(forumUpdatePostDTO.getColor());
-            post.setExpiresAt(toUtcDateTime(forumUpdatePostDTO.getExpiresAt()));
-        } else {
-            if (forumUpdatePostDTO.getContent() != null) {
-                validateContent(forumUpdatePostDTO.getContent());
-                post.setContent(forumUpdatePostDTO.getContent());
+        // Modification PARTIELLE : un champ absent (null) reste inchangé, quel que soit le type.
+        ForumKind kind = ForumKind.of(forum);
+        boolean announcement = kind == ForumKind.ANNOUNCEMENT;
+        if (dto.getContent() != null) {
+            if (announcement) validateAnnouncementFields(dto.getContent(), null);
+            else validateContent(dto.getContent());
+            post.setContent(dto.getContent());
+        }
+        if (dto.getTitle() != null) {
+            validateTitle(dto.getTitle());
+            if (announcement && dto.getTitle().isBlank()) {
+                throw new InvalidPostException("Le titre de l'annonce ne peut pas être vide.");
             }
-            if (forumUpdatePostDTO.getTitle() != null) {
-                post.setTitle(forumUpdatePostDTO.getTitle());
+            post.setTitle(dto.getTitle());
+        }
+        // Couleur et expiration n'existent que pour une annonce ; `clearExpiresAt` = « jamais ».
+        boolean announcementChanged = false;
+        if (announcement) {
+            if (dto.getColor() != null) {
+                validateAnnouncementFields(null, dto.getColor());
+                post.setColor(dto.getColor());
+                announcementChanged = true;
+            }
+            if (Boolean.TRUE.equals(dto.getClearExpiresAt())) {
+                post.setExpiresAt(null);
+                announcementChanged = true;
+            } else if (dto.getExpiresAt() != null) {
+                post.setExpiresAt(toUtcDateTime(dto.getExpiresAt()));
+                announcementChanged = true;
             }
         }
-        if (forumUpdatePostDTO.getIsPinned() != null) {
-            post.setIsPinned(forumUpdatePostDTO.getIsPinned());
+        if (dto.getIsPinned() != null) {
+            post.setIsPinned(dto.getIsPinned());
         }
 
         // ── Diffusion temps réel (après commit) : contenu + titre propagés (isPinned pas
         // encore diffusé). Le chat n'a pas de titre → messageEdited (contenu seul). ──
-        if (announcement || forumUpdatePostDTO.getContent() != null || forumUpdatePostDTO.getTitle() != null) {
+        if (announcementChanged || dto.getContent() != null || dto.getTitle() != null) {
             long fId = forum.getId();
             long pId = post.getId();
             String content = post.getContent();
             String title = post.getTitle();
-            boolean discussion = isDiscussion(forum);
             String color = post.getColor();
-            Instant expiresInstant = toUtcInstant(post.getExpiresAt());
-            String expiresAt = expiresInstant == null ? null : expiresInstant.toString();
+            String expiresAt = toUtcIso(post.getExpiresAt());
             afterCommit(() -> {
-                if (discussion) realtimePublisher.messageEdited(fId, pId, content);
-                else if (announcement) realtimePublisher.announcementEdited(fId, pId, content, title, color, expiresAt);
-                else realtimePublisher.postEdited(fId, pId, content, title);
+                switch (kind) {
+                    case DISCUSSION -> realtimePublisher.messageEdited(fId, pId, content);
+                    case ANNOUNCEMENT -> realtimePublisher.postEdited(fId, pId, content, title, color, expiresAt);
+                    case THREAD -> realtimePublisher.postEdited(fId, pId, content, title);
+                }
             });
         }
 

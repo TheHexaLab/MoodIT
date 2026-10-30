@@ -599,6 +599,26 @@ class CourseServiceTest {
     }
 
     @Test
+    @DisplayName("Canal d'annonces : ni supprimé, ni renommé, ni déplacé par l'API des sections")
+    void annonces_protegees_contre_les_sections() {
+      Course c = courseWithForums();
+      Forum annonces = forum(11, "Annonces", 0, fType(3, "Announcement"), c);
+      c.getForums().add(annonces);
+      when(courseRepository.findById(1)).thenReturn(Optional.of(c));
+
+      assertThatThrownBy(() -> courseService.changeSection(1, "text", ItemChangeDto.delete("11")))
+          .isInstanceOf(ForumNotFoundException.class);
+      assertThatThrownBy(() -> courseService.changeSection(1, "forum", ItemChangeDto.rename("11", "X")))
+          .isInstanceOf(ForumNotFoundException.class);
+      assertThatThrownBy(() -> courseService.changeSection(1, "text", ItemChangeDto.reorder(List.of("11", "5"))))
+          .isInstanceOf(ForumNotFoundException.class);
+
+      assertThat(c.getForums()).contains(annonces);
+      assertThat(annonces.getTitle()).isEqualTo("Annonces");
+      verifyNoInteractions(realtimePublisher);
+    }
+
+    @Test
     @DisplayName("create (text) : les positions des AUTRES sections sont ignorées pour le calcul")
     void create_text_ignore_les_autres_sections() {
       Course c = courseWithForums();

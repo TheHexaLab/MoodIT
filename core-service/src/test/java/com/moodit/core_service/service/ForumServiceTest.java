@@ -315,7 +315,7 @@ class ForumServiceTest {
       assertThatThrownBy(() -> forumService.findById(9)).isInstanceOf(ForumNotFoundException.class);
       assertThatThrownBy(() -> forumService.getMessagesPage(9, null, 10, null))
           .isInstanceOf(ForumNotFoundException.class);
-      assertThatThrownBy(() -> forumService.getRootPostsPage(9, null, 10, false, null))
+      assertThatThrownBy(() -> forumService.getRootPostsPage(9, null, 10, false, false, null))
           .isInstanceOf(ForumNotFoundException.class);
       verifyNoInteractions(postRepository);
     }
@@ -448,7 +448,7 @@ class ForumServiceTest {
       root.setChildren(List.of(post(2, bob, "réponse")));
       when(postRepository.findRootPostsPage(eq(5), eq(null), any())).thenReturn(List.of(root));
 
-      List<PostVoteUserDTO> page = forumService.getRootPostsPage(5, null, -1, true, null);
+      List<PostVoteUserDTO> page = forumService.getRootPostsPage(5, null, -1, true, false, null);
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(null), pageable.capture());
@@ -464,7 +464,7 @@ class ForumServiceTest {
       when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
       when(postRepository.findRootPostsPage(eq(5), eq(null), any())).thenReturn(List.of());
 
-      forumService.getRootPostsPage(5, null, 0, false, null);
+      forumService.getRootPostsPage(5, null, 0, false, false, null);
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(null), pageable.capture());
@@ -477,7 +477,7 @@ class ForumServiceTest {
       when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
       when(postRepository.findRootPostsPage(eq(5), eq(3), any())).thenReturn(List.of());
 
-      assertThat(forumService.getRootPostsPage(5, 3, 1000, false, null)).isEmpty();
+      assertThat(forumService.getRootPostsPage(5, 3, 1000, false, false, null)).isEmpty();
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(3), pageable.capture());
@@ -586,11 +586,12 @@ class ForumServiceTest {
     }
 
     @Test
-    @DisplayName("Contenu null → InvalidPostException avant tout accès BD")
+    @DisplayName("Contenu null → InvalidPostException (validé selon le type du forum), rien n'est persisté")
     void contenu_null() {
+      when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Discussion")));
       assertThatThrownBy(() -> forumService.addPostToForum(dto(5, null, null), "alice@test.ca"))
           .isInstanceOf(InvalidPostException.class);
-      verifyNoInteractions(forumRepository, postRepository);
+      verifyNoInteractions(postRepository, userRepository);
     }
   }
 

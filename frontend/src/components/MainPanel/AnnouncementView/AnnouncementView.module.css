@@ -107,6 +107,25 @@ div.announcement-view > header > button.new-button:hover {
     list-style: none;
 }
 
+.load-more {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0.75rem auto 0;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.load-more:hover:not(:disabled) {
+    background: var(--bg-vote-pill);
+}
+
 /* Carte : fond DOUX et uniforme de la couleur choisie (mêlée au fond du thème, donc lisible en
    clair comme en sombre), coins arrondis, toute la largeur. `--ann-color` posé en ligne. */
 .card {

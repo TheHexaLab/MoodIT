@@ -6,6 +6,7 @@ import com.moodit.core_service.model.Enrollment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Forum;
+import com.moodit.core_service.model.ForumKind;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
 import java.time.LocalDateTime;
@@ -29,6 +30,7 @@ import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.CourseDto;
+import com.moodit.core_service.realtime.dto.ForumSectionDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -263,7 +265,7 @@ public class ProgramService {
             .build();
 
     // Chaque cours a son canal « Annonces », enregistré avec lui (cascade Course.forums).
-    fTypeRepository.findByName("Announcement").ifPresent(type -> {
+    fTypeRepository.findByName(ForumKind.ANNOUNCEMENT.typeName()).ifPresent(type -> {
       Forum announcements = new Forum();
       announcements.setTitle("Annonces");
       announcements.setFType(type);
@@ -282,6 +284,11 @@ public class ProgramService {
     String code = course.getCode();
     String title = course.getTitle();
     List<Integer> programIds = programs.stream().map(Program::getId).toList();
+    // Le cours arrive AVEC son canal « Annonces » (seul forum d'un cours neuf).
+    List<ForumSectionDto> forums = course.getForums().stream()
+        .map(f -> new ForumSectionDto(f.getId(), f.getTitle(), f.getFType().getName(), f.getPosition()))
+        .toList();
+    CourseDto live = new CourseDto(courseId, code, title, List.of(), List.of(), forums);
 
     String coursePrograms = AuditContext.ofPrograms(programs); // "Programmes : … · Établissements : …"
 
@@ -325,7 +332,7 @@ public class ProgramService {
     }
 
     afterCommit(() ->
-        programIds.forEach(pid -> realtimePublisher.courseCreated(pid, CourseDto.of(courseId, code, title))));
+        programIds.forEach(pid -> realtimePublisher.courseCreated(pid, live)));
 
     return toCourseDTO(course);
   }

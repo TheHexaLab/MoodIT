@@ -265,6 +265,7 @@ public class ProgramServiceTest {
             when(courseRepository.save(saved.capture())).thenAnswer(inv -> {
                 Course c = inv.getArgument(0);
                 c.setId(1);
+                c.getForums().forEach(f -> f.setId(11)); // id attribué en cascade par la BD
                 return c;
             });
 
@@ -276,6 +277,10 @@ public class ProgramServiceTest {
             assertEquals("Annonces", forums.get(0).getTitle());
             assertEquals(announcement, forums.get(0).getFType());
             assertEquals(saved.getValue(), forums.get(0).getCourse());
+            // L'évènement course:created porte le canal : les autres clients l'ont sans recharger.
+            verify(realtimePublisher).courseCreated(1L, new com.moodit.core_service.realtime.dto.CourseDto(
+                    1, "PHY1", "Physique", List.of(), List.of(),
+                    List.of(new com.moodit.core_service.realtime.dto.ForumSectionDto(11, "Annonces", "Announcement", 0))));
         }
 
         @Test

@@ -84,22 +84,20 @@ public class RealtimeEventPublisher {
 
   /** `title` = nouveau titre d'un sujet racine ('Thread'), ou null pour une réponse. */
   public void postEdited(long forumId, long postId, String content, String title) {
-    emit(
-        "forum",
-        forumId,
-        event(
-            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title));
+    postEdited(forumId, postId, content, title, null, null);
   }
 
-  /** Annonce modifiée : même évènement `post:edited`, avec sa couleur et son expiration. */
-  public void announcementEdited(
+  /** Idem pour une annonce : `color` non null ajoute sa couleur et son expiration (null = jamais). */
+  public void postEdited(
       long forumId, long postId, String content, String title, String color, String expiresAt) {
-    emit(
-        "forum",
-        forumId,
+    Map<String, Object> event =
         event(
-            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title,
-            "color", color, "expiresAt", expiresAt));
+            "post:edited", "forumId", forumId, "postId", postId, "content", content, "title", title);
+    if (color != null) {
+      event.put("color", color);
+      event.put("expiresAt", expiresAt);
+    }
+    emit("forum", forumId, event);
   }
 
   public void postDeleted(long forumId, long postId) {

@@ -4,6 +4,7 @@ export const defaultAnnouncementLabels = {
   loading: 'Chargement des annonces…',
   loadError: 'Impossible de charger les annonces.',
   retry: 'Réessayer',
+  loadMore: 'Charger plus',
   emptyTitle: 'Aucune annonce pour le moment',
   emptyStaff: 'Publiez une annonce : elle apparaîtra en haut pour tous les membres du cours.',
   emptyStudent: 'Les annonces du personnel du cours apparaîtront ici.',

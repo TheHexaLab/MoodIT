@@ -198,6 +198,23 @@ class MembershipServiceTest {
   }
 
   @Test
+  void forumAccess_selonLeTypeDuForumVisible() {
+    when(membershipRepository.visibleForumType(5, 11)).thenReturn("Announcement");
+    when(membershipRepository.visibleForumType(5, 9)).thenReturn("Discussion");
+    when(membershipRepository.visibleForumType(5, 1)).thenReturn(null);
+    assertThat(service.forumAccess(5, 11)).isEqualTo(com.moodit.permission_service.model.ForumAccess.ANNOUNCEMENT);
+    assertThat(service.forumAccess(5, 9)).isEqualTo(com.moodit.permission_service.model.ForumAccess.READ);
+    assertThat(service.forumAccess(5, 1)).isEqualTo(com.moodit.permission_service.model.ForumAccess.NONE);
+  }
+
+  @Test
+  void isExpiredAnnouncement_delegue() {
+    when(membershipRepository.isExpiredAnnouncement(org.mockito.ArgumentMatchers.eq(40L), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(true);
+    assertThat(service.isExpiredAnnouncement(40)).isTrue();
+  }
+
+  @Test
   void isCourseInProgram_delegatesTrueAndFalse() {
     when(membershipRepository.isCourseInProgram(10, 3)).thenReturn(true);
     when(membershipRepository.isCourseInProgram(99, 3)).thenReturn(false);

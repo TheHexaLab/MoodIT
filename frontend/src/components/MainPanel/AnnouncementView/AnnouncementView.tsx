@@ -11,7 +11,7 @@ import { TrashCan } from '../../../assets/TrashCan';
 import { Pencil } from '../../../assets/Pencil';
 import { Plus } from '../../../assets/Plus';
 import { type ForumPost, type User } from '../../../types/domain';
-import { type AnnouncementDraft } from '../../../pages/Dashboard/dashboardApi';
+import { ANNOUNCEMENTS_PAGE_SIZE, type AnnouncementDraft } from '../../../pages/Dashboard/dashboardApi';
 import { type MaybePromise } from '../ChannelView/useChannelMessages';
 import { type ForumSocket } from '../ForumView/useForumThreads';
 import { Markdown } from '../ForumView/Markdown';
@@ -19,9 +19,11 @@ import { AnnouncementFormPopup } from './AnnouncementFormPopup';
 import { announcementHex } from './announcementColors';
 import { defaultAnnouncementLabels, type AnnouncementLabels } from './labels';
 
+/** Une page d'annonces avant l'annonce `before` (absent = les plus récentes). */
 export type FetchAnnouncementsHandler = (
   forumId: number,
-  includeExpired: boolean
+  includeExpired: boolean,
+  before?: number
 ) => MaybePromise<ForumPost[]>;
 export type CreateAnnouncementHandler = (
   forumId: number,
@@ -82,8 +84,11 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
   const [loadError, setLoadError] = useState(false);
   /** Incrémenté par « Réessayer » : relance le chargement. */
   const [reloadKey, setReloadKey] = useState(0);
-  /** Instant de référence de l'expiration (figé à l'ouverture du canal). */
-  const [now] = useState(() => Date.now());
+  /** Instant de référence de l'expiration, avancé à chaque expiration (cf. minuteur). */
+  const [now, setNow] = useState(() => Date.now());
+  /** La dernière page reçue était pleine : il peut rester des annonces plus anciennes. */
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   /** Annonce en cours de modification (popup pré-rempli), ou null. */
   const [editing, setEditing] = useState<ForumPost | null>(null);
@@ -105,7 +110,9 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
     let cancelled = false;
     Promise.resolve(onFetchAnnouncements(forumId, canPost))
       .then((list) => {
-        if (!cancelled) setAnnouncements(list);
+        if (cancelled) return;
+        setAnnouncements(list);
+        setHasMore(list.length >= ANNOUNCEMENTS_PAGE_SIZE);
       })
       .catch(() => {
         if (!cancelled) setLoadError(true);
@@ -123,6 +130,35 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
     setLoadError(false);
     setReloadKey((k) => k + 1);
   }
+
+  // Page suivante (plus ancienne), à partir de la dernière annonce affichée.
+  async function loadMore() {
+    const last = announcements[announcements.length - 1];
+    if (!onFetchAnnouncements || !last || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await onFetchAnnouncements(forumId, canPost, last.id);
+      setAnnouncements((prev) => [...prev, ...page.filter((a) => !prev.some((p) => p.id === a.id))]);
+      setHasMore(page.length >= ANNOUNCEMENTS_PAGE_SIZE);
+    } catch {
+      setError(t.loadError);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // Minuteur sur la PROCHAINE expiration : l'annonce disparaît (étudiant) ou se grise
+  // (personnel) à l'heure dite, sans recharger le canal.
+  useEffect(() => {
+    const upcoming = announcements
+      .map((a) => (a.expiresAt ? Date.parse(a.expiresAt) : NaN))
+      .filter((time) => time > now);
+    if (upcoming.length === 0) return;
+    // setTimeout plafonne à ~24,8 jours (2^31 - 1 ms) : au-delà, on revérifie à ce terme.
+    const delay = Math.min(Math.min(...upcoming) - now, 2 ** 31 - 1);
+    const timer = setTimeout(() => setNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [announcements, now]);
 
   // Temps réel : annonces publiées / modifiées / supprimées par d'autres membres du personnel.
   useEffect(() => {
@@ -249,7 +285,19 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
             <p>{canPost ? t.emptyStaff : t.emptyStudent}</p>
           </div>
         ) : (
-          <ul className={styles.list}>{visible.map(renderCard)}</ul>
+          <>
+            <ul className={styles.list}>{visible.map(renderCard)}</ul>
+            {hasMore && (
+              <button
+                type="button"
+                className={styles['load-more']}
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+              >
+                {loadingMore ? <Spinner tone="current" size={16} /> : t.loadMore}
+              </button>
+            )}
+          </>
         )}
       </div>
 

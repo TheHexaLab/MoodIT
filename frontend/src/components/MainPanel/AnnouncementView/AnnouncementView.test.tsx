@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import AnnouncementView from './AnnouncementView';
 import { defaultAnnouncementLabels as t } from './labels';
 import { announcementHex } from './announcementColors';
@@ -327,6 +327,58 @@ describe('AnnouncementView', () => {
     const card = (await screen.findByText('Renommée')).closest('li')!;
     expect(card.style.getPropertyValue('--ann-color')).toBe(announcementHex('pink'));
     expect(card.textContent).toContain(t.expires);
+  });
+
+  it('étudiant : une annonce disparaît à son heure d’expiration, sans recharger', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const inOneMinute = new Date(Date.now() + 60_000).toISOString();
+      render(
+        <AnnouncementView
+          course={COURSE}
+          channel={CHANNEL}
+          onFetchAnnouncements={vi.fn().mockResolvedValue([post(1, { title: 'Bientôt finie', expiresAt: inOneMinute })])}
+        />
+      );
+      expect(await screen.findByText('Bientôt finie')).toBeTruthy();
+
+      await act(async () => {
+        vi.advanceTimersByTime(61_000);
+      });
+
+      expect(screen.queryByText('Bientôt finie')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('« Charger plus » : page suivante demandée avec la dernière annonce comme curseur', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, i) => post(100 - i));
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([post(50, { title: 'Ancienne' })]);
+    render(<AnnouncementView course={COURSE} channel={CHANNEL} onFetchAnnouncements={fetch} />);
+
+    fireEvent.click(await screen.findByText(t.loadMore));
+
+    expect(await screen.findByText('Ancienne')).toBeTruthy();
+    expect(fetch).toHaveBeenLastCalledWith(11, false, 81);
+    expect(screen.getAllByRole('listitem')).toHaveLength(21);
+    // Page incomplète : plus rien à charger.
+    expect(screen.queryByText(t.loadMore)).toBeNull();
+  });
+
+  it('pas de « Charger plus » quand la première page est incomplète', async () => {
+    render(
+      <AnnouncementView
+        course={COURSE}
+        channel={CHANNEL}
+        onFetchAnnouncements={vi.fn().mockResolvedValue([post(1)])}
+      />
+    );
+    await screen.findByText('Annonce 1');
+    expect(screen.queryByText(t.loadMore)).toBeNull();
   });
 
   it('chargement en échec : bouton « Réessayer » qui relance le chargement', async () => {

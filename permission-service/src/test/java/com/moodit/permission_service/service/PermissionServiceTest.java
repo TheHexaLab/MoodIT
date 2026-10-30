@@ -5,6 +5,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.moodit.permission_service.model.ForumAccess;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
@@ -447,7 +448,7 @@ class PermissionServiceTest {
   @Test
   void sendMessage_subscribed_allowed() {
     loggedIn(user(5));
-    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
     assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", "{\"forumId\":9}"))
         .isTrue();
   }
@@ -900,7 +901,7 @@ class PermissionServiceTest {
   @Test
   void sendMessage_notSubscribed_denied() {
     loggedIn(user(5));
-    when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+    when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
     assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", "{\"forumId\":9}"))
         .isFalse();
   }
@@ -923,8 +924,7 @@ class PermissionServiceTest {
   private static final String ANNOUNCEMENT = "{\"forumId\":11,\"title\":\"Examen\",\"color\":\"red\"}";
 
   private void subscribedToAnnouncements(int userId) {
-    when(membershipService.canAccessForum(userId, 11)).thenReturn(true);
-    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipService.forumAccess(userId, 11)).thenReturn(ForumAccess.ANNOUNCEMENT);
   }
 
   @Test
@@ -978,8 +978,43 @@ class PermissionServiceTest {
   @Test
   void announcement_notSubscribed_teacherElsewhere_denied() {
     loggedIn(user(5, RoleNames.ADMIN));
-    when(membershipService.canAccessForum(5, 11)).thenReturn(false);
+    when(membershipService.forumAccess(5, 11)).thenReturn(ForumAccess.NONE);
     assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcements_includeExpired_onlyAbsentOrFalseForStudents() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    // Spring convertit aussi `1`, `yes`, `on`, `TRUE`... en vrai : seule l'absence ou `false` passe.
+    for (String value : new String[] {"true", "TRUE", "1", "yes", "on", "x", ""}) {
+      assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=" + value))
+          .as("includeExpired=%s", value)
+          .isFalse();
+    }
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=false")).isTrue();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, null)).isTrue();
+  }
+
+  @Test
+  void expiredAnnouncement_byId_studentDenied_staffAllowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    when(membershipService.isExpiredAnnouncement(40)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "GET", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40/replies", "GET", null)).isFalse();
+
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "GET", null)).isTrue();
+  }
+
+  @Test
+  void post_byId_notExpiredAnnouncement_memberAllowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    when(membershipService.isExpiredAnnouncement(40)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "GET", null)).isTrue();
   }
 
   @Test

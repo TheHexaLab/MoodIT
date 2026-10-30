@@ -126,7 +126,7 @@ class ForumServicePaginationTest {
 
   @Test
   void getRootPostsPage_pageRecente_ordreIdDescEtLimite() {
-    List<PostVoteUserDTO> page = forumService.getRootPostsPage(forumId, null, 3, false, currentUserEmail);
+    List<PostVoteUserDTO> page = forumService.getRootPostsPage(forumId, null, 3, false, false, currentUserEmail);
 
     // 3 sujets les plus récents, du plus récent au plus ancien : m4, m3, m2.
     assertThat(page).hasSize(3);
@@ -136,11 +136,11 @@ class ForumServicePaginationTest {
   @Test
   void getRootPostsPage_curseurBefore_chargeLesPlusAnciensSansRecouvrement() {
     List<PostVoteUserDTO> firstPage =
-        forumService.getRootPostsPage(forumId, null, 3, false, currentUserEmail);
+        forumService.getRootPostsPage(forumId, null, 3, false, false, currentUserEmail);
     Integer oldestOnFirstPage = firstPage.get(firstPage.size() - 1).getId(); // id de m2
 
     List<PostVoteUserDTO> secondPage =
-        forumService.getRootPostsPage(forumId, oldestOnFirstPage, 3, false, currentUserEmail);
+        forumService.getRootPostsPage(forumId, oldestOnFirstPage, 3, false, false, currentUserEmail);
 
     // Les sujets STRICTEMENT plus anciens que le curseur : m1, m0.
     assertThat(secondPage).extracting(PostVoteUserDTO::getContent).containsExactly("m1", "m0");
@@ -150,7 +150,7 @@ class ForumServicePaginationTest {
 
   @Test
   void getRootPostsPage_dto_agregatsCorrects() {
-    List<PostVoteUserDTO> all = forumService.getRootPostsPage(forumId, null, 10, false, currentUserEmail);
+    List<PostVoteUserDTO> all = forumService.getRootPostsPage(forumId, null, 10, false, false, currentUserEmail);
 
     PostVoteUserDTO m0 =
         all.stream().filter(d -> "m0".equals(d.getContent())).findFirst().orElseThrow();
@@ -169,7 +169,7 @@ class ForumServicePaginationTest {
 
   @Test
   void getRootPostsPage_neRenvoieQueLesRacines() {
-    List<PostVoteUserDTO> roots = forumService.getRootPostsPage(forumId, null, 50, false, currentUserEmail);
+    List<PostVoteUserDTO> roots = forumService.getRootPostsPage(forumId, null, 50, false, false, currentUserEmail);
     // 5 racines seulement (les 2 réponses sont exclues : parent IS NULL).
     assertThat(roots).hasSize(5);
     assertThat(roots).allSatisfy(d -> assertThat(d.getPostParentId()).isNull());

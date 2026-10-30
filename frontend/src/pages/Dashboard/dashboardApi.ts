@@ -15,6 +15,7 @@ import type {
   AnswerResponse,
   ChannelMessage,
   DragItemResponse,
+  Forum,
   ForumPost,
   ForumResponse,
   PostVoteUserDTO,
@@ -705,8 +706,18 @@ export async function createCourse(course: NewCourse): Promise<Course> {
   return {
     ...data,
     quizzes: [],
-    forums: [],
+    // Un cours neuf a déjà son canal « Annonces » (créé avec lui) : on le charge pour que le
+    // créateur le voie tout de suite. Best-effort : sans lui, il apparaît au prochain chargement.
+    forums: await fetchCourseForums(data.id).catch(() => []),
   };
+}
+
+/** Forums d'un cours (canaux, forums, annonces), au format du modèle. */
+async function fetchCourseForums(courseId: number): Promise<Forum[]> {
+  const res = await apiFetch(`/api/courses/${courseId}/forums`);
+  if (!res.ok) throw new Error('Échec chargement des forums du cours');
+  const forums: ForumResponse[] = await res.json();
+  return forums.map((f) => ({ id: f.id, title: f.title, position: f.position, fType: f.fTypeName }));
 }
 
 /**
@@ -1138,16 +1149,22 @@ export interface AnnouncementDraft {
   expiresAt: string | null;
 }
 
+/** Taille d'une page d'annonces : une page pleine laisse supposer qu'il en reste d'autres. */
+export const ANNOUNCEMENTS_PAGE_SIZE = 20;
+
 /**
- * Annonces d'un canal, de la plus récente à la plus ancienne. Sans `includeExpired`, le
- * backend écarte les expirées ; avec, il les renvoie (réservé au personnel du cours).
+ * Une PAGE d'annonces, de la plus récente à la plus ancienne, avant l'annonce `before` (id ;
+ * absent = les plus récentes). Sans `includeExpired`, le backend écarte les expirées ; avec, il
+ * les renvoie (réservé au personnel du cours).
  */
 export async function fetchAnnouncements(
   forumId: number,
-  includeExpired = false
+  includeExpired = false,
+  before?: number
 ): Promise<ForumPost[]> {
-  const params = new URLSearchParams({ limit: '100' });
+  const params = new URLSearchParams({ limit: String(ANNOUNCEMENTS_PAGE_SIZE) });
   if (includeExpired) params.set('includeExpired', 'true');
+  if (before != null) params.set('before', String(before));
   const res = await apiFetch(`/api/forums/${forumId}/posts?${params.toString()}`);
   if (!res.ok) throw new Error('Échec du chargement des annonces');
   const data: PostVoteUserDTO[] = await res.json();
@@ -1169,7 +1186,10 @@ export async function createAnnouncement(
   return toForumPost(saved);
 }
 
-/** Modifier une annonce : tous ses champs sont remplacés (`expiresAt` null = jamais). */
+/**
+ * Modifier une annonce. Le backend ne change que les champs fournis : « jamais » (`expiresAt`
+ * null) est donc envoyé explicitement par `clearExpiresAt`.
+ */
 export async function updateAnnouncement(
   forumId: number,
   postId: number,
@@ -1178,7 +1198,7 @@ export async function updateAnnouncement(
   const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(draft),
+    body: JSON.stringify({ ...draft, clearExpiresAt: draft.expiresAt === null }),
   });
   if (!res.ok) throw new Error("Échec de la modification de l'annonce");
 }

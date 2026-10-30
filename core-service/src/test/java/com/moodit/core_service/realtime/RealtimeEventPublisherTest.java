@@ -126,10 +126,10 @@ class RealtimeEventPublisherTest {
   }
 
   @Test
-  void announcementEdited_postEditedAvecCouleurEtExpiration() throws IOException {
+  void postEdited_annonce_avecCouleurEtExpiration() throws IOException {
     WebSocketSession session = joinedSession("forum", 11);
 
-    publisher.announcementEdited(11, 40, "", "Examen", "red", null);
+    publisher.postEdited(11, 40, "", "Examen", "red", null);
 
     JsonNode event = capturePayload(session);
     assertThat(event.get("type").asText()).isEqualTo("post:edited");

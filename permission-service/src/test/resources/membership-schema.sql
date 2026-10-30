@@ -26,6 +26,6 @@ CREATE TABLE f_type (id INT PRIMARY KEY, name VARCHAR(256));
 CREATE TABLE forum (id INT PRIMARY KEY, course_id INT, f_type_id INT);
 CREATE TABLE quiz (id INT PRIMARY KEY, course_id INT);
 CREATE TABLE enrollment (id INT PRIMARY KEY, course_id INT, user_id INT);
-CREATE TABLE post (id INT PRIMARY KEY, forum_id INT, user_id INT, post_parent_id INT);
+CREATE TABLE post (id INT PRIMARY KEY, forum_id INT, user_id INT, post_parent_id INT, expires_at TIMESTAMP);
 CREATE TABLE vote (id INT PRIMARY KEY, user_id INT, post_id INT, quiz_id INT);
 CREATE TABLE mcp_response (id INT PRIMARY KEY, user_id INT, course_id INT);

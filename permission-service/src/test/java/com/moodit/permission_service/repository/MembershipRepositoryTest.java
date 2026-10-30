@@ -148,6 +148,33 @@ class MembershipRepositoryTest {
   }
 
   @Test
+  void visibleForumType_typeSiAbonne_nullSinon() {
+    sql("INSERT INTO f_type(id,name) VALUES (3,'Announcement')");
+    sql("INSERT INTO program_course(program_id,course_id) VALUES (7,1)");
+    sql("INSERT INTO user_program(program_id,user_id) VALUES (7,5)");
+    sql("INSERT INTO forum(id,course_id,f_type_id) VALUES (9,1,NULL),(11,1,3)");
+    assertThat(repo.visibleForumType(5, 11)).isEqualTo("Announcement");
+    assertThat(repo.visibleForumType(5, 9)).isEmpty(); // visible, type absent
+    assertThat(repo.visibleForumType(6, 11)).isNull(); // pas abonné
+  }
+
+  @Test
+  void isExpiredAnnouncement_seulementUneAnnoncePassee() {
+    sql("INSERT INTO f_type(id,name) VALUES (2,'Thread'),(3,'Announcement')");
+    sql("INSERT INTO forum(id,course_id,f_type_id) VALUES (6,1,2),(11,1,3)");
+    sql("INSERT INTO post(id,forum_id,user_id,expires_at) VALUES"
+        + " (40,11,1,TIMESTAMP '2026-01-01 00:00:00'),"
+        + " (41,11,1,TIMESTAMP '2099-01-01 00:00:00'),"
+        + " (42,11,1,NULL),"
+        + " (43,6,1,TIMESTAMP '2026-01-01 00:00:00')");
+    java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 6, 1, 0, 0);
+    assertThat(repo.isExpiredAnnouncement(40, now)).isTrue();
+    assertThat(repo.isExpiredAnnouncement(41, now)).isFalse(); // pas encore
+    assertThat(repo.isExpiredAnnouncement(42, now)).isFalse(); // jamais
+    assertThat(repo.isExpiredAnnouncement(43, now)).isFalse(); // pas une annonce
+  }
+
+  @Test
   void hasRoleInAnalysisCourse_true() {
     seedTeacherOfCourse(5, 7, 1);
     sql("INSERT INTO mcp_response(id,user_id,course_id) VALUES (50,99,1)");

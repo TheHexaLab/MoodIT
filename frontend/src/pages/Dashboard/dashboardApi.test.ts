@@ -566,16 +566,22 @@ describe('fetchAnnouncements', () => {
   it('étudiant : sans includeExpired, et mappe couleur + expiration', async () => {
     mockedApiFetch.mockResolvedValueOnce(res([dto]));
     const out = await fetchAnnouncements(11);
-    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=100');
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20');
     expect(out[0]).toMatchObject({ id: 4, title: 'Examen', color: 'red', expiresAt: dto.expiresAt });
   });
 
   it('personnel : demande aussi les annonces expirées', async () => {
     mockedApiFetch.mockResolvedValueOnce(res([{ ...dto, color: null, expiresAt: null }]));
     const out = await fetchAnnouncements(11, true);
-    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=100&includeExpired=true');
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20&includeExpired=true');
     expect(out[0].color).toBeUndefined();
     expect(out[0].expiresAt).toBeUndefined();
+  });
+
+  it('page suivante : curseur `before` = id de la dernière annonce affichée', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([]));
+    await fetchAnnouncements(11, false, 4);
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20&before=4');
   });
 
   it('erreur HTTP → throw', async () => {
@@ -608,13 +614,22 @@ describe('createAnnouncement', () => {
 describe('updateAnnouncement', () => {
   const draft = { title: 'Labo', content: 'x', color: 'red', expiresAt: null };
 
-  it('PATCH /api/forums/{forumId}/posts/{postId} avec tous les champs', async () => {
+  it('PATCH : « jamais » envoyé explicitement par clearExpiresAt', async () => {
     mockedApiFetch.mockResolvedValueOnce(res({}));
     await updateAnnouncement(11, 40, draft);
     const [url, init] = callArgs();
     expect(url).toBe('/api/forums/11/posts/40');
     expect(init?.method).toBe('PATCH');
-    expect(JSON.parse(init?.body as string)).toEqual(draft);
+    expect(JSON.parse(init?.body as string)).toEqual({ ...draft, clearExpiresAt: true });
+  });
+
+  it('PATCH : une date d’expiration ne retire rien', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({}));
+    await updateAnnouncement(11, 40, { ...draft, expiresAt: '2026-12-01T04:59:59.000Z' });
+    expect(JSON.parse(callArgs()[1]?.body as string)).toMatchObject({
+      expiresAt: '2026-12-01T04:59:59.000Z',
+      clearExpiresAt: false,
+    });
   });
 
   it('refus → throw', async () => {
