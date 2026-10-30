@@ -7,7 +7,6 @@ import { CourseSectionEditor } from '../../components/CourseMenu/CourseSectionEd
 import { Spinner } from '../../components/Spinner/Spinner.tsx';
 import {
   type ChannelMessageAuthor,
-  type ChannelRef,
   type ChannelTypeDefinition,
   type CourseChannel,
   isSameChannel,
@@ -48,6 +47,7 @@ import { createAppSocket } from '../../services/appSocket.ts';
 import { type VoicePresenceParticipant } from '../../types/domain.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
 import type { SavedLocation } from '../../helpers/userSettings.ts';
+import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
 import { avatarInitials } from '../../helpers/text.ts';
@@ -118,12 +118,15 @@ export default function Dashboard() {
     settings,
     saveSettings,
   } = useCurrentUser();
-  // Aucun programme sélectionné au départ (-1) : une fois la liste chargée,
-  // l'utilisateur doit choisir un programme avant que ses cours ne soient chargés.
-  const [activeProgramId, setActiveProgramId] = useState<number>(-1);
+  // Vue courante (programme → cours → canal) portée par l'URL (#63) : le bouton « back »
+  // navigue entre les vues. Aucun programme au départ (/home, -1) : une fois la liste chargée,
+  // l'utilisateur doit en choisir un avant que ses cours ne soient chargés.
+  const [view, setView] = useViewLocation();
+  const activeProgramId = view.programId;
+  const selectedCourseId = view.courseId;
+  const selectedChannelRef = view.channel;
   // Dernier programme dont les cours ont été chargés avec succès (cf. restauration).
   const [coursesLoadedFor, setCoursesLoadedFor] = useState<number | null>(null);
-  const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
   // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
   // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
   const permsForProgram = (programId: number) =>
@@ -139,7 +142,6 @@ export default function Dashboard() {
   const [attemptOutcome, setAttemptOutcome] = useState<AttemptOutcome | null>(null);
   // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
   const openQuizIdRef = useRef<number | null>(null);
-  const [selectedChannelRef, setSelectedChannelRef] = useState<ChannelRef | undefined>(undefined);
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
   const [popup, setPopup] = useState<PopupState | null>(null);
   // Type de section en cours de création via les états vides du MainPanel
@@ -283,9 +285,7 @@ export default function Dashboard() {
         setDashboardPrograms((programs) => programs.filter((p) => p.id !== programId));
         if (activeProgramIdRef.current === programId) {
           const fallback = programsRef.current.find((p) => p.id !== programId);
-          setActiveProgramId(fallback?.id ?? -1);
-          setSelectedCourseId(undefined);
-          setSelectedChannelRef(undefined);
+          setView({ programId: fallback?.id ?? -1 }, { replace: true });
         }
       },
       // Mon rôle DANS ce programme a changé → on met à jour son roleName ; les menus
@@ -304,7 +304,7 @@ export default function Dashboard() {
       onQuizAttemptFailed: (quizId, attemptId, reason) =>
         setAttemptOutcome({ quizId, attemptId, ok: false, reason }),
     });
-  }, [ws, currentUser.id, applyGlobalRoles]);
+  }, [ws, currentUser.id, applyGlobalRoles, setView]);
 
   // Abonnement temps réel de la liste des ADMINISTRATEURS (popup rôles globaux) : un autre admin
   // modifie une assignation → le serveur diffuse la liste à jour. On mappe `roles` → `role_ids`
@@ -353,7 +353,13 @@ export default function Dashboard() {
     loading: coursesLoading,
     loadError: coursesError,
     reload: reloadCourses,
-  } = useCoursesLoader(activeProgramId, handleFetchCourses, coursesEnabled);
+  } = useCoursesLoader(
+    activeProgramId,
+    handleFetchCourses,
+    // Programme de l'URL inconnu (lien vers un programme dont on n'est pas membre) : aucun
+    // chargement, l'effet de repli renvoie à /home (#63).
+    coursesEnabled && dashboardPrograms.some((program) => program.id === activeProgramId)
+  );
 
   // Abonnement temps réel (scope programme) : applique les évènements cours /
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
@@ -409,8 +415,12 @@ export default function Dashboard() {
       // et on efface une éventuelle bannière « modifié » le concernant.
       onQuizDeleted: (courseId, quizId) => {
         refreshCourseQuizzes(courseId);
-        setSelectedChannelRef((prev) =>
-          prev?.type === 'quiz' && prev.id === quizId ? undefined : prev
+        setView(
+          (prev) =>
+            prev.channel?.type === 'quiz' && prev.channel.id === quizId
+              ? { ...prev, channel: undefined }
+              : prev,
+          { replace: true }
         );
         setStaleQuizId((prev) => (prev === quizId ? null : prev));
       },
@@ -667,9 +677,7 @@ export default function Dashboard() {
       await api.leaveProgram(programId);
       if (programId === activeProgramId) {
         const fallback = dashboardPrograms.find((program) => program.id !== programId);
-        setActiveProgramId(fallback?.id ?? -1);
-        setSelectedCourseId(undefined);
-        setSelectedChannelRef(undefined);
+        setView({ programId: fallback?.id ?? -1 }, { replace: true });
       }
       setDashboardPrograms((programs) => programs.filter((program) => program.id !== programId));
     } catch {
@@ -691,9 +699,7 @@ export default function Dashboard() {
       await api.deleteProgram(programId);
       if (programId === activeProgramId) {
         const fallback = dashboardPrograms.find((program) => program.id !== programId);
-        setActiveProgramId(fallback?.id ?? -1);
-        setSelectedCourseId(undefined);
-        setSelectedChannelRef(undefined);
+        setView({ programId: fallback?.id ?? -1 }, { replace: true });
       }
       setDashboardPrograms((programs) => programs.filter((program) => program.id !== programId));
     } catch {
@@ -713,8 +719,7 @@ export default function Dashboard() {
     try {
       await api.leaveCourse(courseId);
       if (courseId === effectiveSelectedCourseId) {
-        setSelectedCourseId(undefined);
-        setSelectedChannelRef(undefined);
+        setView({ programId: activeProgramId }, { replace: true });
       }
       setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
     } catch {
@@ -735,8 +740,7 @@ export default function Dashboard() {
     try {
       await api.deleteCourse(courseId);
       if (courseId === effectiveSelectedCourseId) {
-        setSelectedCourseId(undefined);
-        setSelectedChannelRef(undefined);
+        setView({ programId: activeProgramId }, { replace: true });
       }
       setDashboardPrograms((programs) => removeCourse(programs, activeProgramId, courseId));
     } catch {
@@ -830,68 +834,58 @@ export default function Dashboard() {
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // ── Persistance de la localisation (settings utilisateur) ──────────────────────
-  // But : replacer l'utilisateur là où il était (programme → cours → canal) à la
-  // session précédente. La restauration se fait en DEUX TEMPS car le chargement des
-  // cours d'un programme est asynchrone : on sélectionne d'abord le programme, puis
-  // le cours + le canal une fois ses cours chargés. Repli gracieux à chaque niveau
-  // (le programme/cours/canal peut avoir disparu depuis — désinscription, suppression).
-  const restoreStartedRef = useRef(false); // programme traité
-  const restoreDoneRef = useRef(false); // cours + canal traités (débloque la sauvegarde)
-  const restoreTargetRef = useRef<SavedLocation | null>(null);
+  // But : replacer l'utilisateur là où il était (programme → cours → canal) à la session
+  // précédente. L'URL fait autorité (#63) : un lien vers une vue l'ouvre telle quelle, et la
+  // localisation enregistrée ne sert qu'à l'arrivée sur /home sans vue. Repli gracieux à chaque
+  // niveau (le programme/cours/canal peut avoir disparu depuis — désinscription, suppression) :
+  // un programme inconnu renvoie à /home, un cours inconnu affiche le premier cours, un canal
+  // inconnu n'affiche aucun canal.
+  const initialViewRef = useRef(view);
+  const restoreDoneRef = useRef(false); // débloque la sauvegarde
 
-  // Étape 1 : sélectionner le programme sauvegardé, une fois la liste chargée.
+  // Arrivée sur /home sans vue : la localisation enregistrée REMPLACE l'entrée d'historique,
+  // une seule fois, quand le profil (donc les settings) et la liste des programmes sont prêts.
   useEffect(() => {
-    if (restoreStartedRef.current) return;
+    if (restoreDoneRef.current) return;
     if (profileLoading || currentUser.id < 0) return; // profil (donc settings) pas prêt
     if (programsLoading) return; // liste des programmes pas prête
-    restoreStartedRef.current = true;
-
-    const loc = settings.location;
-    const programExists =
-      loc?.programId != null && dashboardPrograms.some((p) => p.id === loc.programId);
-    if (programExists) {
-      restoreTargetRef.current = loc ?? null;
-      // Synchronisation légitime d'un état PERSISTÉ (settings BD) → état React, une seule
-      // fois après chargement asynchrone : pas dérivable au rendu.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActiveProgramId(loc!.programId!);
-      // Le cours + le canal sont restaurés par l'étape 2 (après chargement des cours).
-    } else {
-      restoreDoneRef.current = true; // rien à restaurer → la sauvegarde peut démarrer
-    }
-  }, [profileLoading, currentUser.id, programsLoading, dashboardPrograms, settings]);
-
-  // Étape 2 : sélectionner le cours + le canal une fois les cours du programme chargés.
-  useEffect(() => {
-    if (restoreDoneRef.current || !restoreStartedRef.current) return;
-    const target = restoreTargetRef.current;
-    if (!target || activeProgramId !== target.programId) return;
-    // Attendre que les cours de CE programme soient chargés (coursesLoadedFor). On ne se fie
-    // PAS au seul instantané `coursesLoading` (false pendant la fenêtre initiale, alors que la
-    // liste est encore vide), ni à sa transition true → false, qui n'est jamais rendue quand
-    // la réponse arrive avant le rendu de l'état « chargement ». En cas d'échec du
-    // chargement, on termine la restauration (liste vide → repli) pour débloquer la sauvegarde.
-    if (coursesLoading) return;
-    if (coursesLoadedFor !== activeProgramId && !coursesError) return;
-
-    const courseList = dashboardPrograms.find((p) => p.id === activeProgramId)?.courses ?? [];
-    if (target.courseId != null && courseList.some((c) => c.id === target.courseId)) {
-      // Restauration one-shot d'un état persisté (cf. étape 1).
-      setSelectedCourseId(target.courseId);
-      // Canal restauré tel quel : la dérivation `selectedChannel` retombe sur `null`
-      // si le canal n'existe plus (repli gracieux), sans casser l'affichage.
-      if (target.channel) setSelectedChannelRef(target.channel);
-    }
     restoreDoneRef.current = true;
-  }, [activeProgramId, coursesLoading, coursesLoadedFor, coursesError, dashboardPrograms]);
+    if (initialViewRef.current.programId >= 0) return; // l'URL désignait déjà une vue
+
+    const loc: SavedLocation | undefined = settings.location;
+    if (loc?.programId != null && dashboardPrograms.some((p) => p.id === loc.programId)) {
+      const saved = { programId: loc.programId, courseId: loc.courseId, channel: loc.channel };
+      // Un programme choisi entre-temps (clic pendant le chargement du profil) l'emporte.
+      setView((requested) => (requested.programId >= 0 ? requested : saved), { replace: true });
+    }
+  }, [profileLoading, currentUser.id, programsLoading, dashboardPrograms, settings, setView]);
+
+  // Programme de l'URL inconnu une fois la liste chargée (lien partagé vers un programme dont
+  // on n'est pas membre, programme supprimé depuis) : retour à /home, sans charger ses cours.
+  // Jugé sur la DERNIÈRE vue demandée (mise à jour fonctionnelle), pas sur l'URL rendue : une
+  // navigation est appliquée comme une transition, APRÈS la mise à jour de la liste. Quitter le
+  // programme actif rend donc d'abord la liste sans lui, avec l'URL encore sur lui ; la vue
+  // demandée, elle, est déjà le programme de repli.
+  useEffect(() => {
+    if (programsLoading || programsError || activeProgramId < 0) return;
+    setView(
+      (requested) =>
+        requested.programId < 0 || dashboardPrograms.some((p) => p.id === requested.programId)
+          ? requested
+          : { programId: -1 },
+      { replace: true }
+    );
+  }, [programsLoading, programsError, activeProgramId, dashboardPrograms, setView]);
 
   // Sauvegarde debouncée à chaque changement de position (une fois la restauration
   // terminée, pour ne pas écraser la localisation sauvegardée par l'état par défaut).
   // On enregistre le cours EFFECTIVEMENT affiché (repli inclus) plutôt que la sélection
-  // brute, pour restaurer exactement ce que l'utilisateur voyait.
+  // brute, pour restaurer exactement ce que l'utilisateur voyait — donc seulement une fois
+  // les cours du programme chargés (avant, le cours effectif est encore inconnu).
   useEffect(() => {
     if (!restoreDoneRef.current) return;
     if (activeProgramId < 0) return; // pas de position réelle à mémoriser
+    if (coursesLoadedFor !== activeProgramId) return;
     saveSettings({
       location: {
         programId: activeProgramId,
@@ -899,7 +893,7 @@ export default function Dashboard() {
         channel: selectedChannelRef,
       },
     });
-  }, [activeProgramId, effectiveSelectedCourseId, selectedChannelRef, saveSettings]);
+  }, [activeProgramId, coursesLoadedFor, effectiveSelectedCourseId, selectedChannelRef, saveSettings]);
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>
@@ -979,14 +973,11 @@ export default function Dashboard() {
             programs={dashboardPrograms}
             activeProgramId={activeProgramId}
             onSelectProgram={(nextProgramId) => {
-              setActiveProgramId(nextProgramId);
-              setSelectedChannelRef(undefined);
-
               const nextProgram = dashboardPrograms.find((program) => program.id === nextProgramId);
-
-              setSelectedCourseId(
-                getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined)
-              );
+              setView({
+                programId: nextProgramId,
+                courseId: getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined),
+              });
             }}
             onAddProgram={handleAddProgram}
             loading={programsLoading}
@@ -1010,12 +1001,15 @@ export default function Dashboard() {
             currentUser={currentUser}
             userLoading={profileLoading}
             selectedCourseId={effectiveSelectedCourseId}
-            onSelectCourse={(courseId) => {
-              setSelectedCourseId(courseId);
-              setSelectedChannelRef(undefined);
-            }}
+            onSelectCourse={(courseId) => setView({ programId: activeProgramId, courseId })}
             selectedChannel={selectedChannelRef}
-            onSelectChannel={setSelectedChannelRef}
+            onSelectChannel={(channel) =>
+              setView({
+                programId: activeProgramId,
+                courseId: effectiveSelectedCourseId,
+                channel: { type: channel.type, id: channel.id },
+              })
+            }
             onOpenChannel={handleOpenChannel}
             voicePresence={voicePresence}
             onSectionChange={handleSectionChange}

@@ -14,6 +14,10 @@ RUN npm run build
 
 # Run stage
 FROM nginx:alpine
+# L'image nginx:alpine n'est reconstruite qu'à son rythme : un correctif de sécurité d'Alpine peut
+# être publié des jours avant elle. On applique donc les mises à jour des paquets à la construction,
+# sinon Trivy bloque sur une CVE critique déjà corrigée en amont.
+RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Config nginx (statiques + reverse proxy vers le gateway) écrite inline.

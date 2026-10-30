@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 
 /**
  * Tests de la page de vérification par code (e-mail à l'inscription, ou 2FA à la connexion).
@@ -25,7 +25,13 @@ const EMAIL = 'k@usherbrooke.ca';
 
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="path">{location.pathname}</span>;
+  const navigationType = useNavigationType();
+  return (
+    <>
+      <span data-testid="path">{location.pathname}</span>
+      <span data-testid="navigation">{navigationType}</span>
+    </>
+  );
 }
 
 function renderVerify(state: unknown = { email: EMAIL, mode: 'email' }) {
@@ -99,7 +105,7 @@ describe('VerifyCode', () => {
     expect(screen.queryByText('Déjà un compte ?', { exact: false })).toBeNull();
   });
 
-  it('mode email : le 6e chiffre déclenche verifyEmail puis navigue vers /', async () => {
+  it('mode email : le 6e chiffre déclenche verifyEmail puis remplace l’écran par /home', async () => {
     verifyEmail.mockResolvedValueOnce({});
     renderVerify();
     typeCode('12345');
@@ -108,7 +114,9 @@ describe('VerifyCode', () => {
     expect(verifyEmail).toHaveBeenCalledTimes(1);
     expect(verifyEmail).toHaveBeenCalledWith(EMAIL, '123456');
     expect(verify2FA).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/'));
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/home'));
+    // #63 : l'écran de code est REMPLACÉ, le bouton « back » n'y ramène pas une fois connecté.
+    expect(screen.getByTestId('navigation').textContent).toBe('REPLACE');
   });
 
   it('mode 2fa : le collage d’un code complet déclenche verify2FA', async () => {
@@ -117,7 +125,7 @@ describe('VerifyCode', () => {
     pasteCode('654 321');
     expect(verify2FA).toHaveBeenCalledWith(EMAIL, '654321');
     expect(verifyEmail).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/'));
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/home'));
   });
 
   it('soumission avec un code incomplet : erreur, aucun appel', () => {
@@ -137,7 +145,7 @@ describe('VerifyCode', () => {
     expect(submitButton().disabled).toBe(true);
     expect(boxes().every((b) => b.disabled)).toBe(true);
     await act(async () => resolve({}));
-    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/'));
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/home'));
   });
 
   it('code refusé : message serveur affiché, cases en erreur, on reste sur la page', async () => {
@@ -166,7 +174,7 @@ describe('VerifyCode', () => {
     fireEvent.click(submitButton());
     expect(verifyEmail).toHaveBeenCalledTimes(2);
     expect(verifyEmail).toHaveBeenLastCalledWith(EMAIL, '123456');
-    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/'));
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/home'));
   });
 
   it('renvoi du code : appelle resendCode(email, mode), confirme et lance un cooldown de 60 s', async () => {
