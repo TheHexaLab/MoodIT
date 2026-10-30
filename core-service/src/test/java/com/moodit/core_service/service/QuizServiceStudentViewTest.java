@@ -209,6 +209,33 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Jamais envoyée dans l'ordre attendu : la question ne s'ouvre pas déjà résolue")
+        void jamaisDansLOrdreAttendu() {
+            // Deux éléments : sans garde, l'ordre attendu sortirait une fois sur deux.
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), orderingQuestion(30, 2))));
+            for (int draw = 0; draw < 100; draw++) {
+                List<Integer> ids = service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
+                        .map(DragItemDTO::getId).toList();
+                assertThat(ids).containsExactly(pub(101), pub(100));
+            }
+        }
+
+        @Test
+        @DisplayName("Association : le mélange n'évite aucun ordre (la solution ne dépend pas de l'ordre)")
+        void association_melangeLibre() {
+            Question matching = question(31, MATCHING, 2, 0);
+            drag(matching, 200, "a", null, "G1");
+            drag(matching, 201, "b", null, "G2");
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), matching)));
+            Set<List<Integer>> orders = new HashSet<>();
+            for (int draw = 0; draw < 100; draw++) {
+                orders.add(service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
+                        .map(DragItemDTO::getId).toList());
+            }
+            assertThat(orders).containsExactlyInAnyOrder(List.of(pub(200), pub(201)), List.of(pub(201), pub(200)));
+        }
+
+        @Test
         @DisplayName("Ids publics stables d'un envoi à l'autre (réponse en cours conservée au rechargement)")
         void idsPublics_stables() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), orderingQuestion(30, 4))));

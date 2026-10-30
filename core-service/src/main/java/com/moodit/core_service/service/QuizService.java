@@ -885,11 +885,16 @@ public class QuizService {
                 && new HashSet<>(submitted).equals(expected);
     }
 
+    /** Éléments d'une Remise en ordre dans l'ordre attendu (correctOrder absent = 0, tri stable). */
+    private static List<DragItem> inExpectedOrder(List<DragItem> items) {
+        return items.stream()
+                .sorted(Comparator.comparing(d -> d.getCorrectOrder() == null ? 0 : d.getCorrectOrder()))
+                .toList();
+    }
+
     private QuestionResultDTO gradeOrdering(Question question, SubmittedAnswerDTO answer) {
         List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
-        List<Integer> correctOrder = items.stream()
-                .sorted(Comparator.comparing(d -> d.getCorrectOrder() == null ? 0 : d.getCorrectOrder()))
-                .map(DragItem::getId).toList();
+        List<Integer> correctOrder = inExpectedOrder(items).stream().map(DragItem::getId).toList();
         List<Integer> submittedOrder = answer != null && answer.getOrderedItemIds() != null
                 ? answer.getOrderedItemIds() : List.of();
 
@@ -1249,13 +1254,20 @@ public class QuizService {
     /**
      * Éléments déplaçables d'une question. ÉDITEUR : ids réels, ordre de la base. PASSATION :
      * nouvel ordre aléatoire à chaque envoi et ids PUBLICS (masqués) — ni l'ordre reçu ni le tri
-     * des ids ne révèlent {@code correctOrder} ou les groupes (#28).
+     * des ids ne révèlent {@code correctOrder} ou les groupes (#28). Une Remise en ordre n'est
+     * jamais envoyée dans l'ordre attendu : le client, qui ne le connaît pas, garde l'ordre reçu.
      */
     private List<DragItemDTO> toDragItemDTOs(Question question, boolean includeCorrection) {
         if (question.getDragItems() == null) return List.of();
-        List<DragItem> items = includeCorrection
-                ? question.getDragItems()
-                : itemObfuscator.shuffled(question.getDragItems());
+        List<DragItem> items;
+        if (includeCorrection) {
+            items = question.getDragItems();
+        } else if ("ordering".equals(slugFor(question))) {
+            items = itemObfuscator.shuffledExcept(
+                    question.getDragItems(), inExpectedOrder(question.getDragItems()), DragItem::getId);
+        } else {
+            items = itemObfuscator.shuffled(question.getDragItems());
+        }
         return items.stream().map(d -> toDragItemDTO(d, includeCorrection)).toList();
     }
 

@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -86,5 +87,40 @@ class QuizItemObfuscatorTest {
         }
         assertThat(items).containsExactly(1, 2, 3, 4, 5, 6);
         assertThat(orders).hasSizeGreaterThan(30);
+    }
+
+    @Test
+    @DisplayName("shuffledExcept : jamais l'ordre évité, même avec deux éléments (une chance sur deux sinon)")
+    void shuffledExcept_eviteLOrdre() {
+        List<Integer> items = List.of(1, 2);
+        for (int i = 0; i < 100; i++) {
+            assertThat(obfuscator.shuffledExcept(items, items, Function.identity())).containsExactly(2, 1);
+        }
+        List<Integer> three = List.of(1, 2, 3);
+        Set<List<Integer>> orders = new HashSet<>();
+        for (int i = 0; i < 200; i++) orders.add(obfuscator.shuffledExcept(three, three, Function.identity()));
+        assertThat(orders).hasSize(5).doesNotContain(three); // 3! - 1 ordres possibles, tous atteints
+    }
+
+    @Test
+    @DisplayName("shuffledExcept : comparaison par la clé fournie, pas par equals des éléments")
+    void shuffledExcept_parCle() {
+        // Deux éléments égaux au sens d'equals mais de clés distinctes : l'ordre évité reste évité.
+        record Item(int id) {
+            @Override public boolean equals(Object o) { return o instanceof Item; }
+            @Override public int hashCode() { return 0; }
+        }
+        List<Item> items = List.of(new Item(1), new Item(2));
+        for (int i = 0; i < 50; i++) {
+            assertThat(obfuscator.shuffledExcept(items, items, Item::id)).extracting(Item::id).containsExactly(2, 1);
+        }
+    }
+
+    @Test
+    @DisplayName("shuffledExcept : moins de deux éléments distincts → rendu tel quel, sans boucle infinie")
+    void shuffledExcept_sansAutreOrdrePossible() {
+        assertThat(obfuscator.shuffledExcept(List.<Integer>of(), List.of(), Function.identity())).isEmpty();
+        assertThat(obfuscator.shuffledExcept(List.of(7), List.of(7), Function.identity())).containsExactly(7);
+        assertThat(obfuscator.shuffledExcept(List.of(7, 7), List.of(7, 7), Function.identity())).containsExactly(7, 7);
     }
 }

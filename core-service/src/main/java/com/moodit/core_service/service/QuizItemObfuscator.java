@@ -11,8 +11,10 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Function;
 
 /**
  * Vue PASSATION des éléments déplaçables (Remise en ordre, Association) : identifiants publics
@@ -99,6 +101,22 @@ public class QuizItemObfuscator {
         List<T> copy = new ArrayList<>(items);
         synchronized (random) {
             Collections.shuffle(copy, random);
+        }
+        return copy;
+    }
+
+    /**
+     * Comme {@link #shuffled}, mais jamais dans l'ordre {@code avoided} : une Remise en ordre ne
+     * s'ouvre pas déjà résolue. Les ordres sont comparés par {@code key} (l'id d'un élément : les
+     * entités se référencent entre elles, leurs equals/hashCode ne sont pas utilisables). Moins de
+     * deux clés distinctes : aucun autre ordre possible, la liste est rendue mélangée sans contrainte.
+     */
+    public <T, K> List<T> shuffledExcept(List<T> items, List<T> avoided, Function<T, K> key) {
+        List<K> avoidedKeys = avoided.stream().map(key).toList();
+        List<T> copy = shuffled(items);
+        if (new HashSet<>(avoidedKeys).size() < 2) return copy;
+        while (copy.stream().map(key).toList().equals(avoidedKeys)) {
+            copy = shuffled(items);
         }
         return copy;
     }
