@@ -390,3 +390,19 @@ export class CodeVerificationUnavailableError extends Error {
     this.name = 'CodeVerificationUnavailableError';
   }
 }
+
+/** Message affiché quand le service d'exécution refuse faute de place (HTTP 429, #24). */
+export const EXECUTION_BUSY_MESSAGE =
+  "Trop d'exécutions en cours. Attends quelques secondes, puis réessaie.";
+
+/**
+ * Exécution refusée par le service d'exécution faute de place (HTTP 429) : sandbox saturé ou
+ * trop d'exécutions en cours pour cet utilisateur. Rien n'a été exécuté ; réessayer plus tard
+ * suffit. Distincte d'un échec générique pour afficher un message adapté.
+ */
+export class ExecutionBusyError extends Error {
+  constructor() {
+    super(EXECUTION_BUSY_MESSAGE);
+    this.name = 'ExecutionBusyError';
+  }
+}

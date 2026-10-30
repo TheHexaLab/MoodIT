@@ -17,6 +17,7 @@ vi.mock('../../helpers/api.ts', () => ({
 }));
 
 import { apiFetch } from '../../helpers/api.ts';
+import { ExecutionBusyError } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import {
   fetchPrograms,
   fetchCourses,
@@ -407,6 +408,13 @@ describe('evaluateCode', () => {
       evaluateCode({ language: 'Python', code: '', testCases: [] })
     ).rejects.toThrow("Échec de l'évaluation du code");
   });
+
+  it('429 (trop d’exécutions) → ExecutionBusyError', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(429));
+    await expect(
+      evaluateCode({ language: 'Python', code: '', testCases: [] })
+    ).rejects.toBeInstanceOf(ExecutionBusyError);
+  });
 });
 
 describe('runCode', () => {
@@ -431,6 +439,11 @@ describe('runCode', () => {
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(runCode({ code: '' })).rejects.toThrow("Échec de l'exécution du code");
+  });
+
+  it('429 (trop d’exécutions) → ExecutionBusyError', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(429));
+    await expect(runCode({ code: '' })).rejects.toBeInstanceOf(ExecutionBusyError);
   });
 });
 

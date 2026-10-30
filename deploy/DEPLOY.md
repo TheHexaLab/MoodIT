@@ -24,8 +24,9 @@ Dans la console Hetzner → **Add Server** :
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images Docker du projet se buildent sur place, donc l'archi est gérée
-> automatiquement. Rien de spécial à faire.
+> ARM (CAX) : les images Docker du projet se buildent sur place, **sauf Piston** : son image
+> amont (`ghcr.io/engineer-man/piston`, épinglée par digest dans `piston/Dockerfile`) n'existe
+> qu'en linux/amd64. Pour Piston, prendre un serveur **x86** (CX32), comme la prod actuelle.
 
 ## 2. Pointer le domaine
 
@@ -200,8 +201,24 @@ done
 
 ## Sécurité
 
-- Seuls les ports **80/443** sont exposés (Caddy). Tous les services applicatifs, la base
-  et Piston restent sur le réseau Docker `internal`, injoignables depuis Internet.
+- Seuls les ports **80/443** sont exposés (Caddy). Tous les services applicatifs et la base
+  restent sur le réseau Docker `internal`, injoignables depuis Internet.
 - Le TLS est géré et renouvelé automatiquement par Caddy.
-- Piston tourne en `privileged` (exigé par l'isolation isolate) **mais** sans accès réseau
-  à l'exécution et jamais exposé au gateway.
+- Piston est seul sur le réseau `sandbox`, partagé uniquement avec `execution-service` (et
+  `piston-init`) : ni le gateway, ni core-service, ni Postgres ne peuvent le joindre. Le code
+  exécuté n'a aucun accès réseau (espace de noms réseau vide d'isolate).
+- Piston ne tourne **plus** en `privileged` : capacités limitées à ce qu'isolate utilise
+  (`SYS_ADMIN`, `NET_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`,
+  `FOWNER`, `KILL`), seccomp par défaut de Docker actif, cgroup privé. AppArmor est levé pour ce
+  seul conteneur (le profil `docker-default` interdit de remonter `/sys/fs/cgroup` en écriture).
+  Si Piston ne démarre pas (« remontage de /sys/fs/cgroup impossible »), vérifier que l'hôte est
+  en cgroup v2 et que `cap_add` / `cgroup: private` sont bien appliqués.
+- Limites par exécution : 3 s d'exécution, 10 s de compilation, 256 Mo de mémoire à l'exécution
+  et 512 Mo à la compilation, 1 Mio de sortie par flux. Côté execution-service : 2 exécutions
+  simultanées au plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par
+  utilisateur (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
+  Le conteneur Piston est plafonné à 1,5 Go (`mem_limit`) : 2 compilations de 512 Mo, plus une
+  marge pour l'API Piston. Relever `EXEC_MAX_CONCURRENT` impose de relever ce plafond d'autant.
+- Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
+  `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
+  puis vérifier le job CI `integration` (vrai Piston) avant de déployer.

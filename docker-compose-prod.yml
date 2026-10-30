@@ -151,18 +151,37 @@ services:
 
   #Piston (sandbox d'exécution du code étudiant NON FIABLE) --------------
   # Moteur open-source multi-langages : isolation (isolate/nsjail), pas de réseau à l'exécution,
-  # limites CPU/mémoire/temps. `privileged` requis par isolate (cgroups/namespaces). Les paquets
-  # de langages sont installés dans le volume piston_data (persistés entre redémarrages). Exposé
-  # UNIQUEMENT sur le réseau interne — jamais au gateway.
+  # limites CPU/mémoire/temps. Les paquets de langages sont installés dans le volume piston_data
+  # (persistés entre redémarrages). Seul sur le réseau `sandbox`, partagé avec execution-service :
+  # jamais joignable depuis le gateway, core-service ni aucun autre conteneur.
   piston:
-    # Image Piston patchée (limite body-parser relevée pour les bundles JS HTML/JSX/TSX). cf. piston/Dockerfile
+    # Image Piston patchée et épinglée par digest (limite body-parser relevée). cf. piston/Dockerfile
     build: ./piston
     container_name: moodit_piston
-    privileged: true
+    # Pas de `privileged` (#24) : isolate n'a besoin que de créer des espaces de noms (SYS_ADMIN,
+    # NET_ADMIN pour la boucle locale de la boîte, SYS_CHROOT) et de gérer ses utilisateurs de boîte
+    # (SETUID/SETGID/CHOWN/DAC_OVERRIDE/FOWNER/KILL). Toutes les autres capacités sont retirées et le
+    # profil seccomp par défaut de Docker reste actif. AppArmor est levé : le profil docker-default
+    # interdit le remontage en écriture de /sys/fs/cgroup (cf. piston/Dockerfile), ce que
+    # `privileged` faisait déjà. cgroup privé : la boîte ne voit que l'arbre cgroup du conteneur.
+    cap_drop: [ALL]
+    cap_add: [SYS_ADMIN, NET_ADMIN, SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt:
+      - apparmor=unconfined
+    cgroup: private
+    environment:
+      # Sortie max par flux (caractères). Le défaut de Piston (1 024) tronque tout extrait SQL de
+      # plus de 1 Ko ; il faut au moins app.sql.max-dump-chars (512 Ki) plus la sortie de l'étudiant.
+      PISTON_OUTPUT_MAX_SIZE: "1048576"
+      # Plafonds mémoire (octets) appliqués aussi quand l'appelant n'en envoie pas (piston-init).
+      # execution-service envoie les siens (PISTON_RUN/COMPILE_MEMORY_LIMIT_BYTES), qui ne doivent
+      # pas les dépasser : Piston refuserait l'exécution.
+      PISTON_RUN_MEMORY_LIMIT: "256000000"
+      PISTON_COMPILE_MEMORY_LIMIT: "512000000"
     volumes:
       - piston_data:/piston/packages
     networks:
-      - internal
+      - sandbox
 
   #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
   # Idempotent (paquets persistés dans piston_data). Les PAQUETS installés (à gauche) diffèrent
@@ -211,7 +230,7 @@ services:
         echo "piston pret (12 runtimes ; + JSON via node)";
     restart: "no"
     networks:
-      - internal
+      - sandbox
 
   #Execution service (exécute le code étudiant via le sandbox Piston) ----
   execution-service:
@@ -220,9 +239,10 @@ services:
     env_file:
       - .env.docker
     environment:
-      PISTON_URL: http://piston:2000 # sandbox sur le réseau interne
+      PISTON_URL: http://piston:2000 # sandbox, sur le réseau dédié
     networks:
-      - internal
+      - internal # appelé par le gateway et core-service
+      - sandbox # seul service applicatif qui joint Piston
     depends_on:
       # Ne démarre qu'une fois les langages installés dans Piston.
       piston-init:
@@ -235,4 +255,9 @@ volumes:
 
 networks:
   internal:
+    driver: bridge
+  # Réseau du bac à sable (#24) : Piston n'est joignable que par execution-service (et piston-init).
+  # Ni le gateway, ni core-service, ni Postgres n'y sont. Pas `internal: true` : Piston télécharge
+  # ses paquets de langages (piston-init) ; le code exécuté, lui, n'a aucun réseau (isolate).
+  sandbox:
     driver: bridge

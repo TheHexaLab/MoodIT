@@ -8,6 +8,8 @@ import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonException;
 import com.moodit.execution_service.security.InternalTokenValidator;
+import com.moodit.execution_service.service.ExecutionBusyException;
+import com.moodit.execution_service.service.ExecutionLimiter;
 import com.moodit.execution_service.service.ExecutionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,24 +18,31 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Contrôleurs REST (public /exec et interne /internal/exec) en MockMvc AUTONOME (sans contexte
  * Spring ni sécurité) : sérialisation, validation des payloads, jeton interne, et traduction des
- * exceptions par {@link GlobalExceptionHandler} (422 langage non supporté, 502 sandbox en panne).
+ * exceptions par {@link GlobalExceptionHandler} (422 langage non supporté, 502 sandbox en panne,
+ * 429 trop d'exécutions), et la limite par utilisateur, appliquée au public seulement.
  */
 class ExecutionControllersTest {
 
     private final ExecutionService service = mock(ExecutionService.class);
+    /** Une seule requête en cours par utilisateur, pour rendre la limite observable. */
+    private final ExecutionLimiter limiter = new ExecutionLimiter(4, 0, 1);
     private MockMvc mvc;
 
     private static final String EVALUATE_BODY = """
@@ -44,8 +53,8 @@ class ExecutionControllersTest {
     @BeforeEach
     void setUp() {
         InternalExecutionController internal =
-                new InternalExecutionController(service, new InternalTokenValidator("secret-interne"));
-        mvc = MockMvcBuilders.standaloneSetup(new ExecutionController(service), internal)
+                new InternalExecutionController(service, new InternalTokenValidator("secret-interne"), limiter);
+        mvc = MockMvcBuilders.standaloneSetup(new ExecutionController(service, limiter), internal)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -134,5 +143,72 @@ class ExecutionControllersTest {
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isForbidden());
         verify(service, never()).evaluate(any());
+    }
+
+    private static final String SLOW_RUN = "{\"language\":\"Python\",\"code\":\"lent\"}";
+    private static final String FAST_RUN = "{\"language\":\"Python\",\"code\":\"vite\"}";
+
+    @Test
+    void sandbox_sature_donne_429_avec_message_francais_et_retry_after() throws Exception {
+        when(service.run(any())).thenThrow(new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY));
+
+        mvc.perform(post("/exec/run").contentType(MediaType.APPLICATION_JSON).content(FAST_RUN))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "5"))
+                .andExpect(jsonPath("$.detail").value(ExecutionBusyException.SANDBOX_BUSY));
+    }
+
+    @Test
+    void limite_par_utilisateur_refuse_la_requete_en_trop_du_meme_utilisateur_seulement() throws Exception {
+        // Une exécution d'alice reste en cours (bloquée sur un verrou) pendant qu'on envoie les autres.
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(service.run(new RunRequest("Python", null, "lent"))).thenAnswer(inv -> {
+            started.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return new RunResult("fini", "", 0, null, null, false);
+        });
+        when(service.run(new RunRequest("Python", null, "vite")))
+                .thenReturn(new RunResult("ok", "", 0, null, null, false));
+        when(service.evaluate(any())).thenReturn(List.of(new TestResult("t1", 2, true, null)));
+        Thread slow = new Thread(() -> {
+            try {
+                mvc.perform(post("/exec/run").header("X-User-Email", "alice@usherbrooke.ca")
+                        .contentType(MediaType.APPLICATION_JSON).content(SLOW_RUN));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        slow.start();
+        assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+
+        try {
+            // alice a déjà sa requête en cours : la suivante (run comme evaluate) est refusée tout de suite.
+            mvc.perform(post("/exec/run").header("X-User-Email", "alice@usherbrooke.ca")
+                            .contentType(MediaType.APPLICATION_JSON).content(FAST_RUN))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(jsonPath("$.detail").value(ExecutionBusyException.USER_BUSY));
+            mvc.perform(post("/exec/evaluate").header("X-User-Email", "alice@usherbrooke.ca")
+                            .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                    .andExpect(status().isTooManyRequests());
+            verify(service, never()).evaluate(any());
+            // bob n'est pas concerné par la limite d'alice.
+            mvc.perform(post("/exec/run").header("X-User-Email", "bob@usherbrooke.ca")
+                            .contentType(MediaType.APPLICATION_JSON).content(FAST_RUN))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.stdout").value("ok"));
+            // L'appel interne (correction, sans utilisateur) n'est pas soumis à la limite par utilisateur.
+            mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "secret-interne")
+                            .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                    .andExpect(status().isOk());
+        } finally {
+            release.countDown();
+            slow.join(5000);
+        }
+
+        // Requête d'alice terminée : sa place est rendue.
+        mvc.perform(post("/exec/run").header("X-User-Email", "alice@usherbrooke.ca")
+                        .contentType(MediaType.APPLICATION_JSON).content(FAST_RUN))
+                .andExpect(status().isOk());
     }
 }
