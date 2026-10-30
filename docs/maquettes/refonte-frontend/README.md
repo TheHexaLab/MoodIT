@@ -1,12 +1,12 @@
 # Maquettes : refonte du frontend
 
-Exports du [fichier Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil) pour l'épopée #202. Le contenu est fictif (établissement, étudiant, cours, montants, numéro de téléphone).
+Les maquettes de l'épopée #202 vivent dans [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil). Le contenu est fictif (établissement, étudiant, cours, montants, numéro de téléphone).
 
 | Écran | Issue | Clair | Sombre |
 |---|---|---|---|
-| Accueil | #204 | [PNG](accueil-clair.png) | [PNG](accueil-sombre.png) |
-| Menu réduit | #203 | [PNG](menu-reduit-clair.png) | [PNG](menu-reduit-sombre.png) |
-| Horaire | #206 | [PNG](horaire-clair.png) | [PNG](horaire-sombre.png) |
-| Modifier l'agenda | #214 | [PNG](agenda-clair.png) | [PNG](agenda-sombre.png) |
-| Factures | #207 | [PNG](factures-clair.png) | [PNG](factures-sombre.png) |
-| Centre d'aide | #213 | [PNG](centre-aide-clair.png) | [PNG](centre-aide-sombre.png) |
+| Accueil | #204 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=2-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=4-2) |
+| Menu réduit | #203 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=16-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=17-2) |
+| Horaire | #206 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=5-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=6-2) |
+| Modifier l'agenda | #214 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=26-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=27-2) |
+| Factures | #207 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=7-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=8-2) |
+| Centre d'aide | #213 | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=21-2) | [Figma](https://www.figma.com/design/mZScdl7dUNCGpZgxLA8W2o/Acceuil?node-id=22-2) |
