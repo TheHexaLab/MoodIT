@@ -28,6 +28,11 @@ import java.util.Random;
  *
  * <p>Les ids masqués sont STABLES (même valeur à chaque chargement) : une réponse en cours reste
  * valide si l'étudiant recharge le quiz. L'ordre, lui, est retiré au hasard à chaque envoi.
+ *
+ * <p>Hypothèse : {@code Drag_Item.id} (SERIAL, jusqu'à 2^31 - 1) reste sous 2^30, soit plus d'un
+ * milliard d'éléments créés. Au-delà, {@link #mask} renvoie {@code null} et l'élément n'est plus
+ * jouable en passation. Le domaine est pair pour garder un réseau de Feistel équilibré ; s'il
+ * fallait le dépasser, passer à 32 bits, ce qui change le type des ids publics.
  */
 @Component
 public class QuizItemObfuscator {
