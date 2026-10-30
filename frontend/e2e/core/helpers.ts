@@ -140,7 +140,7 @@ export async function loginThroughUi(page: Page, email: string) {
   await page.getByRole('button', { name: 'Se connecter →' }).click();
   await expect(page.getByRole('heading', { name: 'Double authentification' })).toBeVisible();
   await enterCode(page);
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
 }
 
 /** Ouvre le programme de test puis un élément de la barre du cours (quiz, canal ou forum). */

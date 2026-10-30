@@ -46,7 +46,7 @@ test('connexion complète (identifiants puis 2FA) jusqu’à la disposition atte
   await press(page.getByRole('button', { name: 'Se connecter →' }), hasTouch);
   await expect(page.getByRole('heading', { name: 'Double authentification' })).toBeVisible();
   await enterCode(page);
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
   await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
   await expectLayout(page);
   await expectNoHorizontalOverflow(page);

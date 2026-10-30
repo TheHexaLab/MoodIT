@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import type { DemoProgram } from './dashboardApi';
 import type { Course, Role, User } from '../../types/domain';
 import type { UserSettings } from '../../helpers/userSettings';
@@ -42,6 +42,8 @@ const ws = vi.hoisted(() => ({
   captured: {} as CapturedHandlers,
   open: vi.fn(),
   close: vi.fn(),
+  /** Abonnements à la room de l'utilisateur (programmes, rôles, corrections de quiz). */
+  programsSubscriptions: 0,
 }));
 vi.mock('../../services/appSocket.ts', () => ({
   createAppSocket: () => {
@@ -69,6 +71,7 @@ vi.mock('../../services/appSocket.ts', () => ({
       },
       programs: {
         subscribe: (userId: number, handlers: CapturedHandlers['programs']) => {
+          ws.programsSubscriptions += 1;
           ws.captured.programsUserId = userId;
           ws.captured.programs = handlers;
           return () => {};
@@ -182,9 +185,42 @@ interface Setup {
   isGuardian?: boolean;
   settings?: UserSettings;
   profileLoading?: boolean;
+  /** URL de départ (la vue y est lue, #63). */
+  path?: string;
 }
 
-function renderDashboard({ isAdmin = false, isGuardian = false, settings = {}, profileLoading = false }: Setup = {}) {
+/** Expose l'URL et le type de la dernière navigation (PUSH, REPLACE, POP), et un « back ». */
+function RouterProbe() {
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  const navigate = useNavigate();
+  return (
+    <span data-testid="router" data-path={pathname} data-navigation={navigationType} hidden>
+      <button type="button" data-testid="router-back" onClick={() => navigate(-1)} />
+    </span>
+  );
+}
+
+/** Bouton « back » du navigateur. */
+function goBack() {
+  fireEvent.click(screen.getByTestId('router-back'));
+}
+
+function currentPath() {
+  return screen.getByTestId('router').getAttribute('data-path');
+}
+
+function lastNavigation() {
+  return screen.getByTestId('router').getAttribute('data-navigation');
+}
+
+function renderDashboard({
+  isAdmin = false,
+  isGuardian = false,
+  settings = {},
+  profileLoading = false,
+  path = '/home',
+}: Setup = {}) {
   const saveSettings = vi.fn();
   const applyGlobalRoles = vi.fn();
   const userValue: CurrentUserApi = {
@@ -202,8 +238,9 @@ function renderDashboard({ isAdmin = false, isGuardian = false, settings = {}, p
   const utils = render(
     <ThemeContext.Provider value={themeValue}>
       <CurrentUserContext.Provider value={userValue}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
           <Dashboard />
+          <RouterProbe />
         </MemoryRouter>
       </CurrentUserContext.Provider>
     </ThemeContext.Provider>
@@ -244,6 +281,7 @@ beforeEach(() => {
   localStorage.clear();
   document.documentElement.setAttribute('data-theme', 'light');
   ws.captured = {};
+  ws.programsSubscriptions = 0;
   ws.open.mockClear();
   ws.close.mockClear();
   // Animations réduites : les popups se ferment / confirment de façon synchrone sous jsdom.
@@ -404,6 +442,106 @@ describe('Dashboard', () => {
           location: { programId: 1, courseId: 10, channel: { id: 5, type: 'text' } },
         })
       );
+    });
+  });
+
+  describe('vue dans l’URL (#63)', () => {
+    it('chaque choix ajoute une entrée d’historique : programme, cours, canal', async () => {
+      renderDashboard();
+      await selectProgram('Génie logiciel');
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1'));
+      expect(lastNavigation()).toBe('PUSH');
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByText('entraide'));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/forum/6'));
+      fireEvent.click(courseSelector()!);
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /IFT102/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
+      expect(lastNavigation()).toBe('PUSH');
+    });
+
+    // Revue de #176 : `navigate` change à chaque navigation ; un setView qui en dépendait faisait
+    // désabonner puis réabonner la room de l'utilisateur à chaque clic (évènements manqués).
+    it('naviguer entre les vues ne réabonne pas la room de l’utilisateur', async () => {
+      renderDashboard();
+      await selectProgram('Génie logiciel');
+      await waitForCourseSelector('IFT101');
+      const subscriptions = ws.programsSubscriptions;
+      expect(subscriptions).toBeGreaterThan(0);
+      fireEvent.click(screen.getByText('general'));
+      fireEvent.click(screen.getByText('Quiz intro'));
+      goBack();
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/text/5'));
+      expect(ws.programsSubscriptions).toBe(subscriptions);
+    });
+
+    it('« back » revient à la vue précédente, sans quitter le dashboard', async () => {
+      renderDashboard();
+      await selectProgram('Génie logiciel');
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByText('general'));
+      fireEvent.click(screen.getByText('Quiz intro'));
+      expect(screen.getByTestId('quiz-view').textContent).toBe('Quiz intro');
+
+      goBack();
+      expect((await screen.findByTestId('channel-view')).textContent).toBe('general');
+      goBack();
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1'));
+      expect(screen.queryByTestId('channel-view')).toBeNull();
+      expect(screen.getByRole('heading', { name: noActiveLabels.title })).toBeTruthy();
+    });
+
+    it('lien vers un canal : la vue s’ouvre telle quelle, la localisation enregistrée est ignorée', async () => {
+      const { saveSettings } = renderDashboard({
+        path: '/home/p/1/c/10/forum/6',
+        settings: { location: { programId: 2, courseId: 20 } },
+      });
+      expect((await screen.findByTestId('forum-view')).textContent).toBe('entraide');
+      expect(api.fetchCourses).toHaveBeenCalledWith(1);
+      expect(api.fetchCourses).not.toHaveBeenCalledWith(2);
+      expect(currentPath()).toBe('/home/p/1/c/10/forum/6');
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenLastCalledWith({
+          location: { programId: 1, courseId: 10, channel: { type: 'forum', id: 6 } },
+        })
+      );
+    });
+
+    it('arrivée sur /home : la localisation enregistrée remplace l’entrée, sans en ajouter', async () => {
+      renderDashboard({
+        settings: { location: { programId: 1, courseId: 11, channel: { type: 'text', id: 5 } } },
+      });
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11/text/5'));
+      expect(lastNavigation()).toBe('REPLACE');
+      await waitForCourseSelector('IFT102');
+    });
+
+    it('programme inconnu dans l’URL : retour à /home, sans charger ses cours', async () => {
+      renderDashboard({ path: '/home/p/42/c/1' });
+      await waitFor(() => expect(currentPath()).toBe('/home'));
+      expect(lastNavigation()).toBe('REPLACE');
+      expect(api.fetchCourses).not.toHaveBeenCalled();
+      expect(screen.getByRole('heading', { name: noProgramLabels.title })).toBeTruthy();
+    });
+
+    it('programme actif quitté : le repli remplace l’entrée d’historique', async () => {
+      vi.mocked(api.leaveProgram).mockResolvedValue(undefined);
+      renderDashboard({ path: '/home/p/1/c/10/text/5' });
+      expect((await screen.findByTestId('channel-view')).textContent).toBe('general');
+      fireEvent.click(
+        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Quitter le programme' })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Quitter' }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/2'));
+      expect(lastNavigation()).toBe('REPLACE');
+    });
+
+    it('quiz ouvert supprimé à distance : la vue revient au cours, en remplaçant l’entrée', async () => {
+      renderDashboard({ path: '/home/p/1/c/10/quiz/7' });
+      expect((await screen.findByTestId('quiz-view')).textContent).toBe('Quiz intro');
+      act(() => (ws.captured.courses!.onQuizDeleted as (c: number, q: number) => void)(10, 7));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
+      expect(lastNavigation()).toBe('REPLACE');
     });
   });
 

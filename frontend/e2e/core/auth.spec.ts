@@ -34,7 +34,7 @@ test('inscription validée par le code reçu par courriel', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Vérifiez votre email' })).toBeVisible();
   await enterCode(page, await readCodeFromMail(user.email, 'Code de vérification'));
 
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
   await expect(page.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toContainText(
     `@${user.username}`
@@ -70,7 +70,7 @@ test('un mauvais code 2FA ne connecte pas', async ({ page, baseURL }) => {
 
   // Le bon code passe toujours ensuite (un seul essai raté reste sous le plafond).
   await enterCode(page);
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
 });
 
 test('mot de passe oublié : réinitialisation par le code reçu par courriel', async ({
@@ -99,7 +99,7 @@ test('mot de passe oublié : réinitialisation par le code reçu par courriel', 
   await fillLogin(page, user.email, newPassword);
   await expect(page.getByRole('heading', { name: 'Double authentification' })).toBeVisible();
   await enterCode(page);
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
 });
 
 test('une page protégée sans session renvoie à la connexion', async ({ page }) => {

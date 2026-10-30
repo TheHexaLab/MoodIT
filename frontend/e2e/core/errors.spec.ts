@@ -943,6 +943,6 @@ test('un 401 d’une API renvoie à la connexion', async ({ browser, baseURL }) 
   // La session (cookie) est intacte : sans la panne, /home se rouvre.
   await page.unroute('**/api/me', handler);
   await page.goto('/home');
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\/|$)/);
   await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
 });
