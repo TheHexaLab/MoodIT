@@ -279,8 +279,8 @@ test('quiz du jour : éclair dans l’éditeur, en-tête « Quiz du jour » chez
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
-    await page.getByRole('button', { name: 'Retour' }).click();
+    // Enregistré : retour à la liste des quiz (#201).
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
     await expect(bolt(quizRow(page, regular), true)).toHaveCount(1);
     await page.getByRole('button', { name: 'Fermer' }).click();
 
@@ -324,7 +324,7 @@ test('réordonner les questions d’un quiz par la poignée, persisté et vu par
     await pointerDrag(page, rows.nth(1).locator('> span').first(), rows.nth(0));
     await expect(rows).toHaveText([/Seconde question/, /Première question/]);
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // enregistré (#201)
 
     // Persisté : l'ordre (orderIndex) côté serveur, et la question 1 de l'étudiant.
     const edit = (await (await api.get(`/api/quizzes/${quizId}/edit`)).json()) as {

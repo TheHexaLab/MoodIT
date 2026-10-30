@@ -549,7 +549,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await page.keyboard.press('Space');
     await expect(publish).toHaveAttribute('aria-checked', 'false');
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // enregistré : retour à la liste (#201)
 
     const manage = async () => {
       const res = await fixture.admin.api.get(`/api/courses/${fixture.course.id}/quizzes/manage`);
@@ -559,6 +559,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await expect.poll(manage).toBe(false);
 
     // Retour à l'état publié (les autres tests du fichier comptent sur un quiz visible).
+    await page.getByRole('button', { name: `Modifier ${quizTitle}`, exact: true }).click();
     await publish.focus();
     await page.keyboard.press('Space');
     await expect(publish).toHaveAttribute('aria-checked', 'true');

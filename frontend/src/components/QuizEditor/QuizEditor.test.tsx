@@ -757,7 +757,7 @@ describe('QuizEditor — parcours complémentaires (2)', () => {
     expect(last.map((q) => q.id)).toEqual([2, 1]);
   });
 
-  it('créer puis enregistrer à nouveau : le formulaire passe en modification, le 2e appel met à jour', async () => {
+  it('créer : retour à la liste ; rouvrir le quiz puis enregistrer met à jour (pas de 2e création)', async () => {
     const onCreateQuiz = vi.fn(async (_c: number, quiz: Quiz) => ({ ...quiz, id: 999 }));
     const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
     renderEditor({ quizzes: [], handlers: { onCreateQuiz, onUpdateQuiz } });
@@ -766,8 +766,10 @@ describe('QuizEditor — parcours complémentaires (2)', () => {
     expect(screen.getByRole('switch', { name: formT.daily }).getAttribute('aria-checked')).toBe('false');
     fireEvent.change(screen.getByPlaceholderText(formT.titlePlaceholder), { target: { value: 'Nouveau' } });
     fireEvent.click(screen.getByText(formT.create));
-    await screen.findByText(editorT.editQuizTitle);
-    expect(screen.getByText(formT.save)).toBeTruthy();
+    // Enregistré : l'éditeur remonte d'un cran, à la liste, qui montre le quiz créé (#201).
+    expect(await screen.findByText(editorT.listTitle)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(listT.editAria('Nouveau')));
+    expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
     fireEvent.click(screen.getByText(formT.save));
     await waitFor(() =>
       expect(onUpdateQuiz).toHaveBeenCalledWith(999, expect.objectContaining({ title: 'Nouveau' }))
@@ -775,13 +777,26 @@ describe('QuizEditor — parcours complémentaires (2)', () => {
     expect(onCreateQuiz).toHaveBeenCalledTimes(1);
   });
 
-  it('créer sans persistance (mode mémoire) : le formulaire passe aussi en modification', async () => {
+  it('créer sans persistance (mode mémoire) : retour à la liste, le quiz se rouvre en modification', async () => {
     renderEditor({ quizzes: [] });
     fireEvent.click(screen.getByText(listT.create));
     fireEvent.change(screen.getByPlaceholderText(formT.titlePlaceholder), { target: { value: 'Local' } });
     fireEvent.click(screen.getByText(formT.create));
+    expect(await screen.findByText(editorT.listTitle)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(listT.editAria('Local')));
     expect(await screen.findByText(editorT.editQuizTitle)).toBeTruthy();
     expect(screen.queryByText(formT.create)).toBeNull();
+  });
+
+  it('modifier puis enregistrer : retour à la liste, qui montre le quiz à jour', async () => {
+    const onUpdateQuiz = vi.fn(async (_id: number, quiz: Quiz) => quiz);
+    renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })], handlers: { onUpdateQuiz } });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.change(screen.getByPlaceholderText(formT.titlePlaceholder), { target: { value: 'Q renommé' } });
+    fireEvent.click(screen.getByText(formT.save));
+    expect(await screen.findByText(editorT.listTitle)).toBeTruthy();
+    expect(screen.getByText('Q renommé')).toBeTruthy();
+    expect(screen.queryByText(editorT.editQuizTitle)).toBeNull();
   });
 
   it('pendant l’enregistrement, le bouton est désactivé ; il revient après la réponse', async () => {
@@ -792,8 +807,9 @@ describe('QuizEditor — parcours complémentaires (2)', () => {
     fireEvent.click(screen.getByText(formT.save));
     const lastButton = () => screen.getAllByRole('button').at(-1) as HTMLButtonElement;
     await waitFor(() => expect(lastButton().disabled).toBe(true));
+    expect(screen.getByText(editorT.editQuizTitle)).toBeTruthy(); // pas de retour avant la réponse
     await act(async () => resolve());
-    expect(screen.getByText(formT.save).closest('button')!.disabled).toBe(false);
+    expect(screen.getByText(editorT.listTitle)).toBeTruthy();
   });
 
   it('ouverture en cours : le crayon du quiz est marqué occupé jusqu’à la réponse', async () => {

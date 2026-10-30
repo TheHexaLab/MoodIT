@@ -757,7 +757,7 @@ test('éditeur de quiz : enregistrement en panne (formulaire conservé) puis suc
         await expect(page.getByText('Question de panne')).toBeVisible();
       }
     );
-    await expect(page.getByRole('heading', { name: 'Modifier le quiz' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // créé : retour à la liste (#201)
     const res = await api.get(`/api/courses/${fx.course.id}/quizzes/manage`);
     const titles = ((await res.json()) as { title: string }[]).map((q) => q.title);
     expect(titles).toContain(title);

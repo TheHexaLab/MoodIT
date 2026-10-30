@@ -177,18 +177,16 @@ test('créer un quiz avec les 6 types : publié visible chez l’étudiant, brou
   await publish.click();
   await expect(publish).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('button', { name: 'Créer', exact: true }).click();
-  // Enregistré : le formulaire passe en mode édition du quiz persisté.
-  await expect(page.getByRole('heading', { name: 'Modifier le quiz' })).toBeVisible();
+  // Enregistré : l'éditeur revient à la liste des quiz (#201).
+  await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
 
   // Second quiz, laissé en brouillon.
-  await page.getByRole('button', { name: 'Retour' }).click();
   await page.getByRole('button', { name: 'Créer un quiz' }).click();
   await startQuestion(page, 'Vrai/Faux', 'Brouillon pas encore prêt.', 1);
   await addButton(page).click();
   await page.getByRole('textbox', { name: 'Titre' }).fill(draft);
   await page.getByRole('button', { name: 'Créer', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Modifier le quiz' })).toBeVisible();
-  await page.getByRole('button', { name: 'Retour' }).click();
+  await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
 
   // Liste de l'éditeur : les deux quiz, avec leur statut et leur nombre de questions.
   await expect(quizRow(page, published)).toContainText('Publié');
@@ -410,15 +408,13 @@ test('modifier un quiz, annuler, supprimer une question puis le quiz', async ({ 
   await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
   await expect(page.getByText('Seconde question')).toBeHidden();
   await expect(page.getByText('1 pts', { exact: true }).first()).toBeVisible();
-  // On attend la réponse de l'enregistrement avant « Retour », comme un utilisateur qui voit
-  // l'indicateur : tant qu'elle n'est pas arrivée, la session est encore « modifiée » et le
-  // retour demande confirmation (garde de fermeture, #145).
+  // Enregistré par le serveur, puis retour automatique à la liste des quiz (#201).
   const saved = page.waitForResponse(
     (res) => res.request().method() === 'PUT' && /\/api\/quizzes\/\d+$/.test(res.url())
   );
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   expect((await saved).ok(), 'quiz enregistré par le serveur').toBe(true);
-  await page.getByRole('button', { name: 'Retour' }).click();
+  await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
   await expect(quizRow(page, renamed)).toContainText('1 questions');
 
   // « Annuler » jette toutes les modifications de la session.
@@ -536,13 +532,12 @@ test('temps réel : l’étudiant voit la mise à jour puis la suppression du qu
   await fillPrompt(page, 'Énoncé mis à jour en direct');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
-  await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
+  await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // enregistré (#201)
 
   // quiz:updated : la vue ouverte se recharge sans action de l'étudiant.
   await expect(studentMain).toContainText('Énoncé mis à jour en direct');
 
   // quiz:deleted : la vue se ferme et le quiz quitte la barre latérale.
-  await page.getByRole('button', { name: 'Retour' }).click();
   await page.getByRole('button', { name: `Supprimer ${title}`, exact: true }).click();
   await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
   await expect(studentMain.getByRole('heading', { name: 'Aucun canal sélectionné' })).toBeVisible();
