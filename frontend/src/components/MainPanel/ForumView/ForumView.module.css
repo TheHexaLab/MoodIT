@@ -335,7 +335,7 @@ div.forum-view > div[data-role="body"] > ul > li:hover {
 }
 
 /* ─── Barre de votes verticale. ─── */
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -355,7 +355,7 @@ div.forum-view > div[data-role="body"] > ul > li div[data-role="horizontal-vote-
 /* Cible tactile de 1.5rem (24 px, WCAG 2.5.8) pour une empreinte visuelle inchangée de
    0.9375rem : la marge négative (-(1.5 - 0.9375) / 2) rend l'excédent à la mise en page,
    et `position: relative` garde le bouton au-dessus du score voisin qu'il chevauche. */
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button {
     position: relative;
     display: flex;
     flex-shrink: 0;
@@ -384,27 +384,27 @@ div.forum-view > div[data-role="body"] > ul > li div[data-role="horizontal-vote-
     height: 0.9375rem;
 }
 
-/*div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:hover:not(:disabled) {
+/*div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:hover:not(:disabled) {
     background: var(--bg-vote-pill);
 }*/
 
 /* Vote desactive (sa propre publication) : non interactif. */
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:disabled {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:disabled {
     opacity: 0.4;
     cursor: default;
 }
 
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:first-of-type[aria-pressed="true"],
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:first-of-type:not(:disabled):hover {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:first-of-type[aria-pressed="true"],
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:first-of-type:not(:disabled):hover {
     color: var(--success);
 }
 
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:nth-of-type(2)[aria-pressed="true"],
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > button:nth-of-type(2):not(:disabled):hover {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:nth-of-type(2)[aria-pressed="true"],
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > button:nth-of-type(2):not(:disabled):hover {
     color: var(--danger);
 }
 
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > span {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > span {
     text-align: center;
     color: var(--text);
     font-family: Inter, sans-serif;
@@ -418,11 +418,11 @@ div.forum-view > div[data-role="body"] > ul > li div[data-role="horizontal-vote-
     padding: 0 0.25rem;
 }
 
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > span[data-role="up-voted"] {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > span[data-role="up-voted"] {
     color: var(--success);
 }
 
-div.forum-view > div[data-role="body"] > ul > li div[role$="-vote-actions"] > span[data-role="down-voted"] {
+div.forum-view > div[data-role="body"] > ul > li div[data-role$="-vote-actions"] > span[data-role="down-voted"] {
     color: var(--danger);
 }
 
