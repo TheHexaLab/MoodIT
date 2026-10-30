@@ -975,6 +975,7 @@ public class QuizService {
             q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
             requireCorrectOption(q, index);
+            requireDistinctCorrectOrders(q, qd.getDragItems(), index);
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
             q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
@@ -1004,6 +1005,7 @@ public class QuizService {
         q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
         requireCorrectOption(q, index);
+        requireDistinctCorrectOrders(q, qd.getDragItems(), index);
         applyDragItems(q, qd.getDragItems());
         applyTestCases(q, qd.getTestCases());
     }
@@ -1023,6 +1025,24 @@ public class QuizService {
         if (!hasCorrect) {
             throw new InvalidQuizException(
                     "Question " + (index + 1) + " : au moins une bonne réponse doit être cochée.");
+        }
+    }
+
+    /**
+     * Une Remise en ordre doit donner à chaque élément une position ({@code correctOrder}) présente
+     * et distincte : sinon plusieurs ordres seraient équivalents et le correcteur n'en accepterait
+     * qu'un, choisi par l'ordre d'insertion en base. L'éditeur numérote toujours 0, 1, 2… ; ici on
+     * protège l'API elle-même. On lit les valeurs ENVOYÉES (avant le repli « absent = 0 » des
+     * entités). Les associations n'utilisent pas {@code correctOrder} (0 partout) : non concernées.
+     */
+    private static void requireDistinctCorrectOrders(Question q, List<DragItemDTO> items, int index) {
+        if (!"ordering".equals(slugFor(q)) || items == null) return;
+        Set<Integer> seen = new HashSet<>();
+        for (DragItemDTO item : items) {
+            if (item.getCorrectOrder() == null || !seen.add(item.getCorrectOrder())) {
+                throw new InvalidQuizException("Question " + (index + 1)
+                        + " : chaque élément doit avoir une position distincte dans l'ordre attendu.");
+            }
         }
     }
 
