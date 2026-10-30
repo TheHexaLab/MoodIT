@@ -127,8 +127,9 @@ test('modifier le profil : nom et couleur, « Annuler » ne change rien', async 
   );
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier le profil' })).toBeHidden();
-  await expect(accountButton(page)).toContainText(`Marie Tremblay@${user.username}`);
-  await expect(avatar).toHaveText('MT');
+  await expect(accountButton(page)).toContainText(`Marie Tremblay @${user.username}`);
+  // Initiales dessinées en CSS (data-initials), hors du texte visible du bouton.
+  await expect(avatar).toHaveAttribute('data-initials', 'MT');
   await expect(avatar).toHaveCSS('background-color', 'rgb(15, 118, 110)');
 
   await page.reload();

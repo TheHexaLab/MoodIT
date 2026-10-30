@@ -93,7 +93,7 @@ test.describe('formulaires d’authentification', () => {
     await expectTabOrder(page, browserName, [
       'exemple@gmail.com',
       '••••••••••',
-      '', // œil (sans nom accessible)
+      'Afficher le mot de passe', // œil
       { link: 'Mot de passe oublié ?' },
       'Se connecter →',
       { link: 'Créer un compte' },

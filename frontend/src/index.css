@@ -75,17 +75,18 @@
     --avatar-teal-light: #2dd4bf;
     --avatar-teal-deep: #0f766e;
     --avatar-grey: #7d7d94;
-    /* Coloration syntaxique : palette Catppuccin Latte (theme clair). */
+    /* Coloration syntaxique : palette Catppuccin Latte (theme clair), teintes assombries pour
+       atteindre 4,5:1 sur --syntax-bg (WCAG AA, #109). */
     --syntax-bg: #eff1f5;
     --syntax-fg: #4c4f69;
     --syntax-comment: #5c5f77;
-    --syntax-punctuation: #7c7f93;
+    --syntax-punctuation: #696b7c;
     --syntax-keyword: #8839ef;
-    --syntax-class: #df8e1d;
-    --syntax-string: #40a02b;
-    --syntax-number: #fe640b;
-    --syntax-function: #1e66f5;
-    --syntax-operator: #04a5e5;
+    --syntax-class: #976014;
+    --syntax-string: #317b21;
+    --syntax-number: #b94908;
+    --syntax-function: #1d62ec;
+    --syntax-operator: #0374a1;
     --syntax-variable: #d20f39;
 }
 

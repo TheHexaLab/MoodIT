@@ -433,8 +433,9 @@ test('« Modifier le cours » : rattacher le cours à un second programme', asyn
     await page.getByRole('listbox').getByRole('button', { name: `Modifier le cours ${fx.course.code}` }).click();
     await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toBeVisible();
     await expect(page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first()).toBeVisible();
-    // Ouvrir le sélecteur : clic dans la zone des puces, à droite d'elles (une puce = « Retirer »).
-    const tags = page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first().locator('xpath=..');
+    // Ouvrir le sélecteur : clic dans la zone des puces, à droite d'elles. Seule la croix d'une
+    // puce est un bouton « Retirer » : zone = grand-parent (croix → puce → zone).
+    const tags = page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first().locator('xpath=../..');
     const box = (await tags.boundingBox())!;
     await tags.click({ position: { x: box.width - 8, y: box.height / 2 } });
     await page.getByPlaceholder('Rechercher un programme…').fill(other.name);

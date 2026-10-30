@@ -361,7 +361,8 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
   await press(establishment, hasTouch);
   await expectField(page.getByPlaceholder('Rechercher un programme…'), hasTouch);
   // Ligne = code + nom + cohorte (ex. « GIN Génie informatique Promo … »).
-  const program = page.getByRole('button', { name: new RegExp(`${PROGRAM_NAME} `) });
+  // « ^code nom » : exclut la pastille du rail (« Génie informatique — GIN »).
+  const program = page.getByRole('button', { name: new RegExp(`^\\S+ ${PROGRAM_NAME} `) });
   await expectActionable(program, hasTouch, 32);
   await expect(program).toHaveAttribute('aria-pressed', 'true'); // déjà abonné
   await noteTarget(page.getByRole('button', { name: 'Retour', exact: true }), hasTouch); // 18×18 px
@@ -529,7 +530,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
     // « Choix unique » d'abord : c'est le type par défaut, les autres sont choisis dans la liste.
     const checks: Record<string, () => Promise<void>> = {
       'Choix unique': async () => {
-        await expectField(page.getByRole('textbox', { name: 'Réponse…' }).first(), hasTouch);
+        await expectField(page.getByRole('textbox', { name: /^Réponse \d+$/ }).first(), hasTouch);
         await noteTarget(page.getByRole('button', { name: 'Supprimer la réponse' }).first(), hasTouch);
         await expectActionable(page.getByRole('button', { name: '+ Ajouter une réponse' }), hasTouch);
       },
@@ -537,7 +538,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
         await noteTarget(page.getByRole('button', { name: 'Marquer comme correcte' }).first(), hasTouch);
       },
       'Choix multiple': async () => {
-        await expectField(page.getByRole('textbox', { name: 'Réponse…' }).last(), hasTouch);
+        await expectField(page.getByRole('textbox', { name: /^Réponse \d+$/ }).last(), hasTouch);
       },
       'Remise en ordre': async () => {
         await expectField(page.getByRole('textbox', { name: 'Élément…' }).first(), hasTouch);
@@ -586,8 +587,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
     await expectPopup(page, 'Harnais de test', ['+ Ajouter un harnais', 'Annuler'], hasTouch);
     await press(page.getByRole('button', { name: '+ Ajouter un harnais' }), hasTouch);
     await expectField(page.getByPlaceholder('Nom du cas (ex. Cas nominal)'), hasTouch);
-    // Champ « Poids » : input type=number sans nom accessible (le libellé est un <span> voisin).
-    await expectField(page.getByRole('spinbutton').last(), hasTouch);
+    await expectField(page.getByRole('spinbutton', { name: 'Poids' }), hasTouch);
     await expectField(page.getByRole('textbox', { name: 'Code du harnais 1' }), hasTouch);
     await noteTarget(page.getByRole('button', { name: 'Supprimer le harnais' }), hasTouch);
     await expectActionable(page.getByRole('button', { name: 'Enregistrer' }), hasTouch);
