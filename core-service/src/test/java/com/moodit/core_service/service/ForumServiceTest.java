@@ -123,6 +123,11 @@ class ForumServiceTest {
     return p;
   }
 
+  /** Rend le post trouvable par la requête ciblée (id + forum) du dépôt. */
+  private void stubPost(Forum f, Post p) {
+    when(postRepository.findByIdAndForumId(p.getId(), f.getId())).thenReturn(Optional.of(p));
+  }
+
   private static Vote vote(User voter, int value) {
     Vote v = new Vote();
     v.setUser(voter);
@@ -229,8 +234,9 @@ class ForumServiceTest {
   // ── Ciblage : l'id demandé, pas le premier post du forum ──────────────────
 
   /**
-   * Chaque opération sur un post le cherche PAR ID dans le forum. Le forum contient ici un post
-   * leurre (6) AVANT la cible (7) : un filtre qui laisserait tout passer prendrait le leurre.
+   * Chaque opération sur un post le cherche par une requête ciblée (id + forum), sans parcourir
+   * {@code forum.getPosts()}. Le forum contient ici un post leurre (6) AVANT la cible (7) : un
+   * parcours de la collection qui laisserait tout passer prendrait le leurre.
    */
   @Nested
   class Ciblage_du_post {
@@ -247,6 +253,7 @@ class ForumServiceTest {
       cible = post(7, alice, "cible");
       f.getPosts().add(leurre);
       f.getPosts().add(cible);
+      when(postRepository.findByIdAndForumId(7, 5)).thenReturn(Optional.of(cible));
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
     }
 
@@ -326,7 +333,7 @@ class ForumServiceTest {
       Forum f = forum(5, "Thread");
       Post p = post(7, alice, "sujet");
       p.setVotes(List.of(vote(bob, -1)));
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
 
@@ -356,7 +363,7 @@ class ForumServiceTest {
       Post r2 = post(3, alice, "r2");
       r2.setParent(root);
       root.setChildren(List.of(r1, r2));
-      f.getPosts().add(root);
+      stubPost(f, root);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.sumValueByPostIds(List.of(2, 3)))
@@ -390,7 +397,7 @@ class ForumServiceTest {
     @DisplayName("getRepliesByPost : sans réponse (children null) → liste vide, aucune requête agrégée")
     void getRepliesByPost_sans_reponse() {
       Forum f = forum(5, "Discussion");
-      f.getPosts().add(post(1, alice, "racine"));
+      stubPost(f, post(1, alice, "racine"));
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
 
       assertThat(forumService.getRepliesByPost(5, 1, null)).isEmpty();
@@ -510,7 +517,7 @@ class ForumServiceTest {
     void discussion_emet_messageCreated() {
       Forum f = forum(5, "Discussion");
       Post parent = post(1, bob, "question");
-      f.getPosts().add(parent);
+      stubPost(f, parent);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       stubSave(50);
@@ -766,7 +773,7 @@ class ForumServiceTest {
     void updatePost_discussion_messageEdited() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "avant");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
 
       PostDTO result = forumService.updatePost(5, 7,
@@ -783,7 +790,7 @@ class ForumServiceTest {
     void updatePost_thread_postEdited() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "contenu");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
 
       PostDTO result = forumService.updatePost(6, 8,
@@ -799,7 +806,7 @@ class ForumServiceTest {
     void updatePost_epinglage_seul_sans_echo() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "contenu");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
 
       forumService.updatePost(6, 8, ForumUpdatePostDTO.builder().isPinned(true).build());
@@ -813,7 +820,7 @@ class ForumServiceTest {
     void updatePost_contenu_trop_long() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "avant");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       String tooLong = "a".repeat(ForumService.MAX_CONTENT_LENGTH + 1);
 
@@ -866,7 +873,7 @@ class ForumServiceTest {
     void deletePost_thread_moderation() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "sujet");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
 
@@ -885,7 +892,7 @@ class ForumServiceTest {
     void deletePost_discussion_detache_les_reponses() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "message");
-      f.getPosts().add(p);
+      stubPost(f, p);
       Post reloaded = post(7, alice, "message");
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
@@ -907,8 +914,8 @@ class ForumServiceTest {
     @DisplayName("deletePost : auto-suppression ou appelant non identifié → pas d'audit de modération")
     void deletePost_auto_suppression_sans_audit() {
       Forum f = forum(6, "Thread");
-      f.getPosts().add(post(8, alice, "a"));
-      f.getPosts().add(post(9, alice, "b"));
+      stubPost(f, post(8, alice, "a"));
+      stubPost(f, post(9, alice, "b"));
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
 
