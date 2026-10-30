@@ -21,6 +21,7 @@ import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/types.
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources';
 import { type Course, type Quiz } from '../../types/domain.ts';
 import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
+import { OPTION_SELECTOR, isContextMenuKey, useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
 
 // Entité ré-exportée depuis le modèle de domaine (source unique : src/types/domain.ts).
 export type { Course };
@@ -198,6 +199,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   } | null>(null);
   /** Conteneur du sélecteur de cours (pour le click-outside du menu). */
   const selectRef = useRef<HTMLDivElement | null>(null);
+  /** Bouton du sélecteur de cours (reprend le focus à la fermeture au clavier). */
+  const courseSelectButtonRef = useRef<HTMLButtonElement | null>(null);
   /** Liste déroulante portée vers <body> (pour le click-outside). */
   const pickerRef = useRef<HTMLDivElement | null>(null);
   /** Racine du panneau (pour lire la largeur rendue au début d'un drag). */
@@ -354,7 +357,21 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   function selectCourse(courseId: number) {
     onSelectCourse?.(courseId);
     closeCoursePicker();
+    // L'option choisie disparaît avec la liste : le focus revient au sélecteur.
+    courseSelectButtonRef.current?.focus();
   }
+
+  // Clavier dans la liste (patron WAI-ARIA « Listbox ») : la recherche garde son autoFocus,
+  // ↓/↑ passent de la recherche aux options (circulaires), Début/Fin entre les options,
+  // Échap (depuis la recherche ou une option) ferme et rend le focus au sélecteur.
+  const handlePickerKeyDown = useMenuKeyboard({
+    open: isCourseOpen,
+    containerRef: pickerRef,
+    itemSelector: `input, ${OPTION_SELECTOR}`,
+    initialFocus: 'none',
+    onEscape: closeCoursePicker,
+    returnFocus: () => courseSelectButtonRef.current,
+  });
 
   function editCourse(courseId: number) {
     onEditCourse?.(courseId);
@@ -384,6 +401,14 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   // on laisse le menu natif du navigateur (pas de preventDefault).
   function handleCourseContextMenu(event: React.MouseEvent<HTMLButtonElement>) {
     if (!selectedCourse || !hasContextMenu) return;
+    event.preventDefault();
+    openCourseContextMenu(event.currentTarget);
+  }
+
+  // Touche Menu ou Maj+F10 sur le sélecteur → même menu, sur tous les moteurs (seul Chromium
+  // les convertit lui-même en `contextmenu`).
+  function handleCourseSelectKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (!selectedCourse || !hasContextMenu || !isContextMenuKey(event)) return;
     event.preventDefault();
     openCourseContextMenu(event.currentTarget);
   }
@@ -442,16 +467,20 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         {hasCourses && !loading && !loadError ? (
           <div className={styles.selectWrapper} ref={selectRef}>
             <button
+              ref={courseSelectButtonRef}
               type="button"
               className={`${styles.courseSelect}${isCourseOpen ? ` ${styles.courseSelectOpen}` : ''}`}
               onClick={toggleCourseOpen}
               onContextMenu={handleCourseContextMenu}
+              onKeyDown={handleCourseSelectKeyDown}
               onTouchStart={handleCourseTouchStart}
               onTouchMove={cancelCourseLongPress}
               onTouchEnd={cancelCourseLongPress}
               onTouchCancel={cancelCourseLongPress}
               aria-haspopup="listbox"
               aria-expanded={isCourseOpen}
+              // Annonce le raccourci d'ouverture du menu contextuel (lecteurs d'écran).
+              aria-keyshortcuts={selectedCourse && hasContextMenu ? 'Shift+F10' : undefined}
             >
               <span className={styles.courseSelectCode}>
                 {selectedCourse?.code ?? dropdownLabels.selectFallback}
@@ -471,6 +500,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
                   className={styles.coursePicker}
                   role="listbox"
                   style={{ left: pickerPos.left, top: pickerPos.top, width: pickerPos.width }}
+                  onKeyDown={handlePickerKeyDown}
                 >
                 <div className={styles.pickerSearch}>
                   <MagnifyingGlass width="1rem" height="1rem" />
@@ -480,9 +510,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
                     autoFocus={!isTouchDevice()}
                     value={courseSearch}
                     onChange={(event) => setCourseSearch(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') setIsCourseOpen(false);
-                    }}
                   />
                 </div>
                 <ul>

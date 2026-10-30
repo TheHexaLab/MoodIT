@@ -14,6 +14,7 @@ import { LogOut } from '../../assets/LogOut.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { avatarInitials } from '../../helpers/text.ts';
 import { type User as UserMenuUser } from '../../types/domain.ts';
+import { useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
 
 // L'utilisateur affiché est l'entité User du domaine (source unique).
 // `UserMenuUser` est conservé comme alias de compat pour les imports existants.
@@ -133,6 +134,15 @@ export default function UserMenu({
     }
   }, []);
 
+  // Clavier (patron WAI-ARIA « Menu Button ») : focus sur le premier élément à l'ouverture,
+  // flèches / Début / Fin entre les éléments, Échap qui ferme et rend le focus au bouton.
+  const handleMenuKeyDown = useMenuKeyboard({
+    open: isOpen,
+    containerRef: popupRef,
+    onEscape: requestClose,
+    returnFocus: () => triggerRef.current,
+  });
+
   // Ferme le menu au clic extérieur (déclencheur ou popup porté) ou sur Échap ;
   // recalcule la position au resize / scroll tant qu'il est ouvert.
   useEffect(() => {
@@ -250,6 +260,7 @@ export default function UserMenu({
               aria-label="Menu du compte"
               style={isMobile ? undefined : { left: popupPos?.left, bottom: popupPos?.bottom }}
               onAnimationEnd={handlePopupAnimationEnd}
+              onKeyDown={handleMenuKeyDown}
             >
               {/* ── Section 1 : carte d'identité ── */}
               <section className={styles.identity}>
