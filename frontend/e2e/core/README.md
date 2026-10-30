@@ -89,10 +89,10 @@ un compte **neuf**.
   sur `/home`, l'URL passe à la vue restaurée. Tester l'arrivée avec `toHaveURL(/\/home(\/|$)/)`.
 - **Les pages d'authentification renvoient vers `/home` une session active** (#63) : pour tester
   `/login` ou `/register`, partir d'un contexte sans cookie.
-- **La police change le layout** : l'app demande Inter sans la fournir. Sur Windows elle retombe
-  sur Segoe UI, sur Linux sur DejaVu Sans (plus large) : le titre du forum déborde alors de 41 px
-  à 390 px. En CI, les tests tournent dans l'image officielle de Playwright avec Inter montée comme
-  police système, pour un rendu stable ; en cas de débordement, le message
+- **La police change le layout** : l'app sert elle-même Inter (`src/fonts.css`, woff2 du paquet
+  `@fontsource-variable/inter`, #115), le rendu est donc le même sur Windows, macOS et Linux sans
+  police installée. Si elle ne se chargeait plus, le repli (DejaVu Sans sur Linux, plus large)
+  ferait déborder le titre du forum de 41 px à 390 px ; en cas de débordement, le message
   d'erreur liste les éléments en cause et la police effective. Pour reproduire le rendu des
   runners : `docker run --rm -v "$PWD:/work" -w /work -e E2E_BASE_URL=http://host.docker.internal:5173
   mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test …`.

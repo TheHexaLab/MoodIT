@@ -1,0 +1,37 @@
+/* Police Inter servie par l'app (#115), sans CDN : les fichiers woff2 viennent du paquet
+   @fontsource-variable/inter (version exacte dans package.json) et Vite les copie, hachés,
+   dans dist/assets. Sans ça, chaque système affichait sa police de repli (Segoe UI, San
+   Francisco, DejaVu Sans, plus large) et le layout changeait d'une machine à l'autre.
+
+   On déclare la famille sous le nom « Inter », celui que demande déjà tout le CSS, plutôt que
+   le « Inter Variable » du paquet. Police variable (graisses 100 à 900 dans un seul fichier) :
+   le CSS emploie 400, 500, 600, 700 et 800, soit 48 Ko en variable contre 121 Ko en cinq
+   fichiers statiques. Pas de fichier italique : les rares italiques sont obliqués par le
+   navigateur.
+
+   unicode-range : le navigateur ne télécharge un sous-ensemble que si la page contient un de
+   ses caractères. « latin » couvre le français (é è ê à ç œ « » ’ …) ; « latin-ext » (Ÿ, ł, ő…)
+   n'est chargé qu'au besoin, par exemple pour un nom d'utilisateur. */
+
+/* inter-latin-ext */
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url("@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+        U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+        U+A720-A7FF;
+}
+
+/* inter-latin */
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+        U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
