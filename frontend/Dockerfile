@@ -15,6 +15,8 @@ FROM nginx:alpine
 # sinon Trivy bloque sur une CVE critique déjà corrigée en amont.
 RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html
+# En-têtes de sécurité (CSP, X-Frame-Options, Permissions-Policy…), inclus par default.conf.
+COPY nginx/security-headers.conf /etc/nginx/security-headers.conf
 
 # Config nginx (statiques + reverse proxy vers le gateway) écrite inline.
 # "gateway" = nom du service docker-compose, joignable sur le réseau "internal".
@@ -26,6 +28,12 @@ server {
     # pages d'erreur. Caddy retire de toute façon l'en-tête Server côté public,
     # ceci couvre les réponses internes / défense en profondeur.
     server_tokens off;
+
+    # En-têtes de sécurité de toutes les réponses (statiques, SPA, proxy, erreurs).
+    # add_header_inherit merge (nginx >= 1.29.3) : une location qui pose ses propres add_header
+    # (ex. Cache-Control) hérite quand même de ceux-ci, au lieu de les perdre (défaut de nginx).
+    add_header_inherit merge;
+    include /etc/nginx/security-headers.conf;
 
     location / {
         root /usr/share/nginx/html;

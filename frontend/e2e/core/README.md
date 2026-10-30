@@ -70,6 +70,7 @@ un compte **neuf**.
 | `a11y`, `keyboard`, `focus-visible` | audit axe (WCAG 2.1 AA, clair + sombre), navigation clavier, indicateur de focus |
 | `responsive/` | disposition par largeur, débordements, parcours tactiles, rotation, cibles tactiles |
 | `mobile-back` | bouton « back » : vue dans l'URL, jamais de retour à l'authentification (#63) |
+| `security-headers` | en-têtes de sécurité de l'image nginx (#93) et aucune violation de la CSP (Report-Only), KaTeX compris |
 | `*.helpers.ts`, `fixtures.ts` | helpers par domaine ; `test` commun (ferme les contextes ouverts) |
 
 ## Pièges à connaître
