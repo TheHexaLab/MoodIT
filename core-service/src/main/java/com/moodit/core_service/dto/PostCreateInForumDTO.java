@@ -5,6 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
+import java.time.Instant;
+
 @Data
 @SuperBuilder
 @NoArgsConstructor
@@ -15,6 +17,9 @@ public class PostCreateInForumDTO{
     private String title;
     private Integer forumId;
     private Integer parentPostId;
+    /** Annonce seulement : couleur de la palette et expiration (null = jamais). */
+    private String color;
+    private Instant expiresAt;
     /**
      * Nonce d'idempotence renvoyé TEL QUEL dans l'évènement WebSocket `*:created`, pour que
      * le front déduplique l'écho de son propre message/post optimiste. Le front envoie

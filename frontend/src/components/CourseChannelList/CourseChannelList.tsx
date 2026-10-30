@@ -91,8 +91,36 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
     return acc;
   }, {});
 
+  /** Ligne cliquable d'un canal (sélection + ouverture). */
+  function channelButton(channel: CourseChannel, className: string, activeClassName: string) {
+    const isSelected = isSameChannel(selectedChannel, channel);
+    return (
+      <button
+        type="button"
+        className={`${className} ${isSelected ? activeClassName : ''}`}
+        onClick={() => {
+          onSelectChannel?.({ id: channel.id, type: channel.type });
+          onOpenChannel?.(channel);
+        }}
+        aria-current={isSelected ? 'page' : undefined}
+      >
+        <span className={styles.channelPrefix}>
+          <ChannelTypeIcon type={channel.type} />
+        </span>
+        <span className={styles.channelName}>{channel.name}</span>
+      </button>
+    );
+  }
+
   return (
     <div className={styles.channelSections}>
+      {/* Canal d'annonces : en tête, hors sections (un seul par cours, rien à éditer). */}
+      {(channelsByType.announcement ?? []).map((channel) => (
+        <div key={`announcement-${channel.id}`} className={styles.announcementItem}>
+          {channelButton(channel, styles.announcementButton, styles.announcementButtonActive)}
+        </div>
+      ))}
+
       {typeDefinitions.map((definition) => {
         const typedChannels = channelsByType[definition.type] ?? [];
         const isCollapsed = collapsedTypes[definition.type] ?? false;
@@ -144,27 +172,11 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
 
             {isCollapsed ? null : typedChannels.length > 0 ? (
               <ul className={styles.channelList} role="list">
-                {typedChannels.map((channel) => {
-                  const isSelected = isSameChannel(selectedChannel, channel);
-                  return (
-                    <li key={channel.id} className={styles.channelItem}>
-                      <button
-                        type="button"
-                        className={`${styles.channelButton} ${isSelected ? styles.channelButtonActive : ''}`}
-                        onClick={() => {
-                          onSelectChannel?.({ id: channel.id, type: channel.type });
-                          onOpenChannel?.(channel);
-                        }}
-                        aria-current={isSelected ? 'page' : undefined}
-                      >
-                        <span className={styles.channelPrefix}>
-                          <ChannelTypeIcon type={channel.type} />
-                        </span>
-                        <span className={styles.channelName}>{channel.name}</span>
-                      </button>
-                    </li>
-                  );
-                })}
+                {typedChannels.map((channel) => (
+                  <li key={channel.id} className={styles.channelItem}>
+                    {channelButton(channel, styles.channelButton, styles.channelButtonActive)}
+                  </li>
+                ))}
               </ul>
             ) : (
               <p className={styles.emptyLabel}>{definition.emptyLabel}</p>

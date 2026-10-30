@@ -42,6 +42,9 @@ import {
   fetchReplies,
   votePost,
   sendMessage,
+  fetchAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
 } from './dashboardApi.ts';
 
 const mockedApiFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
@@ -546,6 +549,94 @@ describe('updateEstablishment', () => {
 });
 
 // ── Forum (mapping toForumPost) ────────────────────────────────────────────────
+
+// ── Annonces ─────────────────────────────────────────────────────────────
+
+describe('fetchAnnouncements', () => {
+  const dto = {
+    id: 4,
+    content: '',
+    createdAt: '2026-10-20T14:00:00Z',
+    title: 'Examen',
+    author: { id: 2 },
+    color: 'red',
+    expiresAt: '2026-11-05T04:59:59Z',
+  };
+
+  it('étudiant : sans includeExpired, et mappe couleur + expiration', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([dto]));
+    const out = await fetchAnnouncements(11);
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20');
+    expect(out[0]).toMatchObject({ id: 4, title: 'Examen', color: 'red', expiresAt: dto.expiresAt });
+  });
+
+  it('personnel : demande aussi les annonces expirées', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([{ ...dto, color: null, expiresAt: null }]));
+    const out = await fetchAnnouncements(11, true);
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20&includeExpired=true');
+    expect(out[0].color).toBeUndefined();
+    expect(out[0].expiresAt).toBeUndefined();
+  });
+
+  it('page suivante : curseur `before` = id de la dernière annonce affichée', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([]));
+    await fetchAnnouncements(11, false, 4);
+    expect(callArgs()[0]).toBe('/api/forums/11/posts?limit=20&before=4');
+  });
+
+  it('erreur HTTP → throw', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(403));
+    await expect(fetchAnnouncements(11)).rejects.toThrow();
+  });
+});
+
+describe('createAnnouncement', () => {
+  const draft = { title: 'Labo', content: '', color: 'green', expiresAt: null };
+
+  it('POST /api/forums/posts avec titre, texte, couleur et expiration', async () => {
+    mockedApiFetch.mockResolvedValueOnce(
+      res({ id: 9, content: '', createdAt: 'x', title: 'Labo', author: { id: 2 }, color: 'green' })
+    );
+    const out = await createAnnouncement(11, draft);
+    const [url, init] = callArgs();
+    expect(url).toBe('/api/forums/posts');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ forumId: 11, parentPostId: null, ...draft });
+    expect(out).toMatchObject({ id: 9, color: 'green' });
+  });
+
+  it('refus (ex. étudiant → 403) → throw', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(403));
+    await expect(createAnnouncement(11, draft)).rejects.toThrow();
+  });
+});
+
+describe('updateAnnouncement', () => {
+  const draft = { title: 'Labo', content: 'x', color: 'red', expiresAt: null };
+
+  it('PATCH : « jamais » envoyé explicitement par clearExpiresAt', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({}));
+    await updateAnnouncement(11, 40, draft);
+    const [url, init] = callArgs();
+    expect(url).toBe('/api/forums/11/posts/40');
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({ ...draft, clearExpiresAt: true });
+  });
+
+  it('PATCH : une date d’expiration ne retire rien', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({}));
+    await updateAnnouncement(11, 40, { ...draft, expiresAt: '2026-12-01T04:59:59.000Z' });
+    expect(JSON.parse(callArgs()[1]?.body as string)).toMatchObject({
+      expiresAt: '2026-12-01T04:59:59.000Z',
+      clearExpiresAt: false,
+    });
+  });
+
+  it('refus → throw', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(403));
+    await expect(updateAnnouncement(11, 40, draft)).rejects.toThrow();
+  });
+});
 
 describe('fetchThreads', () => {
   it('mappe PostVoteUserDTO → ForumPost (vote propre + othersVoteTotal)', async () => {

@@ -5,6 +5,8 @@ import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Enrollment;
 import com.moodit.core_service.model.Program;
 import com.moodit.core_service.model.Course;
+import com.moodit.core_service.model.Forum;
+import com.moodit.core_service.model.ForumKind;
 import com.moodit.core_service.model.Role;
 import com.moodit.core_service.model.User;
 import java.time.LocalDateTime;
@@ -20,6 +22,7 @@ import com.moodit.core_service.model.RoleNames;
 import com.moodit.core_service.model.UserProgramRole;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.EnrollmentRepository;
+import com.moodit.core_service.repository.FTypeRepository;
 import com.moodit.core_service.repository.ProgramRepository;
 import com.moodit.core_service.repository.UserProgramRoleRepository;
 import com.moodit.core_service.repository.UserRepository;
@@ -27,6 +30,7 @@ import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.realtime.dto.CourseDto;
+import com.moodit.core_service.realtime.dto.ForumSectionDto;
 import com.moodit.core_service.realtime.dto.ProgramDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -51,6 +55,7 @@ public class ProgramService {
   private final EnrollmentRepository enrollmentRepository;
   private final RealtimeEventPublisher realtimePublisher;
   private final AuditLogService auditLogService;
+  private final FTypeRepository fTypeRepository;
   //private final UserService userService;
 
   /** DTO temps réel d'un programme (scope user:<id>). */
@@ -255,9 +260,19 @@ public class ProgramService {
         Course.builder()
             .code(courseCreateDTO.getCode())
             .title(courseCreateDTO.getTitle())
-            .forums(List.of())
+            .forums(new ArrayList<>())
             .programs(List.of())
             .build();
+
+    // Chaque cours a son canal « Annonces », enregistré avec lui (cascade Course.forums).
+    fTypeRepository.findByName(ForumKind.ANNOUNCEMENT.typeName()).ifPresent(type -> {
+      Forum announcements = new Forum();
+      announcements.setTitle("Annonces");
+      announcements.setFType(type);
+      announcements.setCourse(course);
+      announcements.setPosition(0);
+      course.getForums().add(announcements);
+    });
 
     courseRepository.save(course);
 
@@ -269,6 +284,11 @@ public class ProgramService {
     String code = course.getCode();
     String title = course.getTitle();
     List<Integer> programIds = programs.stream().map(Program::getId).toList();
+    // Le cours arrive AVEC son canal « Annonces » (seul forum d'un cours neuf).
+    List<ForumSectionDto> forums = course.getForums().stream()
+        .map(f -> new ForumSectionDto(f.getId(), f.getTitle(), f.getFType().getName(), f.getPosition()))
+        .toList();
+    CourseDto live = new CourseDto(courseId, code, title, List.of(), List.of(), forums);
 
     String coursePrograms = AuditContext.ofPrograms(programs); // "Programmes : … · Établissements : …"
 
@@ -312,7 +332,7 @@ public class ProgramService {
     }
 
     afterCommit(() ->
-        programIds.forEach(pid -> realtimePublisher.courseCreated(pid, CourseDto.of(courseId, code, title))));
+        programIds.forEach(pid -> realtimePublisher.courseCreated(pid, live)));
 
     return toCourseDTO(course);
   }

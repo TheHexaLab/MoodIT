@@ -445,6 +445,23 @@ describe('createCourse', () => {
     expect(out).toEqual({ id: 12, title: 'Algo', code: 'IFT1', quizzes: [], forums: [] });
   });
 
+  it('charge le canal « Annonces » créé avec le cours, pour que le créateur le voie tout de suite', async () => {
+    mockedApiFetch
+      .mockResolvedValueOnce(res({ id: 12, title: 'Algo', code: 'IFT1' }))
+      .mockResolvedValueOnce(
+        res([{ id: 40, title: 'Annonces', position: 0, courseId: 12, fTypeId: 3, fTypeName: 'Announcement' }])
+      );
+    const out = await createCourse({ title: 'Algo', code: 'IFT1', programIds: [3] } as never);
+    expect(callArgs(1)[0]).toBe('/api/courses/12/forums');
+    expect(out.forums).toEqual([{ id: 40, title: 'Annonces', position: 0, fType: 'Announcement' }]);
+  });
+
+  it('forums indisponibles : le cours est quand même créé, sans forum', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res({ id: 12, title: 'Algo', code: 'IFT1' })).mockResolvedValueOnce(errRes());
+    const out = await createCourse({ title: 'Algo', code: 'IFT1', programIds: [3] } as never);
+    expect(out.forums).toEqual([]);
+  });
+
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(createCourse({} as never)).rejects.toThrow('Échec création du cours');

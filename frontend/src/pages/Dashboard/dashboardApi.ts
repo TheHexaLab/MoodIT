@@ -15,6 +15,7 @@ import type {
   AnswerResponse,
   ChannelMessage,
   DragItemResponse,
+  Forum,
   ForumPost,
   ForumResponse,
   PostVoteUserDTO,
@@ -705,8 +706,18 @@ export async function createCourse(course: NewCourse): Promise<Course> {
   return {
     ...data,
     quizzes: [],
-    forums: [],
+    // Un cours neuf a déjà son canal « Annonces » (créé avec lui) : on le charge pour que le
+    // créateur le voie tout de suite. Best-effort : sans lui, il apparaît au prochain chargement.
+    forums: await fetchCourseForums(data.id).catch(() => []),
   };
+}
+
+/** Forums d'un cours (canaux, forums, annonces), au format du modèle. */
+async function fetchCourseForums(courseId: number): Promise<Forum[]> {
+  const res = await apiFetch(`/api/courses/${courseId}/forums`);
+  if (!res.ok) throw new Error('Échec chargement des forums du cours');
+  const forums: ForumResponse[] = await res.json();
+  return forums.map((f) => ({ id: f.id, title: f.title, position: f.position, fType: f.fTypeName }));
 }
 
 /**
@@ -1031,6 +1042,8 @@ function toForumPost(p: PostVoteUserDTO): ForumPost {
     othersVoteTotal: (p.voteTotalValue ?? 0) - myVote,
     replyCount: p.childrenCount,
     replies: undefined,
+    color: p.color ?? undefined,
+    expiresAt: p.expiresAt ?? undefined,
   };
 }
 
@@ -1125,6 +1138,71 @@ export async function editPost(
 }
 
 /** Supprimer un post ainsi que tout son sous-fil (cascade côté base). */
+// ── Annonces ('Announcement') ─────────────────────────────────────────────
+// Une annonce est un post racine du canal d'annonces du cours : mêmes routes que le forum.
+
+/** Champs saisis dans le formulaire d'annonce. `expiresAt` ISO UTC, null = jamais. */
+export interface AnnouncementDraft {
+  title: string;
+  content: string;
+  color: string;
+  expiresAt: string | null;
+}
+
+/** Taille d'une page d'annonces : une page pleine laisse supposer qu'il en reste d'autres. */
+export const ANNOUNCEMENTS_PAGE_SIZE = 20;
+
+/**
+ * Une PAGE d'annonces, de la plus récente à la plus ancienne, avant l'annonce `before` (id ;
+ * absent = les plus récentes). Sans `includeExpired`, le backend écarte les expirées ; avec, il
+ * les renvoie (réservé au personnel du cours).
+ */
+export async function fetchAnnouncements(
+  forumId: number,
+  includeExpired = false,
+  before?: number
+): Promise<ForumPost[]> {
+  const params = new URLSearchParams({ limit: String(ANNOUNCEMENTS_PAGE_SIZE) });
+  if (includeExpired) params.set('includeExpired', 'true');
+  if (before != null) params.set('before', String(before));
+  const res = await apiFetch(`/api/forums/${forumId}/posts?${params.toString()}`);
+  if (!res.ok) throw new Error('Échec du chargement des annonces');
+  const data: PostVoteUserDTO[] = await res.json();
+  return data.map(toForumPost);
+}
+
+/** Publier une annonce ; renvoie l'annonce persistée (id réel). */
+export async function createAnnouncement(
+  forumId: number,
+  draft: AnnouncementDraft
+): Promise<ForumPost> {
+  const res = await apiFetch('/api/forums/posts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forumId, parentPostId: null, ...draft }),
+  });
+  if (!res.ok) throw new Error("Échec de la publication de l'annonce");
+  const saved: PostVoteUserDTO = await res.json();
+  return toForumPost(saved);
+}
+
+/**
+ * Modifier une annonce. Le backend ne change que les champs fournis : « jamais » (`expiresAt`
+ * null) est donc envoyé explicitement par `clearExpiresAt`.
+ */
+export async function updateAnnouncement(
+  forumId: number,
+  postId: number,
+  draft: AnnouncementDraft
+): Promise<void> {
+  const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...draft, clearExpiresAt: draft.expiresAt === null }),
+  });
+  if (!res.ok) throw new Error("Échec de la modification de l'annonce");
+}
+
 export async function deletePost(forumId: number, postId: number): Promise<void> {
   const res = await apiFetch(`/api/forums/${forumId}/posts/${postId}`, {
     method: 'DELETE',

@@ -165,7 +165,7 @@ class ForumControllerTest {
         @Test
         @DisplayName("GET /forums/{id}/posts → loadChildren false, curseur absent, limite 20 par défaut")
         void sujets_defauts() throws Exception {
-            when(forumService.getRootPostsPage(4, null, 20, false, null)).thenReturn(List.of(postDto(1, "s")));
+            when(forumService.getRootPostsPage(4, null, 20, false, false, null)).thenReturn(List.of(postDto(1, "s")));
 
             mockMvc.perform(get("/api/forums/4/posts"))
                     .andExpect(status().isOk())
@@ -175,14 +175,15 @@ class ForumControllerTest {
         @Test
         @DisplayName("GET /forums/{id}/posts avec tous les paramètres → transmis tels quels")
         void sujets_parametres() throws Exception {
-            when(forumService.getRootPostsPage(4, 30, 5, true, EMAIL)).thenReturn(List.of());
+            when(forumService.getRootPostsPage(4, 30, 5, true, true, EMAIL)).thenReturn(List.of());
 
             mockMvc.perform(get("/api/forums/4/posts")
                             .param("loadChildren", "true").param("before", "30").param("limit", "5")
+                            .param("includeExpired", "true")
                             .header("X-User-Email", EMAIL))
                     .andExpect(status().isOk());
 
-            verify(forumService).getRootPostsPage(4, 30, 5, true, EMAIL);
+            verify(forumService).getRootPostsPage(4, 30, 5, true, true, EMAIL);
         }
 
         @Test

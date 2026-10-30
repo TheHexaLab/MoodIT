@@ -6,6 +6,7 @@ import type { SVGProps } from 'react';
  * - `text`  → dièse (canal de discussion)
  * - `forum` → flèche coin bas-droit (fil / thread)
  * - `quiz`  → éclair (même tracé que l'en-tête de quiz)
+ * - `announcement` → mégaphone (annonces du cours)
  *
  * SVG au trait via `currentColor`, auto-dimensionné (`1em` par défaut) : la couleur
  * et la taille suivent le texte parent, sans largeur codée en dur.
@@ -28,6 +29,14 @@ export function ChannelTypeIcon({
   };
 
   switch (type) {
+    case 'announcement':
+      // Mégaphone (canal d'annonces du cours).
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" {...common}>
+          <path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z" />
+          <path d="M17 8a5 5 0 0 1 0 8" />
+        </svg>
+      );
     case 'forum':
       // Flèche coin bas-droit, dessinée pour occuper la même hauteur (~18 unités)
       // que le dièse et l'éclair, à épaisseur de trait égale.
