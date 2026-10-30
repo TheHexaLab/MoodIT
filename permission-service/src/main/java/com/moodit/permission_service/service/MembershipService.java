@@ -126,6 +126,12 @@ public class MembershipService {
     return membershipRepository.canSeeQuizViaProgram(userId, quizId);
   }
 
+  /** Le quiz est-il publie ? (un brouillon est reserve au personnel du cours) */
+  @Transactional(readOnly = true)
+  public boolean isQuizPublished(long quizId) {
+    return membershipRepository.isQuizPublished(quizId);
+  }
+
   /** Programmes auxquels le cours est actuellement rattaché. */
   @Transactional(readOnly = true)
   public java.util.List<Long> courseProgramIds(long courseId) {

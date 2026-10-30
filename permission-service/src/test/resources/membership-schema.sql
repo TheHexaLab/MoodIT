@@ -24,7 +24,7 @@ CREATE TABLE user_program_role (program_id INT, user_id INT, role_id INT);
 CREATE TABLE program_course (program_id INT, course_id INT);
 CREATE TABLE f_type (id INT PRIMARY KEY, name VARCHAR(256));
 CREATE TABLE forum (id INT PRIMARY KEY, course_id INT, f_type_id INT);
-CREATE TABLE quiz (id INT PRIMARY KEY, course_id INT);
+CREATE TABLE quiz (id INT PRIMARY KEY, course_id INT, is_published BOOLEAN NOT NULL DEFAULT FALSE);
 CREATE TABLE enrollment (id INT PRIMARY KEY, course_id INT, user_id INT);
 CREATE TABLE post (id INT PRIMARY KEY, forum_id INT, user_id INT, post_parent_id INT, expires_at TIMESTAMP);
 CREATE TABLE vote (id INT PRIMARY KEY, user_id INT, post_id INT, quiz_id INT);

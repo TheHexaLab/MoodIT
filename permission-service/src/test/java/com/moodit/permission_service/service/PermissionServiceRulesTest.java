@@ -776,6 +776,35 @@ class PermissionServiceRulesTest {
     void lireQuiz_abonne_autorise() {
       loggedIn(user(5));
       when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
+    }
+
+    @Test
+    void lireQuiz_brouillon_etudiant_refuse() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isFalse();
+    }
+
+    @Test
+    void lireQuiz_brouillon_enseignantDuCours_autorise() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
+    }
+
+    @Test
+    void lireQuiz_brouillon_gardienAbonne_autorise() {
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
       assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
     }
 
@@ -806,7 +835,26 @@ class PermissionServiceRulesTest {
     void soumettre_abonne_autorise() {
       loggedIn(user(5));
       when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(true);
       assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isTrue();
+    }
+
+    @Test
+    void soumettre_brouillon_etudiant_refuse() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isFalse();
+    }
+
+    @Test
+    void soumettre_brouillon_nonAbonne_refuseSansLireLaPublication() {
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isFalse();
+      verify(membershipService, never()).isQuizPublished(12);
     }
 
     @Test

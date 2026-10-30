@@ -63,6 +63,7 @@ public class QuizService {
     private final PlatformTransactionManager transactionManager;
     private final ApplicationEventPublisher eventPublisher;
     private final AuditLogService auditLogService;
+    private final QuizItemObfuscator itemObfuscator;
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -127,13 +128,25 @@ public class QuizService {
      * Détail d'un quiz pour la PASSATION (étudiant). Les champs de correction
      * (isCorrect, correctOrder, groupName) et les harnais (Test_Case) sont EXCLUS :
      * le client n'en a pas besoin (la correction se fait côté serveur) et les exposer
-     * permettrait de tricher.
+     * permettrait de tricher. Les éléments déplaçables sont mélangés et leurs ids masqués
+     * (cf. {@link QuizItemObfuscator}).
+     *
+     * <p>Un BROUILLON n'existe pas en passation (404) : le personnel le consulte par la vue
+     * éditeur ({@link #getQuizForEdit}), seule route qui le concerne (#28).
      */
     @Transactional(readOnly = true)
     public QuizDetailDTO getQuizDetail(Integer quizId) {
+        return toQuizDetailDTO(findPublishedQuiz(quizId), false);
+    }
+
+    /** Quiz PUBLIÉ (passation : lecture, soumission) ; un brouillon est traité comme absent. */
+    private Quiz findPublishedQuiz(Integer quizId) {
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(QuizNotFoundException::new);
-        return toQuizDetailDTO(quiz, false);
+        if (!Boolean.TRUE.equals(quiz.getIsPublished())) {
+            throw new QuizNotFoundException();
+        }
+        return quiz;
     }
 
     /**
@@ -351,11 +364,13 @@ public class QuizService {
      * un 2e insert concurrent viole l'un d'eux → {@link AlreadySubmittedException} (409).
      */
     private Integer persistPendingAttempt(Integer quizId, String userEmail,
-            Map<Integer, SubmittedAnswerDTO> byQuestion) {
-        Quiz quiz = quizRepository.findById(quizId)
-                .orElseThrow(QuizNotFoundException::new);
+            Map<Integer, SubmittedAnswerDTO> submitted) {
+        // Un brouillon ne se soumet pas : la tentative unique n'est pas consommée avant l'ouverture.
+        Quiz quiz = findPublishedQuiz(quizId);
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
+        // Le client répond avec les ids PUBLICS des éléments : on stocke et corrige sur les ids réels.
+        Map<Integer, SubmittedAnswerDTO> byQuestion = unmaskItemIds(submitted);
 
         // Avant toute écriture : une réponse mal formée est refusée (400) sans consommer la tentative.
         requireValidOrderings(quiz, byQuestion);
@@ -590,7 +605,54 @@ public class QuizService {
                 .orElseThrow(UserNotFoundException::new);
         Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
                 .orElseThrow(AttemptNotFoundException::new);
-        return computeAttemptResult(attempt);
+        return maskItemIds(computeAttemptResult(attempt));
+    }
+
+    /**
+     * Ids PUBLICS → ids réels dans les réponses d'éléments déplaçables (ordre, placement). Un id
+     * inconnu devient {@code null} (ordre) ou est ignoré (placement) : l'ordre est alors refusé
+     * par {@link #requireValidOrderings}, comme toute liste qui n'est pas une permutation.
+     */
+    private Map<Integer, SubmittedAnswerDTO> unmaskItemIds(Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        Map<Integer, SubmittedAnswerDTO> unmasked = new HashMap<>();
+        byQuestion.forEach((questionId, answer) -> {
+            SubmittedAnswerDTO copy = SubmittedAnswerDTO.builder()
+                    .questionId(answer.getQuestionId())
+                    .answerIds(answer.getAnswerIds())
+                    .code(answer.getCode())
+                    .build();
+            if (answer.getOrderedItemIds() != null) {
+                copy.setOrderedItemIds(answer.getOrderedItemIds().stream()
+                        .map(itemObfuscator::unmask).collect(Collectors.toCollection(ArrayList::new)));
+            }
+            if (answer.getPlacement() != null) {
+                Map<Integer, String> placement = new HashMap<>();
+                answer.getPlacement().forEach((publicId, group) -> {
+                    Integer realId = itemObfuscator.unmask(publicId);
+                    if (realId != null) placement.put(realId, group);
+                });
+                copy.setPlacement(placement);
+            }
+            unmasked.put(questionId, copy);
+        });
+        return unmasked;
+    }
+
+    /** Ids réels → ids PUBLICS dans un résultat renvoyé à l'étudiant (même espace que la passation). */
+    private QuizResultDTO maskItemIds(QuizResultDTO result) {
+        for (QuestionResultDTO question : result.getQuestions()) {
+            question.setCorrectOrder(maskAll(question.getCorrectOrder()));
+            question.setSubmittedOrder(maskAll(question.getSubmittedOrder()));
+            if (question.getMatching() != null) {
+                question.getMatching().forEach(m -> m.setItemId(itemObfuscator.mask(m.getItemId())));
+            }
+        }
+        return result;
+    }
+
+    private List<Integer> maskAll(List<Integer> ids) {
+        if (ids == null) return null;
+        return ids.stream().map(itemObfuscator::mask).collect(Collectors.toCollection(ArrayList::new));
     }
 
     /**
@@ -823,11 +885,16 @@ public class QuizService {
                 && new HashSet<>(submitted).equals(expected);
     }
 
+    /** Éléments d'une Remise en ordre dans l'ordre attendu (correctOrder absent = 0, tri stable). */
+    private static List<DragItem> inExpectedOrder(List<DragItem> items) {
+        return items.stream()
+                .sorted(Comparator.comparing(d -> d.getCorrectOrder() == null ? 0 : d.getCorrectOrder()))
+                .toList();
+    }
+
     private QuestionResultDTO gradeOrdering(Question question, SubmittedAnswerDTO answer) {
         List<DragItem> items = question.getDragItems() == null ? List.of() : question.getDragItems();
-        List<Integer> correctOrder = items.stream()
-                .sorted(Comparator.comparing(d -> d.getCorrectOrder() == null ? 0 : d.getCorrectOrder()))
-                .map(DragItem::getId).toList();
+        List<Integer> correctOrder = inExpectedOrder(items).stream().map(DragItem::getId).toList();
         List<Integer> submittedOrder = answer != null && answer.getOrderedItemIds() != null
                 ? answer.getOrderedItemIds() : List.of();
 
@@ -1150,9 +1217,7 @@ public class QuizService {
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
                         .map(a -> toAnswerDTO(a, includeCorrection)).toList())
-                .dragItems(question.getDragItems() == null ? List.of()
-                        : question.getDragItems().stream()
-                        .map(d -> toDragItemDTO(d, includeCorrection)).toList())
+                .dragItems(toDragItemDTOs(question, includeCorrection))
                 // Catégories (zones) d'une association : groupes DISTINCTS, exposés à l'étudiant
                 // (les zones de dépôt) — le groupe correct de chaque item reste, lui, masqué.
                 .groups(distinctGroups(question))
@@ -1186,9 +1251,29 @@ public class QuizService {
                 .build();
     }
 
+    /**
+     * Éléments déplaçables d'une question. ÉDITEUR : ids réels, ordre de la base. PASSATION :
+     * nouvel ordre aléatoire à chaque envoi et ids PUBLICS (masqués) — ni l'ordre reçu ni le tri
+     * des ids ne révèlent {@code correctOrder} ou les groupes (#28). Une Remise en ordre n'est
+     * jamais envoyée dans l'ordre attendu : le client, qui ne le connaît pas, garde l'ordre reçu.
+     */
+    private List<DragItemDTO> toDragItemDTOs(Question question, boolean includeCorrection) {
+        if (question.getDragItems() == null) return List.of();
+        List<DragItem> items;
+        if (includeCorrection) {
+            items = question.getDragItems();
+        } else if ("ordering".equals(slugFor(question))) {
+            items = itemObfuscator.shuffledExcept(
+                    question.getDragItems(), inExpectedOrder(question.getDragItems()), DragItem::getId);
+        } else {
+            items = itemObfuscator.shuffled(question.getDragItems());
+        }
+        return items.stream().map(d -> toDragItemDTO(d, includeCorrection)).toList();
+    }
+
     private DragItemDTO toDragItemDTO(DragItem dragItem, boolean includeCorrection) {
         return DragItemDTO.builder()
-                .id(dragItem.getId())
+                .id(includeCorrection ? dragItem.getId() : itemObfuscator.mask(dragItem.getId()))
                 .content(dragItem.getContent())
                 // Passation : null → champs omis (cf. @JsonInclude NON_NULL).
                 .correctOrder(includeCorrection ? dragItem.getCorrectOrder() : null)

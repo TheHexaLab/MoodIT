@@ -78,7 +78,8 @@ class QuizServiceStatsQueryCountTest {
             mock(ExecutionClient.class),
             mock(PlatformTransactionManager.class),
             mock(ApplicationEventPublisher.class),
-            mock(AuditLogService.class));
+            mock(AuditLogService.class),
+            mock(QuizItemObfuscator.class));
 
     single = new QType();
     single.setName("Choix unique");

@@ -56,7 +56,7 @@ class QuizServiceEditAuthTest {
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 new ObjectMapper(), realtimePublisher, executionClient, transactionManager, eventPublisher,
-                auditLogService);
+                auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(28)));
     }
 
     @Test

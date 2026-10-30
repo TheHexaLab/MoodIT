@@ -114,6 +114,13 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
       nativeQuery = true)
   boolean canSeeQuizViaProgram(@Param("userId") long userId, @Param("quizId") long quizId);
 
+  // Le quiz est-il PUBLIE ? Un brouillon n'est lisible / soumissible en passation que par le
+  // personnel du cours (cf. PermissionService.quizTakingAccess).
+  @Query(
+      value = "SELECT EXISTS(SELECT 1 FROM Quiz WHERE id = :quizId AND is_published = TRUE)",
+      nativeQuery = true)
+  boolean isQuizPublished(@Param("quizId") long quizId);
+
   // Le cours appartient-il (structurellement) au programme ? (table de jointure program_course)
   @Query(
       value =

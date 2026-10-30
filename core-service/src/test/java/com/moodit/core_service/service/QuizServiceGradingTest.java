@@ -253,8 +253,9 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
             QuestionResultDTO r = gradeSingle(q, order(101, 102, 100));
 
             assertThat(r.getEarned()).isEqualTo(3.0);
-            assertThat(r.getCorrectOrder()).containsExactly(101, 102, 100);
-            assertThat(r.getSubmittedOrder()).containsExactly(101, 102, 100);
+            // Résultat renvoyé à l'étudiant : ids PUBLICS (même espace que la passation).
+            assertThat(r.getCorrectOrder()).containsExactly(pub(101), pub(102), pub(100));
+            assertThat(r.getSubmittedOrder()).containsExactly(pub(101), pub(102), pub(100));
         }
 
         @Test
@@ -292,7 +293,7 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
             QuestionResultDTO r = gradeSingle(q2,
                     SubmittedAnswerDTO.builder().questionId(31).orderedItemIds(List.of(201, 200)).build());
 
-            assertThat(r.getCorrectOrder()).containsExactly(201, 200);
+            assertThat(r.getCorrectOrder()).containsExactly(pub(201), pub(200));
             assertThat(r.getEarned()).isEqualTo(2.0);
         }
 
@@ -310,7 +311,7 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
             QuestionResultDTO r = gradeSingle(q, order(101, 102, 100, 101, 999));
 
             assertThat(r.getEarned()).isZero();
-            assertThat(r.getSubmittedOrder()).containsExactly(101, 102, 100, 101, 999);
+            assertThat(r.getSubmittedOrder()).containsExactly(pub(101), pub(102), pub(100), pub(101), pub(999));
         }
 
         @Test
@@ -370,7 +371,7 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
             assertThat(r.getEarned()).isEqualTo(1.0);
             assertThat(r.getMatching()).hasSize(2);
             MatchingItemResultDTO java = r.getMatching().get(0);
-            assertThat(java.getItemId()).isEqualTo(300);
+            assertThat(java.getItemId()).isEqualTo(pub(300));
             assertThat(java.getChosenGroup()).isEqualTo("Objet");
             assertThat(java.getCorrectGroup()).isEqualTo("Objet");
             assertThat(java.getCorrect()).isTrue();
@@ -567,7 +568,8 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
                     .placement(Map.of(700, "Objet", 701, "Fonctionnel")).build());
 
             assertThat(r.getEarned()).isZero();
-            assertThat(r.getMatching()).extracting(MatchingItemResultDTO::getItemId).containsExactly(600, 601);
+            assertThat(r.getMatching()).extracting(MatchingItemResultDTO::getItemId)
+                    .containsExactly(pub(600), pub(601));
             assertThat(r.getMatching()).allSatisfy(m -> assertThat(m.getChosenGroup()).isNull());
         }
     }

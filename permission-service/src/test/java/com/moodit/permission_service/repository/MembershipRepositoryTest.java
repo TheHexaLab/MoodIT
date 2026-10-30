@@ -239,6 +239,15 @@ class MembershipRepositoryTest {
     assertThat(repo.canSeeQuizViaProgram(5, 30)).isTrue();
   }
 
+  @Test
+  void isQuizPublished_trueForPublishedFalseForDraftAndUnknown() {
+    sql("INSERT INTO quiz(id,course_id,is_published) VALUES (30,1,TRUE)");
+    sql("INSERT INTO quiz(id,course_id,is_published) VALUES (31,1,FALSE)");
+    assertThat(repo.isQuizPublished(30)).isTrue();
+    assertThat(repo.isQuizPublished(31)).isFalse();
+    assertThat(repo.isQuizPublished(99)).isFalse();
+  }
+
   // ── Propriété d'un post ─────────────────────────────────────────────────────────
 
   @Test

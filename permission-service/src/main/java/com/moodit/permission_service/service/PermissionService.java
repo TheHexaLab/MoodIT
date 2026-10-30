@@ -449,12 +449,14 @@ public class PermissionService {
                 (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
-        // etre abonne a un programme du cours du quiz.
-            rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
+        // etre abonne a un programme du cours du quiz. La lecture et la soumission exigent en
+        // plus que le quiz soit PUBLIE, sauf pour le personnel du cours (#28) : un brouillon
+        // n'est ni lisible ni soumissible par un etudiant.
+            rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizTakingAccess(user, vars)),
             rule(
             "POST",
             "/quizzes/{quizId}/submissions",
-            (user, vars, body) -> quizAccess(user, vars)),
+            (user, vars, body) -> quizTakingAccess(user, vars)),
             rule(
             "GET", "/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
             rule(
@@ -1022,6 +1024,16 @@ public class PermissionService {
   private boolean quizAccess(User user, Map<String, String> vars) {
     long quizId = longVar(vars, "quizId");
     return quizId > 0 && membershipService.canAccessQuiz(user.getId(), quizId);
+  }
+
+  // Passation d'un quiz (lecture du detail, soumission) : acces au quiz ET quiz publie, ou
+  // personnel du cours (gestion de contenu) pour un brouillon.
+  private boolean quizTakingAccess(User user, Map<String, String> vars) {
+    if (!quizAccess(user, vars)) {
+      return false;
+    }
+    long quizId = longVar(vars, "quizId");
+    return membershipService.isQuizPublished(quizId) || canManageQuizContent(user, vars, "quizId");
   }
 
   private boolean verifyUserId(User user, Map<String, String> vars) {
