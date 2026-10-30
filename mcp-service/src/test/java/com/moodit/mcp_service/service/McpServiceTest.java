@@ -17,6 +17,7 @@ import com.moodit.mcp_service.model.AuditLog;
 import com.moodit.mcp_service.exception.UserNotFoundException;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
+import com.moodit.mcp_service.model.McpSource;
 import com.moodit.mcp_service.model.McpStatus;
 import com.moodit.mcp_service.model.Role;
 import com.moodit.mcp_service.model.User;
@@ -343,11 +344,14 @@ class McpServiceTest {
         r.setCreatedAt(LocalDateTime.of(2026, 7, 2, 16, 21, 38));
         r.setContent("{\"score\":80}");
         r.setStatus(McpStatus.DONE);
+        r.setSource(McpSource.DETERMINISTIC);
         r.setUser(author);
         r.setCourse(course(10, "Algo", "IFT101"));
         when(mcpResponseRepository.findById(42)).thenReturn(Optional.of(r));
 
         McpResponseDto dto = service.getAnalysis(42);
+
+        assertThat(dto.source()).isEqualTo("DETERMINISTIC");
 
         assertThat(dto.id()).isEqualTo(42);
         assertThat(dto.createdAt()).isEqualTo("2026-07-02T16:21:38Z");
@@ -359,6 +363,19 @@ class McpServiceTest {
         assertThat(dto.author().firstName()).isEqualTo("Jean");
         assertThat(dto.author().lastName()).isEqualTo("Doe");
         assertThat(dto.author().avatarColor()).isEqualTo("#123456");
+    }
+
+    @Test
+    void getAnalysis_sourceAbsente_pourUneAnalyseAnterieureALaColonne() {
+        McpResponse r = new McpResponse();
+        r.setId(43);
+        r.setCreatedAt(LocalDateTime.of(2026, 7, 2, 16, 21, 38));
+        r.setStatus(McpStatus.DONE);
+        r.setUser(user(5, "Enseignant"));
+        r.setCourse(course(10, "Algo", "IFT101"));
+        when(mcpResponseRepository.findById(43)).thenReturn(Optional.of(r));
+
+        assertThat(service.getAnalysis(43).source()).isNull();
     }
 
     private static McpResponse done(int id, String content) {

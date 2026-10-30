@@ -76,7 +76,8 @@ public class McpService {
                 author.getId(),
                 response.getCourse().getId(),
                 new Author(author.getId(), author.getUsername(), author.getFirstName(),
-                        author.getLastName(), author.getAvatarColor()));
+                        author.getLastName(), author.getAvatarColor()),
+                response.getSource() == null ? null : response.getSource().name());
     }
 
     /** L'utilisateur courant a-t-il une analyse EN COURS sur ce cours ? (réhydratation) */

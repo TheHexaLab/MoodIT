@@ -303,6 +303,23 @@ describe('McpManagementPopup', () => {
     expect(screen.getByText(t.scopeNote(4, 37, 25))).toBeTruthy();
   });
 
+  it.each([
+    ['LLM', t.sourceLlm, t.sourceDeterministic],
+    ['DETERMINISTIC', t.sourceDeterministic, t.sourceLlm],
+  ] as const)('le détail indique l’origine de l’analyse (%s)', async (source, shown, hidden) => {
+    renderPopup({ loadAnalysis: vi.fn().mockResolvedValue({ ...response(ANALYSIS), source }) });
+    await openFirstDetail();
+    expect(screen.getByText(shown)).toBeTruthy();
+    expect(screen.queryByText(hidden)).toBeNull();
+  });
+
+  it('sans origine connue (analyse antérieure), aucune mention n’est affichée', async () => {
+    renderPopup();
+    await openFirstDetail();
+    expect(screen.queryByText(t.sourceLlm)).toBeNull();
+    expect(screen.queryByText(t.sourceDeterministic)).toBeNull();
+  });
+
   it('les onglets basculent entre points forts, à améliorer et recommandations', async () => {
     renderPopup();
     await openFirstDetail();

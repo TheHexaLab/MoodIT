@@ -33,6 +33,15 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Fichiers produits par Vite (JS, CSS, polices woff2…) : leur nom contient un hachage du
+    # contenu, il change à chaque modification. On peut donc les garder en cache un an sans
+    # revalider. Un fichier absent répond 404 au lieu de retomber sur index.html.
+    location /assets/ {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
     location /api/ {
         proxy_pass http://gateway:8080;
         proxy_set_header Host $host;

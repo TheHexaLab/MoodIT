@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -14,6 +15,14 @@ import org.springframework.data.repository.query.Param;
 import com.moodit.core_service.model.Post;
 
 public interface PostRepository extends JpaRepository<Post, Integer> {
+
+    /**
+     * Post d'un forum, par une requête ciblée (id + forum) : remplace le chargement de TOUS les
+     * posts du forum ({@code forum.getPosts()}) suivi d'un filtre en mémoire. Vide si le post
+     * n'existe pas ou n'est pas dans ce forum. L'auteur vient dans la même requête.
+     */
+    @EntityGraph(attributePaths = "user")
+    Optional<Post> findByIdAndForumId(Integer id, Integer forumId);
 
     /**
      * Post d'un forum, VERROUILLÉ en écriture jusqu'à la fin de la transaction ({@code SELECT … FOR

@@ -54,14 +54,22 @@ public class CourseStatsRepository {
 
     /**
      * Échantillon du CONTENU des messages de forum du cours (plus récents d'abord, tronqués),
-     * pour laisser le LLM juger le ressenti étudiant. Vide si aucun message.
+     * pour laisser le LLM juger le ressenti étudiant. Vide si aucun message. Au plus
+     * {@code maxPerAuthor} messages par auteur (ses plus récents) : un seul auteur ne peut pas
+     * occuper tout l'échantillon en multipliant les messages.
      */
-    public List<String> sampleForumMessages(int courseId, int limit) {
+    public List<String> sampleForumMessages(int courseId, int limit, int maxPerAuthor) {
         return jdbc.queryForList(
-                "SELECT LEFT(p.content, 400) FROM post p JOIN forum f ON f.id = p.forum_id "
-                        + "WHERE f.course_id = ? AND p.content IS NOT NULL AND p.content <> '' "
-                        + "ORDER BY p.created_at DESC LIMIT ?",
-                String.class, courseId, limit);
+                "SELECT content FROM ("
+                        + "  SELECT LEFT(p.content, 400) AS content, p.created_at, p.id,"
+                        + "    ROW_NUMBER() OVER (PARTITION BY p.user_id"
+                        + "      ORDER BY p.created_at DESC, p.id DESC) AS rank_by_author"
+                        + "  FROM post p JOIN forum f ON f.id = p.forum_id"
+                        + "  WHERE f.course_id = ? AND p.content IS NOT NULL AND p.content <> ''"
+                        + ") ranked "
+                        + "WHERE rank_by_author <= ? "
+                        + "ORDER BY created_at DESC, id DESC LIMIT ?",
+                String.class, courseId, maxPerAuthor, limit);
     }
 
     /** Nombre total de tentatives de quiz du cours. */

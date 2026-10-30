@@ -328,13 +328,15 @@ public class PermissionService {
             // (cf. DELETE ci-dessous) n'ouvre PAS l'edition : un moderateur supprime, il ne
             // reecrit pas le message d'autrui. Canal d'annonces : le personnel du cours modifie
             // toutes les annonces (comme il les publie et les supprime).
+            // EPINGLER (body.isPinned non nul) est une action de MODERATION : reserve au
+            // personnel du cours du forum, auteur ou non (cf. canEditForumPost).
             rule(
                     "PATCH",
                     "/forums/{forumId}/posts/{postId}",
                     (user, vars, body) ->
                         isAnnouncementPost(vars)
                             ? canManageForumContent(user, vars, "forumId")
-                            : isPostAuthor(user, vars, "postId")),
+                            : canEditForumPost(user, vars, body)),
             // SUPPRIMER un post ou message : SON AUTEUR, OU un MODERATEUR du forum. Moderateur =
             // Administrateur/Gardien GLOBAL (partout), OU Administrateur DU programme du cours du
             // forum (User_Program_Role via Forum.course_id). L'Enseignant N'est PAS moderateur.
@@ -1050,6 +1052,36 @@ public class PermissionService {
   private boolean isPostAuthor(User user, Map<String, String> vars, String postVar) {
     long postId = longVar(vars, postVar);
     return postId > 0 && membershipService.isPostAuthor(user.getId(), postId);
+  }
+
+  // ── PREDICAT : EDITER un post/message hors annonce (PATCH, body = ForumUpdatePostDTO) ──
+  // Sans `isPinned` (absent ou null) : edition du contenu, reservee a l'auteur. Avec
+  // `isPinned` : il faut gerer le contenu du forum (personnel du cours, admin/gardien global) ;
+  // si la requete change AUSSI autre chose, il faut en plus en etre l'auteur. Un champ inconnu
+  // non nul compte comme « autre chose » (prudence : on ne suppose pas que core l'ignore).
+  private boolean canEditForumPost(User user, Map<String, String> vars, JsonNode body) {
+    if (!hasNonNullField(body, "isPinned")) {
+      return isPostAuthor(user, vars, "postId");
+    }
+    if (!canManageForumContent(user, vars, "forumId")) {
+      return false;
+    }
+    return onlyNonNullField(body, "isPinned") || isPostAuthor(user, vars, "postId");
+  }
+
+  // Le body contient-il ce champ avec une valeur non nulle ?
+  private static boolean hasNonNullField(JsonNode body, String field) {
+    return body != null && body.has(field) && !body.get(field).isNull();
+  }
+
+  // Ce champ est-il le SEUL champ non nul du body ?
+  private static boolean onlyNonNullField(JsonNode body, String field) {
+    for (Map.Entry<String, JsonNode> entry : body.properties()) {
+      if (!entry.getKey().equals(field) && !entry.getValue().isNull()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // ── PREDICAT : SUPPRIMER un post/message (auteur OU moderateur du forum) ────────────

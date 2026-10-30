@@ -48,6 +48,8 @@ export const defaultLabels: McpManagementPopupLabels = {
   emptyImprovements: 'Aucun axe d’amélioration identifié.',
   emptyRecommendations: 'Aucune recommandation.',
   generatedNote: (date, author) => `Généré le ${date}${author ? ` par ${author}` : ''}`,
+  sourceLlm: 'Analyse générée par IA',
+  sourceDeterministic: 'Analyse calculée sans IA',
   scopeNote: (quiz, messages, students) =>
     `Sources : ${quiz} quiz, ${messages} messages, ${students} étudiants.`,
 };

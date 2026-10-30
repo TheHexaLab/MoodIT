@@ -156,7 +156,7 @@ public class ForumService {
         dto.setUsername(user.getUsername());
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
-        dto.setEmail(user.getEmail());
+        // Pas de courriel : ce DTO est servi à tous les lecteurs du forum.
         dto.setAvatarColor(user.getAvatarColor());
         return dto;
     }
@@ -266,12 +266,8 @@ public class ForumService {
     }
     public PostVoteUserDTO getPostByForum (Integer forumId, Integer postId, boolean loadChildren, String email) {
         Integer currentUserId = resolveUserId(email);
-        Forum forum = forumRepository.findById(forumId)
-                .orElseThrow(ForumNotFoundException::new);
-        Post post = forum.getPosts()
-                .stream()
-                .filter(p -> p.getId().equals(postId))
-                .findFirst()
+        forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
+        Post post = postRepository.findByIdAndForumId(postId, forumId)
                 .orElseThrow(PostNotFoundException::new);
 
         return toPostVoteUserDTO(post, loadChildren, currentUserId);
@@ -284,12 +280,8 @@ public class ForumService {
      */
     public List<PostVoteUserDTO> getRepliesByPost(Integer forumId, Integer postId, String email) {
         Integer currentUserId = resolveUserId(email);
-        Forum forum = forumRepository.findById(forumId)
-                .orElseThrow(ForumNotFoundException::new);
-        Post post = forum.getPosts()
-                .stream()
-                .filter(p -> p.getId().equals(postId))
-                .findFirst()
+        forumRepository.findById(forumId).orElseThrow(ForumNotFoundException::new);
+        Post post = postRepository.findByIdAndForumId(postId, forumId)
                 .orElseThrow(PostNotFoundException::new);
 
         List<Post> children = post.getChildren();
@@ -416,10 +408,7 @@ public class ForumService {
         // createdAt est généré par la BD (@CreationTimestamp source=DB) → ordre cohérent.
 
         if (postCreateInForumDTO.getParentPostId() != null) {
-            Post parent = forum.getPosts()
-                    .stream()
-                    .filter(p -> p.getId().equals(postCreateInForumDTO.getParentPostId()))
-                    .findFirst()
+            Post parent = postRepository.findByIdAndForumId(postCreateInForumDTO.getParentPostId(), forum.getId())
                     .orElseThrow(PostNotFoundException::new);
             post.setParent(parent);
         }
@@ -498,9 +487,9 @@ public class ForumService {
             result = voteCreateInPostDTO.getVoteValue();
         }
 
-        // ── Diffusion temps réel (après commit) sur la room du forum. ──
-        long forumId = voteCreateInPostDTO.getForumId();
-        long postId = voteCreateInPostDTO.getPostId();
+        // ── Diffusion temps réel (après commit) sur la room du forum DU POST (pas l'id du body). ──
+        long forumId = post.getForum().getId();
+        long postId = post.getId();
         long userId = user.getId();
         int resultingValue = result;
         afterCommit(() -> realtimePublisher.postVoted(forumId, postId, userId, resultingValue));
@@ -526,10 +515,7 @@ public class ForumService {
     public PostDTO updatePost(Integer forumId, Integer postId, ForumUpdatePostDTO dto) {
     Forum forum = forumRepository.findById(forumId)
             .orElseThrow(ForumNotFoundException::new);
-    Post post = forum.getPosts()
-            .stream()
-            .filter(p -> p.getId().equals(postId))
-            .findFirst()
+    Post post = postRepository.findByIdAndForumId(postId, forumId)
             .orElseThrow(PostNotFoundException::new);
 
         // Modification PARTIELLE : un champ absent (null) reste inchangé, quel que soit le type.
@@ -605,10 +591,7 @@ public class ForumService {
     public void deletePost(Integer forumId, Integer postId, String email) {
         Forum forum = forumRepository.findById(forumId)
                 .orElseThrow(ForumNotFoundException::new);
-        Post post = forum.getPosts()
-                .stream()
-                .filter(p -> p.getId().equals(postId))
-                .findFirst()
+        Post post = postRepository.findByIdAndForumId(postId, forumId)
                 .orElseThrow(PostNotFoundException::new);
 
         // Capturé AVANT delete (f_type du forum encore accessible) ; émis après commit.

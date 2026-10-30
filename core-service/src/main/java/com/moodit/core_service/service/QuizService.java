@@ -663,7 +663,11 @@ public class QuizService {
      */
     @Transactional(readOnly = true)
     public CourseQuizStatsDTO getCourseQuizStats(Integer courseId) {
-        List<Attempt> attempts = attemptRepository.findByQuiz_Course_Id(courseId);
+        // Deux requêtes, quel que soit le nombre de tentatives : tentatives + soumissions, puis
+        // verdicts de tests de ces soumissions (le résultat sert seulement à remplir leurs
+        // collections, déjà en mémoire, avant la correction ci-dessous).
+        List<Attempt> attempts = attemptRepository.findWithSubmissionsByCourseId(courseId);
+        submissionRepository.findWithTestCaseResultsByCourseId(courseId);
         List<Double> percentages = new ArrayList<>();
         Set<Integer> students = new HashSet<>();
         for (Attempt attempt : attempts) {

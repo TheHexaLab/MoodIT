@@ -182,7 +182,7 @@ class ForumServiceAnnouncementTest {
     p.setColor("red");
     p.setExpiresAt(LocalDateTime.of(2026, 11, 1, 0, 0));
     p.setForum(announcements);
-    announcements.setPosts(new java.util.ArrayList<>(List.of(p)));
+    when(postRepository.findByIdAndForumId(40, 11)).thenReturn(Optional.of(p));
     return p;
   }
 
