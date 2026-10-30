@@ -156,7 +156,7 @@ public class ForumService {
         dto.setUsername(user.getUsername());
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
-        dto.setEmail(user.getEmail());
+        // Pas de courriel : ce DTO est servi à tous les lecteurs du forum.
         dto.setAvatarColor(user.getAvatarColor());
         return dto;
     }
@@ -498,9 +498,9 @@ public class ForumService {
             result = voteCreateInPostDTO.getVoteValue();
         }
 
-        // ── Diffusion temps réel (après commit) sur la room du forum. ──
-        long forumId = voteCreateInPostDTO.getForumId();
-        long postId = voteCreateInPostDTO.getPostId();
+        // ── Diffusion temps réel (après commit) sur la room du forum DU POST (pas l'id du body). ──
+        long forumId = post.getForum().getId();
+        long postId = post.getId();
         long userId = user.getId();
         int resultingValue = result;
         afterCommit(() -> realtimePublisher.postVoted(forumId, postId, userId, resultingValue));

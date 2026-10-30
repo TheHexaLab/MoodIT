@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -192,7 +193,7 @@ class ForumServiceTest {
       assertThat(dto.getAuthor().getId()).isEqualTo(1);
       assertThat(dto.getAuthor().getFirstName()).isEqualTo("ALICE");
       assertThat(dto.getAuthor().getLastName()).isEqualTo("Test");
-      assertThat(dto.getAuthor().getEmail()).isEqualTo("alice@test.ca");
+      assertThat(dto.getAuthor().getEmail()).as("courriel non exposé aux lecteurs").isNull();
       assertThat(dto.getAuthor().getAvatarColor()).isEqualTo("#000001");
       assertThat(dto.getChildrenCount()).isEqualTo(1);
       assertThat(dto.getChildren()).hasSize(1);
@@ -609,6 +610,7 @@ class ForumServiceTest {
     @BeforeEach
     void postVerrouille() {
       sujet = post(7, bob, "sujet");
+      sujet.setForum(forum(5, "Thread"));
     }
 
     /** Le post 7 du forum 5, chargé ET verrouillé (SELECT … FOR UPDATE). */
@@ -633,6 +635,21 @@ class ForumServiceTest {
       assertThat(saved.getValue().getValue()).isEqualTo(1);
       verify(realtimePublisher).postVoted(5L, 7L, 1L, 1);
       verifyNoInteractions(forumRepository); // post trouvé : pas de chargement du forum
+    }
+
+    @Test
+    @DisplayName("L'écho part dans la room du forum DU POST, pas celle du forumId du corps")
+    void echo_dans_le_forum_du_post() {
+      VoteCreateInPostDTO autreForum =
+          VoteCreateInPostDTO.builder().forumId(8).postId(7).voteValue(1).build();
+      when(postRepository.findByIdAndForumIdForUpdate(7, 8)).thenReturn(Optional.of(sujet));
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
+
+      forumService.addVoteToPost(autreForum, "alice@test.ca");
+
+      verify(realtimePublisher).postVoted(5L, 7L, 1L, 1);
+      verify(realtimePublisher, never()).postVoted(eq(8L), anyLong(), anyLong(), anyInt());
     }
 
     @Test
@@ -930,9 +947,8 @@ class ForumServiceTest {
       verifyNoInteractions(postRepository);
     }
 
-    // Bogue : deletePost lève une RuntimeException("Post not found") générique (non gérée par
-    // GlobalExceptionHandler → HTTP 500) au lieu de PostNotFoundException (→ 404), contrairement
-    // à getPostByForum / updatePost pour le même cas.
+    // Post absent : PostNotFoundException, traduite en 404 par GlobalExceptionHandler (#29),
+    // comme getPostByForum / updatePost pour le même cas.
     @Test
     @DisplayName("deletePost : post absent du forum → PostNotFoundException (404)")
     void deletePost_post_absent_devrait_lancer_PostNotFound() {
