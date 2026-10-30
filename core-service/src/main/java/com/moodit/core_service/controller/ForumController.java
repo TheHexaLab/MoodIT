@@ -6,8 +6,10 @@ import com.moodit.core_service.dto.*;
 //Service
 import com.moodit.core_service.service.ForumService;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -107,7 +109,7 @@ public class ForumController {
     }
 
     @PostMapping("/posts/votes")
-    public ResponseEntity<Void> addVoteToPost(@RequestBody VoteCreateInPostDTO voteCreateInPostDTO,
+    public ResponseEntity<Void> addVoteToPost(@Valid @RequestBody VoteCreateInPostDTO voteCreateInPostDTO,
                                               @RequestHeader("X-User-Email") String email) {
         forumService.addVoteToPost(voteCreateInPostDTO, email);
         return ResponseEntity.noContent().build(); //code 204
@@ -120,7 +122,9 @@ public class ForumController {
         return ResponseEntity.ok(forumService.updateForum(forumId, forumUpdateDTO));
     }
 
-    @PatchMapping("/{forumId}/posts/{postId}")
+    // JSON strict (pas de `application/*+json`) : c'est le corps que le gateway transmet au
+    // permission-service, dont la règle lit `isPinned` (épingler = modération, #29).
+    @PatchMapping(value = "/{forumId}/posts/{postId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<PostDTO> updatePost(@PathVariable Integer forumId,
                                               @PathVariable Integer postId,
                                               @RequestBody ForumUpdatePostDTO forumUpdatePostDTO) {
