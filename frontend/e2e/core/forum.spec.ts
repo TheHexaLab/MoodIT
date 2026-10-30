@@ -27,7 +27,14 @@ test('poster un sujet puis voter', async ({ browser }) => {
     .getByRole('listitem')
     .filter({ has: alicePage.getByRole('heading', { name: title }) });
   await expect(alicePost.getByRole('strong')).toHaveText('gras'); // Markdown rendu
-  await expect(alicePost.getByRole('button', { name: 'Voter pour' })).toBeDisabled();
+  const aliceUp = alicePost.getByRole('button', { name: 'Voter pour' });
+  await expect(aliceUp).toBeDisabled();
+  // Style de la barre de votes (jsdom ne calcule pas le CSS) : conteneur flex, cible de 24 px
+  // (WCAG 2.5.8) et vote sur son propre sujet estompé.
+  await expect(aliceUp.locator('..')).toHaveCSS('display', 'flex');
+  await expect(aliceUp).toHaveCSS('width', '24px');
+  await expect(aliceUp).toHaveCSS('height', '24px');
+  await expect(aliceUp).toHaveCSS('opacity', '0.4');
 
   const bob = await browser.newContext({ storageState: storageStatePath('bob') });
   const bobPage = await bob.newPage();

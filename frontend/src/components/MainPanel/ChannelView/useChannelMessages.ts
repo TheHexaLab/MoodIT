@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
@@ -183,8 +183,11 @@ export function useChannelMessages({
     fetchRef.current = onFetchMessages;
   });
   /** Dernière liste de messages (ref stable → loadOlder lit sans se recréer). */
+  // useLayoutEffect : le ref est à jour dès l'affichage des messages. Avec useEffect, il l'était
+  // après coup, et un scroll vers le haut arrivé entre les deux demandait la page sans curseur,
+  // donc la plus récente au lieu de la précédente (vu en CI, sous charge, #194).
   const messagesRef = useRef(messages);
-  useEffect(() => {
+  useLayoutEffect(() => {
     messagesRef.current = messages;
   });
 

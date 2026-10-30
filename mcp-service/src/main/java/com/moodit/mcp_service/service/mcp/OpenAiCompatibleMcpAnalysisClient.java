@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Implémentation {@link McpAnalysisClient} via une API compatible OpenAI (endpoint
@@ -56,6 +57,12 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
                     + "si AUCUNE donnée de réussite n'est fournie. "
                     + "Tu écris EN FRANÇAIS, de façon courte et concrète, et tu réponds UNIQUEMENT "
                     + "par un objet JSON valide, sans texte autour.";
+
+    /** Suites de 3 chevrons ou plus : forme des délimiteurs du prompt (cf. neutralizeDelimiters). */
+    private static final Pattern OPENING_RUN = Pattern.compile("<{3,}");
+    private static final Pattern CLOSING_RUN = Pattern.compile(">{3,}");
+    /** Tout saut de ligne (\n, \r\n, \r, séparateurs Unicode). */
+    private static final Pattern LINE_BREAK = Pattern.compile("\\R");
 
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
@@ -245,8 +252,8 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
                   ex. « Assouplir les délais des travaux »).
                 """
                 .formatted(
-                        ctx.courseTitle() == null ? "Cours" : ctx.courseTitle(),
-                        ctx.courseCode(),
+                        ctx.courseTitle() == null ? "Cours" : neutralizeDelimiters(ctx.courseTitle()),
+                        neutralizeDelimiters(ctx.courseCode()),
                         ctx.quizCount(),
                         ctx.forumMessageCount(),
                         ctx.studentCount(),
@@ -262,6 +269,17 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
     }
 
     /**
+     * Neutralise les délimiteurs du prompt ({@code <<<MESSAGES>>>}, {@code <<<FIN_MESSAGES>>>}) dans
+     * un texte fourni par un utilisateur : toute suite de 3 chevrons ou plus est ramenée à 2. Le
+     * texte ne peut donc plus fermer ni rouvrir le bloc de messages, quel que soit le nom entre
+     * chevrons. Le sens du message (ressenti) est préservé. {@code null} est rendu tel quel.
+     */
+    static String neutralizeDelimiters(String text) {
+        if (text == null) return null;
+        return CLOSING_RUN.matcher(OPENING_RUN.matcher(text).replaceAll("<<")).replaceAll(">>");
+    }
+
+    /**
      * Met en forme les extraits de messages en liste à puces (ou une mention si vide). Chaque
      * extrait est ANONYMISÉ ({@link ForumTextRedactor}) avant d'être injecté dans le prompt :
      * le texte part vers un LLM externe (Groq), on retire donc le PII à haut risque (courriels,
@@ -273,7 +291,10 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
         }
         StringBuilder sb = new StringBuilder();
         for (String message : samples) {
-            String safe = ForumTextRedactor.redact(message).replace('\n', ' ').trim();
+            // Une ligne par extrait (un message ne peut pas imiter une nouvelle puce ni une
+            // section du prompt) et délimiteurs neutralisés.
+            String safe = neutralizeDelimiters(
+                    LINE_BREAK.matcher(ForumTextRedactor.redact(message)).replaceAll(" ")).trim();
             sb.append("  - ").append(safe).append('\n');
         }
         return sb.toString().stripTrailing();

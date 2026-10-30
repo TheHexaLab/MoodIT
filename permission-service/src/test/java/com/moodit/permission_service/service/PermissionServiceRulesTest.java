@@ -632,6 +632,50 @@ class PermissionServiceRulesTest {
       assertThat(allowed("/api/forums/9", "DELETE", null)).isTrue();
     }
 
+    // ── Épingler un post (PATCH avec isPinned) : action de modération (#29) ──
+    private static final String POST_PATH = "/api/forums/9/posts/40";
+
+    @Test
+    void editerPost_auteurSansEpinglage_autorise() {
+      loggedIn(user(5));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"content\":\"x\",\"isPinned\":null}")).isTrue();
+    }
+
+    @Test
+    void epinglerPost_auteurEtudiant_refuse() {
+      loggedIn(user(5));
+      lenient().when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true}")).isFalse();
+      assertThat(allowed(POST_PATH, "PATCH", "{\"content\":\"x\",\"isPinned\":false}")).isFalse();
+      // Valeur coercible par core (chaîne) : traitée comme une demande d'épinglage.
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":\"true\"}")).isFalse();
+    }
+
+    @Test
+    void epinglerPost_enseignantDuCours_nonAuteur_autorise() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"title\":null}")).isTrue();
+      verify(membershipService, never()).isPostAuthor(anyLong(), anyLong());
+    }
+
+    @Test
+    void epinglerEtModifierPost_personnelNonAuteur_refuse() {
+      // Le personnel épingle, mais ne réécrit pas le post d'autrui.
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"content\":\"x\"}")).isFalse();
+    }
+
+    @Test
+    void epinglerEtModifierPost_personnelAuteur_autorise() {
+      loggedIn(user(5, RoleNames.ADMIN));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"content\":\"x\"}")).isTrue();
+    }
+
     @Test
     void supprimerPost_forumIdNonNumerique_nonAuteur_refuse() {
       // Pas l'auteur, pas de rôle global, forumId invalide → pas de modération possible.

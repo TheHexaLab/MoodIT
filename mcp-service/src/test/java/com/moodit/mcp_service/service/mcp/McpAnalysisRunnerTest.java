@@ -14,6 +14,7 @@ import com.moodit.mcp_service.dto.McpAnalysis;
 import com.moodit.mcp_service.dto.McpResponseSummaryDto;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
+import com.moodit.mcp_service.model.McpSource;
 import com.moodit.mcp_service.model.McpStatus;
 import com.moodit.mcp_service.model.User;
 import com.moodit.mcp_service.repository.CourseStatsRepository;
@@ -69,7 +70,7 @@ class McpAnalysisRunnerTest {
         when(courseStatsRepository.countQuizzes(10)).thenReturn(6);
         when(courseStatsRepository.countForumMessages(10)).thenReturn(9);
         when(courseStatsRepository.countStudents(10)).thenReturn(3);
-        when(courseStatsRepository.sampleForumMessages(10, 20)).thenReturn(List.of("ok"));
+        when(courseStatsRepository.sampleForumMessages(10, 20, 3)).thenReturn(List.of("ok"));
         when(courseStatsRepository.countQuizAttempts(10)).thenReturn(3);
         when(courseStatsRepository.countDistinctQuizStudents(10)).thenReturn(3);
         when(courseStatsRepository.codeTestPassRate(10)).thenReturn(null);
@@ -94,6 +95,7 @@ class McpAnalysisRunnerTest {
         runner.run(1);
 
         assertThat(response.getStatus()).isEqualTo(McpStatus.DONE);
+        assertThat(response.getSource()).isEqualTo(McpSource.LLM);
         assertThat(response.getContent()).contains("\"score\":80");
         verify(mcpResponseRepository).save(response);
         verify(realtimeGateway).analysisCreated(eq(10L), any(McpResponseSummaryDto.class));
@@ -112,6 +114,7 @@ class McpAnalysisRunnerTest {
 
         // Le repli déterministe produit quand même une analyse : statut DONE, event created.
         assertThat(response.getStatus()).isEqualTo(McpStatus.DONE);
+        assertThat(response.getSource()).isEqualTo(McpSource.DETERMINISTIC);
         verify(realtimeGateway).analysisProgress(10L, 5L, "fallback");
         verify(realtimeGateway).analysisCreated(eq(10L), any(McpResponseSummaryDto.class));
         verify(realtimeGateway, never()).analysisFailed(anyLong(), anyLong(), any());
@@ -128,6 +131,7 @@ class McpAnalysisRunnerTest {
         runner.run(1);
 
         assertThat(response.getStatus()).isEqualTo(McpStatus.FAILED);
+        assertThat(response.getSource()).isNull();
         // Motif générique : le message d'exception interne ne doit jamais fuir au client.
         verify(realtimeGateway).analysisFailed(10L, 5L, "Analyse indisponible pour le moment.");
     }

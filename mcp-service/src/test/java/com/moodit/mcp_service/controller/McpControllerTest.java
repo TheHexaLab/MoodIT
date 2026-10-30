@@ -159,7 +159,7 @@ class McpControllerTest {
     void getAnalysis_repond200_avecLeDetailComplet_pourLIdDuChemin() throws Exception {
         when(mcpService.getAnalysis(42)).thenReturn(new McpResponseDto(
                 42, "2026-07-02T16:21:38Z", "{\"summary\":\"ok\"}", 5, 10,
-                new Author(5, "jdoe", "Jean", "Doe", "#123456")));
+                new Author(5, "jdoe", "Jean", "Doe", "#123456"), "LLM"));
 
         mvc.perform(get("/mcp/analyses/42").header("X-User-Email", "a@a"))
                 .andExpect(status().isOk())
@@ -170,7 +170,8 @@ class McpControllerTest {
                 .andExpect(jsonPath("$.userId").value(5))
                 .andExpect(jsonPath("$.courseId").value(10))
                 .andExpect(jsonPath("$.author.id").value(5))
-                .andExpect(jsonPath("$.author.username").value("jdoe"));
+                .andExpect(jsonPath("$.author.username").value("jdoe"))
+                .andExpect(jsonPath("$.source").value("LLM"));
 
         verify(mcpService).getAnalysis(42);
         verifyNoMoreInteractions(mcpService);
