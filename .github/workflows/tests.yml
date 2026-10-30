@@ -411,37 +411,19 @@ jobs:
       # @playwright/test : navigateurs, dépendances système et polices déjà dedans. Plus d'apt sur
       # le chemin critique : le miroir Ubuntu des runners a bloqué ou bridé (93 ko/s) quatre jobs
       # en une soirée. La pile, elle, tourne sur l'hôte ; le conteneur la joint par `--network host`.
+      # La police Inter est servie par l'app elle-même (#115) : rien à monter dans le conteneur.
       - name: Version de Playwright
         id: pw
         working-directory: frontend
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      # Police Inter : l'app la demande sans la fournir. Sans elle, le repli (DejaVu Sans, plus
-      # large) fait déborder des titres (forum : +41 px à 390 px). Récupérée depuis la release
-      # GitHub (CDN, pas apt) et mise en cache ; montée dans le conteneur comme police système.
-      - name: Cache de la police Inter
-        id: inter
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .inter
-          key: inter-4.1
-
-      - name: Télécharger la police Inter
-        if: steps.inter.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p .inter
-          curl -sSL --retry 5 --retry-all-errors -o /tmp/inter.zip \
-            https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
-          unzip -q -j /tmp/inter.zip Inter.ttc -d .inter
-
       - name: Tests Playwright
         run: |
           docker run --rm --network host --ipc=host \
             -v "$PWD/frontend:/work" -w /work \
-            -v "$PWD/.inter:/usr/share/fonts/truetype/inter:ro" \
             -e CI=true \
             mcr.microsoft.com/playwright:v${{ steps.pw.outputs.version }}-noble \
-            bash -c "fc-cache -f > /dev/null && npx playwright test e2e/core --config playwright.core.config.ts ${{ matrix.args }}"
+            npx playwright test e2e/core --config playwright.core.config.ts ${{ matrix.args }}
 
       - name: Logs des services (en cas d'échec)
         if: failure()
