@@ -1,0 +1,53 @@
+name: Déblocage des issues
+
+# À la fermeture d'une issue, retire le label « bloqué » des issues ouvertes qu'elle bloquait et qui
+# n'ont plus aucun bloqueur ouvert (#198). GitHub met à jour le lien « bloquée par », mais pas le label.
+#
+# `issues` exécute toujours la version de ce fichier présente sur main : il ne se teste pas depuis
+# une branche. Le déclenchement manuel rejoue la logique sur une issue existante.
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Numéro de l'issue fermée à traiter"
+        required: true
+      dry_run:
+        description: "Simulation (n'écrit rien)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  unblock:
+    name: Retirer le label des issues débloquées
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write   # lecture des dépendances, retrait du label
+    steps:
+      - name: Retirer « bloqué » s'il ne reste aucun bloqueur ouvert
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          gh api --paginate "repos/$REPO/issues/$ISSUE/dependencies/blocking" \
+            --jq '.[] | select(.state == "open" and any(.labels[]; .name == "bloqué")) | .number' |
+          while read -r number; do
+            open_blockers=$(gh api --paginate "repos/$REPO/issues/$number/dependencies/blocked_by" \
+              --jq '.[] | select(.state == "open") | .number')
+            if [ -n "$open_blockers" ]; then
+              echo "#$number reste bloquée par : $(echo $open_blockers)"
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "#$number serait débloquée (simulation)"
+            else
+              gh issue edit "$number" --repo "$REPO" --remove-label "bloqué"
+              echo "#$number débloquée"
+            fi
+          done
