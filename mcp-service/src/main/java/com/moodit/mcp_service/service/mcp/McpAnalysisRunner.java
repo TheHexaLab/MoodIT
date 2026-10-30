@@ -5,6 +5,7 @@ import com.moodit.mcp_service.dto.McpAnalysis;
 import com.moodit.mcp_service.dto.McpResponseSummaryDto;
 import com.moodit.mcp_service.model.Course;
 import com.moodit.mcp_service.model.McpResponse;
+import com.moodit.mcp_service.model.McpSource;
 import com.moodit.mcp_service.model.McpStatus;
 import com.moodit.mcp_service.repository.CourseStatsRepository;
 import com.moodit.mcp_service.repository.McpResponseRepository;
@@ -40,6 +41,15 @@ public class McpAnalysisRunner {
     private final McpAnalysisClient analysisClient;
     private final McpRealtimeGateway realtimeGateway;
     private final ObjectMapper objectMapper;
+
+    /** Taille de l'échantillon de messages de forum transmis au LLM. */
+    static final int FORUM_SAMPLE_SIZE = 20;
+
+    /**
+     * Plafond de messages par auteur dans l'échantillon : un seul étudiant qui publie beaucoup ne
+     * remplit pas tout l'échantillon à lui seul.
+     */
+    static final int FORUM_SAMPLE_PER_AUTHOR = 3;
 
     /** Motif générique poussé au client quand une analyse ne peut pas aboutir. */
     static final String UNAVAILABLE = "Analyse indisponible pour le moment.";
@@ -98,7 +108,8 @@ public class McpAnalysisRunner {
                     courseStatsRepository.countQuizzes(courseId),
                     courseStatsRepository.countForumMessages(courseId),
                     courseStatsRepository.countStudents(courseId),
-                    courseStatsRepository.sampleForumMessages(courseId, 20),
+                    courseStatsRepository.sampleForumMessages(
+                            courseId, FORUM_SAMPLE_SIZE, FORUM_SAMPLE_PER_AUTHOR),
                     courseStatsRepository.countQuizAttempts(courseId),
                     courseStatsRepository.countDistinctQuizStudents(courseId),
                     courseStatsRepository.codeTestPassRate(courseId),
@@ -106,9 +117,11 @@ public class McpAnalysisRunner {
                     coreQuizStatsClient.averageScorePercent(courseId));
 
             McpAnalysis analysis;
+            McpSource source;
             try {
                 realtimeGateway.analysisProgress(courseId, userId, "analyzing");
                 analysis = analysisClient.analyze(ctx);
+                source = McpSource.LLM;
             } catch (McpAnalysisException e) {
                 // LLM indisponible/illisible : on n'échoue PAS le job, on calcule un repli
                 // déterministe à partir des stats réelles (sécurise la démo).
@@ -116,9 +129,11 @@ public class McpAnalysisRunner {
                         responseId, courseId, e.getMessage());
                 realtimeGateway.analysisProgress(courseId, userId, "fallback");
                 analysis = DeterministicMcpAnalysis.compute(ctx);
+                source = McpSource.DETERMINISTIC;
             }
 
             response.setContent(objectMapper.writeValueAsString(analysis));
+            response.setSource(source);
             response.setStatus(McpStatus.DONE);
             mcpResponseRepository.save(response);
 

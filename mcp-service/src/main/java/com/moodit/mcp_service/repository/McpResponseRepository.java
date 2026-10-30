@@ -6,6 +6,7 @@ import com.moodit.mcp_service.model.McpStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
@@ -19,4 +20,7 @@ public interface McpResponseRepository extends JpaRepository<McpResponse, Intege
 
     /** Toutes les analyses à ce statut (PENDING orphelines au démarrage). */
     List<McpResponse> findByStatus(McpStatus status);
+
+    /** Analyses à ce statut créées avant l'instant donné (PENDING bloquées, cf. StalePendingAnalysisJob). */
+    List<McpResponse> findByStatusAndCreatedAtBefore(McpStatus status, LocalDateTime before);
 }
