@@ -274,6 +274,21 @@ describe('MarkdownEditor — clavier', () => {
     await waitFor(() => expect(textarea().selectionStart).toBe(12));
   });
 
+  it('après une indentation, quitter l’éditeur tout de suite ne ramène pas le focus dedans (#196)', async () => {
+    render(<Controlled initial={'```\n'} onCancel={vi.fn()} autoFocus={false} />);
+    textarea().focus();
+    textarea().setSelectionRange(4, 4);
+    fireEvent.keyDown(textarea(), { key: 'Tab' });
+    expect(textarea().value).toBe('```\n    ');
+    expect(textarea().selectionStart).toBe(8);
+
+    const cancel = screen.getByRole('button', { name: 'Annuler' });
+    cancel.focus();
+    // Une frame plus tard : aucun rappel différé ne reprend le focus.
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(document.activeElement).toBe(cancel);
+  });
+
   it('Tab hors d’un bloc de code garde le comportement natif (pas d’indentation)', () => {
     const onChange = renderWithSelection('abcd', 2);
     expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(true);

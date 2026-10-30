@@ -136,6 +136,18 @@ export function MarkdownEditor({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
+  /** Position du curseur à rétablir après une indentation par Tab (appliquée au rendu suivant). */
+  const pendingCaretRef = useRef<number | null>(null);
+
+  // Curseur après une indentation : placé dès le rendu de la nouvelle valeur, sans rappeler
+  // focus(). Avec un requestAnimationFrame + focus(), un Tab vers « Annuler » juste après
+  // l'indentation pouvait voir le focus ramené dans l'éditeur (vu en CI sous WebKit, #196).
+  useLayoutEffect(() => {
+    const pos = pendingCaretRef.current;
+    if (pos == null) return;
+    pendingCaretRef.current = null;
+    textareaRef.current?.setSelectionRange(pos, pos);
+  }, [value]);
 
   // Auto-dimensionne la zone d'edition selon son contenu (pas de resize manuel).
   // Se relance a chaque changement de texte (frappe ET insertions via la barre),
@@ -388,12 +400,8 @@ export function MarkdownEditor({
               const start = ta.selectionStart;
               const end = ta.selectionEnd;
               const indent = '    ';
+              pendingCaretRef.current = start + indent.length;
               onChange(value.slice(0, start) + indent + value.slice(end));
-              requestAnimationFrame(() => {
-                ta.focus();
-                const pos = start + indent.length;
-                ta.setSelectionRange(pos, pos);
-              });
             }
           }}
           rows={2}
