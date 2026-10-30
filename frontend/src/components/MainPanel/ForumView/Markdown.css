@@ -1,5 +1,5 @@
 /* Rendu Markdown d'un post (selecteurs par role/element, sans classes). */
-div[role="markdown-container"] {
+div[data-role="markdown-container"] {
     color: var(--text-body);
     font-family: Inter, sans-serif;
     font-size: clamp(0.8125rem, 0.75rem + 0.2vw, 0.9375rem);
@@ -7,68 +7,68 @@ div[role="markdown-container"] {
     overflow-wrap: anywhere;
 }
 
-div[role="markdown-container"] > :first-child {
+div[data-role="markdown-container"] > :first-child {
     margin-top: 0;
 }
 
-div[role="markdown-container"] > :last-child {
+div[data-role="markdown-container"] > :last-child {
     margin-bottom: 0;
 }
 
-div[role="markdown-container"] p {
+div[data-role="markdown-container"] p {
     margin: 0.5rem 0;
 }
 
-div[role="markdown-container"] h2,
-div[role="markdown-container"] h3,
-div[role="markdown-container"] h4,
-div[role="markdown-container"] h5,
-div[role="markdown-container"] h6 {
+div[data-role="markdown-container"] h2,
+div[data-role="markdown-container"] h3,
+div[data-role="markdown-container"] h4,
+div[data-role="markdown-container"] h5,
+div[data-role="markdown-container"] h6 {
     margin: 0.75rem 0 0.35rem;
     color: var(--text);
     font-weight: 700;
     line-height: 1.3;
 }
 
-div[role="markdown-container"] h2 {
+div[data-role="markdown-container"] h2 {
     font-size: 1.1em;
 }
 
-div[role="markdown-container"] h3 {
+div[data-role="markdown-container"] h3 {
     font-size: 1em;
 }
 
-div[role="markdown-container"] h4,
-div[role="markdown-container"] h5,
-div[role="markdown-container"] h6 {
+div[data-role="markdown-container"] h4,
+div[data-role="markdown-container"] h5,
+div[data-role="markdown-container"] h6 {
     font-size: 0.95em;
 }
 
-div[role="markdown-container"] strong {
+div[data-role="markdown-container"] strong {
     color: var(--text);
     font-weight: 700;
 }
 
-div[role="markdown-container"] ul,
-div[role="markdown-container"] ol {
+div[data-role="markdown-container"] ul,
+div[data-role="markdown-container"] ol {
     margin: 0.5rem 0;
     padding-left: 1.25rem;
 }
 
-div[role="markdown-container"] li {
+div[data-role="markdown-container"] li {
     margin: 0.15rem 0;
 }
 
-div[role="markdown-container"] a {
+div[data-role="markdown-container"] a {
     color: var(--brand-teal);
     text-decoration: none;
 }
 
-div[role="markdown-container"] a:hover {
+div[data-role="markdown-container"] a:hover {
     text-decoration: underline;
 }
 
-div[role="markdown-container"] code {
+div[data-role="markdown-container"] code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.85em;
     background: var(--bg-vote-pill);
@@ -76,22 +76,22 @@ div[role="markdown-container"] code {
     border-radius: 0.3rem;
 }
 
-div[role="markdown-container"] blockquote {
+div[data-role="markdown-container"] blockquote {
     margin: 0.5rem 0;
     padding: 0.2rem 0 0.2rem 0.75rem;
     border-left: 3px solid var(--border-strong);
     color: var(--text-muted);
 }
 
-div[role="markdown-container"] blockquote > :first-child {
+div[data-role="markdown-container"] blockquote > :first-child {
     margin-top: 0;
 }
 
-div[role="markdown-container"] blockquote > :last-child {
+div[data-role="markdown-container"] blockquote > :last-child {
     margin-bottom: 0;
 }
 
-div[role="markdown-container"] hr {
+div[data-role="markdown-container"] hr {
     margin: 0.75rem 0;
     border: none;
     border-top: 1px solid var(--border);
@@ -99,11 +99,11 @@ div[role="markdown-container"] hr {
 
 /* ─── Équations mathématiques (KaTeX). ─── */
 /* KaTeX hérite de la couleur du texte → thème clair/sombre gratuit. */
-div[role="markdown-container"] span[role="math-inline"] {
+div[data-role="markdown-container"] span[data-role="math-inline"] {
     color: var(--text);
 }
 
-div[role="markdown-container"] div[role="math-block"] {
+div[data-role="markdown-container"] div[data-role="math-block"] {
     margin: 0.6rem 0;
     /* Une équation trop large défile horizontalement au lieu de casser la mise en page. */
     overflow-x: auto;
@@ -115,52 +115,52 @@ div[role="markdown-container"] div[role="math-block"] {
    fine, pouce arrondi discret, piste transparente, sans flèches. Vaut pour les équations
    ET les blocs de code. */
 @supports not selector(::-webkit-scrollbar) {
-    div[role="markdown-container"] div[role="math-block"],
-    div[role="code-block"] > pre {
+    div[data-role="markdown-container"] div[data-role="math-block"],
+    div[data-role="code-block"] > pre {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar,
-div[role="code-block"] > pre::-webkit-scrollbar {
+div[data-role="markdown-container"] div[data-role="math-block"]::-webkit-scrollbar,
+div[data-role="code-block"] > pre::-webkit-scrollbar {
     height: 4px;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-track,
-div[role="code-block"] > pre::-webkit-scrollbar-track {
+div[data-role="markdown-container"] div[data-role="math-block"]::-webkit-scrollbar-track,
+div[data-role="code-block"] > pre::-webkit-scrollbar-track {
     background: transparent;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb,
-div[role="code-block"] > pre::-webkit-scrollbar-thumb {
+div[data-role="markdown-container"] div[data-role="math-block"]::-webkit-scrollbar-thumb,
+div[data-role="code-block"] > pre::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-thumb:hover,
-div[role="code-block"] > pre::-webkit-scrollbar-thumb:hover {
+div[data-role="markdown-container"] div[data-role="math-block"]::-webkit-scrollbar-thumb:hover,
+div[data-role="code-block"] > pre::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div[role="markdown-container"] div[role="math-block"]::-webkit-scrollbar-button,
-div[role="code-block"] > pre::-webkit-scrollbar-button {
+div[data-role="markdown-container"] div[data-role="math-block"]::-webkit-scrollbar-button,
+div[data-role="code-block"] > pre::-webkit-scrollbar-button {
     display: none;
     width: 0;
     height: 0;
 }
 
-div[role="markdown-container"] .katex {
+div[data-role="markdown-container"] .katex {
     color: inherit;
 }
 
 /* Erreur de syntaxe LaTeX (throwOnError:false) : la teinter au rouge du thème. */
-div[role="markdown-container"] .katex .katex-error {
+div[data-role="markdown-container"] .katex .katex-error {
     color: var(--badge-danger-fg);
 }
 
 /* ─── Bloc de code colore (Prism). ─── */
-div[role="code-block"] {
+div[data-role="code-block"] {
     position: relative;
     margin: 0.5rem 0;
     border: 1px solid var(--border);
@@ -170,7 +170,7 @@ div[role="code-block"] {
 }
 
 /* Barre flottante en haut a droite : bouton de copie + pastille de langage. */
-div[role="code-block"] > div[role="code-toolbar"] {
+div[data-role="code-block"] > div[data-role="code-toolbar"] {
     position: absolute;
     top: 0;
     right: 0;
@@ -181,7 +181,7 @@ div[role="code-block"] > div[role="code-toolbar"] {
     background: var(--bg-vote-pill);
 }
 
-div[role="code-toolbar"] > span[role="code-lang"] {
+div[data-role="code-toolbar"] > span[data-role="code-lang"] {
     display: flex;
     align-items: center;
     padding: 0.1rem 0.45rem;
@@ -193,7 +193,7 @@ div[role="code-toolbar"] > span[role="code-lang"] {
 }
 
 /* Bouton de copie : masque (largeur 0) puis revele au survol du bloc (facon GitHub). */
-div[role="code-toolbar"] > button[role="copy"] {
+div[data-role="code-toolbar"] > button[data-role="copy"] {
     flex: none;
     display: flex;
     align-items: center;
@@ -209,29 +209,29 @@ div[role="code-toolbar"] > button[role="copy"] {
     transition: width 0.12s ease, opacity 0.12s ease, color 0.12s ease;
 }
 
-div[role="code-block"]:hover > div[role="code-toolbar"] > button[role="copy"],
-div[role="code-toolbar"] > button[role="copy"]:focus-visible {
+div[data-role="code-block"]:hover > div[data-role="code-toolbar"] > button[data-role="copy"],
+div[data-role="code-toolbar"] > button[data-role="copy"]:focus-visible {
     width: 1.55rem;
     opacity: 1;
 }
 
-div[role="code-toolbar"] > button[role="copy"] > svg {
+div[data-role="code-toolbar"] > button[data-role="copy"] > svg {
     flex: none;
 }
 
-div[role="code-toolbar"] > button[role="copy"]:hover {
+div[data-role="code-toolbar"] > button[data-role="copy"]:hover {
     color: var(--text);
 }
 
 /* Etat « Copié » : la coche (verte) reste visible le temps du retour visuel,
    meme si le curseur a quitte le bloc (sinon width:0 la masquerait). */
-div[role="code-toolbar"] > button[role="copy"][data-copied] {
+div[data-role="code-toolbar"] > button[data-role="copy"][data-copied] {
     width: 1.55rem;
     opacity: 1;
     color: var(--success);
 }
 
-div[role="code-block"] > pre {
+div[data-role="code-block"] > pre {
     margin: 0;
     padding: 0.6rem 0.75rem;
     overflow-x: auto;

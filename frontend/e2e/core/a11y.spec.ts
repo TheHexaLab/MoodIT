@@ -36,9 +36,8 @@ import {
 
 // Audit axe-core (WCAG 2.0/2.1 A et AA) de chaque écran et popup, en thème clair ET sombre.
 // Chaque écran est audité par une assertion douce : un écran fautif n'empêche pas l'audit des
-// suivants, et toutes les violations sont tracées (`A11Y|…`) pour l'inventaire. Les violations
-// « serious » / « critical » connues font échouer ces tests : ils sont marqués `test.fail` avec la
-// liste des règles en cause, à retirer quand l'application sera corrigée.
+// suivants, et toutes les violations sont tracées (`A11Y|…`) pour l'inventaire. Toute violation
+// « serious » ou « critical » fait échouer le test (garde-fou depuis #109 : aucune n'est tolérée).
 
 const CHANNEL_NAME = 'Discussion — Mathématiques pour ingénieurs I';
 
@@ -75,10 +74,6 @@ async function publishThreadWithReply(page: Page, title: string) {
 
 for (const theme of THEMES) {
   test(`pages d’authentification (${theme})`, async ({ browser, baseURL }) => {
-    test.fail(
-      true,
-      '#109 a11y : button-name (.eye-btn du login, .light-dark-btn sur login/forgot/reset/verify) + color-contrast en clair (liens teal, sous-titres, pied de page)'
-    );
     const { user } = await createEnrolledUser(baseURL!);
     const context = await browser.newContext();
     await seedTheme(context, theme);
@@ -114,10 +109,6 @@ for (const theme of THEMES) {
     browser,
     baseURL,
   }) => {
-    test.fail(
-      true,
-      '#109 a11y : aria-roles (rôles inventés du canal et du forum), aria-required-attr (separator sans aria-valuenow), aria-prohibited-attr (aria-label sur div .appIcon), label-content-name-mismatch (pastille programme, bouton compte), aria-required-children (menu du compte), list (canal), scrollable-region-focusable (blocs de code), color-contrast'
-    );
     // Compte neuf sans abonnement : accueil vide d'abord, puis abonné au programme de test.
     const student = await freshAccount(baseURL!);
     await setThemeInDb(baseURL!, student.storageState, theme);
@@ -201,10 +192,6 @@ for (const theme of THEMES) {
     browser,
     baseURL,
   }) => {
-    test.fail(
-      true,
-      '#109 a11y : aria-roles (div role=markdown-container), aria-required-attr (separator), aria-prohibited-attr (.appIcon), label-content-name-mismatch, color-contrast (barème, badge, libellés)'
-    );
     const student = await enrolledStudent(baseURL!, fixture);
     await setThemeInDb(baseURL!, student.storageState, theme);
     await student.api.dispose();
@@ -239,10 +226,6 @@ for (const theme of THEMES) {
     browser,
     baseURL,
   }) => {
-    test.fail(
-      true,
-      '#109 a11y : label (champ de nom des sections, réponses Vrai/Faux, poids du harnais), button-name (poubelle des rôles), nested-interactive (puce de programme de « Modifier le cours »), aria-roles (barre Markdown), aria-required-attr, aria-prohibited-attr, label-content-name-mismatch, color-contrast'
-    );
     await setThemeInDb(baseURL!, fixture.admin.storageState, theme);
     const { context, page } = await openHome(browser, fixture.admin.storageState);
     const nav = page.getByRole('navigation', { name: 'Cours' });
@@ -356,10 +339,6 @@ for (const theme of THEMES) {
     browser,
     baseURL,
   }) => {
-    test.fail(
-      true,
-      '#109 a11y : button-name (poubelles de « Gérer les administrateurs »), aria-required-children (journal d’audit), aria-required-attr, aria-prohibited-attr, label-content-name-mismatch, color-contrast'
-    );
     // Gardien NEUF : le compte gardien du bootstrap est partagé et sa session unique serait
     // révoquée par toute connexion concurrente pendant le parcours.
     const guardian = await createGuardianAccount(baseURL!);

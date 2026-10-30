@@ -239,7 +239,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   return (
     <nav className={styles.rail} aria-label="Programme">
       {/* Icône applicative (meme gabarit que le programme actif). */}
-      <div className={styles.appIcon} aria-label="MoodIT">
+      <div className={styles.appIcon} role="img" aria-label="MoodIT">
         <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
           <defs>
             <linearGradient
@@ -301,6 +301,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           {programs.map((prog) => {
             const programId = prog.id;
             const programLabel = getProgramLabel(prog);
+            const badge = getProgramBadge(prog);
             const isActive = programId === activeProgramId;
 
             return (
@@ -317,7 +318,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 <button
                   className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
                   title={programLabel}
-                  aria-label={programLabel}
+                  // Le nom accessible contient la pastille visible (WCAG 2.5.3, « label in name »).
+                  aria-label={`${programLabel} — ${badge}`}
                   aria-current={isActive ? 'page' : undefined}
                   style={
                     prog.color
@@ -328,7 +330,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                       : undefined
                   }
                 >
-                  <span className={styles.programInitials}>{getProgramBadge(prog)}</span>
+                  <span className={styles.programInitials}>{badge}</span>
                 </button>
               </li>
             );

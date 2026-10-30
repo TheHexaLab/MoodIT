@@ -187,7 +187,7 @@ div.announcement-view > header > button.new-button:hover {
     background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
-.card :global([role="markdown-container"]) {
+.card :global([data-role="markdown-container"]) {
     color: var(--text-body);
     font-size: 0.875rem;
     line-height: 1.5;

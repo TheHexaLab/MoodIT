@@ -13,4 +13,5 @@ export const defaultLabels: RoleEditorPopupLabels = {
   errorTitle: 'Une erreur est survenue',
   saveError: "Échec de l'enregistrement. Réessaie.",
   errorClose: 'Fermer',
+  removeUser: (userName) => `Retirer ${userName} du rôle`,
 };

@@ -387,6 +387,20 @@ describe('CourseMenu', () => {
       );
     });
 
+    it('poignée : valeur ARIA du séparateur focusable (largeur et bornes en px)', () => {
+      localStorage.removeItem('courseMenu:width');
+      const { unmount } = renderMenu();
+      const handle = () => screen.getByRole('separator', { name: 'Redimensionner le menu des cours' });
+      // Sans largeur choisie : largeur par défaut.
+      expect(handle().getAttribute('aria-valuenow')).toBe('224');
+      expect(handle().getAttribute('aria-valuemin')).toBe('176');
+      expect(handle().getAttribute('aria-valuemax')).toBe('448');
+      unmount();
+      localStorage.setItem('courseMenu:width', '300');
+      renderMenu();
+      expect(handle().getAttribute('aria-valuenow')).toBe('300');
+    });
+
     it('une autre touche ne change pas la largeur', () => {
       renderMenu();
       fireEvent.keyDown(screen.getByRole('separator'), { key: 'Enter' });
@@ -429,6 +443,6 @@ describe('CourseMenu', () => {
 
   it('rend le menu du compte en pied de panneau', () => {
     renderMenu({ currentUser: { id: 1, username: 'jdoe', firstName: 'Jean', lastName: 'Doe' } });
-    expect(screen.getByRole('button', { name: 'Compte utilisateur' }).textContent).toContain('Jean Doe');
+    expect(screen.getByRole('button', { name: /^Compte utilisateur/ }).textContent).toContain('Jean Doe');
   });
 });

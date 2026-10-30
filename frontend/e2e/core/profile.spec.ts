@@ -65,7 +65,7 @@ test('mode sombre persisté en BD', async ({ browser, baseURL }) => {
   await expect(html).toHaveAttribute('data-theme', 'light');
 
   await openAccountMenu(page);
-  const darkSwitch = page.getByRole('switch', { name: 'Mode sombre' });
+  const darkSwitch = page.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
   await expect(darkSwitch).toHaveAttribute('aria-checked', 'false');
   const saved = settingsSaved(page, (s) => s.theme === 'dark');
   await darkSwitch.click();
@@ -84,7 +84,7 @@ test('mode sombre persisté en BD', async ({ browser, baseURL }) => {
   await otherPage.goto('/home');
   await expect(otherPage.locator('html')).toHaveAttribute('data-theme', 'dark');
   await openAccountMenu(otherPage);
-  await expect(otherPage.getByRole('switch', { name: 'Mode sombre' })).toHaveAttribute(
+  await expect(otherPage.getByRole('menuitemcheckbox', { name: 'Mode sombre' })).toHaveAttribute(
     'aria-checked',
     'true'
   );

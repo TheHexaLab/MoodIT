@@ -126,7 +126,8 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
         className={[styles.dropdownControl, open ? styles.dropdownOpen : ''].filter(Boolean).join(' ')}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={ariaLabel}
+        // Le nom accessible contient l'option affichée (WCAG 2.5.3, « label in name »).
+        aria-label={ariaLabel && current ? `${ariaLabel} : ${current.label}` : ariaLabel}
         onClick={() => setOpen((o) => !o)}
       >
         <span>{current?.label ?? ''}</span>

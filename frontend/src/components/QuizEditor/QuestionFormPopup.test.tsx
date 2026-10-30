@@ -75,6 +75,9 @@ describe('QuestionFormBody', () => {
 
   it('true_false valide dès que l\'énoncé est saisi (options figées)', () => {
     renderForm(emptyQuestionDraft('true_false'), { isNew: true });
+    // Options figées (sans placeholder) : nommées par leur rang.
+    expect(screen.getByRole('textbox', { name: 'Réponse 1' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Réponse 2' })).toBeTruthy();
     expect(saveButton(t.add).disabled).toBe(true);
     fireEvent.change(promptField(), { target: { value: 'Le ciel est bleu ?' } });
     expect(saveButton(t.add).disabled).toBe(false);
@@ -89,6 +92,8 @@ describe('QuestionFormBody', () => {
     // options vides → invalide
     expect(saveButton(t.add).disabled).toBe(true);
     const answers = screen.getAllByPlaceholderText(t.answerPlaceholder);
+    // Chaque option a un nom accessible (le placeholder seul ne suffit pas aux options figées).
+    expect(answers[1]).toBe(screen.getByRole('textbox', { name: t.answerAria(2) }));
     fireEvent.change(answers[0], { target: { value: 'A' } });
     fireEvent.change(answers[1], { target: { value: 'B' } });
     expect(saveButton(t.add).disabled).toBe(false);
@@ -180,7 +185,7 @@ describe('QuestionFormBody', () => {
     const draft: QuestionDraft = { ...emptyQuestionDraft('single_choice'), prompt: 'Gardé', totalScore: 4 };
     const { onSave } = renderForm(draft, { isNew: true });
     // passe à « Remise en ordre »
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.ordering }));
     // la section « ordering » apparaît
     expect(screen.getByText(t.orderingSection)).toBeTruthy();
@@ -199,7 +204,7 @@ describe('QuestionFormBody', () => {
     const onRequestLanguages = vi.fn();
     renderForm(emptyQuestionDraft('single_choice'), { onRequestLanguages });
     onRequestLanguages.mockClear();
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.coding }));
     expect(onRequestLanguages).toHaveBeenCalled();
   });
@@ -293,7 +298,7 @@ describe('QuestionFormBody', () => {
     renderForm(draft, { isNew: true });
     // valide au départ (1 harnais)
     expect(saveButton(t.add).disabled).toBe(false);
-    fireEvent.click(screen.getByLabelText(t.languageLabel));
+    fireEvent.click(screen.getByLabelText(t.languageLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'C' }));
     // harnais vidés → enregistrement de nouveau bloqué
     expect(saveButton(t.add).disabled).toBe(true);
@@ -346,7 +351,7 @@ describe('QuestionFormBody', () => {
         { id: 2, slug: 'coding', label: 'MON CODE' },
       ],
     });
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     expect(screen.getByRole('option', { name: 'MON CHOIX' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'MON CODE' })).toBeTruthy();
   });

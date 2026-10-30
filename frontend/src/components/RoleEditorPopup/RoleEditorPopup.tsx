@@ -434,6 +434,7 @@ export function RoleEditorPopup({
                       <button
                         className={styles.delete}
                         disabled={pending !== null}
+                        aria-label={t.removeUser(`${user.firstName} ${user.lastName}`.trim())}
                         onClick={() => removeUser(role.id, user.id)}
                       >
                         {pending?.type === 'unassign' &&

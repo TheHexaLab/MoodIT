@@ -278,9 +278,11 @@ export default function UserMenu({
                     />
                     Mode sombre
                   </span>
+                  {/* Case à cocher de menu (et non « switch ») : seuls les rôles menuitem*
+                      sont permis comme enfants d'un role="menu". */}
                   <button
                     type="button"
-                    role="switch"
+                    role="menuitemcheckbox"
                     aria-checked={theme === 'dark'}
                     aria-label="Mode sombre"
                     className={`${styles.toggle}${theme === 'dark' ? ` ${styles.toggleOn}` : ''}`}
@@ -423,13 +425,14 @@ export default function UserMenu({
           aria-haspopup="menu"
           aria-expanded={isOpen}
           aria-label="Compte utilisateur"
+          // Initiales dessinées en CSS (::before) : pastille décorative, hors du « texte
+          // visible » que le nom accessible doit contenir (WCAG 2.5.3).
+          data-initials={initials}
           style={{
             background: user?.avatarColor || 'var(--brand-teal)',
             color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
           }}
-        >
-          {initials}
-        </button>
+        />
       ) : (
         <button
           ref={triggerRef}
@@ -438,20 +441,21 @@ export default function UserMenu({
           onClick={toggleOpen}
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          aria-label="Compte utilisateur"
+          // Le nom accessible reprend le nom et l'identifiant affichés (WCAG 2.5.3).
+          aria-label={`Compte utilisateur : ${displayName} ${handle}`}
         >
+          {/* Initiales dessinées en CSS (::before) : pastille décorative, hors du texte visible. */}
           <span
             className={styles.userAvatarInitials}
+            data-initials={initials}
             style={{
               background: user?.avatarColor || 'var(--brand-teal)',
               color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
             }}
             aria-hidden="true"
-          >
-            {initials}
-          </span>
+          />
           <span className={styles.userInfo}>
-            <span className={styles.userName}>{displayName}</span>
+            <span className={styles.userName}>{displayName}</span>{' '}
             <span className={styles.userHandle}>{handle}</span>
           </span>
         </button>

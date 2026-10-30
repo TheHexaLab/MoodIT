@@ -17,7 +17,7 @@ const programs: Program[] = [
 
 /** Ouvre le menu contextuel (clic droit) sur la pastille du programme de libellé donné. */
 function openContextMenu(label: string): HTMLElement {
-  const li = screen.getByRole('button', { name: label }).closest('li');
+  const li = screen.getByRole('button', { name: new RegExp(`^${label} — `) }).closest('li');
   if (!li) throw new Error('élément de liste introuvable');
   fireEvent.contextMenu(li);
   return screen.getByRole('menu');
@@ -32,31 +32,39 @@ function menuItems(menu: HTMLElement): string[] {
 describe('ProgramMenu', () => {
   it('affiche une pastille par programme : code (3 lettres max, majuscules) ou initiales', () => {
     render(<ProgramMenu programs={programs} />);
-    expect(screen.getByRole('button', { name: 'Génie logiciel' }).textContent).toBe('GIN');
+    expect(screen.getByRole('button', { name: 'Génie logiciel — GIN' }).textContent).toBe('GIN');
     // Plusieurs mots → première lettre de chacun (2 max).
-    expect(screen.getByRole('button', { name: 'Génie informatique' }).textContent).toBe('GI');
+    expect(screen.getByRole('button', { name: 'Génie informatique — GI' }).textContent).toBe('GI');
     // Mot unique → deux premières lettres.
-    expect(screen.getByRole('button', { name: 'math' }).textContent).toBe('MA');
+    expect(screen.getByRole('button', { name: 'math — MA' }).textContent).toBe('MA');
+  });
+
+  it('le nom accessible contient la pastille visible (WCAG 2.5.3)', () => {
+    render(<ProgramMenu programs={programs} />);
+    const pill = screen.getByRole('button', { name: 'Génie logiciel — GIN' });
+    expect(pill.getAttribute('title')).toBe('Génie logiciel');
+    // Icône de l'application : image nommée (aria-label sur un div sans rôle est interdit).
+    expect(screen.getByRole('img', { name: 'MoodIT' })).toBeTruthy();
   });
 
   it('le libellé UI (label) a priorité sur le nom', () => {
     render(<ProgramMenu programs={[program({ id: 9, name: 'Nom', label: 'Libellé' })]} />);
-    expect(screen.getByRole('button', { name: 'Libellé' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Nom' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Libellé — LI' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Nom/ })).toBeNull();
   });
 
   it('marque le programme actif avec aria-current', () => {
     render(<ProgramMenu programs={programs} activeProgramId={2} />);
-    expect(screen.getByRole('button', { name: 'Génie informatique' }).getAttribute('aria-current')).toBe(
+    expect(screen.getByRole('button', { name: 'Génie informatique — GI' }).getAttribute('aria-current')).toBe(
       'page'
     );
-    expect(screen.getByRole('button', { name: 'Génie logiciel' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Génie logiciel — GIN' }).getAttribute('aria-current')).toBeNull();
   });
 
   it('un clic sur un programme appelle onSelectProgram avec son id', () => {
     const onSelectProgram = vi.fn();
     render(<ProgramMenu programs={programs} onSelectProgram={onSelectProgram} />);
-    fireEvent.click(screen.getByRole('button', { name: 'math' }));
+    fireEvent.click(screen.getByRole('button', { name: 'math — MA' }));
     expect(onSelectProgram).toHaveBeenCalledWith(3);
   });
 
@@ -75,7 +83,7 @@ describe('ProgramMenu', () => {
   it('chargement : spinner à la place de la liste', () => {
     render(<ProgramMenu programs={programs} loading />);
     expect(screen.getByRole('status', { name: 'Chargement des programmes' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'math' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'math — MA' })).toBeNull();
   });
 
   it('erreur : bouton « Réessayer » (titre = message) qui appelle onReload', () => {

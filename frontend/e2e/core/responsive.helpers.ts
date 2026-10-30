@@ -16,7 +16,7 @@ import { enrollInCourses } from './dashboard.helpers';
  *    poignée de redimensionnement masquée ; menu du compte en feuille basse ; points de
  *    progression et « Retour au résumé » du quiz masqués.
  *  - ≤ 768 px (48rem, ChannelView / ForumView) : actions des messages / posts flottantes,
- *    révélées au toucher ; vote du sujet déplacé sous le post (`[role="mobile-vote"]`).
+ *    révélées au toucher ; vote du sujet déplacé sous le post (`[data-role="mobile-vote"]`).
  *    < 768 px : marges réduites des popups (`@media (min-width: 768px)`).
  *  - ≤ 480 px (30rem) : contexte de cours masqué dans les en-têtes, actions des états vides
  *    empilées, actions des lignes de l'éditeur de quiz flottantes.

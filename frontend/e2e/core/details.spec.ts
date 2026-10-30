@@ -91,8 +91,8 @@ async function expectRendered(root: Locator) {
   await expect(root.getByRole('heading', { level: 3, name: 'Section' })).toBeVisible();
   await expect(root.getByRole('heading', { level: 4, name: 'Entete' })).toBeVisible();
   await expect(root.getByRole('heading', { level: 5, name: 'Petit' })).toBeVisible();
-  const block = root.locator('[role="code-block"]');
-  await expect(block.locator('[role="code-lang"]')).toHaveText('python');
+  const block = root.locator('[data-role="code-block"]');
+  await expect(block.locator('[data-role="code-lang"]')).toHaveText('python');
   await expect(block.locator('pre')).toContainText('print(1)');
 }
 
@@ -168,7 +168,7 @@ test('forum : toute la barre Markdown, rendu dans l’aperçu puis une fois publ
   await preview.click();
   await expect(preview).toHaveAttribute('aria-pressed', 'true');
   await expect(toolbar(page).getByRole('button', { name: 'Gras' })).toBeDisabled();
-  await expectRendered(page.locator('[role="preview"]'));
+  await expectRendered(page.locator('[data-role="preview"]'));
   await preview.click();
   await expect(editor(page)).toHaveValue(MARKDOWN_BODY);
 

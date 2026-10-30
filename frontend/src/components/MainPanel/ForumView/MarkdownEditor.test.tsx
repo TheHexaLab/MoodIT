@@ -117,6 +117,13 @@ describe('MarkdownEditor — préfixes de ligne', () => {
     expect(onChange).toHaveBeenCalledWith('1. item');
   });
 
+  it('Liste numérotée : glyphe « 1. » dessiné en CSS, hors du texte visible (nom = libellé)', () => {
+    renderWithSelection('item', 2);
+    const button = screen.getByRole('button', { name: 'Liste numérotée' });
+    expect(button.textContent).toBe('');
+    expect(button.querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('1.');
+  });
+
   it('Citation préfixe de « > »', () => {
     const onChange = renderWithSelection('a\nb\nc', 2);
     fireEvent.click(screen.getByLabelText('Citation'));
@@ -214,11 +221,11 @@ describe('MarkdownEditor — aperçu', () => {
     expect(previewBtn.getAttribute('aria-pressed')).toBe('true');
     expect(previewBtn.getAttribute('title')).toBe('Modifier');
     expect(screen.queryByLabelText('Éditeur Markdown')).toBeNull();
-    const preview = document.querySelector('[role="preview"]')!;
+    const preview = document.querySelector('[data-role="preview"]')!;
     expect(preview.querySelector('strong')?.textContent).toBe('fort');
     expect((screen.getByLabelText('Gras') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText('Titre') as HTMLButtonElement).disabled).toBe(true);
-    expect(document.querySelector('[role="markdown-editor-preview"]')).not.toBeNull();
+    expect(document.querySelector('[data-role="markdown-editor-preview"]')).not.toBeNull();
 
     // Retour à l'édition : le textarea revient avec le même contenu.
     fireEvent.click(previewBtn);
@@ -286,18 +293,18 @@ describe('MarkdownEditor — actions, limite et état', () => {
     expect(screen.getByText('4 / 5')).toBeTruthy();
     const submit = screen.getByRole('button', { name: 'Envoyer' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
-    expect(document.querySelector('[role="editor-status"]')!.hasAttribute('data-over')).toBe(false);
+    expect(document.querySelector('[data-role="editor-status"]')!.hasAttribute('data-over')).toBe(false);
 
     fireEvent.change(textarea(), { target: { value: 'abcdef' } });
     expect(screen.getByText('6 / 5')).toBeTruthy();
-    expect(document.querySelector('[role="editor-status"]')!.hasAttribute('data-over')).toBe(true);
+    expect(document.querySelector('[data-role="editor-status"]')!.hasAttribute('data-over')).toBe(true);
     expect(textarea().getAttribute('aria-invalid')).toBe('true');
     expect(submit.disabled).toBe(true);
   });
 
   it('sans maxLength : pas de compteur', () => {
     render(<Controlled initial="a" submitLabel="Envoyer" autoFocus={false} />);
-    expect(document.querySelector('[role="char-count"]')).toBeNull();
+    expect(document.querySelector('[data-role="char-count"]')).toBeNull();
   });
 
   it('contenu vide ou disableSubmit : bouton de validation désactivé', () => {
@@ -332,7 +339,7 @@ describe('MarkdownEditor — actions, limite et état', () => {
   it('submitting : le bouton affiche un spinner à la place du libellé et se désactive', () => {
     render(<Controlled initial="ok" submitLabel="Publier" submitting autoFocus={false} />);
     expect(screen.queryByRole('button', { name: 'Publier' })).toBeNull();
-    const buttons = document.querySelectorAll('[role="editor-actions"] button');
+    const buttons = document.querySelectorAll('[data-role="editor-actions"] button');
     const submit = buttons[buttons.length - 1] as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     expect(submit.textContent).not.toContain('Publier');
@@ -340,8 +347,8 @@ describe('MarkdownEditor — actions, limite et état', () => {
 
   it('mode intégré : pas de barre d’actions, attribut data-embedded', () => {
     render(<Controlled initial="ok" embedded maxLength={10} autoFocus={false} />);
-    expect(document.querySelector('[role="editor-actions"]')).toBeNull();
-    expect(document.querySelector('[role="markdown-editor"]')!.hasAttribute('data-embedded')).toBe(
+    expect(document.querySelector('[data-role="editor-actions"]')).toBeNull();
+    expect(document.querySelector('[data-role="markdown-editor"]')!.hasAttribute('data-embedded')).toBe(
       true
     );
   });
@@ -445,7 +452,7 @@ describe('MarkdownEditor — auto-dimensionnement', () => {
       Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 1000 });
       Object.defineProperty(feed, 'clientHeight', { configurable: true, get: () => 100 });
       feed.getBoundingClientRect = () => ({ top: 0, bottom: 100, height: 100 }) as DOMRect;
-      const root = document.querySelector('[role="markdown-editor"]') as HTMLElement;
+      const root = document.querySelector('[data-role="markdown-editor"]') as HTMLElement;
       root.getBoundingClientRect = () => rootRect as DOMRect;
       const ta = textarea();
       ta.getBoundingClientRect = () => taRect as DOMRect;

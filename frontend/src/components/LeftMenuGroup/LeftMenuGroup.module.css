@@ -90,14 +90,14 @@
         overflow: hidden;
     }
 
-    .mobileTitle > span[role="prefix"] {
+    .mobileTitle > span[data-role="prefix"] {
         color: var(--text-muted);
         font-size: 1.375rem;
         width: 1.375rem;
         font-weight: 600;
     }
 
-    .mobileTitle > span[role="title"] {
+    .mobileTitle > span[data-role="title"] {
         text-overflow: ellipsis;
         min-width: 0;
         white-space: nowrap;

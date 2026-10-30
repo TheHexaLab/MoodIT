@@ -66,6 +66,8 @@ describe('HarnessBody', () => {
     const names = screen.getAllByPlaceholderText(t.namePlaceholder) as HTMLInputElement[];
     expect(names).toHaveLength(1);
     expect(names[0].value).toBe('');
+    // Le libellé « Poids » nomme son champ (<label> englobant).
+    expect((screen.getByLabelText(t.weightLabel) as HTMLInputElement).value).toBe('1');
     // le code du harnais reçoit le squelette
     const code = screen.getByLabelText(t.codeAria(1)) as HTMLTextAreaElement;
     expect(code.value).toBe('// SKELETON\n');

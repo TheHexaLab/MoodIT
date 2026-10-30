@@ -331,8 +331,6 @@ export function AddCoursePopup({
                     key={program.id}
                     className={styles.chip}
                     style={{ ['--chip-color']: program.color } as React.CSSProperties}
-                    role="button"
-                    aria-label={`Retirer ${program.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       removeProgram(program.id);

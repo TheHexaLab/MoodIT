@@ -402,7 +402,8 @@ div.section-editor-popup .edit-row > div:first-of-type > div.invalid:focus-withi
 }
 
 div.section-editor-popup .edit-row > div:first-of-type > p.invalid {
-    color: var(--danger);
+    /* Variante « texte » du rouge : lisible (4,5:1) en clair comme en sombre. */
+    color: var(--badge-danger-fg);
 }
 
 div.section-editor-popup .edit-row > div:last-of-type {

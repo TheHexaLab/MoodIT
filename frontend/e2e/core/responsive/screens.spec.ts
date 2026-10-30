@@ -193,7 +193,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   const longText = `${tag} ${longWord} https://exemple.test/${'segment/'.repeat(20)} ${'texte long '.repeat(60)}`;
   await composer.fill(longText);
   await composer.press('Enter');
-  const row = main(page).locator('li[role="message"]').filter({ hasText: tag });
+  const row = main(page).locator('li[data-role="message"]').filter({ hasText: tag });
   await expect(row).toBeVisible();
   await expectScreenFits(page);
   await expectWithinWidth(row);
@@ -211,7 +211,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   const answer = `Réponse ${tag}`;
   await composer.fill(answer);
   await press(send, hasTouch);
-  const replyRow = main(page).locator('li[role="message"]').filter({ hasText: answer });
+  const replyRow = main(page).locator('li[data-role="message"]').filter({ hasText: answer });
   const chip = replyRow.getByRole('button', { name: new RegExp(`^NE ${tag}`) });
   await expect(chip).toBeVisible();
   await expectScreenFits(page);
@@ -219,7 +219,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   // ≤ 768 px la barre d'actions flotte dans la ligne ; au-delà elle est en ligne.
   if (hasTouch) await replyRow.tap();
   else await replyRow.hover();
-  const actions = replyRow.locator('[role="message-actions"]');
+  const actions = replyRow.locator('[data-role="message-actions"]');
   await expect(actions).toHaveCSS('position', dense ? 'absolute' : 'static');
   await expectWithinWidth(actions);
   await context.close();
@@ -283,7 +283,7 @@ test('forum : sujet Markdown long et réponses sans débordement', async ({ brow
   const up = card.getByRole('button', { name: 'Voter pour' }).first();
   await expect(card.getByRole('button', { name: 'Voter pour' })).toHaveCount(1);
   await expect(up).toBeDisabled(); // son propre sujet
-  const upInMobileVote = await up.evaluate((el) => el.closest('[role="mobile-vote"]') !== null);
+  const upInMobileVote = await up.evaluate((el) => el.closest('[data-role="mobile-vote"]') !== null);
   expect(upInMobileVote).toBe(dense);
 
   // Réponse (actions révélées au toucher de la carte ≤ 768 px) puis réponse imbriquée.
@@ -295,7 +295,7 @@ test('forum : sujet Markdown long et réponses sans débordement', async ({ brow
   await expectField(composer, hasTouch);
   await composer.fill(`Réponse ${tag} ${'LongueRéponseSansEspace'.repeat(8)}`);
   await press(card.getByRole('button', { name: 'Répondre', exact: true }).last(), hasTouch);
-  const reply = card.locator('li[role="comment"]').filter({ hasText: `Réponse ${tag}` }).last();
+  const reply = card.locator('li[data-role="comment"]').filter({ hasText: `Réponse ${tag}` }).last();
   await expect(reply).toBeVisible();
   await expectScreenFits(page);
   await expectWithinWidth(reply);

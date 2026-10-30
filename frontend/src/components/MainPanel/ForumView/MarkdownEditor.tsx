@@ -155,7 +155,7 @@ export function MarkdownEditor({
       // Cible : l'ÉDITEUR COMPLET (barre d'outils + zone de saisie + compteur/boutons) s'il TIENT
       // dans le feed → tout reste visible ; sinon (éditeur plus haut que le feed) on se rabat sur
       // la zone de saisie, pour au moins suivre le curseur.
-      const editorRoot = ta.closest('[role^="markdown-editor"]') as HTMLElement | null;
+      const editorRoot = ta.closest('[data-role^="markdown-editor"]') as HTMLElement | null;
       const rootRect = editorRoot?.getBoundingClientRect();
       const target =
         rootRect && rootRect.height <= pRect.height - margin
@@ -237,13 +237,13 @@ export function MarkdownEditor({
 
   return (
     <div
-      role={`markdown-editor${preview ? '-preview' : ''}`}
+      data-role={`markdown-editor${preview ? '-preview' : ''}`}
       data-embedded={embedded ? '' : undefined}
       onClick={(event) => event.stopPropagation()}
     >
       {/* Toolbar + zone de saisie : bloc englobant de la toolbar collante, pour
           qu'elle se decolle a la fin du textarea sans recouvrir les actions. */}
-      <div role="editor-main">
+      <div data-role="editor-main">
       <div role="toolbar" aria-label={t.toolbar}>
         <div>
           <ToolMenu
@@ -279,7 +279,7 @@ export function MarkdownEditor({
             disabled={preview}
             onClick={() => wrap('`')}
           >
-            <span role="mono">{'</>'}</span>
+            <span data-role="mono">{'</>'}</span>
           </button>
           <ToolMenu
             icon={<CodeBlockIcon />}
@@ -314,7 +314,9 @@ export function MarkdownEditor({
             disabled={preview}
             onClick={() => linePrefix('1. ')}
           >
-            <span role="mono">1.</span>
+            {/* « 1. » dessiné en CSS (::before) : glyphe d'icône, hors du texte visible que le
+                nom accessible doit contenir (WCAG 2.5.3). */}
+            <span data-role="mono" data-glyph="1." aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -341,7 +343,7 @@ export function MarkdownEditor({
       </div>
 
       {preview ? (
-        <div role="preview">
+        <div data-role="preview">
           {value.trim() ? <Markdown source={value} /> : <p>{t.emptyPreview}</p>}
         </div>
       ) : (
@@ -384,10 +386,10 @@ export function MarkdownEditor({
       </div>
 
       {!embedded && (
-        <div role="editor-actions">
+        <div data-role="editor-actions">
           {maxLength != null && (
-            <span role="editor-status" data-over={overLimit ? '' : undefined}>
-              <span role="char-count">
+            <span data-role="editor-status" data-over={overLimit ? '' : undefined}>
+              <span data-role="char-count">
                 {value.length} / {maxLength}
               </span>
             </span>
@@ -455,7 +457,7 @@ function ToolMenu({ icon, title, ariaLabel, items, onSelect, disabled }: ToolMen
   }, [open]);
 
   return (
-    <div role="menu-wrap" ref={wrapRef}>
+    <div data-role="menu-wrap" ref={wrapRef}>
       <button
         type="button"
         title={title}

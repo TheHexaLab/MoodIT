@@ -55,4 +55,6 @@ export interface SectionEditorPopupLabels {
   saveError: string;
   /** Bouton « fermer » du popup d'erreur. */
   errorClose: string;
+  /** Nom accessible du champ de nom (ajout et modification). */
+  nameInputAria: string;
 }

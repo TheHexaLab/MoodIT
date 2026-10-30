@@ -246,9 +246,12 @@ function renderDashboard({
   return { saveSettings, applyGlobalRoles, ...utils };
 }
 
+/** Nom accessible d'une pastille du rail : « <nom du programme> — <pastille> ». */
+const programName = (name: string) => new RegExp(`^${name} — `);
+
 /** Pastille d'un programme dans le rail. */
 function programButton(name: string) {
-  return screen.getByRole('button', { name });
+  return screen.getByRole('button', { name: programName(name) });
 }
 
 async function selectProgram(name: string) {
@@ -625,7 +628,7 @@ describe('Dashboard', () => {
       fireEvent.click(within(menu).getByRole('menuitem', { name: 'Quitter le programme' }));
       expect(screen.getByText('Quitter le programme ?')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Quitter' }));
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Génie logiciel' })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('button', { name: programName('Génie logiciel') })).toBeNull());
       expect(api.leaveProgram).toHaveBeenCalledWith(1);
       // Le programme actif a disparu : bascule sur un autre programme.
       await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
@@ -653,7 +656,7 @@ describe('Dashboard', () => {
       );
       expect(screen.getByText('Supprimer le programme ?')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Mathématiques' })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('button', { name: programName('Mathématiques') })).toBeNull());
       expect(api.deleteProgram).toHaveBeenCalledWith(3);
     });
 
@@ -875,7 +878,7 @@ describe('Dashboard', () => {
     it('« Modifier le profil » ouvre le popup de profil', async () => {
       renderDashboard();
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Modifier le profil' }));
       expect(await screen.findByText(profileLabels.subtitle)).toBeTruthy();
     });
@@ -883,7 +886,7 @@ describe('Dashboard', () => {
     it('utilisateur simple : ni gestion des administrateurs ni journal', async () => {
       renderDashboard();
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       expect(screen.queryByRole('menuitem', { name: 'Gérer les administrateurs' })).toBeNull();
       expect(screen.queryByRole('menuitem', { name: 'Journalisation' })).toBeNull();
     });
@@ -892,7 +895,7 @@ describe('Dashboard', () => {
       vi.mocked(api.fetchGlobalRoles).mockRejectedValue(new Error('refus'));
       renderDashboard({ isAdmin: true });
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
       expect(await screen.findByText('Impossible de charger les administrateurs. Réessaie.')).toBeTruthy();
       expect(screen.queryByRole('menuitem', { name: 'Journalisation' })).toBeNull();
@@ -902,7 +905,7 @@ describe('Dashboard', () => {
       vi.mocked(api.fetchGlobalRoles).mockResolvedValue({ roles: [{ id: 1, name: ROLE.ADMIN }], users: [] });
       renderDashboard({ isAdmin: true });
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
       expect(await screen.findByText('Administrateurs généraux et gardiens de la plateforme.')).toBeTruthy();
     });
@@ -911,7 +914,7 @@ describe('Dashboard', () => {
       vi.mocked(api.fetchAuditLogs).mockResolvedValue([]);
       renderDashboard({ isAdmin: true, isGuardian: true });
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Journalisation' }));
       expect(await screen.findByText(auditLabels.title)).toBeTruthy();
     });
@@ -952,7 +955,7 @@ describe('Dashboard', () => {
       act(() => {
         (ws.captured.programs!.onProgramRemove as (id: number) => void)(1);
       });
-      expect(screen.queryByRole('button', { name: 'Génie logiciel' })).toBeNull();
+      expect(screen.queryByRole('button', { name: programName('Génie logiciel') })).toBeNull();
       await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
     });
 
@@ -1302,7 +1305,7 @@ describe('Dashboard — compléments', () => {
       expect(screen.getByTestId('channel-view')).toBeTruthy();
       expect(drawerToggle().getAttribute('aria-expanded')).toBe('false');
       // Titre mobile = nom de l'élément ouvert.
-      expect(document.querySelector('[role="title"]')?.textContent).toBe('general');
+      expect(document.querySelector('[data-role="title"]')?.textContent).toBe('general');
 
       // Même nom, autre élément : la clé (cours:type:id) change → le tiroir se referme.
       fireEvent.click(drawerToggle());
@@ -1313,7 +1316,7 @@ describe('Dashboard — compléments', () => {
 
     it('sans élément ouvert : titre « Accueil »', async () => {
       await openGlo();
-      expect(document.querySelector('[role="title"]')?.textContent).toBe('Accueil');
+      expect(document.querySelector('[data-role="title"]')?.textContent).toBe('Accueil');
     });
   });
 
@@ -1419,7 +1422,7 @@ describe('Dashboard — compléments', () => {
       });
       saveSettings.mockClear();
       act(() => programsWs().onProgramRemove(1));
-      expect(screen.queryByRole('button', { name: 'Génie logiciel' })).toBeNull();
+      expect(screen.queryByRole('button', { name: programName('Génie logiciel') })).toBeNull();
       expect(screen.getByRole('heading', { name: noProgramLabels.title })).toBeTruthy();
       for (const [arg] of saveSettings.mock.calls) expect(arg.location.programId).toBeGreaterThan(0);
     });
@@ -1573,7 +1576,7 @@ describe('Dashboard — compléments', () => {
     it('profil : « Annuler » ferme le popup', async () => {
       renderDashboard();
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Modifier le profil' }));
       expect(screen.getByDisplayValue('Jean')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: profileLabels.cancel }));
@@ -1584,7 +1587,7 @@ describe('Dashboard — compléments', () => {
       vi.mocked(api.fetchAuditLogs).mockResolvedValue([]);
       renderDashboard({ isAdmin: true, isGuardian: true });
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Journalisation' }));
       await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalled());
       fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -1608,7 +1611,7 @@ describe('Dashboard — compléments', () => {
       vi.mocked(api.fetchGlobalRoles).mockResolvedValue(structuredClone(globalRoles) as never);
       renderDashboard(setup);
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
       await screen.findByText('Administrateurs généraux et gardiens de la plateforme.');
     }
@@ -1670,7 +1673,7 @@ describe('Dashboard — compléments', () => {
       vi.mocked(api.fetchGlobalRoles).mockRejectedValue(new Error('refus'));
       renderDashboard({ isAdmin: true });
       await waitFor(() => expect(programButton('Génie logiciel')).toBeTruthy());
-      fireEvent.click(screen.getByRole('button', { name: 'Compte utilisateur' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Compte utilisateur/ }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Gérer les administrateurs' }));
       await screen.findByText('Impossible de charger les administrateurs. Réessaie.');
       fireEvent.click(screen.getByRole('button', { name: errorLabels.close }));

@@ -20,4 +20,5 @@ export const defaultLabels: SectionEditorPopupLabels = {
   errorTitle: 'Une erreur est survenue',
   saveError: "Échec de l'enregistrement. Réessaie.",
   errorClose: 'Fermer',
+  nameInputAria: "Nom de l'élément",
 };

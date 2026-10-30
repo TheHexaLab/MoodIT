@@ -252,11 +252,11 @@
 }
 
 /* Le rendu Markdown du prompt : on resserre les marges par défaut. */
-.prompt :global([role='markdown-container']) > :first-child {
+.prompt :global([data-role='markdown-container']) > :first-child {
     margin-top: 0;
 }
 
-.prompt :global([role='markdown-container']) > :last-child {
+.prompt :global([data-role='markdown-container']) > :last-child {
     margin-bottom: 0;
 }
 

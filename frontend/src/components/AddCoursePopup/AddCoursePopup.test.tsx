@@ -157,7 +157,7 @@ describe('AddCoursePopup', () => {
     // Le menu reste ouvert et il n'est plus candidat.
     expect(screen.getByPlaceholderText(t.searchPlaceholder)).toBeTruthy();
     expect(screen.queryByText('Génie informatique')).toBeNull();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Retirer Génie informatique' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer Génie informatique' }));
     expect(screen.queryByText('GIN - Promo 71')).toBeNull();
     expect(screen.getByText(t.programsPlaceholder)).toBeTruthy();
   });
