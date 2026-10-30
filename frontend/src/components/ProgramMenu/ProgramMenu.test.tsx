@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import ProgramMenu, { type Program } from './ProgramMenu';
 import { ROLE } from '../../helpers/roles';
 
@@ -201,5 +202,57 @@ describe('ProgramMenu', () => {
       fireEvent(window, new Event('resize'));
       expect(screen.queryByRole('menu')).toBeNull();
     });
+  });
+});
+
+// Ouverture au clavier (touche Menu / Maj+F10, sur tous les moteurs) et flèches, au clavier réel.
+describe('ProgramMenu — menu contextuel au clavier', () => {
+  const pill = (label: string) => screen.getByRole('button', { name: new RegExp(`^${label} — `) });
+
+  it('annonce le raccourci d’ouverture sur chaque pastille', () => {
+    render(<ProgramMenu programs={programs} />);
+    expect(pill('math').getAttribute('aria-keyshortcuts')).toBe('Shift+F10');
+  });
+
+  it('Maj+F10 ouvre le menu (focus sur le menu), ↓ mène au premier élément, ↑ au dernier', async () => {
+    const user = userEvent.setup();
+    render(<ProgramMenu programs={programs} onJoinCourses={vi.fn()} />);
+    pill('Génie logiciel').focus();
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    const menu = screen.getByRole('menu');
+    expect(document.activeElement).toBe(menu);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Rejoindre des cours' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Quitter le programme' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Rejoindre des cours' }));
+  });
+
+  it('la touche Menu ouvre aussi le menu ; Entrée active l’élément', async () => {
+    const user = userEvent.setup();
+    const onLeaveProgram = vi.fn();
+    render(<ProgramMenu programs={programs} onLeaveProgram={onLeaveProgram} />);
+    pill('math').focus();
+    await user.keyboard('{ContextMenu}{ArrowUp}{Enter}');
+    expect(onLeaveProgram).toHaveBeenCalledWith(3);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('Échap dans le menu le ferme et rend le focus à la pastille', async () => {
+    const user = userEvent.setup();
+    render(<ProgramMenu programs={programs} />);
+    pill('math').focus();
+    await user.keyboard('{Shift>}{F10}{/Shift}{ArrowDown}{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(pill('math'));
+  });
+
+  it('F10 seule ou une autre touche n’ouvre pas le menu', async () => {
+    const user = userEvent.setup();
+    render(<ProgramMenu programs={programs} />);
+    pill('math').focus();
+    await user.keyboard('{F10}a');
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

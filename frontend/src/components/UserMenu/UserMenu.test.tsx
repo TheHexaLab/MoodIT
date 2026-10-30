@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import UserMenu, { type UserMenuUser } from './UserMenu';
 import { ThemeContext, type Theme, type ThemeApi } from '../../context/themeContext';
@@ -348,5 +349,43 @@ describe('UserMenu', () => {
       });
       expect(screen.getByRole('button', { name: 'Fermer le menu du compte' })).toBeTruthy();
     });
+  });
+});
+
+// Patron WAI-ARIA « Menu Button », au clavier réel (user-event).
+describe('UserMenu — navigation au clavier', () => {
+  it('Entrée ouvre le menu et place le focus sur « Mode sombre » ; les flèches circulent', async () => {
+    const user = userEvent.setup();
+    renderMenu({ props: { onEditProfile: vi.fn() } });
+    trigger().focus();
+    await user.keyboard('{Enter}');
+    const menu = screen.getByRole('menu', { name: 'Menu du compte' });
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitemcheckbox', { name: 'Mode sombre' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Modifier le profil' }));
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Se déconnecter' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitemcheckbox', { name: 'Mode sombre' }));
+  });
+
+  it('Entrée sur un élément l’active (« Modifier le profil »)', async () => {
+    const user = userEvent.setup();
+    const onEditProfile = vi.fn();
+    renderMenu({ props: { onEditProfile } });
+    trigger().focus();
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+    expect(onEditProfile).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('Échap depuis un élément ferme le menu et rend le focus au bouton', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    trigger().focus();
+    await user.keyboard('{Enter}{ArrowDown}');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 });

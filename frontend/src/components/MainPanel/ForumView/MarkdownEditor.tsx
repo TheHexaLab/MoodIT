@@ -25,6 +25,20 @@ function getScrollableParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * Le curseur (`position`) est-il dans un bloc de code clôturé (```) ? On compte les lignes
+ * de clôture AVANT la ligne du curseur : un nombre impair signifie un bloc ouvert. La ligne
+ * d'ouverture elle-même n'est donc pas « dans » le bloc ; la ligne de fermeture, si.
+ */
+function isInCodeBlock(text: string, position: number): boolean {
+  const lineStart = text.lastIndexOf('\n', position - 1) + 1;
+  const fences = text
+    .slice(0, lineStart)
+    .split('\n')
+    .filter((line) => /^\s*```/.test(line)).length;
+  return fences % 2 === 1;
+}
+
 /** Une entree de menu (libelle affiche + texte insere). */
 interface MenuItem {
   label: string;
@@ -361,9 +375,14 @@ export function MarkdownEditor({
               if (!onCancel) return;
               event.preventDefault();
               onCancel();
-            } else if (event.key === 'Tab' && !event.shiftKey) {
-              // Tab dans le textarea = indentation (4 espaces), pas de changement de
-              // champ. La sélection est remplacée par les espaces, curseur après.
+            } else if (
+              event.key === 'Tab' &&
+              !event.shiftKey &&
+              isInCodeBlock(value, event.currentTarget.selectionStart)
+            ) {
+              // Tab DANS un bloc de code = indentation (4 espaces). Ailleurs, Tab garde son
+              // rôle (champ suivant) : le focus n'est pas piégé dans l'éditeur (WCAG 2.1.2).
+              // La sélection est remplacée par les espaces, curseur après.
               event.preventDefault();
               const ta = event.currentTarget;
               const start = ta.selectionStart;

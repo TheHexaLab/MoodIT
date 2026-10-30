@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
 afterEach(() => {
@@ -175,5 +176,44 @@ describe('Dropdown', () => {
     expect(style.top).toBe('344px');
     expect(style.left).toBe('50px');
     expect(style.width).toBe('120px');
+  });
+});
+
+// Patron WAI-ARIA « Listbox », au clavier réel (user-event).
+describe('Dropdown — clavier', () => {
+  it('Entrée ouvre et place le focus sur l’option choisie ; ↓/↑ circulent ; Début/Fin', async () => {
+    const user = userEvent.setup();
+    renderDropdown('c');
+    control().focus();
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'C' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
+    await user.keyboard('{ArrowUp}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+  });
+
+  it('Entrée sur une option la choisit, ferme la liste et rend le focus au contrôle', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderDropdown('py');
+    control().focus();
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+    expect(onChange).toHaveBeenCalledWith('c');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(control());
+  });
+
+  it('valeur inconnue : le focus va sur la première option', async () => {
+    const user = userEvent.setup();
+    renderDropdown('inconnu');
+    control().focus();
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
   });
 });

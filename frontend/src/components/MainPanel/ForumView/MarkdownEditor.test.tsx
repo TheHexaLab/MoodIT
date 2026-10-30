@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MarkdownEditor } from './MarkdownEditor';
 
 /**
@@ -266,11 +267,42 @@ describe('MarkdownEditor — clavier', () => {
     expect(fireEvent.keyDown(textarea(), { key: 'Escape' })).toBe(true);
   });
 
-  it('Tab remplace la sélection par 4 espaces et place le curseur après', async () => {
-    const onChange = renderWithSelection('abXYcd', 2, 4);
+  it('Tab dans un bloc de code remplace la sélection par 4 espaces, curseur après', async () => {
+    const onChange = renderWithSelection('```py\nabXYcd', 8, 10);
     expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(false);
-    expect(onChange).toHaveBeenCalledWith('ab    cd');
-    await waitFor(() => expect(textarea().selectionStart).toBe(6));
+    expect(onChange).toHaveBeenCalledWith('```py\nab    cd');
+    await waitFor(() => expect(textarea().selectionStart).toBe(12));
+  });
+
+  it('Tab hors d’un bloc de code garde le comportement natif (pas d’indentation)', () => {
+    const onChange = renderWithSelection('abcd', 2);
+    expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('Tab sur la ligne d’ouverture ou après un bloc refermé : pas d’indentation', () => {
+    const onChange = renderWithSelection('```js\nx\n```\nsuite', 3);
+    expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(true);
+    textarea().setSelectionRange(16, 16); // dans « suite », après la clôture
+    expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('Tab sur la ligne de clôture d’un bloc indente (encore dans le bloc)', () => {
+    const onChange = renderWithSelection('```\nx\n```', 6);
+    expect(fireEvent.keyDown(textarea(), { key: 'Tab' })).toBe(false);
+    expect(onChange).toHaveBeenCalledWith('```\nx\n    ```');
+  });
+
+  it('Tab (clavier réel) quitte l’éditeur vers les actions : le focus n’est pas piégé', async () => {
+    const user = userEvent.setup();
+    render(<Controlled initial="du texte" submitLabel="Publier" onSubmit={vi.fn()} onCancel={vi.fn()} autoFocus={false} />);
+    textarea().focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Annuler' }));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Publier' }));
+    expect(textarea().value).toBe('du texte');
   });
 
   it('Maj+Tab garde le comportement natif (pas d’indentation)', () => {

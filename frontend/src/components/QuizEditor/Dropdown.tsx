@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './QuizEditor.module.css';
 import { Chevron } from '../../assets/Chevron';
+import { OPTION_SELECTOR, useMenuKeyboard } from '../../hooks/useMenuKeyboard';
 
 export interface DropdownOption {
   value: string;
@@ -45,6 +46,16 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>();
 
   const current = options.find((o) => o.value === value);
+
+  // Clavier (patron WAI-ARIA « Listbox ») : à l'ouverture, le focus va sur l'option choisie ;
+  // ↓/↑ (circulaires), Début/Fin entre les options. Échap est traité plus bas (conteneur).
+  // Le menu n'est focusable qu'une fois placé (avant, il est en `visibility: hidden`).
+  const handleListKeyDown = useMenuKeyboard({
+    open: open && menuStyle !== undefined,
+    containerRef: menuRef,
+    itemSelector: OPTION_SELECTOR,
+    initialFocus: 'selected',
+  });
 
   // Position du menu (porté en `position: fixe`), calculée UNE fois à l'ouverture (et
   // au redimensionnement de la fenêtre). On ne recalcule PAS au défilement : ça évitait
@@ -144,6 +155,7 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
             role="listbox"
             ref={menuRef}
             style={menuStyle ?? HIDDEN_MENU_STYLE}
+            onKeyDown={handleListKeyDown}
           >
             {options.map((option) => {
               const selected = option.value === value;
@@ -157,6 +169,8 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
                     onClick={() => {
                       onChange(option.value);
                       setOpen(false);
+                      // L'option disparaît avec la liste : le focus revient au contrôle.
+                      controlRef.current?.focus();
                     }}
                   >
                     <span>{option.label}</span>
