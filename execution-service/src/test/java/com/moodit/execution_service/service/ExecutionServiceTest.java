@@ -2,6 +2,7 @@ package com.moodit.execution_service.service;
 
 import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
+import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
@@ -14,9 +15,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -193,5 +197,29 @@ class ExecutionServiceTest {
                 List.of(new TestCaseInput("a", "return True", 3)));
         assertThat(service.evaluate(req)).singleElement()
                 .satisfies(t -> assertThat(t.weight()).isEqualTo(3));
+    }
+
+    @Test
+    void chaque_appel_piston_occupe_une_place_du_sandbox() {
+        // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel Piston (run, harnais,
+        // SQL en deux phases) doit passer par cette place, donc être refusé sans appeler Piston.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+        ExecutionService limited = new ExecutionService(assembler, piston, limiter);
+        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+
+        limiter.withSandboxSlot(() -> {
+            assertThatThrownBy(() -> limited.run(new RunRequest("Python", null, "print(1)")))
+                    .isInstanceOf(ExecutionBusyException.class);
+            assertThatThrownBy(() -> limited.evaluate(oneTest("Python", "def f(): pass", "return True")))
+                    .isInstanceOf(ExecutionBusyException.class);
+            assertThatThrownBy(() -> limited.evaluate(oneTest("SQL", "UPDATE t SET n = 0", SQL_MUTATION_HARNESS)))
+                    .isInstanceOf(ExecutionBusyException.class);
+            return null;
+        });
+        verify(piston, never()).execute(anyString(), any(), any());
+
+        // Place rendue : la même exécution passe.
+        assertThat(limited.evaluate(oneTest("Python", "def f(): pass", "return True")))
+                .singleElement().satisfies(t -> assertThat(t.passed()).isTrue());
     }
 }

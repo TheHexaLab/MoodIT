@@ -41,6 +41,7 @@ import {
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
+  ExecutionBusyError,
   type QuizResult,
   type QuizSubmission,
   type RunCodeInput,
@@ -258,7 +259,7 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 /**
  * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
  * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
- * bouton « Tester » de l'éditeur (sans persistance).
+ * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
   const res = await apiFetch('/exec/evaluate', {
@@ -274,6 +275,7 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
       })),
     }),
   });
+  if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'évaluation du code");
   return await res.json();
 }
@@ -281,6 +283,7 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
 /**
  * Exécute un code TEL QUEL (sans harnais) dans le sandbox et renvoie sa sortie brute
  * (stdout/stderr/exit). Sert au bouton « play » des éditeurs de code (étudiant + onglet « Tester »).
+ * 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function runCode(input: RunCodeInput): Promise<RunResult> {
   const res = await apiFetch('/exec/run', {
@@ -288,6 +291,7 @@ export async function runCode(input: RunCodeInput): Promise<RunResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ language: input.language, code: input.code }),
   });
+  if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'exécution du code");
   return await res.json();
 }

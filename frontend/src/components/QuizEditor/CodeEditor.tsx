@@ -6,7 +6,7 @@ import styles from './CodeEditor.module.css';
 import { Play } from '../../assets/Play';
 import { X } from '../../assets/X';
 import { Spinner } from '../Spinner/Spinner';
-import { type RunResult } from '../MainPanel/QuizView/quizAttempt';
+import { ExecutionBusyError, type RunResult } from '../MainPanel/QuizView/quizAttempt';
 
 /** Noms de langage dont la grammaire Prism diffère du nom affiché (minuscule). */
 const PRISM_ALIASES: Record<string, string> = {
@@ -349,9 +349,13 @@ export function CodeEditor({
     setRunError(null);
     try {
       setRunResult(await onRun(value));
-    } catch {
+    } catch (e) {
       setRunResult(null);
-      setRunError('Exécution impossible pour le moment. Réessaie dans un instant.');
+      setRunError(
+        e instanceof ExecutionBusyError
+          ? e.message
+          : 'Exécution impossible pour le moment. Réessaie dans un instant.'
+      );
     } finally {
       setRunning(false);
     }

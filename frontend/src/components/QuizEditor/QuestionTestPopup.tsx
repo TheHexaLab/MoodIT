@@ -9,6 +9,7 @@ import { gradeQuestion } from '../MainPanel/QuizView/grading';
 import { Spinner } from '../Spinner/Spinner';
 import {
   emptyAnswer,
+  ExecutionBusyError,
   type CodeEvaluationInput,
   type CodingTestResult,
   type QuestionAnswer,
@@ -96,8 +97,8 @@ export function QuestionTestBody({
           testCases: question.testCases ?? [],
         });
         setResult(codingResult(question, tests));
-      } catch {
-        setError(t.evalError);
+      } catch (e) {
+        setError(e instanceof ExecutionBusyError ? t.evalBusy : t.evalError);
       } finally {
         setEvaluating(false);
       }

@@ -1,3 +1,5 @@
+import { EXECUTION_BUSY_MESSAGE } from '../MainPanel/QuizView/quizAttempt';
+
 /**
  * Libellés du corps « Tester » (prévisualisation d'une question). Passés via
  * `labels` (en Partial) ; les champs omis prennent les défauts.
@@ -7,6 +9,8 @@ export interface QuestionTestLabels {
   infoBanner: string;
   /** Message d'erreur si l'évaluation du code échoue. */
   evalError: string;
+  /** Message si le service d'exécution refuse faute de place (trop d'exécutions en cours). */
+  evalBusy: string;
   /** Bouton « réessayer » (après correction). */
   retry: string;
   /** Bouton « corriger ». */
@@ -17,6 +21,7 @@ export interface QuestionTestLabels {
 export const defaultQuestionTestLabels: QuestionTestLabels = {
   infoBanner: 'Prévisualisation : réponds comme un étudiant, puis « Corriger ».',
   evalError: "L'évaluation du code a échoué. Réessayez.",
+  evalBusy: EXECUTION_BUSY_MESSAGE,
   retry: 'Réessayer',
   correct: 'Corriger',
 };

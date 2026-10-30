@@ -4,7 +4,7 @@ import { QuestionTestBody } from './QuestionTestPopup';
 import { EditorShell } from './EditorShell';
 import { defaultQuestionTestLabels } from './questionTestLabels';
 import { emptyQuestionDraft, type QuestionDraft } from './editorTypes';
-import type { CodingTestResult } from '../MainPanel/QuizView/quizAttempt';
+import { ExecutionBusyError, type CodingTestResult } from '../MainPanel/QuizView/quizAttempt';
 import type { Language } from '../../types/domain';
 import './editorTestSetup';
 
@@ -198,6 +198,16 @@ describe('QuestionTestBody — correction Code via l’API', () => {
     await waitFor(() => expect(onEvaluateCode).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('4 / 4 pts')).toBeTruthy();
     expect(screen.queryByText(t.evalError)).toBeNull();
+  });
+
+  it('service d’exécution saturé (429) → popup d’erreur avec le message dédié', async () => {
+    const onEvaluateCode = vi.fn().mockRejectedValue(new ExecutionBusyError());
+    renderBody(codingDraft(), { onEvaluateCode });
+    fireEvent.click(correctButton());
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Une erreur est survenue' });
+    expect(within(dialog).getByText(t.evalBusy)).toBeTruthy();
+    expect(within(dialog).queryByText(t.evalError)).toBeNull();
   });
 
   it('échec de l’évaluation → « Fermer » masque la popup sans relancer', async () => {
