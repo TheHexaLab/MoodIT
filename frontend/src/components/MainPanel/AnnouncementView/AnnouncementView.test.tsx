@@ -7,6 +7,15 @@ import type { ForumPost, User } from '../../../types/domain';
 import type { Course } from '../../CourseMenu/CourseMenu';
 import type { ForumSocket, IncomingForumHandlers } from '../ForumView/useForumThreads';
 
+// jsdom ne fournit pas ResizeObserver (utilisé par le MarkdownEditor du formulaire).
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+  ResizeObserverStub;
+
 // Fermeture immédiate des popups (pas d'animationend sous jsdom), comme les autres tests de popup.
 function stubReducedMotion() {
   vi.stubGlobal(
@@ -157,6 +166,46 @@ describe('AnnouncementView', () => {
     await waitFor(() => expect(screen.queryByText(t.formSubtitle)).toBeNull());
     const titles = screen.getAllByRole('listitem').map((c) => c.querySelector('h2')?.textContent);
     expect(titles).toEqual(['Nouvelle', 'Ancienne']);
+  });
+
+  it('formulaire : le texte s’écrit en Markdown (barre gras / italique), envoyé tel quel', async () => {
+    const create = vi.fn().mockResolvedValue(post(7));
+    render(
+      <AnnouncementView
+        course={COURSE}
+        channel={CHANNEL}
+        canPost
+        onFetchAnnouncements={vi.fn().mockResolvedValue([])}
+        onCreateAnnouncement={create}
+      />
+    );
+    await screen.findByText(t.emptyStaff);
+    fireEvent.click(screen.getByText(t.newAnnouncement));
+
+    expect(screen.getByRole('button', { name: 'Gras' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Italique' })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(t.titlePlaceholder), { target: { value: 'Labo' } });
+    fireEvent.change(screen.getByPlaceholderText(t.contentPlaceholder), {
+      target: { value: 'Le TP est **mercredi**, *pas* jeudi.' },
+    });
+    fireEvent.click(screen.getByText(t.publish));
+
+    await waitFor(() =>
+      expect(create.mock.calls[0][1].content).toBe('Le TP est **mercredi**, *pas* jeudi.')
+    );
+  });
+
+  it('carte : le texte Markdown est rendu (gras, italique)', async () => {
+    render(
+      <AnnouncementView
+        course={COURSE}
+        channel={CHANNEL}
+        onFetchAnnouncements={vi.fn().mockResolvedValue([post(1, { content: 'TP **mercredi**, *pas* jeudi' })])}
+      />
+    );
+    const card = (await screen.findByText('Annonce 1')).closest('li')!;
+    expect(card.querySelector('strong')?.textContent).toBe('mercredi');
+    expect(card.querySelector('em')?.textContent).toBe('pas');
   });
 
   it('formulaire : titre obligatoire, date obligatoire si « Jamais » est décoché', async () => {

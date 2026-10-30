@@ -8,6 +8,7 @@ import { MAX_POST_CONTENT_LENGTH } from '../../../helpers/forumLimits';
 import { type AnnouncementDraft } from '../../../pages/Dashboard/dashboardApi';
 import { type ForumPost } from '../../../types/domain';
 import { type MaybePromise } from '../ChannelView/useChannelMessages';
+import { MarkdownEditor } from '../ForumView/MarkdownEditor';
 import {
   ANNOUNCEMENT_COLORS,
   DEFAULT_ANNOUNCEMENT_COLOR,
@@ -119,16 +120,19 @@ export function AnnouncementFormPopup({
           />
         </label>
 
-        <label>
+        {/* Même éditeur Markdown que les sujets du forum (gras, italique, liens…), en mode
+            champ : le popup a ses propres boutons. */}
+        <div className={styles['content-field']}>
           <span>{t.contentLabel}</span>
-          <textarea
+          <MarkdownEditor
+            embedded
+            autoFocus={false}
             value={content}
             maxLength={MAX_POST_CONTENT_LENGTH}
             placeholder={t.contentPlaceholder}
-            rows={4}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={setContent}
           />
-        </label>
+        </div>
 
         <fieldset>
           <legend>{t.colorLabel}</legend>

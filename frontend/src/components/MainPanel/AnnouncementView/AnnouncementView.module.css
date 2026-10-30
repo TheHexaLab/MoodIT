@@ -292,7 +292,8 @@ div.announcement-form > div > form > header > button:hover {
 }
 
 div.announcement-form > div > form > label,
-div.announcement-form > div > form > fieldset {
+div.announcement-form > div > form > fieldset,
+div.announcement-form > div > form > .content-field {
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
@@ -302,6 +303,7 @@ div.announcement-form > div > form > fieldset {
 }
 
 div.announcement-form > div > form > label > span,
+div.announcement-form > div > form > .content-field > span,
 div.announcement-form > div > form > fieldset > legend {
     padding: 0;
     margin-bottom: 0.375rem;
@@ -310,9 +312,9 @@ div.announcement-form > div > form > fieldset > legend {
     font-weight: 500;
 }
 
-div.announcement-form input[type="text"],
-div.announcement-form input[type="date"],
-div.announcement-form textarea {
+/* Champs du formulaire seulement (l'éditeur Markdown garde ses propres styles). */
+div.announcement-form > div > form > label > input,
+div.announcement-form > div > form > fieldset > div > input[type="date"] {
     box-sizing: border-box;
     width: 100%;
     padding: 0.75rem 0.88rem;
@@ -322,19 +324,17 @@ div.announcement-form textarea {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.8125rem;
-    resize: vertical;
     outline: none;
     transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-div.announcement-form input[type="text"]:focus,
-div.announcement-form input[type="date"]:focus,
-div.announcement-form textarea:focus {
+div.announcement-form > div > form > label > input:focus,
+div.announcement-form > div > form > fieldset > div > input[type="date"]:focus {
     border-color: var(--brand-teal);
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
-div.announcement-form input[type="date"]:disabled {
+div.announcement-form > div > form > fieldset > div > input[type="date"]:disabled {
     opacity: 0.5;
 }
 
