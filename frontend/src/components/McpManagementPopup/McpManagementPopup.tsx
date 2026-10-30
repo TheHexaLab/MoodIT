@@ -498,6 +498,11 @@ export function McpManagementPopup({
             )}
 
             <p className={styles.footnote}>
+              {detailResponse?.source && (
+                <span>
+                  {detailResponse.source === 'LLM' ? t.sourceLlm : t.sourceDeterministic}
+                </span>
+              )}
               <span>
                 {t.scopeNote(
                   detailAnalysis.sources.quizCount,

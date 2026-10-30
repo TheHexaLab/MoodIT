@@ -298,6 +298,7 @@ CREATE TABLE Submission_Test_Case(
 -- Historique conservé : une ligne par analyse (tri par created_at).
 -- status : 'pending' (job en cours), 'done' (analyse disponible), 'failed' (échec du job).
 -- content NULL tant que le job n'a pas produit de résultat (pending/failed).
+-- source : origine du contenu ('LLM' ou 'DETERMINISTIC'), NULL tant que pas de résultat.
 CREATE TABLE MCP_Response(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -305,6 +306,9 @@ CREATE TABLE MCP_Response(
    -- Défaut 'pending' (état logique d'une ligne fraîchement insérée). Le service pose
    -- toujours le statut explicitement ; ce défaut protège un INSERT manuel oublié.
    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+   -- Origine du contenu : 'LLM' (modèle de langage) ou 'DETERMINISTIC' (repli calculé sans IA).
+   -- NULL tant que l'analyse n'est pas terminée (et pour les analyses antérieures à la colonne).
+   source VARCHAR(16),
    user_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
@@ -314,7 +318,8 @@ CREATE TABLE MCP_Response(
 
 -- Verrou « une seule analyse en cours par (cours, utilisateur) » : rend la garde de
 -- tentative unique ATOMIQUE (deux POST concurrents → le 2e viole l'index → 409).
-CREATE UNIQUE INDEX uq_mcp_response_pending ON MCP_Response(course_id, user_id) WHERE status = 'pending';
+-- Majuscules : McpStatus est stocké par son nom (EnumType.STRING).
+CREATE UNIQUE INDEX uq_mcp_response_pending ON MCP_Response(course_id, user_id) WHERE status = 'PENDING';
 
 CREATE TABLE User_Program(
    program_id INTEGER,

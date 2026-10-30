@@ -318,7 +318,15 @@ export interface McpResponse {
   courseId: number;
   /** Auteur résolu (jointure sur user_id) : l'utilisateur qui a lancé l'analyse. */
   author?: User;
+  /**
+   * Origine du contenu : rédigé par le LLM ou calculé sans IA (repli déterministe). Absent pour
+   * les analyses antérieures à la colonne (origine inconnue).
+   */
+  source?: McpSource;
 }
+
+/** Origine d'une analyse MCP (colonne MCP_Response.source). */
+export type McpSource = 'LLM' | 'DETERMINISTIC';
 
 /**
  * Analyse MCP structurée, telle que sérialisée dans MCP_Response.content : le service

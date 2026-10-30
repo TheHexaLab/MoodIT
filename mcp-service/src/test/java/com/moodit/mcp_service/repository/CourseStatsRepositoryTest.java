@@ -38,7 +38,7 @@ class CourseStatsRepositoryTest {
     jdbc.execute("CREATE TABLE forum (id INT PRIMARY KEY, course_id INT)");
     jdbc.execute(
         "CREATE TABLE post (id INT PRIMARY KEY, forum_id INT, content VARCHAR(2000),"
-            + " created_at TIMESTAMP)");
+            + " created_at TIMESTAMP, user_id INT)");
     jdbc.execute("CREATE TABLE attempt (id INT PRIMARY KEY, quiz_id INT, user_id INT)");
     jdbc.execute("CREATE TABLE submission (id INT PRIMARY KEY, attempt_id INT)");
     jdbc.execute("CREATE TABLE submission_test_case (submission_id INT, passed BOOLEAN)");
@@ -85,9 +85,9 @@ class CourseStatsRepositoryTest {
   @Test
   void countForumMessages_compte_les_posts_de_tous_les_forums_du_cours() {
     jdbc.update("INSERT INTO forum VALUES (1, 100), (2, 100), (3, 200)");
-    jdbc.update("INSERT INTO post VALUES (1, 1, 'a', NULL), (2, 1, 'b', NULL)"); // forum 1 (cours 100)
-    jdbc.update("INSERT INTO post VALUES (3, 2, 'c', NULL)"); // forum 2 (cours 100)
-    jdbc.update("INSERT INTO post VALUES (4, 3, 'd', NULL)"); // autre cours
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (1, 1, 'a', NULL), (2, 1, 'b', NULL)"); // forum 1 (cours 100)
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (3, 2, 'c', NULL)"); // forum 2 (cours 100)
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (4, 3, 'd', NULL)"); // autre cours
 
     assertThat(repo.countForumMessages(100)).isEqualTo(3);
     assertThat(repo.countForumMessages(200)).isEqualTo(1);
@@ -110,33 +110,52 @@ class CourseStatsRepositoryTest {
   @Test
   void sampleForumMessages_plus_recents_d_abord_limite_et_sans_vides() {
     jdbc.update("INSERT INTO forum VALUES (1, 100), (2, 200)");
-    jdbc.update("INSERT INTO post VALUES (1, 1, 'ancien', TIMESTAMP '2026-01-01 10:00:00')");
-    jdbc.update("INSERT INTO post VALUES (2, 1, 'récent', TIMESTAMP '2026-03-01 10:00:00')");
-    jdbc.update("INSERT INTO post VALUES (3, 1, 'milieu', TIMESTAMP '2026-02-01 10:00:00')");
-    jdbc.update("INSERT INTO post VALUES (4, 1, '', TIMESTAMP '2026-04-01 10:00:00')"); // vide exclu
-    jdbc.update("INSERT INTO post VALUES (5, 1, NULL, TIMESTAMP '2026-05-01 10:00:00')"); // NULL exclu
-    jdbc.update("INSERT INTO post VALUES (6, 2, 'autre cours', TIMESTAMP '2026-06-01 10:00:00')");
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (1, 1, 'ancien', TIMESTAMP '2026-01-01 10:00:00')");
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (2, 1, 'récent', TIMESTAMP '2026-03-01 10:00:00')");
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (3, 1, 'milieu', TIMESTAMP '2026-02-01 10:00:00')");
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (4, 1, '', TIMESTAMP '2026-04-01 10:00:00')"); // vide exclu
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (5, 1, NULL, TIMESTAMP '2026-05-01 10:00:00')"); // NULL exclu
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (6, 2, 'autre cours', TIMESTAMP '2026-06-01 10:00:00')");
 
-    assertThat(repo.sampleForumMessages(100, 2)).containsExactly("récent", "milieu");
-    assertThat(repo.sampleForumMessages(100, 20)).containsExactly("récent", "milieu", "ancien");
+    assertThat(repo.sampleForumMessages(100, 2, 10)).containsExactly("récent", "milieu");
+    assertThat(repo.sampleForumMessages(100, 20, 10)).containsExactly("récent", "milieu", "ancien");
   }
 
   @Test
   void sampleForumMessages_tronque_chaque_message_a_400_caracteres() {
     jdbc.update("INSERT INTO forum VALUES (1, 100)");
-    jdbc.update("INSERT INTO post VALUES (1, 1, ?, NULL)", "x".repeat(1000));
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at) VALUES (1, 1, ?, NULL)", "x".repeat(1000));
 
-    List<String> sample = repo.sampleForumMessages(100, 5);
+    List<String> sample = repo.sampleForumMessages(100, 5, 10);
 
     assertThat(sample).hasSize(1);
     assertThat(sample.getFirst()).hasSize(400);
   }
 
   @Test
+  void sampleForumMessages_plafonne_les_messages_par_auteur() {
+    jdbc.update("INSERT INTO forum VALUES (1, 100)");
+    // L'auteur 10 inonde le forum avec 5 messages plus récents que ceux des autres.
+    for (int i = 1; i <= 5; i++) {
+      jdbc.update(
+          "INSERT INTO post (id, forum_id, content, created_at, user_id) VALUES (?, 1, ?, ?, 10)",
+          i, "flood" + i, java.sql.Timestamp.valueOf("2026-03-0" + i + " 10:00:00"));
+    }
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at, user_id) VALUES (6, 1, 'avis A', TIMESTAMP '2026-02-01 10:00:00', 20)");
+    jdbc.update("INSERT INTO post (id, forum_id, content, created_at, user_id) VALUES (7, 1, 'avis B', TIMESTAMP '2026-01-01 10:00:00', 30)");
+
+    // Au plus 2 par auteur (ses plus récents), le tout trié du plus récent au plus ancien.
+    assertThat(repo.sampleForumMessages(100, 20, 2))
+        .containsExactly("flood5", "flood4", "avis A", "avis B");
+    // La limite globale s'applique après le plafond par auteur.
+    assertThat(repo.sampleForumMessages(100, 3, 2)).containsExactly("flood5", "flood4", "avis A");
+  }
+
+  @Test
   void sampleForumMessages_vide_si_aucun_message() {
     jdbc.update("INSERT INTO forum VALUES (1, 100)");
 
-    assertThat(repo.sampleForumMessages(100, 20)).isEmpty();
+    assertThat(repo.sampleForumMessages(100, 20, 10)).isEmpty();
   }
 
   // ── Réussite au code ─────────────────────────────────────────────────────
