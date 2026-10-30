@@ -217,6 +217,8 @@ done
   et 512 Mo à la compilation, 1 Mio de sortie par flux. Côté execution-service : 2 exécutions
   simultanées au plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par
   utilisateur (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
+  Le conteneur Piston est plafonné à 1,5 Go (`mem_limit`) : 2 compilations de 512 Mo, plus une
+  marge pour l'API Piston. Relever `EXEC_MAX_CONCURRENT` impose de relever ce plafond d'autant.
 - Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
   `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
   puis vérifier le job CI `integration` (vrai Piston) avant de déployer.
