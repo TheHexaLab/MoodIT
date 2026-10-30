@@ -23,7 +23,8 @@ public class QuizController {
     /**
      * Détail d'un quiz pour la PASSATION (étudiant) : SANS les champs de correction
      * (isCorrect/correctOrder/groupName) ni les harnais. La correction est faite côté
-     * serveur (submitQuiz), le client n'a donc pas besoin de ces champs.
+     * serveur (submitQuiz), le client n'a donc pas besoin de ces champs. Éléments déplaçables
+     * mélangés à chaque envoi, ids publics masqués. Brouillon → 404 (le personnel passe par /edit).
      */
     @GetMapping("/{quizId}")
     public ResponseEntity<QuizDetailDTO> getQuizDetail(@PathVariable Integer quizId) {

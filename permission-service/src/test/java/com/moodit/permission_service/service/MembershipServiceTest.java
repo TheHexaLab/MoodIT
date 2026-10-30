@@ -178,6 +178,14 @@ class MembershipServiceTest {
   }
 
   @Test
+  void isQuizPublished_delegatesTrueAndFalse() {
+    when(membershipRepository.isQuizPublished(12)).thenReturn(true);
+    when(membershipRepository.isQuizPublished(13)).thenReturn(false);
+    assertThat(service.isQuizPublished(12)).isTrue();
+    assertThat(service.isQuizPublished(13)).isFalse();
+  }
+
+  @Test
   void canAccessCourse_delegatesFalse() {
     when(membershipRepository.canSeeCourseViaProgram(5, 3)).thenReturn(false);
     assertThat(service.canAccessCourse(5, 3)).isFalse();

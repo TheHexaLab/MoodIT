@@ -119,9 +119,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             return quiz(4, course(1), ordering);
         }
 
+        /** Ordre soumis par le client : ids PUBLICS des éléments (ceux de la passation). */
         private SubmittedAnswerDTO ordered(Integer... ids) {
             return SubmittedAnswerDTO.builder().questionId(30)
-                    .orderedItemIds(java.util.Arrays.asList(ids)).build();
+                    .orderedItemIds(java.util.Arrays.stream(ids)
+                            .map(id -> id == null ? null : pub(id)).toList()).build();
         }
 
         @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
