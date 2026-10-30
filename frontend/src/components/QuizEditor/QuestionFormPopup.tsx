@@ -391,6 +391,7 @@ export function QuestionFormBody({
                 className={[styles.input, styles.answerInput, a.isCorrect ? styles.answerInputSelected : '']
                   .filter(Boolean)
                   .join(' ')}
+                aria-label={t.answerAria(i + 1)}
                 value={a.content}
                 placeholder={fixed ? '' : t.answerPlaceholder}
                 disabled={fixed}

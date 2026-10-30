@@ -25,13 +25,13 @@ function renderDropdown(value = 'py', onChange = vi.fn(), parentKeyDown = vi.fn(
 }
 
 function control(): HTMLButtonElement {
-  return screen.getByRole('button', { name: 'Langage' }) as HTMLButtonElement;
+  return screen.getByRole('button', { name: /^Langage/ }) as HTMLButtonElement;
 }
 
 /** Simule la position du contrôle à l'écran (jsdom ne fait pas de mise en page). */
 function mockControlRect(rect: { top: number; bottom: number; left: number; width: number }) {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.getAttribute('aria-label') === 'Langage') {
+    if (this.getAttribute('aria-label')?.startsWith('Langage')) {
       return { ...rect, right: rect.left + rect.width, height: rect.bottom - rect.top, x: rect.left, y: rect.top, toJSON: () => ({}) } as DOMRect;
     }
     return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
@@ -45,6 +45,16 @@ describe('Dropdown', () => {
     expect(control().getAttribute('aria-expanded')).toBe('false');
     expect(control().getAttribute('aria-haspopup')).toBe('listbox');
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('nom accessible : libellé du contrôle suivi de l’option affichée (WCAG 2.5.3)', () => {
+    renderDropdown('js');
+    expect(screen.getByRole('button', { name: 'Langage : JavaScript' })).toBeTruthy();
+  });
+
+  it('valeur inconnue → nom accessible réduit au libellé du contrôle', () => {
+    renderDropdown('inconnu');
+    expect(screen.getByRole('button', { name: 'Langage' })).toBeTruthy();
   });
 
   it('valeur inconnue → libellé vide', () => {

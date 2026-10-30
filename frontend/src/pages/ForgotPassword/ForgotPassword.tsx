@@ -101,7 +101,12 @@ export default function ForgotPassword() {
 
         <footer className="footer">© 2026 MoodIT · Confidentialité · Conditions d'utilisation</footer>
       </main>
-      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+      <button
+        type="button"
+        className="light-dark-btn"
+        onClick={toggleTheme}
+        aria-label="Changer de thème"
+      >
         <Lightanddark isDark={theme === 'dark'} />
       </button>
     </div>

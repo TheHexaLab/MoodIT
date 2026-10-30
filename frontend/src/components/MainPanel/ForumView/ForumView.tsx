@@ -436,7 +436,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     const own = isOwn(post);
     const ownTitle = own ? t.ownVoteTitle : undefined;
     return (
-      <div role={`${!compact ? 'vertical' : 'horizontal'}-vote-actions`}>
+      <div data-role={`${!compact ? 'vertical' : 'horizontal'}-vote-actions`}>
         <button
           type="button"
           aria-label={t.voteUp}
@@ -450,7 +450,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         >
           <Arrow direction="up" />
         </button>
-        <span role={userVote === 1 ? 'up-voted' : userVote === -1 ? 'down-voted' : undefined}>
+        <span data-role={userVote === 1 ? 'up-voted' : userVote === -1 ? 'down-voted' : undefined}>
           {formatScore(score)}
         </span>
         <button
@@ -474,16 +474,16 @@ const ForumView: React.FC<ForumViewProps> = ({
   function renderByline(post: ForumPost) {
     const color = post.author.avatarColor ?? DEFAULT_AVATAR_COLOR;
     return (
-      <div role="header">
-        <span role="avatar" style={{ background: color, color: contrastingTextColor(color) }}>
+      <div data-role="header">
+        <span data-role="avatar" style={{ background: color, color: contrastingTextColor(color) }}>
           <span>{getInitials(post.author)}</span>
         </span>
-        <span role="author">{getAuthorName(post.author)}</span>
+        <span data-role="author">{getAuthorName(post.author)}</span>
         <span role="separator" aria-hidden="true">
           •
         </span>
-        <span role="time">{formatRelativeTime(post.createdAt)}</span>
-        {post.isPinned && <span role="pin-indicator">{t.pinned}</span>}
+        <span data-role="time">{formatRelativeTime(post.createdAt)}</span>
+        {post.isPinned && <span data-role="pin-indicator">{t.pinned}</span>}
       </div>
     );
   }
@@ -496,7 +496,7 @@ const ForumView: React.FC<ForumViewProps> = ({
         {isThread && (
           <input
             type="text"
-            role="edit-title"
+            data-role="edit-title"
             value={editTitleDraft}
             onChange={(event) => setEditTitleDraft(event.target.value)}
             placeholder={t.newThreadTitle}
@@ -520,21 +520,21 @@ const ForumView: React.FC<ForumViewProps> = ({
 
   /** Toggle « chevron + N réponses » : replie/deplie le fil (sujets & commentaires). */
   function renderRepliesToggle(open: boolean, count: number, onToggle: () => void) {
+    const countLabel = `${count} ${count > 1 ? t.replyMany : t.replyOne}`;
     return (
       <button
         type="button"
-        role="replies-toggle"
+        data-role="replies-toggle"
         onClick={(event) => {
           event.stopPropagation();
           onToggle();
         }}
         aria-expanded={open}
-        aria-label={open ? t.collapseReplies : t.expandReplies}
+        // Le nom accessible commence par le texte visible (WCAG 2.5.3, « label in name »).
+        aria-label={`${countLabel} — ${open ? t.collapseReplies : t.expandReplies}`}
       >
         <Chevron open={open} />
-        <span>
-          {count} {count > 1 ? t.replyMany : t.replyOne}
-        </span>
+        <span>{countLabel}</span>
       </button>
     );
   }
@@ -565,14 +565,14 @@ const ForumView: React.FC<ForumViewProps> = ({
     return (
       <>
         {own && (
-          <button type="button" role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
+          <button type="button" data-role="edit" aria-label={t.edit} onClick={() => startEdit(post)}>
             <Pencil width={14} height={14} />
           </button>
         )}
         {(own || canModerate) && (
           <button
             type="button"
-            role="delete"
+            data-role="delete"
             aria-label={t.delete}
             onClick={() => setConfirmDeleteId(post.id)}
           >
@@ -591,7 +591,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   function renderCommentInner(post: ForumPost, replyToggle?: React.ReactNode) {
     const editing = editingId === post.id;
     return (
-      <div role="comment-body">
+      <div data-role="comment-body">
         {renderByline(post)}
         {editing ? (
           // Une réponse n'a pas de titre → isThread=false.
@@ -601,12 +601,12 @@ const ForumView: React.FC<ForumViewProps> = ({
           <Markdown source={post.content} />
         )}
         {!editing && (
-          <div role="comment-footer">
+          <div data-role="comment-footer">
             {renderVoteControl(post, true)}
-            <div role="post-actions">
+            <div data-role="post-actions">
               <button
                 type="button"
-                role="answer"
+                data-role="answer"
                 aria-label={t.reply}
                 onClick={() => startReply(post)}
               >
@@ -630,7 +630,7 @@ const ForumView: React.FC<ForumViewProps> = ({
   function renderRepliesBody(post: ForumPost, childDepth: number, flat: boolean): React.ReactNode {
     if (replyErrors.has(post.id)) {
       return (
-        <div role="replies-error">
+        <div data-role="replies-error">
           <span>{t.repliesError}</span>
           <button
             type="button"
@@ -647,14 +647,14 @@ const ForumView: React.FC<ForumViewProps> = ({
     // `replies` non charge (undefined) = chargement paresseux en cours.
     if (post.replies === undefined) {
       return (
-        <div role="replies-loading">
+        <div data-role="replies-loading">
           <Spinner size={18} />
           <span>{t.repliesLoading}</span>
         </div>
       );
     }
     return (
-      <ul role="replies" data-flat={flat || undefined}>
+      <ul data-role="replies" data-flat={flat || undefined}>
         {post.replies.map((child) => renderComment(child, childDepth))}
       </ul>
     );
@@ -683,7 +683,7 @@ const ForumView: React.FC<ForumViewProps> = ({
     return (
       <li
         key={post.id}
-        role="comment"
+        data-role="comment"
         data-actions={activeActionsId === post.id ? 'open' : undefined}
         onClick={(event) => {
           event.stopPropagation();
@@ -696,10 +696,10 @@ const ForumView: React.FC<ForumViewProps> = ({
           hasReplies &&
           (indentChildren ? (
             // Sous le plateau : indentation + filet vertical cliquable (replie la branche).
-            <div role="replies-wrap">
+            <div data-role="replies-wrap">
               <button
                 type="button"
-                role="collapse-rail"
+                data-role="collapse-rail"
                 onClick={(event) => {
                   event.stopPropagation();
                   toggleReplies(post);
@@ -729,9 +729,9 @@ const ForumView: React.FC<ForumViewProps> = ({
         onClick={() => toggleActions(post.id)}
       >
         {renderVoteControl(post)}
-        <div role="thread-main">
+        <div data-role="thread-main">
           {renderByline(post)}
-          {post.title && <h2 role="thread-title">{post.title}</h2>}
+          {post.title && <h2 data-role="thread-title">{post.title}</h2>}
           {editing ? (
             // Sujet racine → titre editable (isThread=true).
             renderEditor(post, true)
@@ -740,14 +740,14 @@ const ForumView: React.FC<ForumViewProps> = ({
             <Markdown source={post.content} />
           )}
           {!editing && (
-            <div role="thread-footer">
+            <div data-role="thread-footer">
               {/* Mobile uniquement : le vote passe sous le post (le rail vertical
                   de gauche est masque), facon reponse. */}
-              <div role="mobile-vote">{renderVoteControl(post, true)}</div>
-              <div role="post-actions">
+              <div data-role="mobile-vote">{renderVoteControl(post, true)}</div>
+              <div data-role="post-actions">
                 <button
                   type="button"
-                  role="answer"
+                  data-role="answer"
                   aria-label="Répondre"
                   onClick={() => startReply(post)}
                 >
@@ -758,7 +758,7 @@ const ForumView: React.FC<ForumViewProps> = ({
               {replyCount > 0 ? (
                 renderRepliesToggle(isOpen, replyCount, () => toggleReplies(post))
               ) : (
-                <span role="no-replies">{t.noReplies}</span>
+                <span data-role="no-replies">{t.noReplies}</span>
               )}
             </div>
           )}
@@ -788,7 +788,7 @@ const ForumView: React.FC<ForumViewProps> = ({
           <div role="group" aria-label={t.sortGroup}>
             <button
               type="button"
-              role={sort === 'top' ? 'active-sort' : undefined}
+              data-role={sort === 'top' ? 'active-sort' : undefined}
               onClick={() => setSort('top')}
               aria-pressed={sort === 'top'}
             >
@@ -796,7 +796,7 @@ const ForumView: React.FC<ForumViewProps> = ({
             </button>
             <button
               type="button"
-              role={sort === 'recent' ? 'active-sort' : undefined}
+              data-role={sort === 'recent' ? 'active-sort' : undefined}
               onClick={() => setSort('recent')}
               aria-pressed={sort === 'recent'}
             >
@@ -805,7 +805,7 @@ const ForumView: React.FC<ForumViewProps> = ({
           </div>
           <button
             type="button"
-            role={`new-post${composing ? '-composing' : ''}`}
+            data-role={`new-post${composing ? '-composing' : ''}`}
             onClick={startCompose}
           >
             +<span>{t.newThread}</span>
@@ -813,11 +813,11 @@ const ForumView: React.FC<ForumViewProps> = ({
         </div>
       )}
 
-      <div role="body" ref={bodyRef} onScroll={handleBodyScroll}>
+      <div data-role="body" ref={bodyRef} onScroll={handleBodyScroll}>
         {/* Formulaire « Nouveau sujet » : inline en tete de la liste (pas une autre page). */}
         {composing && (
-          <div role="new-thread">
-            <h2 role="new-thread-heading">{t.newThreadHeading}</h2>
+          <div data-role="new-thread">
+            <h2 data-role="new-thread-heading">{t.newThreadHeading}</h2>
             <input
               type="text"
               value={newTitle}

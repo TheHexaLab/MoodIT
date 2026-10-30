@@ -398,7 +398,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
           ) : (
             <ul ref={listRef} onScroll={handleListScroll}>
               {loadingOlder && (
-                <li role="separator" aria-live="polite">
+                <li data-role="separator" aria-live="polite">
                   <Spinner size={18} />
                 </li>
               )}
@@ -416,12 +416,14 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                 return (
                   <React.Fragment key={message.id}>
                     {showDateSeparator && (
-                      <li role="separator">
+                      // Élément de liste ordinaire (pas role="separator", interdit dans un <ul>
+                      // et qui masquerait la date aux lecteurs d'écran).
+                      <li data-role="separator">
                         <span>{formatDaySeparator(message.createdAt)}</span>
                       </li>
                     )}
                     <li
-                      role="message"
+                      data-role="message"
                       data-actions={activeActionsId === message.id ? 'open' : undefined}
                       onClick={() =>
                         setActiveActionsId((prev) => (prev === message.id ? null : message.id))
@@ -467,7 +469,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                       >
                         {getInitials(message.author)}
                       </span>
-                      <div role={editingId === message.id ? "editor" : undefined}>
+                      <div data-role={editingId === message.id ? "editor" : undefined}>
                         <p>
                           <span>{authorName}</span>
                           <span>{formatTime(message.createdAt)}</span>
@@ -493,7 +495,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                               autoFocus
                             />
                             {editOverLimit && (
-                              <p role="composer-error">
+                              <p data-role="composer-error">
                                 ⚠ {t.overLimit(MAX_POST_CONTENT_LENGTH)}
                               </p>
                             )}
@@ -515,10 +517,10 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                         )}
                       </div>
                       {editingId !== message.id && (
-                        <div role="message-actions">
+                        <div data-role="message-actions">
                           <button
                             type="button"
-                            role="reply"
+                            data-role="reply"
                             aria-label={t.reply}
                             onClick={() => startReply(message)}
                           >
@@ -538,7 +540,7 @@ const ChannelView: React.FC<ChannelViewProps> = ({
                           {(isOwnMessage(message) || canModerate) && (
                             <button
                               type="button"
-                              role="delete"
+                              data-role="delete"
                               aria-label={t.delete}
                               onClick={() => setConfirmDeleteId(message.id)}
                             >
@@ -554,14 +556,14 @@ const ChannelView: React.FC<ChannelViewProps> = ({
             </ul>
           )}
 
-          <div role={replyingTo || draftOverLimit ? 'reply' : undefined}>
+          <div data-role={replyingTo || draftOverLimit ? 'reply' : undefined}>
             <div>
               {(replyingTo || draftOverLimit) && (
                 <div>
                   {draftOverLimit ? (
                     // Erreur de dépassement, dans le MÊME bandeau que « répondre à… » (priorité
                     // sur l'indicateur de réponse tant que c'est trop long).
-                    <span role="composer-error">
+                    <span data-role="composer-error">
                       ⚠ {t.overLimit(MAX_POST_CONTENT_LENGTH)}
                     </span>
                   ) : replyingTo ? (

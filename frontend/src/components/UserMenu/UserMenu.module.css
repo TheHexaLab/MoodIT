@@ -75,6 +75,12 @@
     user-select: none;
 }
 
+/* Initiales des pastilles (attribut data-initials) : générées en CSS, voir UserMenu.tsx. */
+.userAvatarInitials::before,
+.compactTrigger::before {
+    content: attr(data-initials);
+}
+
 .userInfo {
     display: flex;
     flex-direction: column;
@@ -437,7 +443,8 @@
 
 /* Déconnexion : teinte « danger ». */
 .logout {
-    color: var(--danger);
+    /* Variante « texte » du rouge : 4,5:1 en clair comme en sombre. */
+    color: var(--badge-danger-fg);
 }
 
 .logout .actionIcon {
@@ -446,7 +453,7 @@
 
 .logout:hover {
     background: var(--shadow-danger);
-    color: var(--danger);
+    color: var(--badge-danger-fg);
 }
 
 .logout:hover .actionIcon {

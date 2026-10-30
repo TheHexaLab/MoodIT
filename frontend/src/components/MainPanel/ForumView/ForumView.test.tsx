@@ -148,7 +148,7 @@ describe('ForumView', () => {
     renderForum([thread(101, { author: other })], { canModerate: true, onDeletePost });
     await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
     fireEvent.click(screen.getByLabelText('Supprimer'));
-    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(onDeletePost).toHaveBeenCalledWith(101));
   });
 
@@ -158,7 +158,7 @@ describe('ForumView', () => {
     await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
     fireEvent.click(screen.getByLabelText('Supprimer'));
     // Popup de confirmation : bouton « Supprimer » (texte).
-    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(onDeletePost).toHaveBeenCalledWith(101));
   });
 
@@ -187,7 +187,7 @@ describe('ForumView', () => {
   it("le bouton « Répondre » ouvre le composer de réponse", async () => {
     renderForum([thread(101, { author: other })]);
     await waitFor(() => expect(screen.getByText('Sujet 101')).toBeTruthy());
-    // Le bouton répondre porte role="answer" → cible par libellé.
+    // Le bouton répondre porte data-role="answer" → cible par libellé.
     fireEvent.click(screen.getAllByLabelText('Répondre')[0]);
     // Le composer (MarkdownEditor) apparaît avec le placeholder de réponse.
     await waitFor(() => expect(screen.getByPlaceholderText('Votre réponse…')).toBeTruthy());
@@ -261,17 +261,17 @@ async function renderLoaded(
 
 /** Éditeurs Markdown ouverts (composer de réponse, édition, nouveau sujet). */
 function openEditor(): HTMLElement {
-  return document.querySelector('[role^="markdown-editor"]') as HTMLElement;
+  return document.querySelector('[data-role^="markdown-editor"]') as HTMLElement;
 }
 
 /** Bouton de dépliage des réponses d'un sujet / commentaire (premier trouvé). */
 function repliesToggle(scope: HTMLElement | Document = document): HTMLElement {
-  return scope.querySelector('[role="replies-toggle"]') as HTMLElement;
+  return scope.querySelector('[data-role="replies-toggle"]') as HTMLElement;
 }
 
 /** Titres des sujets, dans l'ordre d'affichage. */
 function threadTitles(): string[] {
-  return Array.from(document.querySelectorAll('[role="thread-title"]')).map(
+  return Array.from(document.querySelectorAll('[data-role="thread-title"]')).map(
     (el) => el.textContent ?? ''
   );
 }
@@ -285,13 +285,13 @@ describe('ForumView — fil de réponses', () => {
     const toggle = repliesToggle();
     expect(toggle.textContent).toContain('2 réponses');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-label')).toBe('Déplier les réponses');
+    expect(toggle.getAttribute('aria-label')).toBe('2 réponses — Déplier les réponses');
 
     fireEvent.click(toggle);
     expect(onFetchReplies).toHaveBeenCalledWith(3, 101);
     expect(screen.getByText('Chargement des réponses…')).toBeTruthy();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.getAttribute('aria-label')).toBe('Replier les réponses');
+    expect(toggle.getAttribute('aria-label')).toBe('2 réponses — Replier les réponses');
 
     await act(async () => {
       children.resolve([reply(201), reply(202)]);
@@ -343,12 +343,12 @@ describe('ForumView — fil de réponses', () => {
     fireEvent.click(repliesToggle());
     await waitFor(() => expect(screen.getByText('Réponse 201')).toBeTruthy());
 
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(repliesToggle(comment));
     await waitFor(() => expect(screen.getByText('Réponse 301')).toBeTruthy());
     expect(onFetchReplies).toHaveBeenLastCalledWith(3, 201);
 
-    fireEvent.click(comment.querySelector('[role="collapse-rail"]') as HTMLElement);
+    fireEvent.click(comment.querySelector('[data-role="collapse-rail"]') as HTMLElement);
     expect(screen.queryByText('Réponse 301')).toBeNull();
     // Le sujet reste déplié.
     expect(screen.getByText('Réponse 201')).toBeTruthy();
@@ -364,18 +364,18 @@ describe('ForumView — fil de réponses', () => {
     fireEvent.click(repliesToggle());
     for (const id of [201, 202, 203]) {
       await waitFor(() => expect(screen.getByText(`Réponse ${id}`)).toBeTruthy());
-      const comment = screen.getByText(`Réponse ${id}`).closest('[role="comment"]') as HTMLElement;
+      const comment = screen.getByText(`Réponse ${id}`).closest('[data-role="comment"]') as HTMLElement;
       fireEvent.click(repliesToggle(comment));
     }
     await waitFor(() => expect(screen.getByText('Réponse 204')).toBeTruthy());
-    const deep = screen.getByText('Réponse 203').closest('[role="comment"]') as HTMLElement;
+    const deep = screen.getByText('Réponse 203').closest('[data-role="comment"]') as HTMLElement;
     // Profondeur 3 (plateau) : liste d'enfants plate, aucun filet de repli.
-    expect(deep.querySelector(':scope > ul[role="replies"]')?.getAttribute('data-flat')).toBe(
+    expect(deep.querySelector(':scope > ul[data-role="replies"]')?.getAttribute('data-flat')).toBe(
       'true'
     );
-    expect(deep.querySelector(':scope > [role="collapse-rail"]')).toBeNull();
-    const shallow = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
-    expect(shallow.querySelector(':scope > [role="replies-wrap"]')).not.toBeNull();
+    expect(deep.querySelector(':scope > [data-role="collapse-rail"]')).toBeNull();
+    const shallow = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
+    expect(shallow.querySelector(':scope > [data-role="replies-wrap"]')).not.toBeNull();
   });
 });
 
@@ -461,7 +461,7 @@ describe('ForumView — réponses (rédaction)', () => {
       { onCreatePost }
     );
     fireEvent.click(repliesToggle());
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(within(comment).getByLabelText('Répondre'));
     const composer = within(comment).getByPlaceholderText('Votre réponse…');
     fireEvent.change(composer, { target: { value: 'Sous-réponse' } });
@@ -522,7 +522,7 @@ describe('ForumView — édition', () => {
     expect((screen.getByLabelText('Éditeur Markdown') as HTMLTextAreaElement).value).toBe('Après');
     expect((screen.getByLabelText('Titre du sujet') as HTMLInputElement).value).toBe('Titre 2');
     // Le titre affiché au-dessus de l'éditeur est revenu à l'original (rollback).
-    expect(document.querySelector('[role="thread-title"]')?.textContent).toBe('Titre');
+    expect(document.querySelector('[data-role="thread-title"]')?.textContent).toBe('Titre');
   });
 
   it('Annuler restaure l’affichage sans appel serveur', async () => {
@@ -543,7 +543,7 @@ describe('ForumView — édition', () => {
       { onEditPost }
     );
     fireEvent.click(repliesToggle());
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(within(comment).getByLabelText('Modifier'));
     expect(screen.queryByLabelText('Titre du sujet')).toBeNull();
     fireEvent.change(within(comment).getByLabelText('Éditeur Markdown'), {
@@ -559,7 +559,7 @@ describe('ForumView — édition', () => {
       thread(101, { author: other, replies: [reply(201, { author: me })], replyCount: 1 }),
     ]);
     fireEvent.click(repliesToggle());
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(within(comment).getByLabelText('Modifier'));
     expect(within(comment).getByLabelText('Éditeur Markdown')).toBeTruthy();
     // « Répondre » du sujet (premier bouton Répondre, hors commentaire).
@@ -586,7 +586,7 @@ describe('ForumView — suppression', () => {
     await renderLoaded([thread(101), thread(102)], { onDeletePost });
     const card = screen.getByText('Sujet 101').closest('li') as HTMLElement;
     fireEvent.click(within(card).getByLabelText('Supprimer'));
-    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(screen.queryByText('Sujet 101')).toBeNull());
     expect(screen.getByText('Sujet 102')).toBeTruthy();
   });
@@ -597,7 +597,7 @@ describe('ForumView — suppression', () => {
     });
     await renderLoaded([thread(101)], { onDeletePost });
     fireEvent.click(screen.getByLabelText('Supprimer'));
-    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
     await waitFor(() =>
       expect(screen.getByText("La suppression n'a pas pu être effectuée. Réessayez.")).toBeTruthy()
     );
@@ -617,9 +617,9 @@ describe('ForumView — suppression', () => {
       { onDeletePost }
     );
     fireEvent.click(repliesToggle());
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(within(comment).getByLabelText('Supprimer'));
-    fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
     await waitFor(() => expect(screen.queryByText('Réponse 201')).toBeNull());
     expect(onDeletePost).toHaveBeenCalledWith(201);
     expect(repliesToggle().textContent).toContain('1 réponse');
@@ -718,7 +718,7 @@ describe('ForumView — tri, votes et affichage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Populaires' }));
     expect(threadTitles()).toEqual(['Épinglé', 'Ancien populaire', 'Récent impopulaire']);
     // L'épinglé porte l'indicateur.
-    expect(screen.getAllByText('Épinglé').some((el) => el.getAttribute('role') === 'pin-indicator')).toBe(
+    expect(screen.getAllByText('Épinglé').some((el) => el.getAttribute('data-role') === 'pin-indicator')).toBe(
       true
     );
   });
@@ -740,7 +740,7 @@ describe('ForumView — tri, votes et affichage', () => {
     const second = screen.getByText('Second').closest('li') as HTMLElement;
     fireEvent.click(within(second).getAllByLabelText('Voter pour')[0]);
     expect(threadTitles()).toEqual(['Premier', 'Second']);
-    expect(second.querySelector('[role="up-voted"]')?.textContent).toBe('2');
+    expect(second.querySelector('[data-role="up-voted"]')?.textContent).toBe('2');
 
     // Action explicite (changement de tri) : la liste est reclassée.
     fireEvent.click(screen.getByRole('button', { name: 'Récents' }));
@@ -752,22 +752,22 @@ describe('ForumView — tri, votes et affichage', () => {
     const onVotePost = vi.fn(async () => undefined);
     await renderLoaded([thread(101, { author: other, othersVoteTotal: 4 })], { onVotePost });
     const card = screen.getByText('Sujet 101').closest('li') as HTMLElement;
-    const rail = card.querySelector('[role="vertical-vote-actions"]') as HTMLElement;
+    const rail = card.querySelector('[data-role="vertical-vote-actions"]') as HTMLElement;
     expect(rail.querySelector('span')?.textContent).toBe('4');
 
     fireEvent.click(within(rail).getByLabelText('Voter contre'));
     expect(rail.querySelector('span')?.textContent).toBe('3');
-    expect(rail.querySelector('[role="down-voted"]')).not.toBeNull();
+    expect(rail.querySelector('[data-role="down-voted"]')).not.toBeNull();
     expect(within(rail).getByLabelText('Voter contre').getAttribute('aria-pressed')).toBe('true');
     expect(onVotePost).toHaveBeenCalledWith(101, -1);
 
     // Re-cliquer la même direction retire le vote.
     fireEvent.click(within(rail).getByLabelText('Voter contre'));
     expect(rail.querySelector('span')?.textContent).toBe('4');
-    expect(rail.querySelector('[role="down-voted"]')).toBeNull();
+    expect(rail.querySelector('[data-role="down-voted"]')).toBeNull();
 
     fireEvent.click(within(rail).getByLabelText('Voter pour'));
-    expect(rail.querySelector('[role="up-voted"]')?.textContent).toBe('5');
+    expect(rail.querySelector('[data-role="up-voted"]')?.textContent).toBe('5');
   });
 
   it('un vote refusé par le serveur est annulé et affiche une erreur', async () => {
@@ -779,7 +779,7 @@ describe('ForumView — tri, votes et affichage', () => {
     await waitFor(() =>
       expect(screen.getByText("Votre vote n'a pas pu être enregistré. Réessayez.")).toBeTruthy()
     );
-    expect(document.querySelector('[role="up-voted"]')).toBeNull();
+    expect(document.querySelector('[data-role="up-voted"]')).toBeNull();
   });
 
   it('compacte les grands scores (1234 → « 1,2 k »)', async () => {
@@ -802,7 +802,7 @@ describe('ForumView — tri, votes et affichage', () => {
     await renderLoaded([thread(101, { replies: [reply(201)], replyCount: 1 })]);
     fireEvent.click(repliesToggle());
     const card = screen.getByText('Sujet 101').closest('li') as HTMLElement;
-    const comment = screen.getByText('Réponse 201').closest('[role="comment"]') as HTMLElement;
+    const comment = screen.getByText('Réponse 201').closest('[data-role="comment"]') as HTMLElement;
     fireEvent.click(comment);
     expect(comment.getAttribute('data-actions')).toBe('open');
     expect(card.getAttribute('data-actions')).toBeNull();
@@ -819,7 +819,7 @@ describe('ForumView — tri, votes et affichage', () => {
     ];
     await renderLoaded(threads, {}, 'T1');
     const timeOf = (title: string) =>
-      (screen.getByText(title).closest('li') as HTMLElement).querySelector('[role="time"]')
+      (screen.getByText(title).closest('li') as HTMLElement).querySelector('[data-role="time"]')
         ?.textContent;
     expect(timeOf('T1')).toBe("à l'instant");
     expect(timeOf('T2')).toBe('il y a 5 min');
@@ -832,18 +832,18 @@ describe('ForumView — tri, votes et affichage', () => {
     );
     expect(timeOf('T6')).toBe('');
     const card = screen.getByText('T1').closest('li') as HTMLElement;
-    expect(card.querySelector('[role="avatar"]')?.textContent).toBe('JD');
-    expect(card.querySelector('[role="author"]')?.textContent).toBe('Jean D.');
+    expect(card.querySelector('[data-role="avatar"]')?.textContent).toBe('JD');
+    expect(card.querySelector('[data-role="author"]')?.textContent).toBe('Jean D.');
   });
 
   it('auteur sans prénom ni nom : nom = username, initiale = 1re lettre du username', async () => {
     const anon: ForumAuthor = { id: 7, username: 'zed', firstName: '', lastName: '' };
     await renderLoaded([thread(101, { author: anon })]);
     const card = screen.getByText('Sujet 101').closest('li') as HTMLElement;
-    expect(card.querySelector('[role="author"]')?.textContent).toBe('zed');
-    expect(card.querySelector('[role="avatar"]')?.textContent).toBe('Z');
+    expect(card.querySelector('[data-role="author"]')?.textContent).toBe('zed');
+    expect(card.querySelector('[data-role="avatar"]')?.textContent).toBe('Z');
     // Couleur d'avatar par défaut.
-    expect((card.querySelector('[role="avatar"]') as HTMLElement).style.background).toBe(
+    expect((card.querySelector('[data-role="avatar"]') as HTMLElement).style.background).toBe(
       'rgb(10, 92, 192)'
     );
   });
@@ -856,7 +856,7 @@ describe('ForumView — tri, votes et affichage', () => {
   it('la prop labels surcharge les textes', async () => {
     await renderLoaded([thread(101)], { labels: { newThread: 'Créer', sortTop: 'Top' } });
     expect(screen.getByText('Créer')).toBeTruthy();
-    // Le tri actif porte role="active-sort" (pas « button ») : on le cible par son texte.
+    // Le tri actif porte data-role="active-sort" (pas « button ») : on le cible par son texte.
     expect(screen.getByText('Top').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Récents' })).toBeTruthy();
   });
@@ -909,7 +909,7 @@ describe('ForumView — chargement et pagination', () => {
     const older = deferred<ForumPost[]>();
     const { onFetchThreads } = await renderLoaded(first, {}, 'S200');
     onFetchThreads.mockReturnValueOnce(older.promise);
-    const body = document.querySelector('[role="body"]') as HTMLElement;
+    const body = document.querySelector('[data-role="body"]') as HTMLElement;
     Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 1000 });
     Object.defineProperty(body, 'clientHeight', { configurable: true, value: 500 });
 

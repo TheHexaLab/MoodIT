@@ -45,14 +45,18 @@ const HUE: Record<string, number> = {
   MCP: 245,
 };
 
-/** Style coloré d'un badge à partir de la teinte du type (gris neutre si type inconnu). */
+/**
+ * Style coloré d'un badge à partir de la teinte du type (gris neutre si type inconnu). Le texte
+ * prend la luminosité du thème (`--badge-hue-lightness`, foncée en clair, claire en sombre) pour
+ * garder un contraste de 4,5:1 sur le fond teinté, quelle que soit la teinte.
+ */
 function badgeStyle(entityType: string): React.CSSProperties {
   const hue = HUE[entityType];
   if (hue === undefined) {
     return {};
   }
   return {
-    color: `hsl(${hue} 62% 45%)`,
+    color: `hsl(${hue} 62% var(--badge-hue-lightness))`,
     background: `hsl(${hue} 62% 45% / 0.13)`,
     borderColor: `hsl(${hue} 62% 45% / 0.32)`,
   };

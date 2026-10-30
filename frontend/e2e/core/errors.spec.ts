@@ -63,9 +63,8 @@ test.afterAll(async ({ baseURL }) => {
   await deleteFixture(baseURL!, fx);
 });
 
-/** Nom du formulaire de section (champ sans label ni placeholder, cf. inventaire). */
-const sectionNameField = (page: Page) =>
-  page.locator('input[type="text"]:not([aria-label]):not([placeholder])');
+/** Champ de nom du formulaire de section (« Nom du canal », « Nom du forum »…). */
+const sectionNameField = (page: Page) => page.getByRole('textbox', { name: /^Nom (du |de l')/ });
 const editorRow = (page: Page, name: string) =>
   page.getByRole('listitem').filter({ hasText: new RegExp(`^⠿\\s*${name}$`) });
 

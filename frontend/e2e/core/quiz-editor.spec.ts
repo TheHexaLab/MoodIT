@@ -85,7 +85,8 @@ async function startQuestion(page: Page, type: string, prompt: string, points: n
   await page.getByRole('spinbutton', { name: 'Points' }).fill(String(points));
 }
 
-const answerFields = (page: Page) => page.getByRole('textbox', { name: 'Réponse…' });
+// Champs de réponse : nommés « Réponse 1 », « Réponse 2 »… (aria-label, #109).
+const answerFields = (page: Page) => page.getByRole('textbox', { name: /^Réponse \d+$/ });
 const elementFields = (page: Page) => page.getByRole('textbox', { name: 'Élément…' });
 const categoryFields = (page: Page) => page.getByRole('textbox', { name: 'Catégorie' });
 const addButton = (page: Page) => page.getByRole('button', { name: 'Ajouter', exact: true });

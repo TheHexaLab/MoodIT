@@ -51,23 +51,24 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   }
 
   return (
-    <div role="code-block">
+    <div data-role="code-block">
       {/* Coin haut-droit : bouton de copie (apparait au survol) + pastille de langage. */}
-      <div role="code-toolbar">
+      <div data-role="code-toolbar">
         <button
           type="button"
-          role="copy"
+          data-role="copy"
           onClick={copyCode}
           aria-label={copied ? 'Copié' : 'Copier'}
           data-copied={copied || undefined}
         >
           {copied ? <Check width={13} height={13} /> : <Copy width={13} height={13} />}
         </button>
-        {lang ? <span role="code-lang">{lang}</span> : null}
+        {lang ? <span data-role="code-lang">{lang}</span> : null}
       </div>
       <Highlight code={code} language={language} theme={codeTheme}>
         {({ style, tokens, getLineProps, getTokenProps }) => (
-          <pre style={style}>
+          // Bloc défilable horizontalement : focusable pour être parcouru au clavier.
+          <pre style={style} tabIndex={0}>
             {tokens.map((line, lineIndex) => (
               <div key={lineIndex} {...getLineProps({ line })}>
                 {line.map((token, tokenIndex) => (
@@ -116,12 +117,12 @@ function renderTex(tex: string, displayMode: boolean): string {
 
 /** Équation en ligne `$…$` (rendu KaTeX). */
 function InlineMath({ tex }: { tex: string }) {
-  return <span role="math-inline" dangerouslySetInnerHTML={{ __html: renderTex(tex, false) }} />;
+  return <span data-role="math-inline" dangerouslySetInnerHTML={{ __html: renderTex(tex, false) }} />;
 }
 
 /** Équation en bloc `$$…$$` (rendu KaTeX, mode display centré). */
 function MathBlock({ tex }: { tex: string }) {
-  return <div role="math-block" dangerouslySetInnerHTML={{ __html: renderTex(tex, true) }} />;
+  return <div data-role="math-block" dangerouslySetInnerHTML={{ __html: renderTex(tex, true) }} />;
 }
 
 /** Schemes d'URL autorises pour les liens. */
@@ -307,5 +308,5 @@ interface MarkdownProps {
 
 /** Conteneur de rendu Markdown (sous-ensemble courant), sans HTML brut. */
 export function Markdown({ source }: MarkdownProps): React.ReactElement {
-  return <div role="markdown-container">{renderBlocks(source, 'md')}</div>;
+  return <div data-role="markdown-container">{renderBlocks(source, 'md')}</div>;
 }

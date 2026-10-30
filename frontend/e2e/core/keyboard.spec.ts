@@ -93,7 +93,7 @@ test.describe('formulaires d’authentification', () => {
     await expectTabOrder(page, browserName, [
       'exemple@gmail.com',
       '••••••••••',
-      '', // œil (sans nom accessible)
+      'Afficher le mot de passe', // œil
       { link: 'Mot de passe oublié ?' },
       'Se connecter →',
       { link: 'Créer un compte' },
@@ -340,7 +340,7 @@ test.describe('menus', () => {
     await page.keyboard.press('Enter');
     const menu = page.getByRole('menu', { name: 'Menu du compte' });
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('switch', { name: 'Mode sombre' })).toBeFocused({ timeout: 2_000 });
+    await expect(menu.getByRole('menuitemcheckbox', { name: 'Mode sombre' })).toBeFocused({ timeout: 2_000 });
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Modifier le profil' })).toBeFocused();
     await page.keyboard.press('Enter');
@@ -624,7 +624,7 @@ test.describe('switch et forum', () => {
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     await page.getByRole('button', { name: 'Compte utilisateur' }).click();
-    const darkSwitch = page.getByRole('switch', { name: 'Mode sombre' });
+    const darkSwitch = page.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
     await expect(darkSwitch).toHaveAttribute('aria-checked', 'false');
     const saved = settingsSaved(page, (s) => s.theme === 'dark');
     await darkSwitch.focus();

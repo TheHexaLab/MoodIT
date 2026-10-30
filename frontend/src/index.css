@@ -16,7 +16,8 @@
     --text: #161623;
     --text-body: #4d4d61;
     --text-heading-alt: #333347;
-    --text-muted: #7d7d94;
+    /* Texte secondaire : 4,5:1 mini sur les fonds clairs (WCAG AA, #109). */
+    --text-muted: #66667a;
     --text-on-brand: #ffffff;
     --icon-stroke: #7d7d94;
     --brand-blue-alt: #0099cc;
@@ -25,7 +26,7 @@
     --brand-gradient: linear-gradient(135deg, #00c0d2 0%, #0a5cc0 100%);
     --text-active: #0a5cc0;
     --success: #23a55a;
-    --danger: #db2e2e;
+    --danger: #c42929;
     --danger-alt: #e5484d;
     --warning: #f5a623;
     --accent-amber: #f6c350;
@@ -35,11 +36,15 @@
     --badge-success-bg: #ccfbf1;
     --badge-success-fg: #0a6a60;
     --badge-danger-bg: #fdecec;
-    --badge-danger-fg: #db2e2e;
+    --badge-danger-fg: #c42929;
     --badge-warn-bg: #fdf3d7;
     --badge-warn-fg: #9a6700;
+    /* Luminosité du texte des pastilles colorées par teinte (journal d'audit) : 4,5:1 mini. */
+    --badge-hue-lightness: 28%;
     --scrim: rgba(0, 0, 0, 0.45);
-    --brand-teal: #0d9488;
+    --brand-teal: #0f766e;
+    /* Fond de bouton teal sous texte blanc (5,5:1), identique dans les deux thèmes. */
+    --brand-teal-strong: #0f766e;
     --brand-teal-hover: brightness(0.5);
     --brand-teal-surface: rgba(13, 148, 136, 0.05);
     --brand-teal-gradient: linear-gradient(101deg, #2dd4bf 0%, #0d9488 83.33%);
@@ -60,7 +65,7 @@
     --text-input-focus: #AFAFC1;
     --login-button: linear-gradient(90deg, #0D9488 0%, #14B8A6 100%);
     --login-button-shadow: rgba(10, 92, 192, 0.30);
-    --text-or-divider: #9999AD;
+    --text-or-divider: #717180;
     --button-light-dark: rgba(0, 0, 0, 0.06);
     --button-light-dark-ordinateur: #454559;
     --button-light-dark-mobile: #ffffff;
@@ -70,17 +75,18 @@
     --avatar-teal-light: #2dd4bf;
     --avatar-teal-deep: #0f766e;
     --avatar-grey: #7d7d94;
-    /* Coloration syntaxique : palette Catppuccin Latte (theme clair). */
+    /* Coloration syntaxique : palette Catppuccin Latte (theme clair), teintes assombries pour
+       atteindre 4,5:1 sur --syntax-bg (WCAG AA, #109). */
     --syntax-bg: #eff1f5;
     --syntax-fg: #4c4f69;
-    --syntax-comment: #8c8fa1;
-    --syntax-punctuation: #7c7f93;
+    --syntax-comment: #5c5f77;
+    --syntax-punctuation: #696b7c;
     --syntax-keyword: #8839ef;
-    --syntax-class: #df8e1d;
-    --syntax-string: #40a02b;
-    --syntax-number: #fe640b;
-    --syntax-function: #1e66f5;
-    --syntax-operator: #04a5e5;
+    --syntax-class: #976014;
+    --syntax-string: #317b21;
+    --syntax-number: #b94908;
+    --syntax-function: #1d62ec;
+    --syntax-operator: #0374a1;
     --syntax-variable: #d20f39;
 }
 
@@ -110,8 +116,11 @@
         --badge-success-fg: #5eead4;
         --badge-danger-bg: rgba(229, 72, 77, 0.18);
         --badge-danger-fg: #ff8585;
+        /* Rouge du thème clair (#c42929) trop sombre ici : valeur d'origine conservée. */
+        --danger: #db2e2e;
         --badge-warn-bg: rgba(245, 166, 35, 0.18);
         --badge-warn-fg: #f5c87a;
+        --badge-hue-lightness: 72%;
         --brand-teal: #14b8a6;
         --brand-teal-hover: brightness(2);
         --brand-teal-surface: rgba(20, 184, 166, 0.05);
@@ -127,7 +136,7 @@
         /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
         --syntax-bg: #1e1e2e;
         --syntax-fg: #cdd6f4;
-        --syntax-comment: #6c7086;
+        --syntax-comment: #9399b2;
         --syntax-punctuation: #9399b2;
         --syntax-keyword: #cba6f7;
         --syntax-class: #f9e2af;
@@ -164,8 +173,11 @@
     --badge-success-fg: #5eead4;
     --badge-danger-bg: rgba(229, 72, 77, 0.18);
     --badge-danger-fg: #ff8585;
+    /* Rouge du thème clair (#c42929) trop sombre ici : valeur d'origine conservée. */
+    --danger: #db2e2e;
     --badge-warn-bg: rgba(245, 166, 35, 0.18);
     --badge-warn-fg: #f5c87a;
+    --badge-hue-lightness: 72%;
     --brand-teal: #14b8a6;
     --brand-teal-hover: brightness(2);
     --brand-teal-surface: rgba(20, 184, 166, 0.05);
@@ -181,7 +193,7 @@
     /* Coloration syntaxique : palette Catppuccin Mocha (theme sombre). */
     --syntax-bg: #1e1e2e;
     --syntax-fg: #cdd6f4;
-    --syntax-comment: #6c7086;
+    --syntax-comment: #9399b2;
     --syntax-punctuation: #9399b2;
     --syntax-keyword: #cba6f7;
     --syntax-class: #f9e2af;
@@ -356,12 +368,12 @@ input,
 textarea,
 [contenteditable="true"],
 [contenteditable=""],
-[role="message"],
-[role="message"] *,
-[role="thread-main"],
-[role="thread-main"] *,
-[role="comment-body"],
-[role="comment-body"] *,
+[data-role="message"],
+[data-role="message"] *,
+[data-role="thread-main"],
+[data-role="thread-main"] *,
+[data-role="comment-body"],
+[data-role="comment-body"] *,
 .selectable,
 .selectable * {
     -webkit-user-select: text;

@@ -49,12 +49,13 @@ type StorageState = Awaited<ReturnType<APIRequestContext['storageState']>>;
  * ou « critical » font échouer (assertion douce : l'écran suivant est audité quand même).
  */
 export async function auditScreen(page: Page, screen: string, theme: Theme): Promise<Violation[]> {
+  await settleAnimations(page);
   const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
   const flat: Violation[] = results.violations.flatMap((v) =>
     v.nodes.map((n) => ({
       rule: v.id,
       impact: v.impact ?? 'unknown',
-      target: n.target.map(String).join(' '),
+      target: n.target.map(String).join(' ') + contrastDetail(v.id, n.any[0]?.data),
       help: v.help,
     }))
   );
@@ -71,6 +72,30 @@ export async function auditScreen(page: Page, screen: string, theme: Theme): Pro
     )
     .toEqual([]);
   return blocking;
+}
+
+/** Pour `color-contrast` : couleurs et ratio mesurés, à ajuster dans les variables de thème. */
+function contrastDetail(rule: string, data: unknown): string {
+  if (rule !== 'color-contrast' || !data) return '';
+  const d = data as { fgColor?: string; bgColor?: string; contrastRatio?: number };
+  return ` (${d.fgColor} sur ${d.bgColor} : ${d.contrastRatio}:1)`;
+}
+
+/**
+ * Attend la fin des animations finies (ouverture d'une popup, fermeture d'un menu…) : en plein
+ * fondu, le texte est mélangé au fond et axe mesurerait un contraste transitoire. Les animations
+ * infinies (spinners) sont ignorées ; 2 s au plus.
+ */
+async function settleAnimations(page: Page) {
+  await page.evaluate(async () => {
+    const finite = document
+      .getAnimations()
+      .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
+    await Promise.race([
+      Promise.allSettled(finite.map((a) => a.finished)),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+  });
 }
 
 /**

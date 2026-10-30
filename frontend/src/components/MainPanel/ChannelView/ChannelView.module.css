@@ -126,7 +126,7 @@ div.channel-view > div > ul::-webkit-scrollbar-button:vertical:decrement {
     height: 0;
 }
 
-div.channel-view > div > ul > li[role="message"] {
+div.channel-view > div > ul > li[data-role="message"] {
     display: flex;
     align-items: flex-start;
     flex-wrap: wrap;
@@ -135,7 +135,7 @@ div.channel-view > div > ul > li[role="message"] {
 }
 
 /* Reference au message parent (reponse), facon Discord : ligne au-dessus du message. */
-div.channel-view > div > ul > li[role="message"] > button {
+div.channel-view > div > ul > li[data-role="message"] > button {
     flex-basis: 100%;
     position: relative;
     display: flex;
@@ -154,7 +154,7 @@ div.channel-view > div > ul > li[role="message"] > button {
 }
 
 /* Connecteur en equerre reliant la reference a l'avatar du message en dessous. */
-div.channel-view > div > ul > li[role="message"] > button::before {
+div.channel-view > div > ul > li[data-role="message"] > button::before {
     content: '';
     position: absolute;
     left: 1.1rem;
@@ -166,11 +166,11 @@ div.channel-view > div > ul > li[role="message"] > button::before {
     border-top-left-radius: 0.5rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > button:disabled {
+div.channel-view > div > ul > li[data-role="message"] > button:disabled {
     cursor: default;
 }
 
-div.channel-view > div > ul > li[role="message"] > button > .replyRefAvatar {
+div.channel-view > div > ul > li[data-role="message"] > button > .replyRefAvatar {
     flex-shrink: 0;
     width: 1.125rem;
     height: 1.125rem;
@@ -185,41 +185,41 @@ div.channel-view > div > ul > li[role="message"] > button > .replyRefAvatar {
     user-select: none;
 }
 
-div.channel-view > div > ul > li[role="message"] > button > .replyRefName {
+div.channel-view > div > ul > li[data-role="message"] > button > .replyRefName {
     flex-shrink: 0;
     color: var(--text);
     font-weight: 600;
 }
 
-div.channel-view > div > ul > li[role="message"] > button > .replyRefText {
+div.channel-view > div > ul > li[data-role="message"] > button > .replyRefText {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-div.channel-view > div > ul > li[role="message"] > button:not(:disabled):hover > .replyRefText,
-div.channel-view > div > ul > li[role="message"] > button:not(:disabled):hover > .replyRefName {
+div.channel-view > div > ul > li[data-role="message"] > button:not(:disabled):hover > .replyRefText,
+div.channel-view > div > ul > li[data-role="message"] > button:not(:disabled):hover > .replyRefName {
     color: var(--text);
 }
 
 /* Separateur de date facon Discord : libelle centre entre deux filets. */
-div.channel-view > div > ul > li[role="separator"] {
+div.channel-view > div > ul > li[data-role="separator"] {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     margin: 0.25rem 0;
 }
 
-div.channel-view > div > ul > li[role="separator"]::before,
-div.channel-view > div > ul > li[role="separator"]::after {
+div.channel-view > div > ul > li[data-role="separator"]::before,
+div.channel-view > div > ul > li[data-role="separator"]::after {
     content: '';
     flex: 1;
     height: 1px;
     background: var(--border);
 }
 
-div.channel-view > div > ul > li[role="separator"] > span {
+div.channel-view > div > ul > li[data-role="separator"] > span {
     flex-shrink: 0;
     color: var(--text-muted);
     font-family: Inter, sans-serif;
@@ -229,7 +229,7 @@ div.channel-view > div > ul > li[role="separator"] > span {
     letter-spacing: 0.03em;
 }
 
-div.channel-view > div > ul > li[role="message"] > span:first-of-type {
+div.channel-view > div > ul > li[data-role="message"] > span:first-of-type {
     /* Positionne pour passer au-dessus du connecteur ::before de la reference. */
     position: relative;
     z-index: 1;
@@ -249,7 +249,7 @@ div.channel-view > div > ul > li[role="message"] > span:first-of-type {
     user-select: none;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:first-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div:first-of-type {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -257,14 +257,14 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type {
     min-width: 0;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:first-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div:first-of-type > p:first-of-type {
     margin: 0;
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:first-of-type > span:first-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div:first-of-type > p:first-of-type > span:first-of-type {
     color: var(--text);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
@@ -275,14 +275,14 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:first-o
     overflow: hidden;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:first-of-type > span:nth-of-type(2) {
+div.channel-view > div > ul > li[data-role="message"] > div:first-of-type > p:first-of-type > span:nth-of-type(2) {
     color: var(--text-muted);
     font-family: Inter, sans-serif;
     font-size: 0.6875rem;
     min-width: 2.294rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-type(2) {
+div.channel-view > div > ul > li[data-role="message"] > div:first-of-type > p:nth-of-type(2) {
     margin: 0;
     color: var(--text-body);
     font-family: Inter, sans-serif;
@@ -295,7 +295,7 @@ div.channel-view > div > ul > li[role="message"] > div:first-of-type > p:nth-of-
 }
 
 /* Actions d'un message (repondre / modifier / supprimer) : revelees au survol. */
-div.channel-view > div > ul > li[role="message"] > div[role="message-actions"]:last-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="message-actions"]:last-of-type {
     flex-shrink: 0;
     align-self: flex-start;
     display: flex;
@@ -307,14 +307,14 @@ div.channel-view > div > ul > li[role="message"] > div[role="message-actions"]:l
 
 /* Appareils a pointeur : revele les actions au survol (ou focus clavier). */
 @media (hover: hover) {
-    div.channel-view > div > ul > li[role="message"]:hover > div:last-of-type,
-    div.channel-view > div > ul > li[role="message"]:focus-within > div:last-of-type {
+    div.channel-view > div > ul > li[data-role="message"]:hover > div:last-of-type,
+    div.channel-view > div > ul > li[data-role="message"]:focus-within > div:last-of-type {
         opacity: 1;
         pointer-events: auto;
     }
 }
 
-div.channel-view > div > ul > li[role="message"] > div:last-of-type > button {
+div.channel-view > div > ul > li[data-role="message"] > div:last-of-type > button {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -329,28 +329,28 @@ div.channel-view > div > ul > li[role="message"] > div:last-of-type > button {
     transition: background 0.12s ease, color 0.12s ease;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:last-of-type > button > svg {
+div.channel-view > div > ul > li[data-role="message"] > div:last-of-type > button > svg {
     width: 1rem;
     height: 1rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div:last-of-type > button:hover {
+div.channel-view > div > ul > li[data-role="message"] > div:last-of-type > button:hover {
     color: var(--brand-teal);
 }
 
-div.channel-view > div > ul > li[role="message"] > div:last-of-type > button[role="delete"]:hover {
+div.channel-view > div > ul > li[data-role="message"] > div:last-of-type > button[data-role="delete"]:hover {
     color: var(--danger);
 }
 
 /* Formulaire d'edition en ligne d'un message. */
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div {
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
     margin-top: 0.125rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid var(--border);
@@ -380,48 +380,48 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
    ::-webkit-scrollbar ci-dessous → il réafficherait sa scrollbar native (avec flèches).
    Même pattern que la liste de messages. */
 @supports not selector(::-webkit-scrollbar) {
-    div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea {
+    div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
 /* WebKit : même style de scrollbar que la liste de messages (fine, thumb arrondi, sans boutons). */
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar {
     width: 4px;
 }
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-track {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-track {
     background: transparent;
 }
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb:hover {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:start,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:end,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:start,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:end,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:increment,
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:decrement {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:start,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:end,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:start,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:end,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:increment,
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea::-webkit-scrollbar-button:vertical:decrement {
     display: none;
     width: 0;
     height: 0;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > textarea:focus {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > textarea:focus {
     border-color: var(--border-strong);
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child {
     display: flex;
     gap: 0.5rem;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child > button {
     border: none;
     border-radius: 0.375rem;
     padding: 0.3rem 0.7rem;
@@ -433,19 +433,19 @@ div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-t
     transition: filter 0.3s ease, color 0.12s ease;
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:first-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child > button:first-of-type {
     color: var(--text-muted);
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:first-of-type:hover {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child > button:first-of-type:hover {
     color: var(--text);
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:last-of-type {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child > button:last-of-type {
     color: var(--brand-teal);
 }
 
-div.channel-view > div > ul > li[role="message"] > div[role="editor"]:first-of-type > div > div:last-child > button:last-of-type:hover {
+div.channel-view > div > ul > li[data-role="message"] > div[data-role="editor"]:first-of-type > div > div:last-child > button:last-of-type:hover {
     filter: var(--brand-teal-hover);
 }
 
@@ -485,21 +485,21 @@ div.channel-view > div > div:first-child > button:hover {
 }
 
 /* Contenu de la barre « repondre a … » (texte tronque + bouton d'annulation). */
-div.channel-view > div > div[role="reply"]:last-child > div > div > span {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div > span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-div.channel-view > div > div[role="reply"]:last-child > div > div > span > strong {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div > span > strong {
     color: var(--text);
     font-weight: 600;
 }
 
 /* Erreur de dépassement affichée dans le bandeau du composer (même emplacement que
    « répondre à… ») : rouge, et autorisée à passer sur plusieurs lignes (message complet). */
-div.channel-view > div > div[role="reply"]:last-child > div > div > span[role="composer-error"] {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div > span[data-role="composer-error"] {
     color: var(--danger, #e5484d);
     font-weight: 600;
     white-space: normal;
@@ -507,7 +507,7 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > span[role="c
 }
 
 /* Erreur de dépassement sous le champ d'édition inline d'un message. */
-div.channel-view p[role="composer-error"] {
+div.channel-view p[data-role="composer-error"] {
     margin: 0;
     font-family: Inter, sans-serif;
     font-size: 0.75rem;
@@ -515,7 +515,7 @@ div.channel-view p[role="composer-error"] {
     color: var(--danger, #e5484d);
 }
 
-div.channel-view > div > div[role="reply"]:last-child > div > div > button {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div > button {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -533,7 +533,7 @@ div.channel-view > div > div[role="reply"]:last-child > div > div > button {
     transition: background 0.12s ease, color 0.12s ease;
 }
 
-div.channel-view > div > div[role="reply"]:last-child > div > div > button:hover {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div > button:hover {
     color: var(--text);
 }
 
@@ -578,17 +578,17 @@ div.channel-view > div > div:last-child > div {
     transition: border-color 0.15s ease;
 }
 
-div.channel-view > div > div[role="reply"]:last-child > div {
+div.channel-view > div > div[data-role="reply"]:last-child > div {
     border-top-left-radius: 0;
     border-top-right-radius: 0;
 }
 
 div.channel-view > div > div:last-child > div:focus-within,
-div.channel-view > div > div[role="reply"]:last-child > div:focus-within > div{
+div.channel-view > div > div[data-role="reply"]:last-child > div:focus-within > div{
     border-color: var(--border-strong);
 }
 
-div.channel-view > div > div[role="reply"]:last-child > div > div {
+div.channel-view > div > div[data-role="reply"]:last-child > div > div {
     position: absolute;
     z-index: 1;
     box-sizing: border-box;
@@ -766,7 +766,7 @@ div.channel-view > div > div:last-child > div > button:last-of-type:disabled {
 
 /* Tactile (pas de survol) : les actions n'apparaissent qu'au tap sur le message. */
 @media (hover: none) {
-    div.channel-view > div > ul > li[role="message"][data-actions="open"] > div:last-of-type {
+    div.channel-view > div > ul > li[data-role="message"][data-actions="open"] > div:last-of-type {
         opacity: 1;
         pointer-events: auto;
     }
@@ -791,11 +791,11 @@ div.channel-view > div > div:last-child > div > button:last-of-type:disabled {
     /* Barre d'actions sortie du flux : flottante en haut a droite du message.
        Elle ne reserve plus de largeur (le texte garde toute la place) ni de
        hauteur (plus de grand vide sous les messages courts). */
-    div.channel-view > div > ul > li[role="message"] {
+    div.channel-view > div > ul > li[data-role="message"] {
         position: relative;
     }
 
-    div.channel-view > div > ul > li[role="message"] > div[role="message-actions"]:last-of-type {
+    div.channel-view > div > ul > li[data-role="message"] > div[data-role="message-actions"]:last-of-type {
         position: absolute;
         top: -0.25rem;
         right: 0;

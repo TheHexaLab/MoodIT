@@ -249,7 +249,7 @@ describe('QuizEditor — annulation défait la session', () => {
     await screen.findByText(editorT.newQuestionTitle);
     fireEvent.change(promptField(), { target: { value: 'Nouvelle Q' } });
     // true_false valide, on enregistre la question (en mémoire)
-    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByLabelText(qT.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
     fireEvent.click(screen.getByText(qT.add));
     // de retour au formulaire, la question apparaît
@@ -295,7 +295,7 @@ describe('QuizEditor — navigation question/harnais', () => {
     fireEvent.click(screen.getByText(formT.addQuestion));
     await screen.findByText(editorT.newQuestionTitle);
     // passe au type Code
-    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByLabelText(qT.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'Code' }));
     // Gérer les harnais
     fireEvent.click(screen.getByText(qT.manageHarness));
@@ -335,7 +335,7 @@ describe('QuizEditor — méta du quiz conservées pendant l’édition d’une 
     fireEvent.click(screen.getByText(formT.addQuestion));
     await screen.findByText(editorT.newQuestionTitle);
     fireEvent.change(promptField(), { target: { value: 'Une question.' } });
-    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByLabelText(qT.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
     fireEvent.click(screen.getByText(qT.add));
     await screen.findByText(editorT.newQuizTitle);
@@ -557,7 +557,7 @@ describe('QuizEditor — parcours complémentaires', () => {
     fireEvent.click(screen.getByText(formT.addQuestion));
     await screen.findByText(editorT.newQuestionTitle);
     fireEvent.change(promptField(), { target: { value: prompt } });
-    fireEvent.click(screen.getByLabelText(qT.typeLabel));
+    fireEvent.click(screen.getByLabelText(qT.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
   }
 
@@ -817,7 +817,7 @@ describe('QuizEditor — parcours complémentaires (2)', () => {
       fireEvent.click(screen.getByText(formT.addQuestion));
       await screen.findByText(editorT.newQuestionTitle);
       fireEvent.change(promptField(), { target: { value: prompt } });
-      fireEvent.click(screen.getByLabelText(qT.typeLabel));
+      fireEvent.click(screen.getByLabelText(qT.typeLabel, { exact: false }));
       fireEvent.click(screen.getByRole('option', { name: 'Vrai/Faux' }));
       fireEvent.click(screen.getByText(qT.add));
       await screen.findByText(prompt);

@@ -123,13 +123,12 @@ div.audit-logs-popup > div {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    opacity: 0.72;
-    transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease,
+    /* Pas d'atténuation par opacité : le texte d'un filtre inactif doit rester à 4,5:1 (WCAG AA).
+       Le filtre actif se distingue par son anneau (et aria-pressed). */
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease,
         box-shadow 0.15s ease;
 }
-.chip:hover { opacity: 1; }
 .chipActive {
-    opacity: 1;
     box-shadow: 0 0 0 1px currentColor inset;
 }
 
@@ -264,7 +263,8 @@ div.audit-logs-popup > div {
     padding: 0.05rem 0.35rem;
     border-radius: 0.35rem;
     background: var(--border);
-    color: var(--text-muted);
+    /* --text-muted n'atteint pas 4,5:1 sur le fond --border : texte courant. */
+    color: var(--text-body);
 }
 
 /* Ligne « chargement de la page suivante » (pagination on-scroll). */

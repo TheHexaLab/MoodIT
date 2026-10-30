@@ -133,8 +133,8 @@ describe('ForgotPassword', () => {
   });
 
   it('le bouton de thème appelle toggleTheme', () => {
-    const { container } = renderForgot();
-    fireEvent.click(container.querySelector('.light-dark-btn') as HTMLButtonElement);
+    renderForgot();
+    fireEvent.click(screen.getByRole('button', { name: 'Changer de thème' }));
     expect(toggleTheme).toHaveBeenCalledTimes(1);
   });
 });

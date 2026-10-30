@@ -190,17 +190,16 @@ describe('LoginPage', () => {
   });
 
   it('le bouton œil bascule l’affichage du mot de passe', () => {
-    const { container } = renderLogin();
-    const eye = container.querySelector('.eye-btn') as HTMLButtonElement;
-    fireEvent.click(eye);
+    renderLogin();
+    fireEvent.click(screen.getByRole('button', { name: 'Afficher le mot de passe' }));
     expect(passwordInput().type).toBe('text');
-    fireEvent.click(eye);
+    fireEvent.click(screen.getByRole('button', { name: 'Masquer le mot de passe' }));
     expect(passwordInput().type).toBe('password');
   });
 
   it('le bouton de thème appelle toggleTheme', () => {
-    const { container } = renderLogin();
-    fireEvent.click(container.querySelector('.light-dark-btn') as HTMLButtonElement);
+    renderLogin();
+    fireEvent.click(screen.getByRole('button', { name: 'Changer de thème' }));
     expect(toggleTheme).toHaveBeenCalledTimes(1);
   });
 

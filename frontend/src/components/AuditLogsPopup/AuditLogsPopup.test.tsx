@@ -190,6 +190,13 @@ describe('AuditLogsPopup', () => {
     expect(screen.getAllByText(defaultLabels.entityTypes.ENROLLMENT).length).toBeGreaterThan(1);
   });
 
+  it('pastilles colorées : la luminosité du texte vient du thème (contraste 4,5:1)', async () => {
+    render(<AuditLogsPopup onClose={vi.fn()} load={vi.fn().mockResolvedValue(makeEntries(9, 1))} />);
+    await screen.findByText('Action 9');
+    const chip = screen.getByRole('button', { name: defaultLabels.entityTypes.ENROLLMENT });
+    expect(chip.getAttribute('style')).toContain('var(--badge-hue-lightness)');
+  });
+
   it('le bouton fermer appelle onClose', async () => {
     const onClose = vi.fn();
     render(<AuditLogsPopup onClose={onClose} load={vi.fn().mockResolvedValue(makeEntries(9, 1))} />);
