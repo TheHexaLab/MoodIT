@@ -34,7 +34,11 @@ async function scriptHash(content: string): Promise<string> {
   return `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`;
 }
 
-const inlineScripts = [...indexHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+// Scripts inline de index.html : toute balise <script> sans `src`, quelles que soient la casse et
+// les autres attributs (un script externe n'a pas besoin d'empreinte : il relève de 'self').
+const inlineScripts = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)]
+  .filter(([, attributes]) => !/\bsrc\s*=/i.test(attributes))
+  .map(([, , content]) => content);
 const reportOnlyPolicy = nginxHeader('Content-Security-Policy-Report-Only') ?? '';
 const caddyPolicy = caddyHeader('Content-Security-Policy') ?? '';
 
