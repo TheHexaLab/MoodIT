@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import styles from './ProgramMenu.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
@@ -260,7 +261,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   return (
     <nav className={styles.rail} aria-label="Programme">
       {/* Icône applicative (meme gabarit que le programme actif). */}
-      <div className={styles.appIcon} role="img" aria-label="MoodIT">
+      <Link to="/home" className={styles.appIcon} aria-label="Retour à l'Accueil">
         <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
           <defs>
             <linearGradient
@@ -281,7 +282,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           <circle cx="18" cy="18" r="2" fill="white" />
           <circle cx="23" cy="18" r="2" fill="white" />
         </svg>
-      </div>
+      </Link>
 
       {/* Séparateur visuel */}
       <span className={styles.divider} />

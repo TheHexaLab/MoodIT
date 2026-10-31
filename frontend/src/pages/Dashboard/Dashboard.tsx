@@ -45,7 +45,9 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
-import type { SavedLocation } from '../../helpers/userSettings.ts';
+import PortalBand from '../../components/PortalBand/PortalBand.tsx';
+import PortalSidebar from '../../components/PortalSidebar/PortalSidebar.tsx';
+import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
@@ -114,18 +116,16 @@ export default function Dashboard() {
     isGuardian,
     saveProfile,
     applyGlobalRoles,
-    settings,
-    saveSettings,
   } = useCurrentUser();
   // Vue courante (programme → cours → canal) portée par l'URL (#63) : le bouton « back »
-  // navigue entre les vues. Aucun programme au départ (/home, -1) : une fois la liste chargée,
-  // l'utilisateur doit en choisir un avant que ses cours ne soient chargés.
+  // navigue entre les vues. Aucun programme (/home, -1) : la page Accueil du portail ; un cours
+  // ouvert affiche l'interface du cours.
   const [view, setView] = useViewLocation();
   const activeProgramId = view.programId;
   const selectedCourseId = view.courseId;
   const selectedChannelRef = view.channel;
-  // Dernier programme dont les cours ont été chargés avec succès (cf. restauration).
-  const [coursesLoadedFor, setCoursesLoadedFor] = useState<number | null>(null);
+  // Nom de l'établissement de l'utilisateur, affiché dans le bandeau du portail.
+  const [establishmentName, setEstablishmentName] = useState<string | undefined>(undefined);
   // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
   // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
   const permsForProgram = (programId: number) =>
@@ -331,10 +331,6 @@ export default function Dashboard() {
     setDashboardPrograms((programs) =>
       programs.map((p) => (p.id === programId ? { ...p, courses } : p))
     );
-    // Repère « les cours de CE programme sont chargés » (posé dans le même lot que les
-    // cours) : la restauration de la localisation s'appuie dessus plutôt que sur la
-    // transition coursesLoading true → false, qui peut ne jamais être rendue.
-    setCoursesLoadedFor(programId);
   }, []);
 
   // Chaînage : on ne charge les cours qu'une fois la liste des programmes chargée
@@ -824,32 +820,27 @@ export default function Dashboard() {
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
-  // ── Persistance de la localisation (settings utilisateur) ──────────────────────
-  // But : replacer l'utilisateur là où il était (programme → cours → canal) à la session
-  // précédente. L'URL fait autorité (#63) : un lien vers une vue l'ouvre telle quelle, et la
-  // localisation enregistrée ne sert qu'à l'arrivée sur /home sans vue. Repli gracieux à chaque
-  // niveau (le programme/cours/canal peut avoir disparu depuis — désinscription, suppression) :
-  // un programme inconnu renvoie à /home, un cours inconnu affiche le premier cours, un canal
-  // inconnu n'affiche aucun canal.
-  const initialViewRef = useRef(view);
-  const restoreDoneRef = useRef(false); // débloque la sauvegarde
-
-  // Arrivée sur /home sans vue : la localisation enregistrée REMPLACE l'entrée d'historique,
-  // une seule fois, quand le profil (donc les settings) et la liste des programmes sont prêts.
+  // Établissement de l'utilisateur : celui dont le domaine courriel correspond au sien. Le bandeau
+  // retombe sur « MoodIT » si aucun ne correspond ou si la liste ne se charge pas.
+  const userEmailDomain = currentUser.email?.split('@')[1]?.toLowerCase();
   useEffect(() => {
-    if (restoreDoneRef.current) return;
-    if (profileLoading || currentUser.id < 0) return; // profil (donc settings) pas prêt
-    if (programsLoading) return; // liste des programmes pas prête
-    restoreDoneRef.current = true;
-    if (initialViewRef.current.programId >= 0) return; // l'URL désignait déjà une vue
-
-    const loc: SavedLocation | undefined = settings.location;
-    if (loc?.programId != null && dashboardPrograms.some((p) => p.id === loc.programId)) {
-      const saved = { programId: loc.programId, courseId: loc.courseId, channel: loc.channel };
-      // Un programme choisi entre-temps (clic pendant le chargement du profil) l'emporte.
-      setView((requested) => (requested.programId >= 0 ? requested : saved), { replace: true });
-    }
-  }, [profileLoading, currentUser.id, programsLoading, dashboardPrograms, settings, setView]);
+    if (!userEmailDomain) return;
+    let cancelled = false;
+    api
+      .fetchEstablishments()
+      .then((establishments) => {
+        if (cancelled) return;
+        setEstablishmentName(
+          establishments.find((e) => e.domainEmail?.toLowerCase() === userEmailDomain)?.name
+        );
+      })
+      .catch(() => {
+        /* échec silencieux : le bandeau garde son nom par défaut */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userEmailDomain]);
 
   // Programme de l'URL inconnu une fois la liste chargée (lien partagé vers un programme dont
   // on n'est pas membre, programme supprimé depuis) : retour à /home, sans charger ses cours.
@@ -867,24 +858,6 @@ export default function Dashboard() {
       { replace: true }
     );
   }, [programsLoading, programsError, activeProgramId, dashboardPrograms, setView]);
-
-  // Sauvegarde debouncée à chaque changement de position (une fois la restauration
-  // terminée, pour ne pas écraser la localisation sauvegardée par l'état par défaut).
-  // On enregistre le cours EFFECTIVEMENT affiché (repli inclus) plutôt que la sélection
-  // brute, pour restaurer exactement ce que l'utilisateur voyait — donc seulement une fois
-  // les cours du programme chargés (avant, le cours effectif est encore inconnu).
-  useEffect(() => {
-    if (!restoreDoneRef.current) return;
-    if (activeProgramId < 0) return; // pas de position réelle à mémoriser
-    if (coursesLoadedFor !== activeProgramId) return;
-    saveSettings({
-      location: {
-        programId: activeProgramId,
-        courseId: effectiveSelectedCourseId,
-        channel: selectedChannelRef,
-      },
-    });
-  }, [activeProgramId, coursesLoadedFor, effectiveSelectedCourseId, selectedChannelRef, saveSettings]);
 
   // Charge l'historique d'un canal : entièrement délégué à api.fetchMessages.
   const handleFetchMessages = (channelId: number, before?: number, limit?: number) =>
@@ -933,9 +906,16 @@ export default function Dashboard() {
       ? (dashboardPrograms.find((program) => program.id === popup.programId) ?? null)
       : null;
 
+  // Aucun programme dans l'URL (/home) : le portail (Accueil). Sinon, l'interface du cours.
+  const isPortal = activeProgramId < 0;
+
   return (
+    <div className={styles.portalRoot}>
+    <PortalBand establishmentName={establishmentName} />
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
+        // Remonté au passage portail ↔ cours : le tiroir mobile se referme à l'ouverture d'un cours.
+        key={isPortal ? 'portal' : 'course'}
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
@@ -960,6 +940,28 @@ export default function Dashboard() {
           />
         }
         programMenu={
+          isPortal ? (
+            <PortalSidebar
+              programs={dashboardPrograms}
+              loading={programsLoading}
+              loadError={programsError}
+              onReload={reloadPrograms}
+              loadCourses={api.fetchCourses}
+              onOpenProgram={(programId) => setView({ programId })}
+              onOpenCourse={(programId, courseId) => setView({ programId, courseId })}
+              onJoin={handleAddProgram}
+              userMenu={
+                <UserMenu
+                  user={currentUser}
+                  loading={profileLoading}
+                  onEditProfile={handleEditProfile}
+                  onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+                  onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
+                  onLogout={handleLogout}
+                />
+              }
+            />
+          ) : (
           <ProgramMenu
             programs={dashboardPrograms}
             activeProgramId={activeProgramId}
@@ -982,8 +984,10 @@ export default function Dashboard() {
             onJoinCourses={handleJoinCourses}
             onLeaveProgram={handleLeaveProgram}
           />
+          )
         }
         courseMenu={
+          isPortal ? null : (
           <CourseMenu
             activeProgram={activeProgram}
             // Tant que les programmes ne sont pas chargés (chaînage), on ne montre
@@ -1023,9 +1027,13 @@ export default function Dashboard() {
             quizHandlers={quizEditorHandlers}
             onQuizzesChange={handleQuizzesChange}
           />
+          )
         }
       />
 
+      {isPortal ? (
+        <AccueilPage firstName={currentUser.firstName} />
+      ) : (
       <MainPanel
         isAdmin={permsForProgram(activeProgramId).canManageContent}
         // Modération (supprimer le contenu d'autrui) : admin GLOBAL ou Administrateur du
@@ -1074,6 +1082,7 @@ export default function Dashboard() {
         quizStale={quizStale}
         onReloadStale={() => setStaleQuizId(null)}
       />
+      )}
 
       {/* Création d'un canal / quiz / forum depuis un état vide : même popup que
           l'édition d'une section dans le CourseMenu (réservé à l'admin via les
@@ -1351,6 +1360,7 @@ export default function Dashboard() {
         </div>
       )}
       {leaveError && <ErrorPopup content={leaveError} onClose={() => setLeaveError(null)} />}
+    </div>
     </div>
   );
 }

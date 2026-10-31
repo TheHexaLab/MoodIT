@@ -1,5 +1,6 @@
-.dashboardLayout {
+.portalRoot {
     display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100vh;
     /* Hauteur DYNAMIQUE : sur mobile, 100vh inclut la barre d'URL du navigateur → la zone
@@ -8,6 +9,21 @@
     height: 100dvh;
     overflow: hidden;
     background: var(--bg-main);
+}
+
+/* Mobile : le bandeau est masqué (voir PortalBand), les panneaux reprennent toute la hauteur. */
+@media (max-width: 56.25rem) {
+    .portalRoot {
+        --portal-band-height: 0px;
+    }
+}
+
+.dashboardLayout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    width: 100%;
+    overflow: hidden;
 }
 /* Overlay de chargement (ex. fetch des rôles avant le RoleEditorPopup). */
 .loadingOverlay {

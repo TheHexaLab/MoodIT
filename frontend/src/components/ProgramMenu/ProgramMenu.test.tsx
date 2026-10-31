@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { render as rtlRender, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import ProgramMenu, { type Program } from './ProgramMenu';
 import { ROLE } from '../../helpers/roles';
 
 afterEach(cleanup);
+
+/** Le logo du rail est un lien vers l'Accueil : il lui faut un routeur. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 function program(overrides: Partial<Program> & { id: number }): Program {
   return { name: `Programme ${overrides.id}`, code: '', cohort: '', color: '', ...overrides };
@@ -44,8 +49,8 @@ describe('ProgramMenu', () => {
     render(<ProgramMenu programs={programs} />);
     const pill = screen.getByRole('button', { name: 'Génie logiciel — GIN' });
     expect(pill.getAttribute('title')).toBe('Génie logiciel');
-    // Icône de l'application : image nommée (aria-label sur un div sans rôle est interdit).
-    expect(screen.getByRole('img', { name: 'MoodIT' })).toBeTruthy();
+    // Icône de l'application : lien nommé vers l'Accueil.
+    expect(screen.getByRole('link', { name: "Retour à l'Accueil" }).getAttribute('href')).toBe('/home');
   });
 
   it('le libellé UI (label) a priorité sur le nom', () => {
