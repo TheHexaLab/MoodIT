@@ -53,6 +53,8 @@ public class QuizItemObfuscator {
     private static final String HMAC = "HmacSHA256";
     private static final String KEY_LABEL = "moodit/quiz/drag-item-public-id/v1";
     private static final String START_ORDER_KEY_LABEL = "moodit/quiz/ordering-start-order/v1";
+    /** Candidats essayés au plus par {@link #fixedOrderExcept} (avec des clés distinctes, 2 suffisent presque toujours). */
+    private static final int MAX_START_ORDER_CANDIDATES = 64;
 
     private final SecretKeySpec roundKey;
     private final SecretKeySpec startOrderKey;
@@ -118,10 +120,12 @@ public class QuizItemObfuscator {
      * pour que la question ne s'ouvre pas déjà résolue.
      *
      * <p>Les candidats sont des permutations de Fisher-Yates dont chaque tirage est un HMAC (clé
-     * propre à cet usage) de l'id de la question, des ids de ses éléments, du numéro du candidat et
-     * de la position. On garde le premier candidat différent de {@code avoided} : le résultat est
-     * uniforme sur les autres ordres et ne dépend de l'ordre attendu que par cette exclusion.
-     * Modifier les éléments change leurs ids, donc l'ordre de départ.
+     * propre à cet usage) de l'id de la question, des ids de ses éléments, de l'ordre évité, du
+     * numéro du candidat et de la position. On garde le premier candidat différent de
+     * {@code avoided} : le résultat est uniforme sur les autres ordres. L'ordre évité fait partie de
+     * la graine : changer la solution sans toucher aux éléments tire un nouvel ordre de départ, sans
+     * lien avec l'ancien (sinon, le voir changer pourrait trahir l'ancienne ou la nouvelle solution).
+     * Modifier les éléments change leurs ids, donc aussi l'ordre de départ.
      *
      * <p>Les ordres sont comparés par {@code key} (l'id d'un élément : les entités se référencent
      * entre elles, leurs equals/hashCode ne sont pas utilisables). Les clés sont non nulles et
@@ -132,16 +136,20 @@ public class QuizItemObfuscator {
         List<T> canonical = items.stream().sorted(Comparator.comparing(key)).toList();
         if (canonical.size() < 2) return canonical;
         List<Integer> avoidedKeys = avoided.stream().map(key).toList();
-        ByteBuffer seed = ByteBuffer.allocate(Integer.BYTES * (canonical.size() + 4));
+        ByteBuffer seed = ByteBuffer.allocate(Integer.BYTES * (canonical.size() + avoidedKeys.size() + 5));
         seed.putInt(scopeId).putInt(canonical.size());
         canonical.forEach(item -> seed.putInt(key.apply(item)));
+        seed.putInt(avoidedKeys.size());
+        avoidedKeys.forEach(seed::putInt);
         Mac mac = newMac(startOrderKey);
         // Chaque candidat est uniforme sur les n! ordres : au plus une chance sur deux de retomber
-        // sur l'ordre évité, la boucle s'arrête presque aussitôt.
-        for (int candidate = 0; ; candidate++) {
+        // sur l'ordre évité, la boucle s'arrête presque aussitôt. Le plafond ne sert qu'en cas de
+        // clés en double (contrat non respecté) : une erreur plutôt qu'une boucle sans fin.
+        for (int candidate = 0; candidate < MAX_START_ORDER_CANDIDATES; candidate++) {
             List<T> order = permutation(mac, seed, candidate, canonical);
             if (!order.stream().map(key).toList().equals(avoidedKeys)) return order;
         }
+        throw new IllegalStateException("Aucun ordre de départ différent de l'ordre évité : clés en double ?");
     }
 
     /** Candidat n° {@code candidate} : Fisher-Yates dont chaque tirage est un HMAC de la graine. */

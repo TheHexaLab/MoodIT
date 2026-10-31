@@ -262,9 +262,13 @@ describe('QuestionFormBody', () => {
     expect(message).toBe('Une remise en ordre doit avoir au moins 3 éléments.');
     expect(saveButton(t.add).disabled).toBe(false);
     expect(screen.queryByText(message)).toBeNull();
+    // La zone live est déjà là, vide : seul son texte change (annoncé par les lecteurs d'écran).
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
     fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
     expect(saveButton(t.add).disabled).toBe(true);
-    expect(screen.getByRole('status').textContent).toBe(message);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(message);
     fireEvent.click(screen.getByText(`+ ${t.addItem}`));
     expect(screen.queryByText(message)).toBeNull();
   });

@@ -425,12 +425,15 @@ export function QuestionFormBody({
         <div className={styles.sectionBar}>
           <span className={styles.sectionTitle}>{t.orderingSection}</span>
         </div>
-        {/* Sous le minimum, « Ajouter »/« Enregistrer » est grisé : on dit pourquoi. */}
-        {items.length < MIN_ORDERING_ITEMS && (
-          <span className={styles.fieldHint} role="status">
-            {t.orderingMinItems(MIN_ORDERING_ITEMS)}
-          </span>
-        )}
+        {/* Sous le minimum, « Ajouter »/« Enregistrer » est grisé : on dit pourquoi. La zone live
+            reste toujours dans le DOM, seul son texte change : sinon beaucoup de lecteurs d'écran
+            n'annoncent pas le message. */}
+        <span
+          className={items.length < MIN_ORDERING_ITEMS ? styles.fieldHint : undefined}
+          role="status"
+        >
+          {items.length < MIN_ORDERING_ITEMS ? t.orderingMinItems(MIN_ORDERING_ITEMS) : ''}
+        </span>
         <div className={styles.list} ref={listRef}>
           {orderReorder.order.map((id, position) => {
             const d = items[id];

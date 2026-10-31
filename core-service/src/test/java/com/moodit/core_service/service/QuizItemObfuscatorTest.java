@@ -157,18 +157,29 @@ class QuizItemObfuscatorTest {
     }
 
     @Test
-    @DisplayName("fixedOrderExcept : l'ordre évité ne sert qu'à l'exclusion (même ordre pour deux solutions, presque toujours)")
-    void fixedOrder_nEncodePasLOrdreEvite() {
+    @DisplayName("fixedOrderExcept : changer l'ordre évité (la solution) tire un nouvel ordre, sans lien avec l'ancien")
+    void fixedOrder_nouvelOrdreSiLaSolutionChange() {
         List<Integer> items = List.of(1, 2, 3, 4);
         List<Integer> otherAvoided = List.of(4, 3, 2, 1);
         int same = 0;
         for (int scope = 0; scope < 240; scope++) {
             List<Integer> a = obfuscator.fixedOrderExcept(scope, items, items, Function.identity());
             List<Integer> b = obfuscator.fixedOrderExcept(scope, items, otherAvoided, Function.identity());
+            assertThat(a).isNotEqualTo(items);
+            assertThat(b).isNotEqualTo(otherAvoided);
             if (a.equals(b)) same++;
         }
-        // Différents seulement si le premier candidat est l'un des deux ordres évités (≈ 2 sur 24).
-        assertThat(same).isGreaterThan(200);
+        // Tirages indépendants : égaux ≈ 1 fois sur 23 (≈ 10 sur 240). Avec l'ordre évité hors de
+        // la graine, ils l'étaient presque toujours (≈ 220 sur 240).
+        assertThat(same).isLessThan(40);
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : clés en double → erreur au lieu d'une boucle sans fin")
+    void fixedOrder_clesEnDouble() {
+        List<Integer> items = List.of(5, 5, 5);
+        assertThatThrownBy(() -> obfuscator.fixedOrderExcept(1, items, items, Function.identity()))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
