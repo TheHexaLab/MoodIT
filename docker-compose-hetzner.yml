@@ -1,6 +1,6 @@
 # Compose de PRODUCTION pour un VPS unique (Hetzner ~8 €/mois, ARM ou x86).
 # Dérivé de docker-compose-prod.yml, avec 2 différences :
-#   1. Ollama SUPPRIMÉ  → mcp-service pointe sur Groq (LLM gratuit, compatible OpenAI).
+#   1. Ollama SUPPRIMÉ  → mcp-service pointe sur Groq : choix de la prod pour son coût (voir #33).
 #   2. Caddy AJOUTÉ     → seul conteneur exposé sur Internet (HTTPS auto Let's Encrypt).
 # Le frontend (nginx) reste le reverse-proxy applicatif interne (/api, /mcp, /ws → gateway).
 #
@@ -129,7 +129,13 @@ services:
       postgres:
         condition: service_healthy
 
-  # ── MCP : LLM = Groq (gratuit, sans carte). Pas d'Ollama. ─────────────────
+  # ── MCP : LLM = Groq, choix de la PROD pour son coût (#33) ─────────────────
+  # Partout ailleurs, le défaut est un modèle LOCAL (Ollama, cf. mcp-service et
+  # docker-compose-prod.yml) : aucune donnée du forum ne sort vers un tiers. Le VPS (8 Go) ne
+  # peut pas faire tourner un modèle 7B à côté du reste ; Groq est gratuit, mais les extraits du
+  # forum (anonymisés) partent alors chez lui. Pour un autre modèle (hébergé par l'équipe…),
+  # définir LLM_BASE_URL et LLM_MODEL dans .env.docker : ils remplacent ces défauts, sans toucher
+  # au dépôt (update.sh lance compose avec --env-file .env.docker).
   # LLM_API_KEY (gsk_...) vient de .env.docker. Clé absente / appel KO → repli
   # déterministe (l'analyse aboutit quand même à partir des vraies stats).
   mcp-service:
@@ -141,8 +147,8 @@ services:
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
       CORE_SERVICE_HOST: core-service
-      LLM_BASE_URL: https://api.groq.com/openai/v1
-      LLM_MODEL: llama-3.3-70b-versatile
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
       LLM_TIMEOUT_MS: "60000"
     mem_limit: 512m
     networks:
