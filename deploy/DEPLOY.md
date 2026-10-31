@@ -1,7 +1,7 @@
 # Déploiement MoodIT sur un VPS Hetzner (~8 €/mois)
 
 Guide de bout en bout : d'un compte Hetzner vide à l'app en HTTPS.
-LLM = **Groq** (gratuit). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
+LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
 
 ---
 
@@ -70,7 +70,7 @@ openssl rand -base64 64   # à coller dans INTERNAL_TOKEN
 ```
 
 Points clés :
-- `LLM_API_KEY=gsk_...` (ta clé Groq).
+- `LLM_API_KEY=gsk_...` (ta clé Groq ; voir « Modèle d'IA » pour un autre modèle).
 - `FRONT_ORIGIN=https://moodit.example.com` (l'origine HTTPS réelle — sinon le WebSocket est refusé).
 - `SPRING_PROFILES_ACTIVE=prod`.
 - `MAIL_USERNAME` / `MAIL_PASSWORD`.
@@ -180,11 +180,31 @@ en argument) au schéma produit par `db/migration`, et affiche le SQL d'écart.
 
 ---
 
+## Modèle d'IA (analyse MCP)
+
+L'analyse MCP passe par une API compatible OpenAI (`/chat/completions`), configurée par trois
+variables : `LLM_BASE_URL`, `LLM_MODEL` et `LLM_API_KEY` (#33).
+
+| Où | Modèle | Pourquoi |
+|---|---|---|
+| Défaut (`mcp-service`, dev, tests) | Ollama local, `qwen2.5:7b-instruct` sur `http://localhost:11434/v1` | Aucune donnée du forum ne sort vers un tiers |
+| `docker-compose-prod.yml` | Conteneur Ollama du réseau interne | Même raison, pour un serveur qui a la mémoire nécessaire |
+| VPS (`docker-compose-hetzner.yml`) | **Groq**, `llama-3.3-70b-versatile` | **Coût** : un modèle 7B ne tient pas dans les 8 Go du VPS à côté du reste, et Groq est gratuit. Les extraits du forum, anonymisés (`ForumTextRedactor`), partent alors chez Groq |
+
+Changer de modèle sur le VPS (par exemple vers un modèle hébergé par l'équipe) : définir
+`LLM_BASE_URL` et `LLM_MODEL` dans `.env.docker`, puis `./deploy/update.sh --force`. Ces valeurs
+remplacent celles du compose, et `update.sh` ne les écrase pas : `.env.docker` est hors du dépôt.
+
+Si le modèle est injoignable ou la clé absente, `mcp-service` produit une analyse **déterministe**
+à partir des vraies statistiques du cours : l'analyse aboutit toujours.
+
+---
+
 ## Notes de coût / dimensionnement
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
   dans le compose). Total observé ≈ 3,5-4 Go → marge confortable.
-- **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU.
+- **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
 - Pour réduire la RAM : externaliser Postgres vers **Neon**/**Supabase** (offre gratuite)
