@@ -1,5 +1,5 @@
 -- Schéma H2 pour les tests JPA de suppression de programme.
--- Reproduit les tables et les contraintes ON DELETE CASCADE de init.sql qui portent la
+-- Reproduit les tables et les contraintes ON DELETE CASCADE du schéma (db/migration) qui portent la
 -- logique testée (nettoyage des cours orphelins + cascades program_course / User_Program_Role).
 -- Volontairement RÉDUIT aux tables touchées par ProgramService.deleteProgram.
 

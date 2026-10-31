@@ -7,7 +7,7 @@ export type ForumAuthor = User;
 /** Vote d'un post. Alias de compat. */
 export type ForumVote = PostVote;
 
-// ─── Auteurs reutilises (inspires des seeds de init.sql). ───
+// ─── Auteurs reutilises (inspires de la demo, db/demo). ───
 // `me` = l'utilisateur connecte (mock Dashboard : id 1, « jeandubois »). Ses posts
 // portent donc les actions Modifier/Supprimer. `admin` est decale a un autre id
 // pour ne pas se confondre avec l'utilisateur courant.

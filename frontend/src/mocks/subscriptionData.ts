@@ -11,7 +11,7 @@ import type {
  * loaders du popup. À remplacer par de vrais GET le jour du branchement.
  */
 
-/** Établissements (aligné sur init.sql). */
+/** Établissements (aligné sur les données de référence). */
 export const establishments: Establishment[] = [
   { id: 1, name: 'Université de Sherbrooke' },
   { id: 2, name: 'Université Laval' },

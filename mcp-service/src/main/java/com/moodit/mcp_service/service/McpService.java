@@ -37,7 +37,7 @@ import java.util.List;
  * Déclenchement ASYNCHRONE : {@link #requestAnalysis} crée une ligne `pending` et rend la
  * main (le contrôleur répond 202) ; le job ({@link McpAnalysisRunner}) produit le résultat
  * et le POUSSE par WebSocket (via core-service). Le verrou « une analyse en cours par
- * (cours, user) » est garanti par l'index unique partiel (cf. init.sql).
+ * (cours, user) » est garanti par l'index unique partiel (cf. db/migration/V1__schema.sql).
  */
 @Service
 @RequiredArgsConstructor

@@ -3,7 +3,7 @@ import { ROLE } from './roles';
 
 /**
  * La constante ROLE est la source unique des noms de rôle côté front.
- * Ces valeurs DOIVENT rester alignées avec init.sql / RoleNames.java :
+ * Ces valeurs DOIVENT rester alignées avec les données de référence (db/migration) / RoleNames.java :
  * un changement ici est intentionnel et doit être revu.
  */
 describe('ROLE', () => {

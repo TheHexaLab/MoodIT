@@ -10,7 +10,7 @@ export POSTGRES_USER=postgres POSTGRES_DB=moodit_db   # interpolation des fichie
 # La CI fournit son propre COMPOSE (avec docker-compose-ci-cache.yml, cache de build gha) : on le
 # garde ; sans lui (en local), la pile e2e de base.
 COMPOSE="${COMPOSE:-docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml}"
-SERVICES="postgres mailpit auth-service core-service permission-service mcp-service piston execution-service gateway frontend"
+SERVICES="postgres db-migrate mailpit auth-service core-service permission-service mcp-service piston execution-service gateway frontend"
 
 [ -f .env.docker ] || touch .env.docker   # requis par `env_file:` ; valeurs imposées par docker-compose-e2e.yml
 

@@ -1,7 +1,7 @@
 package com.moodit.permission_service.model;
 
 /**
- * Noms canoniques des rôles (colonne Role.name dans init.sql), en un seul endroit. Les prédicats
+ * Noms canoniques des rôles (colonne Role.name, données de référence de db/migration), en un seul endroit. Les prédicats
  * d'autorisation comparent par NOM (pas par id) — utiliser ces constantes évite les fautes de
  * frappe silencieuses (ex. "Administration" ≠ "Administrateur" ne matcherait jamais → règle morte).
  */

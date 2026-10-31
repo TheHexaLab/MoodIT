@@ -45,7 +45,7 @@ import org.testcontainers.utility.MountableFile;
 
 /**
  * Votes SIMULTANÉS d'un même utilisateur sur un même post (#130), contre un VRAI Postgres
- * (Testcontainers, schéma {@code init.sql}). H2 ne reproduit ni la contrainte UNIQUE sous
+ * (Testcontainers, migrations {@code db/migration} V1 et V2). H2 ne reproduit ni la contrainte UNIQUE sous
  * concurrence ni le verrou de ligne : seul ce test prouve que {@link ForumService#addVoteToPost}
  * sérialise les votes. Avant le verrou, deux transactions lisaient « aucun vote » en même temps,
  * puis inséraient chacune le leur : l'une échouait sur UNIQUE(user_id, post_id) (409 côté API).
@@ -64,9 +64,13 @@ class ForumVoteConcurrencyIT {
   @Container
   private static final PostgreSQLContainer<?> POSTGRES =
       new PostgreSQLContainer<>("postgres:16")
+          // Préfixes 01-/02- : docker-entrypoint exécute les fichiers par ordre alphabétique.
           .withCopyFileToContainer(
-              MountableFile.forHostPath(Path.of("..", "init.sql")),
-              "/docker-entrypoint-initdb.d/init.sql");
+              MountableFile.forHostPath(Path.of("..", "db", "migration", "V1__schema.sql")),
+              "/docker-entrypoint-initdb.d/01-V1__schema.sql")
+          .withCopyFileToContainer(
+              MountableFile.forHostPath(Path.of("..", "db", "migration", "V2__donnees_reference.sql")),
+              "/docker-entrypoint-initdb.d/02-V2__donnees_reference.sql");
 
   @DynamicPropertySource
   static void datasource(DynamicPropertyRegistry registry) {

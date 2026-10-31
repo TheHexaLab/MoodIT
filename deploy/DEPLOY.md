@@ -90,8 +90,8 @@ docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
 Le premier build prend quelques minutes (6 services Java + frontend + Piston).
-`piston-init` installe les 12 langages puis s'arrête (normal). Au **tout premier**
-démarrage, `init.sql` crée le schéma dans un volume Postgres vierge.
+`piston-init` installe les 12 langages puis s'arrête (normal), de même que `db-migrate`, qui crée
+le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
 
 Suivre les logs :
 
@@ -124,68 +124,59 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 ```
 
-### Changement de schéma après le 1er déploiement
+### Changement de schéma : migrations Flyway
 
-`init.sql` ne rejoue **que** sur un volume vierge, et le profil prod tourne en
-`validate`. Pour toute évolution de schéma, applique les scripts de `migrations/`
-sur la base en cours (ne supprime pas le volume `postgres_data` en prod).
+Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
+service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de
+`db/migration/` pas encore enregistrées dans la table `flyway_schema_history` ; les services qui
+utilisent la base (auth, core, permission, mcp) ne démarrent qu'après lui. `deploy/update.sh` le
+lance aussi avant le build, pour qu'une migration en échec arrête la mise à jour.
 
-#### 1. Générer la migration automatiquement (dev)
+| Dossier | Contenu | Où |
+|---|---|---|
+| `db/migration/` | Schéma (V1), données de référence (V2 : établissements, rôles, types, langages), puis chaque évolution | Partout, prod comprise |
+| `db/demo/` | Données de démo (comptes, programme, cours, quiz…) | Dev, e2e et CI, **jamais en prod** |
 
-Tu édites `init.sql` (source de vérité du schéma complet) comme d'habitude, puis :
+#### Écrire une migration
 
-```bash
-./deploy/generate-migration.sh <nom_migration>     # ex. add_bio_colonne_user
-```
+1. Créer `db/migration/V<n>__<sujet>.sql`, `<n>` = la version suivante (ex. `V3__bio_utilisateur.sql`).
+   Le SQL est appliqué tel quel, dans une transaction.
+2. **Ne jamais modifier ni supprimer une migration fusionnée** : Flyway refuserait de démarrer
+   (somme de contrôle différente), et le job CI `schema` bloque déjà ce cas. Une correction passe
+   par une nouvelle version.
+3. Si la démo doit suivre (nouvelle colonne obligatoire, nouvelles données), ajouter
+   `db/demo/V<n>_1__<sujet>.sql`.
+4. Vérifier en local : `docker compose -f docker-compose-dev.yml up -d` (applique les migrations
+   manquantes à la base de dev), puis le job CI `schema` démarre chaque service en `validate`.
 
-Le script diffe le schéma de `init.sql@HEAD` (avant ta modif) contre le `init.sql`
-courant, via deux Postgres jetables + [migra](https://github.com/djrobstep/migra),
-et écrit le SQL dans `migrations/<date>_<nom>.sql`. **Prérequis : Docker.** Rien à
-installer localement.
+#### Appliquer en prod
 
-> ⚠️ Le fichier généré est un **point de départ, à RELIRE** : un renommage de
-> colonne apparaît comme `DROP + ADD` (perte de données), et les conversions de
-> type peuvent nécessiter un `USING`. Corrige à la main puis committe le `.sql`
-> **avec** ta modif de `init.sql`.
-
-Diff contre la vraie prod plutôt que `HEAD` (optionnel) : fournis un dump et
-`REF=prod PROD_DUMP=backups/db-XX.sql.gz ./deploy/generate-migration.sh <nom>`.
-
-#### 2. Appliquer la migration (prod)
-
-`init.sql` contient déjà la version à jour du schéma → un **volume vierge** n'a
-**pas** besoin des migrations (elles feraient doublon et échoueraient, p. ex.
-`ADD COLUMN` d'une colonne déjà présente). Les migrations ne servent qu'aux bases
-**déjà peuplées**. Applique-les avec un suivi (pour ne jamais rejouer une migration) :
+Rien à faire à la main : `./deploy/update.sh` applique les nouvelles versions (après sa
+sauvegarde de la base). Pour voir l'état :
 
 ```bash
-PGUSER="$(grep -E '^POSTGRES_USER=' .env.docker | cut -d= -f2-)"
-PGDB="$(grep -E '^POSTGRES_DB=' .env.docker | cut -d= -f2-)"
-# Table de suivi (idempotent)
-docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDB" -c \
-  "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());"
-# Appliquer chaque migration non encore enregistrée, en transaction
-for m in $(ls -1 migrations/*.sql | sort); do
-  base="$(basename "$m")"
-  seen="$(docker exec moodit_postgres psql -tAX -U "$PGUSER" -d "$PGDB" -c \
-    "SELECT 1 FROM schema_migrations WHERE filename='$base'")"
-  [ "$seen" = "1" ] && continue
-  echo "Migration : $base"
-  docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 --single-transaction -U "$PGUSER" -d "$PGDB" \
-    -c "INSERT INTO schema_migrations(filename) VALUES ('$base')" -f - < "$m" \
-    || { echo "ÉCHEC : $base"; break; }
-done
+docker compose --env-file .env.docker -f docker-compose-hetzner.yml run --rm --no-deps db-migrate
+docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT version, description, installed_on, success FROM flyway_schema_history ORDER BY installed_rank"
 ```
 
-Sur un **volume neuf** créé depuis `init.sql`, enregistre les migrations comme
-déjà appliquées **sans les exécuter** (sinon doublon) :
+#### Passage à Flyway d'une base existante (une seule fois)
+
+Une base créée par l'ancien `init.sql` n'a pas d'historique Flyway. Au premier lancement,
+`db-migrate` la marque à la version 2 (`FLYWAY_BASELINE_ON_MIGRATE`) sans rien rejouer : son schéma
+doit donc être **exactement** celui de V1. À vérifier avant ce premier déploiement :
 
 ```bash
-for m in migrations/*.sql; do
-  docker exec -i moodit_postgres psql -U "$PGUSER" -d "$PGDB" -c \
-    "INSERT INTO schema_migrations(filename) VALUES ('$(basename "$m")') ON CONFLICT DO NOTHING"
-done
+./deploy/check-schema.sh        # « ✓ Schéma identique à db/migration », sinon le SQL d'écart
 ```
+
+En cas d'écart, corriger la base (ou ajouter une migration) avant de déployer. L'ancienne table
+de suivi `schema_migrations` peut ensuite être supprimée.
+
+#### Détecter une dérive
+
+`./deploy/check-schema.sh` compare à tout moment la base de `moodit_postgres` (ou un dump passé
+en argument) au schéma produit par `db/migration`, et affiche le SQL d'écart.
 
 ---
 

@@ -11,13 +11,36 @@ services:
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Migrations Flyway (#96) : schéma, données de référence ET données de démo (db/demo). Rejoué à
+  # chaque `up` : n'applique que les versions manquantes. Un volume créé par l'ancien init.sql (démo
+  # comprise) est marqué à la version 2.1 sans rien rejouer.
+  db-migrate:
+    image: flyway/flyway:13.10.0@sha256:f5dab54b2b51e5aa131ebc2be36fd8a7c18006541db06638469ec26b6ad2bfe2
+    container_name: moodit_db_migrate
+    restart: "no"
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      FLYWAY_USER: ${POSTGRES_USER}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD}
+      FLYWAY_LOCATIONS: filesystem:/flyway/db/migration,filesystem:/flyway/db/demo
+      # Les gabarits de code des langages contiennent des ${…} (JavaScript) : pas de variables Flyway.
+      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "2.1"
+      FLYWAY_CONNECT_RETRIES: "10"
+    command: migrate
+    volumes:
+      - ./db:/flyway/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   pgadmin:
     image: dpage/pgadmin4

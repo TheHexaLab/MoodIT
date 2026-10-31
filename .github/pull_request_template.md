@@ -28,7 +28,7 @@ parenthèses) ; ces cases servent au relecteur à voir d'un coup d'œil la port�
 - [ ] CI, outillage ou build (`ci`, `build`)
 - [ ] Dépendances : montée de version, ajout, retrait (`chore`)
 - [ ] Style ou formatage, sans effet sur le code (`style`)
-- [ ] Schéma de base de données : `init.sql` et migration (`feat` ou `fix`)
+- [ ] Schéma de base de données : migration Flyway (`feat` ou `fix`)
 - [ ] Infrastructure ou déploiement : Docker, compose, serveur (`chore`)
 - [ ] **Changement incompatible** : route, contrat d'API ou comportement dont dépend un autre service ou le frontend (`!` dans le titre, ex. `feat(core)!: …`)
 
@@ -54,7 +54,7 @@ Une ligne par changement, avec le test qui le prouve. Écrire « Aucun » si c'e
 - [ ] Code documenté : commentaires en français, `CLAUDE.md` ou wiki mis à jour si une règle change
 - [ ] Tests ajoutés ou mis à jour, et CI verte : tests, couverture au-dessus du seuil, Playwright
 - [ ] Route ajoutée ou modifiée (lecture ou écriture) : règle dans `permission-service` et manifestes de routes à jour
-- [ ] Changement de schéma : `init.sql` **et** une migration idempotente dans `migrations/`
+- [ ] Changement de schéma : une **nouvelle** migration `db/migration/V<n>__sujet.sql` (aucune migration existante modifiée), et la démo (`db/demo/`) si besoin
 - [ ] Aucun secret, jeton ou fichier `.env` dans le diff
 - [ ] Aucun conflit non résolu
 

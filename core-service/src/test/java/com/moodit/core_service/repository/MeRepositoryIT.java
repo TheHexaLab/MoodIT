@@ -19,8 +19,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.MountableFile;
 
 /**
- * {@link MeRepository} contre un VRAI Postgres (Testcontainers), schéma chargé depuis {@code
- * init.sql}. Les requêtes {@code UPDATE … RETURNING} ne tournent pas sur H2 : seul ce test prouve
+ * {@link MeRepository} contre un VRAI Postgres (Testcontainers), schéma et données de référence
+ * chargés depuis les migrations Flyway ({@code db/migration}, V1 et V2). Les requêtes {@code UPDATE … RETURNING} ne tournent pas sur H2 : seul ce test prouve
  * qu'elles sont valides, qu'elles modifient la BONNE ligne (et seulement elle), que les colonnes
  * renvoyées sont bien mappées et que les rôles globaux (User_Role) sont rattachés au profil.
  */
@@ -28,14 +28,18 @@ import org.testcontainers.utility.MountableFile;
 @Testcontainers
 class MeRepositoryIT {
 
-  // init.sql est monté dans docker-entrypoint-initdb.d, exactement comme en dev et en prod : il
-  // est exécuté par psql (ON_ERROR_STOP), qui comprend ses chaînes $sc$…$sc$ (ScriptUtils, non).
+  // Les migrations sont montées dans docker-entrypoint-initdb.d : exécutées par psql (ON_ERROR_STOP),
+  // qui comprend les chaînes $sc$…$sc$ des langages (ScriptUtils, non).
   @Container
   private static final PostgreSQLContainer<?> POSTGRES =
       new PostgreSQLContainer<>("postgres:16")
+          // Préfixes 01-/02- : docker-entrypoint exécute les fichiers par ordre alphabétique.
           .withCopyFileToContainer(
-              MountableFile.forHostPath(Path.of("..", "init.sql")),
-              "/docker-entrypoint-initdb.d/init.sql");
+              MountableFile.forHostPath(Path.of("..", "db", "migration", "V1__schema.sql")),
+              "/docker-entrypoint-initdb.d/01-V1__schema.sql")
+          .withCopyFileToContainer(
+              MountableFile.forHostPath(Path.of("..", "db", "migration", "V2__donnees_reference.sql")),
+              "/docker-entrypoint-initdb.d/02-V2__donnees_reference.sql");
 
   private static JdbcTemplate jdbc;
   private static MeRepository repository;
@@ -94,7 +98,7 @@ class MeRepositoryIT {
     assertThat(me.email()).isEqualTo(EMAIL);
     assertThat(me.avatarColor()).isEqualTo("#112233");
     assertThat(me.settings()).isEqualTo("{\"theme\":\"light\"}");
-    // init.sql crée Administrateur avant Gardien : le tri par id doit les rendre dans cet ordre,
+    // V2 crée Administrateur avant Gardien : le tri par id doit les rendre dans cet ordre,
     // alors qu'ils ont été insérés dans User_Role dans l'ordre inverse.
     assertThat(adminRoleId).isLessThan(gardienRoleId);
     assertThat(me.roles())

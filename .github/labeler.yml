@@ -39,7 +39,7 @@ ci:
 
 migration BD:
   - changed-files:
-      - any-glob-to-any-file: ["init.sql", "migrations/**"]
+      - any-glob-to-any-file: ["db/**"]
 
 déploiement:
   - changed-files:

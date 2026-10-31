@@ -271,10 +271,10 @@ jobs:
 
   # ── Schéma : chaque service JPA démarre en profil prod contre le VRAI schéma ─────
   # Les tests unitaires tournent sur H2 avec un schéma généré depuis les entités : un écart entre
-  # init.sql et le code n'y casse jamais rien. Ici, Postgres est monté avec init.sql (comme le
-  # docker-entrypoint de prod), puis migrations/*.sql sont rejouées (idempotentes : elles doivent
-  # passer sans erreur sur une base à jour). Le VRAI JAR démarre ensuite en profil prod, donc en
-  # `ddl-auto=validate` : une table ou colonne manquante empêche le démarrage → job rouge.
+  # les migrations et le code n'y casse jamais rien. Ici, Flyway applique db/migration sur une base
+  # vide (comme pour une nouvelle prod : sans les données de démo). Le VRAI JAR démarre ensuite en
+  # profil prod, donc en `ddl-auto=validate` : une table ou colonne manquante empêche le
+  # démarrage → job rouge.
   # execution-service et gateway n'ont pas de base : rien à valider.
   schema:
     name: ${{ matrix.service }} — démarrage prod (vrai schéma)
@@ -315,16 +315,25 @@ jobs:
           chmod +x ./gradlew
           ./gradlew bootJar --no-daemon --console=plain
 
-      - name: Créer le schéma (init.sql puis migrations/)
-        env:
-          PGPASSWORD: postgres
-          PGOPTIONS: "-c client_min_messages=warning"   # masque les NOTICE « already exists » des migrations rejouées
+      # Une migration déjà fusionnée ne change plus : Flyway refuserait de démarrer en prod (somme
+      # de contrôle différente). Seuls les ajouts dans db/migration sont permis (#96).
+      - name: Migrations existantes inchangées
+        if: github.event_name == 'pull_request' && matrix.service == 'core-service'
         run: |
-          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f init.sql
-          for f in migrations/*.sql; do
-            echo "→ $f"
-            psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d moodit_db -q -f "$f"
-          done
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed=$(git diff --name-status FETCH_HEAD HEAD -- db/migration | grep -v '^A' || true)
+          if [ -n "$changed" ]; then
+            echo "::error::Migration existante modifiée ou supprimée (ajouter une nouvelle version) :"
+            echo "$changed"
+            exit 1
+          fi
+
+      - name: Créer le schéma (Flyway, db/migration)
+        run: |
+          docker run --rm --network host -v "$PWD/db:/flyway/db:ro" \
+            flyway/flyway:13.10.0@sha256:f5dab54b2b51e5aa131ebc2be36fd8a7c18006541db06638469ec26b6ad2bfe2 \
+            -url=jdbc:postgresql://localhost:5432/moodit_db -user=postgres -password=postgres \
+            -locations=filesystem:/flyway/db/migration -placeholderReplacement=false migrate
 
       # Lancé depuis la racine du dépôt : `optional:file:../.env` pointe alors hors du workspace
       # (aucun .env ne vient surcharger le profil). Secrets bidons : seuls les placeholders sans
