@@ -8,7 +8,8 @@ import {
 } from './helpers';
 
 // En-têtes de sécurité envoyés par l'image nginx du frontend (#93, frontend/nginx/security-headers.conf),
-// et absence de violation de la CSP (encore en Report-Only) sur les écrans principaux, KaTeX compris.
+// et absence de violation de la CSP (bloquante) sur les écrans principaux, KaTeX et pages statiques
+// compris : une ressource refusée casserait l'écran sans erreur visible ailleurs.
 // HSTS n'est pas attendu ici : c'est Caddy, devant nginx en prod, qui le pose.
 
 const EXPECTED: Record<string, string | RegExp> = {
@@ -16,8 +17,7 @@ const EXPECTED: Record<string, string | RegExp> = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
   'permissions-policy': /camera=\(self\), microphone=\(self\),.*geolocation=\(\)/,
-  'content-security-policy-report-only':
-    /^default-src 'self'; script-src 'self' 'sha256-.*frame-ancestors 'none'$/,
+  'content-security-policy': /^default-src 'self'; script-src 'self' 'sha256-.*frame-ancestors 'none'$/,
 };
 
 /** Chaque en-tête attendu est présent UNE fois (nginx retire ceux des services) avec sa valeur. */
@@ -30,6 +30,10 @@ function expectSecurityHeaders(response: APIResponse, what: string) {
     else expect(values[0], `${name} sur ${what}`).toMatch(value);
   }
   expect(response.headers()['strict-transport-security'], `HSTS sur ${what}`).toBeUndefined();
+  expect(
+    response.headers()['content-security-policy-report-only'],
+    `CSP Report-Only sur ${what}`
+  ).toBeUndefined();
 }
 
 test('en-têtes de sécurité sur la page, les fichiers du build et une erreur de l’API', async ({
@@ -54,7 +58,7 @@ test('en-têtes de sécurité sur la page, les fichiers du build et une erreur d
   expectSecurityHeaders(api, '/api/me');
 });
 
-/** Note chaque violation de CSP (y compris en Report-Only) dès la création du document. */
+/** Note chaque violation de CSP dès la création du document. */
 async function recordCspViolations(context: BrowserContext) {
   await context.addInitScript(() => {
     const store = window as unknown as { cspViolations: string[] };
@@ -68,7 +72,7 @@ async function recordCspViolations(context: BrowserContext) {
 const violations = (page: Page) =>
   page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations);
 
-test('aucune violation de la CSP : authentification, tableau de bord, forum avec KaTeX', async ({
+test('aucune violation de la CSP : authentification, pages statiques, tableau de bord, forum avec KaTeX', async ({
   browser,
   baseURL,
 }) => {
@@ -79,6 +83,11 @@ test('aucune violation de la CSP : authentification, tableau de bord, forum avec
     await guestPage.goto(path);
     await expect(guestPage.getByRole('img', { name: 'Logo MoodIT' })).toBeVisible();
     await guestPage.evaluate(() => document.fonts.ready);
+    expect(await violations(guestPage), path).toEqual([]);
+  }
+  // Pages statiques de public/ : scripts et styles en fichiers (SheetJS, schéma SVG de la BD).
+  for (const path of ['/plan-de-test.html', '/schema-bd.html']) {
+    await guestPage.goto(path, { waitUntil: 'load' });
     expect(await violations(guestPage), path).toEqual([]);
   }
   await guest.close();
