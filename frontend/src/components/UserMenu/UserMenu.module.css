@@ -448,7 +448,8 @@
 }
 
 .logout .actionIcon {
-    color: var(--danger);
+    /* Même rouge que le texte : en sombre, --danger différait (et --badge-danger-fg reste au-dessus de 3:1). */
+    color: var(--badge-danger-fg);
 }
 
 .logout:hover {
@@ -457,7 +458,7 @@
 }
 
 .logout:hover .actionIcon {
-    color: var(--danger);
+    color: var(--badge-danger-fg);
 }
 
 /* ── Toggle (mode sombre) ───────────────────────────────────── */

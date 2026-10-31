@@ -1,6 +1,7 @@
 import { expect, request, test, type Page } from './fixtures';
 import { TEST_PASSWORD } from '../setup/accounts';
 import { MAIL_DOMAIN, createEnrolledUser, enterCode, newUser, readCodeFromMail } from './helpers';
+import { expectTheme, setThemeInDb } from './a11y.helpers';
 
 // Compléments d'auth.spec.ts : déconnexion, renvoi de code, validations client, liens entre
 // les pages d'authentification et redirections du routeur.
@@ -71,6 +72,25 @@ test.describe('déconnexion', () => {
     // Le cookie de session ne vaut plus rien : /home renvoie à la connexion.
     await page.goto('/home');
     await expect(page).toHaveURL(/\/login$/);
+    await context.close();
+  });
+
+  // #224 : en sombre, l'icône était en --danger et le texte en --badge-danger-fg (deux rouges).
+  test('« Se déconnecter » : l\'icône a la couleur du texte, en sombre', async ({
+    browser,
+    baseURL,
+  }) => {
+    const { storageState } = await createEnrolledUser(baseURL!);
+    await setThemeInDb(baseURL!, storageState, 'dark');
+    const context = await browser.newContext({ storageState });
+    const page = await context.newPage();
+    await page.goto('/home');
+    await expectTheme(page, 'dark');
+
+    await page.getByRole('button', { name: 'Compte utilisateur' }).click();
+    const item = page.getByRole('menuitem', { name: 'Se déconnecter' });
+    const textColor = await item.evaluate((el) => getComputedStyle(el).color);
+    await expect(item.locator('svg')).toHaveCSS('color', textColor);
     await context.close();
   });
 });
