@@ -279,6 +279,9 @@ jobs:
   schema:
     name: ${{ matrix.service }} — démarrage prod (vrai schéma)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # liste des fichiers de la PR (migrations existantes inchangées)
     strategy:
       fail-fast: false
       matrix:
@@ -317,11 +320,18 @@ jobs:
 
       # Une migration déjà fusionnée ne change plus : Flyway refuserait de démarrer en prod (somme
       # de contrôle différente). Seuls les ajouts dans db/migration sont permis (#96).
+      # Fichiers de la PR elle-même, avec leur statut (added, modified, removed, renamed) : exact
+      # même si la branche est en retard sur sa base (une migration ajoutée entre-temps sur la base
+      # n'est pas prise pour une suppression).
       - name: Migrations existantes inchangées
         if: github.event_name == 'pull_request' && matrix.service == 'core-service'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-          changed=$(git diff --name-status FETCH_HEAD HEAD -- db/migration | grep -v '^A' || true)
+          changed=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[] | select((.filename | startswith("db/migration/")) or ((.previous_filename // "") | startswith("db/migration/")))
+                      | select(.status != "added") | "\(.status) \(.filename)"')
           if [ -n "$changed" ]; then
             echo "::error::Migration existante modifiée ou supprimée (ajouter une nouvelle version) :"
             echo "$changed"
