@@ -134,8 +134,8 @@ lance aussi avant le build, pour qu'une migration en échec arrête la mise à j
 
 | Dossier | Contenu | Où |
 |---|---|---|
-| `db/migration/` | Schéma (V1), données de référence (V2 : établissements, rôles, types, langages), puis chaque évolution | Partout, prod comprise |
-| `db/demo/` | Données de démo (comptes, programme, cours, quiz…) | Dev, e2e et CI, **jamais en prod** |
+| `db/migration/` | Schéma (V1), données de référence (V2 : rôles, types de forum et de question, langages), puis chaque évolution | Partout, prod comprise |
+| `db/demo/` | Données de démo, un script par thème : établissements, comptes, programme et cours de base (V2.1), démo MCP (V2.2), quiz de code (V2.3), annonces (V2.4) | Dev, e2e et CI, **jamais en prod** |
 
 #### Écrire une migration
 

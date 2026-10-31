@@ -1,17 +1,9 @@
 -- ============================================================================
 --  V2 — Données de référence, nécessaires partout (prod comprise)
 -- ============================================================================
--- Établissements autorisés, rôles, types de forum et de question, langages d'exécution. Les
--- données de DÉMO (comptes, programme, cours, quiz…) sont dans db/demo/, chargées seulement en dev,
--- en e2e et en CI.
-
--- Établissements autorisés à s'inscrire (domaine email).
--- Les sous-domaines d'un domaine listé sont aussi acceptés (cf. AuthService.isAllowedDomain).
-INSERT INTO Establishment (name, domain_email)
-VALUES
-   ('Université de Sherbrooke', 'usherbrooke.ca'),
-   ('Cégep de Victoriaville', 'cegepvicto.ca')
-ON CONFLICT (domain_email) DO NOTHING;
+-- Rôles, types de forum et de question, langages d'exécution : l'application en a besoin pour
+-- fonctionner. Tout le reste (établissements, comptes, programme, cours, quiz…) est de la DÉMO,
+-- dans db/demo/ : chargée en dev, en e2e et en CI, jamais en prod.
 
 -- ------------------------------------------------------------
 -- Role
@@ -26,7 +18,7 @@ ON CONFLICT (domain_email) DO NOTHING;
 INSERT INTO Role (name, program_assignable, global_assignable) VALUES
   ('Enseignant',          TRUE,  FALSE),
   ('Administrateur',      TRUE,  TRUE),
-  ('Gardien', FALSE, TRUE);   -- 5 tiède → zone warning
+  ('Gardien', FALSE, TRUE);
 
 -- ------------------------------------------------------------
 -- F_Type  (types de forum)
@@ -34,7 +26,7 @@ INSERT INTO Role (name, program_assignable, global_assignable) VALUES
 INSERT INTO F_Type (name) VALUES
   ('Discussion'),
   ('Thread'),
-  ('Announcement');  -- mich +1 post 10
+  ('Announcement');   -- canal d'annonces : un par cours, seul le personnel publie
 
 -- ------------------------------------------------------------
 -- Q_Type  (types de question — ordre = mapping vers les slugs front)
@@ -45,7 +37,8 @@ INSERT INTO Q_Type (name) VALUES
   ('Choix multiple'),   -- 3 → multiple_choice
   ('Remise en ordre'),  -- 4 → ordering
   ('Association'),       -- 5 → matching
-  ('Code');
+  ('Code');             -- 6 → coding
+
 
 -- Langages d'exécution (GET /api/languages). start_code_template : squelette montré à
 -- l'ÉTUDIANT. harness_template : gabarit du harnais pour le PROF, écrit dans le langage DU

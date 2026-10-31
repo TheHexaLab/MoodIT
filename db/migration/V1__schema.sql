@@ -419,4 +419,9 @@ CREATE INDEX idx_audit_log_summary_trgm ON Audit_Log USING gin (lower(summary) g
 CREATE INDEX idx_audit_log_actor_trgm ON Audit_Log USING gin (lower(actor_email) gin_trgm_ops) WITH (fastupdate = off);
 CREATE INDEX idx_audit_log_details_trgm ON Audit_Log USING gin (lower(details) gin_trgm_ops) WITH (fastupdate = off);
 CREATE INDEX idx_quiz_course_position ON Quiz(course_id, position); -- quiz d'un cours dans l'ordre d'affichage
-CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index);
+CREATE INDEX idx_question_quiz_order ON Question(quiz_id, order_index); -- questions d'un quiz dans l'ordre + cascade quiz_id
+
+-- TRIGGER
+-- (Retiré) L'email est désormais saisi par l'utilisateur à l'inscription et
+-- conservé tel quel : il ne doit plus être dérivé du username, afin que le
+-- username puisse différer de l'email utilisé pour se connecter.
