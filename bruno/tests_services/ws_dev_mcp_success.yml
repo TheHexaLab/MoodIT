@@ -18,7 +18,7 @@ docs: |
   (le RÉSUMÉ, sans contenu) sur la room mcp:<courseId>.
 
   Abonne-toi d'abord côté WS : {"type":"join","scope":"mcp","id":1}
-  (courseId 1 = tronc commun, présent dans le programme 1 dans init.sql ;
+  (courseId 1 = tronc commun, présent dans le programme 1 dans la démo, db/demo ;
   l'utilisateur du token doit être abonné à un programme contenant ce cours,
   sinon le join est refusé).
 

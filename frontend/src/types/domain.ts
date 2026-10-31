@@ -1,6 +1,6 @@
 /**
  * Modèle de domaine CANONIQUE de l'application — source unique de vérité des
- * entités échangées avec l'API et le WebSocket. Aligné sur `init.sql` :
+ * entités échangées avec l'API et le WebSocket. Aligné sur le schéma (`db/migration`) :
  * convention **snake_case** (= forme des payloads JSON renvoyés par le backend).
  *
  * Règle : une seule interface par entité. Les composants/popups ne redéfinissent

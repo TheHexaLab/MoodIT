@@ -26,8 +26,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * produite par {@link AuditLogRepositoryCustomImpl#buildSearchSql} et exige un {@code Bitmap Index
  * Scan} sur un index GIN trigram. Retirer le fence ⇒ plan différent ⇒ ce test casse.
  *
- * <p>Bonus : charge la MIGRATION prod ({@code migrations/…audit_log.sql}) → prouve aussi que son DDL
- * (table + pg_trgm + index) est valide sur Postgres.
+ * <p>Bonus : charge le schéma Flyway ({@code db/migration/V1__schema.sql}) → prouve aussi que le DDL
+ * du journal (table + pg_trgm + index) est valide sur Postgres.
  */
 @Tag("integration")
 @Testcontainers
@@ -47,10 +47,10 @@ class AuditLogSearchPlanIT {
     ds.setDriverClassName("org.postgresql.Driver");
     jdbc = new JdbcTemplate(ds);
 
-    // Schéma = la migration prod (single source of truth ; en valide aussi le DDL sur Postgres).
+    // Schéma = la migration Flyway V1 (source unique ; en valide aussi le DDL sur Postgres).
     try (Connection c = ds.getConnection()) {
       ScriptUtils.executeSqlScript(
-          c, new FileSystemResource(Path.of("..", "migrations", "2026-07-12_audit_log.sql")));
+          c, new FileSystemResource(Path.of("..", "db", "migration", "V1__schema.sql")));
     }
 
     // 50 000 lignes ; un token rare ('zqxjw') dans ~4 lignes → recherche sélective (cas où l'index

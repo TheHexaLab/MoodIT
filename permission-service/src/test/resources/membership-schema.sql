@@ -1,5 +1,5 @@
 -- Schéma MINIMAL pour tester les requêtes SQL natives de MembershipRepository sous H2
--- (mode PostgreSQL). Noms de tables/colonnes IDENTIQUES à init.sql (seules les colonnes
+-- (mode PostgreSQL). Noms de tables/colonnes IDENTIQUES à db/migration (seules les colonnes
 -- réellement lues par les requêtes sont créées). Recréé avant chaque test (DROP + CREATE).
 
 DROP TABLE IF EXISTS user_program_role;

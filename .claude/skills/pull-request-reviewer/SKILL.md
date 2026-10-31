@@ -128,7 +128,7 @@ La valeur de la revue est dans ce que ces contrôles ne voient pas :
 Ce sont surtout des règles qu'aucun check n'impose.
 - **Autorisations** : aucune vérification de rôle codée en dur hors de `permission-service` (la justesse des règles est traitée plus haut).
 - **Endpoints internes** : un appel service à service passe par `/internal/**` avec `X-Internal-Token`, jamais par le gateway.
-- **Schéma** : tout changement est à la fois dans `init.sql` et dans un nouveau `migrations/AAAA-MM-JJ_sujet.sql` **idempotent** (relançable sans erreur ni effet de plus). Vérifier aussi qu'une migration tient compte des données déjà présentes, par exemple des doublons avant un index unique.
+- **Schéma** : tout changement est une **nouvelle** migration Flyway `db/migration/V<n>__sujet.sql`, jamais une modification d'une migration existante (le job CI `schema` le bloque déjà). Vérifier qu'elle tient compte des données déjà présentes en prod (par exemple des doublons avant un index unique, une colonne `NOT NULL` sans valeur par défaut), et que la démo suit si besoin (`db/demo/V<n>_1__sujet.sql`). Aucune donnée de démo dans `db/migration`.
 - **Analyse MCP** : le repli déterministe de `mcp-service` reste fonctionnel quand le LLM est injoignable.
 - **Frontend** :
   - toute modale passe par `components/Popup`, et un Échap interne appelle `stopPropagation()` ;

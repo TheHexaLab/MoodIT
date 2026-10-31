@@ -13,7 +13,7 @@ import org.springframework.test.context.jdbc.Sql;
 /**
  * Teste les requêtes SQL natives de {@link MembershipRepository} contre une VRAIE base
  * (H2 en mode PostgreSQL), pas des mocks : on valide les JOINs, conditions et noms de
- * tables/colonnes (calqués sur init.sql). Attrape les fautes de frappe SQL et les jointures
+ * tables/colonnes (calqués sur db/migration). Attrape les fautes de frappe SQL et les jointures
  * erronées qu'un test mocké ne verrait pas. Schéma recréé avant chaque test (@Sql), données
  * insérées dans la transaction du test (rollback automatique).
  */

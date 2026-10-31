@@ -30,7 +30,7 @@ public class Question {
     @Column(name = "order_index")
     private Integer orderIndex;
 
-    // NUMERIC(4,1) dans init.sql : sans le type explicite, Hibernate attend un float8 et
+    // NUMERIC(4,1) dans le schéma (db/migration) : sans le type explicite, Hibernate attend un float8 et
     // `ddl-auto=validate` (profil prod) refuse de démarrer.
     @Column(name = "total_score", nullable = false, precision = 4, scale = 1)
     @JdbcTypeCode(SqlTypes.NUMERIC)

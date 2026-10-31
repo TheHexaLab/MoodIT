@@ -172,7 +172,7 @@ contrôle de domaine restreint l'inscription aux établissements autorisés.
 
 ## 5. Base de données
 
-Le schéma est géré par **`init.sql`** (monté dans Postgres), **pas par Hibernate**
+Le schéma est géré par les **migrations Flyway** (`db/migration`), **pas par Hibernate**
 (voir §7). Tables clés de l'authentification :
 
 - **`user_`** : comptes confirmés. Une ligne n'y existe qu'après vérification de l'email

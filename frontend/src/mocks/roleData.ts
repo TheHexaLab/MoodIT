@@ -8,7 +8,7 @@ import type { Role, User } from '../components/RoleEditorPopup/RoleEditorPopup.t
  * du branchement (rôles globaux + membres/assignations d'un programme précis).
  */
 
-/** Rôles éditables (ids alignés sur init.sql ; ordre = ordre d'affichage). */
+/** Rôles éditables (ids alignés sur les données de référence ; ordre = ordre d'affichage). */
 const roles: Role[] = [
   { id: 4, name: 'Administrateur' },
   { id: 2, name: 'Enseignant' },

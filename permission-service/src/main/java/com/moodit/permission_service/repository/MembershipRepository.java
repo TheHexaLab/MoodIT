@@ -1,5 +1,5 @@
 // Verifs d'appartenance encapsulees dans un repository Spring Data : le SQL natif
-// (sur le schema init.sql) reste confine ici, le reste du code n'appelle que des
+// (sur le schema de db/migration) reste confine ici, le reste du code n'appelle que des
 // methodes typees. Reprend la logique de core DbRoomAuthorizer et l'enrichit de
 // l'inscription directe au cours (Enrollment).
 //

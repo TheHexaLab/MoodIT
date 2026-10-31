@@ -15,6 +15,7 @@
 #    tests y lisent les codes de validation / réinitialisation.
 #  - MCP : LLM_API_KEY vide → repli déterministe de mcp-service, sans Ollama ni réseau.
 #  - Piston : démarré sans piston-init (12 langages) ; la CI n'installe que Python.
+#  - Base : Flyway applique aussi db/demo (données de démo), jamais chargées en prod.
 
 x-e2e-env: &e2e-env
   SPRING_PROFILES_ACTIVE: dev
@@ -51,6 +52,12 @@ services:
   postgres:
     container_name: moodit_e2e_postgres
     environment: *e2e-env
+  # Migrations Flyway AVEC les données de démo (programme, cours, quiz… utilisés par les tests).
+  db-migrate:
+    container_name: moodit_e2e_db_migrate
+    environment:
+      <<: *e2e-env
+      FLYWAY_LOCATIONS: filesystem:/flyway/db/migration,filesystem:/flyway/db/demo
   mailpit:
     image: axllent/mailpit:v1.21.8@sha256:81370195cd4a0eab9604d17c2617a7525b0486f9365555253b6c5376c6350f1a
     container_name: moodit_e2e_mailpit

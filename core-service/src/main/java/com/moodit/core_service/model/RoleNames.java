@@ -3,7 +3,7 @@ package com.moodit.core_service.model;
 /**
  * Noms des rôles (table Role) référencés dans la logique métier. Source UNIQUE côté backend :
  * évite les littéraux dupliqués dans les services (un renommage ne casse plus le code silencieusement).
- * Doit rester aligné avec les seeds d'init.sql ET les constantes du front (frontend/src/helpers/roles.ts).
+ * Doit rester aligné avec les données de référence (db/migration/V2__donnees_reference.sql) ET les constantes du front (frontend/src/helpers/roles.ts).
  */
 public final class RoleNames {
 

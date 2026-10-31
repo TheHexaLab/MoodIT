@@ -37,7 +37,6 @@ services:
       TZ: America/Toronto
       PGTZ: America/Toronto
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -45,6 +44,36 @@ services:
       timeout: 5s
       retries: 5
     mem_limit: 512m
+    networks:
+      - internal
+
+  # ── Migrations du schéma (Flyway, #96) : one-shot, avant les services qui utilisent la base ──
+  # Applique db/migration (schéma + données de référence, jamais les données de démo). Une base déjà
+  # peuplée sans historique Flyway (la prod au passage à Flyway) est marquée à la version 2 sans rien
+  # rejouer (baseline) ; ensuite, seules les nouvelles versions s'appliquent. Les identifiants
+  # viennent de .env.docker, lus dans le conteneur (rien n'est interpolé dans ce fichier).
+  db-migrate:
+    image: flyway/flyway:13.10.0@sha256:f5dab54b2b51e5aa131ebc2be36fd8a7c18006541db06638469ec26b6ad2bfe2
+    container_name: moodit_db_migrate
+    restart: "no"
+    env_file:
+      - .env.docker
+    environment:
+      FLYWAY_LOCATIONS: filesystem:/flyway/db/migration
+      # Les gabarits de code des langages contiennent des ${…} (JavaScript) : pas de variables Flyway.
+      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "2"
+      FLYWAY_CONNECT_RETRIES: "10"
+    entrypoint: ["sh", "-c"]
+    command:
+      - exec flyway -url="jdbc:postgresql://postgres:5432/$$POSTGRES_DB" -user="$$POSTGRES_USER" -password="$$POSTGRES_PASSWORD" migrate
+    volumes:
+      - ./db:/flyway/db:ro
+    mem_limit: 384m
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - internal
 
@@ -96,6 +125,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       auth-service:
         condition: service_started
 
@@ -113,6 +144,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   permission-service:
     build: ./permission-service
@@ -128,6 +161,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   # ── MCP : LLM = Groq, choix de la PROD pour son coût (#33) ─────────────────
   # Partout ailleurs, le défaut est un modèle LOCAL (Ollama, cf. mcp-service et
@@ -156,6 +191,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   # ── Sandbox d'exécution du code étudiant (réseau dédié, capacités minimales) ──
   piston:
