@@ -18,6 +18,7 @@ import {
 } from '../../types/domain';
 import {
   FALLBACK_LANGUAGES,
+  MIN_ORDERING_ITEMS,
   defaultStartCode,
   emptyQuestionDraft,
   type AnswerDraft,
@@ -74,7 +75,7 @@ const FALLBACK_QUESTION_TYPES: QuestionTypeOption[] = TYPE_ORDER.map((slug, i) =
  * Validité du corps selon le type (en plus de l'énoncé + barème) :
  * - choix unique / multiple : au moins 2 choix, aucun vide (espaces compris) et au
  *   moins une bonne réponse cochée ;
- * - remise en ordre : au moins 2 éléments, tous remplis (non vides) ;
+ * - remise en ordre : au moins MIN_ORDERING_ITEMS (3) éléments, tous remplis (non vides) ;
  * - association : au moins 2 éléments, chacun avec élément ET catégorie remplis ;
  * - code : au moins un harnais de test (les harnais eux-mêmes sont validés — nom +
  *   poids > 0 — dans leur propre éditeur) ;
@@ -91,7 +92,7 @@ function isBodyValid(d: QuestionDraft): boolean {
   }
   if (d.qType === 'ordering') {
     const items = d.dragItems ?? [];
-    return items.length > 1 && items.every((item) => item.content.trim() !== '');
+    return items.length >= MIN_ORDERING_ITEMS && items.every((item) => item.content.trim() !== '');
   }
   if (d.qType === 'matching') {
     const items = d.dragItems ?? [];
@@ -424,6 +425,12 @@ export function QuestionFormBody({
         <div className={styles.sectionBar}>
           <span className={styles.sectionTitle}>{t.orderingSection}</span>
         </div>
+        {/* Sous le minimum, « Ajouter »/« Enregistrer » est grisé : on dit pourquoi. */}
+        {items.length < MIN_ORDERING_ITEMS && (
+          <span className={styles.fieldHint} role="status">
+            {t.orderingMinItems(MIN_ORDERING_ITEMS)}
+          </span>
+        )}
         <div className={styles.list} ref={listRef}>
           {orderReorder.order.map((id, position) => {
             const d = items[id];

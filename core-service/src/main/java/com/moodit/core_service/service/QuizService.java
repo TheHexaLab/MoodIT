@@ -80,6 +80,9 @@ public class QuizService {
     private static final Map<String, String> Q_TYPE_SLUG_TO_NAME = Q_TYPE_NAME_TO_SLUG.entrySet().stream()
             .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
 
+    /** Nombre minimal d'éléments d'une Remise en ordre (cf. requireValidOrderingItems). */
+    static final int MIN_ORDERING_ITEMS = 3;
+
     // ── Lecture ────────────────────────────────────────────────────────────────
 
     /** Types de question disponibles (table Q_Type), triés par id. */
@@ -975,7 +978,7 @@ public class QuizService {
             q.setLanguage(resolveLanguage(qd));
             q.setAnswers(buildAnswers(qd.getAnswers(), q));
             requireCorrectOption(q, index);
-            requireDistinctCorrectOrders(q, qd.getDragItems(), index);
+            requireValidOrderingItems(q, qd.getDragItems(), index);
             q.setDragItems(buildDragItems(qd.getDragItems(), q));
             q.setTestCases(buildTestCases(qd.getTestCases(), q));
             questions.add(q);
@@ -1005,7 +1008,7 @@ public class QuizService {
         q.setLanguage(resolveLanguage(qd));
         applyAnswers(q, qd.getAnswers());
         requireCorrectOption(q, index);
-        requireDistinctCorrectOrders(q, qd.getDragItems(), index);
+        requireValidOrderingItems(q, qd.getDragItems(), index);
         applyDragItems(q, qd.getDragItems());
         applyTestCases(q, qd.getTestCases());
     }
@@ -1029,14 +1032,20 @@ public class QuizService {
     }
 
     /**
-     * Une Remise en ordre doit donner à chaque élément une position ({@code correctOrder}) présente
-     * et distincte : sinon plusieurs ordres seraient équivalents et le correcteur n'en accepterait
-     * qu'un, choisi par l'ordre d'insertion en base. L'éditeur numérote toujours 0, 1, 2… ; ici on
-     * protège l'API elle-même. On lit les valeurs ENVOYÉES (avant le repli « absent = 0 » des
-     * entités). Les associations n'utilisent pas {@code correctOrder} (0 partout) : non concernées.
+     * Une Remise en ordre a au moins {@value #MIN_ORDERING_ITEMS} éléments : avec deux, le seul
+     * ordre de départ différent de la solution la révélerait (#211). Et chaque élément doit avoir
+     * une position ({@code correctOrder}) présente et distincte : sinon plusieurs ordres seraient
+     * équivalents et le correcteur n'en accepterait qu'un, choisi par l'ordre d'insertion en base.
+     * L'éditeur bloque déjà les deux ; ici on protège l'API elle-même. On lit les valeurs ENVOYÉES
+     * (avant le repli « absent = 0 » des entités). Les associations n'utilisent pas
+     * {@code correctOrder} (0 partout) : non concernées.
      */
-    private static void requireDistinctCorrectOrders(Question q, List<DragItemDTO> items, int index) {
-        if (!"ordering".equals(slugFor(q)) || items == null) return;
+    private static void requireValidOrderingItems(Question q, List<DragItemDTO> items, int index) {
+        if (!"ordering".equals(slugFor(q))) return;
+        if (items == null || items.size() < MIN_ORDERING_ITEMS) {
+            throw new InvalidQuizException("Question " + (index + 1)
+                    + " : une remise en ordre doit avoir au moins " + MIN_ORDERING_ITEMS + " éléments.");
+        }
         Set<Integer> seen = new HashSet<>();
         for (DragItemDTO item : items) {
             if (item.getCorrectOrder() == null || !seen.add(item.getCorrectOrder())) {
@@ -1272,10 +1281,11 @@ public class QuizService {
     }
 
     /**
-     * Éléments déplaçables d'une question. ÉDITEUR : ids réels, ordre de la base. PASSATION :
-     * nouvel ordre aléatoire à chaque envoi et ids PUBLICS (masqués) — ni l'ordre reçu ni le tri
-     * des ids ne révèlent {@code correctOrder} ou les groupes (#28). Une Remise en ordre n'est
-     * jamais envoyée dans l'ordre attendu : le client, qui ne le connaît pas, garde l'ordre reçu.
+     * Éléments déplaçables d'une question. ÉDITEUR : ids réels, ordre de la base. PASSATION : ids
+     * PUBLICS (masqués), et ni l'ordre reçu ni le tri des ids ne révèlent {@code correctOrder} ou
+     * les groupes (#28). Une Association est mélangée à chaque envoi. Une Remise en ordre arrive
+     * dans un ordre de départ FIXE (#211) : le même pour tous les étudiants et à chaque chargement,
+     * jamais l'ordre attendu ; le client, qui ne le connaît pas, garde l'ordre reçu.
      */
     private List<DragItemDTO> toDragItemDTOs(Question question, boolean includeCorrection) {
         if (question.getDragItems() == null) return List.of();
@@ -1283,8 +1293,8 @@ public class QuizService {
         if (includeCorrection) {
             items = question.getDragItems();
         } else if ("ordering".equals(slugFor(question))) {
-            items = itemObfuscator.shuffledExcept(
-                    question.getDragItems(), inExpectedOrder(question.getDragItems()), DragItem::getId);
+            items = itemObfuscator.fixedOrderExcept(question.getId(), question.getDragItems(),
+                    inExpectedOrder(question.getDragItems()), DragItem::getId);
         } else {
             items = itemObfuscator.shuffled(question.getDragItems());
         }

@@ -30,6 +30,8 @@ export interface QuestionFormLabels {
   orderingSection: string;
   deleteItemAria: string;
   addItem: string;
+  /** Pourquoi l'enregistrement est bloqué sous le minimum d'éléments (reçoit ce minimum). */
+  orderingMinItems: (min: number) => string;
 
   // ── Association ──
   matchingSection: string;
@@ -72,6 +74,7 @@ export const defaultQuestionFormLabels: QuestionFormLabels = {
   orderingSection: 'Éléments à ordonner',
   deleteItemAria: "Supprimer l'élément",
   addItem: 'Ajouter un élément',
+  orderingMinItems: (min) => `Une remise en ordre doit avoir au moins ${min} éléments.`,
 
   matchingSection: 'Associations',
   categoryPlaceholder: 'Catégorie',

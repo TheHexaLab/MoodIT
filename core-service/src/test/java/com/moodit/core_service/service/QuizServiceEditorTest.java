@@ -240,13 +240,13 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                 default -> MULTIPLE;
             };
             when(qTypeRepository.findByName(name)).thenReturn(Optional.of(type(1, name)));
-            QuestionDTO bonne = QuestionDTO.builder().qType("ordering").build();
+            QuestionDTO bonne = QuestionDTO.builder().qType("matching").build();
             QuestionDTO sansBonne = QuestionDTO.builder().qType(slug)
                     .answers(List.of(
                             AnswerDTO.builder().content("A").isCorrect(false).build(),
                             AnswerDTO.builder().content("B").build()))
                     .build();
-            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
 
             assertThatThrownBy(() -> service.createQuiz(1, QuizDetailDTO.builder().title("T")
                     .questions(List.of(bonne, sansBonne)).build()))
@@ -298,6 +298,34 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThatThrownBy(() -> service.createQuiz(1, orderingQuiz(orders)))
                     .isInstanceOf(InvalidQuizException.class)
                     .hasMessage("Question 2 : chaque élément doit avoir une position distincte dans l'ordre attendu.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0} élément(s)")
+        @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2})
+        @DisplayName("Remise en ordre de moins de trois éléments → refusée, rien n'est enregistré")
+        void remiseEnOrdre_moinsDeTroisElements_refuse(int size) {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            Integer[] orders = java.util.stream.IntStream.range(0, size).boxed().toArray(Integer[]::new);
+
+            assertThatThrownBy(() -> service.createQuiz(1, orderingQuiz(orders)))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 2 : une remise en ordre doit avoir au moins 3 éléments.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Remise en ordre sans liste d'éléments (absente du DTO) → refusée")
+        void remiseEnOrdre_sansElements_refuse() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+
+            assertThatThrownBy(() -> service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().qType("ordering").build())).build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : une remise en ordre doit avoir au moins 3 éléments.");
             verify(quizRepository, never()).save(any());
         }
 
@@ -448,9 +476,9 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         @DisplayName("orderIndex absent → position dans la liste (0, 1, 2…)")
         void orderIndexAbsent_positionDansLaListe() {
             when(courseRepository.findById(1)).thenReturn(Optional.of(course));
-            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
-            QuestionDTO sansIndex = QuestionDTO.builder().qType("ordering").build();
+            QuestionDTO sansIndex = QuestionDTO.builder().qType("matching").build();
 
             service.createQuiz(1, QuizDetailDTO.builder().title("T")
                     .questions(List.of(sansIndex, sansIndex, sansIndex)).build());
@@ -465,14 +493,14 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         @DisplayName("Listes absentes du DTO → collections vides MODIFIABLES (Hibernate, édition ultérieure)")
         void listesAbsentes_collectionsModifiables() {
             when(courseRepository.findById(1)).thenReturn(Optional.of(course));
-            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             // Quiz sans questions : la collection doit pouvoir recevoir des questions plus tard.
             service.createQuiz(1, QuizDetailDTO.builder().title("Vide").build());
             // Question sans réponses / éléments / harnais.
             service.createQuiz(1, QuizDetailDTO.builder().title("T")
-                    .questions(List.of(QuestionDTO.builder().qType("ordering").build())).build());
+                    .questions(List.of(QuestionDTO.builder().qType("matching").build())).build());
 
             ArgumentCaptor<Quiz> captor = ArgumentCaptor.forClass(Quiz.class);
             verify(quizRepository, org.mockito.Mockito.times(2)).save(captor.capture());
@@ -582,6 +610,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             Question ordering = question(3, ORDERING, 1.0, 0);
             drag(ordering, 40, "a", 0, null);
             drag(ordering, 41, "b", 1, null);
+            drag(ordering, 42, "c", 2, null);
             Quiz withOrdering = quiz(6, course, ordering);
             when(quizRepository.findById(6)).thenReturn(Optional.of(withOrdering));
             when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
@@ -589,10 +618,31 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             assertThatThrownBy(() -> service.updateQuiz(6, QuizDetailDTO.builder().title("T")
                     .questions(List.of(QuestionDTO.builder().id(3).qType("ordering").dragItems(List.of(
                             DragItemDTO.builder().id(40).content("a").build(),
-                            DragItemDTO.builder().id(41).content("b").correctOrder(0).build())).build()))
+                            DragItemDTO.builder().id(41).content("b").correctOrder(0).build(),
+                            DragItemDTO.builder().id(42).content("c").correctOrder(1).build())).build()))
                     .build()))
                     .isInstanceOf(InvalidQuizException.class)
                     .hasMessage("Question 1 : chaque élément doit avoir une position distincte dans l'ordre attendu.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Mise à jour qui ramène une remise en ordre à deux éléments → refusée, rien n'est enregistré")
+        void remiseEnOrdre_rameneeADeuxElements_refuse() {
+            Question ordering = question(3, ORDERING, 1.0, 0);
+            drag(ordering, 40, "a", 0, null);
+            drag(ordering, 41, "b", 1, null);
+            drag(ordering, 42, "c", 2, null);
+            when(quizRepository.findById(6)).thenReturn(Optional.of(quiz(6, course, ordering)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+
+            assertThatThrownBy(() -> service.updateQuiz(6, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(3).qType("ordering").dragItems(List.of(
+                            DragItemDTO.builder().id(40).content("a").correctOrder(0).build(),
+                            DragItemDTO.builder().id(41).content("b").correctOrder(1).build())).build()))
+                    .build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : une remise en ordre doit avoir au moins 3 éléments.");
             verify(quizRepository, never()).save(any());
         }
 
@@ -634,7 +684,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         void reutiliseRetireEtAjoute() {
             when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
             when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
-            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             QuizDetailDTO dto = QuizDetailDTO.builder()
@@ -653,7 +703,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                                             TestCaseDTO.builder().name("nouveau cas").harnessCode("h3").build()))
                                     .build(),
                             // id inconnu → traité comme une nouvelle question
-                            QuestionDTO.builder().id(999).prompt("nouvelle").qType("ordering").build()))
+                            QuestionDTO.builder().id(999).prompt("nouvelle").qType("matching").build()))
                     .build();
 
             QuizDetailDTO result = service.updateQuiz(5, dto);
@@ -717,11 +767,11 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             kept.setTestCases(null);
             quiz.setQuestions(null);
             when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
-            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
 
             service.updateQuiz(5, QuizDetailDTO.builder().title("T")
-                    .questions(List.of(QuestionDTO.builder().prompt("p").qType("ordering").build()))
+                    .questions(List.of(QuestionDTO.builder().prompt("p").qType("matching").build()))
                     .build());
 
             assertThat(quiz.getQuestions()).singleElement().satisfies(q -> {
