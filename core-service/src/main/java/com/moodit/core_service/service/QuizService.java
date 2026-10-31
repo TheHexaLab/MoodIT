@@ -1291,7 +1291,12 @@ public class QuizService {
         if (question.getDragItems() == null) return List.of();
         List<DragItem> items;
         if (includeCorrection) {
-            items = question.getDragItems();
+            // Vue enseignant : une remise en ordre arrive dans son ordre attendu, que l'éditeur
+            // affiche tel quel. L'ordre de la base ne suit pas correctOrder : les éléments gardent
+            // leur id d'un enregistrement à l'autre (#229).
+            items = "ordering".equals(slugFor(question))
+                    ? inExpectedOrder(question.getDragItems())
+                    : question.getDragItems();
         } else if ("ordering".equals(slugFor(question))) {
             items = itemObfuscator.fixedOrderExcept(question.getId(), question.getDragItems(),
                     inExpectedOrder(question.getDragItems()), DragItem::getId);

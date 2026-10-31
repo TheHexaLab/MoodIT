@@ -113,6 +113,21 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
             assertThat(dto.getQuestions().get(0).getDragItems())
                     .extracting(DragItemDTO::getCorrectOrder).containsExactly(0, 1, 2);
         }
+
+        @Test
+        @DisplayName("Vue éditeur d'une remise en ordre réordonnée → éléments dans l'ordre attendu, pas celui de la base (#229)")
+        void vueEditeur_ordreAttendu() {
+            // L'enseignant a déplacé le premier élément en dernier : mêmes ids, nouvelles positions.
+            Question q = draft.getQuestions().get(0);
+            q.getDragItems().get(0).setCorrectOrder(2);
+            q.getDragItems().get(1).setCorrectOrder(0);
+            q.getDragItems().get(2).setCorrectOrder(1);
+            QuizDetailDTO dto = service.getQuizForEdit(4);
+            assertThat(dto.getQuestions().get(0).getDragItems())
+                    .extracting(DragItemDTO::getId).containsExactly(101, 102, 100);
+            assertThat(dto.getQuestions().get(0).getDragItems())
+                    .extracting(DragItemDTO::getCorrectOrder).containsExactly(0, 1, 2);
+        }
     }
 
     // ── Aucune information de correction ────────────────────────────────────────
