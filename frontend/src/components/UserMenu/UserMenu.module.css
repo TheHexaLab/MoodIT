@@ -441,24 +441,17 @@
     color: var(--brand-teal);
 }
 
-/* Déconnexion : teinte « danger ». */
-.logout {
-    /* Variante « texte » du rouge : 4,5:1 en clair comme en sombre. */
-    color: var(--badge-danger-fg);
-}
-
-.logout .actionIcon {
-    /* Même rouge que le texte : en sombre, --danger différait (et --badge-danger-fg reste au-dessus de 3:1). */
-    color: var(--badge-danger-fg);
+/* Déconnexion : teinte « danger », propre à cet item (--logout-text, 4,5:1 dans chaque thème).
+   Le texte et l'icône ont la même couleur, au repos comme au survol. */
+.logout,
+.logout .actionIcon,
+.logout:hover,
+.logout:hover .actionIcon {
+    color: var(--logout-text);
 }
 
 .logout:hover {
     background: var(--shadow-danger);
-    color: var(--badge-danger-fg);
-}
-
-.logout:hover .actionIcon {
-    color: var(--badge-danger-fg);
 }
 
 /* ── Toggle (mode sombre) ───────────────────────────────────── */

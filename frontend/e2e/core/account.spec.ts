@@ -89,8 +89,9 @@ test.describe('déconnexion', () => {
 
     await page.getByRole('button', { name: 'Compte utilisateur' }).click();
     const item = page.getByRole('menuitem', { name: 'Se déconnecter' });
-    const textColor = await item.evaluate((el) => getComputedStyle(el).color);
-    await expect(item.locator('svg')).toHaveCSS('color', textColor);
+    // --logout-text en sombre (#e25a5a), pour le texte comme pour l'icône.
+    await expect(item).toHaveCSS('color', 'rgb(226, 90, 90)');
+    await expect(item.locator('svg')).toHaveCSS('color', 'rgb(226, 90, 90)');
     await context.close();
   });
 });

@@ -37,6 +37,9 @@
     --badge-success-fg: #0a6a60;
     --badge-danger-bg: #fdecec;
     --badge-danger-fg: #c42929;
+    /* « Se déconnecter » (texte et icône) : le rouge #db2e2e, éclairci ou foncé selon le thème
+       pour garder 4,5:1 sur le fond du menu du compte (--bg-surface). */
+    --logout-text: #db2e2e;
     --badge-warn-bg: #fdf3d7;
     --badge-warn-fg: #9a6700;
     /* Luminosité du texte des pastilles colorées par teinte (journal d'audit) : 4,5:1 mini. */
@@ -116,6 +119,7 @@
         --badge-success-fg: #5eead4;
         --badge-danger-bg: rgba(229, 72, 77, 0.18);
         --badge-danger-fg: #ff8585;
+        --logout-text: #e25a5a;
         /* Rouge du thème clair (#c42929) trop sombre ici : valeur d'origine conservée. */
         --danger: #db2e2e;
         --badge-warn-bg: rgba(245, 166, 35, 0.18);
@@ -173,6 +177,7 @@
     --badge-success-fg: #5eead4;
     --badge-danger-bg: rgba(229, 72, 77, 0.18);
     --badge-danger-fg: #ff8585;
+    --logout-text: #e25a5a;
     /* Rouge du thème clair (#c42929) trop sombre ici : valeur d'origine conservée. */
     --danger: #db2e2e;
     --badge-warn-bg: rgba(245, 166, 35, 0.18);
@@ -231,6 +236,7 @@
     --text-active: #3c6d1f;
     --bg-send-button: linear-gradient(135deg, #4f9d2f 14.29%, #7bc23f 85.71%);
     --shadow-hover: rgba(60, 109, 31, 0.22);
+    --logout-text: #bd2020;
 }
 
 /* Thème secret « twee » (débloqué en tapant 8339! sur le dashboard, cf. Dashboard.tsx).
@@ -261,6 +267,7 @@
     --badge-success-fg: #ffdb4d;
     --badge-danger-bg: rgba(229, 72, 77, 0.18);
     --badge-danger-fg: #ff8585;
+    --logout-text: #ec8080;
     --badge-warn-bg: rgba(245, 166, 35, 0.18);
     --badge-warn-fg: #f5c87a;
     --brand-teal: #ffd21a;
@@ -300,6 +307,7 @@
     --badge-success-fg: #ffe14d;
     --badge-danger-bg: rgba(255, 59, 59, 0.20);
     --badge-danger-fg: #ff7a7a;
+    --logout-text: #e25a5a;
     --badge-warn-bg: rgba(255, 156, 34, 0.18);
     --badge-warn-fg: #ffc266;
     --brand-teal: #ffcc00;
