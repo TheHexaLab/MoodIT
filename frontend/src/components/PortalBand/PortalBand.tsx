@@ -6,18 +6,35 @@ import { currentSessionLabel } from './currentSession.ts';
 interface PortalBandProps {
   /** Nom de l'établissement de l'utilisateur (absent : « MoodIT »). */
   establishmentName?: string;
+  /** Ajouter ou rejoindre un programme (le logo de l'établissement). */
+  onAddProgram?: () => void;
 }
 
-/** Bandeau du portail : nom de l'établissement (retour à l'Accueil au clic) et session en cours. */
-export default function PortalBand({ establishmentName }: PortalBandProps): React.ReactElement {
+/**
+ * Bandeau du portail : logo (ajouter un programme), nom de l'établissement (retour à l'Accueil au
+ * clic) et session en cours.
+ */
+export default function PortalBand({
+  establishmentName,
+  onAddProgram,
+}: PortalBandProps): React.ReactElement {
   const name = establishmentName?.trim() || 'MoodIT';
 
   return (
     <header className={styles.band}>
-      <Link to="/home" className={styles.home} aria-label={`${name}, retour à l'Accueil`}>
-        <span className={styles.logo} aria-hidden="true">
-          {name.charAt(0).toUpperCase()}
+      <button
+        type="button"
+        className={styles.logo}
+        aria-label="Ajouter un programme"
+        title="Ajouter un programme"
+        onClick={onAddProgram}
+      >
+        <span aria-hidden="true">{name.charAt(0).toUpperCase()}</span>
+        <span className={styles.logoPlus} aria-hidden="true">
+          +
         </span>
+      </button>
+      <Link to="/home" className={styles.home} aria-label={`${name}, retour à l'Accueil`}>
         <span className={styles.name}>{name}</span>
       </Link>
       <span className={styles.session}>{currentSessionLabel()}</span>

@@ -53,9 +53,7 @@
 }
 
 .navItem:focus-visible,
-.course:focus-visible,
-.programButton:focus-visible,
-.retry:focus-visible {
+.course:focus-visible {
     outline: 2px solid var(--brand-teal);
     outline-offset: -2px;
 }
@@ -83,33 +81,6 @@
     flex-direction: column;
     gap: 2px;
     padding: 0 0.75rem 0.5rem;
-}
-
-.program {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.programButton {
-    align-self: flex-start;
-    max-width: 100%;
-    padding: 0.25rem 0.75rem;
-    overflow: hidden;
-    border: none;
-    border-radius: 0.375rem;
-    background: transparent;
-    color: var(--text-muted);
-    font: inherit;
-    font-size: 0.75rem;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-
-.programButton:hover {
-    color: var(--text);
-    text-decoration: underline;
 }
 
 .course {
@@ -172,16 +143,6 @@
     padding: 0.5rem 0.75rem;
     color: var(--text-muted);
     font-size: 0.8125rem;
-}
-
-.retry {
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--portal-active);
-    font: inherit;
-    text-decoration: underline;
-    cursor: pointer;
 }
 
 .footer {

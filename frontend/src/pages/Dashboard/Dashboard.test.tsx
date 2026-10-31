@@ -189,7 +189,7 @@ interface Setup {
   isGuardian?: boolean;
   settings?: UserSettings;
   profileLoading?: boolean;
-  /** URL de départ (la vue y est lue, #63). Défaut : l'interface d'un programme ; /home : le portail. */
+  /** URL de départ (la vue y est lue, #63). */
   path?: string;
 }
 
@@ -223,7 +223,7 @@ function renderDashboard({
   isGuardian = false,
   settings = {},
   profileLoading = false,
-  path = '/home/p/3',
+  path = '/home',
 }: Setup = {}) {
   const saveSettings = vi.fn();
   const applyGlobalRoles = vi.fn();
@@ -260,14 +260,20 @@ function programButton(name: string) {
   return screen.getByRole('button', { name: programName(name) });
 }
 
-/** Ouvre un programme : son titre dans la barre du portail, ou sa pastille dans le rail. */
+/** Ouvre le premier cours d'un programme depuis la barre du portail. */
 async function selectProgram(name: string) {
-  fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^${name}( — |$)`) }));
+  const item = (await screen.findByRole('button', { name: programName(name) })).closest('li')!;
+  const course = await waitFor(() => {
+    const button = item.nextElementSibling?.querySelector('button');
+    expect(button).toBeTruthy();
+    return button!;
+  });
+  fireEvent.click(course);
 }
 
-/** Sélecteur de cours du CourseMenu (bouton à listbox). */
+/** Titre du cours ouvert dans le CourseMenu (porte son menu contextuel). */
 function courseSelector(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[aria-haspopup="listbox"]');
+  return document.querySelector<HTMLElement>('nav[aria-label="Cours"] header button');
 }
 
 async function waitForCourseSelector(code: string) {
@@ -327,7 +333,7 @@ describe('Dashboard', () => {
     it('ouvre la connexion WS, charge les programmes et affiche le portail', async () => {
       renderDashboard({ path: '/home' });
       expect(ws.open).toHaveBeenCalledTimes(1);
-      expect(await screen.findByRole('button', { name: 'Génie logiciel' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: programName('Génie logiciel') })).toBeTruthy();
       expect(api.fetchPrograms).toHaveBeenCalledTimes(1);
       expect(screen.getByRole('heading', { name: /^Bonjour/ })).toBeTruthy();
       // La barre du portail liste les cours de tous les programmes.
@@ -354,7 +360,24 @@ describe('Dashboard', () => {
       expect(await screen.findByText('Université Test')).toBeTruthy();
     });
 
-    it('le logo du rail ramène à l’Accueil', async () => {
+    it('le rail d’un cours ouvert liste les cours de tous les programmes et en ouvre un autre', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      const rail = screen.getByRole('navigation', { name: 'Mes cours' });
+      expect(within(rail).getByRole('button', { name: 'IFT101' }).getAttribute('aria-current')).toBe('page');
+      fireEvent.click(await within(rail).findByRole('button', { name: 'GIF200' }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/2/c/20'));
+      await waitForCourseSelector('GIF200');
+    });
+
+    it('le « + » du bandeau ouvre l’ajout de programme, même dans un cours', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByRole('button', { name: 'Ajouter un programme' }));
+      expect(await screen.findByText('Crée ton propre programme ou rejoins-en un existant.')).toBeTruthy();
+    });
+
+    it('la flèche du rail ramène à l’Accueil', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');
       fireEvent.click(screen.getByRole('link', { name: "Retour à l'Accueil" }));
@@ -398,8 +421,8 @@ describe('Dashboard', () => {
     it('échec du chargement des programmes : bouton « Réessayer » qui relance le fetch', async () => {
       vi.mocked(api.fetchPrograms).mockRejectedValueOnce(new Error('panne'));
       renderDashboard({ path: '/home' });
-      fireEvent.click(await screen.findByRole('button', { name: 'Réessayer' }));
-      expect(await screen.findByRole('button', { name: 'Génie logiciel' })).toBeTruthy();
+      fireEvent.click(await screen.findByRole('button', { name: 'Réessayer le chargement des programmes' }));
+      expect(await screen.findByRole('button', { name: programName('Génie logiciel') })).toBeTruthy();
       expect(api.fetchPrograms).toHaveBeenCalledTimes(2);
     });
 
@@ -439,8 +462,7 @@ describe('Dashboard', () => {
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
       fireEvent.click(screen.getByText('general'));
-      fireEvent.click(courseSelector()!);
-      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /IFT102/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
       expect(courseSelector()!.textContent).toBe('IFT102');
       expect(screen.queryByTestId('channel-view')).toBeNull();
       expect(screen.getByRole('heading', { name: emptyCourseLabels.title })).toBeTruthy();
@@ -449,8 +471,7 @@ describe('Dashboard', () => {
     it('programme sans cours : état « aucun cours » et « Rejoindre un cours » ouvre le popup', async () => {
       vi.mocked(api.fetchProgramCourses).mockResolvedValue([]);
       vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
-      renderDashboard();
-      await selectProgram('Mathématiques');
+      renderDashboard({ path: '/home/p/3' });
       const join = await screen.findByText(noCourseLabels.joinCourse);
       fireEvent.click(join);
       expect(await screen.findByText(joinCoursesLabels.title)).toBeTruthy();
@@ -461,24 +482,25 @@ describe('Dashboard', () => {
       vi.mocked(api.fetchCourses).mockRejectedValueOnce(new Error('panne'));
       renderDashboard({ path: '/home/p/1' });
       const alert = await screen.findByRole('alert');
+      vi.mocked(api.fetchCourses).mockClear();
       fireEvent.click(within(alert).getByRole('button', { name: 'Réessayer' }));
       await waitForCourseSelector('IFT101');
-      expect(api.fetchCourses).toHaveBeenCalledTimes(2);
+      expect(api.fetchCourses).toHaveBeenCalledTimes(1);
+      expect(api.fetchCourses).toHaveBeenCalledWith(1);
     });
 
   });
 
   describe('vue dans l’URL (#63)', () => {
-    it('chaque choix ajoute une entrée d’historique : programme, cours, canal', async () => {
+    it('chaque choix ajoute une entrée d’historique : cours, canal', async () => {
       renderDashboard();
       await selectProgram('Génie logiciel');
-      await waitFor(() => expect(currentPath()).toBe('/home/p/1'));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
       expect(lastNavigation()).toBe('PUSH');
       await waitForCourseSelector('IFT101');
       fireEvent.click(screen.getByText('entraide'));
       await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/forum/6'));
-      fireEvent.click(courseSelector()!);
-      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /IFT102/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
       await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
       expect(lastNavigation()).toBe('PUSH');
     });
@@ -509,7 +531,7 @@ describe('Dashboard', () => {
       goBack();
       expect((await screen.findByTestId('channel-view')).textContent).toBe('general');
       goBack();
-      await waitFor(() => expect(currentPath()).toBe('/home/p/1'));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
       expect(screen.queryByTestId('channel-view')).toBeNull();
       expect(screen.getByRole('heading', { name: noActiveLabels.title })).toBeTruthy();
     });
@@ -518,13 +540,12 @@ describe('Dashboard', () => {
       renderDashboard({ path: '/home/p/1/c/10/forum/6' });
       expect((await screen.findByTestId('forum-view')).textContent).toBe('entraide');
       expect(api.fetchCourses).toHaveBeenCalledWith(1);
-      expect(api.fetchCourses).not.toHaveBeenCalledWith(2);
       expect(currentPath()).toBe('/home/p/1/c/10/forum/6');
     });
 
     it('arrivée sur /home : l’Accueil s’affiche, la localisation enregistrée est ignorée', async () => {
       renderDashboard({ path: '/home', settings: { location: { programId: 1, courseId: 11 } } });
-      expect(await screen.findByRole('button', { name: 'Génie logiciel' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: programName('Génie logiciel') })).toBeTruthy();
       expect(currentPath()).toBe('/home');
       expect(screen.getByRole('heading', { name: /^Bonjour/ })).toBeTruthy();
     });
@@ -537,14 +558,10 @@ describe('Dashboard', () => {
       expect(screen.getByRole('heading', { name: /^Bonjour/ })).toBeTruthy();
     });
 
-    it('programme actif quitté : le repli remplace l’entrée d’historique', async () => {
-      vi.mocked(api.leaveProgram).mockResolvedValue(undefined);
+    it('programme actif retiré via WS : le repli remplace l’entrée d’historique', async () => {
       renderDashboard({ path: '/home/p/1/c/10/text/5' });
       expect((await screen.findByTestId('channel-view')).textContent).toBe('general');
-      fireEvent.click(
-        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Quitter le programme' })
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Quitter' }));
+      act(() => (ws.captured.programs!.onProgramRemove as (id: number) => void)(1));
       await waitFor(() => expect(currentPath()).toBe('/home/p/2'));
       expect(lastNavigation()).toBe('REPLACE');
     });
@@ -562,16 +579,14 @@ describe('Dashboard', () => {
     it('quitter un programme : confirmation puis api.leaveProgram et retrait de la liste', async () => {
       vi.mocked(api.leaveProgram).mockResolvedValue(undefined);
       renderDashboard();
-      await selectProgram('Génie logiciel');
-      await waitForCourseSelector('IFT101');
+      await screen.findByRole('button', { name: programName('Génie logiciel') });
       const menu = openProgramContextMenu('Génie logiciel');
       fireEvent.click(within(menu).getByRole('menuitem', { name: 'Quitter le programme' }));
       expect(screen.getByText('Quitter le programme ?')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Quitter' }));
       await waitFor(() => expect(screen.queryByRole('button', { name: programName('Génie logiciel') })).toBeNull());
       expect(api.leaveProgram).toHaveBeenCalledWith(1);
-      // Le programme actif a disparu : bascule sur un autre programme.
-      await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
+      expect(currentPath()).toBe('/home');
     });
 
     it('échec de la sortie : ErrorPopup et programme conservé', async () => {
@@ -807,8 +822,7 @@ describe('Dashboard', () => {
       renderDashboard();
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
-      fireEvent.click(courseSelector()!);
-      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /IFT102/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
       expect(screen.getByRole('heading', { name: emptyCourseLabels.title })).toBeTruthy();
       expect(screen.queryByText(emptyCourseLabels.createChannel)).toBeNull();
     });
@@ -861,10 +875,27 @@ describe('Dashboard', () => {
   });
 
   describe('ajout / adhésion de programme', () => {
-    it('« Rejoindre un cours » de la barre du portail ouvre le popup d’ajout', async () => {
+    it('« Rejoindre un cours » ouvre directement les programmes de son établissement', async () => {
+      vi.mocked(api.fetchEstablishments).mockResolvedValue([
+        { id: 7, name: 'Université Test', domainEmail: 'test.ca' },
+      ]);
+      vi.mocked(api.fetchEstablishmentsForJoin).mockResolvedValue([{ id: 7, name: 'Université Test' }]);
+      vi.mocked(api.fetchEstablishmentPrograms).mockResolvedValue([
+        { id: 40, name: 'Physique', code: 'PHY', cohort: '', color: '' },
+      ]);
+      renderDashboard({ path: '/home' });
+      await screen.findByText('Université Test');
+      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un cours' }));
+      expect(await screen.findByText('Physique')).toBeTruthy();
+      expect(api.fetchEstablishmentPrograms).toHaveBeenCalledWith(7);
+    });
+
+    it('« Rejoindre un cours » sans établissement connu : la recherche d’établissement', async () => {
+      vi.mocked(api.fetchEstablishmentsForJoin).mockResolvedValue([{ id: 7, name: 'Université Test' }]);
       renderDashboard({ path: '/home' });
       fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un cours' }));
-      expect(await screen.findByText('Crée ton propre programme ou rejoins-en un existant.')).toBeTruthy();
+      expect(await screen.findByText('Université Test')).toBeTruthy();
+      expect(api.fetchEstablishmentPrograms).not.toHaveBeenCalled();
     });
 
     it('le « + » du rail ouvre le popup d’ajout de programme', async () => {
@@ -876,10 +907,9 @@ describe('Dashboard', () => {
   });
 
   describe('temps réel', () => {
-    it('programme ajouté / supprimé via WS : la liste suit, le programme actif bascule', async () => {
+    it('programme ajouté / supprimé via WS : la liste suit', async () => {
       renderDashboard();
-      await selectProgram('Génie logiciel');
-      await waitForCourseSelector('IFT101');
+      await screen.findByRole('button', { name: programName('Génie logiciel') });
       act(() => {
         (ws.captured.programs!.onProgramUpsert as (p: unknown) => void)({
           id: 9,
@@ -894,13 +924,11 @@ describe('Dashboard', () => {
         (ws.captured.programs!.onProgramRemove as (id: number) => void)(1);
       });
       expect(screen.queryByRole('button', { name: programName('Génie logiciel') })).toBeNull();
-      await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
     });
 
     it('programme renommé via WS : met à jour le libellé en gardant les cours', async () => {
       renderDashboard();
-      await selectProgram('Génie logiciel');
-      await waitForCourseSelector('IFT101');
+      await screen.findByRole('button', { name: /IFT101/ });
       act(() => {
         (ws.captured.programs!.onProgramUpsert as (p: unknown) => void)({
           id: 1,
@@ -911,7 +939,7 @@ describe('Dashboard', () => {
         });
       });
       expect(programButton('Génie logiciel 2')).toBeTruthy();
-      expect(courseSelector()!.textContent).toBe('IFT101');
+      expect(screen.getByRole('button', { name: /IFT101/ })).toBeTruthy();
     });
 
     it('changement de rôle dans un programme via WS : les droits suivent', async () => {
@@ -964,8 +992,7 @@ describe('Dashboard', () => {
         upsert({ id: 77, code: 'NOUV', title: 'Inconnu' });
       });
       expect(courseSelector()!.textContent).toBe('IFT111');
-      fireEvent.click(courseSelector()!);
-      expect(within(screen.getByRole('listbox')).queryByRole('option', { name: /NOUV/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'NOUV' })).toBeNull();
     });
 
     it('quiz créé via WS : recharge les quiz publiés du cours', async () => {
@@ -996,11 +1023,12 @@ describe('Dashboard', () => {
     it('resync WS : recharge les cours du programme actif', async () => {
       renderDashboard({ path: '/home/p/1' });
       await waitForCourseSelector('IFT101');
-      expect(api.fetchCourses).toHaveBeenCalledTimes(1);
+      vi.mocked(api.fetchCourses).mockClear();
       act(() => {
         (ws.captured.courses!.onResync as () => void)();
       });
-      await waitFor(() => expect(api.fetchCourses).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(api.fetchCourses).toHaveBeenCalledTimes(1));
+      expect(api.fetchCourses).toHaveBeenCalledWith(1);
     });
   });
 
@@ -1340,18 +1368,6 @@ describe('Dashboard — compléments', () => {
   });
 
   describe('suppression / retrait du programme actif', () => {
-    it('supprimer le programme actif bascule sur un autre programme', async () => {
-      vi.mocked(api.deleteProgram).mockResolvedValue(undefined);
-      await openGlo({ isAdmin: true });
-      fireEvent.click(
-        within(openProgramContextMenu('Génie logiciel')).getByRole('menuitem', { name: 'Supprimer le programme' })
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
-      await waitFor(() => expect(programButton('Génie info').getAttribute('aria-current')).toBe('page'));
-      expect(api.deleteProgram).toHaveBeenCalledWith(1);
-      await waitForCourseSelector('GIF200');
-    });
-
     it('tous les programmes retirés via WS : retour à l’Accueil', async () => {
       await openGlo();
       act(() => {
@@ -1419,16 +1435,17 @@ describe('Dashboard — compléments', () => {
       vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
       vi.mocked(api.joinCourses).mockResolvedValue([]);
       renderDashboard();
-      await selectProgram('Mathématiques');
-      await screen.findByText(noCourseLabels.joinCourse);
-      vi.mocked(api.fetchCourses).mockResolvedValue([{ id: 30, code: 'MAT100', title: 'Algèbre' }]);
+      await screen.findByRole('button', { name: programName('Mathématiques') });
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 3 ? [{ id: 30, code: 'MAT100', title: 'Algèbre' }] : structuredClone(coursesByProgram[id] ?? [])
+      );
 
       fireEvent.click(
         within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Rejoindre des cours' })
       );
       fireEvent.click(await screen.findByRole('button', { name: /Algèbre/ }));
       fireEvent.click(screen.getByRole('button', { name: joinCoursesLabels.join }));
-      await waitForCourseSelector('MAT100');
+      expect(await screen.findByRole('button', { name: /MAT100/ })).toBeTruthy();
       expect(api.joinCourses).toHaveBeenCalledWith(3, [30]);
       expect(api.fetchCourses).toHaveBeenLastCalledWith(3);
     });
@@ -1440,8 +1457,7 @@ describe('Dashboard — compléments', () => {
       ] as never);
       vi.mocked(api.createCourse).mockResolvedValue({ id: 21, code: 'GIF201', title: 'Structures' });
       renderDashboard();
-      await selectProgram('Génie info');
-      await waitForCourseSelector('GIF200');
+      await screen.findByRole('button', { name: programName('Génie info') });
       fireEvent.click(
         within(openProgramContextMenu('Génie info')).getByRole('menuitem', { name: 'Ajouter un cours' })
       );
@@ -1459,8 +1475,7 @@ describe('Dashboard — compléments', () => {
         expect(api.createCourse).toHaveBeenCalledWith({ code: 'GIF201', title: 'Structures', programIds: [2] })
       );
       await waitFor(() => expect(screen.queryByText('Ajoute ce cours à un ou plusieurs programmes')).toBeNull());
-      fireEvent.click(courseSelector()!);
-      expect(within(screen.getByRole('listbox')).getByRole('option', { name: /GIF201/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /GIF201/ })).toBeTruthy();
     });
 
     it('programme sans cours (enseignant) : « Créer un cours » ouvre l’ajout, Échap le ferme', async () => {
@@ -1468,8 +1483,7 @@ describe('Dashboard — compléments', () => {
         id === 2 ? [] : structuredClone(coursesByProgram[id] ?? [])
       );
       vi.mocked(api.fetchEstablishments).mockResolvedValue([]);
-      renderDashboard();
-      await selectProgram('Génie info');
+      renderDashboard({ path: '/home/p/2' });
       fireEvent.click(await screen.findByText(noCourseLabels.addCourse));
       expect(await screen.findByText('Ajoute ce cours à un ou plusieurs programmes')).toBeTruthy();
       fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -1592,6 +1606,7 @@ describe('Dashboard — compléments', () => {
 
     it('liste des administrateurs poussée via WS : rôles mappés vers role_ids', async () => {
       await openGlobalRoles({ isAdmin: true });
+      await waitFor(() => expect(ws.captured.adminRoles).toBeTruthy());
       const push = ws.captured.adminRoles as (users: unknown[]) => void;
       act(() =>
         push([

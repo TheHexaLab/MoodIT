@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
 import styles from './ProgramMenu.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
-import { contrastingTextColor } from '../../helpers/color.ts';
 import { Plus } from '../../assets/Plus.tsx';
 import { Pencil } from '../../assets/Pencil.tsx';
 import { Sliders } from '../../assets/Sliders.tsx';
@@ -28,12 +26,8 @@ export type {
 interface ProgramMenuProps {
   /** Programmes assignes a l'utilisateur. */
   programs?: Program[];
-  /** Programme actuellement selectionne. */
-  activeProgramId?: number;
-  /** Callback de selection d'un programme. */
-  onSelectProgram?: (id: number) => void;
-  /** Callback du bouton d'ajout (adhesion / creation de programme). */
-  onAddProgram?: () => void;
+  /** Contenu affiché sous un programme (ses cours, dans la barre du portail). */
+  renderCourses?: (program: Program) => React.ReactNode;
   /**
    * Chargement de la liste des programmes en cours (API-ready). Affiche un spinner
    * à la place de la liste. Piloté par le parent (GET des programmes de l'utilisateur).
@@ -110,9 +104,7 @@ function getProgramBadge(program: Program): string {
 
 const ProgramMenu: React.FC<ProgramMenuProps> = ({
   programs = [],
-  activeProgramId,
-  onSelectProgram,
-  onAddProgram,
+  renderCourses,
   loading = false,
   loadError = null,
   onReload,
@@ -133,11 +125,8 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
     anchor: HTMLElement;
   } | null>(null);
 
-  // Long-press tactile sur une pastille de programme (ouvre le menu contextuel sur mobile) :
-  // `longPressTimer` = timer d'appui maintenu ; `longPressFired` = vrai quand le long-press a
-  // ouvert le menu, pour NEUTRALISER la sélection de fin d'appui (sinon le programme changerait).
+  // Long-press tactile sur un programme (ouvre le menu contextuel sur mobile).
   const longPressTimer = useRef<number | null>(null);
-  const longPressFired = useRef(false);
   /** Menu contextuel porté (reçoit le focus à l'ouverture). */
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -214,8 +203,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   // ── Long-press tactile → menu contextuel (parité iOS) ──────────────────────────────────
   // iOS Safari n'émet PAS l'évènement `contextmenu` au long-press (contrairement à Android
   // Chrome) : le menu du programme y était inaccessible. On détecte nous-mêmes un appui
-  // maintenu (~500 ms sans glissement) pour ouvrir le MÊME menu. `longPressFired` neutralise
-  // la sélection du programme sur le clic de fin d'appui.
+  // maintenu (~500 ms sans glissement) pour ouvrir le MÊME menu.
   const LONG_PRESS_MS = 500;
 
   function clearLongPress() {
@@ -226,11 +214,9 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   }
 
   function handleProgramTouchStart(event: React.TouchEvent<HTMLLIElement>, programId: number) {
-    longPressFired.current = false;
     const anchor = event.currentTarget; // capturé : l'évènement React est réutilisé après le timeout
     clearLongPress();
     longPressTimer.current = window.setTimeout(() => {
-      longPressFired.current = true; // neutralise la sélection sur le clic de fin d'appui
       openContextMenuAt(anchor, programId);
     }, LONG_PRESS_MS);
   }
@@ -243,15 +229,6 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   // Nettoyage : ne jamais laisser un timer d'appui courir après le démontage.
   useEffect(() => clearLongPress, []);
 
-  // Sélection d'un programme (tap / clic), sauf si un long-press vient d'ouvrir le menu.
-  function handleSelectProgram(programId: number) {
-    if (longPressFired.current) {
-      longPressFired.current = false;
-      return;
-    }
-    onSelectProgram?.(programId);
-  }
-
   /** Exécute une action du menu contextuel puis le referme. */
   function runContextAction(action?: (programId: number) => void) {
     if (contextMenu && action) action(contextMenu.programId);
@@ -259,34 +236,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   }
 
   return (
-    <nav className={styles.rail} aria-label="Programme">
-      {/* Icône applicative (meme gabarit que le programme actif). */}
-      <Link to="/home" className={styles.appIcon} aria-label="Retour à l'Accueil">
-        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient
-              id="pg-grad"
-              x1="0"
-              y1="0"
-              x2="36"
-              y2="36"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stopColor="#2dd4bf" />
-              <stop offset="100%" stopColor="#0d9488" />
-            </linearGradient>
-          </defs>
-          <rect width="36" height="36" rx="10" fill="url(#pg-grad)" />
-          {/* Pictogramme minimal type message */}
-          <circle cx="13" cy="18" r="2" fill="white" />
-          <circle cx="18" cy="18" r="2" fill="white" />
-          <circle cx="23" cy="18" r="2" fill="white" />
-        </svg>
-      </Link>
-
-      {/* Séparateur visuel */}
-      <span className={styles.divider} />
-
+    <nav className={styles.programs} aria-label="Programme">
       {/* Liste des programmes (ou état de chargement / d'erreur). */}
       {loadError ? (
         <button
@@ -324,56 +274,38 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
             const programId = prog.id;
             const programLabel = getProgramLabel(prog);
             const badge = getProgramBadge(prog);
-            const isActive = programId === activeProgramId;
 
             return (
-              <li
-                key={programId}
-                className={`${styles.programItem} ${isActive ? styles.programItemActive : ''}`}
-                onClick={() => handleSelectProgram(programId)}
-                onContextMenu={(event) => openContextMenu(event, programId)}
-                onKeyDown={(event) => handleProgramKeyDown(event, programId)}
-                onTouchStart={(event) => handleProgramTouchStart(event, programId)}
-                onTouchMove={cancelProgramLongPress}
-                onTouchEnd={cancelProgramLongPress}
-                onTouchCancel={cancelProgramLongPress}
-              >
-                <button
-                  className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
-                  title={programLabel}
-                  // Le nom accessible contient la pastille visible (WCAG 2.5.3, « label in name »).
-                  aria-label={`${programLabel} — ${badge}`}
-                  aria-current={isActive ? 'page' : undefined}
-                  // Annonce le raccourci d'ouverture du menu contextuel (lecteurs d'écran).
-                  aria-keyshortcuts="Shift+F10"
-                  style={
-                    prog.color
-                      ? ({
-                          '--program-color': prog.color,
-                          color: contrastingTextColor(prog.color),
-                        } as React.CSSProperties)
-                      : undefined
-                  }
+              <React.Fragment key={programId}>
+                <li
+                  className={styles.programItem}
+                  onContextMenu={(event) => openContextMenu(event, programId)}
+                  onKeyDown={(event) => handleProgramKeyDown(event, programId)}
+                  onTouchStart={(event) => handleProgramTouchStart(event, programId)}
+                  onTouchMove={cancelProgramLongPress}
+                  onTouchEnd={cancelProgramLongPress}
+                  onTouchCancel={cancelProgramLongPress}
                 >
-                  <span className={styles.programInitials}>{badge}</span>
-                </button>
-              </li>
+                  {/* Pas d'action au clic : le bouton ne porte que le menu contextuel du programme. */}
+                  <button
+                    type="button"
+                    className={styles.programBtn}
+                    title={programLabel}
+                    // Le nom accessible contient le nom visible (WCAG 2.5.3, « label in name »).
+                    aria-label={`${programLabel} — ${badge}`}
+                    aria-haspopup="menu"
+                    // Annonce le raccourci d'ouverture du menu contextuel (lecteurs d'écran).
+                    aria-keyshortcuts="Shift+F10"
+                  >
+                    {programLabel}
+                  </button>
+                </li>
+                {renderCourses && <li className={styles.programCourses}>{renderCourses(prog)}</li>}
+              </React.Fragment>
             );
           })}
         </ul>
       )}
-
-      {/* Bouton d'ajout (placeholder d'action) */}
-      <button
-        className={styles.addBtn}
-        title="Ajouter un programme"
-        aria-label="Ajouter un programme"
-        onClick={onAddProgram}
-      >
-        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </button>
 
       {/* Menu contextuel (clic droit sur un programme). Porté vers <body> + position
           fixe : échappe au overflow du rail et au transform du tiroir mobile. */}

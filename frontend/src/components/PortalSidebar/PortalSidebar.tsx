@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import styles from './PortalSidebar.module.css';
+import ProgramMenu from '../ProgramMenu/ProgramMenu.tsx';
+import { courseTileColor } from '../CourseRail/courseTile.ts';
 import type { Course, Program } from '../../types/domain.ts';
-
-/** Teintes des tuiles de cours : toutes à 4,5:1 mini sous du texte blanc. */
-const TILE_COLORS = ['#0f766e', '#1f4799', '#454559', '#115e59', '#0a5cc0'];
 
 /** Pages du portail à venir : présentes pour la maquette, sans action pour l'instant. */
 const UPCOMING_PAGES = [
@@ -16,14 +15,27 @@ const UPCOMING_PAGES = [
   },
 ];
 
+type ProgramActions = Pick<
+  React.ComponentProps<typeof ProgramMenu>,
+  | 'onAddCourseToProgram'
+  | 'onEditProgram'
+  | 'onManageRoles'
+  | 'onDeleteProgram'
+  | 'onJoinCourses'
+  | 'onLeaveProgram'
+>;
+
 interface PortalSidebarProps {
   programs: Program[];
   loading: boolean;
   loadError: string | null;
   onReload: () => void;
-  /** Charge les cours de l'utilisateur dans un programme. */
-  loadCourses: (programId: number) => Promise<Course[]>;
-  onOpenProgram: (programId: number) => void;
+  /** Programmes dont les cours n'ont pas pu être chargés. */
+  failedProgramIds?: number[];
+  /** L'utilisateur est-il administrateur global ? (actions du menu contextuel des programmes) */
+  isGlobalAdmin?: boolean;
+  /** Actions du menu contextuel (clic droit) d'un programme. */
+  programActions?: ProgramActions;
   onOpenCourse: (programId: number, courseId: number) => void;
   onJoin: () => void;
   /** Menu du compte, au pied de la barre. */
@@ -59,35 +71,26 @@ export default function PortalSidebar({
   loading,
   loadError,
   onReload,
-  loadCourses,
-  onOpenProgram,
+  failedProgramIds = [],
+  isGlobalAdmin = false,
+  programActions,
   onOpenCourse,
   onJoin,
   userMenu,
 }: PortalSidebarProps): React.ReactElement {
-  const [coursesByProgram, setCoursesByProgram] = useState<Record<number, Course[] | 'error'>>({});
-
-  // Dépend des identifiants, pas du tableau : la liste change de référence à chaque mise à jour
-  // d'un programme (rôle, nom) sans que ses cours changent.
-  const programIds = programs.map((program) => program.id).join(',');
-  useEffect(() => {
-    if (!programIds) return;
-    let cancelled = false;
-    for (const id of programIds.split(',').map(Number)) {
-      loadCourses(id)
-        .then((courses) => {
-          if (!cancelled) setCoursesByProgram((previous) => ({ ...previous, [id]: courses }));
-        })
-        .catch(() => {
-          if (!cancelled) setCoursesByProgram((previous) => ({ ...previous, [id]: 'error' }));
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [programIds, loadCourses]);
-
+  // Calculé ici, pas pendant le rendu de ProgramMenu : un rendu doit rester pur (StrictMode rend
+  // deux fois, et un second passage verrait tous les cours comme déjà affichés).
   const seenCourseIds = new Set<number>();
+  const coursesByProgram = new Map(
+    programs.map((program) => [
+      program.id,
+      (program.courses ?? []).filter((course) => {
+        if (seenCourseIds.has(course.id)) return false;
+        seenCourseIds.add(course.id);
+        return true;
+      }),
+    ])
+  );
 
   return (
     <div className={styles.sidebar}>
@@ -112,43 +115,20 @@ export default function PortalSidebar({
 
       <h2 className={styles.heading}>Mes cours</h2>
       <div className={styles.courses}>
-        {loading && (
-          <p className={styles.status} role="status">
-            Chargement de vos cours…
-          </p>
-        )}
-        {loadError && (
-          <div className={styles.status} role="alert">
-            Impossible de charger vos cours.{' '}
-            <button type="button" className={styles.retry} onClick={onReload}>
-              Réessayer
-            </button>
-          </div>
-        )}
-        {!loading &&
-          !loadError &&
-          programs.map((program) => {
-            const courses = coursesByProgram[program.id];
-            const visibleCourses = Array.isArray(courses)
-              ? courses.filter((course) => {
-                  if (seenCourseIds.has(course.id)) return false;
-                  seenCourseIds.add(course.id);
-                  return true;
-                })
-              : [];
-            return (
-              <section key={program.id} className={styles.program}>
-                <button
-                  type="button"
-                  className={styles.programButton}
-                  onClick={() => onOpenProgram(program.id)}
-                >
-                  {program.name}
-                </button>
-                {courses === 'error' && (
-                  <p className={styles.status}>Cours indisponibles pour l'instant.</p>
-                )}
-                {visibleCourses.map((course) => (
+        <ProgramMenu
+          programs={programs}
+          loading={loading}
+          loadError={loadError}
+          onReload={onReload}
+          isGlobalAdmin={isGlobalAdmin}
+          {...programActions}
+          renderCourses={(program) => (
+            <>
+              {failedProgramIds.includes(program.id) && (
+                <p className={styles.status}>Cours indisponibles pour l'instant.</p>
+              )}
+              {(coursesByProgram.get(program.id) ?? [])
+                .map((course) => (
                   <button
                     key={course.id}
                     type="button"
@@ -157,7 +137,7 @@ export default function PortalSidebar({
                   >
                     <span
                       className={styles.tile}
-                      style={{ background: TILE_COLORS[course.id % TILE_COLORS.length] }}
+                      style={{ background: courseTileColor(course.id) }}
                       aria-hidden="true"
                     >
                       {tileLabel(course)}
@@ -168,9 +148,9 @@ export default function PortalSidebar({
                     </span>
                   </button>
                 ))}
-              </section>
-            );
-          })}
+            </>
+          )}
+        />
         <button type="button" className={`${styles.navItem} ${styles.join}`} onClick={onJoin}>
           <NavIcon path="M12 5v14M5 12h14" />
           Rejoindre un cours

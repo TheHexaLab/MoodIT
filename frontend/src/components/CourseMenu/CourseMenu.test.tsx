@@ -79,15 +79,11 @@ function renderMenu(props: Partial<React.ComponentProps<typeof CourseMenu>> = {}
 
 /** Sélecteur de cours (bouton à listbox). */
 function selector(): HTMLElement {
-  const el = document.querySelector<HTMLElement>('[aria-haspopup="listbox"]');
+  const el = document.querySelector<HTMLElement>('nav[aria-label="Cours"] header button');
   if (!el) throw new Error('sélecteur de cours introuvable');
   return el;
 }
 
-function openPicker(): HTMLElement {
-  fireEvent.click(selector());
-  return screen.getByRole('listbox');
-}
 
 describe('CourseMenu', () => {
   describe('états de la liste', () => {
@@ -127,7 +123,7 @@ describe('CourseMenu', () => {
     });
   });
 
-  describe('sélecteur de cours', () => {
+  describe('titre du cours', () => {
     it('affiche le code du cours sélectionné, ou du premier cours par défaut', () => {
       renderMenu();
       expect(selector().textContent).toBe('IFT101');
@@ -148,91 +144,15 @@ describe('CourseMenu', () => {
       expect(screen.getByText('Quiz intro')).toBeTruthy();
     });
 
-    it('ouvre la liste déroulante avec tous les cours et marque le cours sélectionné', () => {
-      renderMenu({ selectedCourseId: 20 });
-      const listbox = openPicker();
-      expect(selector().getAttribute('aria-expanded')).toBe('true');
-      const options = within(listbox).getAllByRole('option');
-      expect(options.map((o) => o.textContent)).toEqual([
-        'IFT101Programmation',
-        'MAT200Algèbre',
-        'Cours sans code',
-      ]);
-      expect(options[1].getAttribute('aria-selected')).toBe('true');
-      expect(options[0].getAttribute('aria-selected')).toBe('false');
-    });
-
-    it('choisir un cours appelle onSelectCourse et referme la liste', () => {
-      const onSelectCourse = vi.fn();
-      renderMenu({ onSelectCourse });
-      const listbox = openPicker();
-      fireEvent.click(within(listbox).getByRole('option', { name: /MAT200/ }));
-      expect(onSelectCourse).toHaveBeenCalledWith(20);
+    it('un clic sur le titre n’ouvre rien', () => {
+      renderMenu({ onLeaveCourse: vi.fn() });
+      fireEvent.click(selector());
       expect(screen.queryByRole('listbox')).toBeNull();
-    });
-
-    it('la recherche filtre sur le code ou le titre, et affiche « Aucun résultat »', () => {
-      renderMenu();
-      const listbox = openPicker();
-      const input = within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder);
-      fireEvent.change(input, { target: { value: 'algè' } });
-      expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
-        'MAT200Algèbre',
-      ]);
-      fireEvent.change(input, { target: { value: 'zzz' } });
-      expect(within(listbox).queryAllByRole('option').length).toBe(0);
-      expect(within(listbox).getByText(defaultLabels.noResults)).toBeTruthy();
-    });
-
-    it('Échap dans la recherche referme la liste', () => {
-      renderMenu();
-      const listbox = openPicker();
-      fireEvent.keyDown(within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder), {
-        key: 'Escape',
-      });
-      expect(screen.queryByRole('listbox')).toBeNull();
-    });
-
-    it('un clic extérieur referme la liste et réinitialise la recherche', () => {
-      renderMenu();
-      let listbox = openPicker();
-      fireEvent.change(within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder), {
-        target: { value: 'MAT' },
-      });
-      // mousedown DANS la liste : reste ouverte.
-      fireEvent.mouseDown(listbox);
-      expect(screen.queryByRole('listbox')).not.toBeNull();
-      fireEvent.mouseDown(document.body);
-      expect(screen.queryByRole('listbox')).toBeNull();
-      listbox = openPicker();
-      expect(
-        (within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder) as HTMLInputElement).value
-      ).toBe('');
-    });
-
-    it('non-admin : ni crayon par cours ni « Ajouter un cours »', () => {
-      renderMenu({ onEditCourse: vi.fn(), onAddCourse: vi.fn() });
-      const listbox = openPicker();
-      expect(within(listbox).queryByRole('button', { name: defaultLabels.editCourseAction('IFT101') })).toBeNull();
-      expect(within(listbox).queryByText(defaultLabels.addCourse)).toBeNull();
-    });
-
-    it('admin : crayon d’édition (id du cours) et « Ajouter un cours »', () => {
-      const onEditCourse = vi.fn();
-      const onAddCourse = vi.fn();
-      renderMenu({ isAdmin: true, onEditCourse, onAddCourse });
-      let listbox = openPicker();
-      fireEvent.click(within(listbox).getByRole('button', { name: defaultLabels.editCourseAction('MAT200') }));
-      expect(onEditCourse).toHaveBeenCalledWith(20);
-      expect(screen.queryByRole('listbox')).toBeNull();
-      listbox = openPicker();
-      fireEvent.click(within(listbox).getByText(defaultLabels.addCourse));
-      expect(onAddCourse).toHaveBeenCalledTimes(1);
-      expect(screen.queryByRole('listbox')).toBeNull();
+      expect(screen.queryByRole('menu')).toBeNull();
     });
   });
 
-  describe('menu contextuel du sélecteur', () => {
+  describe('menu contextuel du titre', () => {
     it('sans aucune action applicable : le menu natif n’est pas bloqué', () => {
       renderMenu({ isAdmin: false, onEditCourse: vi.fn() });
       const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
@@ -275,14 +195,6 @@ describe('CourseMenu', () => {
       }
     });
 
-    it('le clic droit referme la liste déroulante ouverte', () => {
-      renderMenu({ onLeaveCourse: vi.fn() });
-      openPicker();
-      fireEvent.contextMenu(selector());
-      expect(screen.queryByRole('listbox')).toBeNull();
-      expect(screen.getByRole('menu')).toBeTruthy();
-    });
-
     it('Échap ferme le menu contextuel', () => {
       renderMenu({ onLeaveCourse: vi.fn() });
       fireEvent.contextMenu(selector());
@@ -290,7 +202,7 @@ describe('CourseMenu', () => {
       expect(screen.queryByRole('menu')).toBeNull();
     });
 
-    it('long-press tactile (500 ms) : ouvre le menu sans ouvrir la liste au relâcher', () => {
+    it('long-press tactile (500 ms) : ouvre le menu', () => {
       vi.useFakeTimers();
       renderMenu({ onLeaveCourse: vi.fn() });
       const btn = selector();
@@ -300,12 +212,6 @@ describe('CourseMenu', () => {
       });
       expect(screen.getByRole('menu')).toBeTruthy();
       fireEvent.touchEnd(btn);
-      // Le clic synthétique de fin d'appui est neutralisé.
-      fireEvent.click(btn);
-      expect(screen.queryByRole('listbox')).toBeNull();
-      // Le clic suivant ouvre bien la liste.
-      fireEvent.click(btn);
-      expect(screen.getByRole('listbox')).toBeTruthy();
     });
 
     it('un glissement avant 500 ms annule le long-press', () => {
@@ -451,60 +357,7 @@ describe('CourseMenu', () => {
 // Navigation au clavier réel (user-event) : listbox du sélecteur (patron WAI-ARIA « Listbox »)
 // et ouverture du menu contextuel par la touche Menu / Maj+F10.
 describe('CourseMenu — clavier', () => {
-  const search = (listbox: HTMLElement) =>
-    within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder);
-
-  it('Entrée ouvre sur la recherche ; ↓/↑ circulent entre recherche et options', async () => {
-    const user = userEvent.setup();
-    renderMenu();
-    selector().focus();
-    await user.keyboard('{Enter}');
-    const listbox = screen.getByRole('listbox');
-    expect(document.activeElement).toBe(search(listbox));
-    const options = within(listbox).getAllByRole('option');
-    await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(options[0]);
-    await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(options[1]);
-    await user.keyboard('{End}');
-    expect(document.activeElement).toBe(options[2]);
-    await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
-    expect(document.activeElement).toBe(search(listbox));
-  });
-
-  it('Entrée sur une option choisit le cours, ferme et rend le focus au sélecteur', async () => {
-    const user = userEvent.setup();
-    const onSelectCourse = vi.fn();
-    renderMenu({ onSelectCourse });
-    selector().focus();
-    await user.keyboard('{Enter}{ArrowDown}{ArrowDown}{Enter}');
-    expect(onSelectCourse).toHaveBeenCalledWith(20);
-    expect(screen.queryByRole('listbox')).toBeNull();
-    expect(document.activeElement).toBe(selector());
-  });
-
-  it('Échap depuis une option ferme sans changer de cours et rend le focus au sélecteur', async () => {
-    const user = userEvent.setup();
-    const onSelectCourse = vi.fn();
-    renderMenu({ onSelectCourse });
-    selector().focus();
-    await user.keyboard('{Enter}{ArrowDown}{Escape}');
-    expect(screen.queryByRole('listbox')).toBeNull();
-    expect(onSelectCourse).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(selector());
-  });
-
-  it('Échap depuis la recherche rend aussi le focus au sélecteur', async () => {
-    const user = userEvent.setup();
-    renderMenu();
-    selector().focus();
-    await user.keyboard('{Enter}');
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('listbox')).toBeNull();
-    expect(document.activeElement).toBe(selector());
-  });
-
-  it('Maj+F10 sur le sélecteur ouvre le menu contextuel ; Échap rend le focus au sélecteur', async () => {
+  it('Maj+F10 sur le titre ouvre le menu contextuel ; Échap lui rend le focus', async () => {
     const user = userEvent.setup();
     renderMenu({ onLeaveCourse: vi.fn() });
     expect(selector().getAttribute('aria-keyshortcuts')).toBe('Shift+F10');

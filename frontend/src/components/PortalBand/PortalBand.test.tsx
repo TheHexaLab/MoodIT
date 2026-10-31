@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import PortalBand from './PortalBand';
 import { currentSessionLabel } from './currentSession';
@@ -15,6 +15,17 @@ describe('PortalBand', () => {
     );
     const link = screen.getByRole('link', { name: "Université Test, retour à l'Accueil" });
     expect(link.getAttribute('href')).toBe('/home');
+  });
+
+  it('le logo ajoute un programme', () => {
+    const onAddProgram = vi.fn();
+    render(
+      <MemoryRouter>
+        <PortalBand establishmentName="Université Test" onAddProgram={onAddProgram} />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un programme' }));
+    expect(onAddProgram).toHaveBeenCalledTimes(1);
   });
 
   it('sans établissement : « MoodIT »', () => {

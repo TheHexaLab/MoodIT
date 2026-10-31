@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ProgramMenu, { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
+import { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
 import { useCoursesLoader } from '../../components/CourseMenu/useCoursesLoader.ts';
@@ -45,6 +45,7 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
+import CourseRail, { type RailCourse } from '../../components/CourseRail/CourseRail.tsx';
 import PortalBand from '../../components/PortalBand/PortalBand.tsx';
 import PortalSidebar from '../../components/PortalSidebar/PortalSidebar.tsx';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
@@ -89,7 +90,7 @@ const quizEditorHandlers: QuizEditorHandlers = {
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
 type PopupState =
   | { kind: 'addCourse'; programId: number } // programId = programme préselectionné
-  | { kind: 'addSubscription'; view?: 'join' }
+  | { kind: 'addSubscription'; view?: 'join'; establishmentId?: number }
   | { kind: 'editCourse'; courseId: number }
   | { kind: 'editProfile' }
   | { kind: 'editProgram'; programId: number }
@@ -124,8 +125,12 @@ export default function Dashboard() {
   const activeProgramId = view.programId;
   const selectedCourseId = view.courseId;
   const selectedChannelRef = view.channel;
-  // Nom de l'établissement de l'utilisateur, affiché dans le bandeau du portail.
-  const [establishmentName, setEstablishmentName] = useState<string | undefined>(undefined);
+  // Aucun programme dans l'URL (/home) : le portail (Accueil). Sinon, l'interface du cours.
+  const isPortal = activeProgramId < 0;
+  // Programmes dont les cours n'ont pas pu être chargés (barre du portail).
+  const [failedProgramIds, setFailedProgramIds] = useState<number[]>([]);
+  // Établissement de l'utilisateur : son nom dans le bandeau, ses programmes pour « Rejoindre un cours ».
+  const [establishment, setEstablishment] = useState<{ id: number; name: string } | undefined>(undefined);
   // Permissions FRONT (cosmétiques : le backend ne re-vérifie pas) dérivées du rôle de
   // l'utilisateur DANS le programme visé (Program.roleName) combiné au rôle GLOBAL (isAdmin).
   const permsForProgram = (programId: number) =>
@@ -351,6 +356,19 @@ export default function Dashboard() {
     coursesEnabled && dashboardPrograms.some((program) => program.id === activeProgramId)
   );
 
+  // Cours des AUTRES programmes (celui du programme actif passe par le loader ci-dessus) : la barre
+  // du portail et le rail listent les cours de tous les programmes. Rechargés au retour à l'Accueil.
+  const programIds = dashboardPrograms.map((program) => program.id).join(',');
+  useEffect(() => {
+    if (!coursesEnabled || !programIds) return;
+    for (const id of programIds.split(',').map(Number)) {
+      if (id === activeProgramIdRef.current) continue;
+      handleFetchCourses(id)
+        .then(() => setFailedProgramIds((ids) => ids.filter((failed) => failed !== id)))
+        .catch(() => setFailedProgramIds((ids) => (ids.includes(id) ? ids : [...ids, id])));
+    }
+  }, [programIds, coursesEnabled, isPortal, handleFetchCourses]);
+
   // Abonnement temps réel (scope programme) : applique les évènements cours /
   // section reçus à l'état. Le désabonnement se fait au changement de programme.
   useEffect(() => {
@@ -430,6 +448,10 @@ export default function Dashboard() {
   // « Rejoindre un programme » (offert à tous depuis l'état « aucun programme ») : ouvre le même
   // popup DIRECTEMENT sur la vue d'adhésion (la création reste gatée par canCreateProgram).
   const handleJoinProgram = () => setPopup({ kind: 'addSubscription', view: 'join' });
+  // « Rejoindre un cours » de la barre du portail : directement les programmes de son établissement
+  // (la recherche d'établissement si on ne le connaît pas).
+  const handleJoinFromPortal = () =>
+    setPopup({ kind: 'addSubscription', view: 'join', establishmentId: establishment?.id });
 
   // Ouvre le AddCoursePopup avec le programme courant préselectionné (gestion contenu).
   const handleAddCourse = () => {
@@ -830,8 +852,8 @@ export default function Dashboard() {
       .fetchEstablishments()
       .then((establishments) => {
         if (cancelled) return;
-        setEstablishmentName(
-          establishments.find((e) => e.domainEmail?.toLowerCase() === userEmailDomain)?.name
+        setEstablishment(
+          establishments.find((e) => e.domainEmail?.toLowerCase() === userEmailDomain)
         );
       })
       .catch(() => {
@@ -906,12 +928,20 @@ export default function Dashboard() {
       ? (dashboardPrograms.find((program) => program.id === popup.programId) ?? null)
       : null;
 
-  // Aucun programme dans l'URL (/home) : le portail (Accueil). Sinon, l'interface du cours.
-  const isPortal = activeProgramId < 0;
+  // Cours du rail : ceux de tous les programmes. Un cours rattaché à plusieurs programmes n'y
+  // apparaît qu'une fois, ouvert par le programme actif s'il en fait partie.
+  const railCourses: RailCourse[] = [];
+  for (const program of dashboardPrograms) {
+    for (const course of program.courses ?? []) {
+      const index = railCourses.findIndex((entry) => entry.course.id === course.id);
+      if (index < 0) railCourses.push({ course, programId: program.id });
+      else if (program.id === activeProgramId) railCourses[index] = { course, programId: program.id };
+    }
+  }
 
   return (
     <div className={styles.portalRoot}>
-    <PortalBand establishmentName={establishmentName} />
+    <PortalBand establishmentName={establishment?.name} onAddProgram={handleAddProgram} />
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
         // Remonté au passage portail ↔ cours : le tiroir mobile se referme à l'ouverture d'un cours.
@@ -946,10 +976,18 @@ export default function Dashboard() {
               loading={programsLoading}
               loadError={programsError}
               onReload={reloadPrograms}
-              loadCourses={api.fetchCourses}
-              onOpenProgram={(programId) => setView({ programId })}
+              failedProgramIds={failedProgramIds}
+              isGlobalAdmin={isAdmin}
+              programActions={{
+                onAddCourseToProgram: handleAddCourseToProgram,
+                onEditProgram: handleEditProgram,
+                onManageRoles: handleManageRoles,
+                onDeleteProgram: handleDeleteProgram,
+                onJoinCourses: handleJoinCourses,
+                onLeaveProgram: handleLeaveProgram,
+              }}
               onOpenCourse={(programId, courseId) => setView({ programId, courseId })}
-              onJoin={handleAddProgram}
+              onJoin={handleJoinFromPortal}
               userMenu={
                 <UserMenu
                   user={currentUser}
@@ -962,27 +1000,13 @@ export default function Dashboard() {
               }
             />
           ) : (
-          <ProgramMenu
-            programs={dashboardPrograms}
-            activeProgramId={activeProgramId}
-            onSelectProgram={(nextProgramId) => {
-              const nextProgram = dashboardPrograms.find((program) => program.id === nextProgramId);
-              setView({
-                programId: nextProgramId,
-                courseId: getEffectiveSelectedCourseId(nextProgram?.courses ?? [], undefined),
-              });
-            }}
-            onAddProgram={handleAddProgram}
+          <CourseRail
+            courses={railCourses}
+            selectedCourseId={effectiveSelectedCourseId}
+            onSelectCourse={(programId, courseId) => setView({ programId, courseId })}
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
-            isGlobalAdmin={isAdmin}
-            onAddCourseToProgram={handleAddCourseToProgram}
-            onEditProgram={handleEditProgram}
-            onManageRoles={handleManageRoles}
-            onDeleteProgram={handleDeleteProgram}
-            onJoinCourses={handleJoinCourses}
-            onLeaveProgram={handleLeaveProgram}
           />
           )
         }
@@ -996,7 +1020,6 @@ export default function Dashboard() {
             currentUser={currentUser}
             userLoading={profileLoading}
             selectedCourseId={effectiveSelectedCourseId}
-            onSelectCourse={(courseId) => setView({ programId: activeProgramId, courseId })}
             selectedChannel={selectedChannelRef}
             onSelectChannel={(channel) =>
               setView({
@@ -1014,7 +1037,6 @@ export default function Dashboard() {
             loading={coursesLoading}
             loadError={coursesError}
             onReloadCourses={reloadCourses}
-            onAddCourse={handleAddCourse}
             onEditCourse={handleEditCourse}
             onOpenMcpManagement={handleOpenMcpManagement}
             onLeaveCourse={handleLeaveCourse}
@@ -1153,6 +1175,7 @@ export default function Dashboard() {
           // popup (création de programme par soi ou un autre gardien). `ws` est stable (useMemo).
           subscribeEstablishmentUpdates={ws.establishments.subscribe}
           initialView={popup.view ?? 'menu'}
+          initialEstablishmentId={popup.establishmentId}
         />
       )}
 

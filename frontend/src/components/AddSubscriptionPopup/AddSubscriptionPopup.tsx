@@ -115,6 +115,11 @@ interface AddSubscriptionPopupProps {
    * pour ouvrir DIRECTEMENT l'adhésion (bouton « Rejoindre un programme » des états vides).
    */
   initialView?: 'menu' | 'join';
+  /**
+   * Avec `initialView="join"` : ouvre directement les programmes de cet établissement, sans
+   * passer par sa recherche (« Rejoindre un cours » de la barre du portail).
+   */
+  initialEstablishmentId?: number;
   /** Surcharge des textes ; seuls les champs fournis remplacent les défauts. */
   labels?: Partial<AddSubscriptionPopupLabels>;
 }
@@ -141,6 +146,7 @@ export function AddSubscriptionPopup({
   onDeleteEstablishment,
   subscribeEstablishmentUpdates,
   initialView = 'menu',
+  initialEstablishmentId,
   labels,
 }: AddSubscriptionPopupProps): React.ReactElement {
   const t = { ...defaultLabels, ...labels };
@@ -263,18 +269,31 @@ export function AddSubscriptionPopup({
     });
   }
 
+  /** Passe à la sélection des programmes de l'établissement `id`, une fois `load` résolu. */
+  function loadJoinPrograms(id: number, load: () => MaybePromise<Program[]>) {
+    runLoad<Program>({ kind: 'establishment', id }, load, (data) => {
+      setEstablishmentPrograms(data);
+      setProgramSearch('');
+      // Préselectionne les programmes (de cet établissement) déjà suivis par l'utilisateur.
+      setSelectedProgramIds(data.filter((p) => subscribedProgramIds.includes(p.id)).map((p) => p.id));
+      setJoinEstablishmentId(id); // on n'avance qu'après des données valides
+    });
+  }
+
   function chooseJoinEstablishment(id: number) {
-    runLoad<Program>(
-      { kind: 'establishment', id },
-      () => loadEstablishmentPrograms(id),
-      (data) => {
-        setEstablishmentPrograms(data);
-        setProgramSearch('');
-        // Préselectionne les programmes (de cet établissement) déjà suivis par l'utilisateur.
-        setSelectedProgramIds(data.filter((p) => subscribedProgramIds.includes(p.id)).map((p) => p.id));
-        setJoinEstablishmentId(id); // on n'avance qu'après des données valides
-      }
-    );
+    loadJoinPrograms(id, () => loadEstablishmentPrograms(id));
+  }
+
+  /**
+   * Ouverture directe sur un établissement : charge aussi la liste des établissements, qui donne
+   * le titre de l'étape et sert au bouton retour.
+   */
+  function enterJoinAt(id: number) {
+    loadJoinPrograms(id, async () => {
+      const establishments = await loadJoinEstablishments();
+      if (Array.isArray(establishments)) setJoinEstablishments(establishments);
+      return loadEstablishmentPrograms(id);
+    });
   }
 
   /** Revient de la sélection des programmes vers la recherche d'établissement. */
@@ -418,9 +437,11 @@ export function AddSubscriptionPopup({
   // vides) : le menu est court-circuité, donc enterJoin() n'est jamais cliqué et la liste des
   // établissements resterait vide. On lance ici le chargement au montage.
   useEffect(() => {
+    if (initialView !== 'join') return;
     // Chargement légitime au montage (synchronisation avec la source de données distante).
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (initialView === 'join') enterJoin();
+    if (initialEstablishmentId != null) enterJoinAt(initialEstablishmentId);
+    else enterJoin();
     // Montage uniquement : la vue initiale est fixée une fois à l'ouverture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
