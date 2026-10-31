@@ -380,6 +380,31 @@ describe('Dashboard', () => {
       expect(await screen.findByText('Crée ton propre programme ou rejoins-en un existant.')).toBeTruthy();
     });
 
+    it('depuis l’Accueil, le cours s’ouvre sans passer par « pas de cours » pendant le rechargement', async () => {
+      renderDashboard({ path: '/home' });
+      const course = await screen.findByRole('button', { name: /IFT101/ });
+      // Le rechargement du programme reste en attente : les cours connus doivent suffire.
+      vi.mocked(api.fetchCourses).mockImplementation(() => new Promise(() => {}));
+      fireEvent.click(course);
+      await waitForCourseSelector('IFT101');
+      expect(screen.queryByRole('heading', { name: noCourseLabels.title })).toBeNull();
+      expect(screen.getByRole('heading', { name: noActiveLabels.title })).toBeTruthy();
+    });
+
+    it('lien vers un cours : un indicateur, ni « Bienvenue » ni « pas de cours », tant que les cours ne répondent pas', async () => {
+      vi.mocked(api.fetchCourses).mockImplementation(() => new Promise(() => {}));
+      renderDashboard({ path: '/home/p/1/c/10' });
+      expect(await screen.findByRole('status', { name: 'Chargement du cours' })).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: noCourseLabels.title })).toBeNull();
+      expect(screen.queryByRole('heading', { name: /Bienvenue/ })).toBeNull();
+    });
+
+    it('programme vraiment sans cours : « pas de cours », une fois la réponse reçue', async () => {
+      renderDashboard({ path: '/home/p/3' });
+      expect(await screen.findByRole('heading', { name: noCourseLabels.title })).toBeTruthy();
+      expect(screen.queryByRole('status', { name: 'Chargement du cours' })).toBeNull();
+    });
+
     it('ouvrir un cours garde la même barre de gauche : elle peut glisser au lieu de changer d’un coup', async () => {
       renderDashboard({ path: '/home' });
       const bar = await screen.findByRole('navigation', { name: 'Portail' });

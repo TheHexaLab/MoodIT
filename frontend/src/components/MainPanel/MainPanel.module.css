@@ -1,3 +1,24 @@
+/* Indicateur de chargement : n'apparaît qu'après un court délai, invisible si la réponse est rapide. */
+.loading {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: main-panel-loading-in 0.2s ease 0.4s backwards;
+}
+
+@keyframes main-panel-loading-in {
+    from {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .loading {
+        animation: none;
+    }
+}
+
 .mainPanel {
     height: calc(100vh - var(--portal-band-height, 0px));
     /* Hauteur dynamique (mobile) : suit la zone visible du navigateur (barre d'URL comprise)

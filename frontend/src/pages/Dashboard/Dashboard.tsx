@@ -150,6 +150,8 @@ export default function Dashboard() {
   };
   // Panneau du cours réduit en mince bande. Ouvrir un cours le rouvre : ses canaux y sont.
   const [coursePanelCollapsed, setCoursePanelCollapsed] = useState(false);
+  // Programmes dont les cours ont répondu au moins une fois : avant, « aucun cours » ne veut rien dire.
+  const [fetchedProgramIds, setFetchedProgramIds] = useState<number[]>([]);
   // Programmes dont les cours n'ont pas pu être chargés (barre du portail).
   const [failedProgramIds, setFailedProgramIds] = useState<number[]>([]);
   // Établissement de l'utilisateur : son nom dans le bandeau, ses programmes pour « Rejoindre un cours ».
@@ -359,6 +361,7 @@ export default function Dashboard() {
     setDashboardPrograms((programs) =>
       programs.map((p) => (p.id === programId ? { ...p, courses } : p))
     );
+    setFetchedProgramIds((ids) => (ids.includes(programId) ? ids : [...ids, programId]));
   }, []);
 
   // Chaînage : on ne charge les cours qu'une fois la liste des programmes chargée
@@ -840,17 +843,19 @@ export default function Dashboard() {
     api.votePost(selectedChannelRef?.id ?? -1, postId, value as 1 | -1);
 
   const activeProgram = dashboardPrograms.find((program) => program.id === activeProgramId) ?? null;
-  // Programme passé à MainPanel selon l'avancement des fetchs (chaînage programmes → cours) :
-  // - programmes pas prêts (chargement / erreur)            → null            → NoProgramState
-  // - programme prêt mais cours en cours de chargement      → sans ses cours  → NoCourseState
-  // - cours chargés                                         → programme réel  → EmptyCourseState / contenu
-  const mainPanelProgram =
-    !coursesEnabled || activeProgram == null
-      ? null
-      : coursesLoading
-        ? { ...activeProgram, courses: [] }
-        : activeProgram;
   const courses = activeProgram?.courses ?? [];
+  // Cours déjà connus (la barre de gauche les a chargés) : affichés tout de suite, le rechargement
+  // se fait en arrière-plan. Sinon, aucun état « vide » tant qu'on ne sait pas : il clignoterait.
+  const hasKnownCourses = courses.length > 0;
+  const mainPanelLoading =
+    !isPortal &&
+    (programsLoading ||
+      (activeProgram != null &&
+        !hasKnownCourses &&
+        !coursesError &&
+        (coursesLoading || !fetchedProgramIds.includes(activeProgramId))));
+  // Programme passé à MainPanel : null si les programmes n'ont pas pu être chargés (NoProgramState).
+  const mainPanelProgram = !coursesEnabled ? null : activeProgram;
   const effectiveSelectedCourseId = getEffectiveSelectedCourseId(courses, selectedCourseId);
   const selectedCourse = getSelectedCourse(courses, effectiveSelectedCourseId);
   const selectedCourseChannels = selectedCourse
@@ -1050,7 +1055,7 @@ export default function Dashboard() {
             isAdmin={permsForProgram(activeProgramId).canManageContent}
             // CourseMenu ne reflète QUE le fetch des cours (qui n'a lieu qu'après
             // le succès du fetch programmes) → pas d'illusion de fetch parallèle.
-            loading={coursesLoading}
+            loading={coursesLoading && !hasKnownCourses}
             loadError={coursesError}
             onReloadCourses={reloadCourses}
             onEditCourse={handleEditCourse}
@@ -1069,6 +1074,7 @@ export default function Dashboard() {
         <AccueilPage firstName={currentUser.firstName} />
       ) : (
       <MainPanel
+        loading={mainPanelLoading}
         isAdmin={permsForProgram(activeProgramId).canManageContent}
         // Modération (supprimer le contenu d'autrui) : admin GLOBAL ou Administrateur du
         // programme (déduit par MainPanel de roleName), jamais l'Enseignant.
