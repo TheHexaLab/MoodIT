@@ -6,6 +6,7 @@ import { Sparkles } from '../../assets/Sparkles.tsx';
 import { LogOut } from '../../assets/LogOut.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { defaultLabels } from './labels.ts';
+import { useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
 
 interface CourseContextMenuProps {
   /** Position du clic droit (coordonnées viewport). */
@@ -49,6 +50,16 @@ export function CourseContextMenu({
 }: CourseContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x, top: y });
+
+  // Clavier : le focus entre dans le menu à l'ouverture (sur le menu lui-même, la première
+  // flèche choisit le premier ou le dernier élément), Échap ferme et rend le focus à l'ancre.
+  const handleKeyDown = useMenuKeyboard({
+    open: true,
+    containerRef: menuRef,
+    initialFocus: 'container',
+    onEscape: onClose,
+    returnFocus: () => anchor,
+  });
 
   // Recalage dans le viewport une fois la taille réelle connue (évite le débordement
   // à droite / en bas selon l'endroit du clic).
@@ -96,6 +107,8 @@ export function CourseContextMenu({
       role="menu"
       aria-label={defaultLabels.contextMenuAria(courseCode)}
       style={{ left: pos.left, top: pos.top }}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
       onContextMenu={(event) => event.preventDefault()}
     >
       {onEditCourse && (

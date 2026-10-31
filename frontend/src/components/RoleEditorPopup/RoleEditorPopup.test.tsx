@@ -123,6 +123,13 @@ describe('RoleEditorPopup', () => {
     expect(memberNames(2)).toEqual(['Bob Roy']);
   });
 
+  it('corbeille d’un membre : nom accessible « Retirer <nom> du rôle »', () => {
+    renderPopup();
+    expect(trashFor(1, 'Alice Martin')).toBe(
+      screen.getByRole('button', { name: 'Retirer Alice Martin du rôle' })
+    );
+  });
+
   it('section vide : message « aucun utilisateur pour ce rôle »', () => {
     renderPopup({ roles: [{ id: 3, name: 'Mainteneur' }] });
     expect(screen.getByText(t.emptyRole)).toBeTruthy();

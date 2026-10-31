@@ -124,6 +124,7 @@ export default function LoginPage() {
                   type="button"
                   className="eye-btn"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                 >
                   <EyeIcon visible={showPassword} />
                 </button>
@@ -164,7 +165,12 @@ export default function LoginPage() {
           </a>
         </footer>
       </main>
-      <button type="button" className="light-dark-btn" onClick={toggleTheme}>
+      <button
+        type="button"
+        className="light-dark-btn"
+        onClick={toggleTheme}
+        aria-label="Changer de thème"
+      >
         <Lightanddark isDark={theme === 'dark'} />
       </button>
     </div>

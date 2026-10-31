@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
 afterEach(() => {
@@ -25,13 +26,13 @@ function renderDropdown(value = 'py', onChange = vi.fn(), parentKeyDown = vi.fn(
 }
 
 function control(): HTMLButtonElement {
-  return screen.getByRole('button', { name: 'Langage' }) as HTMLButtonElement;
+  return screen.getByRole('button', { name: /^Langage/ }) as HTMLButtonElement;
 }
 
 /** Simule la position du contrôle à l'écran (jsdom ne fait pas de mise en page). */
 function mockControlRect(rect: { top: number; bottom: number; left: number; width: number }) {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.getAttribute('aria-label') === 'Langage') {
+    if (this.getAttribute('aria-label')?.startsWith('Langage')) {
       return { ...rect, right: rect.left + rect.width, height: rect.bottom - rect.top, x: rect.left, y: rect.top, toJSON: () => ({}) } as DOMRect;
     }
     return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
@@ -45,6 +46,16 @@ describe('Dropdown', () => {
     expect(control().getAttribute('aria-expanded')).toBe('false');
     expect(control().getAttribute('aria-haspopup')).toBe('listbox');
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('nom accessible : libellé du contrôle suivi de l’option affichée (WCAG 2.5.3)', () => {
+    renderDropdown('js');
+    expect(screen.getByRole('button', { name: 'Langage : JavaScript' })).toBeTruthy();
+  });
+
+  it('valeur inconnue → nom accessible réduit au libellé du contrôle', () => {
+    renderDropdown('inconnu');
+    expect(screen.getByRole('button', { name: 'Langage' })).toBeTruthy();
   });
 
   it('valeur inconnue → libellé vide', () => {
@@ -165,5 +176,44 @@ describe('Dropdown', () => {
     expect(style.top).toBe('344px');
     expect(style.left).toBe('50px');
     expect(style.width).toBe('120px');
+  });
+});
+
+// Patron WAI-ARIA « Listbox », au clavier réel (user-event).
+describe('Dropdown — clavier', () => {
+  it('Entrée ouvre et place le focus sur l’option choisie ; ↓/↑ circulent ; Début/Fin', async () => {
+    const user = userEvent.setup();
+    renderDropdown('c');
+    control().focus();
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'C' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
+    await user.keyboard('{ArrowUp}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'JavaScript' }));
+  });
+
+  it('Entrée sur une option la choisit, ferme la liste et rend le focus au contrôle', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderDropdown('py');
+    control().focus();
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+    expect(onChange).toHaveBeenCalledWith('c');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(control());
+  });
+
+  it('valeur inconnue : le focus va sur la première option', async () => {
+    const user = userEvent.setup();
+    renderDropdown('inconnu');
+    control().focus();
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('option', { name: 'Python' }));
   });
 });

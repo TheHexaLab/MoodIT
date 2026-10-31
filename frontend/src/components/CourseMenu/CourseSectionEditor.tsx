@@ -113,6 +113,8 @@ function sectionPopupLabels(section: ChannelTypeDefinition) {
     emptyMessage: `Aucun ${singular.noun} pour le moment.`,
     addTitle: `Nouveau ${singular.noun}`,
     editTitle: `Modifier ${singular.article}${singular.noun}`,
+    // « du canal », mais « de l'élément » (élision devant voyelle).
+    nameInputAria: `Nom ${/^[aeéiouy]/i.test(singular.noun) ? "de l'" : 'du '}${singular.noun}`,
     deleteTitle: `Supprimer ${singular.article}${singular.noun} ?`,
     deleteBody: (item: { name: string }) =>
       `${sectionPrefixLabel(section.type)} « ${item.name} » et tout son contenu seront définitivement supprimés. Cette action est irréversible.`,

@@ -399,8 +399,10 @@ public class CourseService {
       // id temporaire non réconcilié (ex. crypto.randomUUID d'un create non persisté) : 404 propre.
       throw new ForumNotFoundException();
     }
+    // Seuls les forums d'une SECTION (canaux 'text', forums) passent : le canal d'annonces, unique
+    // et créé avec le cours, ne se renomme, ne se déplace ni ne se supprime par cette API.
     return (course.getForums() == null ? List.<Forum>of() : course.getForums()).stream()
-        .filter(f -> f.getId().equals(id))
+        .filter(f -> f.getId().equals(id) && ForumKind.of(f) != ForumKind.ANNOUNCEMENT)
         .findFirst()
         .orElseThrow(ForumNotFoundException::new);
   }

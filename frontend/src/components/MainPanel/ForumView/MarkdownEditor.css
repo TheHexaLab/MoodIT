@@ -1,7 +1,7 @@
 /* Editeur Markdown (selecteurs par role/element, sans classes).
-   Tout est scope sous [role^="markdown-editor"] : le role "toolbar" est aussi
+   Tout est scope sous [data-role^="markdown-editor"] : le role "toolbar" est aussi
    utilise par ForumView, on evite donc toute fuite de style. */
-div[role^="markdown-editor"] {
+div[data-role^="markdown-editor"] {
     display: flex;
     flex-direction: column;
     /* Espacement avec l'element precedent (deplace ici depuis la toolbar : sinon
@@ -12,7 +12,7 @@ div[role^="markdown-editor"] {
 /* Bloc englobant de la toolbar collante (toolbar + zone de saisie). Borne le
    « collage » : la barre se decolle a la fin de cette zone, donc avant les
    actions (Annuler/Publier), qu'elle ne recouvre plus. */
-div[role^="markdown-editor"] > div[role="editor-main"] {
+div[data-role^="markdown-editor"] > div[data-role="editor-main"] {
     display: flex;
     flex-direction: column;
 }
@@ -21,15 +21,15 @@ div[role^="markdown-editor"] > div[role="editor-main"] {
    (l'espacement vient du champ hôte). La barre d'outils reste collante, comme dans
    les forums : le conteneur défilant (le corps du popup) n'a pas de padding haut,
    donc on colle à `top: 0` (les forums utilisent -1rem pour leur padding de scroll). */
-div[role^="markdown-editor"][data-embedded] {
+div[data-role^="markdown-editor"][data-embedded] {
     margin-top: 0;
 }
-div[role^="markdown-editor"][data-embedded] div[role="toolbar"] {
+div[data-role^="markdown-editor"][data-embedded] div[role="toolbar"] {
     top: 0;
 }
 
 /* ─── Barre d'outils. ─── */
-div[role^="markdown-editor"] div[role="toolbar"] {
+div[data-role^="markdown-editor"] div[role="toolbar"] {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -44,7 +44,7 @@ div[role^="markdown-editor"] div[role="toolbar"] {
        haut du conteneur defilant (z-index pour passer au-dessus du textarea).
        Pas de margin-top ici : elle laisserait une bande visible au-dessus de la
        barre collee (l'espacement est porte par le conteneur de l'editeur).
-       top negatif = -(padding-top du conteneur scrollable .forum-view > [role=body],
+       top negatif = -(padding-top du conteneur scrollable .forum-view > [data-role=body],
        soit 1rem) : sinon la barre se colle au bord du content-box (1rem sous le
        haut visible) et le contenu defile dans cette bande au-dessus d'elle. */
     position: sticky;
@@ -52,13 +52,13 @@ div[role^="markdown-editor"] div[role="toolbar"] {
     z-index: 5;
 }
 
-div[role="markdown-editor-preview"] div[role="toolbar"] {
+div[data-role="markdown-editor-preview"] div[role="toolbar"] {
     border: 1px dashed var(--border);
     border-bottom-color: transparent;
     background: var(--bg-surface);
 }
 
-div[role^="markdown-editor"] div[role="toolbar"] > div {
+div[data-role^="markdown-editor"] div[role="toolbar"] > div {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -66,9 +66,9 @@ div[role^="markdown-editor"] div[role="toolbar"] > div {
 }
 
 /* Boutons d'outils : directs (gras, italique…) + declencheurs de menu (titre, bloc). */
-div[role^="markdown-editor"] div[role="toolbar"] > button,
-div[role^="markdown-editor"] div[role="toolbar"] > div > button,
-div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button {
+div[data-role^="markdown-editor"] div[role="toolbar"] > button,
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > button,
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > div[data-role="menu-wrap"] > button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -86,51 +86,51 @@ div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] >
     transition: background 0.12s ease, color 0.3s ease, border-color 0.12s ease;
 }
 
-div[role^="markdown-editor"] div[role="toolbar"] > button:hover:not(:disabled),
-div[role^="markdown-editor"] div[role="toolbar"] > div > button:hover:not(:disabled),
-div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button:hover:not(:disabled) {
+div[data-role^="markdown-editor"] div[role="toolbar"] > button:hover:not(:disabled),
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > button:hover:not(:disabled),
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > div[data-role="menu-wrap"] > button:hover:not(:disabled) {
     background: var(--bg-vote-pill);
     color: var(--brand-teal);
 }
 
-div[role^="markdown-editor"] div[role="toolbar"] > button:disabled,
-div[role^="markdown-editor"] div[role="toolbar"] > div > button:disabled,
-div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button:disabled {
+div[data-role^="markdown-editor"] div[role="toolbar"] > button:disabled,
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > button:disabled,
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > div[data-role="menu-wrap"] > button:disabled {
     opacity: 0.4;
     cursor: default;
 }
 
 /* Etat actif : apercu (aria-pressed) ou menu ouvert (aria-expanded). */
-div[role^="markdown-editor"] div[role="toolbar"] > button[aria-pressed="true"],
-div[role^="markdown-editor"] div[role="toolbar"] > div > button[aria-pressed="true"],
-div[role^="markdown-editor"] div[role="toolbar"] > div > div[role="menu-wrap"] > button[aria-expanded="true"] {
+div[data-role^="markdown-editor"] div[role="toolbar"] > button[aria-pressed="true"],
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > button[aria-pressed="true"],
+div[data-role^="markdown-editor"] div[role="toolbar"] > div > div[data-role="menu-wrap"] > button[aria-expanded="true"] {
     color: var(--brand-teal);
     border-color: var(--border);
     background: var(--brand-teal-surface);
 }
 
-div[role^="markdown-editor"] div[role="toolbar"] button > svg {
+div[data-role^="markdown-editor"] div[role="toolbar"] button > svg {
     width: 1rem;
     height: 1rem;
 }
 
-div[role^="markdown-editor"] div[role="toolbar"] [role="mono"] {
+div[data-role^="markdown-editor"] div[role="toolbar"] [data-role="mono"] {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.75rem;
 }
 
 /* Espaceur qui repousse l'apercu a droite (seul span direct de la barre). */
-div[role^="markdown-editor"] div[role="toolbar"] > span {
+div[data-role^="markdown-editor"] div[role="toolbar"] > span {
     flex: 1;
 }
 
 /* ─── Menu deroulant (titres, langages). ─── */
-div[role^="markdown-editor"] div[role="menu-wrap"] {
+div[data-role^="markdown-editor"] div[data-role="menu-wrap"] {
     position: relative;
     display: inline-flex;
 }
 
-div[role^="markdown-editor"] div[role="menu"] {
+div[data-role^="markdown-editor"] div[role="menu"] {
     position: absolute;
     top: calc(100% + 0.25rem);
     left: 0;
@@ -145,7 +145,7 @@ div[role^="markdown-editor"] div[role="menu"] {
     box-shadow: 0 4px 12px var(--shadow-modal);
 }
 
-div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"] {
+div[data-role^="markdown-editor"] div[role="menu"] > button[role="menuitem"] {
     display: block;
     width: 100%;
     text-align: left;
@@ -160,12 +160,12 @@ div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"] {
     transition: background 0.12s ease;
 }
 
-div[role^="markdown-editor"] div[role="menu"] > button[role="menuitem"]:hover {
+div[data-role^="markdown-editor"] div[role="menu"] > button[role="menuitem"]:hover {
     background: var(--bg-vote-pill);
 }
 
 /* ─── Zone de saisie (auto-dimensionnee par JS). ─── */
-div[role^="markdown-editor"] textarea {
+div[data-role^="markdown-editor"] textarea {
     width: 100%;
     box-sizing: border-box;
     /* Hauteur pilotee par le contenu (auto-resize JS) MAIS plafonnee : au-dela, la zone defile
@@ -190,12 +190,12 @@ div[role^="markdown-editor"] textarea {
     transition: border-color 0.15s ease;
 }
 
-div[role^="markdown-editor"]:focus-within div[role="toolbar"] {
+div[data-role^="markdown-editor"]:focus-within div[role="toolbar"] {
     border-color: var(--border-strong);
 }
 
-div[role^="markdown-editor"]:focus-within textarea,
-div[role^="markdown-editor"]:focus-within div[role="preview"]{
+div[data-role^="markdown-editor"]:focus-within textarea,
+div[data-role^="markdown-editor"]:focus-within div[data-role="preview"]{
     border-top-color: transparent;
     border-right-color: var(--border-strong);
     border-left-color: var(--border-strong);
@@ -205,13 +205,13 @@ div[role^="markdown-editor"]:focus-within div[role="preview"]{
 /* Indicateur de focus visible de la zone de saisie (WCAG 2.4.7) : contour teal tracé à
    l'intérieur (offset négatif), pour ne pas passer sous la barre d'outils collée au-dessus.
    Mode « champ » (quiz) exclu : son hôte entoure déjà tout l'éditeur d'un halo. */
-div[role^="markdown-editor"]:not([data-embedded]) textarea:focus-visible {
+div[data-role^="markdown-editor"]:not([data-embedded]) textarea:focus-visible {
     outline: 2px solid var(--brand-teal);
     outline-offset: -2px;
 }
 
 /* ─── Apercu (rendu Markdown). ─── */
-div[role^="markdown-editor"] div[role="preview"] {
+div[data-role^="markdown-editor"] div[data-role="preview"] {
     min-height: 3.5rem;
     box-sizing: border-box;
     border: 1px dashed var(--border);
@@ -221,7 +221,7 @@ div[role^="markdown-editor"] div[role="preview"] {
     background: var(--bg-surface);
 }
 
-div[role^="markdown-editor"] div[role="preview"] > p {
+div[data-role^="markdown-editor"] div[data-role="preview"] > p {
     margin: 0;
     color: var(--border);
     font-family: Inter, sans-serif;
@@ -229,7 +229,7 @@ div[role^="markdown-editor"] div[role="preview"] > p {
 }
 
 /* ─── Actions (Annuler / Valider). ─── */
-div[role^="markdown-editor"] > div[role="editor-actions"] {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -238,7 +238,7 @@ div[role^="markdown-editor"] > div[role="editor-actions"] {
 
 /* Zone d'état (compteur + avertissement) : poussée à gauche (margin-right auto → boutons à
    droite), discrète, passe en rouge quand la limite est dépassée (data-over). */
-div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"] {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > span[data-role="editor-status"] {
     margin-right: auto;
     display: flex;
     align-items: center;
@@ -249,17 +249,17 @@ div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-st
     color: var(--text-muted);
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"] > span[role="char-count"] {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > span[data-role="editor-status"] > span[data-role="char-count"] {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > span[role="editor-status"][data-over] {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > span[data-role="editor-status"][data-over] {
     color: var(--danger, #e5484d);
     font-weight: 600;
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button {
     display: flex;
     align-items: center;
     /* Cible tactile minimale de 24 px (WCAG 2.5.8) : sans elle, la hauteur venait de la
@@ -276,82 +276,86 @@ div[role^="markdown-editor"] > div[role="editor-actions"] > button {
     transition: filter 0.3s ease, color 0.12s ease;
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button:first-of-type {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button:first-of-type {
     background: transparent;
     color: var(--text-muted);
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button:first-of-type:hover {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button:first-of-type:hover {
     color: var(--text);
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button:last-of-type {
     background: transparent;
     color: var(--brand-teal);
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:hover:not(:disabled) {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button:last-of-type:hover:not(:disabled) {
     filter: var(--brand-teal-hover);
 }
 
-div[role^="markdown-editor"] > div[role="editor-actions"] > button:last-of-type:disabled {
+div[data-role^="markdown-editor"] > div[data-role="editor-actions"] > button:last-of-type:disabled {
     opacity: 0.5;
     cursor: default;
 }
 
 /* ─── Scrollbar (menu + textarea) : fine, sans boutons, alignee sur l'app. ─── */
 @supports not selector(::-webkit-scrollbar) {
-    div[role^="markdown-editor"] div[role="menu"],
-    div[role^="markdown-editor"] textarea {
+    div[data-role^="markdown-editor"] div[role="menu"],
+    div[data-role^="markdown-editor"] textarea {
         scrollbar-width: thin;
         scrollbar-color: var(--border-strong) transparent;
     }
 }
 
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar {
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar {
     width: 4px;
 }
 
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-track,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-track {
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-track,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-track {
     background: transparent;
     /* Inset vertical = rayon du conteneur : le scrollbar ne touche pas les coins arrondis. */
     margin: 0.5rem 0;
 }
 
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-thumb {
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
 }
 
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb:hover,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-thumb:hover {
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-thumb:hover,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:start,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:end,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:start,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:end,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:increment,
-div[role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:decrement,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:start,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:end,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:start,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:end,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:increment,
-div[role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:decrement {
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:start,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:end,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:start,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:end,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:increment,
+div[data-role^="markdown-editor"] div[role="menu"]::-webkit-scrollbar-button:vertical:decrement,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:start,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:end,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:start,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:end,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:increment,
+div[data-role^="markdown-editor"] textarea::-webkit-scrollbar-button:vertical:decrement {
     display: none;
     width: 0;
     height: 0;
 }
 
 @media(max-width: 26rem) {
-    div[role^="markdown-editor"] div[role="toolbar"] {
+    div[data-role^="markdown-editor"] div[role="toolbar"] {
         align-items: flex-start;
     }
+}
+/* Glyphe d'icône dessiné en CSS (« 1. » de la liste numérotée) : voir MarkdownEditor.tsx. */
+div[data-role^="markdown-editor"] div[role="toolbar"] [data-role="mono"][data-glyph]::before {
+    content: attr(data-glyph);
 }

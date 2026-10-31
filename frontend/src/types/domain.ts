@@ -15,8 +15,9 @@
 import type { ProgramRoleName } from '../helpers/roles.ts';
 
 /** F_Type d'un forum (table F_Type) : 'Discussion' = chat, 'Thread' = post+réponses,
- *  'Voice' = salon vocal (prototype — aucun Post, le contenu est le flux audio). */
-export type ForumType = 'Discussion' | 'Thread' | 'Voice';
+ *  'Voice' = salon vocal (prototype — aucun Post, le contenu est le flux audio),
+ *  'Announcement' = canal d'annonces du cours. */
+export type ForumType = 'Discussion' | 'Thread' | 'Voice' | 'Announcement';
 
 /** Établissement (table Establishment). */
 export interface Establishment {
@@ -325,7 +326,15 @@ export interface McpResponse {
   courseId: number;
   /** Auteur résolu (jointure sur user_id) : l'utilisateur qui a lancé l'analyse. */
   author?: User;
+  /**
+   * Origine du contenu : rédigé par le LLM ou calculé sans IA (repli déterministe). Absent pour
+   * les analyses antérieures à la colonne (origine inconnue).
+   */
+  source?: McpSource;
 }
+
+/** Origine d'une analyse MCP (colonne MCP_Response.source). */
+export type McpSource = 'LLM' | 'DETERMINISTIC';
 
 /**
  * Analyse MCP structurée, telle que sérialisée dans MCP_Response.content : le service
@@ -406,6 +415,9 @@ export interface ForumPost {
   replyCount?: number;
   /** Nonce de réconciliation optimiste ↔ écho WS. */
   clientPostId?: string;
+  /** Annonce seulement : clé de la palette et expiration ISO UTC (null = jamais). */
+  color?: string;
+  expiresAt?: string | null;
 }
 
 // ── Formes de réponse brutes du backend (DTO) ──────────────────────────────────
@@ -495,6 +507,9 @@ export interface PostVoteUserDTO {
   createdAt: string;
   title?: string;
   isPinned?: boolean;
+  /** Annonce seulement : clé de la palette et expiration ISO UTC (null = jamais). */
+  color?: string | null;
+  expiresAt?: string | null;
   postParentId?: number | null;
   author: User;
   voteTotalValue?: number;

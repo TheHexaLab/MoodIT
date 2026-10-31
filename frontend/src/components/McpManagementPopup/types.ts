@@ -102,6 +102,9 @@ export interface McpManagementPopupLabels {
   emptyRecommendations: string;
   /** Note de bas, 1re ligne : date + auteur. `author` vide = mention « par … » omise. */
   generatedNote: (date: string, author: string) => string;
+  /** Mention de l'origine de l'analyse : rédigée par l'IA ou calculée sans IA (repli). */
+  sourceLlm: string;
+  sourceDeterministic: string;
   /** Note de bas, 2e ligne : portée de l'analyse (sources). */
   scopeNote: (quiz: number, messages: number, students: number) => string;
 }

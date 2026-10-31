@@ -25,6 +25,20 @@ function getScrollableParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * Le curseur (`position`) est-il dans un bloc de code clôturé (```) ? On compte les lignes
+ * de clôture AVANT la ligne du curseur : un nombre impair signifie un bloc ouvert. La ligne
+ * d'ouverture elle-même n'est donc pas « dans » le bloc ; la ligne de fermeture, si.
+ */
+function isInCodeBlock(text: string, position: number): boolean {
+  const lineStart = text.lastIndexOf('\n', position - 1) + 1;
+  const fences = text
+    .slice(0, lineStart)
+    .split('\n')
+    .filter((line) => /^\s*```/.test(line)).length;
+  return fences % 2 === 1;
+}
+
 /** Une entree de menu (libelle affiche + texte insere). */
 interface MenuItem {
   label: string;
@@ -122,6 +136,18 @@ export function MarkdownEditor({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
+  /** Position du curseur à rétablir après une indentation par Tab (appliquée au rendu suivant). */
+  const pendingCaretRef = useRef<number | null>(null);
+
+  // Curseur après une indentation : placé dès le rendu de la nouvelle valeur, sans rappeler
+  // focus(). Avec un requestAnimationFrame + focus(), un Tab vers « Annuler » juste après
+  // l'indentation pouvait voir le focus ramené dans l'éditeur (vu en CI sous WebKit, #196).
+  useLayoutEffect(() => {
+    const pos = pendingCaretRef.current;
+    if (pos == null) return;
+    pendingCaretRef.current = null;
+    textareaRef.current?.setSelectionRange(pos, pos);
+  }, [value]);
 
   // Auto-dimensionne la zone d'edition selon son contenu (pas de resize manuel).
   // Se relance a chaque changement de texte (frappe ET insertions via la barre),
@@ -155,7 +181,7 @@ export function MarkdownEditor({
       // Cible : l'ÉDITEUR COMPLET (barre d'outils + zone de saisie + compteur/boutons) s'il TIENT
       // dans le feed → tout reste visible ; sinon (éditeur plus haut que le feed) on se rabat sur
       // la zone de saisie, pour au moins suivre le curseur.
-      const editorRoot = ta.closest('[role^="markdown-editor"]') as HTMLElement | null;
+      const editorRoot = ta.closest('[data-role^="markdown-editor"]') as HTMLElement | null;
       const rootRect = editorRoot?.getBoundingClientRect();
       const target =
         rootRect && rootRect.height <= pRect.height - margin
@@ -237,13 +263,13 @@ export function MarkdownEditor({
 
   return (
     <div
-      role={`markdown-editor${preview ? '-preview' : ''}`}
+      data-role={`markdown-editor${preview ? '-preview' : ''}`}
       data-embedded={embedded ? '' : undefined}
       onClick={(event) => event.stopPropagation()}
     >
       {/* Toolbar + zone de saisie : bloc englobant de la toolbar collante, pour
           qu'elle se decolle a la fin du textarea sans recouvrir les actions. */}
-      <div role="editor-main">
+      <div data-role="editor-main">
       <div role="toolbar" aria-label={t.toolbar}>
         <div>
           <ToolMenu
@@ -279,7 +305,7 @@ export function MarkdownEditor({
             disabled={preview}
             onClick={() => wrap('`')}
           >
-            <span role="mono">{'</>'}</span>
+            <span data-role="mono">{'</>'}</span>
           </button>
           <ToolMenu
             icon={<CodeBlockIcon />}
@@ -314,7 +340,9 @@ export function MarkdownEditor({
             disabled={preview}
             onClick={() => linePrefix('1. ')}
           >
-            <span role="mono">1.</span>
+            {/* « 1. » dessiné en CSS (::before) : glyphe d'icône, hors du texte visible que le
+                nom accessible doit contenir (WCAG 2.5.3). */}
+            <span data-role="mono" data-glyph="1." aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -341,7 +369,7 @@ export function MarkdownEditor({
       </div>
 
       {preview ? (
-        <div role="preview">
+        <div data-role="preview">
           {value.trim() ? <Markdown source={value} /> : <p>{t.emptyPreview}</p>}
         </div>
       ) : (
@@ -359,20 +387,21 @@ export function MarkdownEditor({
               if (!onCancel) return;
               event.preventDefault();
               onCancel();
-            } else if (event.key === 'Tab' && !event.shiftKey) {
-              // Tab dans le textarea = indentation (4 espaces), pas de changement de
-              // champ. La sélection est remplacée par les espaces, curseur après.
+            } else if (
+              event.key === 'Tab' &&
+              !event.shiftKey &&
+              isInCodeBlock(value, event.currentTarget.selectionStart)
+            ) {
+              // Tab DANS un bloc de code = indentation (4 espaces). Ailleurs, Tab garde son
+              // rôle (champ suivant) : le focus n'est pas piégé dans l'éditeur (WCAG 2.1.2).
+              // La sélection est remplacée par les espaces, curseur après.
               event.preventDefault();
               const ta = event.currentTarget;
               const start = ta.selectionStart;
               const end = ta.selectionEnd;
               const indent = '    ';
+              pendingCaretRef.current = start + indent.length;
               onChange(value.slice(0, start) + indent + value.slice(end));
-              requestAnimationFrame(() => {
-                ta.focus();
-                const pos = start + indent.length;
-                ta.setSelectionRange(pos, pos);
-              });
             }
           }}
           rows={2}
@@ -384,10 +413,10 @@ export function MarkdownEditor({
       </div>
 
       {!embedded && (
-        <div role="editor-actions">
+        <div data-role="editor-actions">
           {maxLength != null && (
-            <span role="editor-status" data-over={overLimit ? '' : undefined}>
-              <span role="char-count">
+            <span data-role="editor-status" data-over={overLimit ? '' : undefined}>
+              <span data-role="char-count">
                 {value.length} / {maxLength}
               </span>
             </span>
@@ -455,7 +484,7 @@ function ToolMenu({ icon, title, ariaLabel, items, onSelect, disabled }: ToolMen
   }, [open]);
 
   return (
-    <div role="menu-wrap" ref={wrapRef}>
+    <div data-role="menu-wrap" ref={wrapRef}>
       <button
         type="button"
         title={title}

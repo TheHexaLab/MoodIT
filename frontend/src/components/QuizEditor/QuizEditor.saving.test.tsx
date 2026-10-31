@@ -38,13 +38,15 @@ const back = () => screen.getByLabelText('Retour') as HTMLButtonElement;
 const close = () => screen.getByLabelText('Fermer') as HTMLButtonElement;
 
 describe('QuizEditor — aucune sortie pendant l’enregistrement', () => {
-  it('chevron et croix désactivés pendant l’enregistrement, réactivés après la réponse', async () => {
+  it('chevron et croix désactivés pendant l’enregistrement ; après la réponse, retour à la liste', async () => {
     const { finish, onUpdateQuiz } = setup();
     expect(onUpdateQuiz).toHaveBeenCalledTimes(1);
     expect(back().disabled).toBe(true);
     expect(close().disabled).toBe(true);
     await finish();
-    expect(back().disabled).toBe(false);
+    // Remonté d'un cran (#201) : la liste n'a pas de chevron, la croix est active.
+    expect(screen.getByText(editorT.listTitle)).toBeTruthy();
+    expect(screen.queryByLabelText('Retour')).toBeNull();
     expect(close().disabled).toBe(false);
   });
 

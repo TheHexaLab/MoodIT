@@ -1059,6 +1059,11 @@ export default function Dashboard() {
         onDeletePost={handleDeletePost}
         onVotePost={handleVotePost}
         forumSocket={ws.forums}
+        // ── Annonces ('Announcement') : posts du canal d'annonces, mêmes routes. ──
+        onFetchAnnouncements={api.fetchAnnouncements}
+        onCreateAnnouncement={api.createAnnouncement}
+        onUpdateAnnouncement={api.updateAnnouncement}
+        onDeleteAnnouncement={api.deletePost}
         onAddProgram={handleAddProgram}
         // Rejoindre un programme — offert à tous depuis l'état « aucun programme ».
         onJoinProgram={handleJoinProgram}

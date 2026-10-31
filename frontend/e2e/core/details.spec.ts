@@ -91,8 +91,8 @@ async function expectRendered(root: Locator) {
   await expect(root.getByRole('heading', { level: 3, name: 'Section' })).toBeVisible();
   await expect(root.getByRole('heading', { level: 4, name: 'Entete' })).toBeVisible();
   await expect(root.getByRole('heading', { level: 5, name: 'Petit' })).toBeVisible();
-  const block = root.locator('[role="code-block"]');
-  await expect(block.locator('[role="code-lang"]')).toHaveText('python');
+  const block = root.locator('[data-role="code-block"]');
+  await expect(block.locator('[data-role="code-lang"]')).toHaveText('python');
   await expect(block.locator('pre')).toContainText('print(1)');
 }
 
@@ -168,7 +168,7 @@ test('forum : toute la barre Markdown, rendu dans l’aperçu puis une fois publ
   await preview.click();
   await expect(preview).toHaveAttribute('aria-pressed', 'true');
   await expect(toolbar(page).getByRole('button', { name: 'Gras' })).toBeDisabled();
-  await expectRendered(page.locator('[role="preview"]'));
+  await expectRendered(page.locator('[data-role="preview"]'));
   await preview.click();
   await expect(editor(page)).toHaveValue(MARKDOWN_BODY);
 
@@ -279,8 +279,8 @@ test('quiz du jour : éclair dans l’éditeur, en-tête « Quiz du jour » chez
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
-    await page.getByRole('button', { name: 'Retour' }).click();
+    // Enregistré : retour à la liste des quiz (#201).
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
     await expect(bolt(quizRow(page, regular), true)).toHaveCount(1);
     await page.getByRole('button', { name: 'Fermer' }).click();
 
@@ -324,7 +324,7 @@ test('réordonner les questions d’un quiz par la poignée, persisté et vu par
     await pointerDrag(page, rows.nth(1).locator('> span').first(), rows.nth(0));
     await expect(rows).toHaveText([/Seconde question/, /Première question/]);
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // enregistré (#201)
 
     // Persisté : l'ordre (orderIndex) côté serveur, et la question 1 de l'étudiant.
     const edit = (await (await api.get(`/api/quizzes/${quizId}/edit`)).json()) as {
@@ -433,8 +433,9 @@ test('« Modifier le cours » : rattacher le cours à un second programme', asyn
     await page.getByRole('listbox').getByRole('button', { name: `Modifier le cours ${fx.course.code}` }).click();
     await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toBeVisible();
     await expect(page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first()).toBeVisible();
-    // Ouvrir le sélecteur : clic dans la zone des puces, à droite d'elles (une puce = « Retirer »).
-    const tags = page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first().locator('xpath=..');
+    // Ouvrir le sélecteur : clic dans la zone des puces, à droite d'elles. Seule la croix d'une
+    // puce est un bouton « Retirer » : zone = grand-parent (croix → puce → zone).
+    const tags = page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first().locator('xpath=../..');
     const box = (await tags.boundingBox())!;
     await tags.click({ position: { x: box.width - 8, y: box.height / 2 } });
     await page.getByPlaceholder('Rechercher un programme…').fill(other.name);

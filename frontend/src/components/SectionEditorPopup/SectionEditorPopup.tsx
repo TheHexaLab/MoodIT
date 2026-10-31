@@ -213,6 +213,7 @@ export function SectionEditorPopup({
             <span>{prefix}</span>
             <input
               type="text"
+              aria-label={t.nameInputAria}
               value={draftName}
               autoFocus
               onChange={(e) => setDraftName(e.target.value)}

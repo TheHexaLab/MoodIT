@@ -2,7 +2,11 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { useState } from 'react';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { CodeEditor } from './CodeEditor';
-import type { RunResult } from '../MainPanel/QuizView/quizAttempt';
+import {
+  EXECUTION_BUSY_MESSAGE,
+  ExecutionBusyError,
+  type RunResult,
+} from '../MainPanel/QuizView/quizAttempt';
 
 // jsdom ne fournit pas ResizeObserver (utilisé par l'auto-dimensionnement de l'éditeur).
 class ResizeObserverStub {
@@ -104,6 +108,14 @@ describe('CodeEditor', () => {
     await waitFor(() =>
       expect(screen.getByText(/Exécution impossible pour le moment/)).toBeTruthy()
     );
+  });
+
+  it('affiche le message « trop d’exécutions » si le service refuse faute de place (429)', async () => {
+    const onRun = vi.fn().mockRejectedValue(new ExecutionBusyError());
+    render(<CodeEditor value="x" onChange={() => {}} onRun={onRun} ariaLabel="code" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Exécuter' }));
+    expect(await screen.findByText(EXECUTION_BUSY_MESSAGE)).toBeTruthy();
+    expect(screen.queryByText(/Exécution impossible pour le moment/)).toBeNull();
   });
 });
 

@@ -102,12 +102,12 @@ describe('UpdateCoursePopup', () => {
 
   it('ignore un id de programme inconnu dans les chips', () => {
     renderPopup({ course: { ...COURSE, programIds: [1, 999] } });
-    expect(screen.getAllByRole('button', { name: /Retirer/ })).toHaveLength(2); // chip + sa croix
+    expect(screen.getAllByRole('button', { name: /Retirer/ })).toHaveLength(1); // la croix du chip (le chip n'est pas un bouton imbriqué)
   });
 
   it('retirer un chip détache le programme', () => {
     renderPopup();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Retirer Génie informatique' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer Génie informatique' }));
     expect(screen.queryByText('GIN - Promo 71')).toBeNull();
     expect(screen.getByText(t.programsPlaceholder)).toBeTruthy();
     expect(saveButton().disabled).toBe(true);

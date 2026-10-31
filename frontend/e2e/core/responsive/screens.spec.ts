@@ -193,7 +193,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   const longText = `${tag} ${longWord} https://exemple.test/${'segment/'.repeat(20)} ${'texte long '.repeat(60)}`;
   await composer.fill(longText);
   await composer.press('Enter');
-  const row = main(page).locator('li[role="message"]').filter({ hasText: tag });
+  const row = main(page).locator('li[data-role="message"]').filter({ hasText: tag });
   await expect(row).toBeVisible();
   await expectScreenFits(page);
   await expectWithinWidth(row);
@@ -211,7 +211,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   const answer = `Réponse ${tag}`;
   await composer.fill(answer);
   await press(send, hasTouch);
-  const replyRow = main(page).locator('li[role="message"]').filter({ hasText: answer });
+  const replyRow = main(page).locator('li[data-role="message"]').filter({ hasText: answer });
   const chip = replyRow.getByRole('button', { name: new RegExp(`^NE ${tag}`) });
   await expect(chip).toBeVisible();
   await expectScreenFits(page);
@@ -219,7 +219,7 @@ test('canal : messages longs, réponse, composeur et bouton d’envoi atteignabl
   // ≤ 768 px la barre d'actions flotte dans la ligne ; au-delà elle est en ligne.
   if (hasTouch) await replyRow.tap();
   else await replyRow.hover();
-  const actions = replyRow.locator('[role="message-actions"]');
+  const actions = replyRow.locator('[data-role="message-actions"]');
   await expect(actions).toHaveCSS('position', dense ? 'absolute' : 'static');
   await expectWithinWidth(actions);
   await context.close();
@@ -283,7 +283,7 @@ test('forum : sujet Markdown long et réponses sans débordement', async ({ brow
   const up = card.getByRole('button', { name: 'Voter pour' }).first();
   await expect(card.getByRole('button', { name: 'Voter pour' })).toHaveCount(1);
   await expect(up).toBeDisabled(); // son propre sujet
-  const upInMobileVote = await up.evaluate((el) => el.closest('[role="mobile-vote"]') !== null);
+  const upInMobileVote = await up.evaluate((el) => el.closest('[data-role="mobile-vote"]') !== null);
   expect(upInMobileVote).toBe(dense);
 
   // Réponse (actions révélées au toucher de la carte ≤ 768 px) puis réponse imbriquée.
@@ -295,7 +295,7 @@ test('forum : sujet Markdown long et réponses sans débordement', async ({ brow
   await expectField(composer, hasTouch);
   await composer.fill(`Réponse ${tag} ${'LongueRéponseSansEspace'.repeat(8)}`);
   await press(card.getByRole('button', { name: 'Répondre', exact: true }).last(), hasTouch);
-  const reply = card.locator('li[role="comment"]').filter({ hasText: `Réponse ${tag}` }).last();
+  const reply = card.locator('li[data-role="comment"]').filter({ hasText: `Réponse ${tag}` }).last();
   await expect(reply).toBeVisible();
   await expectScreenFits(page);
   await expectWithinWidth(reply);
@@ -361,7 +361,8 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
   await press(establishment, hasTouch);
   await expectField(page.getByPlaceholder('Rechercher un programme…'), hasTouch);
   // Ligne = code + nom + cohorte (ex. « GIN Génie informatique Promo … »).
-  const program = page.getByRole('button', { name: new RegExp(`${PROGRAM_NAME} `) });
+  // « ^code nom » : exclut la pastille du rail (« Génie informatique — GIN »).
+  const program = page.getByRole('button', { name: new RegExp(`^\\S+ ${PROGRAM_NAME} `) });
   await expectActionable(program, hasTouch, 32);
   await expect(program).toHaveAttribute('aria-pressed', 'true'); // déjà abonné
   await noteTarget(page.getByRole('button', { name: 'Retour', exact: true }), hasTouch); // 18×18 px
@@ -529,7 +530,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
     // « Choix unique » d'abord : c'est le type par défaut, les autres sont choisis dans la liste.
     const checks: Record<string, () => Promise<void>> = {
       'Choix unique': async () => {
-        await expectField(page.getByRole('textbox', { name: 'Réponse…' }).first(), hasTouch);
+        await expectField(page.getByRole('textbox', { name: /^Réponse \d+$/ }).first(), hasTouch);
         await noteTarget(page.getByRole('button', { name: 'Supprimer la réponse' }).first(), hasTouch);
         await expectActionable(page.getByRole('button', { name: '+ Ajouter une réponse' }), hasTouch);
       },
@@ -537,7 +538,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
         await noteTarget(page.getByRole('button', { name: 'Marquer comme correcte' }).first(), hasTouch);
       },
       'Choix multiple': async () => {
-        await expectField(page.getByRole('textbox', { name: 'Réponse…' }).last(), hasTouch);
+        await expectField(page.getByRole('textbox', { name: /^Réponse \d+$/ }).last(), hasTouch);
       },
       'Remise en ordre': async () => {
         await expectField(page.getByRole('textbox', { name: 'Élément…' }).first(), hasTouch);
@@ -586,8 +587,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
     await expectPopup(page, 'Harnais de test', ['+ Ajouter un harnais', 'Annuler'], hasTouch);
     await press(page.getByRole('button', { name: '+ Ajouter un harnais' }), hasTouch);
     await expectField(page.getByPlaceholder('Nom du cas (ex. Cas nominal)'), hasTouch);
-    // Champ « Poids » : input type=number sans nom accessible (le libellé est un <span> voisin).
-    await expectField(page.getByRole('spinbutton').last(), hasTouch);
+    await expectField(page.getByRole('spinbutton', { name: 'Poids' }), hasTouch);
     await expectField(page.getByRole('textbox', { name: 'Code du harnais 1' }), hasTouch);
     await noteTarget(page.getByRole('button', { name: 'Supprimer le harnais' }), hasTouch);
     await expectActionable(page.getByRole('button', { name: 'Enregistrer' }), hasTouch);

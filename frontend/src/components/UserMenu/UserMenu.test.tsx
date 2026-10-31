@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import UserMenu, { type UserMenuUser } from './UserMenu';
 import { ThemeContext, type Theme, type ThemeApi } from '../../context/themeContext';
@@ -67,7 +68,7 @@ function fireAnimationEnd(el: HTMLElement) {
 }
 
 function trigger() {
-  return screen.getByRole('button', { name: 'Compte utilisateur' });
+  return screen.getByRole('button', { name: /^Compte utilisateur/ });
 }
 
 function openMenu() {
@@ -92,34 +93,42 @@ describe('UserMenu', () => {
       const btn = trigger();
       expect(btn.textContent).toContain('Jean Doe');
       expect(btn.textContent).toContain('@jdoe');
-      expect(btn.textContent).toContain('JD');
+      // Initiales dessinées en CSS : attribut, pas texte (hors du texte visible).
+      expect(btn.querySelector('[data-initials]')?.getAttribute('data-initials')).toBe('JD');
       expect(btn.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('footer : le nom accessible contient le texte visible (WCAG 2.5.3)', () => {
+      renderMenu();
+      expect(screen.getByRole('button', { name: 'Compte utilisateur : Jean Doe @jdoe' })).toBeTruthy();
     });
 
     it('sans prénom/nom : affiche le nom d’utilisateur et une seule initiale', () => {
       renderMenu({ user: { id: 2, username: 'alice', firstName: '', lastName: '' } });
-      expect(trigger().textContent).toBe('Aalice@alice');
+      expect(trigger().textContent).toBe('alice @alice');
+      expect(trigger().querySelector('[data-initials]')?.getAttribute('data-initials')).toBe('A');
     });
 
     it('sans utilisateur : libellés de repli', () => {
       renderMenu({ user: null });
-      expect(trigger().textContent).toBe('UUtilisateur@utilisateur');
+      expect(trigger().textContent).toBe('Utilisateur @utilisateur');
     });
 
     it('compact : pastille d’initiales seule', () => {
       renderMenu({ props: { variant: 'compact' } });
-      expect(trigger().textContent).toBe('JD');
+      expect(trigger().getAttribute('data-initials')).toBe('JD');
+      expect(trigger().textContent).toBe('');
     });
 
     it('chargement : skeleton, pas de déclencheur', () => {
       const { container } = renderMenu({ props: { loading: true } });
-      expect(screen.queryByRole('button', { name: 'Compte utilisateur' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Compte utilisateur/ })).toBeNull();
       expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
     });
 
     it('chargement en variante compacte : pas de déclencheur non plus', () => {
       renderMenu({ props: { loading: true, variant: 'compact' } });
-      expect(screen.queryByRole('button', { name: 'Compte utilisateur' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Compte utilisateur/ })).toBeNull();
     });
   });
 
@@ -210,7 +219,7 @@ describe('UserMenu', () => {
     it('clair → bascule en sombre et persiste dans les settings', () => {
       const { setTheme, saveSettings } = renderMenu({ theme: 'light' });
       openMenu();
-      const toggle = screen.getByRole('switch', { name: 'Mode sombre' });
+      const toggle = screen.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
       expect(toggle.getAttribute('aria-checked')).toBe('false');
       fireEvent.click(toggle);
       expect(setTheme).toHaveBeenCalledWith('dark');
@@ -220,7 +229,7 @@ describe('UserMenu', () => {
     it('sombre → bascule en clair', () => {
       const { setTheme, saveSettings } = renderMenu({ theme: 'dark' });
       openMenu();
-      const toggle = screen.getByRole('switch', { name: 'Mode sombre' });
+      const toggle = screen.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
       expect(toggle.getAttribute('aria-checked')).toBe('true');
       fireEvent.click(toggle);
       expect(setTheme).toHaveBeenCalledWith('light');
@@ -340,5 +349,43 @@ describe('UserMenu', () => {
       });
       expect(screen.getByRole('button', { name: 'Fermer le menu du compte' })).toBeTruthy();
     });
+  });
+});
+
+// Patron WAI-ARIA « Menu Button », au clavier réel (user-event).
+describe('UserMenu — navigation au clavier', () => {
+  it('Entrée ouvre le menu et place le focus sur « Mode sombre » ; les flèches circulent', async () => {
+    const user = userEvent.setup();
+    renderMenu({ props: { onEditProfile: vi.fn() } });
+    trigger().focus();
+    await user.keyboard('{Enter}');
+    const menu = screen.getByRole('menu', { name: 'Menu du compte' });
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitemcheckbox', { name: 'Mode sombre' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Modifier le profil' }));
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Se déconnecter' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitemcheckbox', { name: 'Mode sombre' }));
+  });
+
+  it('Entrée sur un élément l’active (« Modifier le profil »)', async () => {
+    const user = userEvent.setup();
+    const onEditProfile = vi.fn();
+    renderMenu({ props: { onEditProfile } });
+    trigger().focus();
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+    expect(onEditProfile).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('Échap depuis un élément ferme le menu et rend le focus au bouton', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    trigger().focus();
+    await user.keyboard('{Enter}{ArrowDown}');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 });

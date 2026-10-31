@@ -135,7 +135,40 @@ class PistonClientTest {
         assertThat(body.get("files").get(0).get("content").asString()).isEqualTo("print(1)");
         assertThat(body.get("files").get(1).get("name").asString()).isEqualTo("student_server.py");
         assertThat(body.get("files").get(1).get("content").asString()).isEqualTo("x = 'é'");
-        assertThat(body.size()).isEqualTo(5); // aucun champ superflu
+        // Limites mémoire par défaut (#24) : sans elles, Piston n'en applique aucune.
+        assertThat(body.get("run_memory_limit").asLong()).isEqualTo(256_000_000L);
+        assertThat(body.get("compile_memory_limit").asLong()).isEqualTo(512_000_000L);
+        assertThat(body.size()).isEqualTo(7); // aucun champ superflu
+    }
+
+    @Test
+    void envoie_les_limites_memoire_configurees() throws Exception {
+        respond(200, OK_RESPONSE);
+        PistonClient c = new PistonClient(baseUrl, 3000, 10000, 20000, 128_000_000L, 300_000_000L);
+
+        c.execute("python", "*", oneFile());
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("run_memory_limit").asLong()).isEqualTo(128_000_000L);
+        assertThat(body.get("compile_memory_limit").asLong()).isEqualTo(300_000_000L);
+    }
+
+    @Test
+    void limite_memoire_nulle_ou_negative_n_est_pas_envoyee() throws Exception {
+        // ≤ 0 : on laisse Piston appliquer sa configuration (0 serait lu comme « 0 octet »).
+        respond(200, OK_RESPONSE);
+        new PistonClient(baseUrl, 3000, 10000, 20000, 0L, -1L).execute("python", "*", oneFile());
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.has("run_memory_limit")).isFalse();
+        assertThat(body.has("compile_memory_limit")).isFalse();
+        assertThat(body.size()).isEqualTo(5);
+
+        // Une seule des deux à 0 : l'autre est quand même envoyée.
+        new PistonClient(baseUrl, 3000, 10000, 20000, 1L, 0L).execute("python", "*", oneFile());
+        body = JSON.readTree(lastBody.get());
+        assertThat(body.get("run_memory_limit").asLong()).isEqualTo(1L);
+        assertThat(body.has("compile_memory_limit")).isFalse();
     }
 
     @Test

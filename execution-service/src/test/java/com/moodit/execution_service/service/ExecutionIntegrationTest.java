@@ -291,6 +291,32 @@ class ExecutionIntegrationTest {
         assertThat(passes("SQL", "SELECT n FROM t WHERE n > 1", roHarness)).isFalse();
     }
 
+    // ─────────────────────── Limites du bac à sable (#24) ───────────────────────
+
+    @Test
+    void sql_etat_de_plus_de_100_ko_recu_complet() {
+        // Phase 1 : l'étudiant remplit la table de 2 000 lignes de 50 caractères ; le dump renvoyé
+        // par Piston dépasse 100 Ko. Avec la limite de sortie par défaut de Piston (1 024 caractères),
+        // il serait tronqué et la phase 2 ne retrouverait pas toutes les lignes.
+        requireRuntime("sqlite3");
+        String harness = "CREATE TABLE t(v TEXT);\n-- @student\n"
+                + "SELECT (SELECT count(*) FROM t) = 2000 AND (SELECT sum(length(v)) FROM t) = 100000;";
+        String student = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) "
+                + "INSERT INTO t SELECT printf('%050d', i) FROM n;";
+        assertThat(passes("SQL", student, harness)).isTrue();
+    }
+
+    @Test
+    void boucle_d_allocation_tuee_par_la_limite_memoire() {
+        // PistonClient envoie run_memory_limit (256 Mo par défaut) : le processus est tué bien avant
+        // le délai d'exécution. Sans limite, la boucle tournerait jusqu'au délai (Time limit exceeded).
+        requireRuntime("python");
+        PistonClient.Stage run = piston.execute("python", "*", List.of(new PistonClient.File("main.py",
+                "a = []\nwhile True:\n    a.append(bytearray(10 * 1024 * 1024))\n"))).run();
+        assertThat(run.code() != null && run.code() == 137 || "SIGKILL".equals(run.signal())).isTrue();
+        assertThat(run.message()).doesNotContain("Time limit");
+    }
+
     /** Le bundle react-runtime.js est-il présent (nécessaire pour assembler JSX/TSX) ? */
     private static boolean vendorAvailable() {
         String dir = System.getenv().getOrDefault("APP_VENDOR_DIR", "/nonexistent-vendor");

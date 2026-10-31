@@ -31,6 +31,8 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -165,7 +167,7 @@ class ForumControllerTest {
         @Test
         @DisplayName("GET /forums/{id}/posts → loadChildren false, curseur absent, limite 20 par défaut")
         void sujets_defauts() throws Exception {
-            when(forumService.getRootPostsPage(4, null, 20, false, null)).thenReturn(List.of(postDto(1, "s")));
+            when(forumService.getRootPostsPage(4, null, 20, false, false, null)).thenReturn(List.of(postDto(1, "s")));
 
             mockMvc.perform(get("/api/forums/4/posts"))
                     .andExpect(status().isOk())
@@ -175,14 +177,15 @@ class ForumControllerTest {
         @Test
         @DisplayName("GET /forums/{id}/posts avec tous les paramètres → transmis tels quels")
         void sujets_parametres() throws Exception {
-            when(forumService.getRootPostsPage(4, 30, 5, true, EMAIL)).thenReturn(List.of());
+            when(forumService.getRootPostsPage(4, 30, 5, true, true, EMAIL)).thenReturn(List.of());
 
             mockMvc.perform(get("/api/forums/4/posts")
                             .param("loadChildren", "true").param("before", "30").param("limit", "5")
+                            .param("includeExpired", "true")
                             .header("X-User-Email", EMAIL))
                     .andExpect(status().isOk());
 
-            verify(forumService).getRootPostsPage(4, 30, 5, true, EMAIL);
+            verify(forumService).getRootPostsPage(4, 30, 5, true, true, EMAIL);
         }
 
         @Test
@@ -271,6 +274,38 @@ class ForumControllerTest {
                     eq(EMAIL));
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "{\"voteValue\":0,\"postId\":10,\"forumId\":4}",
+                "{\"voteValue\":2,\"postId\":10,\"forumId\":4}",
+                "{\"voteValue\":-5,\"postId\":10,\"forumId\":4}",
+                "{\"postId\":10,\"forumId\":4}",
+                "{\"voteValue\":1,\"forumId\":4}",
+                "{\"voteValue\":1,\"postId\":0,\"forumId\":4}",
+                "{\"voteValue\":1,\"postId\":10}",
+                "{\"voteValue\":1,\"postId\":10,\"forumId\":-4}"
+        })
+        @DisplayName("POST /forums/posts/votes invalide (valeur ≠ ±1, id absent ou ≤ 0) → 400, service non appelé")
+        void voter_invalide_400(String body) throws Exception {
+            mockMvc.perform(post("/api/forums/posts/votes").header("X-User-Email", EMAIL)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(forumService);
+        }
+
+        @Test
+        @DisplayName("POST /forums/posts/votes sur un post introuvable → 404")
+        void voter_postInexistant_404() throws Exception {
+            doThrow(new PostNotFoundException()).when(forumService)
+                    .addVoteToPost(any(VoteCreateInPostDTO.class), eq(EMAIL));
+
+            mockMvc.perform(post("/api/forums/posts/votes").header("X-User-Email", EMAIL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"voteValue\":1,\"postId\":99,\"forumId\":4}"))
+                    .andExpect(status().isNotFound());
+        }
+
         @Test
         @DisplayName("PATCH /forums/{id} → 200 avec le forum renommé")
         void modifierForum() throws Exception {
@@ -300,6 +335,29 @@ class ForumControllerTest {
 
             verify(forumService).updatePost(eq(4), eq(10),
                     argThat(dto -> Boolean.TRUE.equals(dto.getIsPinned()) && dto.getTitle() == null));
+        }
+
+        @Test
+        @DisplayName("PATCH d'un post dans un autre type que application/json → 415, service non appelé")
+        void modifierPost_typeNonJson_415() throws Exception {
+            mockMvc.perform(patch("/api/forums/4/posts/10")
+                            .contentType("application/merge-patch+json")
+                            .content("{\"isPinned\":true}"))
+                    .andExpect(status().isUnsupportedMediaType());
+
+            verifyNoInteractions(forumService);
+        }
+
+        @Test
+        @DisplayName("PATCH d'un post en application/json avec charset → accepté")
+        void modifierPost_jsonAvecCharset_200() throws Exception {
+            when(forumService.updatePost(eq(4), eq(10), any(ForumUpdatePostDTO.class)))
+                    .thenReturn(PostDTO.builder().id(10).content("x").build());
+
+            mockMvc.perform(patch("/api/forums/4/posts/10")
+                            .contentType("application/json;charset=UTF-8")
+                            .content("{\"content\":\"x\"}"))
+                    .andExpect(status().isOk());
         }
 
         @Test
@@ -338,6 +396,15 @@ class ForumControllerTest {
                     .andExpect(status().isNoContent());
 
             verify(forumService).deletePost(4, 10, EMAIL);
+        }
+
+        @Test
+        @DisplayName("DELETE d'un post introuvable → 404 (pas 500)")
+        void supprimerPost_inexistant_404() throws Exception {
+            doThrow(new PostNotFoundException()).when(forumService).deletePost(4, 99, EMAIL);
+
+            mockMvc.perform(delete("/api/forums/4/posts/99").header("X-User-Email", EMAIL))
+                    .andExpect(status().isNotFound());
         }
 
         @Test

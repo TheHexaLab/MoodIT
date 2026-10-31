@@ -14,6 +14,7 @@ import { LogOut } from '../../assets/LogOut.tsx';
 import { contrastingTextColor } from '../../helpers/color.ts';
 import { avatarInitials } from '../../helpers/text.ts';
 import { type User as UserMenuUser } from '../../types/domain.ts';
+import { useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
 
 // L'utilisateur affiché est l'entité User du domaine (source unique).
 // `UserMenuUser` est conservé comme alias de compat pour les imports existants.
@@ -133,6 +134,15 @@ export default function UserMenu({
     }
   }, []);
 
+  // Clavier (patron WAI-ARIA « Menu Button ») : focus sur le premier élément à l'ouverture,
+  // flèches / Début / Fin entre les éléments, Échap qui ferme et rend le focus au bouton.
+  const handleMenuKeyDown = useMenuKeyboard({
+    open: isOpen,
+    containerRef: popupRef,
+    onEscape: requestClose,
+    returnFocus: () => triggerRef.current,
+  });
+
   // Ferme le menu au clic extérieur (déclencheur ou popup porté) ou sur Échap ;
   // recalcule la position au resize / scroll tant qu'il est ouvert.
   useEffect(() => {
@@ -250,6 +260,7 @@ export default function UserMenu({
               aria-label="Menu du compte"
               style={isMobile ? undefined : { left: popupPos?.left, bottom: popupPos?.bottom }}
               onAnimationEnd={handlePopupAnimationEnd}
+              onKeyDown={handleMenuKeyDown}
             >
               {/* ── Section 1 : carte d'identité ── */}
               <section className={styles.identity}>
@@ -278,9 +289,11 @@ export default function UserMenu({
                     />
                     Mode sombre
                   </span>
+                  {/* Case à cocher de menu (et non « switch ») : seuls les rôles menuitem*
+                      sont permis comme enfants d'un role="menu". */}
                   <button
                     type="button"
-                    role="switch"
+                    role="menuitemcheckbox"
                     aria-checked={theme === 'dark'}
                     aria-label="Mode sombre"
                     className={`${styles.toggle}${theme === 'dark' ? ` ${styles.toggleOn}` : ''}`}
@@ -423,13 +436,14 @@ export default function UserMenu({
           aria-haspopup="menu"
           aria-expanded={isOpen}
           aria-label="Compte utilisateur"
+          // Initiales dessinées en CSS (::before) : pastille décorative, hors du « texte
+          // visible » que le nom accessible doit contenir (WCAG 2.5.3).
+          data-initials={initials}
           style={{
             background: user?.avatarColor || 'var(--brand-teal)',
             color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
           }}
-        >
-          {initials}
-        </button>
+        />
       ) : (
         <button
           ref={triggerRef}
@@ -438,20 +452,21 @@ export default function UserMenu({
           onClick={toggleOpen}
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          aria-label="Compte utilisateur"
+          // Le nom accessible reprend le nom et l'identifiant affichés (WCAG 2.5.3).
+          aria-label={`Compte utilisateur : ${displayName} ${handle}`}
         >
+          {/* Initiales dessinées en CSS (::before) : pastille décorative, hors du texte visible. */}
           <span
             className={styles.userAvatarInitials}
+            data-initials={initials}
             style={{
               background: user?.avatarColor || 'var(--brand-teal)',
               color: contrastingTextColor(user?.avatarColor || 'var(--brand-teal)'),
             }}
             aria-hidden="true"
-          >
-            {initials}
-          </span>
+          />
           <span className={styles.userInfo}>
-            <span className={styles.userName}>{displayName}</span>
+            <span className={styles.userName}>{displayName}</span>{' '}
             <span className={styles.userHandle}>{handle}</span>
           </span>
         </button>

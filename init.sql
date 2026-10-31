@@ -156,6 +156,9 @@ CREATE TABLE Post(
    user_id INTEGER NOT NULL,
    post_parent_id INTEGER,
    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+   -- Annonce (forum 'Announcement') : couleur de la palette et date d'expiration (NULL = jamais).
+   color VARCHAR(16),
+   expires_at TIMESTAMP,
    PRIMARY KEY(id),
    FOREIGN KEY(forum_id) REFERENCES Forum(id) ON DELETE CASCADE,
    FOREIGN KEY(user_id) REFERENCES User_(id) ON DELETE CASCADE,
@@ -295,6 +298,7 @@ CREATE TABLE Submission_Test_Case(
 -- Historique conservé : une ligne par analyse (tri par created_at).
 -- status : 'pending' (job en cours), 'done' (analyse disponible), 'failed' (échec du job).
 -- content NULL tant que le job n'a pas produit de résultat (pending/failed).
+-- source : origine du contenu ('LLM' ou 'DETERMINISTIC'), NULL tant que pas de résultat.
 CREATE TABLE MCP_Response(
    id SERIAL,
    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -302,6 +306,9 @@ CREATE TABLE MCP_Response(
    -- Défaut 'pending' (état logique d'une ligne fraîchement insérée). Le service pose
    -- toujours le statut explicitement ; ce défaut protège un INSERT manuel oublié.
    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+   -- Origine du contenu : 'LLM' (modèle de langage) ou 'DETERMINISTIC' (repli calculé sans IA).
+   -- NULL tant que l'analyse n'est pas terminée (et pour les analyses antérieures à la colonne).
+   source VARCHAR(16),
    user_id INTEGER NOT NULL,
    course_id INTEGER NOT NULL,
    PRIMARY KEY(id),
@@ -311,7 +318,8 @@ CREATE TABLE MCP_Response(
 
 -- Verrou « une seule analyse en cours par (cours, utilisateur) » : rend la garde de
 -- tentative unique ATOMIQUE (deux POST concurrents → le 2e viole l'index → 409).
-CREATE UNIQUE INDEX uq_mcp_response_pending ON MCP_Response(course_id, user_id) WHERE status = 'pending';
+-- Majuscules : McpStatus est stocké par son nom (EnumType.STRING).
+CREATE UNIQUE INDEX uq_mcp_response_pending ON MCP_Response(course_id, user_id) WHERE status = 'PENDING';
 
 CREATE TABLE User_Program(
    program_id INTEGER,
@@ -495,7 +503,9 @@ INSERT INTO Course (title, code) VALUES
 INSERT INTO F_Type (name) VALUES
   ('Discussion'),
   ('Thread'),
-  ('Voice');   -- Salon vocal (prototype) : forum sans Post, le « contenu » est le flux audio.
+  ('Voice'),          -- 3 : salon vocal (prototype) : forum sans Post, le « contenu » est le flux audio.
+  ('Announcement');   -- 4 : canal d'annonces : un par cours, seul le personnel publie.
+                      -- Ordre de la prod : Voice existait avant la migration des annonces.
 
 -- ------------------------------------------------------------
 -- Forum  (un forum Q&R et un forum Annonces par cours)
@@ -521,6 +531,14 @@ SELECT
     'Vocal — ' || c.title,
     3,
     c.id, 2
+FROM Course c;
+
+-- Canal d'annonces : exactement un par cours (créé aussi à la création d'un cours, côté core).
+INSERT INTO Forum (title, f_type_id, course_id, position)
+SELECT
+    'Annonces',
+    4,   -- 'Announcement'
+    c.id, 0
 FROM Course c;
 
 -- ------------------------------------------------------------
@@ -1691,3 +1709,28 @@ SELECT (SELECT count(*) FROM utilisateurs) = 1
 JOIN Question qn ON qn.order_index = v.oidx
                  AND qn.quiz_id = (SELECT id FROM Quiz WHERE title = 'Démo — Questions de code (multi-langages)'
                                                        AND course_id = (SELECT id FROM Course WHERE code = 'GIF201'));
+
+-- ------------------------------------------------------------
+-- Annonces (canal « Annonces » de MAT115)
+-- ------------------------------------------------------------
+-- Publiées par l'admin (Gardien). Une sans expiration, une expirée (grisée pour le personnel,
+-- masquée pour les étudiants) et une qui expire dans une semaine. Insérées en ordre chronologique
+-- (la liste est triée par id décroissant). Dates en UTC, comme le reste des posts lus par core.
+INSERT INTO Post (title, content, forum_id, user_id, color, expires_at, created_at)
+SELECT v.title, v.content, f.id, 1, v.color,
+       (NOW() AT TIME ZONE 'UTC') + v.expires_in,
+       (NOW() AT TIME ZONE 'UTC') - v.age
+FROM (VALUES
+  (1, 'Bienvenue dans MAT115 !',
+      'Le plan de cours et les notes du chapitre 1 sont dans le forum. Bonne session à tous !',
+      'blue', NULL::INTERVAL, INTERVAL '20 days'),
+  (2, 'TP 3 : changement de local (cette semaine seulement)',
+      'Le TP de mercredi a lieu au **D7-3018** au lieu du D7-2023.',
+      'orange', INTERVAL '-2 days', INTERVAL '6 days'),
+  (3, 'Examen intra déplacé au jeudi 5 novembre',
+      'Même local, même heure. Matière : chapitres 1 à 5 (les intégrales doubles ne sont **pas** à l''examen).',
+      'red', INTERVAL '7 days', INTERVAL '2 hours')
+) AS v(ord, title, content, color, expires_in, age)
+JOIN Forum f ON f.course_id = (SELECT id FROM Course WHERE code = 'MAT115')
+            AND f.f_type_id = (SELECT id FROM F_Type WHERE name = 'Announcement')
+ORDER BY v.ord;

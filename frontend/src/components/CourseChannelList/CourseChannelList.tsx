@@ -99,8 +99,42 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
     return acc;
   }, {});
 
+  /** Ligne cliquable d'un canal (sélection + ouverture) ; `trailing` : contenu en fin de ligne. */
+  function channelButton(
+    channel: CourseChannel,
+    className: string,
+    activeClassName: string,
+    trailing?: React.ReactNode
+  ) {
+    const isSelected = isSameChannel(selectedChannel, channel);
+    return (
+      <button
+        type="button"
+        className={`${className} ${isSelected ? activeClassName : ''}`}
+        onClick={() => {
+          onSelectChannel?.({ id: channel.id, type: channel.type });
+          onOpenChannel?.(channel);
+        }}
+        aria-current={isSelected ? 'page' : undefined}
+      >
+        <span className={styles.channelPrefix}>
+          <ChannelTypeIcon type={channel.type} />
+        </span>
+        <span className={styles.channelName}>{channel.name}</span>
+        {trailing}
+      </button>
+    );
+  }
+
   return (
     <div className={styles.channelSections}>
+      {/* Canal d'annonces : en tête, hors sections (un seul par cours, rien à éditer). */}
+      {(channelsByType.announcement ?? []).map((channel) => (
+        <div key={`announcement-${channel.id}`} className={styles.announcementItem}>
+          {channelButton(channel, styles.announcementButton, styles.announcementButtonActive)}
+        </div>
+      ))}
+
       {typeDefinitions.map((definition) => {
         const typedChannels = channelsByType[definition.type] ?? [];
         const isCollapsed = collapsedTypes[definition.type] ?? false;
@@ -153,31 +187,21 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
             {isCollapsed ? null : typedChannels.length > 0 ? (
               <ul className={styles.channelList} role="list">
                 {typedChannels.map((channel) => {
-                  const isSelected = isSameChannel(selectedChannel, channel);
                   // Présence vocale : participants connectés à ce salon (vide pour les autres types).
                   const present =
                     channel.type === 'voice' ? (voicePresence?.[channel.id] ?? []) : [];
                   return (
                     <li key={channel.id} className={styles.channelItem}>
-                      <button
-                        type="button"
-                        className={`${styles.channelButton} ${isSelected ? styles.channelButtonActive : ''}`}
-                        onClick={() => {
-                          onSelectChannel?.({ id: channel.id, type: channel.type });
-                          onOpenChannel?.(channel);
-                        }}
-                        aria-current={isSelected ? 'page' : undefined}
-                      >
-                        <span className={styles.channelPrefix}>
-                          <ChannelTypeIcon type={channel.type} />
-                        </span>
-                        <span className={styles.channelName}>{channel.name}</span>
-                        {present.length > 0 && (
+                      {channelButton(
+                        channel,
+                        styles.channelButton,
+                        styles.channelButtonActive,
+                        present.length > 0 && (
                           <span className={styles.voiceCount} aria-label={`${present.length} connecté(s)`}>
                             {present.length}
                           </span>
-                        )}
-                      </button>
+                        )
+                      )}
 
                       {present.length > 0 && (
                         <ul className={styles.voiceParticipants} role="list">

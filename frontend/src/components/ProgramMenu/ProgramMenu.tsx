@@ -11,6 +11,7 @@ import { LogOut } from '../../assets/LogOut.tsx';
 import { TrashCan } from '../../assets/TrashCan.tsx';
 import { type Program } from '../../types/domain.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
+import { isContextMenuKey, useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
 
 // Entité Program ré-exportée depuis le modèle de domaine (source unique).
 export type { Program };
@@ -136,6 +137,18 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   // ouvert le menu, pour NEUTRALISER la sélection de fin d'appui (sinon le programme changerait).
   const longPressTimer = useRef<number | null>(null);
   const longPressFired = useRef(false);
+  /** Menu contextuel porté (reçoit le focus à l'ouverture). */
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Clavier : le focus entre dans le menu à l'ouverture (sur le menu lui-même, la première
+  // flèche choisit le premier ou le dernier élément), Échap ferme et rend le focus à la pastille.
+  const handleContextMenuKeyDown = useMenuKeyboard({
+    open: contextMenu !== null,
+    containerRef: contextMenuRef,
+    initialFocus: 'container',
+    onEscape: () => setContextMenu(null),
+    returnFocus: () => contextMenu?.anchor.querySelector('button'),
+  });
 
   // Ferme le menu contextuel au clic, à l'Échap, au scroll ou au redimensionnement.
   useEffect(() => {
@@ -185,6 +198,14 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
 
   // Clic droit sur une pastille → menu contextuel (desktop, long-press Android).
   function openContextMenu(event: React.MouseEvent<HTMLLIElement>, programId: number) {
+    event.preventDefault();
+    openContextMenuAt(event.currentTarget, programId);
+  }
+
+  // Touche Menu ou Maj+F10 sur la pastille → même menu, sur tous les moteurs (seul Chromium
+  // les convertit lui-même en `contextmenu`).
+  function handleProgramKeyDown(event: React.KeyboardEvent<HTMLLIElement>, programId: number) {
+    if (!isContextMenuKey(event)) return;
     event.preventDefault();
     openContextMenuAt(event.currentTarget, programId);
   }
@@ -239,7 +260,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
   return (
     <nav className={styles.rail} aria-label="Programme">
       {/* Icône applicative (meme gabarit que le programme actif). */}
-      <div className={styles.appIcon} aria-label="MoodIT">
+      <div className={styles.appIcon} role="img" aria-label="MoodIT">
         <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
           <defs>
             <linearGradient
@@ -301,6 +322,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
           {programs.map((prog) => {
             const programId = prog.id;
             const programLabel = getProgramLabel(prog);
+            const badge = getProgramBadge(prog);
             const isActive = programId === activeProgramId;
 
             return (
@@ -309,6 +331,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 className={`${styles.programItem} ${isActive ? styles.programItemActive : ''}`}
                 onClick={() => handleSelectProgram(programId)}
                 onContextMenu={(event) => openContextMenu(event, programId)}
+                onKeyDown={(event) => handleProgramKeyDown(event, programId)}
                 onTouchStart={(event) => handleProgramTouchStart(event, programId)}
                 onTouchMove={cancelProgramLongPress}
                 onTouchEnd={cancelProgramLongPress}
@@ -317,8 +340,11 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                 <button
                   className={`${styles.programBtn} ${isActive ? styles.programBtnActive : ''}`}
                   title={programLabel}
-                  aria-label={programLabel}
+                  // Le nom accessible contient la pastille visible (WCAG 2.5.3, « label in name »).
+                  aria-label={`${programLabel} — ${badge}`}
                   aria-current={isActive ? 'page' : undefined}
+                  // Annonce le raccourci d'ouverture du menu contextuel (lecteurs d'écran).
+                  aria-keyshortcuts="Shift+F10"
                   style={
                     prog.color
                       ? ({
@@ -328,7 +354,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                       : undefined
                   }
                 >
-                  <span className={styles.programInitials}>{getProgramBadge(prog)}</span>
+                  <span className={styles.programInitials}>{badge}</span>
                 </button>
               </li>
             );
@@ -363,9 +389,12 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
 
           return createPortal(
           <div
+            ref={contextMenuRef}
             className={styles.contextMenu}
             role="menu"
             style={{ top: contextMenu.top, left: contextMenu.left }}
+            tabIndex={-1}
+            onKeyDown={handleContextMenuKeyDown}
             onClick={(event) => event.stopPropagation()}
             onContextMenu={(event) => event.preventDefault()}
           >

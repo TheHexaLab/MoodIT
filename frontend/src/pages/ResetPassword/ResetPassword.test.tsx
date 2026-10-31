@@ -287,8 +287,8 @@ describe('ResetPassword', () => {
   });
 
   it('le bouton de thème appelle toggleTheme', () => {
-    const { container } = renderReset();
-    fireEvent.click(container.querySelector('.light-dark-btn') as HTMLButtonElement);
+    renderReset();
+    fireEvent.click(screen.getByRole('button', { name: 'Changer de thème' }));
     expect(toggleTheme).toHaveBeenCalledTimes(1);
   });
 });

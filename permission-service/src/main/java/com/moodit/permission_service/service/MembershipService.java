@@ -10,9 +10,12 @@
 
 package com.moodit.permission_service.service;
 
+import com.moodit.permission_service.model.ForumAccess;
 import com.moodit.permission_service.model.User;
 import com.moodit.permission_service.repository.MembershipRepository;
 import com.moodit.permission_service.repository.UserRepository;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,6 +83,24 @@ public class MembershipService {
     return membershipRepository.canSeeForumViaProgram(userId, forumId);
   }
 
+  /** Le forum est-il le canal d'annonces de son cours ? Seul le personnel y publie. */
+  @Transactional(readOnly = true)
+  public boolean isAnnouncementForum(long forumId) {
+    return membershipRepository.isAnnouncementForum(forumId);
+  }
+
+  /** Accès de l'utilisateur au forum et ce que son type implique, en une seule requête. */
+  @Transactional(readOnly = true)
+  public ForumAccess forumAccess(long userId, long forumId) {
+    return ForumAccess.ofVisibleType(membershipRepository.visibleForumType(userId, forumId));
+  }
+
+  /** Le post est-il une annonce expirée (lisible seulement par le personnel du cours) ? */
+  @Transactional(readOnly = true)
+  public boolean isExpiredAnnouncement(long postId) {
+    return membershipRepository.isExpiredAnnouncement(postId, LocalDateTime.now(ZoneOffset.UTC));
+  }
+
   /**
    * L'utilisateur est-il ABONNE a ce programme (User_Program) ? Verification directe de
    * l'abonnement. Sert a autoriser l'inscription a des cours d'un programme (POST /courses/users) :
@@ -103,6 +124,12 @@ public class MembershipService {
   @Transactional(readOnly = true)
   public boolean canAccessQuiz(long userId, long quizId) {
     return membershipRepository.canSeeQuizViaProgram(userId, quizId);
+  }
+
+  /** Le quiz est-il publie ? (un brouillon est reserve au personnel du cours) */
+  @Transactional(readOnly = true)
+  public boolean isQuizPublished(long quizId) {
+    return membershipRepository.isQuizPublished(quizId);
   }
 
   /** Programmes auxquels le cours est actuellement rattaché. */

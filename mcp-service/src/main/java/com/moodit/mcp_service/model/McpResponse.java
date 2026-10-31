@@ -35,6 +35,11 @@ public class McpResponse {
     @Column(nullable = false, length = 16)
     private McpStatus status;
 
+    /** Origine du contenu (LLM ou repli déterministe). Null en PENDING / FAILED et pour l'historique. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private McpSource source;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;

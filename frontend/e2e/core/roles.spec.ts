@@ -58,7 +58,7 @@ test('l’administrateur du programme donne puis retire le rôle Enseignant ; ef
     await expectProgramMenu(target.page, PROGRAM_NAME, TEACHER_MENU);
     await target.page.keyboard.press('Escape');
 
-    // Retrait : la poubelle de la ligne (sans nom accessible).
+    // Retrait : la poubelle de la ligne (« Retirer <nom> du rôle »).
     await memberRow(page, 'Enseignant', user.email).getByRole('button').click();
     await expect(memberRow(page, 'Enseignant', user.email)).toHaveCount(0);
     await expectProgramMenu(target.page, PROGRAM_NAME, STUDENT_MENU);

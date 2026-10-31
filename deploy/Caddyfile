@@ -4,6 +4,11 @@
 
 # --- En-têtes de sécurité, appliqués à TOUTES les réponses (statiques + proxy) --
 # Caddy étant l'unique point d'entrée navigateur, c'est ici qu'on durcit tout.
+# Le frontend nginx envoie aussi X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+# Permissions-Policy et une CSP en Report-Only (frontend/nginx/security-headers.conf, #93), pour
+# les déploiements sans Caddy. Les en-têtes nommés ici remplacent ceux de nginx (mêmes valeurs) ;
+# Permissions-Policy et la CSP Report-Only de nginx passent tels quels. HSTS n'est posé qu'ici,
+# là où TLS est terminé.
 (security_headers) {
 	header {
 		# Anti-clickjacking : interdit toute mise en <iframe> de MoodIT.
@@ -13,7 +18,8 @@
 		# Content-Security-Policy stricte.
 		#  - script-src : 'self' + hash du script inline de bootstrap thème dans
 		#    index.html (pas de 'unsafe-inline' JS). Si ce script change, recalculer
-		#    le hash (openssl dgst -sha256 -binary | openssl base64 sur son contenu).
+		#    le hash (openssl dgst -sha256 -binary | openssl base64 sur son contenu) ;
+		#    frontend/src/securityHeaders.test.ts échoue tant qu'il ne correspond pas.
 		#  - styles : split fin pour minimiser 'unsafe-inline'.
 		#      * style-src-elem 'self' : seules les feuilles CSS bundlées (app +
 		#        katex.min.css) sont autorisées ; AUCUNE balise <style> inline

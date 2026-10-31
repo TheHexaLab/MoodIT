@@ -63,9 +63,8 @@ test.afterAll(async ({ baseURL }) => {
   await deleteFixture(baseURL!, fx);
 });
 
-/** Nom du formulaire de section (champ sans label ni placeholder, cf. inventaire). */
-const sectionNameField = (page: Page) =>
-  page.locator('input[type="text"]:not([aria-label]):not([placeholder])');
+/** Champ de nom du formulaire de section (« Nom du canal », « Nom du forum »…). */
+const sectionNameField = (page: Page) => page.getByRole('textbox', { name: /^Nom (du |de l')/ });
 const editorRow = (page: Page, name: string) =>
   page.getByRole('listitem').filter({ hasText: new RegExp(`^⠿\\s*${name}$`) });
 
@@ -758,7 +757,7 @@ test('éditeur de quiz : enregistrement en panne (formulaire conservé) puis suc
         await expect(page.getByText('Question de panne')).toBeVisible();
       }
     );
-    await expect(page.getByRole('heading', { name: 'Modifier le quiz' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // créé : retour à la liste (#201)
     const res = await api.get(`/api/courses/${fx.course.id}/quizzes/manage`);
     const titles = ((await res.json()) as { title: string }[]).map((q) => q.title);
     expect(titles).toContain(title);

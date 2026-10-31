@@ -65,7 +65,7 @@ test('mode sombre persisté en BD', async ({ browser, baseURL }) => {
   await expect(html).toHaveAttribute('data-theme', 'light');
 
   await openAccountMenu(page);
-  const darkSwitch = page.getByRole('switch', { name: 'Mode sombre' });
+  const darkSwitch = page.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
   await expect(darkSwitch).toHaveAttribute('aria-checked', 'false');
   const saved = settingsSaved(page, (s) => s.theme === 'dark');
   await darkSwitch.click();
@@ -84,7 +84,7 @@ test('mode sombre persisté en BD', async ({ browser, baseURL }) => {
   await otherPage.goto('/home');
   await expect(otherPage.locator('html')).toHaveAttribute('data-theme', 'dark');
   await openAccountMenu(otherPage);
-  await expect(otherPage.getByRole('switch', { name: 'Mode sombre' })).toHaveAttribute(
+  await expect(otherPage.getByRole('menuitemcheckbox', { name: 'Mode sombre' })).toHaveAttribute(
     'aria-checked',
     'true'
   );
@@ -127,8 +127,9 @@ test('modifier le profil : nom et couleur, « Annuler » ne change rien', async 
   );
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier le profil' })).toBeHidden();
-  await expect(accountButton(page)).toContainText(`Marie Tremblay@${user.username}`);
-  await expect(avatar).toHaveText('MT');
+  await expect(accountButton(page)).toContainText(`Marie Tremblay @${user.username}`);
+  // Initiales dessinées en CSS (data-initials), hors du texte visible du bouton.
+  await expect(avatar).toHaveAttribute('data-initials', 'MT');
   await expect(avatar).toHaveCSS('background-color', 'rgb(15, 118, 110)');
 
   await page.reload();

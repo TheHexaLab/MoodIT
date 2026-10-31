@@ -96,7 +96,7 @@ test('forum : descendre charge les sujets suivants (20 par page) ; réponses cha
   await sidebarItem(page, fx.forumName).click();
   const main = mainContent(page);
   const titles = main.getByRole('heading', { level: 2 }).filter({ hasText: new RegExp(`^Sujet défilement ${tag}`) });
-  const body = main.locator('[role="body"]');
+  const body = main.locator('[data-role="body"]');
 
   // Première page : les 20 plus récents (25 → 06).
   await expect(titles).toHaveCount(20);

@@ -21,6 +21,8 @@ export interface QuestionFormLabels {
   answersSection: string;
   markCorrectAria: string;
   answerPlaceholder: string;
+  /** Nom accessible du champ d'une réponse (reçoit son rang, à partir de 1). */
+  answerAria: (position: number) => string;
   deleteAnswerAria: string;
   addAnswer: string;
 
@@ -28,6 +30,8 @@ export interface QuestionFormLabels {
   orderingSection: string;
   deleteItemAria: string;
   addItem: string;
+  /** Pourquoi l'enregistrement est bloqué sous le minimum d'éléments (reçoit ce minimum). */
+  orderingMinItems: (min: number) => string;
 
   // ── Association ──
   matchingSection: string;
@@ -63,12 +67,14 @@ export const defaultQuestionFormLabels: QuestionFormLabels = {
   answersSection: 'Réponses',
   markCorrectAria: 'Marquer comme correcte',
   answerPlaceholder: 'Réponse…',
+  answerAria: (position) => `Réponse ${position}`,
   deleteAnswerAria: 'Supprimer la réponse',
   addAnswer: 'Ajouter une réponse',
 
   orderingSection: 'Éléments à ordonner',
   deleteItemAria: "Supprimer l'élément",
   addItem: 'Ajouter un élément',
+  orderingMinItems: (min) => `Une remise en ordre doit avoir au moins ${min} éléments.`,
 
   matchingSection: 'Associations',
   categoryPlaceholder: 'Catégorie',

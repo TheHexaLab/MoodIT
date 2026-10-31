@@ -210,9 +210,11 @@ export async function sessionFor(
   };
 }
 
-/** Pastille d'un programme dans le rail (nom accessible = nom du programme). */
+/** Pastille d'un programme dans le rail (nom accessible = « <nom du programme> — <pastille> »). */
 export const programButton = (page: Page, name: string) =>
-  page.getByRole('navigation', { name: 'Programme' }).getByRole('button', { name, exact: true });
+  page
+    .getByRole('navigation', { name: 'Programme' })
+    .getByRole('button', { name: new RegExp(`^${escapeRegExp(name)} — `) });
 
 /** Sélecteur de cours de la barre latérale (texte = code du cours actif). */
 export const courseSelector = (page: Page, code: string) =>

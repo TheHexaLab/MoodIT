@@ -55,10 +55,14 @@ export function answerKindFor(qType: QuestionType): QuestionAnswer['kind'] {
 }
 
 /**
- * Ordre de départ MÉLANGÉ d'une Remise en ordre, garanti DIFFÉRENT de l'ordre
- * correct : la question ne s'ouvre jamais déjà résolue. (≤ 1 élément → tel quel.)
+ * Ordre de départ d'une Remise en ordre, jamais l'ordre correct : la question ne s'ouvre pas
+ * déjà résolue. En PASSATION, `correctOrder` est absent et le serveur envoie déjà un ordre de
+ * départ fixe (le même à chaque chargement), garanti différent de l'ordre attendu (#28, #211) :
+ * il est gardé tel quel (le remélanger ici pourrait retomber sur la solution). Avec
+ * `correctOrder` (aperçu de l'éditeur), mélange local garanti différent. (≤ 1 élément → tel quel.)
  */
 function shuffledOrderingItemIds(items: DragItem[]): number[] {
+  if (items.every((d) => d.correctOrder == null)) return items.map((d) => d.id);
   const correct = [...items]
     .sort((a, b) => (a.correctOrder ?? 0) - (b.correctOrder ?? 0))
     .map((d) => d.id);
@@ -384,5 +388,21 @@ export class CodeVerificationUnavailableError extends Error {
   constructor() {
     super('Code verification unavailable');
     this.name = 'CodeVerificationUnavailableError';
+  }
+}
+
+/** Message affiché quand le service d'exécution refuse faute de place (HTTP 429, #24). */
+export const EXECUTION_BUSY_MESSAGE =
+  "Trop d'exécutions en cours. Attends quelques secondes, puis réessaie.";
+
+/**
+ * Exécution refusée par le service d'exécution faute de place (HTTP 429) : sandbox saturé ou
+ * trop d'exécutions en cours pour cet utilisateur. Rien n'a été exécuté ; réessayer plus tard
+ * suffit. Distincte d'un échec générique pour afficher un message adapté.
+ */
+export class ExecutionBusyError extends Error {
+  constructor() {
+    super(EXECUTION_BUSY_MESSAGE);
+    this.name = 'ExecutionBusyError';
   }
 }

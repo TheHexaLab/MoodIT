@@ -2,6 +2,7 @@ package com.moodit.mcp_service;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Microservice MCP : analyse de la « santé » d'un cours via un LLM (client compatible
@@ -10,6 +11,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * (endpoint interne). Servi sous /mcp (le gateway route /mcp/** ici, port 8082).
  */
 @SpringBootApplication
+@EnableScheduling // StalePendingAnalysisJob
 public class McpServiceApplication {
 
     public static void main(String[] args) {

@@ -279,35 +279,38 @@ public class PermissionService {
                     "/courses/{courseId}/users/{userId}",
                     (user, vars, body) -> verifyUserId(user, vars)),
             // ── Forum ───────────────────────────────────────────────────────────────────
-            // Ecrire un post : il faut voir le forum. forumId dans PostCreateInForumDTO.
+            // Ecrire un post : il faut voir le forum (cf. canWriteInForum). forumId dans
+            // PostCreateInForumDTO.
             rule(
                     "POST",
                     "/forums/posts",
-                    (user, vars, body) -> {
-                      long forumId = longField(body, "forumId");
-                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-                    }),
+                    (user, vars, body) -> canWriteInForum(user, longField(body, "forumId"))),
 
             // Voter sur un post : meme contrainte (le forum du post). forumId dans VoteCreateInPostDTO.
             rule(
                     "POST",
                     "/forums/posts/votes",
-                    (user, vars, body) -> {
-                      long forumId = longField(body, "forumId");
-                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-                    }),
+                    (user, vars, body) -> canWriteInForum(user, longField(body, "forumId"))),
 
             // Lire les sujets/messages d'un forum : etre abonne a un programme du cours du forum.
             // forumId dans le PATH. Couvre : sujets racines ('Thread') + reponses d'un post +
-            // messages d'un canal ('Discussion').
+            // messages d'un canal ('Discussion') + annonces. Inclure les annonces expirees est
+            // reserve au personnel du cours : un non-membre n'a droit qu'a `includeExpired` ABSENT
+            // ou exactement `false` (core convertit le parametre avec Spring, qui accepte aussi
+            // `1`, `yes`, `on`... : toute autre valeur est donc traitee comme une demande).
             rule(
                     "GET",
                     "/forums/{forumId}/posts",
-                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+                    (user, vars, body, query) -> {
+                      String includeExpired = query.get("includeExpired");
+                      boolean onlyUnexpired = includeExpired == null || "false".equals(includeExpired);
+                      return canAccessForum(user, vars, "forumId")
+                          && (onlyUnexpired || canManageForumContent(user, vars, "forumId"));
+                    }),
             rule(
                     "GET",
                     "/forums/{forumId}/posts/{postId}/replies",
-                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+                    (user, vars, body) -> canReadPost(user, vars)),
             rule(
                     "GET",
                     "/forums/{forumId}/messages",
@@ -318,10 +321,7 @@ public class PermissionService {
             rule(
                     "POST",
                     "/forums/messages",
-                    (user, vars, body) -> {
-                      long forumId = longField(body, "forumId");
-                      return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
-                    }),
+                    (user, vars, body) -> canWriteInForum(user, longField(body, "forumId"))),
 
             // Obtenir un JoinToken vocal (prototype) : meme appartenance qu'un message — etre
             // abonne a un programme du cours du salon vocal (Forum de F_Type 'Voice'). channelId
@@ -337,19 +337,29 @@ public class PermissionService {
             // EDITER un post ou message : reserve a SON AUTEUR (Post.user_id). On protege via le
             // postId (PATH) ; le forumId du motif n'intervient pas dans la decision. La MODERATION
             // (cf. DELETE ci-dessous) n'ouvre PAS l'edition : un moderateur supprime, il ne
-            // reecrit pas le message d'autrui.
+            // reecrit pas le message d'autrui. Canal d'annonces : le personnel du cours modifie
+            // toutes les annonces (comme il les publie et les supprime).
+            // EPINGLER (body.isPinned non nul) est une action de MODERATION : reserve au
+            // personnel du cours du forum, auteur ou non (cf. canEditForumPost).
             rule(
                     "PATCH",
                     "/forums/{forumId}/posts/{postId}",
-                    (user, vars, body) -> isPostAuthor(user, vars, "postId")),
+                    (user, vars, body) ->
+                        isAnnouncementPost(vars)
+                            ? canManageForumContent(user, vars, "forumId")
+                            : canEditForumPost(user, vars, body)),
             // SUPPRIMER un post ou message : SON AUTEUR, OU un MODERATEUR du forum. Moderateur =
             // Administrateur/Gardien GLOBAL (partout), OU Administrateur DU programme du cours du
             // forum (User_Program_Role via Forum.course_id). L'Enseignant N'est PAS moderateur.
             // postId (auteur) et forumId (moderation) sont tous deux dans le PATH.
+            // Canal d'annonces : reserve au personnel du cours (meme un ancien auteur est refuse).
             rule(
                     "DELETE",
                     "/forums/{forumId}/posts/{postId}",
-                    (user, vars, body) -> canModerateForumPost(user, vars)),
+                    (user, vars, body) ->
+                        isAnnouncementPost(vars)
+                            ? canManageForumContent(user, vars, "forumId")
+                            : canModerateForumPost(user, vars)),
 
             // ── Course / Program : structure, inscription, abonnement ─────────────────────
             // Lister les forums d'un cours (canaux 'Discussion' + forums 'Thread', filtres par
@@ -450,12 +460,14 @@ public class PermissionService {
                 (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
-        // etre abonne a un programme du cours du quiz.
-            rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizAccess(user, vars)),
+        // etre abonne a un programme du cours du quiz. La lecture et la soumission exigent en
+        // plus que le quiz soit PUBLIE, sauf pour le personnel du cours (#28) : un brouillon
+        // n'est ni lisible ni soumissible par un etudiant.
+            rule("GET", "/quizzes/{quizId}", (user, vars, body) -> quizTakingAccess(user, vars)),
             rule(
             "POST",
             "/quizzes/{quizId}/submissions",
-            (user, vars, body) -> quizAccess(user, vars)),
+            (user, vars, body) -> quizTakingAccess(user, vars)),
             rule(
             "GET", "/quizzes/{quizId}/attempts", (user, vars, body) -> quizAccess(user, vars)),
             rule(
@@ -630,7 +642,7 @@ public class PermissionService {
             rule(
                     "GET",
                     "/forums/{forumId}/posts/{postId}",
-                    (user, vars, body) -> canAccessForum(user, vars, "forumId")),
+                    (user, vars, body) -> canReadPost(user, vars)),
             rule(
                     "GET",
                     "/courses/{courseId}/forums/{forumId}",
@@ -979,7 +991,11 @@ public class PermissionService {
   // cote SQL via Forum.course_id). Sert a gerer un forum (renommer / supprimer). forumId lu dans
   // une variable de PATH.
   private boolean canManageForumContent(User user, Map<String, String> vars, String forumVar) {
-    long forumId = longVar(vars, forumVar);
+    return canManageForumContentById(user, longVar(vars, forumVar));
+  }
+
+  // Meme regle, a partir d'un forumId deja resolu (ex. lu dans le BODY).
+  private boolean canManageForumContentById(User user, long forumId) {
     if (forumId <= 0) {
       return false;
     }
@@ -1021,6 +1037,16 @@ public class PermissionService {
     return quizId > 0 && membershipService.canAccessQuiz(user.getId(), quizId);
   }
 
+  // Passation d'un quiz (lecture du detail, soumission) : acces au quiz ET quiz publie, ou
+  // personnel du cours (gestion de contenu) pour un brouillon.
+  private boolean quizTakingAccess(User user, Map<String, String> vars) {
+    if (!quizAccess(user, vars)) {
+      return false;
+    }
+    long quizId = longVar(vars, "quizId");
+    return membershipService.isQuizPublished(quizId) || canManageQuizContent(user, vars, "quizId");
+  }
+
   private boolean verifyUserId(User user, Map<String, String> vars) {
     long requestUserId  = longVar(vars, "userId");
     return requestUserId == user.getId();
@@ -1037,6 +1063,36 @@ public class PermissionService {
   private boolean isPostAuthor(User user, Map<String, String> vars, String postVar) {
     long postId = longVar(vars, postVar);
     return postId > 0 && membershipService.isPostAuthor(user.getId(), postId);
+  }
+
+  // ── PREDICAT : EDITER un post/message hors annonce (PATCH, body = ForumUpdatePostDTO) ──
+  // Sans `isPinned` (absent ou null) : edition du contenu, reservee a l'auteur. Avec
+  // `isPinned` : il faut gerer le contenu du forum (personnel du cours, admin/gardien global) ;
+  // si la requete change AUSSI autre chose, il faut en plus en etre l'auteur. Un champ inconnu
+  // non nul compte comme « autre chose » (prudence : on ne suppose pas que core l'ignore).
+  private boolean canEditForumPost(User user, Map<String, String> vars, JsonNode body) {
+    if (!hasNonNullField(body, "isPinned")) {
+      return isPostAuthor(user, vars, "postId");
+    }
+    if (!canManageForumContent(user, vars, "forumId")) {
+      return false;
+    }
+    return onlyNonNullField(body, "isPinned") || isPostAuthor(user, vars, "postId");
+  }
+
+  // Le body contient-il ce champ avec une valeur non nulle ?
+  private static boolean hasNonNullField(JsonNode body, String field) {
+    return body != null && body.has(field) && !body.get(field).isNull();
+  }
+
+  // Ce champ est-il le SEUL champ non nul du body ?
+  private static boolean onlyNonNullField(JsonNode body, String field) {
+    for (Map.Entry<String, JsonNode> entry : body.properties()) {
+      if (!entry.getKey().equals(field) && !entry.getValue().isNull()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // ── PREDICAT : SUPPRIMER un post/message (auteur OU moderateur du forum) ────────────
@@ -1070,6 +1126,42 @@ public class PermissionService {
   private boolean canAccessForum(User user, Map<String, String> vars, String forumVar) {
     long forumId = longVar(vars, forumVar);
     return forumId > 0 && membershipService.canAccessForum(user.getId(), forumId);
+  }
+
+  // Le post du PATH est-il une annonce (forum d'annonces) ? Ids invalides : non, sans requete BD.
+  private boolean isAnnouncementPost(Map<String, String> vars) {
+    long forumId = longVar(vars, "forumId");
+    return forumId > 0
+        && longVar(vars, "postId") > 0
+        && membershipService.isAnnouncementForum(forumId);
+  }
+
+  // ── PREDICAT : lire un post par son id (forumId et postId dans le PATH) ─────────────
+  // Il faut voir le forum ; une annonce EXPIREE n'est lisible que par le personnel du cours
+  // (comme dans la liste : masquee ne doit pas vouloir dire accessible par son id).
+  private boolean canReadPost(User user, Map<String, String> vars) {
+    if (!canAccessForum(user, vars, "forumId")) {
+      return false;
+    }
+    long postId = longVar(vars, "postId");
+    return postId <= 0
+        || !membershipService.isExpiredAnnouncement(postId)
+        || canManageForumContent(user, vars, "forumId");
+  }
+
+  // ── PREDICAT : ecrire dans un forum (post, message, vote ; forumId lu dans le BODY) ────
+  // Il faut voir le forum. Dans un canal d'annonces, seul le personnel du cours ecrit (memes
+  // droits que gerer son contenu) : les etudiants lisent seulement. Acces et type du forum en
+  // UNE requete : c'est le chemin d'ecriture le plus utilise (chaque message, post et vote).
+  private boolean canWriteInForum(User user, long forumId) {
+    if (forumId <= 0) {
+      return false;
+    }
+    return switch (membershipService.forumAccess(user.getId(), forumId)) {
+      case NONE -> false;
+      case READ -> true;
+      case ANNOUNCEMENT -> canManageForumContentById(user, forumId);
+    };
   }
 
   // Lit une variable de path entiere (long) ; -1 si absente / non numerique.

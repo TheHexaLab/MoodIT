@@ -40,6 +40,14 @@ public class Post {
     @Column(name = "is_pinned")
     private Boolean isPinned = false;
 
+    /** Couleur d'une ANNONCE (forum 'Announcement'), clé de la palette du front ; null sinon. */
+    @Column(length = 16)
+    private String color;
+
+    /** Expiration d'une ANNONCE (UTC, comme createdAt) ; null = n'expire jamais. */
+    @Column(name = "expires_at")
+    private LocalDateTime expiresAt;
+
     @ManyToOne
     @JoinColumn(name = "forum_id", nullable = false)
     private Forum forum;

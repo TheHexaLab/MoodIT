@@ -15,6 +15,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.moodit.permission_service.model.ForumAccess;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
@@ -493,14 +494,14 @@ class PermissionServiceRulesTest {
     @Test
     void publierPost_abonne_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isTrue();
     }
 
     @Test
     void publierPost_nonAbonne_refuse() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isFalse();
     }
 
@@ -508,14 +509,14 @@ class PermissionServiceRulesTest {
     void publierPost_nonAbonneMemeGardien_refuse() {
       // L'écriture dans un forum suit l'APPARTENANCE, pas le rôle global.
       loggedIn(user(5, RoleNames.GUARDIAN));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":9}")).isFalse();
     }
 
     @Test
     void publierPost_forumIdEnChaine_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts", "POST", "{\"forumId\":\" 9 \"}")).isTrue();
     }
 
@@ -549,7 +550,7 @@ class PermissionServiceRulesTest {
     @Test
     void voter_abonne_autorise() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
       assertThat(allowed("/api/forums/posts/votes", "POST", "{\"forumId\":9,\"postId\":40}"))
           .isTrue();
     }
@@ -557,7 +558,7 @@ class PermissionServiceRulesTest {
     @Test
     void voter_nonAbonne_refuse() {
       loggedIn(user(5));
-      when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+      when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
       assertThat(allowed("/api/forums/posts/votes", "POST", "{\"forumId\":9,\"postId\":40}"))
           .isFalse();
     }
@@ -629,6 +630,50 @@ class PermissionServiceRulesTest {
       when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
       when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.TEACHER)).thenReturn(true);
       assertThat(allowed("/api/forums/9", "DELETE", null)).isTrue();
+    }
+
+    // ── Épingler un post (PATCH avec isPinned) : action de modération (#29) ──
+    private static final String POST_PATH = "/api/forums/9/posts/40";
+
+    @Test
+    void editerPost_auteurSansEpinglage_autorise() {
+      loggedIn(user(5));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"content\":\"x\",\"isPinned\":null}")).isTrue();
+    }
+
+    @Test
+    void epinglerPost_auteurEtudiant_refuse() {
+      loggedIn(user(5));
+      lenient().when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true}")).isFalse();
+      assertThat(allowed(POST_PATH, "PATCH", "{\"content\":\"x\",\"isPinned\":false}")).isFalse();
+      // Valeur coercible par core (chaîne) : traitée comme une demande d'épinglage.
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":\"true\"}")).isFalse();
+    }
+
+    @Test
+    void epinglerPost_enseignantDuCours_nonAuteur_autorise() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInForumCourse(5, 9, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"title\":null}")).isTrue();
+      verify(membershipService, never()).isPostAuthor(anyLong(), anyLong());
+    }
+
+    @Test
+    void epinglerEtModifierPost_personnelNonAuteur_refuse() {
+      // Le personnel épingle, mais ne réécrit pas le post d'autrui.
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"content\":\"x\"}")).isFalse();
+    }
+
+    @Test
+    void epinglerEtModifierPost_personnelAuteur_autorise() {
+      loggedIn(user(5, RoleNames.ADMIN));
+      when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+      assertThat(allowed(POST_PATH, "PATCH", "{\"isPinned\":true,\"content\":\"x\"}")).isTrue();
     }
 
     @Test
@@ -731,6 +776,35 @@ class PermissionServiceRulesTest {
     void lireQuiz_abonne_autorise() {
       loggedIn(user(5));
       when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
+    }
+
+    @Test
+    void lireQuiz_brouillon_etudiant_refuse() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isFalse();
+    }
+
+    @Test
+    void lireQuiz_brouillon_enseignantDuCours_autorise() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
+    }
+
+    @Test
+    void lireQuiz_brouillon_gardienAbonne_autorise() {
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
       assertThat(allowed("/api/quizzes/12", "GET", null)).isTrue();
     }
 
@@ -761,7 +835,26 @@ class PermissionServiceRulesTest {
     void soumettre_abonne_autorise() {
       loggedIn(user(5));
       when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(true);
       assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isTrue();
+    }
+
+    @Test
+    void soumettre_brouillon_etudiant_refuse() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      when(membershipService.isQuizPublished(12)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isFalse();
+    }
+
+    @Test
+    void soumettre_brouillon_nonAbonne_refuseSansLireLaPublication() {
+      loggedIn(user(5, RoleNames.GUARDIAN));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/submissions", "POST", "{}")).isFalse();
+      verify(membershipService, never()).isQuizPublished(12);
     }
 
     @Test

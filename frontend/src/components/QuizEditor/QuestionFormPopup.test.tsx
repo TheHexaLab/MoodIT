@@ -75,6 +75,9 @@ describe('QuestionFormBody', () => {
 
   it('true_false valide dès que l\'énoncé est saisi (options figées)', () => {
     renderForm(emptyQuestionDraft('true_false'), { isNew: true });
+    // Options figées (sans placeholder) : nommées par leur rang.
+    expect(screen.getByRole('textbox', { name: 'Réponse 1' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Réponse 2' })).toBeTruthy();
     expect(saveButton(t.add).disabled).toBe(true);
     fireEvent.change(promptField(), { target: { value: 'Le ciel est bleu ?' } });
     expect(saveButton(t.add).disabled).toBe(false);
@@ -89,6 +92,8 @@ describe('QuestionFormBody', () => {
     // options vides → invalide
     expect(saveButton(t.add).disabled).toBe(true);
     const answers = screen.getAllByPlaceholderText(t.answerPlaceholder);
+    // Chaque option a un nom accessible (le placeholder seul ne suffit pas aux options figées).
+    expect(answers[1]).toBe(screen.getByRole('textbox', { name: t.answerAria(2) }));
     fireEvent.change(answers[0], { target: { value: 'A' } });
     fireEvent.change(answers[1], { target: { value: 'B' } });
     expect(saveButton(t.add).disabled).toBe(false);
@@ -180,7 +185,7 @@ describe('QuestionFormBody', () => {
     const draft: QuestionDraft = { ...emptyQuestionDraft('single_choice'), prompt: 'Gardé', totalScore: 4 };
     const { onSave } = renderForm(draft, { isNew: true });
     // passe à « Remise en ordre »
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.ordering }));
     // la section « ordering » apparaît
     expect(screen.getByText(t.orderingSection)).toBeTruthy();
@@ -188,6 +193,7 @@ describe('QuestionFormBody', () => {
     const items = screen.getAllByPlaceholderText(t.elementPlaceholder);
     fireEvent.change(items[0], { target: { value: 'un' } });
     fireEvent.change(items[1], { target: { value: 'deux' } });
+    fireEvent.change(items[2], { target: { value: 'trois' } });
     fireEvent.click(saveButton(t.add));
     const saved = onSave.mock.calls[0][0] as QuestionDraft;
     expect(saved.qType).toBe('ordering');
@@ -199,7 +205,7 @@ describe('QuestionFormBody', () => {
     const onRequestLanguages = vi.fn();
     renderForm(emptyQuestionDraft('single_choice'), { onRequestLanguages });
     onRequestLanguages.mockClear();
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.coding }));
     expect(onRequestLanguages).toHaveBeenCalled();
   });
@@ -227,15 +233,52 @@ describe('QuestionFormBody', () => {
   it('ordering : ajouter/supprimer des éléments et valider', () => {
     const draft: QuestionDraft = { ...emptyQuestionDraft('ordering'), prompt: 'Q' };
     renderForm(draft, { isNew: true });
-    // 2 éléments vides → invalide
+    // 3 éléments vides → invalide
     expect(saveButton(t.add).disabled).toBe(true);
     const items = screen.getAllByPlaceholderText(t.elementPlaceholder);
     fireEvent.change(items[0], { target: { value: 'a' } });
     fireEvent.change(items[1], { target: { value: 'b' } });
+    expect(saveButton(t.add).disabled).toBe(true);
+    fireEvent.change(items[2], { target: { value: 'c' } });
     expect(saveButton(t.add).disabled).toBe(false);
-    // ajouter un 3e
+    // ajouter un 4e
     fireEvent.click(screen.getByText(`+ ${t.addItem}`));
-    expect(screen.getAllByPlaceholderText(t.elementPlaceholder)).toHaveLength(3);
+    expect(screen.getAllByPlaceholderText(t.elementPlaceholder)).toHaveLength(4);
+  });
+
+  it('ordering : sous trois éléments, enregistrement bloqué avec un message qui dit pourquoi', () => {
+    const draft: QuestionDraft = {
+      qType: 'ordering',
+      prompt: 'Q',
+      totalScore: 1,
+      dragItems: [
+        { content: 'a', correctOrder: 0 },
+        { content: 'b', correctOrder: 1 },
+        { content: 'c', correctOrder: 2 },
+      ],
+    };
+    renderForm(draft, { isNew: true });
+    const message = t.orderingMinItems(3);
+    expect(message).toBe('Une remise en ordre doit avoir au moins 3 éléments.');
+    expect(saveButton(t.add).disabled).toBe(false);
+    expect(screen.queryByText(message)).toBeNull();
+    // La zone live est déjà là, vide : seul son texte change (annoncé par les lecteurs d'écran).
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
+    fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
+    expect(saveButton(t.add).disabled).toBe(true);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(message);
+    fireEvent.click(screen.getByText(`+ ${t.addItem}`));
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
+  it('ordering : le message passe par les libellés fournis', () => {
+    renderForm(
+      { qType: 'ordering', prompt: 'Q', totalScore: 1, dragItems: [{ content: 'a', correctOrder: 0 }] },
+      { isNew: true, labels: { orderingMinItems: (min: number) => `min ${min}` } }
+    );
+    expect(screen.getByText('min 3')).toBeTruthy();
   });
 
   it('matching : invalide tant qu\'une catégorie manque, valide une fois remplie', () => {
@@ -293,7 +336,7 @@ describe('QuestionFormBody', () => {
     renderForm(draft, { isNew: true });
     // valide au départ (1 harnais)
     expect(saveButton(t.add).disabled).toBe(false);
-    fireEvent.click(screen.getByLabelText(t.languageLabel));
+    fireEvent.click(screen.getByLabelText(t.languageLabel, { exact: false }));
     fireEvent.click(screen.getByRole('option', { name: 'C' }));
     // harnais vidés → enregistrement de nouveau bloqué
     expect(saveButton(t.add).disabled).toBe(true);
@@ -346,7 +389,7 @@ describe('QuestionFormBody', () => {
         { id: 2, slug: 'coding', label: 'MON CODE' },
       ],
     });
-    fireEvent.click(screen.getByLabelText(t.typeLabel));
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
     expect(screen.getByRole('option', { name: 'MON CHOIX' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'MON CODE' })).toBeTruthy();
   });
@@ -368,6 +411,7 @@ describe('QuestionFormBody — remise en ordre (éléments)', () => {
         { content: 'un', correctOrder: 0 },
         { content: 'deux', correctOrder: 1 },
         { content: 'trois', correctOrder: 2 },
+        { content: 'quatre', correctOrder: 3 },
       ],
     };
   }
@@ -395,13 +439,14 @@ describe('QuestionFormBody — remise en ordre (éléments)', () => {
     fireEvent.click(grip);
 
     const inputs = screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[];
-    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois', 'un']);
+    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois', 'un', 'quatre']);
     fireEvent.click(saveButton(t.add));
     const saved = onSave.mock.calls[0][0] as QuestionDraft;
     expect(saved.dragItems?.map((d) => [d.content, d.correctOrder])).toEqual([
       ['deux', 0],
       ['trois', 1],
       ['un', 2],
+      ['quatre', 3],
     ]);
   });
 
@@ -409,19 +454,21 @@ describe('QuestionFormBody — remise en ordre (éléments)', () => {
     const { onSave } = renderForm(orderingDraft(), { isNew: true });
     fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
     const inputs = screen.getAllByPlaceholderText(t.elementPlaceholder) as HTMLInputElement[];
-    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois']);
+    expect(inputs.map((i) => i.value)).toEqual(['deux', 'trois', 'quatre']);
     fireEvent.click(saveButton(t.add));
     const saved = onSave.mock.calls[0][0] as QuestionDraft;
     expect(saved.dragItems?.map((d) => [d.content, d.correctOrder])).toEqual([
       ['deux', 0],
       ['trois', 1],
+      ['quatre', 2],
     ]);
   });
 
-  it('un seul élément restant → enregistrement bloqué', () => {
+  it('deux éléments restants → enregistrement bloqué', () => {
     renderForm(orderingDraft(), { isNew: true });
     expect(saveButton(t.add).disabled).toBe(false);
     fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
+    expect(saveButton(t.add).disabled).toBe(false);
     fireEvent.click(screen.getAllByLabelText(t.deleteItemAria)[0]);
     expect(saveButton(t.add).disabled).toBe(true);
   });
