@@ -13,6 +13,7 @@ export const defaultForumViewLabels: ForumViewLabels = {
   voteDown: 'Voter contre',
   ownVoteTitle: 'Vous ne pouvez pas voter sur votre propre publication',
   reply: 'Répondre',
+  pendingReplyTitle: 'Publication en cours…',
   edit: 'Modifier',
   delete: 'Supprimer',
   collapseReplies: 'Replier les réponses',
