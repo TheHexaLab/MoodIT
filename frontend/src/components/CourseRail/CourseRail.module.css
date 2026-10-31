@@ -1,0 +1,160 @@
+.rail {
+    --slot-size: 3rem;
+    --slot-radius: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    width: 4.5rem;
+    min-width: 4.5rem;
+    height: 100%;
+    padding: 0.75rem 0;
+    box-sizing: border-box;
+    background: var(--bg-rail);
+}
+
+.back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    flex-shrink: 0;
+    border-radius: var(--slot-radius);
+    background: var(--brand-teal-strong);
+    color: var(--text-on-brand);
+}
+
+.back svg {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.back:focus-visible,
+.retry:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
+}
+
+.divider {
+    display: block;
+    width: 2rem;
+    height: 0.125rem;
+    flex-shrink: 0;
+    background: var(--border-strong);
+}
+
+.spinner,
+.retry {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    flex-shrink: 0;
+}
+
+.retry {
+    padding: 0;
+    border: 1px solid var(--danger);
+    border-radius: var(--slot-radius);
+    background: transparent;
+    color: var(--danger);
+    cursor: pointer;
+}
+
+.retry svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.list {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    margin: 0;
+    padding: 1px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    list-style: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.item {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+/* Barre latérale : une partie au survol, pleine hauteur sur le cours ouvert. */
+.item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 0.25rem;
+    height: 2rem;
+    border-radius: 0 0.1875rem 0.1875rem 0;
+    background: var(--brand-teal);
+    transform: translateY(-50%) scaleY(0);
+    opacity: 0;
+    transition: transform 0.18s ease, opacity 0.15s ease;
+    pointer-events: none;
+}
+
+.item:hover::before {
+    transform: translateY(-50%) scaleY(0.5);
+    opacity: 1;
+}
+
+.item.itemActive::before {
+    transform: translateY(-50%) scaleY(1);
+    opacity: 1;
+}
+
+.course {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    flex-shrink: 0;
+    padding: 0;
+    overflow: hidden;
+    border: none;
+    border-radius: 50%;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 0.625rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-radius 0.18s ease, box-shadow 0.15s ease;
+}
+
+.course:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--brand-teal);
+}
+
+.item:hover .course,
+.courseActive {
+    border-radius: var(--slot-radius);
+}
+
+.code {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .course,
+    .item::before {
+        transition: none;
+    }
+}

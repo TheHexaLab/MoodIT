@@ -25,6 +25,10 @@
     --brand-deep: #1f4799;
     --brand-gradient: linear-gradient(135deg, #00c0d2 0%, #0a5cc0 100%);
     --text-active: #0a5cc0;
+    /* Élément actif du portail : suit --text-active, éclairci en sombre (voir plus bas). */
+    --portal-active: var(--text-active);
+    /* Hauteur du bandeau du portail (0 sur mobile) : les panneaux pleine hauteur la soustraient. */
+    --portal-band-height: 3.25rem;
     --success: #23a55a;
     --danger: #c42929;
     --danger-alt: #e5484d;
@@ -109,6 +113,7 @@
         --text-body: #b4b4c6;
         --text-heading-alt: #c4c4d2;
         --text-muted: #9a9ab2;
+        --portal-active: #8ab8f5;
         --text-on-brand: #ffffff;
         --icon-stroke: #a6a6bc;
         /* Pastilles de score (versions sombres). */
@@ -166,6 +171,7 @@
     --text-body: #b4b4c6;
     --text-heading-alt: #c4c4d2;
     --text-muted: #9a9ab2;
+    --portal-active: #8ab8f5;
     --text-on-brand: #ffffff;
     --icon-stroke: #a6a6bc;
     /* Pastilles de score (versions sombres). */

@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { render as rtlRender, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import ProgramMenu, { type Program } from './ProgramMenu';
 import { ROLE } from '../../helpers/roles';
 
 afterEach(cleanup);
+
+/** Le logo du rail est un lien vers l'Accueil : il lui faut un routeur. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 function program(overrides: Partial<Program> & { id: number }): Program {
   return { name: `Programme ${overrides.id}`, code: '', cohort: '', color: '', ...overrides };
@@ -31,21 +36,24 @@ function menuItems(menu: HTMLElement): string[] {
 }
 
 describe('ProgramMenu', () => {
-  it('affiche une pastille par programme : code (3 lettres max, majuscules) ou initiales', () => {
+  it('affiche le nom de chaque programme ; son code complète le nom accessible', () => {
     render(<ProgramMenu programs={programs} />);
-    expect(screen.getByRole('button', { name: 'Génie logiciel — GIN' }).textContent).toBe('GIN');
+    expect(screen.getByRole('button', { name: 'Génie logiciel — GIN' }).textContent).toBe('Génie logiciel');
     // Plusieurs mots → première lettre de chacun (2 max).
-    expect(screen.getByRole('button', { name: 'Génie informatique — GI' }).textContent).toBe('GI');
+    expect(screen.getByRole('button', { name: 'Génie informatique — GI' })).toBeTruthy();
     // Mot unique → deux premières lettres.
-    expect(screen.getByRole('button', { name: 'math — MA' }).textContent).toBe('MA');
+    expect(screen.getByRole('button', { name: 'math — MA' })).toBeTruthy();
+  });
+
+  it('affiche les cours sous leur programme', () => {
+    render(<ProgramMenu programs={programs} renderCourses={(p) => <span>cours de {p.name}</span>} />);
+    expect(screen.getByText('cours de math')).toBeTruthy();
   });
 
   it('le nom accessible contient la pastille visible (WCAG 2.5.3)', () => {
     render(<ProgramMenu programs={programs} />);
     const pill = screen.getByRole('button', { name: 'Génie logiciel — GIN' });
     expect(pill.getAttribute('title')).toBe('Génie logiciel');
-    // Icône de l'application : image nommée (aria-label sur un div sans rôle est interdit).
-    expect(screen.getByRole('img', { name: 'MoodIT' })).toBeTruthy();
   });
 
   it('le libellé UI (label) a priorité sur le nom', () => {
@@ -54,27 +62,11 @@ describe('ProgramMenu', () => {
     expect(screen.queryByRole('button', { name: /^Nom/ })).toBeNull();
   });
 
-  it('marque le programme actif avec aria-current', () => {
-    render(<ProgramMenu programs={programs} activeProgramId={2} />);
-    expect(screen.getByRole('button', { name: 'Génie informatique — GI' }).getAttribute('aria-current')).toBe(
-      'page'
-    );
-    expect(screen.getByRole('button', { name: 'Génie logiciel — GIN' }).getAttribute('aria-current')).toBeNull();
+  it('un programme s’annonce comme ouvrant un menu', () => {
+    render(<ProgramMenu programs={programs} />);
+    expect(screen.getByRole('button', { name: 'math — MA' }).getAttribute('aria-haspopup')).toBe('menu');
   });
 
-  it('un clic sur un programme appelle onSelectProgram avec son id', () => {
-    const onSelectProgram = vi.fn();
-    render(<ProgramMenu programs={programs} onSelectProgram={onSelectProgram} />);
-    fireEvent.click(screen.getByRole('button', { name: 'math — MA' }));
-    expect(onSelectProgram).toHaveBeenCalledWith(3);
-  });
-
-  it('le bouton « Ajouter un programme » appelle onAddProgram', () => {
-    const onAddProgram = vi.fn();
-    render(<ProgramMenu programs={[]} onAddProgram={onAddProgram} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un programme' }));
-    expect(onAddProgram).toHaveBeenCalledTimes(1);
-  });
 
   it('liste vide : aucune pastille de programme', () => {
     render(<ProgramMenu programs={[]} />);
@@ -163,13 +155,6 @@ describe('ProgramMenu', () => {
         expect(handlers[handler]).toHaveBeenCalledWith(3);
         expect(screen.queryByRole('menu')).toBeNull();
       }
-    });
-
-    it('le clic droit ne sélectionne pas le programme', () => {
-      const onSelectProgram = vi.fn();
-      render(<ProgramMenu programs={programs} onSelectProgram={onSelectProgram} />);
-      openContextMenu('math');
-      expect(onSelectProgram).not.toHaveBeenCalled();
     });
 
     it('se ferme sur Échap', () => {

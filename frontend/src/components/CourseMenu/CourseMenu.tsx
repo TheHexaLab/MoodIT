@@ -1,10 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { isTouchDevice } from '../../helpers/viewport';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './CourseMenu.module.css';
-import { MagnifyingGlass } from '../../assets/MagnifyingGlass.tsx';
-import { Chevron } from '../../assets/Chevron.tsx';
-import { Pencil } from '../../assets/Pencil.tsx';
 import { type Program } from '../ProgramMenu/ProgramMenu';
 import UserMenu, { type UserMenuUser } from '../UserMenu/UserMenu';
 import CourseChannelList, {
@@ -21,7 +16,7 @@ import { type ItemChange, type MaybePromise } from '../SectionEditorPopup/types.
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources';
 import { type Course, type Quiz } from '../../types/domain.ts';
 import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
-import { OPTION_SELECTOR, isContextMenuKey, useMenuKeyboard } from '../../hooks/useMenuKeyboard.ts';
+import { isContextMenuKey } from '../../hooks/useMenuKeyboard.ts';
 
 // Entité ré-exportée depuis le modèle de domaine (source unique : src/types/domain.ts).
 export type { Course };
@@ -56,10 +51,8 @@ interface CourseMenuProps {
   activeProgram?: Program | null;
   /** Cours disponibles pour le programme actif. */
   courses?: Course[];
-  /** Cours actuellement sélectionné dans la liste déroulante. */
+  /** Cours actuellement ouvert (par défaut, le premier). */
   selectedCourseId?: number;
-  /** Callback lors d'un changement de cours. */
-  onSelectCourse?: (courseId: number) => void;
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
   /** Canal actuellement sélectionné (type + id). */
@@ -99,22 +92,20 @@ interface CourseMenuProps {
   loadError?: string | null;
   /** Relance le chargement des cours (bouton « Réessayer » de l'état d'erreur). */
   onReloadCourses?: () => void;
-  /** Callback de l'option « ajouter un cours » (en bas du menu déroulant). */
-  onAddCourse?: () => void;
-  /** Callback du crayon d'édition d'un cours dans le menu déroulant. */
+  /** « Modifier le cours » (clic droit sur le titre, admin). */
   onEditCourse?: (courseId: number) => void;
   /**
-   * Ouvre la « Gestion MCP — Feedback du cours » (clic droit sur le sélecteur, admin).
+   * Ouvre la « Gestion MCP — Feedback du cours » (clic droit sur le titre, admin).
    * Si absent, l'item correspondant du menu contextuel n'est pas affiché.
    */
   onOpenMcpManagement?: (courseId: number) => void;
   /**
-   * « Quitter le cours » (clic droit sur le sélecteur, admin). Action destructive.
+   * « Quitter le cours » (clic droit sur le titre, admin). Action destructive.
    * Si absent, l'item correspondant du menu contextuel n'est pas affiché.
    */
   onLeaveCourse?: (courseId: number) => void;
   /**
-   * « Supprimer le cours » (clic droit sur le sélecteur, admin uniquement). Action
+   * « Supprimer le cours » (clic droit sur le titre, admin uniquement). Action
    * destructive : retire le cours pour tous. Absent → item du menu contextuel masqué.
    */
   onDeleteCourse?: (courseId: number) => void;
@@ -145,13 +136,12 @@ interface CourseMenuProps {
 /**
  * Panneau lateral secondaire affichant les canaux du cours sélectionné.
  * Si le programme n'a aucun cours, un état vide est affiché.
- * Sinon, un sélecteur de cours puis les canaux groupes par type sont rendus.
+ * Sinon, le titre du cours puis les canaux groupes par type sont rendus.
  */
 const CourseMenu: React.FC<CourseMenuProps> = ({
   activeProgram,
   courses = [],
   selectedCourseId,
-  onSelectCourse,
   channelTypeDefinitions,
   selectedChannel,
   onSelectChannel,
@@ -161,7 +151,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   loading = false,
   loadError = null,
   onReloadCourses,
-  onAddCourse,
   onEditCourse,
   onOpenMcpManagement,
   onLeaveCourse,
@@ -175,50 +164,29 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   quizHandlers,
   onQuizzesChange,
 }) => {
-  /** Menu déroulant des cours ouvert ? */
-  const [isCourseOpen, setIsCourseOpen] = useState(false);
-  /** Recherche dans le menu déroulant des cours. */
-  const [courseSearch, setCourseSearch] = useState('');
   /** Section en cours d'édition (popup ouvert), ou null. */
   const [editingSection, setEditingSection] = useState<ChannelTypeDefinition | null>(null);
   /** Largeur du panneau (px) ; null = largeur clamp par défaut (jamais redimensionné). */
   const [width, setWidth] = useState<number | null>(readStoredWidth);
   /** Drag en cours (handle de redimensionnement) ? */
   const [isResizing, setIsResizing] = useState(false);
-  /** Position + largeur (viewport) de la liste déroulante portée ; null si fermée. */
-  const [pickerPos, setPickerPos] = useState<{
-    left: number;
-    top: number;
-    width: number;
-  } | null>(null);
-  /** Position du menu contextuel (clic droit sur le sélecteur) ; null si fermé. */
+  /** Position du menu contextuel (clic droit sur le titre) ; null si fermé. */
   const [ctxMenuPos, setCtxMenuPos] = useState<{
     x: number;
     y: number;
     anchor: HTMLElement;
   } | null>(null);
-  /** Conteneur du sélecteur de cours (pour le click-outside du menu). */
-  const selectRef = useRef<HTMLDivElement | null>(null);
-  /** Bouton du sélecteur de cours (reprend le focus à la fermeture au clavier). */
-  const courseSelectButtonRef = useRef<HTMLButtonElement | null>(null);
-  /** Liste déroulante portée vers <body> (pour le click-outside). */
-  const pickerRef = useRef<HTMLDivElement | null>(null);
   /** Racine du panneau (pour lire la largeur rendue au début d'un drag). */
   const navRef = useRef<HTMLElement | null>(null);
   /** État du drag : position et largeur de départ. */
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
 
-  // Long-press tactile sur le sélecteur de cours (ouvre le menu contextuel sur mobile) :
-  // `longPressTimer` = timer d'appui maintenu ; `longPressFired` = vrai quand le long-press
-  // a ouvert le menu, pour NEUTRALISER le clic de fin d'appui (sinon la liste s'ouvrirait aussi).
+  // Long-press tactile sur le titre du cours (ouvre le menu contextuel sur mobile).
   const longPressTimer = useRef<number | null>(null);
-  const longPressFired = useRef(false);
 
   const courseOptions = courses.map((course) => ({
     id: course.id,
     code: formatCourseCode(course),
-    label: formatCourseLabel(course),
-    title: course.title?.trim() ?? '',
     channels: normalizeCourseChannelsFromSources({
       quizzes: course.quizzes,
       forums: course.forums,
@@ -236,52 +204,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   const emptySubtitle = activeProgram
     ? 'Ce programme ne contient encore aucun cours à afficher.'
     : 'Rejoins un programme pour voir tes cours, canaux et forums.';
-
-  // Calcule la position de la liste déroulante (sous le sélecteur, largeur fixe 20rem).
-  // En fixed + portail vers <body>, elle échappe au overflow:hidden de la sidebar.
-  const computePickerPosition = useCallback(() => {
-    const anchor = selectRef.current;
-    if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    const margin = rootFontSize; // 1rem : marge avec le bord de l'écran (pas collé)
-    const maxWidth = 20 * rootFontSize; // 20rem : largeur cible quand il y a la place
-    const minWidth = 11 * rootFontSize; // borne basse (cohérente avec la sidebar)
-
-    // On aligne le picker sur la GAUCHE du sélecteur et on l'étend vers la droite,
-    // sans dépasser maxWidth ni le bord droit de l'écran. Sur mobile (sélecteur après
-    // le rail), il reste ainsi sous le sélecteur au lieu d'être collé au bord droit.
-    let left = rect.left;
-    let width = Math.min(maxWidth, window.innerWidth - left - margin);
-
-    // Cas limite : sélecteur trop proche du bord droit → on décale le picker à gauche.
-    if (width < minWidth) {
-      width = Math.min(maxWidth, window.innerWidth - 2 * margin);
-      left = Math.max(margin, window.innerWidth - width - margin);
-    }
-
-    setPickerPos({ left, top: rect.bottom + 4, width });
-  }, []);
-
-  // Ferme le menu au clic extérieur (sélecteur ou liste portée) ;
-  // recalcule la position au resize / scroll tant qu'il est ouvert.
-  useEffect(() => {
-    if (!isCourseOpen) return;
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (selectRef.current?.contains(target) || pickerRef.current?.contains(target)) return;
-      setIsCourseOpen(false);
-      setCourseSearch('');
-    }
-    document.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('resize', computePickerPosition);
-    window.addEventListener('scroll', computePickerPosition, true);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('resize', computePickerPosition);
-      window.removeEventListener('scroll', computePickerPosition, true);
-    };
-  }, [isCourseOpen, computePickerPosition]);
 
   // Persiste (ou efface) la largeur choisie.
   useEffect(() => {
@@ -335,69 +257,20 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     setWidth(clampWidth(base + (event.key === 'ArrowLeft' ? -16 : 16)));
   }
 
-  function toggleCourseOpen() {
-    // Un long-press vient d'ouvrir le menu contextuel → le clic de fin d'appui ne doit PAS
-    // aussi ouvrir la liste déroulante. On consomme le drapeau et on sort.
-    if (longPressFired.current) {
-      longPressFired.current = false;
-      return;
-    }
-    setIsCourseOpen((prev) => {
-      if (!prev) computePickerPosition();
-      return !prev;
-    });
-    setCourseSearch('');
-  }
-
-  function closeCoursePicker() {
-    setIsCourseOpen(false);
-    setCourseSearch('');
-  }
-
-  function selectCourse(courseId: number) {
-    onSelectCourse?.(courseId);
-    closeCoursePicker();
-    // L'option choisie disparaît avec la liste : le focus revient au sélecteur.
-    courseSelectButtonRef.current?.focus();
-  }
-
-  // Clavier dans la liste (patron WAI-ARIA « Listbox ») : la recherche garde son autoFocus,
-  // ↓/↑ passent de la recherche aux options (circulaires), Début/Fin entre les options,
-  // Échap (depuis la recherche ou une option) ferme et rend le focus au sélecteur.
-  const handlePickerKeyDown = useMenuKeyboard({
-    open: isCourseOpen,
-    containerRef: pickerRef,
-    itemSelector: `input, ${OPTION_SELECTOR}`,
-    initialFocus: 'none',
-    onEscape: closeCoursePicker,
-    returnFocus: () => courseSelectButtonRef.current,
-  });
-
-  function editCourse(courseId: number) {
-    onEditCourse?.(courseId);
-    closeCoursePicker();
-  }
-
-  function addCourse() {
-    onAddCourse?.();
-    closeCoursePicker();
-  }
-
   // Actions admin du menu contextuel (modifier, gestion MCP) ; « quitter le cours »
   // reste accessible à TOUS. On n'ouvre le menu que s'il aura au moins un item.
   const hasAdminContextActions =
     isAdmin && (Boolean(onEditCourse) || Boolean(onOpenMcpManagement) || Boolean(onDeleteCourse));
   const hasContextMenu = hasAdminContextActions || Boolean(onLeaveCourse);
 
-  // Ouvre le menu contextuel ANCRÉ sous le sélecteur (comme le Figma), pas à la position du
+  // Ouvre le menu contextuel ANCRÉ sous le titre (comme le Figma), pas à la position du
   // pointeur. Partagé par le clic droit (desktop / long-press Android) et le long-press tactile.
   function openCourseContextMenu(anchor: HTMLElement) {
-    closeCoursePicker(); // ferme la liste déroulante si elle était ouverte
     const rect = anchor.getBoundingClientRect();
     setCtxMenuPos({ x: rect.left, y: rect.bottom + 4, anchor });
   }
 
-  // Clic droit sur le sélecteur de cours → menu contextuel. Si aucun item n'est applicable,
+  // Clic droit sur le titre du cours → menu contextuel. Si aucun item n'est applicable,
   // on laisse le menu natif du navigateur (pas de preventDefault).
   function handleCourseContextMenu(event: React.MouseEvent<HTMLButtonElement>) {
     if (!selectedCourse || !hasContextMenu) return;
@@ -405,7 +278,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     openCourseContextMenu(event.currentTarget);
   }
 
-  // Touche Menu ou Maj+F10 sur le sélecteur → même menu, sur tous les moteurs (seul Chromium
+  // Touche Menu ou Maj+F10 sur le titre → même menu, sur tous les moteurs (seul Chromium
   // les convertit lui-même en `contextmenu`).
   function handleCourseSelectKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     if (!selectedCourse || !hasContextMenu || !isContextMenuKey(event)) return;
@@ -428,11 +301,9 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
 
   function handleCourseTouchStart(event: React.TouchEvent<HTMLButtonElement>) {
     if (!selectedCourse || !hasContextMenu) return;
-    longPressFired.current = false;
     const anchor = event.currentTarget; // capturé : l'évènement React est réutilisé après le timeout
     clearLongPress();
     longPressTimer.current = window.setTimeout(() => {
-      longPressFired.current = true; // neutralise le clic de fin d'appui (cf. toggleCourseOpen)
       openCourseContextMenu(anchor);
     }, LONG_PRESS_MS);
   }
@@ -445,15 +316,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   // Nettoyage : ne jamais laisser un timer d'appui courir après le démontage.
   useEffect(() => clearLongPress, []);
 
-  /** Cours filtrés par la recherche (sur le code et le titre). */
-  function filteredCourses() {
-    const query = courseSearch.trim().toLowerCase();
-    if (query === '') return courseOptions;
-    return courseOptions.filter((course) =>
-      `${course.code} ${course.title} ${course.label}`.toLowerCase().includes(query)
-    );
-  }
-
   return (
     <nav
       ref={navRef}
@@ -461,105 +323,29 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
       aria-label="Cours"
       style={width != null ? ({ ['--cm-width']: `${width}px` } as React.CSSProperties) : undefined}
     >
-      {/* En-tete : sélecteur de cours seulement si la liste est chargée sans erreur ;
+      {/* En-tete : titre du cours seulement si la liste est chargée sans erreur ;
           sinon (chargement / erreur / aucun cours) on affiche le nom du programme. */}
       <header className={styles.header}>
         {hasCourses && !loading && !loadError ? (
-          <div className={styles.selectWrapper} ref={selectRef}>
+          <div className={styles.selectWrapper}>
+            {/* Pas d'action au clic : le bouton ne porte que le menu contextuel du cours. */}
             <button
-              ref={courseSelectButtonRef}
               type="button"
-              className={`${styles.courseSelect}${isCourseOpen ? ` ${styles.courseSelectOpen}` : ''}`}
-              onClick={toggleCourseOpen}
+              className={styles.courseSelect}
               onContextMenu={handleCourseContextMenu}
               onKeyDown={handleCourseSelectKeyDown}
               onTouchStart={handleCourseTouchStart}
               onTouchMove={cancelCourseLongPress}
               onTouchEnd={cancelCourseLongPress}
               onTouchCancel={cancelCourseLongPress}
-              aria-haspopup="listbox"
-              aria-expanded={isCourseOpen}
+              aria-haspopup={selectedCourse && hasContextMenu ? 'menu' : undefined}
               // Annonce le raccourci d'ouverture du menu contextuel (lecteurs d'écran).
               aria-keyshortcuts={selectedCourse && hasContextMenu ? 'Shift+F10' : undefined}
             >
               <span className={styles.courseSelectCode}>
                 {selectedCourse?.code ?? dropdownLabels.selectFallback}
               </span>
-              <Chevron
-                className={`${styles.selectChevron}${isCourseOpen ? ` ${styles.selectChevronOpen}` : ''}`}
-                width="1rem"
-                height="1rem"
-              />
             </button>
-
-            {isCourseOpen &&
-              pickerPos &&
-              createPortal(
-                <div
-                  ref={pickerRef}
-                  className={styles.coursePicker}
-                  role="listbox"
-                  style={{ left: pickerPos.left, top: pickerPos.top, width: pickerPos.width }}
-                  onKeyDown={handlePickerKeyDown}
-                >
-                <div className={styles.pickerSearch}>
-                  <MagnifyingGlass width="1rem" height="1rem" />
-                  <input
-                    type="text"
-                    placeholder={dropdownLabels.searchPlaceholder}
-                    autoFocus={!isTouchDevice()}
-                    value={courseSearch}
-                    onChange={(event) => setCourseSearch(event.target.value)}
-                  />
-                </div>
-                <ul>
-                  {filteredCourses().length === 0 ? (
-                    <li className={styles.pickerEmpty}>{dropdownLabels.noResults}</li>
-                  ) : (
-                    filteredCourses().map((course) => (
-                      <li
-                        key={course.id}
-                        className={course.id === selectedCourse?.id ? styles.pickerActive : undefined}
-                      >
-                        <button
-                          type="button"
-                          className={styles.pickerSelect}
-                          onClick={() => selectCourse(course.id)}
-                          role="option"
-                          aria-selected={course.id === selectedCourse?.id}
-                        >
-                          <span className={styles.pickerCode}>{course.code}</span>
-                          {course.title && (
-                            <span className={styles.pickerTitle}>{course.title}</span>
-                          )}
-                        </button>
-                        {isAdmin && onEditCourse && (
-                          <button
-                            type="button"
-                            className={styles.pickerEdit}
-                            onClick={() => editCourse(course.id)}
-                            aria-label={dropdownLabels.editCourseAction(course.code)}
-                            title={dropdownLabels.editCourseAction(course.code)}
-                          >
-                            <Pencil width="14" height="14" aria-hidden="true" />
-                          </button>
-                        )}
-                      </li>
-                    ))
-                  )}
-                </ul>
-
-                {isAdmin && onAddCourse && (
-                  <button type="button" className={styles.pickerAdd} onClick={addCourse}>
-                    <span className={styles.pickerAddIcon} aria-hidden="true">
-                      +
-                    </span>
-                    <span>{dropdownLabels.addCourse}</span>
-                  </button>
-                )}
-                </div>,
-                document.body
-              )}
           </div>
         ) : (
           <span className={styles.headerTitle}>{activeProgram?.label ?? 'Accueil'}</span>
@@ -632,7 +418,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         onKeyDown={handleResizeKeyDown}
       />
 
-      {/* Menu contextuel du sélecteur de cours (clic droit). Actions admin (modifier,
+      {/* Menu contextuel du titre du cours (clic droit). Actions admin (modifier,
           gestion MCP) réservées aux admins ; « quitter le cours » accessible à tous. */}
       {ctxMenuPos && selectedCourse && (
         <CourseContextMenu
@@ -699,21 +485,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
 };
 
 /**
- * Retourne le libellé complet d'un cours.
- * Priorité: nom UI > "CODE · Titre" backend > titre backend.
- */
-function formatCourseLabel(course: Course): string {
-  if (course.name?.trim()) return course.name.trim();
-
-  const title = course.title?.trim() ?? '';
-  const code = course.code?.trim() ?? '';
-
-  if (code && title) return `${code} · ${title}`;
-  return title || code || 'Cours';
-}
-
-/**
- * Retourne le code affiché dans le sélecteur (on ne montre que le code).
+ * Retourne le code affiché en titre (on ne montre que le code).
  * Priorité: code backend > nom UI > titre backend.
  */
 function formatCourseCode(course: Course): string {
