@@ -1658,6 +1658,8 @@ describe('Dashboard — compléments', () => {
 
     it('liste des administrateurs poussée via WS : rôles mappés vers role_ids', async () => {
       await openGlobalRoles({ isAdmin: true });
+      // Le popup s'abonne dans un effet, qui peut passer après l'affichage du sous-titre.
+      await waitFor(() => expect(ws.captured.adminRoles).toBeTypeOf('function'));
       const push = ws.captured.adminRoles as (users: unknown[]) => void;
       act(() =>
         push([
