@@ -13,6 +13,21 @@
     transition: width 0.2s ease, min-width 0.2s ease;
 }
 
+/* À l'ouverture d'un cours, le panneau s'ouvre pendant que la barre de gauche se réduit : le contenu
+   à droite ne saute pas. Bureau seulement : sur mobile, il est dans le tiroir. */
+@media (min-width: 56.3rem) {
+    .sidebar {
+        animation: course-panel-open 0.2s ease;
+    }
+}
+
+@keyframes course-panel-open {
+    from {
+        width: 0;
+        min-width: 0;
+    }
+}
+
 /* Pendant le glissement de la poignée, la largeur suit la souris sans retard. */
 .sidebarResizing {
     transition: none;
@@ -39,6 +54,7 @@
 @media (prefers-reduced-motion: reduce) {
     .sidebar {
         transition: none;
+        animation: none;
     }
 }
 

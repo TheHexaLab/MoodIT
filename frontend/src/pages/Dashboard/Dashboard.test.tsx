@@ -380,6 +380,14 @@ describe('Dashboard', () => {
       expect(await screen.findByText('Crée ton propre programme ou rejoins-en un existant.')).toBeTruthy();
     });
 
+    it('ouvrir un cours garde la même barre de gauche : elle peut glisser au lieu de changer d’un coup', async () => {
+      renderDashboard({ path: '/home' });
+      const bar = await screen.findByRole('navigation', { name: 'Portail' });
+      fireEvent.click(await screen.findByRole('button', { name: /IFT101/ }));
+      await waitForCourseSelector('IFT101');
+      expect(screen.getByRole('navigation', { name: 'Portail' })).toBe(bar);
+    });
+
     it('dans un cours : la barre reste réduite, sans bouton pour la déplier', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');
