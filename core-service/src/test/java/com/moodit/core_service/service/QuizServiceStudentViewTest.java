@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -39,7 +40,8 @@ import org.mockito.ArgumentCaptor;
 
 /**
  * Vue PASSATION d'un quiz (#28) : un brouillon n'est ni lisible ni soumissible par ce chemin, les
- * éléments déplaçables arrivent mélangés avec des ids publics non corrélés à la solution, aucune
+ * éléments déplaçables arrivent avec des ids publics non corrélés à la solution (mélangés pour une
+ * association, dans un ordre de départ fixe pour une remise en ordre, #211), aucune
  * information de correction n'est exposée, et la correction reste juste après le mélange.
  */
 class QuizServiceStudentViewTest extends QuizServiceTestSupport {
@@ -152,37 +154,100 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
     // ── Mélange et décorrélation ────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("Remise en ordre : ordre reçu non corrélé à correctOrder")
+    @DisplayName("Remise en ordre : un ordre de départ fixe, non corrélé à correctOrder")
     class Shuffle {
 
+        /** Ids RÉELS de la remise en ordre telle qu'envoyée en passation (première question). */
+        private List<Integer> sentRealIds(QuizService s) {
+            return s.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
+                    .map(d -> obfuscator.unmask(d.getId())).toList();
+        }
+
+        /** Ids réels dans l'ordre attendu (tri par correctOrder). */
+        private static List<Integer> expectedIds(Question q) {
+            return q.getDragItems().stream().sorted(Comparator.comparing(DragItem::getCorrectOrder))
+                    .map(DragItem::getId).toList();
+        }
+
         @Test
-        @DisplayName("Sur 3000 envois, chaque élément occupe chaque position ~1/n des fois, ordres variés")
-        void ordreRecu_uniformeEtVarie() {
-            int size = 5;
-            int draws = 3000;
-            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), orderingQuestion(30, size))));
-            Map<Integer, Integer> correctOrderByPublicId = new HashMap<>();
-            for (int i = 0; i < size; i++) correctOrderByPublicId.put(pub(100 + i), i);
+        @DisplayName("Même ordre de départ à chaque chargement et pour deux étudiants (deux instances du service)")
+        void ordreDeDepart_fixe() {
+            Question q = orderingQuestion(30, 5);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), q)));
+            List<Integer> first = sentRealIds(service);
+            assertThat(first).containsExactlyInAnyOrder(100, 101, 102, 103, 104).isNotEqualTo(expectedIds(q));
+            for (int load = 0; load < 20; load++) {
+                assertThat(sentRealIds(service)).isEqualTo(first);
+            }
+            // Un autre étudiant, servi par une autre instance (autre générateur aléatoire) : même ordre.
+            QuizService other = new QuizService(
+                    quizRepository, courseRepository, qTypeRepository, languageRepository,
+                    submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
+                    objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
+                    auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(99)));
+            assertThat(sentRealIds(other)).isEqualTo(first);
+        }
 
-            int[][] counts = new int[size][size]; // [correctOrder][position reçue]
-            Set<List<Integer>> distinctOrders = new HashSet<>();
-            for (int draw = 0; draw < draws; draw++) {
-                List<Integer> ids = service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
-                        .map(DragItemDTO::getId).toList();
-                distinctOrders.add(ids);
-                for (int pos = 0; pos < size; pos++) {
-                    counts[correctOrderByPublicId.get(ids.get(pos))][pos]++;
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0} éléments")
+        @org.junit.jupiter.params.provider.ValueSource(ints = {3, 4})
+        @DisplayName("Jamais l'ordre attendu, pour toutes les permutations de correctOrder (et 50 questions)")
+        void jamaisDansLOrdreAttendu_toutesPermutations(int size) {
+            AtomicReference<Quiz> current = new AtomicReference<>();
+            when(quizRepository.findById(4)).thenAnswer(inv -> Optional.of(current.get()));
+            Set<List<Integer>> reached = new HashSet<>();
+            int permutations = 0;
+            for (List<Integer> orders : permutations(size)) {
+                permutations++;
+                for (int questionId = 1; questionId <= 50; questionId++) {
+                    Question q = question(questionId, ORDERING, size, 0);
+                    for (int i = 0; i < size; i++) drag(q, 100 + i, "élément " + i, orders.get(i), null);
+                    current.set(quiz(4, course(1), q));
+                    List<Integer> sent = sentRealIds(service);
+                    assertThat(sent).containsExactlyInAnyOrderElementsOf(expectedIds(q))
+                            .isNotEqualTo(expectedIds(q));
+                    reached.add(sent);
                 }
             }
+            assertThat(permutations).isEqualTo(size == 3 ? 6 : 24);
+            assertThat(reached).hasSize(permutations); // tous les ordres apparaissent d'une question à l'autre
+        }
 
-            // Attendu : 600 par case. Tolérance large (±20 %) : test déterministe (graine fixée).
-            double expected = (double) draws / size;
-            for (int[] row : counts) {
-                for (int c : row) {
-                    assertThat((double) c).isBetween(expected * 0.8, expected * 1.2);
+        @Test
+        @DisplayName("Modifier les éléments d'une question (nouvel id) peut changer son ordre de départ")
+        void modifierLesElements_changeLOrdre() {
+            AtomicReference<Quiz> current = new AtomicReference<>();
+            when(quizRepository.findById(4)).thenAnswer(inv -> Optional.of(current.get()));
+            int changed = 0;
+            for (int questionId = 1; questionId <= 20; questionId++) {
+                current.set(quiz(4, course(1), orderingQuestion(questionId, 4)));
+                List<String> before = sentContents();
+                // Le dernier élément est retiré puis recréé (même contenu, même position attendue).
+                Question after = question(questionId, ORDERING, 4, 0);
+                for (int i = 0; i < 3; i++) drag(after, 100 + i, "élément " + i, i, null);
+                drag(after, 200, "élément 3", 3, null);
+                current.set(quiz(4, course(1), after));
+                if (!sentContents().equals(before)) changed++;
+            }
+            assertThat(changed).isGreaterThan(10);
+        }
+
+        private List<String> sentContents() {
+            return service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
+                    .map(DragItemDTO::getContent).toList();
+        }
+
+        /** Toutes les permutations de 0..size-1. */
+        private static List<List<Integer>> permutations(int size) {
+            if (size == 0) return List.of(List.of());
+            List<List<Integer>> all = new ArrayList<>();
+            for (List<Integer> rest : permutations(size - 1)) {
+                for (int at = 0; at <= rest.size(); at++) {
+                    List<Integer> p = new ArrayList<>(rest);
+                    p.add(at, size - 1);
+                    all.add(p);
                 }
             }
-            assertThat(distinctOrders).hasSizeGreaterThan(100); // 120 permutations possibles
+            return all;
         }
 
         @Test
@@ -206,18 +271,6 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
             }
             double rho = 1 - 6 * sumSq / (size * ((double) size * size - 1));
             assertThat(Math.abs(rho)).isLessThan(0.35);
-        }
-
-        @Test
-        @DisplayName("Jamais envoyée dans l'ordre attendu : la question ne s'ouvre pas déjà résolue")
-        void jamaisDansLOrdreAttendu() {
-            // Deux éléments : sans garde, l'ordre attendu sortirait une fois sur deux.
-            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz(4, course(1), orderingQuestion(30, 2))));
-            for (int draw = 0; draw < 100; draw++) {
-                List<Integer> ids = service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
-                        .map(DragItemDTO::getId).toList();
-                assertThat(ids).containsExactly(pub(101), pub(100));
-            }
         }
 
         @Test
@@ -301,6 +354,21 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
             SubmittedAnswerDTO stored = objectMapper.readValue(
                     captor.getAllValues().get(0).getContent(), SubmittedAnswerDTO.class);
             assertThat(stored.getOrderedItemIds()).containsExactly(100, 101, 102, 103);
+        }
+
+        @Test
+        @DisplayName("Ordre de départ soumis tel quel → pas le score plein (la question ne s'ouvre pas résolue)")
+        void ordreDeDepartTelQuel_pasLeScorePlein() {
+            List<Integer> received = service.getQuizDetail(4).getQuestions().get(0).getDragItems().stream()
+                    .map(DragItemDTO::getId).toList();
+
+            QuizResultDTO result = submitThenGrade(SubmittedAnswerDTO.builder()
+                    .questionId(30).orderedItemIds(received).build());
+
+            QuestionResultDTO r = result.getQuestions().get(0);
+            assertThat(r.getSubmittedOrder()).isEqualTo(received);
+            assertThat(r.getEarned()).isLessThan(4.0);
+            assertThat(r.getCorrectOrder()).containsExactly(pub(100), pub(101), pub(102), pub(103));
         }
 
         @Test

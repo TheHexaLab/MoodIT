@@ -6,19 +6,20 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Function;
 
 /**
  * Vue PASSATION des éléments déplaçables (Remise en ordre, Association) : identifiants publics
- * opaques et ordre d'envoi mélangé (#28).
+ * opaques et ordre d'envoi mélangé (#28), ou ordre de départ fixe pour une Remise en ordre (#211).
  *
  * <p>Les ids de {@code Drag_Item} sont séquentiels et l'éditeur crée les éléments dans l'ordre
  * attendu : exposés tels quels, trier les ids redonnait la solution. En passation, chaque id est
@@ -29,7 +30,11 @@ import java.util.function.Function;
  * secret à déployer) avec un libellé propre à cet usage.
  *
  * <p>Les ids masqués sont STABLES (même valeur à chaque chargement) : une réponse en cours reste
- * valide si l'étudiant recharge le quiz. L'ordre, lui, est retiré au hasard à chaque envoi.
+ * valide si l'étudiant recharge le quiz. L'ordre d'une Association est retiré au hasard à chaque
+ * envoi ({@link #shuffled}). Celui d'une Remise en ordre est FIXE ({@link #fixedOrderExcept}) : un
+ * seul ordre de départ par question, le même pour tous et à chaque chargement, différent de l'ordre
+ * attendu. Un observateur ne voit donc jamais qu'un ordre, qui lui apprend seulement que ce n'est
+ * pas la solution.
  *
  * <p>Hypothèse : {@code Drag_Item.id} (SERIAL, jusqu'à 2^31 - 1) reste sous 2^30, soit plus d'un
  * milliard d'éléments créés. Au-delà, {@link #mask} renvoie {@code null} et l'élément n'est plus
@@ -47,8 +52,12 @@ public class QuizItemObfuscator {
     private static final int ROUNDS = 4;
     private static final String HMAC = "HmacSHA256";
     private static final String KEY_LABEL = "moodit/quiz/drag-item-public-id/v1";
+    private static final String START_ORDER_KEY_LABEL = "moodit/quiz/ordering-start-order/v1";
+    /** Candidats essayés au plus par {@link #fixedOrderExcept} (avec des clés distinctes, 2 suffisent presque toujours). */
+    private static final int MAX_START_ORDER_CANDIDATES = 64;
 
     private final SecretKeySpec roundKey;
+    private final SecretKeySpec startOrderKey;
     private final Random random;
 
     @Autowired
@@ -61,9 +70,9 @@ public class QuizItemObfuscator {
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException("INTERNAL_TOKEN est vide : définir un jeton interne");
         }
-        byte[] derived = newMac(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC))
-                .doFinal(KEY_LABEL.getBytes(StandardCharsets.UTF_8));
-        this.roundKey = new SecretKeySpec(derived, HMAC);
+        SecretKeySpec master = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC);
+        this.roundKey = derivedKey(master, KEY_LABEL);
+        this.startOrderKey = derivedKey(master, START_ORDER_KEY_LABEL);
         this.random = random;
     }
 
@@ -106,24 +115,63 @@ public class QuizItemObfuscator {
     }
 
     /**
-     * Comme {@link #shuffled}, mais jamais dans l'ordre {@code avoided} : une Remise en ordre ne
-     * s'ouvre pas déjà résolue. Les ordres sont comparés par {@code key} (l'id d'un élément : les
-     * entités se référencent entre elles, leurs equals/hashCode ne sont pas utilisables). Moins de
-     * deux clés distinctes : aucun autre ordre possible, la liste est rendue mélangée sans contrainte.
+     * Ordre de départ FIXE d'une Remise en ordre : toujours le même pour une question et ses
+     * éléments (aucun tirage, aucun stockage), et jamais l'ordre {@code avoided} (l'ordre attendu),
+     * pour que la question ne s'ouvre pas déjà résolue.
+     *
+     * <p>Les candidats sont des permutations de Fisher-Yates dont chaque tirage est un HMAC (clé
+     * propre à cet usage) de l'id de la question, des ids de ses éléments, de l'ordre évité, du
+     * numéro du candidat et de la position. On garde le premier candidat différent de
+     * {@code avoided} : le résultat est uniforme sur les autres ordres. L'ordre évité fait partie de
+     * la graine : changer la solution sans toucher aux éléments tire un nouvel ordre de départ, sans
+     * lien avec l'ancien (sinon, le voir changer pourrait trahir l'ancienne ou la nouvelle solution).
+     * Modifier les éléments change leurs ids, donc aussi l'ordre de départ.
+     *
+     * <p>Les ordres sont comparés par {@code key} (l'id d'un élément : les entités se référencent
+     * entre elles, leurs equals/hashCode ne sont pas utilisables). Les clés sont non nulles et
+     * distinctes ; moins de deux : aucun autre ordre possible, la liste est rendue telle quelle.
      */
-    public <T, K> List<T> shuffledExcept(List<T> items, List<T> avoided, Function<T, K> key) {
-        List<K> avoidedKeys = avoided.stream().map(key).toList();
-        List<T> copy = shuffled(items);
-        if (new HashSet<>(avoidedKeys).size() < 2) return copy;
-        while (copy.stream().map(key).toList().equals(avoidedKeys)) {
-            copy = shuffled(items);
+    public <T> List<T> fixedOrderExcept(int scopeId, List<T> items, List<T> avoided, Function<T, Integer> key) {
+        // Point de départ canonique (tri par clé) : l'ordre de la base n'influe pas sur le résultat.
+        List<T> canonical = items.stream().sorted(Comparator.comparing(key)).toList();
+        if (canonical.size() < 2) return canonical;
+        List<Integer> avoidedKeys = avoided.stream().map(key).toList();
+        ByteBuffer seed = ByteBuffer.allocate(Integer.BYTES * (canonical.size() + avoidedKeys.size() + 5));
+        seed.putInt(scopeId).putInt(canonical.size());
+        canonical.forEach(item -> seed.putInt(key.apply(item)));
+        seed.putInt(avoidedKeys.size());
+        avoidedKeys.forEach(seed::putInt);
+        Mac mac = newMac(startOrderKey);
+        // Chaque candidat est uniforme sur les n! ordres : au plus une chance sur deux de retomber
+        // sur l'ordre évité, la boucle s'arrête presque aussitôt. Le plafond ne sert qu'en cas de
+        // clés en double (contrat non respecté) : une erreur plutôt qu'une boucle sans fin.
+        for (int candidate = 0; candidate < MAX_START_ORDER_CANDIDATES; candidate++) {
+            List<T> order = permutation(mac, seed, candidate, canonical);
+            if (!order.stream().map(key).toList().equals(avoidedKeys)) return order;
         }
-        return copy;
+        throw new IllegalStateException("Aucun ordre de départ différent de l'ordre évité : clés en double ?");
+    }
+
+    /** Candidat n° {@code candidate} : Fisher-Yates dont chaque tirage est un HMAC de la graine. */
+    private static <T> List<T> permutation(Mac mac, ByteBuffer seed, int candidate, List<T> canonical) {
+        List<T> order = new ArrayList<>(canonical);
+        for (int i = order.size() - 1; i > 0; i--) {
+            seed.putInt(seed.capacity() - 2 * Integer.BYTES, candidate).putInt(seed.capacity() - Integer.BYTES, i);
+            long draw = ByteBuffer.wrap(mac.doFinal(seed.array())).getLong();
+            // Biais du modulo négligeable : 2^64 tirages pour au plus quelques dizaines de positions.
+            Collections.swap(order, i, (int) Long.remainderUnsigned(draw, i + 1));
+        }
+        return order;
     }
 
     private int roundFunction(Mac mac, int round, int half) {
         byte[] out = mac.doFinal(new byte[] {(byte) round, (byte) (half >>> 8), (byte) half});
         return ((out[0] & 0xFF) << 8 | (out[1] & 0xFF)) & HALF_MASK;
+    }
+
+    /** Sous-clé propre à un usage : HMAC du libellé sous le secret maître. */
+    private static SecretKeySpec derivedKey(SecretKeySpec master, String label) {
+        return new SecretKeySpec(newMac(master).doFinal(label.getBytes(StandardCharsets.UTF_8)), HMAC);
     }
 
     private Mac newMac() {

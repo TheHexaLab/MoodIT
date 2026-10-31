@@ -56,10 +56,10 @@ export function answerKindFor(qType: QuestionType): QuestionAnswer['kind'] {
 
 /**
  * Ordre de départ d'une Remise en ordre, jamais l'ordre correct : la question ne s'ouvre pas
- * déjà résolue. En PASSATION, `correctOrder` est absent et le serveur envoie déjà un ordre
- * mélangé, garanti différent de l'ordre attendu (#28) : il est gardé tel quel (le remélanger
- * ici pourrait retomber sur la solution). Avec `correctOrder` (aperçu de l'éditeur), mélange
- * local garanti différent. (≤ 1 élément → tel quel.)
+ * déjà résolue. En PASSATION, `correctOrder` est absent et le serveur envoie déjà un ordre de
+ * départ fixe (le même à chaque chargement), garanti différent de l'ordre attendu (#28, #211) :
+ * il est gardé tel quel (le remélanger ici pourrait retomber sur la solution). Avec
+ * `correctOrder` (aperçu de l'éditeur), mélange local garanti différent. (≤ 1 élément → tel quel.)
  */
 function shuffledOrderingItemIds(items: DragItem[]): number[] {
   if (items.every((d) => d.correctOrder == null)) return items.map((d) => d.id);
