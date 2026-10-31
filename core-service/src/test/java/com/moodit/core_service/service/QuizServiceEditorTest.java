@@ -273,6 +273,67 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             verify(quizRepository).save(any(Quiz.class));
         }
 
+        /** Remise en ordre (2e question du quiz) dont les éléments portent ces correctOrder. */
+        private QuizDetailDTO orderingQuiz(Integer... orders) {
+            List<DragItemDTO> items = new java.util.ArrayList<>();
+            for (int i = 0; i < orders.length; i++) {
+                items.add(DragItemDTO.builder().content("e" + i).correctOrder(orders[i]).build());
+            }
+            QuestionDTO premiere = QuestionDTO.builder().qType("multiple_choice")
+                    .answers(List.of(AnswerDTO.builder().content("A").isCorrect(true).build())).build();
+            return QuizDetailDTO.builder().title("T").questions(List.of(premiere,
+                    QuestionDTO.builder().qType("ordering").dragItems(items).build())).build();
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"0,1,1", "2,2,2", "0,,1", ",,"})
+        @DisplayName("Remise en ordre aux correctOrder répétés ou absents → refusée, rien n'est enregistré")
+        void remiseEnOrdre_correctOrderRepeteOuAbsent_refuse(String csv) {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            Integer[] orders = java.util.Arrays.stream(csv.split(",", -1))
+                    .map(v -> v.isEmpty() ? null : Integer.valueOf(v)).toArray(Integer[]::new);
+
+            assertThatThrownBy(() -> service.createQuiz(1, orderingQuiz(orders)))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 2 : chaque élément doit avoir une position distincte dans l'ordre attendu.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Remise en ordre aux correctOrder 0..n-1 distincts (comme l'éditeur) → acceptée telle quelle")
+        void remiseEnOrdre_correctOrderDistincts_accepte() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.createQuiz(1, orderingQuiz(2, 0, 1));
+
+            ArgumentCaptor<Quiz> captor = ArgumentCaptor.forClass(Quiz.class);
+            verify(quizRepository).save(captor.capture());
+            assertThat(captor.getValue().getQuestions().get(1).getDragItems())
+                    .extracting(DragItem::getCorrectOrder).containsExactly(2, 0, 1);
+        }
+
+        @Test
+        @DisplayName("Association aux correctOrder tous à 0 ou absents → acceptée (correctOrder non utilisé)")
+        void association_correctOrderNonVerifie() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MATCHING)).thenReturn(Optional.of(type(5, MATCHING)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.createQuiz(1, QuizDetailDTO.builder().title("T").questions(List.of(
+                    QuestionDTO.builder().qType("matching").dragItems(List.of(
+                            DragItemDTO.builder().content("a").correctOrder(0).groupName("G").build(),
+                            DragItemDTO.builder().content("b").correctOrder(0).groupName("H").build(),
+                            DragItemDTO.builder().content("c").groupName("G").build())).build()))
+                    .build());
+
+            verify(quizRepository).save(any(Quiz.class));
+        }
+
 
         @Test
         @DisplayName("Cours introuvable → CourseNotFoundException, rien d'enregistré")
@@ -512,6 +573,26 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                     .build()))
                     .isInstanceOf(InvalidQuizException.class)
                     .hasMessageContaining("Question 1");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Mise à jour d'une remise en ordre avec un correctOrder absent → refusée (pas de repli à 0)")
+        void remiseEnOrdre_correctOrderAbsent_refuse() {
+            Question ordering = question(3, ORDERING, 1.0, 0);
+            drag(ordering, 40, "a", 0, null);
+            drag(ordering, 41, "b", 1, null);
+            Quiz withOrdering = quiz(6, course, ordering);
+            when(quizRepository.findById(6)).thenReturn(Optional.of(withOrdering));
+            when(qTypeRepository.findByName(ORDERING)).thenReturn(Optional.of(type(4, ORDERING)));
+
+            assertThatThrownBy(() -> service.updateQuiz(6, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(3).qType("ordering").dragItems(List.of(
+                            DragItemDTO.builder().id(40).content("a").build(),
+                            DragItemDTO.builder().id(41).content("b").correctOrder(0).build())).build()))
+                    .build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : chaque élément doit avoir une position distincte dans l'ordre attendu.");
             verify(quizRepository, never()).save(any());
         }
 
