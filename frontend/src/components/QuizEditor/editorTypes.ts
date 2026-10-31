@@ -207,6 +207,12 @@ export function defaultHarness(questionLanguage?: Language, harnessLanguage?: La
   );
 }
 
+/**
+ * Nombre minimal d'éléments d'une Remise en ordre (même règle côté serveur) : avec deux
+ * éléments, le seul ordre de départ différent de la solution la révélerait (#211).
+ */
+export const MIN_ORDERING_ITEMS = 3;
+
 /** Construit le brouillon initial d'une question d'un type donné (valeurs par défaut). */
 export function emptyQuestionDraft(qType: QuestionType): QuestionDraft {
   const base = { prompt: '', totalScore: 1 } as const;
@@ -234,10 +240,7 @@ export function emptyQuestionDraft(qType: QuestionType): QuestionDraft {
       return {
         ...base,
         qType,
-        dragItems: [
-          { content: '', correctOrder: 0 },
-          { content: '', correctOrder: 1 },
-        ],
+        dragItems: Array.from({ length: MIN_ORDERING_ITEMS }, (_, i) => ({ content: '', correctOrder: i })),
       };
     case 'matching':
       return {

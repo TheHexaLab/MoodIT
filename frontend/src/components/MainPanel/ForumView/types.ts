@@ -27,6 +27,8 @@ export interface ForumViewLabels {
   ownVoteTitle: string;
   /** aria-label du bouton « répondre ». */
   reply: string;
+  /** title affiché sur « répondre » tant que le post n'est pas confirmé par le serveur. */
+  pendingReplyTitle: string;
   /** aria-label du bouton « modifier ». */
   edit: string;
   /** aria-label du bouton « supprimer ». */

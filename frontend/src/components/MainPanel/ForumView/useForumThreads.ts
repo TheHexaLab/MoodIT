@@ -538,7 +538,8 @@ export function useForumThreads({
 
   async function addReply(parentId: number, content: string): Promise<boolean> {
     const trimmed = content.trim();
-    if (!trimmed) return false;
+    // id temporaire négatif = parent pas encore confirmé côté serveur : on bloque (#212).
+    if (!trimmed || parentId < 0) return false;
 
     const clientId = generateClientId(++seqRef.current);
     const tempId = -seqRef.current; // id temporaire negatif, unique pour la cle React

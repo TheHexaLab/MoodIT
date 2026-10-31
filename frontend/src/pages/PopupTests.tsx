@@ -42,7 +42,7 @@ import { Sun } from '../assets/Sun.tsx';
 import { Moon } from '../assets/Moon.tsx';
 import { useTheme } from '../helpers/theme.ts';
 
-/** Mock — programmes fournis au AddCoursePopup (alignés sur init.sql). */
+/** Mock — programmes fournis au AddCoursePopup (alignés sur la démo, db/demo). */
 const programs: Program[] = [
   { id: 1, name: 'Génie informatique', code: 'GIN', cohort: 'Promo 71', color: '#1a6e3c' },
   { id: 2, name: 'Génie logiciel', code: 'GLO', cohort: 'Promo 71', color: '#0a5cc0' },
@@ -61,7 +61,7 @@ const programs: Program[] = [
 ];
 
 /**
- * Mock — rôles fournis au RoleEditorPopup (ids alignés sur init.sql).
+ * Mock — rôles fournis au RoleEditorPopup (ids alignés sur les données de référence).
  * L'ordre du tableau = ordre d'affichage des sections.
  */
 const roles: Role[] = [
@@ -186,7 +186,7 @@ const roleUsers: User[] = [
   },
 ];
 
-/** Mock — établissements fournis au AddSubscriptionPopup (aligné sur init.sql). */
+/** Mock — établissements fournis au AddSubscriptionPopup (aligné sur les données de référence). */
 const establishments: Establishment[] = [
   { id: 1, name: 'Université de Sherbrooke' },
   { id: 2, name: 'Université Laval' },
@@ -213,7 +213,7 @@ const joinPrograms: JoinProgram[] = programs.map((p, i) => ({
 }));
 
 /**
- * Mock — programmes auxquels l'utilisateur est déjà abonné (ids alignés sur init.sql).
+ * Mock — programmes auxquels l'utilisateur est déjà abonné (ids alignés sur la démo, db/demo).
  * Tous rattachés à l'Université de Sherbrooke (id 1) : en l'ouvrant dans la vue
  * « rejoindre », GIN (1), GEL (3) et GEN (7) doivent apparaître préselectionnés.
  */

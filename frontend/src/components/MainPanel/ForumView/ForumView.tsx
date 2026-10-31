@@ -296,6 +296,27 @@ const ForumView: React.FC<ForumViewProps> = ({
     return post.author.id === currentUser.id;
   }
 
+  /**
+   * Bouton « Répondre » d'un post (sujet ou réponse). Désactivé tant que le post a un id
+   * temporaire négatif (affichage optimiste, pas encore confirmé par le serveur) : la
+   * réponse partirait avec un parent inconnu du serveur (#212).
+   */
+  function renderReplyButton(post: ForumPost, iconSize: number) {
+    const unconfirmed = post.id < 0;
+    return (
+      <button
+        type="button"
+        data-role="answer"
+        aria-label={t.reply}
+        disabled={unconfirmed}
+        title={unconfirmed ? t.pendingReplyTitle : undefined}
+        onClick={() => startReply(post)}
+      >
+        <Reply width={iconSize} height={iconSize} />
+      </button>
+    );
+  }
+
   /** Ouvre l'editeur de reponse sous un post (ferme une edition en cours). */
   function startReply(post: ForumPost) {
     cancelEdit();
@@ -604,14 +625,7 @@ const ForumView: React.FC<ForumViewProps> = ({
           <div data-role="comment-footer">
             {renderVoteControl(post, true)}
             <div data-role="post-actions">
-              <button
-                type="button"
-                data-role="answer"
-                aria-label={t.reply}
-                onClick={() => startReply(post)}
-              >
-                <Reply width={14} height={14} />
-              </button>
+              {renderReplyButton(post, 14)}
               {renderOwnerActions(post)}
             </div>
             {replyToggle}
@@ -745,14 +759,7 @@ const ForumView: React.FC<ForumViewProps> = ({
                   de gauche est masque), facon reponse. */}
               <div data-role="mobile-vote">{renderVoteControl(post, true)}</div>
               <div data-role="post-actions">
-                <button
-                  type="button"
-                  data-role="answer"
-                  aria-label="Répondre"
-                  onClick={() => startReply(post)}
-                >
-                  <Reply width={15} height={15} />
-                </button>
+                {renderReplyButton(post, 15)}
                 {renderOwnerActions(post)}
               </div>
               {replyCount > 0 ? (

@@ -90,11 +90,12 @@ describe('emptyQuestionDraft', () => {
     }
   });
 
-  it('ordering : 2 éléments avec correctOrder 0 et 1', () => {
+  it('ordering : 3 éléments (le minimum) avec correctOrder 0, 1 et 2', () => {
     const d = emptyQuestionDraft('ordering');
     expect(d.dragItems).toEqual([
       { content: '', correctOrder: 0 },
       { content: '', correctOrder: 1 },
+      { content: '', correctOrder: 2 },
     ]);
   });
 

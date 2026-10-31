@@ -139,8 +139,8 @@ test('créer un quiz avec les 6 types : publié visible chez l’étudiant, brou
   await page.getByRole('button', { name: 'Marquer comme correcte' }).nth(2).click();
   await addButton(page).click();
 
+  // Trois éléments d'office (le minimum d'une remise en ordre).
   await startQuestion(page, 'Remise en ordre', 'Ordonne du plus petit au plus grand.', 2);
-  await page.getByRole('button', { name: '+ Ajouter un élément' }).click();
   await elementFields(page).nth(0).fill('Un');
   await elementFields(page).nth(1).fill('Deux');
   await elementFields(page).nth(2).fill('Trois');
@@ -246,14 +246,17 @@ test('validations de l’éditeur de question', async ({ browser }) => {
   await page.getByRole('button', { name: 'Marquer comme correcte' }).nth(1).click();
   await expect(addButton(page)).toBeEnabled();
 
-  // Remise en ordre : au moins 2 éléments remplis.
+  // Remise en ordre : au moins 3 éléments remplis.
   await pickOption(page, 'Type de question', 'Remise en ordre');
   await elementFields(page).nth(0).fill('Premier');
   await expect(addButton(page)).toBeDisabled();
   await elementFields(page).nth(1).fill('Second');
+  await expect(addButton(page)).toBeDisabled();
+  await elementFields(page).nth(2).fill('Troisième');
   await expect(addButton(page)).toBeEnabled();
   await page.getByRole('button', { name: "Supprimer l'élément" }).nth(1).click();
   await expect(addButton(page)).toBeDisabled();
+  await expect(page.getByText('Une remise en ordre doit avoir au moins 3 éléments.')).toBeVisible();
 
   // Association : élément ET catégorie pour chaque ligne.
   await pickOption(page, 'Type de question', 'Association');

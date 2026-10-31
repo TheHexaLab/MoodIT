@@ -1,4 +1,4 @@
-// Mappage en lecture de la table Role (geree par init.sql).
+// Mappage en lecture de la table Role (geree par les migrations Flyway, db/migration).
 
 package com.moodit.permission_service.model;
 

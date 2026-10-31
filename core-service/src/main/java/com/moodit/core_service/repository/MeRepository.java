@@ -1,4 +1,4 @@
-// Lecture de l'utilisateur via JdbcTemplate sur le schéma d'init.sql (table User_).
+// Lecture de l'utilisateur via JdbcTemplate sur le schéma de db/migration (table User_).
 // SQL direct, sans dépendre des entités JPA : les collègues pourront remplacer cette
 // impl par un repository JPA sans toucher au contrôleur.
 

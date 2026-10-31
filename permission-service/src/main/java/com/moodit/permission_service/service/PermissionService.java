@@ -136,7 +136,7 @@ public class PermissionService {
   //            body, ex. forumId dans PostCreateInForumDTO. Le gateway nous transmet le body.)
   //    3. Choisir le predicat d'autorisation :
   //         - APPARTENANCE (fin) : membershipService.canAccessForum / canAccessCourse /
-  //           canAccessQuiz (delegue au MembershipRepository, SQL sur init.sql).
+  //           canAccessQuiz (delegue au MembershipRepository, SQL sur le schema de db/migration).
   //         - ROLE (grossier)    : hasRole(user, RoleNames.ADMIN).
   //    4. Ajouter `rule(methode, motif, (user, vars, body) -> <predicat>)` a la liste.
   //       ⚠️ Ecrire le motif SANS "/api" : la fabrique rule(...) l'ajoute automatiquement

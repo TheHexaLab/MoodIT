@@ -15,8 +15,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Client de correction (execution-service, endpoint interne) : appel avec le jeton, verdicts dans
- * l'ordre des harnais, {@code null} en cas de panne, et délai de lecture proportionnel au nombre de
- * harnais (#31). Mini serveur HTTP (JDK) en guise d'execution-service.
+ * l'ordre des harnais, {@code null} en cas de panne, et délai de lecture proportionnel au nombre
+ * d'appels au sandbox, attente d'une place comprise (#31, #216). Mini serveur HTTP (JDK) en guise
+ * d'execution-service.
  */
 class ExecutionClientTest {
 
@@ -60,8 +61,13 @@ class ExecutionClientTest {
         return "http://localhost:" + server.getAddress().getPort();
     }
 
+    /** Client sans attente d'une place : le délai par appel se réduit à {@code perTestMs}. */
     private static ExecutionClient client(String url, long baseMs, long perTestMs) {
-        return new ExecutionClient(url, TOKEN, 2_000, baseMs, perTestMs);
+        return client(url, baseMs, perTestMs, 0);
+    }
+
+    private static ExecutionClient client(String url, long baseMs, long perTestMs, long queueWaitMs) {
+        return new ExecutionClient(url, TOKEN, 2_000, baseMs, perTestMs, queueWaitMs);
     }
 
     @Test
@@ -119,13 +125,50 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Délai de lecture = base + nombre de harnais × délai par harnais (au moins un)")
-    void readTimeout_proportionnelAuNombreDeHarnais() {
-        ExecutionClient client = client("http://localhost:1", 10_000, 20_000);
+    @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + appel Piston), au moins un")
+    void readTimeout_couvreAttenteEtAppelParHarnais() {
+        // Valeurs par défaut : 10 s de base, PISTON_HTTP_TIMEOUT_MS = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
+        ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
-        assertThat(client.readTimeoutMs(1)).isEqualTo(30_000);
-        assertThat(client.readTimeoutMs(5)).isEqualTo(110_000);
-        assertThat(client.readTimeoutMs(100)).isEqualTo(2_010_000);
-        assertThat(client.readTimeoutMs(0)).isEqualTo(30_000);
+        assertThat(client.readTimeoutMs(1)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs(5)).isEqualTo(185_000);
+        assertThat(client.readTimeoutMs(100)).isEqualTo(3_510_000);
+        assertThat(client.readTimeoutMs(0)).isEqualTo(45_000);
+    }
+
+    @Test
+    @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
+    void pistonCalls_sqlEnDeuxPhases() {
+        assertThat(ExecutionClient.pistonCalls("Python", 3)).isEqualTo(3);
+        assertThat(ExecutionClient.pistonCalls(null, 3)).isEqualTo(3);
+        assertThat(ExecutionClient.pistonCalls("sql", 3)).isEqualTo(6);
+        assertThat(ExecutionClient.pistonCalls(" SQL ", 1)).isEqualTo(2);
+        assertThat(ExecutionClient.pistonCalls("sqlite", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.pistonCalls("sqlite3", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.pistonCalls("sqlserver", 2)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Réponse retardée par l'attente d'une place mais dans le budget → verdicts")
+    void evaluate_attenteDUnePlaceDansLeBudget_verdicts() throws Exception {
+        String url = startStub(200,
+                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 800);
+
+        // 2 harnais : 100 + 2 × (200 + 300) = 1,1 s > 800 ms ; sans l'attente, 100 + 2 × 200 = 500 ms.
+        assertThat(client(url, 100, 200, 300).evaluate("Python", "code", TWO_HARNESSES))
+                .containsExactly(true, true);
+    }
+
+    @Test
+    @DisplayName("Harnais SQL : le délai compte ses deux appels au sandbox")
+    void evaluate_sqlDeuxPhasesDansLeDelai_verdicts() throws Exception {
+        String url = startStub(200,
+                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":false,\"detail\":\"x\"}]", 800);
+
+        // 2 harnais SQL = 4 appels : 100 + 4 × 250 = 1,1 s > 800 ms ; comptés comme 2 appels, 600 ms.
+        assertThat(client(url, 100, 250).evaluate("sql", "code", TWO_HARNESSES))
+                .containsExactly(true, false);
     }
 }

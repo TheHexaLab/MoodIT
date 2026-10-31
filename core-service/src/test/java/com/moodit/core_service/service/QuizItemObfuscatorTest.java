@@ -3,8 +3,10 @@ package com.moodit.core_service.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
@@ -12,7 +14,7 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** Ids publics des éléments déplaçables (#28) : bijection à clé, stable, et mélange. */
+/** Ids publics des éléments déplaçables (#28) : bijection à clé, stable ; mélange et ordre de départ fixe (#211). */
 class QuizItemObfuscatorTest {
 
     private static final int DOMAIN = 1 << QuizItemObfuscator.DOMAIN_BITS;
@@ -90,37 +92,115 @@ class QuizItemObfuscatorTest {
     }
 
     @Test
-    @DisplayName("shuffledExcept : jamais l'ordre évité, même avec deux éléments (une chance sur deux sinon)")
-    void shuffledExcept_eviteLOrdre() {
-        List<Integer> items = List.of(1, 2);
-        for (int i = 0; i < 100; i++) {
-            assertThat(obfuscator.shuffledExcept(items, items, Function.identity())).containsExactly(2, 1);
+    @DisplayName("fixedOrderExcept : même ordre à chaque appel, pour toute instance de même secret")
+    void fixedOrder_deterministe() {
+        List<Integer> items = List.of(10, 11, 12, 13, 14);
+        List<Integer> first = obfuscator.fixedOrderExcept(7, items, items, Function.identity());
+        assertThat(first).containsExactlyInAnyOrderElementsOf(items).isNotEqualTo(items);
+        for (int i = 0; i < 20; i++) {
+            assertThat(obfuscator.fixedOrderExcept(7, items, items, Function.identity())).isEqualTo(first);
         }
-        List<Integer> three = List.of(1, 2, 3);
-        Set<List<Integer>> orders = new HashSet<>();
-        for (int i = 0; i < 200; i++) orders.add(obfuscator.shuffledExcept(three, three, Function.identity()));
-        assertThat(orders).hasSize(5).doesNotContain(three); // 3! - 1 ordres possibles, tous atteints
+        // Autre instance (autre générateur aléatoire), même secret : même ordre, sans état partagé.
+        assertThat(new QuizItemObfuscator("test-secret", new Random(99))
+                .fixedOrderExcept(7, items, items, Function.identity())).isEqualTo(first);
+        assertThat(items).containsExactly(10, 11, 12, 13, 14); // liste d'origine intacte
     }
 
     @Test
-    @DisplayName("shuffledExcept : comparaison par la clé fournie, pas par equals des éléments")
-    void shuffledExcept_parCle() {
+    @DisplayName("fixedOrderExcept : l'ordre des éléments en entrée (ordre de la base) n'influe pas")
+    void fixedOrder_independantDeLOrdreDEntree() {
+        List<Integer> items = List.of(10, 11, 12, 13);
+        List<Integer> avoided = List.of(13, 12, 11, 10);
+        assertThat(obfuscator.fixedOrderExcept(7, List.of(12, 10, 13, 11), avoided, Function.identity()))
+                .isEqualTo(obfuscator.fixedOrderExcept(7, items, avoided, Function.identity()));
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : la question, les ids des éléments et le secret font varier l'ordre")
+    void fixedOrder_varieSelonQuestionElementsEtSecret() {
+        List<Integer> items = List.of(10, 11, 12, 13, 14);
+        List<Integer> replaced = List.of(10, 11, 12, 13, 15); // un élément remplacé → nouvel id
+        QuizItemObfuscator other = new QuizItemObfuscator("autre-secret", new Random(28));
+        Set<List<Integer>> byQuestion = new HashSet<>();
+        int changedByItems = 0;
+        int changedBySecret = 0;
+        for (int scope = 0; scope < 30; scope++) {
+            List<Integer> order = obfuscator.fixedOrderExcept(scope, items, items, Function.identity());
+            byQuestion.add(order);
+            // Rang de chaque élément gardé : comparable d'une version des éléments à l'autre.
+            List<Integer> keptRanks = obfuscator.fixedOrderExcept(scope, replaced, replaced, Function.identity())
+                    .stream().map(id -> id == 15 ? 14 : id).toList();
+            if (!keptRanks.equals(order)) changedByItems++;
+            if (!other.fixedOrderExcept(scope, items, items, Function.identity()).equals(order)) changedBySecret++;
+        }
+        assertThat(byQuestion).hasSizeGreaterThan(20); // 119 ordres possibles
+        assertThat(changedByItems).isGreaterThan(20);
+        assertThat(changedBySecret).isGreaterThan(20);
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : jamais l'ordre évité ; uniforme sur les autres ordres d'une question à l'autre")
+    void fixedOrder_eviteLOrdre() {
+        // Deux éléments : un seul autre ordre, atteint quelle que soit la question.
+        List<Integer> two = List.of(1, 2);
+        for (int scope = 0; scope < 100; scope++) {
+            assertThat(obfuscator.fixedOrderExcept(scope, two, two, Function.identity())).containsExactly(2, 1);
+        }
+        List<Integer> three = List.of(1, 2, 3);
+        Map<List<Integer>, Integer> counts = new HashMap<>();
+        for (int scope = 0; scope < 1500; scope++) {
+            counts.merge(obfuscator.fixedOrderExcept(scope, three, three, Function.identity()), 1, Integer::sum);
+        }
+        // 3! - 1 = 5 ordres, ≈ 300 chacun ; tolérance large (test déterministe, secret fixé).
+        assertThat(counts).hasSize(5).doesNotContainKey(three);
+        assertThat(counts.values()).allSatisfy(c -> assertThat(c).isBetween(220, 380));
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : changer l'ordre évité (la solution) tire un nouvel ordre, sans lien avec l'ancien")
+    void fixedOrder_nouvelOrdreSiLaSolutionChange() {
+        List<Integer> items = List.of(1, 2, 3, 4);
+        List<Integer> otherAvoided = List.of(4, 3, 2, 1);
+        int same = 0;
+        for (int scope = 0; scope < 240; scope++) {
+            List<Integer> a = obfuscator.fixedOrderExcept(scope, items, items, Function.identity());
+            List<Integer> b = obfuscator.fixedOrderExcept(scope, items, otherAvoided, Function.identity());
+            assertThat(a).isNotEqualTo(items);
+            assertThat(b).isNotEqualTo(otherAvoided);
+            if (a.equals(b)) same++;
+        }
+        // Tirages indépendants : égaux ≈ 1 fois sur 23 (≈ 10 sur 240). Avec l'ordre évité hors de
+        // la graine, ils l'étaient presque toujours (≈ 220 sur 240).
+        assertThat(same).isLessThan(40);
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : clés en double → erreur au lieu d'une boucle sans fin")
+    void fixedOrder_clesEnDouble() {
+        List<Integer> items = List.of(5, 5, 5);
+        assertThatThrownBy(() -> obfuscator.fixedOrderExcept(1, items, items, Function.identity()))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("fixedOrderExcept : comparaison par la clé fournie, pas par equals des éléments")
+    void fixedOrder_parCle() {
         // Deux éléments égaux au sens d'equals mais de clés distinctes : l'ordre évité reste évité.
         record Item(int id) {
             @Override public boolean equals(Object o) { return o instanceof Item; }
             @Override public int hashCode() { return 0; }
         }
         List<Item> items = List.of(new Item(1), new Item(2));
-        for (int i = 0; i < 50; i++) {
-            assertThat(obfuscator.shuffledExcept(items, items, Item::id)).extracting(Item::id).containsExactly(2, 1);
+        for (int scope = 0; scope < 50; scope++) {
+            assertThat(obfuscator.fixedOrderExcept(scope, items, items, Item::id))
+                    .extracting(Item::id).containsExactly(2, 1);
         }
     }
 
     @Test
-    @DisplayName("shuffledExcept : moins de deux éléments distincts → rendu tel quel, sans boucle infinie")
-    void shuffledExcept_sansAutreOrdrePossible() {
-        assertThat(obfuscator.shuffledExcept(List.<Integer>of(), List.of(), Function.identity())).isEmpty();
-        assertThat(obfuscator.shuffledExcept(List.of(7), List.of(7), Function.identity())).containsExactly(7);
-        assertThat(obfuscator.shuffledExcept(List.of(7, 7), List.of(7, 7), Function.identity())).containsExactly(7, 7);
+    @DisplayName("fixedOrderExcept : moins de deux éléments → rendu tel quel, sans boucle infinie")
+    void fixedOrder_sansAutreOrdrePossible() {
+        assertThat(obfuscator.fixedOrderExcept(1, List.<Integer>of(), List.of(), Function.identity())).isEmpty();
+        assertThat(obfuscator.fixedOrderExcept(1, List.of(7), List.of(7), Function.identity())).containsExactly(7);
     }
 }

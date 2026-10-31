@@ -1,4 +1,4 @@
-// Mappage en lecture de User_ (geree par init.sql). On ne mappe que ce dont le
+// Mappage en lecture de User_ (geree par les migrations Flyway, db/migration). On ne mappe que ce dont le
 // permission-service a besoin : l'email (cle de recherche envoyee par le gateway)
 // et les roles via la table de jointure user_role.
 

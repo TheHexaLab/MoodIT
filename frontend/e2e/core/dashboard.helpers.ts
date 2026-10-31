@@ -3,7 +3,7 @@ import { TEST_PROGRAM_ID } from '../setup/accounts';
 
 type StorageState = Awaited<ReturnType<APIRequestContext['storageState']>>;
 
-/** Cours du seed rattachés au programme de test (init.sql) ; le 1 (MAT115) est déjà suivi. */
+/** Cours du seed rattachés au programme de test (démo, db/demo) ; le 1 (MAT115) est déjà suivi. */
 export const SECOND_COURSE = {
   id: 2,
   code: 'GIF201',
