@@ -33,6 +33,10 @@ async function openProgram(page: Page) {
   await openDrawer(page);
   await drawer(page).getByRole('button', { name: /MAT115/ }).click();
   await expect(page).toHaveURL(/\/home\/p\/\d+\/c\/\d+$/);
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Ouvrir le menu' })).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  );
 }
 
 /** Ouvre un élément du cours de test depuis le tiroir (qui se referme ensuite). */
