@@ -57,10 +57,18 @@
 # toujours les challenges ACME /.well-known/ sur le port 80 malgré ce bloc.
 http://moodit.ca, http://www.moodit.ca {
 	import security_headers
-	redir https://{host}{uri} permanent
+	redir https://moodit.ca{uri} permanent
 }
 
-moodit.ca, www.moodit.ca {
+# Une seule origine : www.moodit.ca redirige vers moodit.ca. Le gateway n'accepte les écritures et
+# le WebSocket que depuis les origines de FRONT_ORIGIN (#234) ; servir aussi www rendrait le site
+# inutilisable pour qui y arrive.
+www.moodit.ca {
+	import security_headers
+	redir https://moodit.ca{uri} permanent
+}
+
+moodit.ca {
 	encode gzip zstd
 	import security_headers
 
