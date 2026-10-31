@@ -26,6 +26,8 @@ export type {
 interface ProgramMenuProps {
   /** Programmes assignes a l'utilisateur. */
   programs?: Program[];
+  /** Masque le nom des programmes (barre réduite) : seuls leurs cours restent. */
+  namesHidden?: boolean;
   /** Contenu affiché sous un programme (ses cours, dans la barre du portail). */
   renderCourses?: (program: Program) => React.ReactNode;
   /**
@@ -104,6 +106,7 @@ function getProgramBadge(program: Program): string {
 
 const ProgramMenu: React.FC<ProgramMenuProps> = ({
   programs = [],
+  namesHidden = false,
   renderCourses,
   loading = false,
   loadError = null,
@@ -278,7 +281,7 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
             return (
               <React.Fragment key={programId}>
                 <li
-                  className={styles.programItem}
+                  className={`${styles.programItem} ${namesHidden ? styles.programItemHidden : ''}`}
                   onContextMenu={(event) => openContextMenu(event, programId)}
                   onKeyDown={(event) => handleProgramKeyDown(event, programId)}
                   onTouchStart={(event) => handleProgramTouchStart(event, programId)}

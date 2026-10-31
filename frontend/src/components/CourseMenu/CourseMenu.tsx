@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './CourseMenu.module.css';
 import { type Program } from '../ProgramMenu/ProgramMenu';
-import UserMenu, { type UserMenuUser } from '../UserMenu/UserMenu';
 import CourseChannelList, {
   type ChannelRef,
   type ChannelTypeDefinition,
@@ -109,20 +108,10 @@ interface CourseMenuProps {
    * destructive : retire le cours pour tous. Absent → item du menu contextuel masqué.
    */
   onDeleteCourse?: (courseId: number) => void;
-  /**
-   * Utilisateur connecte affiche en bas du panneau.
-   */
-  currentUser?: UserMenuUser | null;
-  /** Profil en cours de chargement : le UserMenu affiche un skeleton. */
-  userLoading?: boolean;
-  /** Ouvre le formulaire de modification du profil (menu du compte). */
-  onEditProfile?: () => void;
-  /** Ouvre le gestionnaire des administrateurs (menu du compte ; masqué si absent). */
-  onManageAdmins?: () => void;
-  /** Ouvre le journal d'audit (menu du compte ; masqué si absent — Gardien uniquement). */
-  onViewAuditLogs?: () => void;
-  /** Déconnecte l'utilisateur (menu du compte). */
-  onLogout?: () => void;
+  /** Panneau réduit en mince bande : seul le bouton pour le rouvrir reste. */
+  collapsed?: boolean;
+  /** Réduit ou rouvre le panneau (bouton de l'en-tête). Absent : pas de bouton (mobile). */
+  onToggleCollapsed?: () => void;
   /**
    * Handlers CRUD de l'éditeur de quiz (crayon de la section « quiz »). Fournit
    * notamment `onFetchQuiz` pour charger les questions à l'édition. Sans eux,
@@ -155,12 +144,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   onOpenMcpManagement,
   onLeaveCourse,
   onDeleteCourse,
-  currentUser,
-  userLoading = false,
-  onEditProfile,
-  onManageAdmins,
-  onViewAuditLogs,
-  onLogout,
+  collapsed = false,
+  onToggleCollapsed,
   quizHandlers,
   onQuizzesChange,
 }) => {
@@ -319,7 +304,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   return (
     <nav
       ref={navRef}
-      className={styles.sidebar}
+      className={`${styles.sidebar}${collapsed ? ` ${styles.sidebarCollapsed}` : ''}${isResizing ? ` ${styles.sidebarResizing}` : ''}`}
       aria-label="Cours"
       style={width != null ? ({ ['--cm-width']: `${width}px` } as React.CSSProperties) : undefined}
     >
@@ -349,6 +334,26 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           </div>
         ) : (
           <span className={styles.headerTitle}>{activeProgram?.label ?? 'Accueil'}</span>
+        )}
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            className={styles.collapseButton}
+            aria-label={collapsed ? 'Déplier le panneau du cours' : 'Réduire le panneau du cours'}
+            title={collapsed ? 'Déplier le panneau du cours' : 'Réduire le panneau du cours'}
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapsed}
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d={collapsed ? 'M6 7l5 5-5 5M13 7l5 5-5 5' : 'M18 7l-5 5 5 5M11 7l-5 5 5 5'}
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         )}
       </header>
 
@@ -387,18 +392,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
           />
         )}
       </main>
-
-      {/* Panneau utilisateur */}
-      <footer className={styles.userPanel}>
-        <UserMenu
-          user={currentUser}
-          loading={userLoading}
-          onEditProfile={onEditProfile}
-          onManageAdmins={onManageAdmins}
-          onViewAuditLogs={onViewAuditLogs}
-          onLogout={onLogout}
-        />
-      </footer>
 
       {/* Poignée de redimensionnement (bord droit) */}
       <div

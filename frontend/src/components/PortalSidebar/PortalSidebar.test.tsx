@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import PortalSidebar from './PortalSidebar';
+import { ROLE } from '../../helpers/roles';
 import type { Course, Program } from '../../types/domain';
 
 afterEach(cleanup);
@@ -20,7 +21,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof PortalSidebar>[0]> =
     loadError: null,
     onReload: vi.fn(),
     onOpenCourse: vi.fn(),
-    onJoin: vi.fn(),
+    onJoinProgram: vi.fn(),
     userMenu: <span>compte</span>,
     ...overrides,
   };
@@ -68,7 +69,7 @@ describe('PortalSidebar', () => {
             loadError={null}
             onReload={vi.fn()}
             onOpenCourse={vi.fn()}
-            onJoin={vi.fn()}
+            onJoinProgram={vi.fn()}
             userMenu={null}
           />
         </MemoryRouter>
@@ -89,10 +90,114 @@ describe('PortalSidebar', () => {
     expect(props.onReload).toHaveBeenCalled();
   });
 
-  it('les pages à venir n’ont pas d’action, « Rejoindre un cours » en a une', () => {
-    const props = renderSidebar();
+  describe('version réduite', () => {
+    it('les pages et les cours gardent un nom accessible et une infobulle', () => {
+      renderSidebar({ collapsed: true });
+      expect(screen.getByRole('link', { name: 'Accueil' }).getAttribute('title')).toBe('Accueil');
+      expect(screen.getByRole('button', { name: 'Horaire' }).getAttribute('title')).toBe('Horaire');
+      expect(screen.getByRole('button', { name: 'IFT101 · Algo' }).getAttribute('title')).toBe('IFT101 · Algo');
+    });
+
+    it('un clic sur une tuile ouvre le cours ; le cours ouvert est marqué, pas l’Accueil', () => {
+      const props = renderSidebar({ collapsed: true, activeProgramId: 1, selectedCourseId: 10 });
+      const tile = screen.getByRole('button', { name: 'IFT101 · Algo' });
+      expect(tile.getAttribute('aria-current')).toBe('page');
+      expect(screen.getByRole('link', { name: 'Accueil' }).getAttribute('aria-current')).toBeNull();
+      fireEvent.click(tile);
+      expect(props.onOpenCourse).toHaveBeenCalledWith(1, 10);
+    });
+
+    it('un cours sans sigle : les lettres de son titre', () => {
+      renderSidebar({
+        collapsed: true,
+        programs: [{ ...programs[0], courses: [{ id: 11, code: '', title: 'Maths' } as Course] }],
+      });
+      expect(screen.getByRole('button', { name: 'Maths' }).textContent).toContain('MAT');
+    });
+
+    it('un cours de deux programmes s’ouvre par le programme actif', () => {
+      const props = renderSidebar({
+        collapsed: true,
+        activeProgramId: 2,
+        programs: [programs[0], { ...programs[1], courses: [course(10, 'IFT101', 'Algo')] }],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'IFT101 · Algo' }));
+      expect(props.onOpenCourse).toHaveBeenCalledWith(2, 10);
+    });
+
+    it('le « + » vise le programme ouvert', () => {
+      const onJoinCourses = vi.fn();
+      renderSidebar({ collapsed: true, activeProgramId: 2, programActions: { onJoinCourses } });
+      fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours' }));
+      expect(onJoinCourses).toHaveBeenCalledWith(2);
+    });
+
+    it('le « + » vise le seul programme, sur l’Accueil', () => {
+      const onJoinCourses = vi.fn();
+      renderSidebar({ collapsed: true, programs: [programs[0]], programActions: { onJoinCourses } });
+      fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours' }));
+      expect(onJoinCourses).toHaveBeenCalledWith(1);
+    });
+
+    it('le « + » déplie la barre s’il y a plusieurs programmes, sans programme ouvert', () => {
+      const onToggleCollapsed = vi.fn();
+      renderSidebar({ collapsed: true, onToggleCollapsed });
+      fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours' }));
+      expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+    });
+
+    it('le « + » sans programme rejoint un programme', () => {
+      const props = renderSidebar({ collapsed: true, programs: [] });
+      fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours' }));
+      expect(props.onJoinProgram).toHaveBeenCalled();
+    });
+
+    it('chargement et erreur de la liste', () => {
+      renderSidebar({ collapsed: true, loading: true });
+      expect(screen.getByRole('status', { name: 'Chargement des programmes' })).toBeTruthy();
+      cleanup();
+      const props = renderSidebar({ collapsed: true, loadError: 'panne' });
+      fireEvent.click(screen.getByRole('button', { name: 'Réessayer le chargement des programmes' }));
+      expect(props.onReload).toHaveBeenCalled();
+    });
+
+    it('le bouton réduire / déplier n’existe que si la barre peut changer (pas sur mobile)', () => {
+      const onToggleCollapsed = vi.fn();
+      renderSidebar({ onToggleCollapsed });
+      fireEvent.click(screen.getByRole('button', { name: 'Réduire le menu' }));
+      expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+      cleanup();
+      renderSidebar();
+      expect(screen.queryByRole('button', { name: 'Réduire le menu' })).toBeNull();
+    });
+  });
+
+  it('les pages à venir n’ont pas d’action', () => {
+    renderSidebar();
     expect(screen.getByRole('button', { name: 'Horaire' }).getAttribute('aria-disabled')).toBe('true');
-    fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours' }));
-    expect(props.onJoin).toHaveBeenCalled();
+  });
+
+  it('« Rejoindre un cours » vise son programme, même sans cours', () => {
+    const onJoinCourses = vi.fn();
+    renderSidebar({ programActions: { onJoinCourses } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un cours : Mathématiques' }));
+    expect(onJoinCourses).toHaveBeenCalledWith(2);
+  });
+
+  it('« Ajouter un cours » : seulement si l’utilisateur gère le programme', () => {
+    const onAddCourseToProgram = vi.fn();
+    renderSidebar({
+      programs: [programs[0], { ...programs[1], roleName: ROLE.TEACHER }],
+      programActions: { onAddCourseToProgram },
+    });
+    expect(screen.queryByRole('button', { name: 'Ajouter un cours : Génie logiciel' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un cours : Mathématiques' }));
+    expect(onAddCourseToProgram).toHaveBeenCalledWith(2);
+  });
+
+  it('sans programme : « Rejoindre un programme »', () => {
+    const props = renderSidebar({ programs: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un programme' }));
+    expect(props.onJoinProgram).toHaveBeenCalled();
   });
 });

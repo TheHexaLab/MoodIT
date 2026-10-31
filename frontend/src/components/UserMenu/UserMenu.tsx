@@ -48,6 +48,8 @@ interface UserMenuProps {
    * - 'compact' : pastille d'avatar seule (barre mobile en haut à droite).
    */
   variant?: 'footer' | 'compact';
+  /** Variante 'footer' : efface le nom sans bouger l'avatar (barre latérale réduite). */
+  infoHidden?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export default function UserMenu({
   onViewAuditLogs,
   onLogout,
   variant = 'footer',
+  infoHidden = false,
 }: UserMenuProps): React.ReactElement {
   const navigate = useNavigate();
   const displayName = getDisplayName(user);
@@ -465,7 +468,7 @@ export default function UserMenu({
             }}
             aria-hidden="true"
           />
-          <span className={styles.userInfo}>
+          <span className={`${styles.userInfo}${infoHidden ? ` ${styles.userInfoHidden}` : ''}`}>
             <span className={styles.userName}>{displayName}</span>{' '}
             <span className={styles.userHandle}>{handle}</span>
           </span>

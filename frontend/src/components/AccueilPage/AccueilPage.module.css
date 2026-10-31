@@ -61,9 +61,9 @@
 }
 
 .filterActive {
-    border-color: var(--portal-active);
-    background: var(--bg-active-channel);
-    color: var(--portal-active);
+    border-color: var(--brand-teal);
+    background: var(--badge-success-bg);
+    color: var(--brand-teal);
 }
 
 .feed,

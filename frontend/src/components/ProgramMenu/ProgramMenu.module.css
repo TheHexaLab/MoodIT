@@ -3,10 +3,10 @@
     flex-direction: column;
 }
 
+/* Alignés sur le centre des tuiles : visibles dans la barre complète comme dans la réduite. */
 .railSpinnerWrap {
     display: flex;
-    justify-content: center;
-    padding: 0.5rem;
+    padding: 0.5rem 0 0.5rem 0.75rem;
 }
 
 .railRetry {
@@ -16,7 +16,7 @@
     align-self: flex-start;
     width: 2rem;
     height: 2rem;
-    margin: 0.25rem 0.75rem;
+    margin: 0.25rem 0.5rem;
     padding: 0;
     border: 1px solid var(--danger);
     border-radius: 0.5rem;
@@ -46,10 +46,20 @@
 }
 
 .programItem {
+    max-height: 2rem;
+    overflow: hidden;
+    transition: max-height var(--sidebar-speed, 0.2s) ease, opacity var(--sidebar-speed, 0.2s) ease,
+        visibility var(--sidebar-speed, 0.2s);
     /* Long-press iOS : sans ceci, Safari ouvre sa bulle de sélection au lieu du menu contextuel. */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+}
+
+.programItemHidden {
+    max-height: 0;
+    opacity: 0;
+    visibility: hidden;
 }
 
 .programBtn {

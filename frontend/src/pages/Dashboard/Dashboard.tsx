@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
@@ -45,9 +45,12 @@ import { type ItemChange } from '../../components/SectionEditorPopup/types.ts';
 // les programmes (quatre facades) — étape [5] du HANDOFF.
 import { createAppSocket } from '../../services/appSocket.ts';
 import { useCurrentUser } from '../../context/currentUserContext.ts';
-import CourseRail, { type RailCourse } from '../../components/CourseRail/CourseRail.tsx';
 import PortalBand from '../../components/PortalBand/PortalBand.tsx';
 import PortalSidebar from '../../components/PortalSidebar/PortalSidebar.tsx';
+import {
+  readSidebarCollapsed,
+  storeSidebarCollapsed,
+} from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -104,6 +107,15 @@ type PopupState =
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
 
+const MOBILE_QUERY = '(max-width: 900px)';
+
+/** La fenêtre a-t-elle une largeur de mobile ? (la barre y reste un tiroir, sans version réduite) */
+function subscribeToMobile(onChange: () => void) {
+  const query = window.matchMedia(MOBILE_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
 export default function Dashboard() {
   // Les programmes (et leurs cours/canaux) vivent dans un state : ainsi les
   // modifications de section (réordre, renommage, ajout, suppression) se reflètent
@@ -127,6 +139,17 @@ export default function Dashboard() {
   const selectedChannelRef = view.channel;
   // Aucun programme dans l'URL (/home) : le portail (Accueil). Sinon, l'interface du cours.
   const isPortal = activeProgramId < 0;
+  const isMobile = useSyncExternalStore(subscribeToMobile, () => window.matchMedia(MOBILE_QUERY).matches);
+  // Barre de gauche : le choix mémorisé sur l'Accueil, toujours réduite dans un cours, à côté du
+  // panneau du cours. Sur mobile, complète sur l'Accueil, sans bouton pour la changer.
+  const [homeSidebarCollapsed, setHomeSidebarCollapsed] = useState(readSidebarCollapsed);
+  const sidebarCollapsed = !isPortal || (!isMobile && homeSidebarCollapsed);
+  const toggleHomeSidebar = () => {
+    storeSidebarCollapsed(!homeSidebarCollapsed);
+    setHomeSidebarCollapsed(!homeSidebarCollapsed);
+  };
+  // Panneau du cours réduit en mince bande. Ouvrir un cours le rouvre : ses canaux y sont.
+  const [coursePanelCollapsed, setCoursePanelCollapsed] = useState(false);
   // Programmes dont les cours n'ont pas pu être chargés (barre du portail).
   const [failedProgramIds, setFailedProgramIds] = useState<number[]>([]);
   // Établissement de l'utilisateur : son nom dans le bandeau, ses programmes pour « Rejoindre un cours ».
@@ -448,8 +471,11 @@ export default function Dashboard() {
   // « Rejoindre un programme » (offert à tous depuis l'état « aucun programme ») : ouvre le même
   // popup DIRECTEMENT sur la vue d'adhésion (la création reste gatée par canCreateProgram).
   const handleJoinProgram = () => setPopup({ kind: 'addSubscription', view: 'join' });
-  // « Rejoindre un cours » de la barre du portail : directement les programmes de son établissement
-  // (la recherche d'établissement si on ne le connaît pas).
+  // « Rejoindre un programme » de la barre du portail : directement les programmes de son
+  // établissement (la recherche d'établissement si on ne le connaît pas).
+  // Programme tout juste rejoint : à sa fermeture, le popup d'adhésion enchaîne sur le choix de ses
+  // cours (AddSubscriptionPopup appelle onClose APRÈS onJoin : un setPopup dans onJoin serait écrasé).
+  const joinedProgramRef = useRef<number | null>(null);
   const handleJoinFromPortal = () =>
     setPopup({ kind: 'addSubscription', view: 'join', establishmentId: establishment?.id });
 
@@ -630,6 +656,8 @@ export default function Dashboard() {
   // renvoie la liste à jour ; on la réconcilie en conservant les cours déjà chargés.
   const handleJoinPrograms = async (selection: JoinSelection) => {
     const updated = await api.joinPrograms(selection, currentUser.id);
+    joinedProgramRef.current =
+      updated.find((p) => !dashboardPrograms.some((known) => known.id === p.id))?.id ?? null;
     setDashboardPrograms((programs) => {
       const byId = new Map(programs.map((p) => [p.id, p]));
       return updated.map((p) => byId.get(p.id) ?? p);
@@ -928,17 +956,6 @@ export default function Dashboard() {
       ? (dashboardPrograms.find((program) => program.id === popup.programId) ?? null)
       : null;
 
-  // Cours du rail : ceux de tous les programmes. Un cours rattaché à plusieurs programmes n'y
-  // apparaît qu'une fois, ouvert par le programme actif s'il en fait partie.
-  const railCourses: RailCourse[] = [];
-  for (const program of dashboardPrograms) {
-    for (const course of program.courses ?? []) {
-      const index = railCourses.findIndex((entry) => entry.course.id === course.id);
-      if (index < 0) railCourses.push({ course, programId: program.id });
-      else if (program.id === activeProgramId) railCourses[index] = { course, programId: program.id };
-    }
-  }
-
   return (
     <div className={styles.portalRoot}>
     <PortalBand establishmentName={establishment?.name} onAddProgram={handleAddProgram} />
@@ -970,55 +987,52 @@ export default function Dashboard() {
           />
         }
         programMenu={
-          isPortal ? (
-            <PortalSidebar
-              programs={dashboardPrograms}
-              loading={programsLoading}
-              loadError={programsError}
-              onReload={reloadPrograms}
-              failedProgramIds={failedProgramIds}
-              isGlobalAdmin={isAdmin}
-              programActions={{
-                onAddCourseToProgram: handleAddCourseToProgram,
-                onEditProgram: handleEditProgram,
-                onManageRoles: handleManageRoles,
-                onDeleteProgram: handleDeleteProgram,
-                onJoinCourses: handleJoinCourses,
-                onLeaveProgram: handleLeaveProgram,
-              }}
-              onOpenCourse={(programId, courseId) => setView({ programId, courseId })}
-              onJoin={handleJoinFromPortal}
-              userMenu={
-                <UserMenu
-                  user={currentUser}
-                  loading={profileLoading}
-                  onEditProfile={handleEditProfile}
-                  onManageAdmins={isAdmin ? handleManageAdmins : undefined}
-                  onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
-                  onLogout={handleLogout}
-                />
-              }
-            />
-          ) : (
-          <CourseRail
-            courses={railCourses}
-            selectedCourseId={effectiveSelectedCourseId}
-            onSelectCourse={(programId, courseId) => setView({ programId, courseId })}
+          <PortalSidebar
+            programs={dashboardPrograms}
             loading={programsLoading}
             loadError={programsError}
             onReload={reloadPrograms}
+            failedProgramIds={failedProgramIds}
+            isGlobalAdmin={isAdmin}
+            programActions={{
+              onAddCourseToProgram: handleAddCourseToProgram,
+              onEditProgram: handleEditProgram,
+              onManageRoles: handleManageRoles,
+              onDeleteProgram: handleDeleteProgram,
+              onJoinCourses: handleJoinCourses,
+              onLeaveProgram: handleLeaveProgram,
+            }}
+            onOpenCourse={(programId, courseId) => {
+              setCoursePanelCollapsed(false);
+              setView({ programId, courseId });
+            }}
+            onJoinProgram={handleJoinFromPortal}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={isPortal && !isMobile ? toggleHomeSidebar : undefined}
+            activeProgramId={activeProgramId}
+            selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
+            userMenu={
+              <UserMenu
+                infoHidden={sidebarCollapsed}
+                user={currentUser}
+                loading={profileLoading}
+                onEditProfile={handleEditProfile}
+                onManageAdmins={isAdmin ? handleManageAdmins : undefined}
+                onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
+                onLogout={handleLogout}
+              />
+            }
           />
-          )
         }
         courseMenu={
           isPortal ? null : (
           <CourseMenu
+            collapsed={!isMobile && coursePanelCollapsed}
+            onToggleCollapsed={isMobile ? undefined : () => setCoursePanelCollapsed(!coursePanelCollapsed)}
             activeProgram={activeProgram}
             // Tant que les programmes ne sont pas chargés (chaînage), on ne montre
             // pas les cours en cache : CourseMenu reste neutre jusqu'au fetch des cours.
             courses={coursesEnabled ? courses : []}
-            currentUser={currentUser}
-            userLoading={profileLoading}
             selectedCourseId={effectiveSelectedCourseId}
             selectedChannel={selectedChannelRef}
             onSelectChannel={(channel) =>
@@ -1041,10 +1055,6 @@ export default function Dashboard() {
             onOpenMcpManagement={handleOpenMcpManagement}
             onLeaveCourse={handleLeaveCourse}
             onDeleteCourse={handleDeleteCourse}
-            onEditProfile={handleEditProfile}
-            onManageAdmins={isAdmin ? handleManageAdmins : undefined}
-            onViewAuditLogs={isGuardian ? handleViewAuditLogs : undefined}
-            onLogout={handleLogout}
             // Crayon section quiz → éditeur peuplé via le mock (cf. dashboardApi).
             quizHandlers={quizEditorHandlers}
             onQuizzesChange={handleQuizzesChange}
@@ -1157,7 +1167,11 @@ export default function Dashboard() {
       {/* Ajout / adhésion à un programme — création réservée à l'admin. */}
       {popup?.kind === 'addSubscription' && (
         <AddSubscriptionPopup
-          onClose={() => setPopup(null)}
+          onClose={() => {
+            const programId = joinedProgramRef.current;
+            joinedProgramRef.current = null;
+            setPopup(programId != null ? { kind: 'joinCourses', programId } : null);
+          }}
           onCreate={handleCreateProgram}
           onJoin={handleJoinPrograms}
           loadCreateEstablishments={loadCreateEstablishments}

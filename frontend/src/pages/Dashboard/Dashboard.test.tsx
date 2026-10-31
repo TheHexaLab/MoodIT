@@ -13,6 +13,7 @@ import { defaultLabels as noActiveLabels } from '../../components/MainPanel/stat
 import { defaultLabels as errorLabels } from '../../components/ErrorPopup/labels';
 import { defaultLabels as courseLabels } from '../../components/CourseMenu/labels';
 import { defaultLabels as profileLabels } from '../../components/EditProfilePopup/labels';
+import { defaultLabels as addSubscriptionLabels } from '../../components/AddSubscriptionPopup/labels';
 import { defaultLabels as joinCoursesLabels } from '../../components/JoinCoursesPopup/labels';
 import { defaultLabels as auditLabels } from '../../components/AuditLogsPopup/labels';
 import { defaultLabels as addCourseLabels } from '../../components/AddCoursePopup/labels';
@@ -264,7 +265,8 @@ function programButton(name: string) {
 async function selectProgram(name: string) {
   const item = (await screen.findByRole('button', { name: programName(name) })).closest('li')!;
   const course = await waitFor(() => {
-    const button = item.nextElementSibling?.querySelector('button');
+    // Les boutons d'action (« Rejoindre un cours : … ») portent un aria-label, pas les cours.
+    const button = item.nextElementSibling?.querySelector('button:not([aria-label])');
     expect(button).toBeTruthy();
     return button!;
   });
@@ -273,7 +275,7 @@ async function selectProgram(name: string) {
 
 /** Titre du cours ouvert dans le CourseMenu (porte son menu contextuel). */
 function courseSelector(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('nav[aria-label="Cours"] header button');
+  return document.querySelector<HTMLElement>('nav[aria-label="Cours"] header button:not([aria-label])');
 }
 
 async function waitForCourseSelector(code: string) {
@@ -360,12 +362,13 @@ describe('Dashboard', () => {
       expect(await screen.findByText('Université Test')).toBeTruthy();
     });
 
-    it('le rail d’un cours ouvert liste les cours de tous les programmes et en ouvre un autre', async () => {
+    it('la barre réduite d’un cours liste les cours de tous les programmes et en ouvre un autre', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');
-      const rail = screen.getByRole('navigation', { name: 'Mes cours' });
-      expect(within(rail).getByRole('button', { name: 'IFT101' }).getAttribute('aria-current')).toBe('page');
-      fireEvent.click(await within(rail).findByRole('button', { name: 'GIF200' }));
+      const rail = await screen.findByRole('navigation', { name: 'Programme' });
+      expect(within(rail).getByRole('button', { name: /^IFT101/ }).getAttribute('aria-current')).toBe('page');
+      expect(screen.getByRole('link', { name: 'Accueil' }).getAttribute('aria-current')).toBeNull();
+      fireEvent.click(await within(rail).findByRole('button', { name: /^GIF200/ }));
       await waitFor(() => expect(currentPath()).toBe('/home/p/2/c/20'));
       await waitForCourseSelector('GIF200');
     });
@@ -377,10 +380,61 @@ describe('Dashboard', () => {
       expect(await screen.findByText('Crée ton propre programme ou rejoins-en un existant.')).toBeTruthy();
     });
 
-    it('la flèche du rail ramène à l’Accueil', async () => {
+    it('dans un cours : la barre reste réduite, sans bouton pour la déplier', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');
-      fireEvent.click(screen.getByRole('link', { name: "Retour à l'Accueil" }));
+      expect(screen.queryByRole('button', { name: 'Déplier le menu' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Réduire le menu' })).toBeNull();
+    });
+
+    it('dans un cours : réduire le panneau le garde en place, avec un bouton pour le rouvrir', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByRole('button', { name: 'Réduire le panneau du cours' }));
+      expect(document.querySelector('nav[aria-label="Cours"]')).not.toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Déplier le panneau du cours' }));
+      expect(screen.getByRole('button', { name: 'Réduire le panneau du cours' })).toBeTruthy();
+    });
+
+    it('ouvrir un cours rouvre le panneau réduit', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByRole('button', { name: 'Réduire le panneau du cours' }));
+      fireEvent.click(await screen.findByRole('button', { name: /^IFT102/ }));
+      await waitForCourseSelector('IFT102');
+      expect(screen.getByRole('button', { name: 'Réduire le panneau du cours' })).toBeTruthy();
+    });
+
+    it('sur l’Accueil, le choix de réduire la barre est mémorisé', async () => {
+      const { unmount } = renderDashboard();
+      fireEvent.click(await screen.findByRole('button', { name: 'Réduire le menu' }));
+      expect(screen.getByRole('button', { name: 'Déplier le menu' })).toBeTruthy();
+      unmount();
+      renderDashboard();
+      expect(await screen.findByRole('button', { name: 'Déplier le menu' })).toBeTruthy();
+    });
+
+    it('sur mobile : barre complète sur l’Accueil malgré le choix mémorisé, et aucun bouton de réduction', async () => {
+      localStorage.setItem('portalSidebar:collapsed', 'true');
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn((query: string) => ({
+          matches: true,
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }))
+      );
+      renderDashboard();
+      expect(await screen.findByRole('button', { name: programName('Génie logiciel') })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Déplier le menu' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Réduire le menu' })).toBeNull();
+    });
+
+    it('l’icône Accueil de la barre réduite ramène à l’Accueil', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      fireEvent.click(screen.getByRole('link', { name: 'Accueil' }));
       await waitFor(() => expect(currentPath()).toBe('/home'));
       expect(screen.getByRole('heading', { name: /^Bonjour/ })).toBeTruthy();
     });
@@ -462,7 +516,7 @@ describe('Dashboard', () => {
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
       fireEvent.click(screen.getByText('general'));
-      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
+      fireEvent.click(await screen.findByRole('button', { name: /^IFT102/ }));
       expect(courseSelector()!.textContent).toBe('IFT102');
       expect(screen.queryByTestId('channel-view')).toBeNull();
       expect(screen.getByRole('heading', { name: emptyCourseLabels.title })).toBeTruthy();
@@ -472,7 +526,8 @@ describe('Dashboard', () => {
       vi.mocked(api.fetchProgramCourses).mockResolvedValue([]);
       vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
       renderDashboard({ path: '/home/p/3' });
-      const join = await screen.findByText(noCourseLabels.joinCourse);
+      const main = await screen.findByRole('region', { name: 'Contenu principal' });
+      const join = await within(main).findByText(noCourseLabels.joinCourse);
       fireEvent.click(join);
       expect(await screen.findByText(joinCoursesLabels.title)).toBeTruthy();
       await waitFor(() => expect(api.fetchProgramCourses).toHaveBeenCalledWith(3));
@@ -500,7 +555,7 @@ describe('Dashboard', () => {
       await waitForCourseSelector('IFT101');
       fireEvent.click(screen.getByText('entraide'));
       await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/forum/6'));
-      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
+      fireEvent.click(await screen.findByRole('button', { name: /^IFT102/ }));
       await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
       expect(lastNavigation()).toBe('PUSH');
     });
@@ -822,7 +877,7 @@ describe('Dashboard', () => {
       renderDashboard();
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
-      fireEvent.click(await screen.findByRole('button', { name: 'IFT102' }));
+      fireEvent.click(await screen.findByRole('button', { name: /^IFT102/ }));
       expect(screen.getByRole('heading', { name: emptyCourseLabels.title })).toBeTruthy();
       expect(screen.queryByText(emptyCourseLabels.createChannel)).toBeNull();
     });
@@ -875,7 +930,39 @@ describe('Dashboard', () => {
   });
 
   describe('ajout / adhésion de programme', () => {
-    it('« Rejoindre un cours » ouvre directement les programmes de son établissement', async () => {
+    it('« Rejoindre un cours » ouvre le choix des cours de ce programme', async () => {
+      vi.mocked(api.fetchProgramCourses).mockResolvedValue([{ id: 30, code: 'MAT100', title: 'Algèbre' }]);
+      vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
+      renderDashboard({ path: '/home' });
+      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un cours : Mathématiques' }));
+      expect(await screen.findByText(joinCoursesLabels.title)).toBeTruthy();
+      await waitFor(() => expect(api.fetchProgramCourses).toHaveBeenCalledWith(3));
+    });
+
+    it('rejoindre un nouveau programme enchaîne sur le choix de ses cours', async () => {
+      vi.mocked(api.fetchEstablishmentsForJoin).mockResolvedValue([{ id: 7, name: 'Université Test' }]);
+      vi.mocked(api.fetchEstablishmentPrograms).mockResolvedValue([
+        { id: 40, name: 'Physique', code: 'PHY', cohort: '', color: '' },
+      ]);
+      vi.mocked(api.joinPrograms).mockResolvedValue([
+        ...makePrograms(),
+        { id: 40, name: 'Physique', code: 'PHY', cohort: '', color: '', courses: [] },
+      ]);
+      vi.mocked(api.fetchProgramCourses).mockResolvedValue([]);
+      vi.mocked(api.fetchJoinedCourseIds).mockResolvedValue([]);
+      renderDashboard({ path: '/home' });
+      await screen.findByRole('button', { name: programName('Génie logiciel') });
+      fireEvent.click(screen.getByRole('button', { name: 'Ajouter un programme' }));
+      fireEvent.click(await within(screen.getByRole('dialog')).findByText(addSubscriptionLabels.joinTitle));
+      fireEvent.click(await screen.findByText('Université Test'));
+      fireEvent.click(await screen.findByText('Physique'));
+      fireEvent.click(screen.getByRole('button', { name: addSubscriptionLabels.add }));
+      expect(await screen.findByText(joinCoursesLabels.title)).toBeTruthy();
+      await waitFor(() => expect(api.fetchProgramCourses).toHaveBeenCalledWith(40));
+    });
+
+    it('« Rejoindre un programme » sans programme : les programmes de son établissement', async () => {
+      vi.mocked(api.fetchPrograms).mockResolvedValue([]);
       vi.mocked(api.fetchEstablishments).mockResolvedValue([
         { id: 7, name: 'Université Test', domainEmail: 'test.ca' },
       ]);
@@ -885,15 +972,16 @@ describe('Dashboard', () => {
       ]);
       renderDashboard({ path: '/home' });
       await screen.findByText('Université Test');
-      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un cours' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un programme' }));
       expect(await screen.findByText('Physique')).toBeTruthy();
       expect(api.fetchEstablishmentPrograms).toHaveBeenCalledWith(7);
     });
 
-    it('« Rejoindre un cours » sans établissement connu : la recherche d’établissement', async () => {
+    it('« Rejoindre un programme » sans établissement connu : la recherche d’établissement', async () => {
+      vi.mocked(api.fetchPrograms).mockResolvedValue([]);
       vi.mocked(api.fetchEstablishmentsForJoin).mockResolvedValue([{ id: 7, name: 'Université Test' }]);
       renderDashboard({ path: '/home' });
-      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un cours' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Rejoindre un programme' }));
       expect(await screen.findByText('Université Test')).toBeTruthy();
       expect(api.fetchEstablishmentPrograms).not.toHaveBeenCalled();
     });

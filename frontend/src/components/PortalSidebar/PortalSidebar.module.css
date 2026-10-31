@@ -1,13 +1,24 @@
 .sidebar {
+    --sidebar-speed: 0.2s;
     box-sizing: border-box;
+    flex: none;
     width: 17rem;
     height: 100%;
-    display: flex;
-    flex-direction: column;
+    overflow: hidden;
+    transition: width var(--sidebar-speed) ease;
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border);
     font-family: Inter, sans-serif;
     font-size: 0.875rem;
+}
+
+/* Largeur fixe : la barre glisse par-dessus ce contenu, qui ne se réorganise jamais à l'horizontale.
+   Le centre des icônes et des tuiles reste à 2,25rem du bord, soit le milieu de la barre réduite. */
+.inner {
+    width: 17rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .pages {
@@ -25,7 +36,7 @@
     display: flex;
     align-items: center;
     gap: 0.625rem;
-    padding: 0 0.75rem;
+    padding: 0 0 0 0.9375rem;
     border: none;
     border-radius: 0.5rem;
     background: transparent;
@@ -35,6 +46,15 @@
     text-align: left;
     text-decoration: none;
     cursor: pointer;
+    transition: width var(--sidebar-speed) ease, max-height var(--sidebar-speed) ease,
+        margin var(--sidebar-speed) ease, opacity var(--sidebar-speed) ease,
+        visibility var(--sidebar-speed);
+}
+
+/* Le libellé s'efface en place : il ne pousse rien pendant le glissement. */
+.label {
+    white-space: nowrap;
+    transition: opacity var(--sidebar-speed) ease;
 }
 
 .navItem[aria-disabled='true'] {
@@ -47,9 +67,24 @@
 }
 
 .navItemActive {
-    background: var(--bg-active-channel);
-    color: var(--portal-active);
+    position: relative;
+    background: var(--badge-success-bg);
+    color: var(--brand-teal);
     font-weight: 600;
+}
+
+/* Élément actif : barre de 4 px au bord gauche de la barre. */
+.navItemActive::before,
+.courseActive::before {
+    content: '';
+    position: absolute;
+    left: -0.75rem;
+    top: 50%;
+    width: 0.25rem;
+    height: 2rem;
+    border-radius: 0 0.1875rem 0.1875rem 0;
+    background: var(--brand-teal);
+    transform: translateY(-50%);
 }
 
 .navItem:focus-visible,
@@ -66,11 +101,16 @@
 
 .heading {
     flex: none;
+    max-height: 2.5rem;
     margin: 0;
+    overflow: hidden;
     padding: 0.75rem 1.5rem 0.375rem;
     color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 600;
+    white-space: nowrap;
+    transition: max-height var(--sidebar-speed) ease, padding var(--sidebar-speed) ease,
+        opacity var(--sidebar-speed) ease;
 }
 
 .courses {
@@ -83,14 +123,18 @@
     padding: 0 0.75rem 0.5rem;
 }
 
+.courseActive {
+    position: relative;
+}
+
 .course {
     box-sizing: border-box;
     width: 100%;
-    min-height: 3.25rem;
+    min-height: 3rem;
     display: flex;
     align-items: center;
     gap: 0.625rem;
-    padding: 0.25rem 0.75rem;
+    padding: 0.25rem;
     border: none;
     border-radius: 0.5rem;
     background: transparent;
@@ -98,19 +142,22 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+    transition: width var(--sidebar-speed) ease;
 }
 
 .tile {
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 2.5rem;
+    height: 2.5rem;
     flex: none;
+    overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 0.625rem;
-    color: #ffffff;
-    font-size: 0.6875rem;
+    color: var(--text-on-brand);
+    font-size: 0.5625rem;
     font-weight: 700;
+    white-space: nowrap;
 }
 
 .courseText {
@@ -118,6 +165,8 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+    white-space: nowrap;
+    transition: opacity var(--sidebar-speed) ease;
 }
 
 .courseTitle {
@@ -134,8 +183,85 @@
 
 .join {
     flex: none;
+    max-height: 2.75rem;
     margin-top: 0.25rem;
+    overflow: hidden;
     color: var(--text-muted);
+}
+
+/* Lignes propres à une version : leur hauteur s'anime pour que les tuiles glissent sans saut. */
+.expandedOnly {
+    max-height: 2.75rem;
+}
+
+.collapsedOnly,
+.sidebarCollapsed .expandedOnly {
+    max-height: 0;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    visibility: hidden;
+}
+
+.sidebarCollapsed .collapsedOnly {
+    max-height: 2.75rem;
+    margin-top: 0.25rem;
+    opacity: 1;
+    visibility: visible;
+}
+
+.mobileOnly {
+    display: none;
+}
+
+/* Bouton réduire / déplier : hors de la zone qui défile, au-dessus du compte. */
+.toggle {
+    width: 15.5rem;
+    margin: 0 0.75rem 0.5rem;
+}
+
+/* ── Version réduite ─────────────────────────────────────────── */
+.sidebarCollapsed {
+    width: 4.5rem;
+}
+
+.sidebarCollapsed .navItem,
+.sidebarCollapsed .course {
+    width: 3rem;
+}
+
+.sidebarCollapsed .label,
+.sidebarCollapsed .courseText {
+    opacity: 0;
+}
+
+.sidebarCollapsed .heading {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+}
+
+/* Remplace le titre « Mes cours » : discret dans la version complète, où sa hauteur est nulle. */
+.divider {
+    flex: none;
+    width: 2rem;
+    height: 0;
+    margin: 0 0 0 1.25rem;
+    background: var(--border-strong);
+    transition: height var(--sidebar-speed) ease, margin var(--sidebar-speed) ease;
+}
+
+.sidebarCollapsed .divider {
+    height: 1px;
+    margin: 0.25rem 0 0.5rem 1.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar {
+        --sidebar-speed: 0s;
+    }
 }
 
 .status {
@@ -145,15 +271,28 @@
     font-size: 0.8125rem;
 }
 
+/* L'avatar (2rem, dans 0,5rem de marge) reste centré à 2,25rem du bord dans les deux versions. */
 .footer {
     flex: none;
+    height: 3.5rem;
+    padding-left: 0.75rem;
+    box-sizing: border-box;
     background: var(--bg-user-panel);
     border-top: 1px solid var(--border);
 }
 
 /* Mobile : la barre remplit le tiroir de LeftMenuGroup. */
 @media (max-width: 56.25rem) {
-    .sidebar {
+    .sidebar:not(.sidebarCollapsed) {
+        flex: 1;
         width: 100%;
+    }
+
+    .sidebar:not(.sidebarCollapsed) .inner {
+        width: 100%;
+    }
+
+    .mobileOnly {
+        display: flex;
     }
 }
