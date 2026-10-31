@@ -41,7 +41,8 @@ public class WebSocketProxyConfig implements WebSocketConfigurer {
   // "a, b" ne doit pas produire une origine " b" qui ne matcherait jamais). FAIL-FAST si le
   // résultat est VIDE (FRONT_ORIGIN manquant ou blanc) : setAllowedOrigins([]) DÉSACTIVERAIT
   // le contrôle d'Origin (allow-all → CSWSH). On refuse de démarrer plutôt que d'ouvrir le WS.
-  static String[] parseAllowedOrigins(String raw) {
+  // Réutilisé par OriginCheckFilter (écritures HTTP) : mêmes origines que le WebSocket.
+  public static String[] parseAllowedOrigins(String raw) {
     String[] origins =
         Arrays.stream(raw == null ? new String[0] : raw.split(","))
             .map(String::trim)
