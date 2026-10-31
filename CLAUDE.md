@@ -51,6 +51,7 @@ docker compose -f docker-compose-dev.yml up -d   # Postgres + migrations Flyway 
 
 - Code (identifiants) en anglais ; commentaires, messages d'interface, issues et PR en **français**.
 - Branches : `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/` (ou `ci/`) + numéro d'issue, ex. `feat/43-systeme-amis`.
+- `deploiement` (la prod) ne reçoit que `main` : une PR vers `deploiement` doit venir de `main` (check « source = main », obligatoire), jamais d'une branche de travail ; tout passe d'abord par `main`.
 - Titres de commits et de PR : commits conventionnels, `type(portée): description` (ex. `fix(core): …`). Les labels de PR sont posés automatiquement à partir du titre et des fichiers touchés.
 - Description de PR : remplir `.github/pull_request_template.md` (proposé automatiquement par GitHub) et lier l'issue (`Closes #43`). Code assisté par IA : label `vibe-coded`.
 - Sous-issues : on utilise les **sous-issues GitHub** pour structurer le travail, aussi bien pour grouper (épopée → issues de feature) que pour découper une grosse issue. Rattacher via l'API : `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<id>`, où `<id>` est l'`id` numérique de la sous-issue (`gh api repos/<owner>/<repo>/issues/<num> --jq .id`), pas son numéro.

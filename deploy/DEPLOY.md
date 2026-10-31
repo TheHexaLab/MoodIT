@@ -114,9 +114,19 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 |---|---|
 | Voir l'état | `docker compose -f docker-compose-hetzner.yml ps` |
 | Logs d'un service | `docker compose -f docker-compose-hetzner.yml logs -f <service>` |
-| Mettre à jour le code | `git pull && docker compose -f docker-compose-hetzner.yml up -d --build` |
+| Mettre à jour le code | `./deploy/update.sh` (voir « Mettre à jour la prod ») |
 | Redémarrer | `docker compose -f docker-compose-hetzner.yml restart <service>` |
 | Tout arrêter | `docker compose -f docker-compose-hetzner.yml down` |
+
+### Mettre à jour la prod
+
+Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
+
+1. Ouvrir une PR **de `main` vers `deploiement`** (le check « source = main » refuse toute autre
+   source ; la règle de branche interdit le push direct).
+2. La fusionner une fois la CI verte.
+3. Sur le serveur : `./deploy/update.sh` (sauvegarde, migrations Flyway, build, redémarrage,
+   vérification de santé, retour à l'ancienne version du code si le build échoue).
 
 ### Sauvegarde de la base
 
