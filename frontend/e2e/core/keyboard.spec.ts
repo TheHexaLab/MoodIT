@@ -27,9 +27,8 @@ import {
   type ProgramFixture,
 } from './a11y.helpers';
 
-// Navigation au clavier réelle (Tab, Entrée, Espace, Échap, flèches, collage). Les manquements
-// connus de l'application (pas de piège de focus, pas de gestion d'Échap dans les popups, pas de
-// flèches dans les menus…) sont écrits comme des tests attendus et marqués `test.fail`.
+// Navigation au clavier réelle (Tab, Entrée, Espace, Échap, flèches, collage). Un manquement
+// connu de l'application serait écrit comme un test attendu et marqué `test.fail` (#106, #110).
 
 /** Noms accessibles (ou placeholders) des éléments atteints par `count` Tab successifs. */
 async function tabSequence(page: Page, count: number) {
@@ -93,7 +92,7 @@ test.describe('formulaires d’authentification', () => {
     await expectTabOrder(page, browserName, [
       'exemple@gmail.com',
       '••••••••••',
-      '', // œil (sans nom accessible)
+      'Afficher le mot de passe', // œil
       { link: 'Mot de passe oublié ?' },
       'Se connecter →',
       { link: 'Créer un compte' },
@@ -328,11 +327,9 @@ test.describe('menus', () => {
     await expect(trigger).toBeFocused();
   });
 
-  // Attendu (WAI-ARIA menu) : à l'ouverture le focus va sur le premier élément, les flèches
-  // circulent, Entrée active. Obtenu : le focus reste sur le déclencheur et Tab part ailleurs dans
-  // la page (le menu est porté en fin de document).
+  // WAI-ARIA « Menu Button » : à l'ouverture le focus va sur le premier élément, les flèches
+  // circulent, Entrée active.
   test('menu du compte : flèches et Entrée', async ({ browser, baseURL }) => {
-    test.fail(true, '#110 menu du compte sans gestion du focus ni des flèches');
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     const trigger = page.getByRole('button', { name: 'Compte utilisateur' });
@@ -340,25 +337,19 @@ test.describe('menus', () => {
     await page.keyboard.press('Enter');
     const menu = page.getByRole('menu', { name: 'Menu du compte' });
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('switch', { name: 'Mode sombre' })).toBeFocused({ timeout: 2_000 });
+    await expect(menu.getByRole('menuitemcheckbox', { name: 'Mode sombre' })).toBeFocused({ timeout: 2_000 });
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem', { name: 'Modifier le profil' })).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Modifier le profil' })).toBeVisible();
   });
 
-  // Maj+F10 (ou la touche Menu) déclenche l'événement `contextmenu` sur l'élément focalisé : c'est
-  // la seule ouverture clavier possible, et seul Chromium la synthétise. Firefox et WebKit n'ont
-  // aucun moyen d'ouvrir ces menus au clavier : l'application devrait offrir une alternative.
+  // Maj+F10 (ou la touche Menu) : seul Chromium la convertit en évènement `contextmenu` ;
+  // l'application la traite elle-même au `keydown`, le menu s'ouvre donc sur tous les moteurs.
   test('menu contextuel du programme : ouverture au clavier, Échap, Entrée sur une action', async ({
     browser,
     baseURL,
-    browserName,
   }) => {
-    test.fail(
-      browserName !== 'chromium',
-      '#110 menus contextuels ouverts seulement au clic droit : pas d’alternative clavier hors Chromium'
-    );
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     const program = programButton(page, PROGRAM_NAME);
@@ -380,10 +371,8 @@ test.describe('menus', () => {
     await page.getByRole('button', { name: 'Annuler' }).click();
   });
 
-  // Attendu (flèches dans le menu, cf. ci-dessus). Obtenu : rien ne bouge.
-  test('menu contextuel du programme : flèches', async ({ browser, baseURL, browserName }) => {
-    test.fail(true, '#110 menus contextuels sans navigation aux flèches');
-    test.skip(browserName !== 'chromium', 'Seul Chromium ouvre un menu contextuel au clavier.');
+  // À l'ouverture, le focus est sur le menu lui-même : la première flèche ↓ cible le premier élément.
+  test('menu contextuel du programme : flèches', async ({ browser, baseURL }) => {
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     await programButton(page, PROGRAM_NAME).focus();
@@ -430,13 +419,12 @@ test.describe('menus', () => {
     await expect(picker).toHaveText('GIF201');
   });
 
-  // Attendu (WAI-ARIA listbox) : flèches entre les options, Entrée valide ; Échap depuis une option
-  // ferme aussi ; le focus revient au bouton du sélecteur. Obtenu : seules la recherche et Tab marchent.
+  // WAI-ARIA « Listbox » : flèches entre les options ; Échap depuis une option ferme aussi, sans
+  // changer de cours ; le focus revient au bouton du sélecteur.
   test('sélecteur de cours : flèches, Échap depuis une option, retour du focus', async ({
     browser,
     baseURL,
   }) => {
-    test.fail(true, '#110 listbox du sélecteur de cours : pas de flèches, Échap ignoré hors de la recherche, focus perdu à la fermeture');
     const { user, storageState } = await createEnrolledUser(baseURL!);
     await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
     const { page } = await openHome(browser, storageState);
@@ -449,25 +437,21 @@ test.describe('menus', () => {
     await page.keyboard.press('Enter');
     await expect(listbox).toBeVisible();
     await page.keyboard.press('ArrowDown');
-    await expect.soft(listbox.getByRole('option').first(), 'ArrowDown ne cible pas la 1re option').toBeFocused({ timeout: 2_000 });
-
-    await page.keyboard.press('Tab'); // 1re option (ou déjà dessus)
+    await expect(listbox.getByRole('option').first()).toBeFocused({ timeout: 2_000 });
+    await page.keyboard.press('ArrowDown');
+    await expect(listbox.getByRole('option').nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
     await expect(listbox.getByRole('option').first()).toBeFocused();
+
     await page.keyboard.press('Escape');
-    await expect.soft(listbox, 'Échap depuis une option ne ferme pas').toBeHidden({ timeout: 2_000 });
-    if (await listbox.isVisible()) {
-      await listbox.getByRole('textbox', { name: 'Rechercher un cours…' }).focus();
-      await page.keyboard.press('Escape');
-      await expect(listbox).toBeHidden();
-    }
-    await expect.soft(picker, 'le focus ne revient pas au sélecteur').toBeFocused({ timeout: 2_000 });
+    await expect(listbox).toBeHidden({ timeout: 2_000 });
+    await expect(picker).toHaveText('MAT115');
+    await expect(picker).toBeFocused({ timeout: 2_000 });
   });
 
-  // L'éditeur Markdown capture Tab pour indenter : en avançant, le clavier ne peut plus atteindre
-  // « Publier » / « Annuler » (WCAG 2.1.2 : il faut au moins annoncer la sortie). Les issues
-  // existantes — Maj+Tab vers la barre d'outils, Ctrl+Entrée publie, Échap annule — sont vérifiées.
+  // L'éditeur Markdown ne capture Tab (indentation) que dans un bloc de code : ailleurs, Tab mène
+  // aux actions « Annuler » puis « Publier » (WCAG 2.1.2, pas de piège de focus).
   test('éditeur Markdown : Tab mène au bouton « Publier »', async ({ browser, baseURL }) => {
-    test.fail(true, '#110 l’éditeur Markdown capture Tab (indentation) : « Publier » inatteignable en avançant');
     const { storageState } = await createEnrolledUser(baseURL!);
     const context = await browser.newContext({ storageState });
     const page = await context.newPage();
@@ -480,9 +464,21 @@ test.describe('menus', () => {
     await expect(
       page.getByRole('toolbar', { name: 'Mise en forme Markdown' }).getByRole('button', { name: 'Aperçu' })
     ).toBeFocused();
+    // Dans un bloc de code, Tab indente (le focus reste dans l'éditeur).
+    await editor.fill('```\n');
+    await editor.focus();
+    await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+    await page.keyboard.press('Tab');
+    await expect(editor).toHaveValue('```\n    ');
+    await expect(editor).toBeFocused();
+
+    // Hors d'un bloc de code, Tab quitte l'éditeur : « Annuler » puis « Publier ».
+    await editor.fill('Du texte');
     await editor.focus();
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Publier' })).toBeFocused({ timeout: 2_000 });
+    await expect(page.getByRole('button', { name: 'Annuler' })).toBeFocused({ timeout: 2_000 });
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Publier' })).toBeFocused();
   });
 
   test('menu « Titre » de l’éditeur Markdown : Entrée ouvre, Tab + Entrée insère, Échap ferme', async ({
@@ -553,7 +549,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await page.keyboard.press('Space');
     await expect(publish).toHaveAttribute('aria-checked', 'false');
     await page.getByRole('button', { name: 'Enregistrer' }).click();
-    await expect(page.getByRole('button', { name: 'Enregistrer' })).toBeEnabled();
+    await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible(); // enregistré : retour à la liste (#201)
 
     const manage = async () => {
       const res = await fixture.admin.api.get(`/api/courses/${fixture.course.id}/quizzes/manage`);
@@ -563,6 +559,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await expect.poll(manage).toBe(false);
 
     // Retour à l'état publié (les autres tests du fichier comptent sur un quiz visible).
+    await page.getByRole('button', { name: `Modifier ${quizTitle}`, exact: true }).click();
     await publish.focus();
     await page.keyboard.press('Space');
     await expect(publish).toHaveAttribute('aria-checked', 'true');
@@ -570,10 +567,9 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await expect.poll(manage).toBe(true);
   });
 
-  // Attendu (listbox) : flèches entre les options, Entrée valide, le focus revient au contrôle.
-  // Obtenu : le menu est porté en fin de document, Tab part ailleurs et les flèches ne font rien.
+  // WAI-ARIA « Listbox » : le focus va sur l'option choisie, les flèches circulent, Entrée valide
+  // et le focus revient au contrôle.
   test('liste déroulante « Type de question » : flèches et Entrée', async ({ browser }) => {
-    test.fail(true, '#110 liste déroulante de l’éditeur sans flèches ni focus sur les options');
     const { page } = await openHome(browser, fixture.admin.storageState);
     await openQuizForm(page);
     await page.getByRole('button', { name: 'Modifier la question' }).first().click();
@@ -624,7 +620,7 @@ test.describe('switch et forum', () => {
     const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
     await page.getByRole('button', { name: 'Compte utilisateur' }).click();
-    const darkSwitch = page.getByRole('switch', { name: 'Mode sombre' });
+    const darkSwitch = page.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
     await expect(darkSwitch).toHaveAttribute('aria-checked', 'false');
     const saved = settingsSaved(page, (s) => s.theme === 'dark');
     await darkSwitch.focus();

@@ -92,9 +92,9 @@ test('actions d’un message : au survol (pointeur) ou au toucher de la ligne (t
   const composer = mainContent(page).getByRole('textbox', { name: `Envoyer un message dans ${CHANNEL_NAME}` });
   await composer.fill(content);
   await composer.press('Enter');
-  const row = mainContent(page).locator('li[role="message"]').filter({ hasText: content });
+  const row = mainContent(page).locator('li[data-role="message"]').filter({ hasText: content });
   await expect(row).toBeVisible();
-  const actions = row.locator('[role="message-actions"]');
+  const actions = row.locator('[data-role="message-actions"]');
   const reply = row.getByRole('button', { name: 'Répondre au message' });
 
   // Le média `hover: none` suit le profil : vrai sur toutes les tablettes et tous les mobiles.
@@ -218,7 +218,7 @@ test('menu du compte : feuille basse ou popover, bascule du thème persistée', 
     await expectReachable(page.getByRole('menuitem', { name: item }));
   }
 
-  const darkSwitch = page.getByRole('switch', { name: 'Mode sombre' });
+  const darkSwitch = page.getByRole('menuitemcheckbox', { name: 'Mode sombre' });
   await expectReachable(darkSwitch);
   const saved = settingsSaved(page, (s) => s.theme === 'dark');
   await press(darkSwitch, hasTouch);

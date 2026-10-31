@@ -132,28 +132,28 @@
 /* ── Éditeur Markdown de l'énoncé : focus teal + halo comme les inputs. Scopé à
    CE popup (via .panelBodyInner) ; le module partagé garde son focus gris pour les
    forums. Les sélecteurs par rôle sont globaux (non hashés par CSS Modules). ── */
-.panelBodyInner div[role^='markdown-editor'] div[role='toolbar'] {
+.panelBodyInner div[data-role^='markdown-editor'] div[role='toolbar'] {
     transition: border-color 0.15s ease;
 }
-.panelBodyInner div[role^='markdown-editor'] > div[role='editor-main'] {
+.panelBodyInner div[data-role^='markdown-editor'] > div[data-role='editor-main'] {
     border-radius: 0.5rem;
     transition: box-shadow 0.15s ease;
 }
 
-.panelBodyInner div[role^='markdown-editor'] textarea {
+.panelBodyInner div[data-role^='markdown-editor'] textarea {
     border-top-color: transparent;
 }
 
-.panelBodyInner div[role^='markdown-editor']:focus-within div[role='toolbar'],
-.panelBodyInner div[role^='markdown-editor']:focus-within textarea,
-.panelBodyInner div[role^='markdown-editor']:focus-within div[role="preview"] {
+.panelBodyInner div[data-role^='markdown-editor']:focus-within div[role='toolbar'],
+.panelBodyInner div[data-role^='markdown-editor']:focus-within textarea,
+.panelBodyInner div[data-role^='markdown-editor']:focus-within div[data-role="preview"] {
     border-color: var(--brand-teal);
 }
-.panelBodyInner div[role^='markdown-editor']:focus-within textarea,
-.panelBodyInner div[role^='markdown-editor']:focus-within div[role="preview"]{
+.panelBodyInner div[data-role^='markdown-editor']:focus-within textarea,
+.panelBodyInner div[data-role^='markdown-editor']:focus-within div[data-role="preview"]{
     border-top-color: transparent;
 }
-.panelBodyInner div[role^='markdown-editor']:focus-within > div[role='editor-main'] {
+.panelBodyInner div[data-role^='markdown-editor']:focus-within > div[data-role='editor-main'] {
     box-shadow: 0 0 4px 3px var(--shadow-hover);
 }
 
@@ -486,7 +486,7 @@
 /* Mobile : actions masquées par défaut, révélées au tap sur la ligne ; et la
    méta de la section Questions (points) passe sous le label. */
 @media (max-width: 30rem) {
-    /* Calqué sur les actions des posts de thread en tactile (role="post-actions") :
+    /* Calqué sur les actions des posts de thread en tactile (data-role="post-actions") :
        petit panneau flottant bordé + ombré à droite de la ligne. Toujours présent
        mais masqué (opacity/pointer-events), révélé en FONDU — comme dans les threads. */
     .rowActions {

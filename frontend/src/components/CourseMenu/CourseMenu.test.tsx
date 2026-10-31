@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import CourseMenu, { type Course } from './CourseMenu';
 import { defaultLabels } from './labels';
@@ -387,6 +388,20 @@ describe('CourseMenu', () => {
       );
     });
 
+    it('poignée : valeur ARIA du séparateur focusable (largeur et bornes en px)', () => {
+      localStorage.removeItem('courseMenu:width');
+      const { unmount } = renderMenu();
+      const handle = () => screen.getByRole('separator', { name: 'Redimensionner le menu des cours' });
+      // Sans largeur choisie : largeur par défaut.
+      expect(handle().getAttribute('aria-valuenow')).toBe('224');
+      expect(handle().getAttribute('aria-valuemin')).toBe('176');
+      expect(handle().getAttribute('aria-valuemax')).toBe('448');
+      unmount();
+      localStorage.setItem('courseMenu:width', '300');
+      renderMenu();
+      expect(handle().getAttribute('aria-valuenow')).toBe('300');
+    });
+
     it('une autre touche ne change pas la largeur', () => {
       renderMenu();
       fireEvent.keyDown(screen.getByRole('separator'), { key: 'Enter' });
@@ -429,6 +444,87 @@ describe('CourseMenu', () => {
 
   it('rend le menu du compte en pied de panneau', () => {
     renderMenu({ currentUser: { id: 1, username: 'jdoe', firstName: 'Jean', lastName: 'Doe' } });
-    expect(screen.getByRole('button', { name: 'Compte utilisateur' }).textContent).toContain('Jean Doe');
+    expect(screen.getByRole('button', { name: /^Compte utilisateur/ }).textContent).toContain('Jean Doe');
+  });
+});
+
+// Navigation au clavier réel (user-event) : listbox du sélecteur (patron WAI-ARIA « Listbox »)
+// et ouverture du menu contextuel par la touche Menu / Maj+F10.
+describe('CourseMenu — clavier', () => {
+  const search = (listbox: HTMLElement) =>
+    within(listbox).getByPlaceholderText(defaultLabels.searchPlaceholder);
+
+  it('Entrée ouvre sur la recherche ; ↓/↑ circulent entre recherche et options', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    selector().focus();
+    await user.keyboard('{Enter}');
+    const listbox = screen.getByRole('listbox');
+    expect(document.activeElement).toBe(search(listbox));
+    const options = within(listbox).getAllByRole('option');
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(options[0]);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(options[1]);
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(options[2]);
+    await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
+    expect(document.activeElement).toBe(search(listbox));
+  });
+
+  it('Entrée sur une option choisit le cours, ferme et rend le focus au sélecteur', async () => {
+    const user = userEvent.setup();
+    const onSelectCourse = vi.fn();
+    renderMenu({ onSelectCourse });
+    selector().focus();
+    await user.keyboard('{Enter}{ArrowDown}{ArrowDown}{Enter}');
+    expect(onSelectCourse).toHaveBeenCalledWith(20);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(selector());
+  });
+
+  it('Échap depuis une option ferme sans changer de cours et rend le focus au sélecteur', async () => {
+    const user = userEvent.setup();
+    const onSelectCourse = vi.fn();
+    renderMenu({ onSelectCourse });
+    selector().focus();
+    await user.keyboard('{Enter}{ArrowDown}{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onSelectCourse).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(selector());
+  });
+
+  it('Échap depuis la recherche rend aussi le focus au sélecteur', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    selector().focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(selector());
+  });
+
+  it('Maj+F10 sur le sélecteur ouvre le menu contextuel ; Échap rend le focus au sélecteur', async () => {
+    const user = userEvent.setup();
+    renderMenu({ onLeaveCourse: vi.fn() });
+    expect(selector().getAttribute('aria-keyshortcuts')).toBe('Shift+F10');
+    selector().focus();
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    const menu = screen.getByRole('menu', { name: defaultLabels.contextMenuAria('IFT101') });
+    expect(document.activeElement).toBe(menu);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem'));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(selector());
+  });
+
+  it('sans action de menu contextuel : Maj+F10 n’ouvre rien et le raccourci n’est pas annoncé', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    expect(selector().hasAttribute('aria-keyshortcuts')).toBe(false);
+    selector().focus();
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

@@ -273,16 +273,17 @@ export function QuizEditor({
         // Réconcilie le quiz temporaire avec la version persistée (ids serveur).
         next = quizzes.map((q) => (q.id === quizId ? created : q));
         setQuizzes(next);
-        setView({ kind: 'form', quizId: created.id, isNew: false });
       } else {
         const saved = !isNew ? await handlers.onUpdateQuiz?.(quizId, payload) : undefined;
         next = upsertInList(quizzes, saved ?? payload);
         setQuizzes(next);
-        if (isNew) setView({ kind: 'form', quizId, isNew: false });
       }
-      // Enregistré : les changements de la session deviennent définitifs.
+      // Enregistré : les changements de la session deviennent définitifs, et l'éditeur remonte
+      // d'un cran, à la liste des quiz, comme la question et le harnais après leur
+      // « Enregistrer » (#201). En cas d'échec, on reste sur le formulaire, saisie conservée.
       snapshotRef.current = null;
       setDirty(false);
+      setView({ kind: 'list' });
       // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
       onQuizzesChange?.(next);
     } catch {

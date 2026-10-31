@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Détail complet d'une analyse MCP (chargé au clic sur une entrée de l'historique).
- * Miroir du type front `McpResponse` : `content` = JSON McpAnalysis, `author` = l'auteur.
+ * Miroir du type front `McpResponse` : `content` = JSON McpAnalysis, `author` = l'auteur,
+ * `source` = origine du contenu (`LLM` / `DETERMINISTIC`), absente pour les analyses antérieures
+ * à la colonne (origine inconnue).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record McpResponseDto(
@@ -13,4 +15,5 @@ public record McpResponseDto(
         String content,
         long userId,
         long courseId,
-        Author author) {}
+        Author author,
+        String source) {}

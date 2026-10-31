@@ -90,13 +90,13 @@ export default function LeftMenuGroup({
 
         <h2 className={styles.mobileTitle}>
           {mobileTitlePrefix && (
-            <span role="prefix">{mobileTitlePrefix}</span>
+            <span data-role="prefix">{mobileTitlePrefix}</span>
           )}
-          <span role="title">{mobileTitle ?? 'Accueil'}</span>
+          <span data-role="title">{mobileTitle ?? 'Accueil'}</span>
         </h2>
 
         {mobileUserMenu ?? (
-          <span className={styles.mobileAvatar} aria-label="Utilisateur connecté">
+          <span className={styles.mobileAvatar} role="img" aria-label="Utilisateur connecté">
             {mobileUserInitial}
           </span>
         )}

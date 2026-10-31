@@ -119,9 +119,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             return quiz(4, course(1), ordering);
         }
 
+        /** Ordre soumis par le client : ids PUBLICS des éléments (ceux de la passation). */
         private SubmittedAnswerDTO ordered(Integer... ids) {
             return SubmittedAnswerDTO.builder().questionId(30)
-                    .orderedItemIds(java.util.Arrays.asList(ids)).build();
+                    .orderedItemIds(java.util.Arrays.stream(ids)
+                            .map(id -> id == null ? null : pub(id)).toList()).build();
         }
 
         @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
@@ -480,7 +482,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         Attempt bobFull = attempt(3, quiz, bob, 1, "done", submission(choiceQ, choice(10, 1)));
         Attempt bobPending = attempt(4, quiz, bob, 2, "pending", submission(choiceQ, choice(10, 2)));
         Attempt codeOnly = attempt(5, codeQuiz, bob, 1, "done", submission(onlyCode, null));
-        when(attemptRepository.findByQuiz_Course_Id(1))
+        when(attemptRepository.findWithSubmissionsByCourseId(1))
                 .thenReturn(List.of(evaFull, evaZero, bobFull, bobPending, codeOnly));
 
         CourseQuizStatsDTO stats = service.getCourseQuizStats(1);
@@ -494,7 +496,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
     @Test
     @DisplayName("Stats MCP sans tentative → moyenne null, compteurs à 0")
     void getCourseQuizStats_vide() {
-        when(attemptRepository.findByQuiz_Course_Id(1)).thenReturn(List.of());
+        when(attemptRepository.findWithSubmissionsByCourseId(1)).thenReturn(List.of());
 
         CourseQuizStatsDTO stats = service.getCourseQuizStats(1);
 

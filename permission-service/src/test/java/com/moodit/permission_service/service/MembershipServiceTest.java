@@ -178,6 +178,14 @@ class MembershipServiceTest {
   }
 
   @Test
+  void isQuizPublished_delegatesTrueAndFalse() {
+    when(membershipRepository.isQuizPublished(12)).thenReturn(true);
+    when(membershipRepository.isQuizPublished(13)).thenReturn(false);
+    assertThat(service.isQuizPublished(12)).isTrue();
+    assertThat(service.isQuizPublished(13)).isFalse();
+  }
+
+  @Test
   void canAccessCourse_delegatesFalse() {
     when(membershipRepository.canSeeCourseViaProgram(5, 3)).thenReturn(false);
     assertThat(service.canAccessCourse(5, 3)).isFalse();
@@ -187,6 +195,31 @@ class MembershipServiceTest {
   void canAccessForum_delegatesTrue() {
     when(membershipRepository.canSeeForumViaProgram(5, 9)).thenReturn(true);
     assertThat(service.canAccessForum(5, 9)).isTrue();
+  }
+
+  @Test
+  void isAnnouncementForum_delegatesTrueAndFalse() {
+    when(membershipRepository.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipRepository.isAnnouncementForum(9)).thenReturn(false);
+    assertThat(service.isAnnouncementForum(11)).isTrue();
+    assertThat(service.isAnnouncementForum(9)).isFalse();
+  }
+
+  @Test
+  void forumAccess_selonLeTypeDuForumVisible() {
+    when(membershipRepository.visibleForumType(5, 11)).thenReturn("Announcement");
+    when(membershipRepository.visibleForumType(5, 9)).thenReturn("Discussion");
+    when(membershipRepository.visibleForumType(5, 1)).thenReturn(null);
+    assertThat(service.forumAccess(5, 11)).isEqualTo(com.moodit.permission_service.model.ForumAccess.ANNOUNCEMENT);
+    assertThat(service.forumAccess(5, 9)).isEqualTo(com.moodit.permission_service.model.ForumAccess.READ);
+    assertThat(service.forumAccess(5, 1)).isEqualTo(com.moodit.permission_service.model.ForumAccess.NONE);
+  }
+
+  @Test
+  void isExpiredAnnouncement_delegue() {
+    when(membershipRepository.isExpiredAnnouncement(org.mockito.ArgumentMatchers.eq(40L), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(true);
+    assertThat(service.isExpiredAnnouncement(40)).isTrue();
   }
 
   @Test

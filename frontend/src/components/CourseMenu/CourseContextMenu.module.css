@@ -19,6 +19,12 @@
   animation: course-context-pop-in 0.12s ease-out;
 }
 
+/* Le menu reçoit le focus à son ouverture (avant la première flèche) : la fenêtre ouverte
+   suffit comme repère, l'indicateur de focus est porté par ses éléments. */
+.menu:focus {
+  outline: none;
+}
+
 @keyframes course-context-pop-in {
   from {
     opacity: 0;

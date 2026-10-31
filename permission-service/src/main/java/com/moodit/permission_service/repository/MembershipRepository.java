@@ -9,6 +9,7 @@
 package com.moodit.permission_service.repository;
 
 import com.moodit.permission_service.model.User;
+import java.time.LocalDateTime;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -36,6 +37,52 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeForumViaProgram(@Param("userId") long userId, @Param("forumId") long forumId);
+
+  // Le forum est-il le canal d'ANNONCES de son cours (F_Type 'Announcement') ?
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM Forum f
+            JOIN F_Type t ON t.id = f.f_type_id
+            WHERE f.id = :forumId AND t.name = 'Announcement'
+          )
+          """,
+      nativeQuery = true)
+  boolean isAnnouncementForum(@Param("forumId") long forumId);
+
+  // Type du forum (F_Type.name, '' si absent) s'il est visible de l'utilisateur (meme regle que
+  // canSeeForumViaProgram), null sinon : acces + type en une seule requete.
+  @Query(
+      value =
+          """
+          SELECT COALESCE(t.name, '')
+          FROM Forum f
+          LEFT JOIN F_Type t     ON t.id = f.f_type_id
+          JOIN program_course pc ON pc.course_id = f.course_id
+          JOIN User_Program up   ON up.program_id = pc.program_id
+          WHERE f.id = :forumId AND up.user_id = :userId
+          LIMIT 1
+          """,
+      nativeQuery = true)
+  String visibleForumType(@Param("userId") long userId, @Param("forumId") long forumId);
+
+  // Le post est-il une annonce EXPIREE (expires_at passe, en UTC comme core) ?
+  @Query(
+      value =
+          """
+          SELECT EXISTS(
+            SELECT 1
+            FROM Post p
+            JOIN Forum f  ON f.id = p.forum_id
+            JOIN F_Type t ON t.id = f.f_type_id
+            WHERE p.id = :postId AND t.name = 'Announcement'
+              AND p.expires_at IS NOT NULL AND p.expires_at <= :now
+          )
+          """,
+      nativeQuery = true)
+  boolean isExpiredAnnouncement(@Param("postId") long postId, @Param("now") LocalDateTime now);
 
   // Le cours appartient a un programme auquel l'utilisateur est abonne (scope MCP).
   @Query(
@@ -66,6 +113,13 @@ public interface MembershipRepository extends JpaRepository<User, Integer> {
           """,
       nativeQuery = true)
   boolean canSeeQuizViaProgram(@Param("userId") long userId, @Param("quizId") long quizId);
+
+  // Le quiz est-il PUBLIE ? Un brouillon n'est lisible / soumissible en passation que par le
+  // personnel du cours (cf. PermissionService.quizTakingAccess).
+  @Query(
+      value = "SELECT EXISTS(SELECT 1 FROM Quiz WHERE id = :quizId AND is_published = TRUE)",
+      nativeQuery = true)
+  boolean isQuizPublished(@Param("quizId") long quizId);
 
   // Le cours appartient-il (structurellement) au programme ? (table de jointure program_course)
   @Query(

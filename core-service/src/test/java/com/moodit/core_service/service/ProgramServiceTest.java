@@ -7,6 +7,7 @@ import com.moodit.core_service.repository.*;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -29,6 +30,7 @@ public class ProgramServiceTest {
     @Mock private EnrollmentRepository enrollmentRepository;
     @Mock private RealtimeEventPublisher realtimePublisher;
     @Mock private AuditLogService auditLogService;
+    @Mock private FTypeRepository fTypeRepository;
 
     //@InjectMocks crée le service et injecte les @Mock dedans automatiquement
     @InjectMocks private ProgramService programService;
@@ -248,6 +250,37 @@ public class ProgramServiceTest {
                     com.moodit.core_service.realtime.dto.CourseDto.of(1, "MATH67", "Mathématique de l'ingénierie");
             verify(realtimePublisher).courseCreated(1L, live);
             verify(realtimePublisher).courseCreated(2L, live);
+        }
+
+        @Test
+        @DisplayName("Le nouveau cours reçoit son canal « Annonces »")
+        void addCourseToPrograms_cree_le_canal_annonces() {
+            Program gi = Program.builder().id(1).name("Informatique").courses(new ArrayList<>()).build();
+            FType announcement = new FType();
+            announcement.setId(3);
+            announcement.setName("Announcement");
+            when(fTypeRepository.findByName("Announcement")).thenReturn(Optional.of(announcement));
+            when(programRepository.findById(1)).thenReturn(Optional.of(gi));
+            ArgumentCaptor<Course> saved = ArgumentCaptor.forClass(Course.class);
+            when(courseRepository.save(saved.capture())).thenAnswer(inv -> {
+                Course c = inv.getArgument(0);
+                c.setId(1);
+                c.getForums().forEach(f -> f.setId(11)); // id attribué en cascade par la BD
+                return c;
+            });
+
+            programService.addCourseToPrograms(
+                    CourseCreateInProgramsDTO.builder().title("Physique").code("PHY1").programIds(List.of(1)).build());
+
+            List<Forum> forums = saved.getValue().getForums();
+            assertEquals(1, forums.size());
+            assertEquals("Annonces", forums.get(0).getTitle());
+            assertEquals(announcement, forums.get(0).getFType());
+            assertEquals(saved.getValue(), forums.get(0).getCourse());
+            // L'évènement course:created porte le canal : les autres clients l'ont sans recharger.
+            verify(realtimePublisher).courseCreated(1L, new com.moodit.core_service.realtime.dto.CourseDto(
+                    1, "PHY1", "Physique", List.of(), List.of(),
+                    List.of(new com.moodit.core_service.realtime.dto.ForumSectionDto(11, "Annonces", "Announcement", 0))));
         }
 
         @Test

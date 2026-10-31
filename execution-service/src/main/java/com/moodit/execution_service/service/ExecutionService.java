@@ -7,6 +7,7 @@ import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -30,14 +31,27 @@ public class ExecutionService {
 
     private final CodeAssembler assembler;
     private final PistonClient piston;
+    private final ExecutionLimiter limiter;
 
     /** Taille max du dump d'état transféré phase 1 → phase 2 (borne anti-DoS). Configurable. */
     @Value("${app.sql.max-dump-chars:524288}")
     private int maxSqlDumpChars = 524288;
 
+    /** Sans borne de charge effective (tests unitaires de la logique de verdict). */
     public ExecutionService(CodeAssembler assembler, PistonClient piston) {
+        this(assembler, piston, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE));
+    }
+
+    @Autowired
+    public ExecutionService(CodeAssembler assembler, PistonClient piston, ExecutionLimiter limiter) {
         this.assembler = assembler;
         this.piston = piston;
+        this.limiter = limiter;
+    }
+
+    /** Un appel au sandbox, dans une place de la limite globale (#24) : file bornée, sinon 429. */
+    private PistonClient.Result execute(String language, String version, List<PistonClient.File> files) {
+        return limiter.withSandboxSlot(() -> piston.execute(language, version, files));
     }
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
@@ -64,7 +78,7 @@ public class ExecutionService {
      */
     public RunResult run(RunRequest request) {
         CodeAssembler.Assembled assembled = assembler.assembleRun(request.language(), request.code());
-        PistonClient.Result result = piston.execute(assembled.pistonLanguage(), request.version(), assembled.files());
+        PistonClient.Result result = execute(assembled.pistonLanguage(), request.version(), assembled.files());
 
         PistonClient.Stage compile = result.compile();
         String compileOutput = compile == null ? null : firstNonBlank(compile.stderr(), compile.stdout());
@@ -95,7 +109,7 @@ public class ExecutionService {
         }
 
         CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
-        PistonClient.Result result = piston.execute(assembled.pistonLanguage(), version, assembled.files());
+        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files());
 
         // Échec de compilation (langages compilés) → test échoué, message = stderr de compilation.
         PistonClient.Stage compile = result.compile();
@@ -137,7 +151,7 @@ public class ExecutionService {
             String nonce, int weight) {
         // Phase 1 — bac à sable.
         CodeAssembler.Assembled p1 = assembler.assembleSqlPhase1(code, testCase.harnessCode(), nonce);
-        PistonClient.Stage run1 = piston.execute("sqlite3", version, p1.files()).run();
+        PistonClient.Stage run1 = execute("sqlite3", version, p1.files()).run();
         if (run1 == null || run1.signal() != null) {
             return new TestResult(testCase.name(), weight, false,
                     "Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
@@ -161,7 +175,7 @@ public class ExecutionService {
         // Phase 2 — noteur isolé. Une erreur ici vient du HARNAIS (prof) : message générique, on ne
         // fuit pas son stderr (structure des tables de référence) à l'étudiant.
         CodeAssembler.Assembled p2 = assembler.assembleSqlPhase2(data, testCase.harnessCode(), nonce);
-        PistonClient.Stage run2 = piston.execute("sqlite3", version, p2.files()).run();
+        PistonClient.Stage run2 = execute("sqlite3", version, p2.files()).run();
         if (run2 == null || run2.signal() != null || (run2.code() != null && run2.code() != 0)) {
             return new TestResult(testCase.name(), weight, false, "Le harnais n'a pas pu évaluer ton résultat");
         }

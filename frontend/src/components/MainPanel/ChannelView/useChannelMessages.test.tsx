@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor, cleanup } from '@testing-library/react';
 import { useChannelMessages } from './useChannelMessages';
@@ -91,6 +92,37 @@ describe('useChannelMessages — loadOlder', () => {
     await waitFor(() => expect(result.current.loadingOlder).toBe(false));
     expect(onFetchMessages).toHaveBeenNthCalledWith(2, CHANNEL, 10, 30);
     expect(result.current.messages.map((m) => m.id)).toEqual([5, 10, 11]);
+  });
+
+  it('dès l’affichage de la première page, loadOlder envoie le curseur (#194)', async () => {
+    const onFetchMessages = vi
+      .fn()
+      .mockResolvedValueOnce([msg(10), msg(11)]) // page initiale
+      .mockResolvedValueOnce([]); // plus anciens
+    // Un scroll vers le haut peut arriver juste après l'affichage, avant les useEffect : on le
+    // simule par un useLayoutEffect, qui s'exécute dans cette fenêtre (une seule fois).
+    let scrolled = false;
+    const { result } = renderHook(() => {
+      const channel = useChannelMessages({
+        channelId: CHANNEL,
+        initialMessages: [],
+        currentUser: user,
+        onFetchMessages,
+      });
+      const { messages, loadOlder } = channel;
+      useLayoutEffect(() => {
+        if (messages.length > 0 && !scrolled) {
+          scrolled = true;
+          loadOlder();
+        }
+      }, [messages, loadOlder]);
+      return channel;
+    });
+
+    await waitFor(() => expect(onFetchMessages).toHaveBeenCalledTimes(2));
+    expect(onFetchMessages).toHaveBeenNthCalledWith(2, CHANNEL, 10, 30);
+    await waitFor(() => expect(result.current.loadingOlder).toBe(false));
+    expect(onFetchMessages).toHaveBeenCalledTimes(2);
   });
 });
 

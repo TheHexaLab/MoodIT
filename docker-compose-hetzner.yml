@@ -194,17 +194,39 @@ services:
       postgres:
         condition: service_healthy
 
-  # ── Sandbox d'exécution du code étudiant (privileged requis par isolate) ──
+  # ── Sandbox d'exécution du code étudiant (réseau dédié, capacités minimales) ──
   piston:
     build: ./piston
     container_name: moodit_piston
     restart: unless-stopped
-    privileged: true
+    # Pas de `privileged` (#24) : isolate n'a besoin que de créer des espaces de noms (SYS_ADMIN,
+    # NET_ADMIN pour la boucle locale de la boîte, SYS_CHROOT) et de gérer ses utilisateurs de boîte
+    # (SETUID/SETGID/CHOWN/DAC_OVERRIDE/FOWNER/KILL). Toutes les autres capacités sont retirées et le
+    # profil seccomp par défaut de Docker reste actif. AppArmor est levé : le profil docker-default
+    # interdit le remontage en écriture de /sys/fs/cgroup (cf. piston/Dockerfile), ce que
+    # `privileged` faisait déjà. cgroup privé : la boîte ne voit que l'arbre cgroup du conteneur.
+    cap_drop: [ALL]
+    cap_add: [SYS_ADMIN, NET_ADMIN, SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt:
+      - apparmor=unconfined
+    cgroup: private
+    environment:
+      # Sortie max par flux (caractères). Le défaut de Piston (1 024) tronque tout extrait SQL de
+      # plus de 1 Ko ; il faut au moins app.sql.max-dump-chars (512 Ki) plus la sortie de l'étudiant.
+      PISTON_OUTPUT_MAX_SIZE: "1048576"
+      # Plafonds mémoire (octets) appliqués aussi quand l'appelant n'en envoie pas (piston-init).
+      # execution-service envoie les siens (PISTON_RUN/COMPILE_MEMORY_LIMIT_BYTES), qui ne doivent
+      # pas les dépasser : Piston refuserait l'exécution.
+      PISTON_RUN_MEMORY_LIMIT: "256000000"
+      PISTON_COMPILE_MEMORY_LIMIT: "512000000"
     volumes:
       - piston_data:/piston/packages
-    mem_limit: 1g
+    # 2 exécutions simultanées (EXEC_MAX_CONCURRENT) × 512 Mo de compilation au pire = 1 Go,
+    # plus une marge pour le processus Node de l'API Piston et l'isolation : sans elle, un
+    # dépassement tuerait aussi l'API, et toutes les exécutions en cours échoueraient.
+    mem_limit: 1536m
     networks:
-      - internal
+      - sandbox
 
   piston-init:
     image: curlimages/curl:latest
@@ -248,7 +270,7 @@ services:
         echo "piston pret (12 runtimes ; + JSON via node)";
     restart: "no"
     networks:
-      - internal
+      - sandbox
 
   execution-service:
     build: ./execution-service
@@ -259,9 +281,13 @@ services:
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
       PISTON_URL: http://piston:2000
+      # 2 exécutions simultanées × 512 Mo de compilation au pire : tient dans le mem_limit de Piston
+      # (1,5 Go, marge comprise). Augmenter l'un impose de revoir l'autre.
+      EXEC_MAX_CONCURRENT: "2"
     mem_limit: 512m
     networks:
       - internal
+      - sandbox
     depends_on:
       piston-init:
         condition: service_completed_successfully
@@ -274,4 +300,9 @@ volumes:
 
 networks:
   internal:
+    driver: bridge
+  # Réseau du bac à sable (#24) : Piston n'est joignable que par execution-service (et piston-init).
+  # Ni le gateway, ni core-service, ni Postgres n'y sont. Pas `internal: true` : Piston télécharge
+  # ses paquets de langages (piston-init) ; le code exécuté, lui, n'a aucun réseau (isolate).
+  sandbox:
     driver: bridge

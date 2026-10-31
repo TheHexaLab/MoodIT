@@ -607,6 +607,24 @@ describe('useForumThreads — publication (compléments)', () => {
     expect(onCreatePost).not.toHaveBeenCalled();
   });
 
+  it('addReply sur un parent à id provisoire (négatif) : false, aucun appel API ni optimiste (#212)', async () => {
+    const onCreatePost = vi.fn();
+    const { result } = mount({
+      initialThreads: [post(-1, { replies: [], replyCount: 0 })],
+      onCreatePost,
+    });
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.addReply(-1, 'trop tôt');
+    });
+    expect(ok).toBe(false);
+    expect(onCreatePost).not.toHaveBeenCalled();
+    expect(result.current.threads[0].replies).toEqual([]);
+    expect(result.current.threads[0].replyCount).toBe(0);
+    expect(result.current.error).toBeNull();
+    expect(result.current.pending).toBe(false);
+  });
+
   it("addReply : échec → retire l'optimiste et rétablit le compteur", async () => {
     const onCreatePost = vi.fn(async () => {
       throw new Error('net');

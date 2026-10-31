@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { CourseContextMenu } from './CourseContextMenu';
 import { defaultLabels } from './labels';
 
@@ -101,5 +102,27 @@ describe('CourseContextMenu', () => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     screen.getByRole('menu').dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+// Navigation au clavier réel (user-event) : focus sur le menu, flèches, Échap → ancre.
+describe('CourseContextMenu — clavier', () => {
+  it('le focus entre dans le menu ; ↓/↑ circulent ; Échap ferme et rend le focus à l’ancre', async () => {
+    const user = userEvent.setup();
+    const anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+    const { onClose } = renderMenu({ anchor, onEditCourse: vi.fn(), onLeaveCourse: vi.fn() });
+    const menu = screen.getByRole('menu');
+    expect(document.activeElement).toBe(menu);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: defaultLabels.contextEditCourse }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: defaultLabels.contextLeaveCourse }));
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: defaultLabels.contextEditCourse }));
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+    expect(document.activeElement).toBe(anchor);
+    anchor.remove();
   });
 });

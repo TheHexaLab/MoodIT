@@ -17,6 +17,7 @@ const FORUM_TYPE_TO_CHANNEL_TYPE: Record<ForumType, string> = {
   Discussion: 'text',
   Thread: 'forum',
   Voice: 'voice',
+  Announcement: 'announcement',
 };
 
 /**

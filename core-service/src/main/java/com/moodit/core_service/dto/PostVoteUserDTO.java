@@ -12,7 +12,7 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "content", "createdAt", "isPinned", "postParentId", "userId", "author", "voteTotalValue", "userVoteValue", "childrenCount", "children"})
+@JsonPropertyOrder({"id", "title", "content", "createdAt", "isPinned", "color", "expiresAt", "postParentId", "userId", "author", "voteTotalValue", "userVoteValue", "childrenCount", "children"})
 public class PostVoteUserDTO extends PostDTO{
     private Integer voteTotalValue;
     /** Vote de l'UTILISATEUR COURANT sur ce post : 1, -1, ou null s'il n'a pas voté.

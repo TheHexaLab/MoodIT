@@ -145,6 +145,21 @@ describe('emptyAnswer', () => {
       if (ans.kind === 'ordering') expect(ans.itemIds).not.toEqual([1, 2, 3]);
     }
   });
+
+  it('ordering en passation (sans correctOrder) : garde l ordre envoyé par le serveur (#28)', () => {
+    // Le serveur mélange déjà, en évitant l'ordre attendu ; remélanger ici pourrait y retomber.
+    const items = [
+      { id: 42, content: 'b' },
+      { id: 7, content: 'c' },
+      { id: 19, content: 'a' },
+    ];
+    for (let i = 0; i < 20; i++) {
+      expect(emptyAnswer(q({ id: 1, qType: 'ordering', dragItems: items }))).toEqual({
+        kind: 'ordering',
+        itemIds: [42, 7, 19],
+      });
+    }
+  });
 });
 
 // ── initAnswers ─────────────────────────────────────────────────────────────────

@@ -27,6 +27,13 @@ describe('normalizeCourseChannelsFromSources', () => {
     ]);
   });
 
+  it('mappe le canal Announcement vers le type "announcement"', () => {
+    const forums: Forum[] = [{ id: 11, title: 'Annonces', fType: 'Announcement' }];
+    expect(normalizeCourseChannelsFromSources({ forums })).toEqual([
+      { id: 11, name: 'Annonces', type: 'announcement', messages: undefined },
+    ]);
+  });
+
   it('mappe un forum Thread vers le type "forum"', () => {
     const forums: Forum[] = [{ id: 4, title: 'Entraide', fType: 'Thread' }];
     const result = normalizeCourseChannelsFromSources({ forums });

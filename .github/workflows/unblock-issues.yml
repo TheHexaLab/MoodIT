@@ -1,0 +1,67 @@
+name: Déblocage des issues
+
+# À la fermeture d'une issue, retire le label « bloqué » des issues ouvertes qu'elle bloquait et qui
+# n'ont plus aucun bloqueur ouvert (#198). GitHub met à jour le lien « bloquée par », mais pas le label.
+#
+# `issues` exécute toujours la version de ce fichier présente sur main : il ne se teste pas depuis
+# une branche. Le déclenchement manuel rejoue la logique sur une issue existante.
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Numéro de l'issue fermée à traiter"
+        required: true
+      dry_run:
+        description: "Simulation (n'écrit rien)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  unblock:
+    name: Retirer le label des issues débloquées
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write   # lecture des dépendances, retrait du label
+    steps:
+      - name: Retirer « bloqué » s'il ne reste aucun bloqueur ouvert
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        # Chaque issue est traitée indépendamment (#200) : un échec (API indisponible, 404, limite
+        # de débit) est signalé et n'empêche pas de traiter les suivantes, qui sinon resteraient
+        # étiquetées « bloqué » jusqu'à un lancement manuel. Le job échoue à la fin s'il y a eu un
+        # échec. Un échec de la liste initiale fait toujours échouer le job tout de suite.
+        run: |
+          blocked=$(gh api --paginate "repos/$REPO/issues/$ISSUE/dependencies/blocking" \
+            --jq '.[] | select(.state == "open" and any(.labels[]; .name == "bloqué")) | .number')
+          failed=()
+          while read -r number; do
+            [ -n "$number" ] || continue
+            if ! open_blockers=$(gh api --paginate "repos/$REPO/issues/$number/dependencies/blocked_by" \
+              --jq '.[] | select(.state == "open") | .number'); then
+              echo "::warning::#$number : lecture des bloqueurs impossible, label laissé en place"
+              failed+=("#$number")
+            elif [ -n "$open_blockers" ]; then
+              echo "#$number reste bloquée par : $(echo $open_blockers)"
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "#$number serait débloquée (simulation)"
+            elif ! gh issue edit "$number" --repo "$REPO" --remove-label "bloqué"; then
+              echo "::warning::#$number : retrait du label « bloqué » impossible"
+              failed+=("#$number")
+            else
+              echo "#$number débloquée"
+            fi
+          done <<< "$blocked"
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Issues non traitées : ${failed[*]}. Relancer le workflow à la main avec issue=$ISSUE."
+            exit 1
+          fi

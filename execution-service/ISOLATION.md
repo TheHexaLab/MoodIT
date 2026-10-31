@@ -42,6 +42,21 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 - **Bash** : `grader.sh` supprimé mais lisible via son fd déjà ouvert (sémantique unlink Unix).
 - **Compilés** : la source n'est pas présente dans le dossier d'exécution (vérifié : `fopen(main.c)=NULL`).
 
+## Limites du bac à sable (#24)
+
+- **Par exécution** (envoyées par `PistonClient` à chaque appel) : `run_timeout` 3 s,
+  `compile_timeout` 10 s, `run_memory_limit` 256 Mo, `compile_memory_limit` 512 Mo
+  (`PISTON_RUN_MEMORY_LIMIT_BYTES` / `PISTON_COMPILE_MEMORY_LIMIT_BYTES`). Piston a les mêmes plafonds
+  côté serveur (compose) : une valeur plus haute côté execution-service serait refusée.
+- **Sortie** : `PISTON_OUTPUT_MAX_SIZE` = 1 Mio par flux (compose). Le défaut de Piston (1 024
+  caractères) tronquait le dump SQL de la phase 1, qui peut atteindre `app.sql.max-dump-chars` (512 Ki).
+- **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` appels Piston simultanés (file
+  d'attente de `EXEC_QUEUE_WAIT_MS`), et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur sur
+  `/exec/**`. Au-delà : 429 avec un message en français. L'appel interne (correction des soumissions)
+  ne compte que dans la limite globale.
+- **Conteneur** : réseau `sandbox` dédié (execution-service seul), pas de `privileged` (capacités
+  minimales, cf. `deploy/DEPLOY.md`), image épinglée par digest (`piston/Dockerfile`).
+
 ## Résiduel connu
 
 L'isolation ramène la triche à « **produire les bonnes sorties = résoudre** ». Il reste que le **serveur
@@ -57,3 +72,5 @@ calculer la bonne sortie) — c'est le problème classique des **cas de test con
   `integration` (démarre Piston + runtimes). Couvre Python/JS/TS/PHP/Bash/C/SQL **et** JSX/TSX (rendu
   statique + interactif). Les cas JSX/TSX exigent le bundle `react-runtime.js` via `APP_VENDOR_DIR`
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
+  Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une boucle d'allocation
+  tuée par la limite mémoire.

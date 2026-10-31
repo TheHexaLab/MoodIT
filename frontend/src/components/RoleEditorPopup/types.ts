@@ -53,4 +53,6 @@ export interface RoleEditorPopupLabels {
   saveError: string;
   /** Bouton « fermer » du popup d'erreur. */
   errorClose: string;
+  /** Nom accessible de la poubelle qui retire un utilisateur d'un rôle (reçoit son nom). */
+  removeUser: (userName: string) => string;
 }

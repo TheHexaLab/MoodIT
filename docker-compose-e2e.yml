@@ -73,7 +73,9 @@ services:
   piston:
     container_name: moodit_e2e_piston
     ports:
-      - "2000:2000"    # installation de Python par la CI (curl), comme docker-compose-ci.yml
+      # Installation de Python par start-stack.sh (curl depuis l'hôte), comme docker-compose-ci.yml.
+      # Lié à 127.0.0.1 : aucun autre conteneur ne joint Piston par l'adresse de l'hôte.
+      - "127.0.0.1:2000:2000"
   execution-service:
     container_name: moodit_e2e_execution
     environment: *e2e-env

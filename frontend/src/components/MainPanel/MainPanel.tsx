@@ -26,6 +26,12 @@ import ForumView, {
   type VotePostHandler,
 } from './ForumView/ForumView.tsx';
 import QuizView from './QuizView/QuizView.tsx';
+import AnnouncementView, {
+  type CreateAnnouncementHandler,
+  type DeleteAnnouncementHandler,
+  type FetchAnnouncementsHandler,
+  type UpdateAnnouncementHandler,
+} from './AnnouncementView/AnnouncementView.tsx';
 import VoiceChannelView from './VoiceChannelView/VoiceChannelView.tsx';
 import {
   type AttemptOutcome,
@@ -88,6 +94,11 @@ interface MainPanelProps {
   onVotePost?: VotePostHandler;
   /** Socket temps reel du forum (optionnel) : posts/votes des autres users. */
   forumSocket?: ForumSocket;
+  /** Canal d'annonces du cours : chargement, publication, suppression. */
+  onFetchAnnouncements?: FetchAnnouncementsHandler;
+  onCreateAnnouncement?: CreateAnnouncementHandler;
+  onUpdateAnnouncement?: UpdateAnnouncementHandler;
+  onDeleteAnnouncement?: DeleteAnnouncementHandler;
   /** Ouvre le formulaire d'ajout / d'adhésion a un programme (admin). */
   onAddProgram?: () => void;
   /** Ouvre le popup « rejoindre un programme » (offert a TOUS : admin et utilisateur). */
@@ -149,6 +160,10 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onDeletePost,
   onVotePost,
   forumSocket,
+  onFetchAnnouncements,
+  onCreateAnnouncement,
+  onUpdateAnnouncement,
+  onDeleteAnnouncement,
   onAddProgram,
   onJoinProgram,
   onAddCourse,
@@ -199,7 +214,9 @@ const MainPanel: React.FC<MainPanelProps> = ({
           forums: course.forums,
         })
       : [];
-    if (courseChannels.length === 0) {
+    // Le canal d'annonces existe dans tout cours : il ne compte pas comme du contenu,
+    // pour que le personnel garde l'invitation à créer canaux, quiz et forums.
+    if (courseChannels.every((ch) => ch.type === 'announcement') && !selectedChannel) {
       return (
         <EmptyCourseState
           isAdmin={isAdmin}
@@ -217,6 +234,20 @@ const MainPanel: React.FC<MainPanelProps> = ({
 
     // 5/6/7 — un canal est sélectionné : on route selon son type.
     switch (channel.type) {
+      case 'announcement': // fType 'Announcement'
+        return (
+          <AnnouncementView
+            key={`${channel.type}-${channel.id}`}
+            course={course}
+            channel={channel}
+            canPost={isAdmin}
+            onFetchAnnouncements={onFetchAnnouncements}
+            onCreateAnnouncement={onCreateAnnouncement}
+            onUpdateAnnouncement={onUpdateAnnouncement}
+            onDeleteAnnouncement={onDeleteAnnouncement}
+            socket={forumSocket}
+          />
+        );
       case 'forum': // fType 'Thread'
         return (
           <ForumView

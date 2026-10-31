@@ -27,7 +27,14 @@ test('poster un sujet puis voter', async ({ browser }) => {
     .getByRole('listitem')
     .filter({ has: alicePage.getByRole('heading', { name: title }) });
   await expect(alicePost.getByRole('strong')).toHaveText('gras'); // Markdown rendu
-  await expect(alicePost.getByRole('button', { name: 'Voter pour' })).toBeDisabled();
+  const aliceUp = alicePost.getByRole('button', { name: 'Voter pour' });
+  await expect(aliceUp).toBeDisabled();
+  // Style de la barre de votes (jsdom ne calcule pas le CSS) : conteneur flex, cible de 24 px
+  // (WCAG 2.5.8) et vote sur son propre sujet estompé.
+  await expect(aliceUp.locator('..')).toHaveCSS('display', 'flex');
+  await expect(aliceUp).toHaveCSS('width', '24px');
+  await expect(aliceUp).toHaveCSS('height', '24px');
+  await expect(aliceUp).toHaveCSS('opacity', '0.4');
 
   const bob = await browser.newContext({ storageState: storageStatePath('bob') });
   const bobPage = await bob.newPage();
@@ -117,6 +124,10 @@ async function publishThread(page: Page, title: string, content = `Corps de ${ti
 const ownButton = (card: Locator, name: string) =>
   card.getByRole('button', { name, exact: true }).first();
 
+/** Bascule des réponses d'un message (nom accessible : « N réponse(s) — Déplier les réponses »). */
+const repliesToggle = (card: Locator, action: 'Déplier' | 'Replier') =>
+  card.getByRole('button', { name: new RegExp(` — ${action} les réponses$`) }).first();
+
 /** Carte de confirmation (DeleteConfirmationPopup) : plus petit bloc titre + boutons. */
 const confirmPopup = (page: Page) =>
   page
@@ -189,7 +200,7 @@ test('répondre à un sujet puis à une réponse, déplier et replier', async ({
   await composer.fill(first);
   await card.getByRole('button', { name: 'Répondre', exact: true }).last().click();
   await expect(reply(reader.page, first)).toBeVisible();
-  await expect(ownButton(card, 'Replier les réponses')).toHaveText('1 réponse');
+  await expect(repliesToggle(card, 'Replier')).toHaveText('1 réponse');
 
   // Réponse à la réponse (imbriquée), envoyée par Ctrl+Entrée.
   const firstReply = reply(reader.page, first);
@@ -198,22 +209,22 @@ test('répondre à un sujet puis à une réponse, déplier et replier', async ({
   await nestedComposer.fill(nested);
   await nestedComposer.press('Control+Enter');
   await expect(firstReply.getByText(nested, { exact: true })).toBeVisible();
-  await expect(ownButton(firstReply, 'Replier les réponses')).toHaveText('1 réponse');
+  await expect(repliesToggle(firstReply, 'Replier')).toHaveText('1 réponse');
 
   // Replier le sujet masque tout le fil ; le déplier le réaffiche.
-  await ownButton(card, 'Replier les réponses').click();
+  await repliesToggle(card, 'Replier').click();
   await expect(reply(reader.page, first)).toBeHidden();
-  await ownButton(card, 'Déplier les réponses').click();
+  await repliesToggle(card, 'Déplier').click();
   await expect(reply(reader.page, first)).toBeVisible();
 
   // Côté auteur (après rechargement) : compteurs, puis chargement paresseux niveau par niveau.
   await openCourseItem(author.page, FORUM_NAME);
-  await expect(ownButton(authorCard, 'Déplier les réponses')).toHaveText('1 réponse');
-  await ownButton(authorCard, 'Déplier les réponses').click();
+  await expect(repliesToggle(authorCard, 'Déplier')).toHaveText('1 réponse');
+  await repliesToggle(authorCard, 'Déplier').click();
   const authorFirst = reply(author.page, first);
   await expect(authorFirst).toBeVisible();
   await expect(author.page.getByText(nested, { exact: true })).toBeHidden();
-  await ownButton(authorFirst, 'Déplier les réponses').click();
+  await repliesToggle(authorFirst, 'Déplier').click();
   await expect(authorFirst.getByText(nested, { exact: true })).toBeVisible();
 
   await author.context.close();

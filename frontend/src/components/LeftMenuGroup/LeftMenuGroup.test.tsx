@@ -39,19 +39,19 @@ describe('LeftMenuGroup', () => {
     const drawer = screen.getByRole('complementary', { name: 'Menus lateraux' });
     expect(drawer.textContent).toContain('Menu programmes');
     expect(drawer.textContent).toContain('Menu cours');
-    expect(screen.getByRole('title', { hidden: true }).textContent).toBe('Accueil');
-    expect(screen.queryByRole('prefix', { hidden: true })).toBeNull();
+    expect(document.querySelector('[data-role="title"]')?.textContent).toBe('Accueil');
+    expect(document.querySelector('[data-role="prefix"]')).toBeNull();
   });
 
   it('affiche le titre et le préfixe fournis', () => {
     renderGroup({ mobileTitle: 'general', mobileTitlePrefix: <span>#</span> });
-    expect(screen.getByRole('title', { hidden: true }).textContent).toBe('general');
-    expect(screen.getByRole('prefix', { hidden: true }).textContent).toBe('#');
+    expect(document.querySelector('[data-role="title"]')?.textContent).toBe('general');
+    expect(document.querySelector('[data-role="prefix"]')?.textContent).toBe('#');
   });
 
   it("sans menu du compte : avatar de repli avec l'initiale fournie", () => {
     renderGroup({ mobileUserInitial: 'Z' });
-    expect(screen.getByLabelText('Utilisateur connecté').textContent).toBe('Z');
+    expect(screen.getByRole('img', { name: 'Utilisateur connecté', hidden: true }).textContent).toBe('Z');
   });
 
   it("avec menu du compte : il remplace l'avatar de repli", () => {

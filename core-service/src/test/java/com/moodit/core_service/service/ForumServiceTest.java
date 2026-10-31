@@ -3,6 +3,7 @@ package com.moodit.core_service.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -123,6 +124,11 @@ class ForumServiceTest {
     return p;
   }
 
+  /** Rend le post trouvable par la requête ciblée (id + forum) du dépôt. */
+  private void stubPost(Forum f, Post p) {
+    when(postRepository.findByIdAndForumId(p.getId(), f.getId())).thenReturn(Optional.of(p));
+  }
+
   private static Vote vote(User voter, int value) {
     Vote v = new Vote();
     v.setUser(voter);
@@ -192,7 +198,7 @@ class ForumServiceTest {
       assertThat(dto.getAuthor().getId()).isEqualTo(1);
       assertThat(dto.getAuthor().getFirstName()).isEqualTo("ALICE");
       assertThat(dto.getAuthor().getLastName()).isEqualTo("Test");
-      assertThat(dto.getAuthor().getEmail()).isEqualTo("alice@test.ca");
+      assertThat(dto.getAuthor().getEmail()).as("courriel non exposé aux lecteurs").isNull();
       assertThat(dto.getAuthor().getAvatarColor()).isEqualTo("#000001");
       assertThat(dto.getChildrenCount()).isEqualTo(1);
       assertThat(dto.getChildren()).hasSize(1);
@@ -229,8 +235,9 @@ class ForumServiceTest {
   // ── Ciblage : l'id demandé, pas le premier post du forum ──────────────────
 
   /**
-   * Chaque opération sur un post le cherche PAR ID dans le forum. Le forum contient ici un post
-   * leurre (6) AVANT la cible (7) : un filtre qui laisserait tout passer prendrait le leurre.
+   * Chaque opération sur un post le cherche par une requête ciblée (id + forum), sans parcourir
+   * {@code forum.getPosts()}. Le forum contient ici un post leurre (6) AVANT la cible (7) : un
+   * parcours de la collection qui laisserait tout passer prendrait le leurre.
    */
   @Nested
   class Ciblage_du_post {
@@ -247,6 +254,7 @@ class ForumServiceTest {
       cible = post(7, alice, "cible");
       f.getPosts().add(leurre);
       f.getPosts().add(cible);
+      when(postRepository.findByIdAndForumId(7, 5)).thenReturn(Optional.of(cible));
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
     }
 
@@ -315,7 +323,7 @@ class ForumServiceTest {
       assertThatThrownBy(() -> forumService.findById(9)).isInstanceOf(ForumNotFoundException.class);
       assertThatThrownBy(() -> forumService.getMessagesPage(9, null, 10, null))
           .isInstanceOf(ForumNotFoundException.class);
-      assertThatThrownBy(() -> forumService.getRootPostsPage(9, null, 10, false, null))
+      assertThatThrownBy(() -> forumService.getRootPostsPage(9, null, 10, false, false, null))
           .isInstanceOf(ForumNotFoundException.class);
       verifyNoInteractions(postRepository);
     }
@@ -326,7 +334,7 @@ class ForumServiceTest {
       Forum f = forum(5, "Thread");
       Post p = post(7, alice, "sujet");
       p.setVotes(List.of(vote(bob, -1)));
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
 
@@ -356,7 +364,7 @@ class ForumServiceTest {
       Post r2 = post(3, alice, "r2");
       r2.setParent(root);
       root.setChildren(List.of(r1, r2));
-      f.getPosts().add(root);
+      stubPost(f, root);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       when(voteRepository.sumValueByPostIds(List.of(2, 3)))
@@ -390,7 +398,7 @@ class ForumServiceTest {
     @DisplayName("getRepliesByPost : sans réponse (children null) → liste vide, aucune requête agrégée")
     void getRepliesByPost_sans_reponse() {
       Forum f = forum(5, "Discussion");
-      f.getPosts().add(post(1, alice, "racine"));
+      stubPost(f, post(1, alice, "racine"));
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
 
       assertThat(forumService.getRepliesByPost(5, 1, null)).isEmpty();
@@ -448,7 +456,7 @@ class ForumServiceTest {
       root.setChildren(List.of(post(2, bob, "réponse")));
       when(postRepository.findRootPostsPage(eq(5), eq(null), any())).thenReturn(List.of(root));
 
-      List<PostVoteUserDTO> page = forumService.getRootPostsPage(5, null, -1, true, null);
+      List<PostVoteUserDTO> page = forumService.getRootPostsPage(5, null, -1, true, false, null);
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(null), pageable.capture());
@@ -464,7 +472,7 @@ class ForumServiceTest {
       when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
       when(postRepository.findRootPostsPage(eq(5), eq(null), any())).thenReturn(List.of());
 
-      forumService.getRootPostsPage(5, null, 0, false, null);
+      forumService.getRootPostsPage(5, null, 0, false, false, null);
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(null), pageable.capture());
@@ -477,7 +485,7 @@ class ForumServiceTest {
       when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Thread")));
       when(postRepository.findRootPostsPage(eq(5), eq(3), any())).thenReturn(List.of());
 
-      assertThat(forumService.getRootPostsPage(5, 3, 1000, false, null)).isEmpty();
+      assertThat(forumService.getRootPostsPage(5, 3, 1000, false, false, null)).isEmpty();
 
       ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
       verify(postRepository).findRootPostsPage(eq(5), eq(3), pageable.capture());
@@ -510,7 +518,7 @@ class ForumServiceTest {
     void discussion_emet_messageCreated() {
       Forum f = forum(5, "Discussion");
       Post parent = post(1, bob, "question");
-      f.getPosts().add(parent);
+      stubPost(f, parent);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
       stubSave(50);
@@ -586,11 +594,12 @@ class ForumServiceTest {
     }
 
     @Test
-    @DisplayName("Contenu null → InvalidPostException avant tout accès BD")
+    @DisplayName("Contenu null → InvalidPostException (validé selon le type du forum), rien n'est persisté")
     void contenu_null() {
+      when(forumRepository.findById(5)).thenReturn(Optional.of(forum(5, "Discussion")));
       assertThatThrownBy(() -> forumService.addPostToForum(dto(5, null, null), "alice@test.ca"))
           .isInstanceOf(InvalidPostException.class);
-      verifyNoInteractions(forumRepository, postRepository);
+      verifyNoInteractions(postRepository, userRepository);
     }
   }
 
@@ -608,6 +617,7 @@ class ForumServiceTest {
     @BeforeEach
     void postVerrouille() {
       sujet = post(7, bob, "sujet");
+      sujet.setForum(forum(5, "Thread"));
     }
 
     /** Le post 7 du forum 5, chargé ET verrouillé (SELECT … FOR UPDATE). */
@@ -632,6 +642,21 @@ class ForumServiceTest {
       assertThat(saved.getValue().getValue()).isEqualTo(1);
       verify(realtimePublisher).postVoted(5L, 7L, 1L, 1);
       verifyNoInteractions(forumRepository); // post trouvé : pas de chargement du forum
+    }
+
+    @Test
+    @DisplayName("L'écho part dans la room du forum DU POST, pas celle du forumId du corps")
+    void echo_dans_le_forum_du_post() {
+      VoteCreateInPostDTO autreForum =
+          VoteCreateInPostDTO.builder().forumId(8).postId(7).voteValue(1).build();
+      when(postRepository.findByIdAndForumIdForUpdate(7, 8)).thenReturn(Optional.of(sujet));
+      when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
+      when(voteRepository.findByUserIdAndPostId(1, 7)).thenReturn(Optional.empty());
+
+      forumService.addVoteToPost(autreForum, "alice@test.ca");
+
+      verify(realtimePublisher).postVoted(5L, 7L, 1L, 1);
+      verify(realtimePublisher, never()).postVoted(eq(8L), anyLong(), anyLong(), anyInt());
     }
 
     @Test
@@ -765,7 +790,7 @@ class ForumServiceTest {
     void updatePost_discussion_messageEdited() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "avant");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
 
       PostDTO result = forumService.updatePost(5, 7,
@@ -782,7 +807,7 @@ class ForumServiceTest {
     void updatePost_thread_postEdited() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "contenu");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
 
       PostDTO result = forumService.updatePost(6, 8,
@@ -798,7 +823,7 @@ class ForumServiceTest {
     void updatePost_epinglage_seul_sans_echo() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "contenu");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
 
       forumService.updatePost(6, 8, ForumUpdatePostDTO.builder().isPinned(true).build());
@@ -812,7 +837,7 @@ class ForumServiceTest {
     void updatePost_contenu_trop_long() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "avant");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       String tooLong = "a".repeat(ForumService.MAX_CONTENT_LENGTH + 1);
 
@@ -865,7 +890,7 @@ class ForumServiceTest {
     void deletePost_thread_moderation() {
       Forum f = forum(6, "Thread");
       Post p = post(8, alice, "sujet");
-      f.getPosts().add(p);
+      stubPost(f, p);
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
 
@@ -884,7 +909,7 @@ class ForumServiceTest {
     void deletePost_discussion_detache_les_reponses() {
       Forum f = forum(5, "Discussion");
       Post p = post(7, alice, "message");
-      f.getPosts().add(p);
+      stubPost(f, p);
       Post reloaded = post(7, alice, "message");
       when(forumRepository.findById(5)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("bob@test.ca")).thenReturn(Optional.of(bob));
@@ -906,8 +931,8 @@ class ForumServiceTest {
     @DisplayName("deletePost : auto-suppression ou appelant non identifié → pas d'audit de modération")
     void deletePost_auto_suppression_sans_audit() {
       Forum f = forum(6, "Thread");
-      f.getPosts().add(post(8, alice, "a"));
-      f.getPosts().add(post(9, alice, "b"));
+      stubPost(f, post(8, alice, "a"));
+      stubPost(f, post(9, alice, "b"));
       when(forumRepository.findById(6)).thenReturn(Optional.of(f));
       when(userRepository.findByEmail("alice@test.ca")).thenReturn(Optional.of(alice));
 
@@ -929,9 +954,8 @@ class ForumServiceTest {
       verifyNoInteractions(postRepository);
     }
 
-    // Bogue : deletePost lève une RuntimeException("Post not found") générique (non gérée par
-    // GlobalExceptionHandler → HTTP 500) au lieu de PostNotFoundException (→ 404), contrairement
-    // à getPostByForum / updatePost pour le même cas.
+    // Post absent : PostNotFoundException, traduite en 404 par GlobalExceptionHandler (#29),
+    // comme getPostByForum / updatePost pour le même cas.
     @Test
     @DisplayName("deletePost : post absent du forum → PostNotFoundException (404)")
     void deletePost_post_absent_devrait_lancer_PostNotFound() {

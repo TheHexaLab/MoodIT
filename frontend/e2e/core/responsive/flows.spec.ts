@@ -91,7 +91,7 @@ test('tiroir → programme → cours → canal → message envoyé et persisté'
   await expect(composer).toBeFocused();
   await composer.fill(content);
   await press(mainContent(page).getByRole('button', { name: 'Envoyer le message' }), hasTouch);
-  const row = mainContent(page).locator('li[role="message"]').filter({ hasText: content });
+  const row = mainContent(page).locator('li[data-role="message"]').filter({ hasText: content });
   await expect(row).toBeVisible();
   await expect(composer).toHaveValue('');
 
@@ -306,7 +306,7 @@ test('clavier virtuel simulé : le composeur reste visible et atteignable', asyn
   const content = `Clavier ${uniqueSuffix()}`;
   await composer.fill(content);
   await composer.press('Enter');
-  await expect(mainContent(page).locator('li[role="message"]').filter({ hasText: content })).toBeVisible();
+  await expect(mainContent(page).locator('li[data-role="message"]').filter({ hasText: content })).toBeVisible();
   await expectReachable(composer);
 
   await page.setViewportSize({ width, height });

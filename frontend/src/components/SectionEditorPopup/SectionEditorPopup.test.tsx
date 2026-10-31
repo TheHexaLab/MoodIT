@@ -111,6 +111,7 @@ describe('SectionEditorPopup', () => {
     expect(screen.queryByText('@')).toBeNull(); // aucune ligne → aucun préfixe
     fireEvent.click(screen.getByText(t.addButton));
     expect(screen.getByText('@')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: t.nameInputAria })).toBeTruthy();
     expect(screen.queryByText(t.emptyMessage)).toBeNull();
   });
 

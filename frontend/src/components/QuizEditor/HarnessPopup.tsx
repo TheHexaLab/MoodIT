@@ -136,14 +136,15 @@ export function HarnessBody({
                   maxLength={128}
                   onChange={(e) => update(i, { name: e.target.value })}
                 />
-                <div className={styles.weightField}>
+                {/* <label> englobant : « Poids » devient le nom accessible du champ. */}
+                <label className={styles.weightField}>
                   <span className={styles.weightLabel}>{t.weightLabel}</span>
                   <WeightInput
                     className={[styles.input, styles.weightInput].join(' ')}
                     value={c.weight}
                     onChange={(weight) => update(i, { weight })}
                   />
-                </div>
+                </label>
               </div>
               <button
                 type="button"

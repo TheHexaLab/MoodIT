@@ -71,6 +71,8 @@ abstract class QuizServiceTestSupport {
     @Mock AuditLogService auditLogService;
 
     final ObjectMapper objectMapper = new ObjectMapper();
+    /** Graine fixée : mélanges reproductibles. Ids publics des éléments via {@link #pub}. */
+    final QuizItemObfuscator obfuscator = new QuizItemObfuscator("test-secret", new java.util.Random(28));
     QuizService service;
 
     @BeforeEach
@@ -79,7 +81,12 @@ abstract class QuizServiceTestSupport {
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
-                auditLogService);
+                auditLogService, obfuscator);
+    }
+
+    /** Id PUBLIC (passation) d'un élément déplaçable. */
+    Integer pub(int realId) {
+        return obfuscator.mask(realId);
     }
 
     // ── Fabriques d'entités ─────────────────────────────────────────────────────

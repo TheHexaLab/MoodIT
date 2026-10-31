@@ -74,6 +74,8 @@ describe('CourseSectionEditor', () => {
     expect(screen.getByText('Modifier les forums')).toBeTruthy();
     expect(screen.getByText('Ajouter un forum')).toBeTruthy();
     expect(screen.getByText('Aucun forum pour le moment.')).toBeTruthy();
+    fireEvent.click(screen.getByText('Ajouter un forum'));
+    expect(screen.getByRole('textbox', { name: 'Nom du forum' })).toBeTruthy();
   });
 
   it('type inconnu : libellés génériques « élément »', () => {
@@ -86,6 +88,9 @@ describe('CourseSectionEditor', () => {
     );
     expect(screen.getByText('Ajouter un élément')).toBeTruthy();
     expect(screen.getByText('Aucun élément pour le moment.')).toBeTruthy();
+    // Élision devant voyelle : « de l'élément ».
+    fireEvent.click(screen.getByText('Ajouter un élément'));
+    expect(screen.getByRole('textbox', { name: "Nom de l'élément" })).toBeTruthy();
   });
 
   it('section « quiz » avec courseId : ouvre l’éditeur de quiz avec les bonnes props', () => {

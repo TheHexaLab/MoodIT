@@ -5,6 +5,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.moodit.permission_service.model.ForumAccess;
 import com.moodit.permission_service.model.Role;
 import com.moodit.permission_service.model.RoleNames;
 import com.moodit.permission_service.model.User;
@@ -447,7 +448,7 @@ class PermissionServiceTest {
   @Test
   void sendMessage_subscribed_allowed() {
     loggedIn(user(5));
-    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.READ);
     assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", "{\"forumId\":9}"))
         .isTrue();
   }
@@ -900,7 +901,7 @@ class PermissionServiceTest {
   @Test
   void sendMessage_notSubscribed_denied() {
     loggedIn(user(5));
-    when(membershipService.canAccessForum(5, 9)).thenReturn(false);
+    when(membershipService.forumAccess(5, 9)).thenReturn(ForumAccess.NONE);
     assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", "{\"forumId\":9}"))
         .isFalse();
   }
@@ -915,6 +916,165 @@ class PermissionServiceTest {
   void sendMessage_forumIdZero_denied() {
     loggedIn(user(5));
     assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", "{\"forumId\":0}"))
+        .isFalse();
+  }
+
+  // ── Canal d'annonces : seul le personnel du cours publie ──────────────────────
+
+  private static final String ANNOUNCEMENT = "{\"forumId\":11,\"title\":\"Examen\",\"color\":\"red\"}";
+
+  private void subscribedToAnnouncements(int userId) {
+    when(membershipService.forumAccess(userId, 11)).thenReturn(ForumAccess.ANNOUNCEMENT);
+  }
+
+  @Test
+  void announcement_student_cannotPost() {
+    loggedIn(user(5)); // abonné, aucun rôle
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcement_student_cannotReplyAsMessage() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/messages", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcement_student_cannotVote() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    assertThat(
+            service()
+                .isAllowed(EMAIL, "/api/forums/posts/votes", "POST", "{\"forumId\":11,\"postId\":1}"))
+        .isFalse();
+  }
+
+  @Test
+  void announcement_courseTeacher_canPost() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_courseAdmin_canPost() {
+    loggedIn(user(5));
+    subscribedToAnnouncements(5);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_globalAdmin_canPost() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    subscribedToAnnouncements(5);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isTrue();
+  }
+
+  @Test
+  void announcement_notSubscribed_teacherElsewhere_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.forumAccess(5, 11)).thenReturn(ForumAccess.NONE);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/posts", "POST", ANNOUNCEMENT)).isFalse();
+  }
+
+  @Test
+  void announcements_includeExpired_onlyAbsentOrFalseForStudents() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    // Spring convertit aussi `1`, `yes`, `on`, `TRUE`... en vrai : seule l'absence ou `false` passe.
+    for (String value : new String[] {"true", "TRUE", "1", "yes", "on", "x", ""}) {
+      assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=" + value))
+          .as("includeExpired=%s", value)
+          .isFalse();
+    }
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=false")).isTrue();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, null)).isTrue();
+  }
+
+  @Test
+  void expiredAnnouncement_byId_studentDenied_staffAllowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    when(membershipService.isExpiredAnnouncement(40)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "GET", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40/replies", "GET", null)).isFalse();
+
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "GET", null)).isTrue();
+  }
+
+  @Test
+  void post_byId_notExpiredAnnouncement_memberAllowed() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 9)).thenReturn(true);
+    when(membershipService.isExpiredAnnouncement(40)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "GET", null)).isTrue();
+  }
+
+  @Test
+  void announcement_authorNoLongerStaff_cannotDeleteOrEdit() {
+    loggedIn(user(5)); // auteur de l'annonce, mais plus aucun rôle dans le cours
+    lenient().when(membershipService.isPostAuthor(5, 40)).thenReturn(true);
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "DELETE", null)).isFalse();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void announcement_teacher_deletesAnyAnnouncement() {
+    loggedIn(user(5)); // pas l'auteur
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "DELETE", null)).isTrue();
+  }
+
+  @Test
+  void announcement_teacher_editsAnyAnnouncement() {
+    loggedIn(user(5)); // pas l'auteur
+    when(membershipService.isAnnouncementForum(11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts/40", "PATCH", "{}")).isTrue();
+  }
+
+  @Test
+  void ordinaryPost_editStillAuthorOnly() {
+    loggedIn(user(5, RoleNames.ADMIN)); // admin global, mais pas l'auteur
+    when(membershipService.isPostAuthor(5, 40)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/9/posts/40", "PATCH", "{}")).isFalse();
+  }
+
+  @Test
+  void announcements_student_readsUnexpiredOnly() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "limit=20")).isTrue();
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
+        .isFalse();
+  }
+
+  @Test
+  void announcements_teacher_readsExpired() {
+    loggedIn(user(5));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(true);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.ADMIN)).thenReturn(false);
+    when(membershipService.hasRoleInForumCourse(5, 11, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
+        .isTrue();
+  }
+
+  @Test
+  void announcements_expired_notSubscribed_denied() {
+    loggedIn(user(5, RoleNames.ADMIN));
+    when(membershipService.canAccessForum(5, 11)).thenReturn(false);
+    assertThat(service().isAllowed(EMAIL, "/api/forums/11/posts", "GET", null, "includeExpired=true"))
         .isFalse();
   }
 

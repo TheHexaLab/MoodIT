@@ -61,7 +61,16 @@ type ServerEvent =
   | { type: 'message:deleted'; channelId: number; messageId: number }
   // Forum
   | { type: 'post:created'; forumId: number; post: ForumPost; parentId: number | null }
-  | { type: 'post:edited'; forumId: number; postId: number; content: string; title?: string | null }
+  | {
+      type: 'post:edited';
+      forumId: number;
+      postId: number;
+      content: string;
+      title?: string | null;
+      // Annonce modifiée seulement.
+      color?: string;
+      expiresAt?: string | null;
+    }
   | { type: 'post:deleted'; forumId: number; postId: number }
   | { type: 'post:voted'; forumId: number; postId: number; userId: number; value: VoteValue }
   // Cours / sections (scope = programme)
@@ -301,7 +310,16 @@ export function createAppSocket(url: string = defaultWebSocketUrl()): AppSocket 
           forumSubs.get(data.forumId)?.onPost(data.post, data.parentId);
           break;
         case 'post:edited':
-          forumSubs.get(data.forumId)?.onEdit(data.postId, data.content, data.title);
+          if ('color' in data) {
+            forumSubs
+              .get(data.forumId)
+              ?.onEdit(data.postId, data.content, data.title, {
+                color: data.color,
+                expiresAt: data.expiresAt ?? null,
+              });
+          } else {
+            forumSubs.get(data.forumId)?.onEdit(data.postId, data.content, data.title);
+          }
           break;
         case 'post:deleted':
           forumSubs.get(data.forumId)?.onDelete(data.postId);

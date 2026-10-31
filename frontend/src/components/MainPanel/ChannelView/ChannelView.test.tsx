@@ -111,7 +111,7 @@ describe('ChannelView', () => {
 
   it('affiche les actions modifier/supprimer sur ses propres messages seulement', () => {
     renderChannel([msg(1, me, 'Le mien'), msg(2, other, 'Le sien')]);
-    // Le bouton supprimer porte role="delete" (pas "button") → on cible par libellé.
+    // Le bouton supprimer porte data-role="delete" (pas "button") → on cible par libellé.
     // Un seul message est le mien → un seul bouton supprimer.
     const deleteButtons = screen.getAllByLabelText('Supprimer le message');
     expect(deleteButtons.length).toBe(1);
@@ -164,7 +164,7 @@ describe('ChannelView', () => {
   it('supprime un message : la corbeille ouvre la confirmation qui appelle onDeleteMessage', async () => {
     const onDeleteMessage = vi.fn().mockResolvedValue(undefined);
     renderChannel([msg(1, me, 'À supprimer')], { onDeleteMessage });
-    // La corbeille (role="delete") ouvre la confirmation.
+    // La corbeille (data-role="delete") ouvre la confirmation.
     fireEvent.click(screen.getByLabelText('Supprimer le message'));
     // Le popup de confirmation : bouton « Supprimer » (texte, role button).
     fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
@@ -175,7 +175,7 @@ describe('ChannelView', () => {
     renderChannel([msg(1, other, 'Question ?')]);
     // Avant de répondre : pas de barre « Annuler la réponse ».
     expect(screen.queryByLabelText('Annuler la réponse')).toBeNull();
-    // Le bouton répondre porte role="reply" → on cible par libellé.
+    // Le bouton répondre porte data-role="reply" → on cible par libellé.
     fireEvent.click(screen.getByLabelText('Répondre au message'));
     // La barre « Répondre à <auteur> » apparaît (bouton d'annulation propre à la barre).
     expect(screen.getByLabelText('Annuler la réponse')).toBeTruthy();
@@ -303,14 +303,14 @@ describe('ChannelView — édition inline', () => {
     fireEvent.change(input, { target: { value: '  Corrigé  ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(onEditMessage).toHaveBeenCalledWith(1, 'Corrigé'));
-    expect(screen.queryByRole('editor')).toBeNull();
+    expect(document.querySelector('[data-role="editor"]')).toBeNull();
   });
 
   it('Échap annule sans appeler onEditMessage', () => {
     const { onEditMessage, input } = openEditor();
     fireEvent.change(input, { target: { value: 'Brouillon' } });
     fireEvent.keyDown(input, { key: 'Escape' });
-    expect(screen.queryByRole('editor')).toBeNull();
+    expect(document.querySelector('[data-role="editor"]')).toBeNull();
     expect(screen.getByText('Original')).toBeTruthy();
     expect(onEditMessage).not.toHaveBeenCalled();
   });
@@ -319,27 +319,27 @@ describe('ChannelView — édition inline', () => {
     const { onEditMessage, input } = openEditor();
     fireEvent.change(input, { target: { value: 'Autre' } });
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
-    expect(screen.getByRole('editor')).toBeTruthy();
+    expect(document.querySelector('[data-role="editor"]')).toBeTruthy();
     expect(onEditMessage).not.toHaveBeenCalled();
   });
 
   it('le bouton Annuler ferme l’éditeur', () => {
     const { onEditMessage } = openEditor();
     fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
-    expect(screen.queryByRole('editor')).toBeNull();
+    expect(document.querySelector('[data-role="editor"]')).toBeNull();
     expect(onEditMessage).not.toHaveBeenCalled();
   });
 
   it('contenu inchangé ou vide : ferme l’éditeur sans appel réseau', () => {
     const { onEditMessage, input } = openEditor();
     fireEvent.keyDown(input, { key: 'Enter' }); // inchangé
-    expect(screen.queryByRole('editor')).toBeNull();
+    expect(document.querySelector('[data-role="editor"]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Modifier le message' }));
     const again = screen.getByLabelText('Modifier le message');
     fireEvent.change(again, { target: { value: '   ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
-    expect(screen.queryByRole('editor')).toBeNull();
+    expect(document.querySelector('[data-role="editor"]')).toBeNull();
     expect(onEditMessage).not.toHaveBeenCalled();
   });
 
@@ -352,7 +352,7 @@ describe('ChannelView — édition inline', () => {
     ).toBe(true);
     fireEvent.keyDown(input, { key: 'Enter' });
     // L'éditeur reste ouvert, rien n'est envoyé.
-    expect(screen.getByRole('editor')).toBeTruthy();
+    expect(document.querySelector('[data-role="editor"]')).toBeTruthy();
     expect(onEditMessage).not.toHaveBeenCalled();
   });
 });
@@ -377,7 +377,7 @@ describe('ChannelView — dates et actions tactiles', () => {
     renderChannel([{ ...msg(1, me, 'Sans date'), createdAt: 'pas-une-date' }]);
     expect(screen.getByText('Sans date')).toBeTruthy();
     expect(screen.queryByText(/Invalid/)).toBeNull();
-    expect(screen.getByRole('separator').textContent).toBe('');
+    expect(document.querySelector('[data-role="separator"]')?.textContent).toBe('');
   });
 
   it('un séparateur de date par jour distinct', () => {
@@ -386,7 +386,7 @@ describe('ChannelView — dates et actions tactiles', () => {
       { ...msg(2, me, 'Lundi bis'), createdAt: '2026-06-01T11:00:00' },
       { ...msg(3, me, 'Mardi'), createdAt: '2026-06-02T10:00:00' },
     ]);
-    const separators = screen.getAllByRole('separator').map((el) => el.textContent);
+    const separators = [...document.querySelectorAll('[data-role="separator"]')].map((el) => el.textContent);
     expect(separators).toEqual(['1 juin 2026', '2 juin 2026']);
   });
 

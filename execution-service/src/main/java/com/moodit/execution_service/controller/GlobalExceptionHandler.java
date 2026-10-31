@@ -2,9 +2,12 @@ package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.assembly.UnsupportedLanguageException;
 import com.moodit.execution_service.piston.PistonException;
+import com.moodit.execution_service.service.ExecutionBusyException;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -23,5 +26,16 @@ public class GlobalExceptionHandler {
     public ProblemDetail handlePiston(PistonException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
                 "Sandbox d'exécution indisponible");
+    }
+
+    /**
+     * Sandbox saturé ou trop d'exécutions en cours pour l'utilisateur (#24) → 429, avec un message
+     * en français affichable tel quel et un {@code Retry-After} indicatif (secondes).
+     */
+    @ExceptionHandler(ExecutionBusyException.class)
+    public ResponseEntity<ProblemDetail> handleBusy(ExecutionBusyException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, "5")
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, e.getMessage()));
     }
 }

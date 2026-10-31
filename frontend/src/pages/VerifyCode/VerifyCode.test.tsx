@@ -253,8 +253,8 @@ describe('VerifyCode', () => {
   });
 
   it('le bouton de thème appelle toggleTheme', () => {
-    const { container } = renderVerify();
-    fireEvent.click(container.querySelector('.light-dark-btn') as HTMLButtonElement);
+    renderVerify();
+    fireEvent.click(screen.getByRole('button', { name: 'Changer de thème' }));
     expect(toggleTheme).toHaveBeenCalledTimes(1);
   });
 });

@@ -335,6 +335,12 @@ describe('createAppSocket · dispatch forum', () => {
     expect(h.onEdit).toHaveBeenCalledWith(3, 'c', 'T');
   });
 
+  it('post:edited d’une annonce → onEdit avec sa couleur et son expiration', () => {
+    const { s, h } = setup();
+    s.emit({ type: 'post:edited', forumId: 20, postId: 3, content: '', title: 'T', color: 'red', expiresAt: null });
+    expect(h.onEdit).toHaveBeenCalledWith(3, '', 'T', { color: 'red', expiresAt: null });
+  });
+
   it('post:deleted → onDelete(postId)', () => {
     const { s, h } = setup();
     s.emit({ type: 'post:deleted', forumId: 20, postId: 3 });

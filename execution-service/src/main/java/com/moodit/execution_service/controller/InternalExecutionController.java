@@ -3,6 +3,7 @@ package com.moodit.execution_service.controller;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.security.InternalTokenValidator;
+import com.moodit.execution_service.service.ExecutionLimiter;
 import com.moodit.execution_service.service.ExecutionService;
 
 import jakarta.validation.Valid;
@@ -19,7 +20,8 @@ import java.util.List;
  * Endpoint INTERNE (service à service) : correction des questions Code d'une soumission, appelé
  * par core-service. Hors gateway (jamais routé) et authentifié par un jeton partagé
  * {@code X-Internal-Token} (= {@code app.internal.token}). Même logique que le « Tester » public,
- * sans l'auth utilisateur du gateway.
+ * sans l'auth utilisateur du gateway. Pas de limite par utilisateur ; la limite globale du sandbox
+ * s'applique avec une attente plus longue (cf. {@link ExecutionLimiter#asInternal}).
  */
 @RestController
 @RequestMapping("/internal/exec")
@@ -27,11 +29,13 @@ public class InternalExecutionController {
 
     private final ExecutionService executionService;
     private final InternalTokenValidator tokenValidator;
+    private final ExecutionLimiter limiter;
 
-    public InternalExecutionController(
-            ExecutionService executionService, InternalTokenValidator tokenValidator) {
+    public InternalExecutionController(ExecutionService executionService,
+            InternalTokenValidator tokenValidator, ExecutionLimiter limiter) {
         this.executionService = executionService;
         this.tokenValidator = tokenValidator;
+        this.limiter = limiter;
     }
 
     @PostMapping("/evaluate")
@@ -39,7 +43,7 @@ public class InternalExecutionController {
             @RequestHeader(value = "X-Internal-Token", required = false) String token,
             @Valid @RequestBody EvaluateRequest request) {
         if (unauthorized(token)) return ResponseEntity.status(403).build();
-        return ResponseEntity.ok(executionService.evaluate(request));
+        return ResponseEntity.ok(limiter.asInternal(() -> executionService.evaluate(request)));
     }
 
     private boolean unauthorized(String token) {

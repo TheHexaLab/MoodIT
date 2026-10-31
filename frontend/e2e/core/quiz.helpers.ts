@@ -40,7 +40,8 @@ export async function profSession(baseURL: string) {
  * (changement de hauteur) juste après l'ouverture d'une vue.
  */
 export async function pickOption(page: Page, control: string, option: string) {
-  const button = page.getByRole('button', { name: control, exact: true });
+  // Nom accessible du contrôle : « <libellé> : <option affichée> » (Dropdown du QuizEditor).
+  const button = page.getByRole('button', { name: new RegExp(`^${control}( : |$)`) });
   await expect(async () => {
     if ((await button.getAttribute('aria-expanded')) !== 'true') await button.click();
     await page.getByRole('option', { name: option, exact: true }).click({ timeout: 2_000 });
