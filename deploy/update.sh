@@ -289,6 +289,16 @@ step "5/5 · Redémarrage des services"
 if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
 ok "Services démarrés."
 
+# Le Caddyfile est un fichier monté : `up -d` ne recrée pas Caddy quand seul ce fichier change.
+# Sans redémarrage, Caddy garderait l'ancienne configuration (en-têtes, redirections, domaines).
+if ! git diff --quiet "$LOCAL" "$REMOTE" -- deploy/Caddyfile; then
+  if stream "Redémarrage de Caddy (Caddyfile modifié)" $COMPOSE restart caddy; then
+    ok "Caddy redémarré avec le nouveau Caddyfile."
+  else
+    warn "Redémarrage de Caddy échoué : lancer « $COMPOSE restart caddy » à la main."
+  fi
+fi
+
 # --- 4. Nettoyage des images orphelines -------------------------------------
 docker image prune -f >/dev/null 2>&1 || true
 

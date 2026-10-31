@@ -71,7 +71,7 @@ openssl rand -base64 64   # à coller dans INTERNAL_TOKEN
 
 Points clés :
 - `LLM_API_KEY=gsk_...` (ta clé Groq).
-- `FRONT_ORIGIN=https://moodit.example.com` (l'origine HTTPS réelle — sinon le WebSocket est refusé).
+- `FRONT_ORIGIN=https://moodit.example.com` : l'origine HTTPS réelle du site, la seule par laquelle on y accède. Le gateway refuse le WebSocket **et toutes les écritures** (connexion comprise, réponse 403) venues d'une autre origine (#234). Plusieurs valeurs possibles, séparées par des virgules ; le Caddyfile redirige `www.` vers le domaine principal pour qu'il n'y en ait qu'une.
 - `SPRING_PROFILES_ACTIVE=prod`.
 - `MAIL_USERNAME` / `MAIL_PASSWORD`.
 
