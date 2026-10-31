@@ -39,29 +39,33 @@ async function scriptHash(content: string): Promise<string> {
 const inlineScripts = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)]
   .filter(([, attributes]) => !/\bsrc\s*=/i.test(attributes))
   .map(([, , content]) => content);
-const reportOnlyPolicy = nginxHeader('Content-Security-Policy-Report-Only') ?? '';
-const caddyPolicy = caddyHeader('Content-Security-Policy') ?? '';
+const policy = nginxHeader('Content-Security-Policy') ?? '';
 
 describe('en-têtes de sécurité', () => {
-  it('chaque script inline de index.html est autorisé par son empreinte, nginx comme Caddy', async () => {
+  it('chaque script inline de index.html est autorisé par son empreinte', async () => {
     expect(inlineScripts.length).toBeGreaterThan(0);
     for (const script of inlineScripts) {
-      const hash = await scriptHash(script);
-      expect(directive(reportOnlyPolicy, 'script-src')).toContain(hash);
-      expect(directive(caddyPolicy, 'script-src')).toContain(hash);
+      expect(directive(policy, 'script-src')).toContain(await scriptHash(script));
     }
   });
 
+  it('la CSP est bloquante, avec nginx pour seule source (ni Report-Only, ni copie dans Caddy)', () => {
+    expect(policy).not.toBe('');
+    expect(nginxHeader('Content-Security-Policy-Report-Only')).toBeUndefined();
+    expect(caddyHeader('Content-Security-Policy')).toBeUndefined();
+    expect(caddyfile).not.toMatch(/Content-Security-Policy/);
+  });
+
   it('la CSP interdit le JS inline ou évalué, les objets et la mise en iframe', () => {
-    const scriptSrc = directive(reportOnlyPolicy, 'script-src');
+    const scriptSrc = directive(policy, 'script-src');
     expect(scriptSrc).toContain("'self'");
     expect(scriptSrc).not.toContain("'unsafe-inline'");
     expect(scriptSrc).not.toContain("'unsafe-eval'");
-    expect(directive(reportOnlyPolicy, 'default-src')).toEqual(["'self'"]);
-    expect(directive(reportOnlyPolicy, 'worker-src')).toEqual(["'self'"]);
-    expect(directive(reportOnlyPolicy, 'object-src')).toEqual(["'none'"]);
-    expect(directive(reportOnlyPolicy, 'frame-ancestors')).toEqual(["'none'"]);
-    expect(directive(reportOnlyPolicy, 'connect-src')).toEqual(["'self'"]);
+    expect(directive(policy, 'default-src')).toEqual(["'self'"]);
+    expect(directive(policy, 'worker-src')).toEqual(["'self'"]);
+    expect(directive(policy, 'object-src')).toEqual(["'none'"]);
+    expect(directive(policy, 'frame-ancestors')).toEqual(["'none'"]);
+    expect(directive(policy, 'connect-src')).toEqual(["'self'"]);
   });
 
   it('pose les autres en-têtes attendus', () => {
