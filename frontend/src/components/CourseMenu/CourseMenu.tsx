@@ -29,16 +29,16 @@ export type {
 } from './courseChannelsApi';
 
 /** Bornes de largeur du panneau (px) et clé de persistance. */
-const MIN_WIDTH = 176; // 11rem (= borne basse de la clamp responsive)
+const MIN_WIDTH = 176; // 11rem
 const MAX_WIDTH = 448; // 28rem
-const DEFAULT_WIDTH = 224; // 14rem (repli quand la largeur rendue est illisible)
+const DEFAULT_WIDTH = 200; // 12,5rem, comme le CSS (repli quand la largeur rendue est illisible)
 const WIDTH_STORAGE_KEY = 'courseMenu:width';
 
 function clampWidth(px: number): number {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, px));
 }
 
-/** Largeur persistée valide, ou null (→ largeur clamp par défaut). */
+/** Largeur persistée valide, ou null (→ largeur par défaut). */
 function readStoredWidth(): number | null {
   if (typeof localStorage === 'undefined') return null;
   const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY));
@@ -151,7 +151,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
 }) => {
   /** Section en cours d'édition (popup ouvert), ou null. */
   const [editingSection, setEditingSection] = useState<ChannelTypeDefinition | null>(null);
-  /** Largeur du panneau (px) ; null = largeur clamp par défaut (jamais redimensionné). */
+  /** Largeur du panneau (px) ; null = largeur par défaut (jamais redimensionné). */
   const [width, setWidth] = useState<number | null>(readStoredWidth);
   /** Drag en cours (handle de redimensionnement) ? */
   const [isResizing, setIsResizing] = useState(false);

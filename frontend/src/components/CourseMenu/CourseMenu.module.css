@@ -3,9 +3,10 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    /* Largeur pilotée par le drag (--cm-width) ; repli sur la clamp responsive si non redimensionné. */
-    width: var(--cm-width, clamp(11rem, 10rem + 5vw, 14rem));
-    min-width: var(--cm-width, clamp(11rem, 10rem + 5vw, 14rem));
+    /* Largeur pilotée par le drag (--cm-width). Par défaut 12,5rem : avec la barre du portail réduite
+       (4,5rem), le total égale la barre étendue (17rem), et le contenu à droite ne bouge pas. */
+    width: var(--cm-width, 12.5rem);
+    min-width: var(--cm-width, 12.5rem);
     height: 100%;
     background: var(--bg-sidebar);
     box-sizing: border-box;

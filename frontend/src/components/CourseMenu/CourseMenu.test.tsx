@@ -299,7 +299,7 @@ describe('CourseMenu', () => {
       const { unmount } = renderMenu();
       const handle = () => screen.getByRole('separator', { name: 'Redimensionner le menu des cours' });
       // Sans largeur choisie : largeur par défaut.
-      expect(handle().getAttribute('aria-valuenow')).toBe('224');
+      expect(handle().getAttribute('aria-valuenow')).toBe('200');
       expect(handle().getAttribute('aria-valuemin')).toBe('176');
       expect(handle().getAttribute('aria-valuemax')).toBe('448');
       unmount();
