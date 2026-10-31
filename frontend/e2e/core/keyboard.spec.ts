@@ -15,6 +15,8 @@ import {
   freshAccount,
   openHome,
   programButton,
+  enterProgram,
+  courseTile,
 } from './admin.helpers';
 import { SECOND_COURSE, enrollInCourses, ensureCourse, settingsSaved } from './dashboard.helpers';
 import {
@@ -220,7 +222,11 @@ test.describe('popups', () => {
     },
     {
       title: 'Quitter le cours ?',
-      open: (page) => clickCourseMenu(page, 'MAT115', 'Quitter le cours'),
+      open: async (page) => {
+        // Le menu du programme précédent a ramené à l'Accueil.
+        if (!new URL(page.url()).pathname.startsWith('/home/p/')) await enterProgram(page, PROGRAM_NAME);
+        await clickCourseMenu(page, 'MAT115', 'Quitter le cours');
+      },
       close: cancel,
     },
   ];
@@ -228,7 +234,7 @@ test.describe('popups', () => {
   async function studentHome(browser: Parameters<typeof openHome>[0], baseURL: string) {
     const { storageState } = await createEnrolledUser(baseURL);
     const { page } = await openHome(browser, storageState);
-    await programButton(page, PROGRAM_NAME).click();
+    await enterProgram(page, PROGRAM_NAME);
     await expect(
       mainContent(page).getByRole('heading', { name: 'Aucun canal sélectionné' })
     ).toBeVisible();
@@ -383,70 +389,34 @@ test.describe('menus', () => {
     await expect(menu.getByRole('menuitem').first()).toBeFocused({ timeout: 2_000 });
   });
 
-  test('sélecteur de cours : Entrée ouvre sur la recherche, Tab + Entrée choisit un cours, Échap ferme', async ({
-    browser,
-    baseURL,
-  }) => {
+  test('barre réduite : Entrée sur une tuile change de cours', async ({ browser, baseURL }) => {
     const { user, storageState } = await createEnrolledUser(baseURL!);
     await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
     const { page } = await openHome(browser, storageState);
-    await programButton(page, PROGRAM_NAME).click();
+    await enterProgram(page, PROGRAM_NAME);
     await ensureCourse(page, 'MAT115');
     const nav = page.getByRole('navigation', { name: 'Cours' });
-    const picker = nav.locator('button[aria-haspopup="listbox"]');
-    const listbox = page.getByRole('listbox');
-    await expect(picker).toHaveText('MAT115');
 
-    await picker.focus();
+    await courseTile(page, SECOND_COURSE.code).focus();
     await page.keyboard.press('Enter');
-    await expect(listbox).toBeVisible();
-    await expect(listbox.getByRole('textbox', { name: 'Rechercher un cours…' })).toBeFocused();
-    await page.keyboard.type('GIF');
-    await expect(listbox.getByRole('option')).toHaveCount(1);
-    await page.keyboard.press('Tab');
-    await expect(listbox.getByRole('option', { name: /^GIF201/ })).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(listbox).toBeHidden();
-    await expect(picker).toHaveText('GIF201');
+    await expect(nav.getByRole('button', { name: SECOND_COURSE.code, exact: true })).toBeVisible();
     await expect(nav.getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
-
-    // Échap depuis la recherche referme sans changer de cours.
-    await picker.focus();
-    await page.keyboard.press('Enter');
-    await expect(listbox.getByRole('textbox', { name: 'Rechercher un cours…' })).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(listbox).toBeHidden();
-    await expect(picker).toHaveText('GIF201');
   });
 
-  // WAI-ARIA « Listbox » : flèches entre les options ; Échap depuis une option ferme aussi, sans
-  // changer de cours ; le focus revient au bouton du sélecteur.
-  test('sélecteur de cours : flèches, Échap depuis une option, retour du focus', async ({
+  test('panneau du cours : Entrée le réduit, Entrée le rouvre, le focus reste sur le bouton', async ({
     browser,
     baseURL,
   }) => {
-    const { user, storageState } = await createEnrolledUser(baseURL!);
-    await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
+    const { storageState } = await createEnrolledUser(baseURL!);
     const { page } = await openHome(browser, storageState);
-    await programButton(page, PROGRAM_NAME).click();
-    await ensureCourse(page, 'MAT115');
-    const picker = page.getByRole('navigation', { name: 'Cours' }).locator('button[aria-haspopup="listbox"]');
-    const listbox = page.getByRole('listbox');
+    await enterProgram(page, PROGRAM_NAME);
 
-    await picker.focus();
+    await page.getByRole('button', { name: 'Réduire le panneau du cours' }).focus();
     await page.keyboard.press('Enter');
-    await expect(listbox).toBeVisible();
-    await page.keyboard.press('ArrowDown');
-    await expect(listbox.getByRole('option').first()).toBeFocused({ timeout: 2_000 });
-    await page.keyboard.press('ArrowDown');
-    await expect(listbox.getByRole('option').nth(1)).toBeFocused();
-    await page.keyboard.press('ArrowUp');
-    await expect(listbox.getByRole('option').first()).toBeFocused();
-
-    await page.keyboard.press('Escape');
-    await expect(listbox).toBeHidden({ timeout: 2_000 });
-    await expect(picker).toHaveText('MAT115');
-    await expect(picker).toBeFocused({ timeout: 2_000 });
+    const reopen = page.getByRole('button', { name: 'Déplier le panneau du cours' });
+    await expect(reopen).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Réduire le panneau du cours' })).toBeFocused();
   });
 
   // L'éditeur Markdown ne capture Tab (indentation) que dans un bloc de code : ailleurs, Tab mène
@@ -529,7 +499,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
 
   /** Ouvre « Modifier le quiz » du quiz de la fixture. */
   async function openQuizForm(page: Page) {
-    await programButton(page, fixture.program.name).click();
+    await enterProgram(page, fixture.program.name);
     await page
       .getByRole('navigation', { name: 'Cours' })
       .getByRole('button', { name: 'Modifier la section QUIZ' })
@@ -591,7 +561,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
   // Échap ferme l'éditeur de quiz et la popup des sections (tous deux bâtis sur Popup).
   test('Échap ferme l’éditeur de quiz et l’éditeur de sections', async ({ browser }) => {
     const { page } = await openHome(browser, fixture.admin.storageState);
-    await programButton(page, fixture.program.name).click();
+    await enterProgram(page, fixture.program.name);
     const nav = page.getByRole('navigation', { name: 'Cours' });
 
     await nav.getByRole('button', { name: 'Modifier la section QUIZ' }).click();

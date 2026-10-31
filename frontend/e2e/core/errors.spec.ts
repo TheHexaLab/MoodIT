@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from './fixtures';
+import { TEST_PROGRAM_ID, TEST_COURSE_ID } from '../setup/accounts';
 import { PROGRAM_NAME, ROLE_ACCOUNTS, createEnrolledUser, mainContent } from './helpers';
 import {
   E2E_ESTABLISHMENT,
@@ -20,6 +21,9 @@ import {
   programButton,
   roleId,
   sessionFor,
+  enterProgram,
+  courseTile,
+  courseTileNamed,
 } from './admin.helpers';
 import { pickOption } from './quiz.helpers';
 import {
@@ -189,10 +193,8 @@ test('créer un cours : échec puis succès (enseignant)', async ({ browser, bas
       }
     );
     await expect(page.getByRole('heading', { name: 'Ajouter un cours' })).toHaveCount(0);
-    // Créé et inscrit : le cours est dans le sélecteur.
-    await courseSelector(page, fx.course.code).click();
-    await expect(page.getByRole('listbox').getByRole('option', { name: `${code} ${title}` })).toBeVisible();
-    await page.keyboard.press('Escape');
+    // Créé et inscrit : le cours est dans la barre.
+    await expect(courseTile(page, code)).toBeVisible();
     await expect.poll(() => courseId, { message: 'id du cours créé (réponse POST)' }).toBeDefined();
   } finally {
     if (courseId !== undefined) await asGardien(baseURL!, (api) => deleteCourseApi(api, courseId!));
@@ -205,12 +207,10 @@ test('modifier le cours et le programme : échec puis succès (administrateur du
 }) => {
   const admin = await member(baseURL!, fx, 'Administrateur');
   const { page } = await openProgram(browser, admin.storageState, fx.program);
-  const picker = page.getByRole('listbox');
   const newTitle = `${fx.course.title} (panne)`;
 
   // Cours : titre modifié, PATCH en panne puis rétabli.
-  await courseSelector(page, fx.course.code).click();
-  await picker.getByRole('button', { name: `Modifier le cours ${fx.course.code}` }).click();
+  await clickCourseMenu(page, fx.course.code, 'Modifier le cours');
   const titleField = page.getByRole('textbox', { name: 'Titre du cours' });
   await titleField.fill(newTitle);
   await underFaultsThenRecover(
@@ -225,9 +225,7 @@ test('modifier le cours et le programme : échec puis succès (administrateur du
     }
   );
   await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toHaveCount(0);
-  await courseSelector(page, fx.course.code).click();
-  await expect(picker.getByRole('option', { name: `${fx.course.code} ${newTitle}` })).toBeVisible();
-  await page.keyboard.press('Escape');
+  await expect(courseTileNamed(page, fx.course.code, newTitle)).toBeVisible();
 
   // Programme : cohorte modifiée (le nom reste : les autres tests le cherchent dans le rail).
   await clickProgramMenu(page, fx.program.name, 'Modifier le programme');
@@ -261,7 +259,6 @@ test('rejoindre un programme puis ses cours : échecs de chargement et d’enreg
 }) => {
   const { storageState } = await createEnrolledUser(baseURL!, undefined, { enroll: false });
   const { page } = await openHome(browser, storageState);
-  const main = mainContent(page);
 
   // Rejoindre le programme : l'enregistrement échoue, la sélection reste cochée, puis réussit.
   await page.getByRole('button', { name: 'Ajouter un programme', exact: true }).click();
@@ -284,8 +281,10 @@ test('rejoindre un programme puis ses cours : échecs de chargement et d’enreg
     }
   );
   await expect(programButton(page, fx.program.name)).toBeVisible();
-  await programButton(page, fx.program.name).click();
-  await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
+  // Le choix des cours s'enchaîne sur l'adhésion : on le referme, puis on le rouvre par le menu.
+  await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toBeVisible();
+  await page.getByRole('button', { name: 'Annuler' }).click();
+  await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toHaveCount(0);
 
   // Rejoindre des cours : la liste ne se charge pas (« Réessayer »), puis l'inscription échoue.
   for (const fault of FAULTS) {
@@ -311,9 +310,9 @@ test('rejoindre un programme puis ses cours : échecs de chargement et d’enreg
       await expect(courseRow).toHaveAttribute('aria-pressed', 'true');
     }
   );
-  await expect(courseSelector(page, fx.course.code)).toBeVisible();
+  await expect(courseTile(page, fx.course.code)).toBeVisible();
   await page.reload();
-  await programButton(page, fx.program.name).click();
+  await enterProgram(page, fx.program.name);
   await expect(courseSelector(page, fx.course.code)).toBeVisible();
 });
 
@@ -354,7 +353,7 @@ test('quitter le cours puis le programme : « Impossible de … Réessaie. » pu
     }
   );
   await expect(programButton(page, fx.program.name)).toHaveCount(0);
-  await expect(main.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
   await page.reload();
   await expect(programButton(page, fx.program.name)).toHaveCount(0);
 });
@@ -472,7 +471,7 @@ test('sections : création en panne (saisie conservée) et suppression annulée'
   await expect(editorRow(page, name)).toHaveCount(0);
   await expect(sidebarItem(page, name)).toHaveCount(0);
   await page.reload();
-  await programButton(page, fx.program.name).click();
+  await enterProgram(page, fx.program.name);
   await expect(sidebarItem(page, fx.channelName)).toBeVisible();
   await expect(sidebarItem(page, name)).toHaveCount(0);
 });
@@ -617,7 +616,7 @@ test('chat : historique introuvable, « Réessayer » recharge une fois la route
   for (const fault of FAULTS) {
     const restore = await injectFault(page, new RegExp(`/api/forums/${fx.channelId}/messages\\?`), fault, 'GET');
     await page.reload();
-    await programButton(page, fx.program.name).click();
+    await enterProgram(page, fx.program.name);
     await sidebarItem(page, fx.channelName).click();
     await expect(main.getByText('Impossible de charger les messages. Réessayez.')).toBeVisible();
     await expect(main.getByText(text)).toHaveCount(0);
@@ -654,7 +653,7 @@ test('forum : sujets puis réponses introuvables, « Réessayer » après rétab
   for (const fault of FAULTS) {
     const restoreThreads = await injectFault(page, new RegExp(`/api/forums/${fx.forumId}/posts\\?`), fault, 'GET');
     await page.reload();
-    await programButton(page, fx.program.name).click();
+    await enterProgram(page, fx.program.name);
     await sidebarItem(page, fx.forumName).click();
     await expect(main.getByText('Impossible de charger les sujets. Réessayez.')).toBeVisible();
     await restoreThreads();
@@ -680,7 +679,7 @@ test('quiz : chargement impossible puis « Réessayer »', async ({ browser, bas
   for (const fault of FAULTS) {
     const restore = await injectFault(page, new RegExp(`/api/quizzes/${quizId}$`), fault, 'GET');
     await page.reload();
-    await programButton(page, fx.program.name).click();
+    await enterProgram(page, fx.program.name);
     await sidebarItem(page, quizTitle).click();
     await expect(main.getByText('Impossible de charger le quiz. Réessayez.')).toBeVisible();
     await restore();
@@ -916,8 +915,7 @@ test('programmes et cours : chargement impossible puis « Réessayer »', async 
 
   for (const fault of FAULTS) {
     const restore = await injectFault(page, /\/api\/users\/\d+\/programs\/\d+\/enrollments/, fault, 'GET');
-    await page.goto('/home');
-    await programButton(page, PROGRAM_NAME).click();
+    await page.goto(`/home/p/${TEST_PROGRAM_ID}/c/${TEST_COURSE_ID}`);
     const nav = courseNav(page);
     await expect(nav.getByText('Chargement impossible')).toBeVisible();
     await expect(nav.getByText('Impossible de charger les cours. Réessayez.')).toBeVisible();

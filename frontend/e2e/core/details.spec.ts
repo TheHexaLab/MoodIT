@@ -18,9 +18,12 @@ import {
   freshAccount,
   openHome,
   openUserMenu,
-  programButton,
   roleId,
   assignProgramRoleApi,
+  enterProgram,
+  courseTile,
+  clickCourseMenu,
+  courseTileNamed,
 } from './admin.helpers';
 import { pointerDrag } from './quiz.helpers';
 import {
@@ -177,7 +180,7 @@ test('forum : toute la barre Markdown, rendu dans l’aperçu puis une fois publ
   const card = main.getByRole('listitem').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
   await expectRendered(card);
   await page.reload();
-  await programButton(page, fx.program.name).click();
+  await enterProgram(page, fx.program.name);
   await sidebarItem(page, fx.forumName).click();
   await expectRendered(card);
 });
@@ -376,7 +379,7 @@ test('quiz:reordered : l’étudiant voit le nouvel ordre des quiz sans recharge
     // WS quiz:reordered : la barre latérale de l'étudiant se réordonne.
     await expect.poll(order).toEqual([b, a]);
     await s.page.reload();
-    await programButton(s.page, fx.program.name).click();
+    await enterProgram(s.page, fx.program.name);
     await expect(sidebarItem(s.page, second)).toBeVisible();
     await expect.poll(order).toEqual([b, a]);
   } finally {
@@ -429,8 +432,7 @@ test('« Modifier le cours » : rattacher le cours à un second programme', asyn
 
   try {
     const { page } = await openProgram(browser, admin.storageState, fx.program);
-    await courseSelector(page, fx.course.code).click();
-    await page.getByRole('listbox').getByRole('button', { name: `Modifier le cours ${fx.course.code}` }).click();
+    await clickCourseMenu(page, fx.course.code, 'Modifier le cours');
     await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toBeVisible();
     await expect(page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first()).toBeVisible();
     // Ouvrir le sélecteur : clic dans la zone des puces, à droite d'elles. Seule la croix d'une
@@ -472,10 +474,8 @@ test('« Modifier le cours » : les programmes rattachés sont pré-remplis', as
   try {
     expect(await coursesOf(baseURL!, other.id)).toContain(course.id);
     const { page } = await openProgram(browser, admin.storageState, fx.program);
-    await courseSelector(page, fx.course.code).click();
-    await page.getByRole('option', { name: new RegExp(`^${course.code} `) }).click();
-    await courseSelector(page, course.code).click();
-    await page.getByRole('listbox').getByRole('button', { name: `Modifier le cours ${course.code}` }).click();
+    await courseTile(page, course.code).click();
+    await clickCourseMenu(page, course.code, 'Modifier le cours');
     await expect(page.getByRole('button', { name: `Retirer ${fx.program.name}` }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: `Retirer ${other.name}` }).first()).toBeVisible({
       timeout: 3_000,
@@ -507,35 +507,29 @@ test('course:edited / course:deleted : un second inscrit voit la modification pu
   try {
     // L'étudiant ouvre le cours jetable.
     const s = await openProgram(browser, student.storageState, fx.program);
-    await courseSelector(s.page, fx.course.code).click();
-    await s.page.getByRole('option', { name: new RegExp(`^${course.code} `) }).click();
+    await courseTile(s.page, course.code).click();
     await expect(courseSelector(s.page, course.code)).toBeVisible();
 
     const { page } = await openProgram(browser, teacher.storageState, fx.program);
-    await courseSelector(page, fx.course.code).click();
-    await page.getByRole('option', { name: new RegExp(`^${course.code} `) }).click();
-    await courseSelector(page, course.code).click();
-    await page.getByRole('listbox').getByRole('button', { name: `Modifier le cours ${course.code}` }).click();
+    await courseTile(page, course.code).click();
+    await clickCourseMenu(page, course.code, 'Modifier le cours');
     await page.getByRole('textbox', { name: 'Code du cours' }).fill(newCode);
     await page.getByRole('textbox', { name: 'Titre du cours' }).fill(newTitle);
     await page.getByRole('button', { name: 'Enregistrer' }).click();
     await expect(courseSelector(page, newCode)).toBeVisible();
 
-    // WS course:edited : le sélecteur de l'étudiant change de code et l'option porte le titre.
+    // WS course:edited : le titre de l'étudiant change de code et sa tuile porte le nouveau titre.
     await expect(courseSelector(s.page, newCode)).toBeVisible();
-    await courseSelector(s.page, newCode).click();
-    await expect(s.page.getByRole('option', { name: `${newCode} ${newTitle}` })).toBeVisible();
-    await s.page.keyboard.press('Escape');
+    await expect(courseTileNamed(s.page, newCode, newTitle)).toBeVisible();
 
-    // WS course:deleted : le cours quitte le sélecteur de l'étudiant, qui retombe sur l'autre.
+    // WS course:deleted : le cours quitte la barre de l'étudiant, qui retombe sur l'autre.
     await courseSelector(page, newCode).click({ button: 'right' });
     await page.getByRole('menu', { name: `Actions du cours ${newCode}` }).getByRole('menuitem', { name: 'Supprimer le cours' }).click();
     await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
     await expect(courseSelector(page, fx.course.code)).toBeVisible();
     await expect(courseSelector(s.page, fx.course.code)).toBeVisible();
-    await courseSelector(s.page, fx.course.code).click();
-    await expect(s.page.getByRole('option', { name: new RegExp(`^${newCode} `) })).toHaveCount(0);
-    await expect(s.page.getByRole('option', { name: new RegExp(`^${fx.course.code} `) })).toBeVisible();
+    await expect(courseTile(s.page, newCode)).toHaveCount(0);
+    await expect(courseTile(s.page, fx.course.code)).toBeVisible();
   } finally {
     await asGardien(baseURL!, (api) => deleteCourseApi(api, course.id));
   }

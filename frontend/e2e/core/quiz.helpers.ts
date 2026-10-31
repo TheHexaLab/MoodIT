@@ -1,25 +1,15 @@
 import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { TEST_COURSE_ID } from '../setup/accounts';
-import { PROGRAM_NAME, ROLE_ACCOUNTS, sessionAs } from './helpers';
+import { TEST_COURSE_ID, TEST_PROGRAM_ID } from '../setup/accounts';
+import { ROLE_ACCOUNTS, sessionAs } from './helpers';
 
 /** Code du cours de test (cours 1 du seed). */
 export const COURSE_CODE = 'MAT115';
 
-/**
- * Ouvre le programme de test et s'assure que le cours MAT115 est sélectionné : le dernier cours
- * ouvert est restauré par compte, et un compte partagé a pu en ouvrir un autre entre-temps.
- */
+/** Ouvre le cours de test (MAT115) par son URL. */
 export async function openTestCourse(page: Page) {
-  await page.goto('/home');
-  await page.getByRole('button', { name: PROGRAM_NAME }).click();
+  await page.goto(`/home/p/${TEST_PROGRAM_ID}/c/${TEST_COURSE_ID}`);
   const nav = page.getByRole('navigation', { name: 'Cours' });
-  const picker = nav.locator('button[aria-haspopup="listbox"]');
-  await expect(picker).toBeVisible();
-  if ((await picker.innerText()).trim() !== COURSE_CODE) {
-    await picker.click();
-    await page.getByRole('option', { name: new RegExp(`^${COURSE_CODE}`) }).click();
-  }
-  await expect(picker).toHaveText(COURSE_CODE);
+  await expect(nav.getByRole('button', { name: COURSE_CODE, exact: true })).toBeVisible();
   return nav;
 }
 

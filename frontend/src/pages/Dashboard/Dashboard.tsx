@@ -1007,6 +1007,7 @@ export default function Dashboard() {
               setView({ programId, courseId });
             }}
             onJoinProgram={handleJoinFromPortal}
+            onAddProgram={isMobile ? handleAddProgram : undefined}
             collapsed={sidebarCollapsed}
             onToggleCollapsed={isPortal && !isMobile ? toggleHomeSidebar : undefined}
             activeProgramId={activeProgramId}

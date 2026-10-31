@@ -1,5 +1,6 @@
 import { expect, test, type Page } from './fixtures';
-import { PROGRAM_NAME, ROLE_ACCOUNTS, createEnrolledUser, sessionAs } from './helpers';
+import { TEST_PROGRAM_ID, TEST_COURSE_ID } from '../setup/accounts';
+import { ROLE_ACCOUNTS, createEnrolledUser, sessionAs } from './helpers';
 
 // Feedback de cours (MCP) sur le cours de test MAT115. Pas de clé LLM dans la pile E2E :
 // mcp-service produit une analyse de repli déterministe. Les analyses s'empilent dans
@@ -8,8 +9,7 @@ const COURSE_CODE = 'MAT115';
 
 /** Clic droit sur le sélecteur de cours → menu contextuel « Actions du cours … ». */
 async function openCourseContextMenu(page: Page) {
-  await page.goto('/home');
-  await page.getByRole('button', { name: PROGRAM_NAME }).click();
+  await page.goto(`/home/p/${TEST_PROGRAM_ID}/c/${TEST_COURSE_ID}`);
   await page
     .getByRole('navigation', { name: 'Cours' })
     .getByRole('button', { name: COURSE_CODE, exact: true })

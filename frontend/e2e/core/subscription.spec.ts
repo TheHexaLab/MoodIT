@@ -16,6 +16,7 @@ import {
   openHome,
   programButton,
   type TestProgram,
+  courseTile,
 } from './admin.helpers';
 
 // Abonnements d'un compte NEUF (aucun programme au départ) à des programmes créés pour la suite :
@@ -52,8 +53,18 @@ async function pickTestProgram(page: Page, name: string) {
     .getByRole('button', { name: new RegExp(`^${escapeRegExp(E2E_ESTABLISHMENT)} `) })
     .click();
   await joinPopupPrograms(page).fill(name);
-  // Ligne = pastille + nom + cohorte (la pastille du rail, elle, s'appelle juste « nom »).
-  return page.getByRole('button', { name: new RegExp(`${escapeRegExp(name)} ${PROGRAM_COHORT}$`) });
+  return programRow(page, name);
+}
+
+/** Ligne du programme dans le popup : pastille + nom + cohorte. */
+const programRow = (page: Page, name: string) =>
+  page.getByRole('button', { name: new RegExp(`${escapeRegExp(name)} ${PROGRAM_COHORT}$`) });
+
+/** Après l'adhésion à un NOUVEAU programme, le choix de ses cours s'enchaîne : on le referme. */
+async function dismissCoursesPopup(page: Page) {
+  await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toBeVisible();
+  await page.getByRole('button', { name: 'Annuler' }).click();
+  await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toHaveCount(0);
 }
 
 /** Ouvre « Ajouter un programme » → « Rejoindre un programme » et cible un programme de test. */
@@ -75,27 +86,24 @@ test('rejoindre un programme depuis l’accueil puis rejoindre et quitter un cou
   const { context, page } = await freshUserHome(browser, baseURL!);
   const main = mainContent(page);
 
-  // Compte neuf : état d'accueil, puis adhésion par le bouton de l'état vide.
-  await expect(main.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
-  await main.getByRole('button', { name: '+ Rejoindre un programme' }).click();
-  const row = await pickTestProgram(page, program.name);
+  // Compte neuf : Accueil, puis adhésion par le bouton de la barre, directement sur les programmes
+  // de son établissement.
+  await expect(main.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Rejoindre un programme', exact: true }).click();
+  await joinPopupPrograms(page).fill(program.name);
+  const row = programRow(page, program.name);
   await expect(row).toHaveAttribute('aria-pressed', 'false');
   await row.click();
   await expect(row).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
 
-  await programButton(page, program.name).click();
-  await expect(programButton(page, program.name)).toHaveAttribute('aria-current', 'page');
-  // Abonné au programme mais à aucun de ses cours.
-  await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
-
-  // Rejoindre le cours par le menu contextuel du programme.
-  await clickProgramMenu(page, program.name, 'Rejoindre des cours');
+  // Le choix des cours s'enchaîne.
   await page.getByPlaceholder('Rechercher un cours…').fill(course.code);
-  const courseRow = page.getByRole('button', { name: new RegExp(course.title) });
+  const courseRow = page.getByRole('dialog').getByRole('button', { name: new RegExp(course.title) });
   await courseRow.click();
   await expect(courseRow).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Rejoindre', exact: true }).click();
+  await courseTile(page, course.code).click();
   await expect(courseSelector(page, course.code)).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Ce cours est vide' })).toBeVisible();
 
@@ -105,16 +113,16 @@ test('rejoindre un programme depuis l’accueil puis rejoindre et quitter un cou
   await courseRow.click();
   await expect(courseRow).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Rejoindre', exact: true }).click();
-  await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
-  await expect(courseSelector(page, course.code)).toHaveCount(0);
+  await expect(courseTile(page, course.code)).toHaveCount(0);
 
-  // Ré-inscription par l'état vide « + Rejoindre un cours ».
-  await main.getByRole('button', { name: '+ Rejoindre un cours' }).click();
+  // Ré-inscription par « Rejoindre un cours », sous le programme dans la barre.
+  await page.getByRole('button', { name: `Rejoindre un cours : ${program.name}` }).click();
   await courseRow.click();
   await page.getByRole('button', { name: 'Rejoindre', exact: true }).click();
+  await courseTile(page, course.code).click();
   await expect(courseSelector(page, course.code)).toBeVisible();
 
-  // « Quitter le cours » (menu contextuel du sélecteur) : « Annuler » ne fait rien, « Quitter » oui.
+  // « Quitter le cours » (menu contextuel du titre) : « Annuler » ne fait rien, « Quitter » oui.
   await clickCourseMenu(page, course.code, 'Quitter le cours');
   await expect(page.getByRole('heading', { name: 'Quitter le cours ?' })).toBeVisible();
   await page.getByRole('button', { name: 'Annuler' }).click();
@@ -125,9 +133,8 @@ test('rejoindre un programme depuis l’accueil puis rejoindre et quitter un cou
   await page.getByRole('button', { name: 'Quitter', exact: true }).click();
   await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
 
-  // Persisté côté serveur : toujours sans cours après rechargement.
+  // Persisté côté serveur : toujours sans cours après rechargement (l'URL reste sur le programme).
   await page.reload();
-  await programButton(page, program.name).click();
   await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
 
   await context.close();
@@ -142,10 +149,10 @@ test('un programme sans cours propose « Rejoindre un cours » sans rien à rejo
   await row.click();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
 
-  await programButton(page, emptyProgram.name).click();
-  const main = mainContent(page);
-  await expect(main.getByRole('heading', { name: "Ce programme n'a pas de cours" })).toBeVisible();
-  await main.getByRole('button', { name: '+ Rejoindre un cours' }).click();
+  // Le choix des cours s'enchaîne : vide. La barre le propose aussi sous le programme.
+  await expect(page.getByText('Aucun cours à rejoindre dans ce programme')).toBeVisible();
+  await page.getByRole('button', { name: 'Annuler' }).click();
+  await page.getByRole('button', { name: `Rejoindre un cours : ${emptyProgram.name}` }).click();
   await expect(page.getByText('Aucun cours à rejoindre dans ce programme')).toBeVisible();
   await page.getByRole('button', { name: 'Annuler' }).click();
   await expect(page.getByPlaceholder('Rechercher un cours…')).toHaveCount(0);
@@ -170,6 +177,7 @@ test('« Annuler » ne change pas les abonnements ; décocher un programme désa
   // Abonnement réel.
   await (await openJoinProgram(page, program.name)).click();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
+  await dismissCoursesPopup(page);
   await expect(programButton(page, program.name)).toBeVisible();
 
   // Rouvrir : le programme suivi est pré-coché ; le décocher puis enregistrer = désabonnement.
@@ -181,7 +189,7 @@ test('« Annuler » ne change pas les abonnements ; décocher un programme désa
 
   await page.reload();
   await expect(
-    mainContent(page).getByRole('heading', { name: 'Bienvenue sur MoodIT' })
+    mainContent(page).getByRole('heading', { name: /^Bonjour/ })
   ).toBeVisible();
   await expect(programButton(page, program.name)).toHaveCount(0);
 
@@ -195,6 +203,7 @@ test('quitter un programme par son menu contextuel (avec confirmation)', async (
   const { context, page } = await freshUserHome(browser, baseURL!);
   await (await openJoinProgram(page, program.name)).click();
   await page.getByRole('button', { name: 'Enregistrer' }).click();
+  await dismissCoursesPopup(page);
   await expect(programButton(page, program.name)).toBeVisible();
 
   // Un étudiant n'a que les deux actions communes à tous.
@@ -210,7 +219,7 @@ test('quitter un programme par son menu contextuel (avec confirmation)', async (
   await page.getByRole('button', { name: 'Quitter', exact: true }).click();
   await expect(programButton(page, program.name)).toHaveCount(0);
   await expect(
-    mainContent(page).getByRole('heading', { name: 'Bienvenue sur MoodIT' })
+    mainContent(page).getByRole('heading', { name: /^Bonjour/ })
   ).toBeVisible();
 
   await page.reload();

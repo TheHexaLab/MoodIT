@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from './fixtures';
 import { FORUM_NAME, PROGRAM_NAME, createEnrolledUser, mainContent, openCourseItem } from './helpers';
-import { openHome, programButton } from './admin.helpers';
+import { openHome, programButton, enterProgram } from './admin.helpers';
 import { hasVisibleFocusIndicator } from './a11y.helpers';
 
 // Indicateur de focus visible (WCAG 2.4.7) : après un Tab, l'élément focalisé porte un contour
@@ -68,13 +68,13 @@ test('accueil : rail, sélecteur de cours, sections, canaux et compte', async ({
 }) => {
   const { storageState } = await createEnrolledUser(baseURL!);
   const { page } = await openHome(browser, storageState);
-  await programButton(page, PROGRAM_NAME).click();
+  await expectFocusIndicator(page, programButton(page, PROGRAM_NAME), 'nom du programme');
+  await enterProgram(page, PROGRAM_NAME);
   const nav = page.getByRole('navigation', { name: 'Cours' });
   await expect(nav.getByRole('button', { name: 'MAT115', exact: true })).toBeVisible();
   const controls: [Locator, string][] = [
-    [programButton(page, PROGRAM_NAME), 'pastille du programme'],
     [page.getByRole('button', { name: 'Ajouter un programme', exact: true }), 'Ajouter un programme'],
-    [nav.getByRole('button', { name: 'MAT115', exact: true }), 'sélecteur de cours'],
+    [nav.getByRole('button', { name: 'MAT115', exact: true }), 'titre du cours'],
     [nav.getByRole('button', { name: 'CANAUX', exact: true }), 'repli de section'],
     [nav.getByRole('button', { name: FORUM_NAME }), 'élément de section (forum)'],
     [page.getByRole('button', { name: 'Compte utilisateur' }), 'bouton du compte'],

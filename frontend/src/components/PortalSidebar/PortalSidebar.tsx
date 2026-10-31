@@ -43,6 +43,8 @@ interface PortalSidebarProps {
   onOpenCourse: (programId: number, courseId: number) => void;
   /** Rejoindre un programme de son établissement. */
   onJoinProgram: () => void;
+  /** Menu complet d'ajout de programme, dans la barre. Mobile seulement : le bandeau y est masqué. */
+  onAddProgram?: () => void;
   /** Menu du compte, au pied de la barre. */
   userMenu: React.ReactNode;
   /** Version réduite : icônes et tuiles seulement. */
@@ -97,6 +99,7 @@ export default function PortalSidebar({
   programActions,
   onOpenCourse,
   onJoinProgram,
+  onAddProgram,
   userMenu,
   collapsed = false,
   onToggleCollapsed,
@@ -243,11 +246,20 @@ export default function PortalSidebar({
             </>
           )}
         />
-        {/* Toujours offert sans programme, et sur mobile où le « + » du bandeau est masqué. */}
-        {!loading && !loadError && (
+        {!loading && !loadError && onAddProgram && (
           <button
             type="button"
-            className={`${styles.navItem} ${styles.join} ${styles.expandedOnly} ${programs.length > 0 ? styles.mobileOnly : ''}`}
+            className={`${styles.navItem} ${styles.join} ${styles.expandedOnly}`}
+            onClick={onAddProgram}
+          >
+            <NavIcon path={PLUS_ICON} />
+            <span className={styles.label}>Ajouter un programme</span>
+          </button>
+        )}
+        {!loading && !loadError && !onAddProgram && programs.length === 0 && (
+          <button
+            type="button"
+            className={`${styles.navItem} ${styles.join} ${styles.expandedOnly}`}
             onClick={onJoinProgram}
           >
             <NavIcon path={PLUS_ICON} />

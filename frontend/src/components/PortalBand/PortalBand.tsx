@@ -29,10 +29,9 @@ export default function PortalBand({
         title="Ajouter un programme"
         onClick={onAddProgram}
       >
-        <span aria-hidden="true">{name.charAt(0).toUpperCase()}</span>
-        <span className={styles.logoPlus} aria-hidden="true">
-          +
-        </span>
+        {/* Lettre et « + » dessinés en CSS : décoratifs, hors du nom accessible (WCAG 2.5.3). */}
+        <span className={styles.logoLetter} data-letter={name.charAt(0).toUpperCase()} />
+        <span className={styles.logoPlus} />
       </button>
       <Link to="/home" className={styles.home} aria-label={`${name}, retour à l'Accueil`}>
         <span className={styles.name}>{name}</span>

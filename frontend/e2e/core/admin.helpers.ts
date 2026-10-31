@@ -221,6 +221,52 @@ export const courseSelector = (page: Page, code: string) =>
   page.getByRole('navigation', { name: 'Cours' }).getByRole('button', { name: code, exact: true });
 
 /**
+ * Cours dans la barre de gauche (tuile en version réduite, ligne en version complète) : son nom
+ * accessible contient le sigle, seul ou avec le titre (« MAT115 · … » ou « … MAT115 »).
+ */
+export const courseTile = (page: Page, code: string) =>
+  page
+    .getByRole('navigation', { name: 'Programme' })
+    .getByRole('button', { name: new RegExp(`(^|\\s)${escapeRegExp(code)}(\\s|$)`) });
+
+/** Le cours est offert dans la barre réduite, sous ce nom complet (sigle et titre). */
+export const courseTileNamed = (page: Page, code: string, title: string) =>
+  page
+    .getByRole('navigation', { name: 'Programme' })
+    .getByRole('button', { name: `${code} · ${title}`, exact: true });
+
+/**
+ * Entre dans un programme depuis la barre de l'Accueil : ouvre son premier cours (le nom du
+ * programme n'est pas cliquable). Déjà dans un programme (un rechargement garde l'URL) : rien à
+ * faire. Pour un programme sans cours : `/home/p/<id>`.
+ */
+export async function enterProgram(page: Page, name: string) {
+  if (new URL(page.url()).pathname.startsWith('/home/p/')) {
+    await expect(page.getByRole('navigation', { name: 'Cours' })).toBeVisible();
+    return;
+  }
+  await programButton(page, name)
+    .locator('xpath=ancestor::li[1]/following-sibling::li[1]')
+    .locator('button:not([aria-label])')
+    .first()
+    .click();
+  await expect(page.getByRole('navigation', { name: 'Cours' })).toBeVisible();
+}
+
+/** Revient à l'Accueil, seul écran où la barre liste les programmes et leur menu contextuel. */
+export async function goHome(page: Page) {
+  // Mobile : le lien est dans le tiroir, qui se referme en changeant d'écran.
+  const openDrawer = async () => {
+    const hamburger = page.getByRole('button', { name: 'Ouvrir le menu' });
+    if (await hamburger.isVisible()) await hamburger.click();
+  };
+  await openDrawer();
+  await page.getByRole('navigation', { name: 'Portail' }).getByRole('link', { name: 'Accueil' }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await openDrawer();
+}
+
+/**
  * Menus contextuels (clic droit). Ils se referment au moindre défilement de la page : un canal
  * ouvert qui reçoit des messages d'autres specs (défilement auto) peut donc les fermer à tout
  * moment. Ouverture + lecture / clic sont faites d'un bloc, réessayé jusqu'à réussite.
@@ -234,6 +280,11 @@ async function withContextMenu(
     if (!(await menu.isVisible())) await target.click({ button: 'right' });
     await action(menu);
   }).toPass();
+}
+
+/** Le menu d'un programme s'ouvre depuis l'Accueil : dans un cours, la barre réduite cache son nom. */
+async function ensureProgramList(page: Page) {
+  if (/\/home\/p\//.test(new URL(page.url()).pathname)) await goHome(page);
 }
 
 const programMenu = (page: Page, name: string) =>
@@ -250,12 +301,16 @@ const clickItem = (item: string) => (menu: Locator) =>
   menu.getByRole('menuitem', { name: item, exact: true }).click({ timeout: 1_000 });
 
 /** Vérifie la liste EXACTE des actions du menu contextuel d'un programme. */
-export const expectProgramMenu = (page: Page, name: string, items: string[]) =>
-  withContextMenu(...programMenu(page, name), expectItems(items));
+export const expectProgramMenu = async (page: Page, name: string, items: string[]) => {
+  await ensureProgramList(page);
+  await withContextMenu(...programMenu(page, name), expectItems(items));
+};
 
 /** Choisit une action du menu contextuel d'un programme. */
-export const clickProgramMenu = (page: Page, name: string, item: string) =>
-  withContextMenu(...programMenu(page, name), clickItem(item));
+export const clickProgramMenu = async (page: Page, name: string, item: string) => {
+  await ensureProgramList(page);
+  await withContextMenu(...programMenu(page, name), clickItem(item));
+};
 
 /** Vérifie la liste EXACTE des actions du menu contextuel d'un cours. */
 export const expectCourseMenu = (page: Page, code: string, items: string[]) =>

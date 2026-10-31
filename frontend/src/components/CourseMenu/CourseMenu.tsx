@@ -238,7 +238,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   function handleResizeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
-    const base = navRef.current?.offsetWidth ?? width ?? DEFAULT_WIDTH;
+    // La largeur demandée d'abord : celle rendue peut être en pleine transition.
+    const base = width ?? navRef.current?.offsetWidth ?? DEFAULT_WIDTH;
     setWidth(clampWidth(base + (event.key === 'ArrowLeft' ? -16 : 16)));
   }
 

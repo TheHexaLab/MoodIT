@@ -211,10 +211,6 @@
     visibility: visible;
 }
 
-.mobileOnly {
-    display: none;
-}
-
 /* Bouton réduire / déplier : hors de la zone qui défile, au-dessus du compte. */
 .toggle {
     width: 15.5rem;
@@ -292,7 +288,8 @@
         width: 100%;
     }
 
-    .mobileOnly {
-        display: flex;
+    /* Le compte est dans la barre mobile du haut (LeftMenuGroup), comme avant le portail. */
+    .footer {
+        display: none;
     }
 }

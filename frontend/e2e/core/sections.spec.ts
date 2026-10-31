@@ -12,8 +12,8 @@ import {
   enrollApi,
   freshAccount,
   openHome,
-  programButton,
   type TestProgram,
+  enterProgram,
 } from './admin.helpers';
 
 // Édition des sections CANAUX / FORUMS d'un cours (canManageContent). Pour ne rien toucher au
@@ -68,7 +68,7 @@ async function setup(browser: Parameters<typeof openHome>[0], baseURL: string) {
   const t = await openHome(browser, teacher.storageState);
   const s = await openHome(browser, student.storageState);
   for (const { page } of [t, s]) {
-    await programButton(page, program.name).click();
+    await enterProgram(page, program.name);
     await expect(
       mainContent(page).getByRole('heading', { name: 'Ce cours est vide' })
     ).toBeVisible();
@@ -177,7 +177,7 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
   await page.getByRole('button', { name: '✕' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toHaveCount(0);
   await page.reload();
-  await programButton(page, program.name).click();
+  await enterProgram(page, program.name);
   await expect(sidebarItems(page, 'CANAUX')).toHaveText([renamed]);
 
   await close();
@@ -227,7 +227,7 @@ test('un étudiant n’a pas les crayons d’édition des sections', async ({ br
   const context = await browser.newContext({ storageState: storageStatePath('alice') });
   const page = await context.newPage();
   await page.goto('/home');
-  await programButton(page, PROGRAM_NAME).click();
+  await enterProgram(page, PROGRAM_NAME);
 
   const sidebar = page.getByRole('navigation', { name: 'Cours' });
   await expect(sidebarSection(page, 'CANAUX')).toBeVisible();

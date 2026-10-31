@@ -52,7 +52,15 @@
     background: rgba(0, 0, 0, 0.35);
 }
 
+.logoLetter::before {
+    content: attr(data-letter);
+}
+
 /* Petit « + » au coin du logo. */
+.logoPlus::before {
+    content: '+';
+}
+
 .logoPlus {
     position: absolute;
     right: -0.3125rem;

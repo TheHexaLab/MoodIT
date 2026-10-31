@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { TEST_PROGRAM_ID } from '../setup/accounts';
-import { apiAs, assignProgramRoleApi, courseSelector, roleId } from './admin.helpers';
+import { apiAs, assignProgramRoleApi, courseSelector, roleId, courseTile, goHome } from './admin.helpers';
 import { PROGRAM_NAME, ROLE_ACCOUNTS, createEnrolledUser } from './helpers';
 import { enrollInCourses } from './dashboard.helpers';
 
@@ -10,8 +10,8 @@ import { enrollInCourses } from './dashboard.helpers';
  * largeur du viewport (`layoutOf`) et branchent dessus.
  *
  * Points de rupture du frontend (lus dans les CSS) :
- *  - ≤ 900 px (56.25rem, LeftMenuGroup / CourseMenu / UserMenu / QuizView) : barre latérale en
- *    tiroir « Menus lateraux » (90 vw, translatée hors écran), barre mobile fixe de 3.25rem avec
+ *  - ≤ 900 px (56.25rem, LeftMenuGroup / PortalBand / UserMenu / QuizView) : bandeau masqué, barre
+ *    latérale en tiroir « Menus lateraux » (90 vw, translatée hors écran), barre mobile fixe de 3.25rem avec
  *    hamburger « Ouvrir le menu » et pastille compte compacte ; pied de page du compte masqué ;
  *    poignée de redimensionnement masquée ; menu du compte en feuille basse ; points de
  *    progression et « Retour au résumé » du quiz masqués.
@@ -52,8 +52,8 @@ export const drawer = (page: Page) => page.getByRole('complementary', { name: 'M
 export const courseNav = (page: Page) => page.getByRole('navigation', { name: 'Cours' });
 export const resizeHandle = (page: Page) =>
   page.getByRole('separator', { name: 'Redimensionner le menu des cours' });
-/** Sélecteur de cours (bouton aria-haspopup="listbox"), quel que soit le cours actif. */
-export const coursePicker = (page: Page) => courseNav(page).locator('button[aria-haspopup="listbox"]');
+/** Titre du cours ouvert (porte son menu contextuel), quel que soit le cours. */
+export const coursePicker = (page: Page) => courseNav(page).locator(':scope > header button:not([aria-label])');
 
 /** Clic ou toucher selon le profil : les parcours « au tactile » passent par `tap`. */
 export const press = (locator: Locator, hasTouch: boolean) =>
@@ -108,8 +108,9 @@ export async function expectDrawerClosed(page: Page, timeout?: number) {
 }
 
 /**
- * Sélectionne un programme dans le rail (en ouvrant le tiroir au besoin, puis en le refermant).
- * `courses: false` pour un programme sans cours suivi (pas de sélecteur de cours).
+ * Entre dans un programme : ouvre son premier cours depuis la barre de l'Accueil (le tiroir se
+ * referme en changeant d'écran). Déjà dans un cours : rien à faire. `courses: false` pour un
+ * programme sans cours suivi, qui ne s'ouvre que par son URL.
  */
 export async function selectProgram(
   page: Page,
@@ -117,12 +118,22 @@ export async function selectProgram(
   hasTouch = false,
   { courses = true }: { courses?: boolean } = {}
 ) {
-  await openDrawer(page, hasTouch);
-  const program = page.getByRole('navigation', { name: 'Programme' }).getByRole('button', { name });
-  await press(program, hasTouch);
-  await expect(program).toHaveAttribute('aria-current', 'page');
-  if (courses) await expect(coursePicker(page)).toBeVisible();
-  else await expect(courseNav(page).getByText('Aucun cours', { exact: true })).toBeVisible();
+  if (!courses) {
+    await page.goto(`/home/p/${TEST_PROGRAM_ID}`);
+    await expect(courseNav(page).getByText('Aucun cours', { exact: true })).toBeAttached();
+    return;
+  }
+  if (!/\/home\/p\//.test(new URL(page.url()).pathname)) {
+    await openDrawer(page, hasTouch);
+    const course = page
+      .getByRole('navigation', { name: 'Programme' })
+      .getByRole('button', { name: new RegExp(`^${name} — `) })
+      .locator('xpath=ancestor::li[1]/following-sibling::li[1]')
+      .locator('button:not([aria-label])')
+      .first();
+    await press(course, hasTouch);
+  }
+  await expect(coursePicker(page)).toBeAttached();
   await closeDrawer(page, hasTouch);
 }
 
@@ -135,16 +146,27 @@ export async function openSidebarItem(page: Page, name: string, hasTouch = false
   await closeDrawer(page, hasTouch);
 }
 
-/** Change de cours par le sélecteur (listbox portée dans <body>) et referme le tiroir. */
+/** Change de cours par sa tuile dans la barre et referme le tiroir. */
 export async function pickCourse(page: Page, code: string, hasTouch = false) {
   await openDrawer(page, hasTouch);
-  await expect(coursePicker(page)).toBeVisible(); // le texte lu ensuite doit être celui du sélecteur rendu
-  if ((await coursePicker(page).innerText()).trim() !== code) {
-    await press(coursePicker(page), hasTouch);
-    await press(page.getByRole('option', { name: new RegExp(`^${code} `) }), hasTouch);
-  }
+  await press(courseTile(page, code), hasTouch);
   await expect(courseSelector(page, code)).toBeVisible();
   await closeDrawer(page, hasTouch);
+}
+
+/** Ouvre le menu « Ajouter un programme » : le logo du bandeau, ou la barre de l'Accueil sur mobile. */
+export async function pressAddProgram(page: Page, hasTouch = false) {
+  if (layoutOf(page).drawer) await goHome(page);
+  await press(page.getByRole('button', { name: 'Ajouter un programme', exact: true }), hasTouch);
+}
+
+/** Ouvre le menu contextuel du cours : appui long sur le tactile, clic droit sinon. */
+export async function openCourseMenu(page: Page, code: string, hasTouch = false) {
+  if (hasTouch) return longPressCourseSelector(page, code);
+  await courseSelector(page, code).click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: `Actions du cours ${code}` });
+  await expect(menu).toBeVisible();
+  return menu;
 }
 
 /**
@@ -463,14 +485,12 @@ export async function expectLayout(page: Page) {
     await expect(resizeHandle(page)).toBeHidden();
     // Pastille compacte dans la barre mobile ; pied de page du compte masqué (display: none).
     await expect(banner(page).getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
-    await expect(courseNav(page).getByRole('button', { name: 'Compte utilisateur' })).toHaveCount(0);
+    await expect(drawer(page).getByRole('button', { name: 'Compte utilisateur' })).toHaveCount(0);
   } else {
-    await expect(banner(page)).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Ouvrir le menu' })).toHaveCount(0);
     await expect(drawer(page)).toBeInViewport({ ratio: 1 });
     expect((await drawer(page).boundingBox())!.x).toBe(0);
-    await expect(resizeHandle(page)).toBeVisible();
-    await expect(courseNav(page).getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
+    await expect(drawer(page).getByRole('button', { name: 'Compte utilisateur' })).toBeVisible();
   }
   // Une seule pastille « Compte utilisateur » visible, quelle que soit la disposition.
   await expect(account).toHaveCount(1);

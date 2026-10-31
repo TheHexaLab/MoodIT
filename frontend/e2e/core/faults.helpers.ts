@@ -19,7 +19,6 @@ import {
   enrollApi,
   freshAccount,
   openHome,
-  programButton,
   type TestProgram,
 } from './admin.helpers';
 
@@ -219,8 +218,8 @@ export type StorageState = Awaited<ReturnType<APIRequestContext['storageState']>
 /** Ouvre /home puis le programme de test (son unique cours s'ouvre de lui-même). */
 export async function openProgram(browser: Browser, storageState: StorageState, program: TestProgram) {
   const opened = await openHome(browser, storageState);
-  await programButton(opened.page, program.name).click();
-  await expect(programButton(opened.page, program.name)).toHaveAttribute('aria-current', 'page');
+  await opened.page.goto(`/home/p/${program.id}`);
+  await expect(opened.page.getByRole('navigation', { name: 'Cours' })).toBeVisible();
   return opened;
 }
 

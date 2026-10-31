@@ -195,6 +195,14 @@ describe('PortalSidebar', () => {
     expect(onAddCourseToProgram).toHaveBeenCalledWith(2);
   });
 
+  it('sur mobile : « Ajouter un programme » ouvre le menu complet', () => {
+    const onAddProgram = vi.fn();
+    renderSidebar({ onAddProgram });
+    expect(screen.queryByRole('button', { name: 'Rejoindre un programme' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un programme' }));
+    expect(onAddProgram).toHaveBeenCalledTimes(1);
+  });
+
   it('sans programme : « Rejoindre un programme »', () => {
     const props = renderSidebar({ programs: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Rejoindre un programme' }));

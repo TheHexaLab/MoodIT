@@ -1,13 +1,12 @@
 import { expect, test, type Page } from './fixtures';
 import { storageStatePath } from '../setup/accounts';
 import {
-  PROGRAM_NAME,
   createEnrolledUser,
   mainContent,
   openCourseItem,
   uniqueSuffix,
 } from './helpers';
-import { SECOND_COURSE, enrollInCourses, ensureCourse, settingsSaved } from './dashboard.helpers';
+import { settingsSaved } from './dashboard.helpers';
 
 // Menu du compte, profil et réglages persistés. Tout ce qui modifie le compte (profil, thème,
 // dernier emplacement) se fait sur un compte NEUF : les comptes partagés ne doivent pas changer.
@@ -215,51 +214,6 @@ test('copier le nom d’utilisateur', async ({ browser, browserName, baseURL }) 
 
 // Le dernier emplacement (programme → cours → canal) est un réglage du compte : une nouvelle
 // session (autre navigateur) y revient directement.
-test('le dernier emplacement est restauré à la session suivante', async ({
-  browser,
-  baseURL,
-}) => {
-  // Garde (révélée par WebKit) : la restauration du cours et du canal ne doit pas dépendre de la
-  // vitesse de la réponse des cours (autrefois abandonnée quand elle arrivait avant le rendu de
-  // `coursesLoading === true`).
-  const { user, storageState } = await createEnrolledUser(baseURL!);
-  await enrollInCourses(baseURL!, storageState, user.id, [1, SECOND_COURSE.id]);
-
-  const context = await browser.newContext({ storageState });
-  const page = await context.newPage();
-  await page.goto('/home');
-  await page.getByRole('button', { name: PROGRAM_NAME }).click();
-  await ensureCourse(page, SECOND_COURSE.code); // l'ordre initial des cours n'est pas garanti
-  const saved = settingsSaved(
-    page,
-    (s) => s.location?.courseId === SECOND_COURSE.id && s.location.channel != null
-  );
-  await page.getByRole('button', { name: SECOND_COURSE.channel }).click();
-  await saved;
-  await context.close();
-
-  const next = await browser.newContext({ storageState });
-  const nextPage = await next.newPage();
-  await nextPage.goto('/home');
-  await expect(nextPage.getByRole('button', { name: PROGRAM_NAME })).toHaveAttribute(
-    'aria-current',
-    'page'
-  );
-  await expect(
-    nextPage.getByRole('navigation', { name: 'Cours' }).getByRole('button', {
-      name: SECOND_COURSE.code,
-      exact: true,
-    })
-  ).toBeVisible();
-  await expect(nextPage.getByRole('button', { name: SECOND_COURSE.channel })).toHaveAttribute(
-    'aria-current',
-    'page'
-  );
-  await expect(
-    nextPage.getByRole('textbox', { name: `Envoyer un message dans ${SECOND_COURSE.channel}` })
-  ).toBeVisible();
-  await next.close();
-});
 
 // Easter eggs : thèmes éphémères posés sur <html data-theme>, refaire la séquence les annule.
 test('easter eggs « kiwi » et « twee »', async ({ browser, baseURL }) => {

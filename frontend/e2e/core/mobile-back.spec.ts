@@ -1,5 +1,5 @@
 import { devices, expect, test, type Page } from './fixtures';
-import { createEnrolledUser, FORUM_NAME, loginThroughUi, PROGRAM_NAME } from './helpers';
+import { createEnrolledUser, FORUM_NAME, loginThroughUi } from './helpers';
 
 // Bogue #63 : toute l'app vivait sous /home et la connexion empilait /login puis /verify-code dans
 // l'historique. Le bouton « back » du téléphone ramenait alors à l'écran de code : impression de
@@ -28,11 +28,11 @@ async function openDrawer(page: Page) {
   await expect(drawer(page)).toBeInViewport();
 }
 
-/** Ouvre le programme de test depuis le tiroir (qui reste ouvert). */
+/** Ouvre le cours de test depuis le tiroir (qui se referme en changeant d'écran). */
 async function openProgram(page: Page) {
   await openDrawer(page);
-  await drawer(page).getByRole('button', { name: PROGRAM_NAME }).click();
-  await expect(page).toHaveURL(/\/home\/p\/\d+(\/c\/\d+)?$/);
+  await drawer(page).getByRole('button', { name: /MAT115/ }).click();
+  await expect(page).toHaveURL(/\/home\/p\/\d+\/c\/\d+$/);
 }
 
 /** Ouvre un élément du cours de test depuis le tiroir (qui se referme ensuite). */
