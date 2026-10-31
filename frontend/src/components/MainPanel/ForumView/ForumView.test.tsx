@@ -469,6 +469,67 @@ describe('ForumView — réponses (rédaction)', () => {
     await waitFor(() => expect(onCreatePost).toHaveBeenCalledWith(3, 'Sous-réponse', 201, expect.any(String)));
     await waitFor(() => expect(within(comment).getByText('Sous-réponse')).toBeTruthy());
   });
+
+  it('« Répondre » est désactivé sur un sujet en cours de création, puis actif une fois confirmé (#212)', async () => {
+    const saved = deferred<ForumPost>();
+    const onCreatePost = vi.fn().mockReturnValue(saved.promise);
+    await renderLoaded([thread(101, { author: other })], { onCreatePost });
+    fireEvent.click(screen.getByText('Nouveau sujet'));
+    fireEvent.change(screen.getByLabelText('Titre du sujet'), { target: { value: 'Mon sujet' } });
+    fireEvent.change(screen.getByPlaceholderText('Rédige ton sujet…'), {
+      target: { value: 'Mon contenu' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Publier' }));
+
+    // Affichage optimiste (id provisoire négatif) : « Répondre » est désactivé (disabled natif).
+    const card = () => screen.getByText('Mon sujet').closest('li') as HTMLElement;
+    const answer = () => within(card()).getByLabelText('Répondre') as HTMLButtonElement;
+    expect(answer().disabled).toBe(true);
+    expect(answer().title).toBe('Publication en cours…');
+    // Le sujet déjà confirmé reste, lui, ouvert aux réponses.
+    const confirmed = screen.getByText('Sujet 101').closest('li') as HTMLElement;
+    expect((within(confirmed).getByLabelText('Répondre') as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => {
+      saved.resolve(thread(900, { title: 'Mon sujet', content: 'Mon contenu', replies: [] }));
+      await saved.promise;
+    });
+    // Confirmé par le serveur (vrai id) : « Répondre » est actif et la réponse vise le vrai id.
+    expect(answer().disabled).toBe(false);
+    expect(answer().title).toBe('');
+    fireEvent.click(answer());
+    const composer = within(card()).getByPlaceholderText('Votre réponse…');
+    fireEvent.change(composer, { target: { value: 'Ma réponse' } });
+    onCreatePost.mockResolvedValue(reply(901, { content: 'Ma réponse', author: me }));
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
+    await waitFor(() =>
+      expect(onCreatePost).toHaveBeenLastCalledWith(3, 'Ma réponse', 900, expect.any(String))
+    );
+  });
+
+  it('« Répondre » est désactivé sur une réponse optimiste tant qu’elle n’est pas confirmée (#212)', async () => {
+    const saved = deferred<ForumPost>();
+    const onCreatePost = vi.fn().mockReturnValue(saved.promise);
+    await renderLoaded([thread(101, { author: other, replies: [], replyCount: 0 })], {
+      onCreatePost,
+    });
+    fireEvent.click(screen.getAllByLabelText('Répondre')[0]);
+    const composer = screen.getByPlaceholderText('Votre réponse…');
+    fireEvent.change(composer, { target: { value: 'En route' } });
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
+
+    const comment = () =>
+      screen.getByText('En route').closest('[data-role="comment"]') as HTMLElement;
+    await waitFor(() => expect(comment()).toBeTruthy());
+    const answer = () => within(comment()).getByLabelText('Répondre') as HTMLButtonElement;
+    expect(answer().disabled).toBe(true);
+
+    await act(async () => {
+      saved.resolve(reply(500, { content: 'En route', author: me, replies: [] }));
+      await saved.promise;
+    });
+    expect(answer().disabled).toBe(false);
+  });
 });
 
 describe('ForumView — édition', () => {
