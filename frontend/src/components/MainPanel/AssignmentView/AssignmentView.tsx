@@ -192,11 +192,6 @@ export default function AssignmentView({
           </span>
           Devoirs
         </p>
-        <span className={styles.headerDivider} />
-        <p className={styles.headerCourse}>
-          {opened ? `${opened.title} · ` : ''}
-          {getCourseDisplayLabel(course)}
-        </p>
       </header>
       <div className={styles.content}>{renderContent()}</div>
       {form && (
