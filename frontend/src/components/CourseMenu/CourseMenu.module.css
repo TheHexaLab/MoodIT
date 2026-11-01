@@ -186,22 +186,31 @@
 }
 
 .courseSelectCode {
-    display: flex;
-    flex-direction: column;
-    gap: 0.0625rem;
     min-width: 0;
-    text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+/* Le nom du cours se pose sous le code, qui remonte d'autant. */
+.courseSelectWithTitle {
+    padding-bottom: 0.875rem;
+}
+
 .courseSelectTitle {
+    position: absolute;
+    left: var(--header-pad-x);
+    right: 2.75rem;
+    bottom: 0.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-muted);
+    font-family: Inter, sans-serif;
     font-size: 0.6875rem;
     font-weight: 400;
+    line-height: normal;
+    pointer-events: none;
 }
 
 /* ── Zone principale ────────────────────────────────────────── */

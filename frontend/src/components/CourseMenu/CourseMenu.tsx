@@ -273,7 +273,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             {/* Pas d'action au clic : le bouton ne porte que le menu contextuel du cours. */}
             <button
               type="button"
-              className={styles.courseSelect}
+              className={`${styles.courseSelect}${selectedCourse?.title ? ` ${styles.courseSelectWithTitle}` : ''}`}
               onContextMenu={handleCourseContextMenu}
               onKeyDown={handleCourseSelectKeyDown}
               onTouchStart={handleCourseTouchStart}
@@ -286,14 +286,14 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             >
               <span className={styles.courseSelectCode}>
                 {selectedCourse?.code ?? dropdownLabels.selectFallback}
-                {/* Repère visuel : le nom accessible du bouton reste le code du cours. */}
-                {selectedCourse?.title && (
-                  <span className={styles.courseSelectTitle} aria-hidden="true">
-                    {selectedCourse.title}
-                  </span>
-                )}
               </span>
             </button>
+            {/* Repère visuel, hors du bouton : son nom accessible reste le code du cours. */}
+            {selectedCourse?.title && (
+              <span className={styles.courseSelectTitle} aria-hidden="true">
+                {selectedCourse.title}
+              </span>
+            )}
           </div>
         ) : (
           <span className={styles.headerTitle}>{activeProgram?.label ?? 'Accueil'}</span>
