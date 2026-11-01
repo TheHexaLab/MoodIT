@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './MainPanel.module.css';
+import { Spinner } from '../Spinner/Spinner.tsx';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
@@ -128,6 +129,8 @@ interface MainPanelProps {
   quizStale?: boolean;
   /** Ferme/efface la bannière « quiz modifié » (après rechargement ou rejet). */
   onReloadStale?: () => void;
+  /** Programme ou cours en attente : un indicateur discret, plutôt qu'un état vide trompeur. */
+  loading?: boolean;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
 }
@@ -177,6 +180,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   quizRefreshKey = 0,
   quizStale = false,
   onReloadStale,
+  loading = false,
 }) => {
   // Modérateur : peut supprimer (jamais éditer) les messages/posts d'autrui. Admin/Gardien
   // GLOBAL (isGlobalAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est
@@ -185,6 +189,14 @@ const MainPanel: React.FC<MainPanelProps> = ({
   const canModerate = isGlobalAdmin || program?.roleName === ROLE.ADMIN;
 
   const content = ((): React.ReactElement => {
+    // Programme ou cours en attente : aucun état vide, qui clignoterait avant le vrai contenu.
+    if (loading) {
+      return (
+        <div className={styles.loading} role="status" aria-label="Chargement du cours">
+          <Spinner size={32} />
+        </div>
+      );
+    }
     // 1 — aucun programme rejoint.
     if (!program) {
       return (

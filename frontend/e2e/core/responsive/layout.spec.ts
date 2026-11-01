@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures';
 import { FORUM_NAME, QUIZ_NAME, mainContent, uniqueSuffix } from '../helpers';
-import { courseSelector } from '../admin.helpers';
+import { courseSelector, courseTile } from '../admin.helpers';
 import { settingsSaved } from '../dashboard.helpers';
 import {
   CHANNEL_NAME,
@@ -37,14 +37,12 @@ test('disposition selon la largeur : tiroir + barre mobile (≤ 900 px) ou barre
   await expectLayout(page);
   await expectNoHorizontalOverflow(page);
 
-  // Rail des programmes : 4.5rem (72 px) de large, à gauche du tiroir ou de la barre fixe.
+  // Barre de l'Accueil, complète dans le tiroir comme sur la barre fixe.
   await openDrawer(page, hasTouch);
   const rail = page.getByRole('navigation', { name: 'Programme' });
   await expect(rail).toBeInViewport({ ratio: 1 });
-  const railBox = (await rail.boundingBox())!;
-  expect(Math.round(railBox.width)).toBe(72);
   if (isDrawer) {
-    // Tiroir = 90 vw ; le rail garde sa largeur et le menu des cours prend le reste.
+    // Tiroir = 90 vw.
     const drawerBox = (await drawer(page).boundingBox())!;
     expect(drawerBox.x).toBe(0);
     expect(Math.round(drawerBox.width)).toBe(Math.round(width * 0.9));
@@ -54,11 +52,16 @@ test('disposition selon la largeur : tiroir + barre mobile (≤ 900 px) ou barre
     );
   }
 
-  // Sélection du programme : le sélecteur de cours et les sections apparaissent dans le même
+  // Ouvrir un cours : barre réduite à 4.5rem (72 px), avec le panneau du cours à côté, dans le même
   // conteneur (tiroir ou barre) ; le titre de la barre mobile reste « Accueil » sans canal.
-  await press(rail.getByRole('button', { name: PROGRAM_NAME }), hasTouch);
-  await expect(courseSelector(page, 'MAT115')).toBeVisible();
+  await press(rail.getByRole('button', { name: /MAT115/ }), hasTouch);
+  await expect(courseSelector(page, 'MAT115')).toBeAttached();
+  await openDrawer(page, hasTouch);
   await expectReachable(coursePicker(page));
+  // La barre glisse à l'ouverture du cours : on attend la fin du glissement.
+  await expect
+    .poll(async () => Math.round((await rail.locator('xpath=ancestor::div[3]').boundingBox())!.width))
+    .toBeLessThan(120);
   for (const section of ['QUIZ', 'CANAUX', 'FORUMS']) {
     await expectReachable(
       page.getByRole('navigation', { name: 'Cours' }).getByRole('button', { name: section, exact: true })
@@ -144,7 +147,7 @@ test('rotation portrait ⇄ paysage : disposition adaptée, état conservé, auc
   const rotated = { width: initial.height, height: initial.width };
   const composer = mainContent(page).getByRole('textbox', { name: `Envoyer un message dans ${CHANNEL_NAME}` });
   const channel = page.getByRole('navigation', { name: 'Cours' }).getByRole('button', { name: CHANNEL_NAME });
-  const program = page.getByRole('navigation', { name: 'Programme' }).getByRole('button', { name: PROGRAM_NAME });
+  const course = courseTile(page, 'MAT115');
 
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openSidebarItem(page, CHANNEL_NAME, hasTouch);
@@ -154,8 +157,8 @@ test('rotation portrait ⇄ paysage : disposition adaptée, état conservé, auc
     await page.setViewportSize(size);
     expect(layoutOf(page).width).toBe(size.width);
     await expectLayout(page);
-    // État conservé : programme courant, cours MAT115, canal courant et son composeur.
-    await expect(program).toHaveAttribute('aria-current', 'page');
+    // État conservé : cours MAT115, canal courant et son composeur.
+    await expect(course).toHaveAttribute('aria-current', 'page');
     await expect(courseSelector(page, 'MAT115')).toHaveCount(1);
     await expect(channel).toHaveAttribute('aria-current', 'page');
     await expectReachable(composer);

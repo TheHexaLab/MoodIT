@@ -1,31 +1,10 @@
 import { expect, test } from '../fixtures';
 import { TEST_PASSWORD } from '../../setup/accounts';
 import { FORUM_NAME, QUIZ_NAME, createEnrolledUser, enterCode, mainContent, uniqueSuffix } from '../helpers';
-import { courseSelector } from '../admin.helpers';
-import { SECOND_COURSE, settingsSaved } from '../dashboard.helpers';
+import { courseSelector, courseTile } from '../admin.helpers';
+import { SECOND_COURSE } from '../dashboard.helpers';
 import { pointerDrag } from '../quiz.helpers';
-import {
-  CHANNEL_NAME,
-  PROGRAM_NAME,
-  banner,
-  closeDrawer,
-  courseNav,
-  coursePicker,
-  drawer,
-  expectActionable,
-  expectLayout,
-  expectNoHorizontalOverflow,
-  expectNoScrollableOverflow,
-  expectReachable,
-  layoutOf,
-  longPressCourseSelector,
-  openDrawer,
-  openSidebarItem,
-  pickCourse,
-  press,
-  selectProgram,
-  studentPage,
-} from '../responsive.helpers';
+import { CHANNEL_NAME, PROGRAM_NAME, banner, closeDrawer, courseNav, drawer, expectActionable, expectLayout, expectNoHorizontalOverflow, expectNoScrollableOverflow, expectReachable, layoutOf, openDrawer, openSidebarItem, pickCourse, press, selectProgram, studentPage, openCourseMenu } from '../responsive.helpers';
 
 // Parcours essentiels, joués avec le geste du profil : `tap` (événements tactiles) sur les
 // profils `hasTouch`, clic ailleurs. Comptes neufs à chaque test. Les glisser-déposer passent
@@ -62,27 +41,19 @@ test('tiroir → programme → cours → canal → message envoyé et persisté'
 
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await pickCourse(page, 'MAT115', hasTouch); // l'ordre des cours n'est pas garanti (cf. ensureCourse)
-  // Changement de cours par le sélecteur (liste portée) : GIF201 puis retour à MAT115.
+  // Changement de cours par sa tuile : GIF201 puis retour à MAT115.
   await openDrawer(page, hasTouch);
-  await press(coursePicker(page), hasTouch);
-  const listbox = page.getByRole('listbox');
-  await expectReachable(listbox.getByRole('textbox', { name: 'Rechercher un cours…' }));
-  await expectActionable(listbox.getByRole('option', { name: new RegExp(`^${SECOND_COURSE.code} `) }), hasTouch, 32);
-  await press(listbox.getByRole('option', { name: new RegExp(`^${SECOND_COURSE.code} `) }), hasTouch);
+  await expectActionable(courseTile(page, SECOND_COURSE.code), hasTouch, 32);
+  await press(courseTile(page, SECOND_COURSE.code), hasTouch);
   await expect(courseSelector(page, SECOND_COURSE.code)).toBeVisible();
   await expect(courseNav(page).getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
   // Changer de cours ne referme PAS le tiroir (seul le choix d'un canal le fait) : on peut y
   // choisir un canal du nouveau cours sans le rouvrir.
   if (isDrawer) await expect(drawer(page)).toBeInViewport();
-  await press(coursePicker(page), hasTouch);
-  await press(listbox.getByRole('option', { name: /^MAT115 / }), hasTouch);
+  await press(courseTile(page, 'MAT115'), hasTouch);
   await expect(courseSelector(page, 'MAT115')).toBeVisible();
   await closeDrawer(page, hasTouch);
 
-  // Dernier emplacement (PUT /api/me/settings, débouncé 1 s) : on l'attend avant de recharger —
-  // sans cela le rechargement peut précéder la sauvegarde (le flush keepalive au pagehide ne
-  // suffit pas sur WebKit) et la page revient sur « Aucun canal sélectionné ».
-  const locationSaved = settingsSaved(page, (s) => s.location?.courseId === 1 && s.location.channel != null);
   await openSidebarItem(page, CHANNEL_NAME, hasTouch);
   if (isDrawer) await expect(banner(page).getByRole('heading')).toHaveText(CHANNEL_NAME);
   const composer = mainContent(page).getByRole('textbox', { name: CHANNEL_INPUT });
@@ -95,9 +66,7 @@ test('tiroir → programme → cours → canal → message envoyé et persisté'
   await expect(row).toBeVisible();
   await expect(composer).toHaveValue('');
 
-  // Persisté : présent après rechargement. Le canal est rouvert explicitement : la restauration du
-  // dernier emplacement est couverte ailleurs (profile.spec.ts) et échoue par instants sur WebKit.
-  await locationSaved;
+  // Persisté : présent après rechargement (l'URL garde le canal ouvert).
   await page.reload();
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openSidebarItem(page, CHANNEL_NAME, hasTouch);
@@ -126,8 +95,6 @@ test('publier un sujet et voter', async ({ browser, baseURL, hasTouch }) => {
   // Un lecteur vote (bouton du rail ou du pied de post selon la largeur) ; persisté.
   const reader = await studentPage(browser, baseURL!);
   await selectProgram(reader.page, PROGRAM_NAME, hasTouch);
-  // Emplacement sauvegardé (débounce 1 s) avant le rechargement plus bas (cf. test précédent).
-  const locationSaved = settingsSaved(reader.page, (s) => s.location?.channel != null);
   await openSidebarItem(reader.page, FORUM_NAME, hasTouch);
   const card = mainContent(reader.page)
     .getByRole('listitem')
@@ -141,7 +108,6 @@ test('publier un sujet et voter', async ({ browser, baseURL, hasTouch }) => {
     - text: "1"
     - button "Voter contre"
   `);
-  await locationSaved;
   await reader.page.reload();
   await selectProgram(reader.page, PROGRAM_NAME, hasTouch); // forum rouvert explicitement (cf. test précédent)
   await openSidebarItem(reader.page, FORUM_NAME, hasTouch);
@@ -259,30 +225,19 @@ test('menu contextuel du cours : appui long (tactile) ou clic droit', async ({ b
   const { page, context } = await studentPage(browser, baseURL!);
   await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openDrawer(page, hasTouch);
-  const menu = hasTouch
-    ? await longPressCourseSelector(page, 'MAT115')
-    : await (async () => {
-        await courseSelector(page, 'MAT115').click({ button: 'right' });
-        const m = page.getByRole('menu', { name: 'Actions du cours MAT115' });
-        await expect(m).toBeVisible();
-        return m;
-      })();
+  const menu = await openCourseMenu(page, 'MAT115', hasTouch);
   await expectReachable(menu);
-  // Étudiant : la seule action commune ; la liste des cours ne s'est pas ouverte.
+  // Étudiant : la seule action commune.
   await expect(menu.getByRole('menuitem')).toHaveText(['Quitter le cours']);
   await expectActionable(menu.getByRole('menuitem', { name: 'Quitter le cours' }), hasTouch, 32);
-  await expect(page.getByRole('listbox')).toHaveCount(0);
-  await expect(coursePicker(page)).toHaveAttribute('aria-expanded', 'false');
 
   // Fermeture par un geste hors du menu (mousedown) : dans le bas du tiroir ouvert (zone vide
   // sous les sections ; le pied de page du compte y est masqué) ou, barre fixe, dans le contenu
-  // principal (état « Aucun canal sélectionné »). Puis le sélecteur s'ouvre normalement.
+  // principal (état « Aucun canal sélectionné »).
   const target = layoutOf(page).drawer ? drawer(page) : mainContent(page);
-  const position = { x: 100, y: layoutOf(page).height - 40 };
+  const position = { x: 100, y: layoutOf(page).height - 120 };
   await (hasTouch ? target.tap({ position }) : target.click({ position }));
   await expect(menu).toBeHidden();
-  await press(coursePicker(page), hasTouch);
-  await expect(page.getByRole('listbox')).toBeVisible();
   await context.close();
 });
 

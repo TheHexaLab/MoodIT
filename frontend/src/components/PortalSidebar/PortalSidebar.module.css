@@ -1,0 +1,375 @@
+.sidebar {
+    --sidebar-speed: 0.2s;
+    position: relative;
+    box-sizing: border-box;
+    flex: none;
+    width: var(--portal-sidebar-width, 17rem);
+    height: 100%;
+    overflow: hidden;
+    transition: width var(--sidebar-speed) ease;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
+}
+
+/* Largeur fixe : la barre glisse par-dessus ce contenu, qui ne se réorganise jamais à l'horizontale.
+   Le centre des icônes et des tuiles reste à 2,25rem du bord, soit le milieu de la barre réduite. */
+.inner {
+    width: var(--portal-sidebar-width, 17rem);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.pages {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 1rem 0.75rem 0.5rem;
+}
+
+.navItem {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    height: 2.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0 0 0 0.9375rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--text-body);
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: width var(--sidebar-speed) ease, max-height var(--sidebar-speed) ease,
+        margin var(--sidebar-speed) ease, opacity var(--sidebar-speed) ease,
+        visibility var(--sidebar-speed), color 0.15s ease;
+}
+
+/* Le libellé s'efface en place : il ne pousse rien pendant le glissement. */
+.label {
+    white-space: nowrap;
+    transition: opacity var(--sidebar-speed) ease;
+}
+
+/* Survol : la barre verticale de l'élément actif, moins haute et plus pâle, et le texte plus franc. */
+@media (hover: hover) {
+    .navItem:not(.navItemActive):hover {
+        color: var(--text);
+    }
+
+    .navItem:hover::before,
+    .course:hover::before {
+        opacity: 0.55;
+        transform: translateY(-50%) scaleY(0.7);
+    }
+}
+
+.navItemActive {
+    background: var(--badge-success-bg);
+    color: var(--brand-teal);
+    font-weight: 600;
+}
+
+/* Barre de 4 px au bord gauche de la barre : un seul élément, qui s'anime en scaleY, pour que le
+   passage du survol à l'élément actif soit fluide. */
+.navItem::before,
+.course::before {
+    content: '';
+    position: absolute;
+    left: -0.75rem;
+    top: 50%;
+    width: 0.25rem;
+    height: 2rem;
+    border-radius: 0 0.1875rem 0.1875rem 0;
+    background: var(--brand-teal);
+    opacity: 0;
+    transform: translateY(-50%) scaleY(0);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.navItem.navItemActive::before,
+.course.courseActive::before {
+    opacity: 1;
+    transform: translateY(-50%) scaleY(1);
+}
+
+.navItem:focus-visible,
+.course:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: -2px;
+}
+
+.navIcon {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex: none;
+}
+
+.heading {
+    flex: none;
+    max-height: 2.5rem;
+    margin: 0;
+    overflow: hidden;
+    padding: 0.75rem 1.5rem 0.375rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: max-height var(--sidebar-speed) ease, padding var(--sidebar-speed) ease,
+        opacity var(--sidebar-speed) ease;
+}
+
+.courses {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 0.75rem 0.5rem;
+}
+
+/* Ces lignes glissent à la verticale quand la barre change : sans couche à part, le texte s'aligne sur
+   le pixel entier mais pas le fond de la tuile, et il tremble dedans. La couche ne dure que le temps du
+   glissement : au repos, le texte garde son rendu net. */
+.sidebarSliding .course,
+.sidebarSliding .join {
+    will-change: transform;
+}
+
+.course {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 3rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.25rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: width var(--sidebar-speed) ease;
+}
+
+.tile {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: none;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.625rem;
+    color: var(--text-on-brand);
+    font-size: 0.5625rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.courseText {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    white-space: nowrap;
+    transition: opacity var(--sidebar-speed) ease;
+}
+
+.courseTitle {
+    overflow: hidden;
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.courseCode {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* Contenu calé en haut de la ligne, et coupé à la verticale seulement (la barre de survol dépasse à
+   gauche) : quand sa hauteur s'anime, il suit la ligne au lieu de glisser à l'intérieur. */
+.join {
+    flex: none;
+    align-items: flex-start;
+    max-height: 2.75rem;
+    margin-top: 0.25rem;
+    overflow-x: visible;
+    overflow-y: clip;
+    color: var(--text-muted);
+}
+
+.join .navIcon {
+    margin-top: 0.8125rem;
+}
+
+.join .label {
+    line-height: 2.75rem;
+}
+
+/* Lignes propres à une version : leur hauteur s'anime pour que les tuiles glissent sans saut. */
+.expandedOnly {
+    max-height: 2.75rem;
+}
+
+.collapsedOnly,
+.sidebarCollapsed .expandedOnly {
+    max-height: 0;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    visibility: hidden;
+}
+
+.sidebarCollapsed .collapsedOnly {
+    max-height: 2.75rem;
+    margin-top: 0.25rem;
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Bouton réduire / déplier : hors de la zone qui défile, au-dessus du compte. */
+.toggle {
+    width: calc(100% - 1.5rem);
+    margin: 0 0.75rem 0.5rem;
+}
+
+/* ── Version réduite ─────────────────────────────────────────── */
+.sidebarCollapsed {
+    width: 4.5rem;
+}
+
+.sidebarCollapsed .navItem,
+.sidebarCollapsed .course {
+    width: 3rem;
+}
+
+.sidebarCollapsed .label,
+.sidebarCollapsed .courseText {
+    opacity: 0;
+}
+
+.sidebarCollapsed .heading {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+}
+
+/* Remplace le titre « Mes cours » : discret dans la version complète, où sa hauteur est nulle. */
+.divider {
+    flex: none;
+    width: 2rem;
+    height: 0;
+    margin: 0 0 0 1.25rem;
+    background: var(--border-strong);
+    transition: height var(--sidebar-speed) ease, margin var(--sidebar-speed) ease;
+}
+
+.sidebarCollapsed .divider {
+    height: 1px;
+    margin: 0.25rem 0 0.5rem 1.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar {
+        --sidebar-speed: 0s;
+    }
+
+    .navItem::before,
+    .course::before {
+        transition: none;
+    }
+}
+
+/* Pendant le glissement de la poignée, la largeur suit la souris sans retard. */
+.sidebarResizing {
+    transition: none;
+}
+
+/* Poignée de redimensionnement (bord droit), comme celle du panneau du cours. */
+.resizeHandle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.resizeHandle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after,
+.resizeHandleActive::after {
+    background: var(--brand-teal);
+}
+
+.resizeHandle:focus-visible {
+    outline: none;
+}
+
+.status {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+
+/* L'avatar (2rem) reste centré à 2,25rem du bord dans les deux versions. Le bouton remplit le pied
+   jusqu'au bord : son survol n'est pas coupé. */
+.footer {
+    --user-menu-inset: 1.25rem;
+    flex: none;
+    height: 3.5rem;
+    box-sizing: border-box;
+    background: var(--bg-user-panel);
+    border-top: 1px solid var(--border);
+}
+
+/* Mobile : la barre remplit le tiroir de LeftMenuGroup. */
+@media (max-width: 56.25rem) {
+    .sidebar:not(.sidebarCollapsed) {
+        flex: 1;
+        width: 100%;
+    }
+
+    .sidebar:not(.sidebarCollapsed) .inner {
+        width: 100%;
+    }
+
+    .resizeHandle {
+        display: none;
+    }
+
+    /* Le compte est dans la barre mobile du haut (LeftMenuGroup), comme avant le portail. */
+    .footer {
+        display: none;
+    }
+}

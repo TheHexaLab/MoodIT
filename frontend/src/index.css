@@ -25,6 +25,11 @@
     --brand-deep: #1f4799;
     --brand-gradient: linear-gradient(135deg, #00c0d2 0%, #0a5cc0 100%);
     --text-active: #0a5cc0;
+    /* Tuiles de cours sans équivalent : fixes dans tous les thèmes, sous du texte blanc. */
+    --tile-slate: #454559;
+    --tile-teal-deep: #115e59;
+    /* Hauteur du bandeau du portail (0 sur mobile) : les panneaux pleine hauteur la soustraient. */
+    --portal-band-height: 3.25rem;
     --success: #23a55a;
     --danger: #c42929;
     --danger-alt: #e5484d;

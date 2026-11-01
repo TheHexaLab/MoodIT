@@ -35,7 +35,7 @@ test('inscription validée par le code reçu par courriel', async ({ page }) => 
   await enterCode(page, await readCodeFromMail(user.email, 'Code de vérification'));
 
   await expect(page).toHaveURL(/\/home(\/|$)/);
-  await expect(page.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Compte utilisateur' })).toContainText(
     `@${user.username}`
   );

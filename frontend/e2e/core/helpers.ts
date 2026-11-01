@@ -143,10 +143,9 @@ export async function loginThroughUi(page: Page, email: string) {
   await expect(page).toHaveURL(/\/home(\/|$)/);
 }
 
-/** Ouvre le programme de test puis un élément de la barre du cours (quiz, canal ou forum). */
+/** Ouvre le cours de test puis un élément de sa barre (quiz, canal ou forum). */
 export async function openCourseItem(page: Page, itemName: string) {
-  await page.goto('/home');
-  await page.getByRole('button', { name: PROGRAM_NAME }).click();
+  await page.goto(`/home/p/${TEST_PROGRAM_ID}/c/${TEST_COURSE_ID}`);
   await page.getByRole('button', { name: itemName }).click();
 }
 

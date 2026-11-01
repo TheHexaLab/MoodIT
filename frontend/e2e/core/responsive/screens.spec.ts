@@ -9,31 +9,7 @@ import {
   waitForPopupSettled,
 } from '../helpers';
 import { clickCourseMenu, clickProgramMenu, openUserMenu } from '../admin.helpers';
-import {
-  CHANNEL_NAME,
-  CODE_COURSE,
-  PROGRAM_NAME,
-  closeDrawer,
-  courseNav,
-  coursePicker,
-  expectActionable,
-  expectField,
-  noteTarget,
-  expectNoHorizontalOverflow,
-  expectNoScrollableOverflow,
-  expectPopupFits,
-  expectReachable,
-  expectWithinWidth,
-  guardianPage,
-  layoutOf,
-  openDrawer,
-  openSidebarItem,
-  pickCourse,
-  press,
-  programAdminPage,
-  selectProgram,
-  studentPage,
-} from '../responsive.helpers';
+import { CHANNEL_NAME, CODE_COURSE, PROGRAM_NAME, closeDrawer, courseNav, drawer, expectActionable, expectField, noteTarget, expectNoHorizontalOverflow, expectNoScrollableOverflow, expectPopupFits, expectReachable, expectWithinWidth, guardianPage, layoutOf, openDrawer, openSidebarItem, pickCourse, press, programAdminPage, selectProgram, studentPage, pressAddProgram, openCourseMenu } from '../responsive.helpers';
 
 // Chaque écran principal et chaque popup, sur les 8 profils : aucun débordement horizontal
 // (document et conteneurs défilants) et les éléments clés (champs, boutons d'action) sont
@@ -130,15 +106,21 @@ test('états vides : accueil, programme sans cours, aucun canal sélectionné', 
   baseURL,
   hasTouch,
 }) => {
-  // Compte neuf sans abonnement : « Bienvenue sur MoodIT ».
+  // Compte neuf sans abonnement : l'Accueil, avec de quoi rejoindre un programme.
   const { user, storageState } = await createEnrolledUser(baseURL!, undefined, { enroll: false });
   const context = await browser.newContext({ storageState });
   const page = await context.newPage();
   await page.goto('/home');
-  await expect(main(page).getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
+  await expect(main(page).getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
   await expectScreenFits(page);
-  await expectReachable(main(page).getByRole('heading', { name: 'Bienvenue sur MoodIT' }));
-  await expectActionable(main(page).getByRole('button', { name: '+ Rejoindre un programme' }), hasTouch, 32);
+  await expectReachable(main(page).getByRole('heading', { name: /^Bonjour/ }));
+  await openDrawer(page, hasTouch);
+  await expectActionable(
+    drawer(page).getByRole('button', { name: /^(Rejoindre|Ajouter) un programme$/ }),
+    hasTouch,
+    32
+  );
+  await closeDrawer(page, hasTouch);
 
   // Abonnement au programme 1 sans cours (API) : « Ce programme n'a pas de cours ».
   const api = await request.newContext({ baseURL, storageState });
@@ -344,13 +326,11 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
   await expect(page.getByRole('heading', { name: 'Modifier le profil' })).toHaveCount(0);
 
   // Ajouter un programme → menu des options → Rejoindre un programme (deux étapes).
-  await openDrawer(page, hasTouch);
-  await press(page.getByRole('button', { name: 'Ajouter un programme', exact: true }), hasTouch);
+  await pressAddProgram(page, hasTouch);
   await expectPopup(page, 'Ajouter un programme', [], hasTouch);
   await noteTarget(page.getByRole('button', { name: '✕' }), hasTouch);
-  // ≤ 360 px l'icône de l'option (« ↪ ») est masquée : le nom accessible perd son préfixe. Le
-  // « + Rejoindre un programme » de l'accueil vide est exclu par son texte « + ».
-  const join = page.getByRole('button', { name: /Rejoindre un programme/ }).filter({ hasNotText: /\+\s*Rejoindre/ });
+  // ≤ 360 px l'icône de l'option (« ↪ ») est masquée : le nom accessible perd son préfixe.
+  const join = page.getByRole('dialog').getByRole('button', { name: /Rejoindre un programme/ });
   await expectActionable(join, hasTouch, 32);
   await press(join, hasTouch);
   await expectPopup(page, 'Rejoindre un programme', [], hasTouch);
@@ -375,7 +355,6 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
 
   // Rejoindre des cours (menu contextuel du programme : clic droit, le seul geste que Playwright
   // sait émettre pour `contextmenu` — l'appui long d'Android n'est pas émulable).
-  await selectProgram(page, PROGRAM_NAME, hasTouch);
   await openDrawer(page, hasTouch);
   await clickProgramMenu(page, PROGRAM_NAME, 'Rejoindre des cours');
   await expectPopup(page, 'Rejoindre des cours', ['Annuler', 'Rejoindre'], hasTouch);
@@ -393,8 +372,6 @@ test('popups de l’étudiant : profil, ajouter / rejoindre un programme, rejoin
 test('popups de gestion : cours, programme, sections, rôles, MCP', async ({ browser, baseURL, hasTouch }) => {
   const { page, context, revoke } = await programAdminPage(browser, baseURL!);
   try {
-    await selectProgram(page, PROGRAM_NAME, hasTouch);
-
     // Ajouter un cours (menu du programme) : établissement, programmes, code, titre.
     await openDrawer(page, hasTouch);
     await clickProgramMenu(page, PROGRAM_NAME, 'Ajouter un cours');
@@ -431,14 +408,13 @@ test('popups de gestion : cours, programme, sections, rôles, MCP', async ({ bro
     await press(page.getByRole('button', { name: '✕' }), hasTouch);
     await expect(page.getByRole('heading', { name: 'Gestion des rôles' })).toHaveCount(0);
 
-    // Modifier le cours (crayon du sélecteur) : programmes multi, code, titre.
+    // Modifier le cours (menu contextuel du cours) : programmes multi, code, titre.
+    await closeDrawer(page, hasTouch);
+    await selectProgram(page, PROGRAM_NAME, hasTouch);
+    await pickCourse(page, 'MAT115', hasTouch);
     await openDrawer(page, hasTouch);
-    await press(coursePicker(page), hasTouch);
-    await expectField(page.getByRole('listbox').getByRole('textbox', { name: 'Rechercher un cours…' }), hasTouch);
-    await expectActionable(page.getByRole('listbox').getByRole('option', { name: /^MAT115 / }), hasTouch, 32);
-    const pencil = page.getByRole('listbox').getByRole('button', { name: 'Modifier le cours MAT115' });
-    await noteTarget(pencil, hasTouch);
-    await press(pencil, hasTouch);
+    const courseMenu = await openCourseMenu(page, 'MAT115', hasTouch);
+    await press(courseMenu.getByRole('menuitem', { name: 'Modifier le cours' }), hasTouch);
     await expectPopup(page, 'Modifier le cours', ['Annuler', 'Enregistrer'], hasTouch);
     await expectField(page.getByRole('textbox', { name: 'Titre du cours' }), hasTouch);
     await noteTarget(page.getByRole('button', { name: `Retirer ${PROGRAM_NAME}` }).first(), hasTouch);
@@ -655,14 +631,12 @@ test('popups du gardien : établissements et journal d’audit', async ({ browse
     await expect(page.getByRole('heading', { name: "Journal d'audit" })).toHaveCount(0);
 
     // Gérer les établissements (Ajouter un programme → option) : lignes, formulaire d'ajout.
-    await openDrawer(page, hasTouch);
-    await press(page.getByRole('button', { name: 'Ajouter un programme', exact: true }), hasTouch);
+    await pressAddProgram(page, hasTouch);
     await expectPopup(page, 'Ajouter un programme', [], hasTouch);
     await noteTarget(page.getByRole('button', { name: '✕' }), hasTouch);
     // ≤ 360 px les icônes des options sont masquées : noms sans préfixe.
     for (const option of [/Créer un programme/, /Rejoindre un programme/, /Gérer les établissements/]) {
-      // Écarte le « + Rejoindre un programme » de l'accueil vide, au nom voisin de l'option.
-      const button = page.getByRole('button', { name: option }).filter({ hasNotText: /\+\s*Rejoindre/ });
+      const button = page.getByRole('dialog').getByRole('button', { name: option });
       await expectActionable(button, hasTouch, 32);
     }
     await press(page.getByRole('button', { name: /Gérer les établissements/ }), hasTouch);

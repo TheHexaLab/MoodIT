@@ -18,6 +18,9 @@ import {
   openHome,
   programButton,
   sessionFor,
+  enterProgram,
+  courseTile,
+  courseTileNamed,
 } from './admin.helpers';
 
 // Gestion des programmes et des cours selon le rôle. Tout ce qui est créé ici (programmes, cours)
@@ -131,9 +134,7 @@ test('le gardien crée, modifie et supprime un programme ; un abonné le voit en
     await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
     await expect(programButton(page, renamed)).toHaveCount(0);
     await expect(programButton(watcher.page, renamed)).toHaveCount(0); // WS program:deleted
-    await expect(
-      mainContent(watcher.page).getByRole('heading', { name: 'Bienvenue sur MoodIT' })
-    ).toBeVisible();
+    await expect(mainContent(watcher.page).getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
     expect(await programIdByCode(gardienApi, identity.code)).toBeUndefined();
   } finally {
     if (programId !== undefined) await deleteProgramApi(gardienApi, programId);
@@ -211,15 +212,8 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
     // L'id (nettoyage en `finally`) est posé par le gestionnaire `response`, asynchrone : l'attendre.
     await expect.poll(() => courseId, { message: 'id du cours créé (réponse POST)' }).toBeDefined();
 
-    // Le cours apparaît dans le sélecteur ; on l'ouvre : il est vide. Le programme est ouvert
-    // explicitement : le test ne doit pas dépendre du dernier emplacement enregistré du compte.
-    // Le cours sélectionné à l'ouverture n'est pas garanti (dernier emplacement, ou tri par code :
-    // « C… » passe avant MAT115) : on ouvre le sélecteur quel que soit le cours affiché.
-    await programButton(page, PROGRAM_NAME).click();
-    const sidebar = page.getByRole('navigation', { name: 'Cours' });
-    await sidebar.locator('button[aria-haspopup="listbox"]').click();
-    const picker = page.getByRole('listbox');
-    await picker.getByRole('option', { name: `${code} ${title}` }).click();
+    // Le cours apparaît dans la barre ; on l'ouvre : il est vide.
+    await courseTile(page, code).click();
     await expect(courseSelector(page, code)).toBeVisible();
     const main = mainContent(page);
     await expect(main.getByRole('heading', { name: 'Ce cours est vide' })).toBeVisible();
@@ -227,16 +221,13 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
       await expect(main.getByRole('button', { name: action })).toBeVisible();
     }
 
-    // Modification par le crayon du sélecteur.
-    await courseSelector(page, code).click();
-    await picker.getByRole('button', { name: `Modifier le cours ${code}` }).click();
+    // Modification par le menu contextuel du cours.
+    await clickCourseMenu(page, code, 'Modifier le cours');
     await expect(page.getByRole('textbox', { name: 'Titre du cours' })).toHaveValue(title);
     await page.getByRole('textbox', { name: 'Titre du cours' }).fill(`${title} v2`);
     await page.getByRole('button', { name: 'Enregistrer' }).click();
     await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toHaveCount(0);
-    await courseSelector(page, code).click();
-    await expect(picker.getByRole('option', { name: `${code} ${title} v2` })).toBeVisible();
-    await page.keyboard.press('Escape');
+    await expect(courseTileNamed(page, code, `${title} v2`)).toBeVisible();
 
     // Menu contextuel du cours : actions de gestion, puis suppression confirmée.
     await expectCourseMenu(page, code, [
@@ -250,8 +241,7 @@ test('l’enseignant ajoute, modifie et supprime un cours du programme 1', async
     await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
     await expect(courseSelector(page, code)).toHaveCount(0);
     await expect(courseSelector(page, 'MAT115')).toBeVisible();
-    await courseSelector(page, 'MAT115').click();
-    await expect(picker.getByRole('option', { name: new RegExp(`^${code} `) })).toHaveCount(0);
+    await expect(courseTile(page, code)).toHaveCount(0);
   } finally {
     if (courseId !== undefined) await deleteCourseApi(profApi, courseId);
     await prof.close();
@@ -270,18 +260,11 @@ test('un étudiant n’a que « Rejoindre des cours » et « Quitter » dans les
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
 
-  // Menu du cours : seulement « Quitter le cours » ; et pas de crayon dans le sélecteur.
-  // Sélection explicite du programme : sur une BD neuve, alice n'a pas de dernier emplacement
-  // enregistré, donc aucun cours n'est ouvert au chargement.
-  await programButton(page, PROGRAM_NAME).click();
+  // Menu du cours : seulement « Quitter le cours ». Pas de gestion du cours dans la barre.
+  await expect(page.getByRole('button', { name: `Ajouter un cours : ${PROGRAM_NAME}` })).toHaveCount(0);
+  await enterProgram(page, PROGRAM_NAME);
   await expectCourseMenu(page, 'MAT115', ['Quitter le cours']);
   await page.keyboard.press('Escape');
-  await courseSelector(page, 'MAT115').click();
-  await expect(page.getByRole('listbox').getByRole('option', { name: /^MAT115 / })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Modifier le cours MAT115' })).toHaveCount(0);
-  await expect(
-    page.getByRole('listbox').getByRole('button', { name: 'Ajouter un cours' })
-  ).toHaveCount(0);
 
   await context.close();
 });
