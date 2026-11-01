@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import styles from './AssignmentView.module.css';
 import { AssignmentDetail, BackLink } from './AssignmentDetail.tsx';
+import { AssignmentFormPopup } from './AssignmentFormPopup.tsx';
 import { AssignmentList } from './AssignmentList.tsx';
+import { SubmissionTracking, TeacherAssignmentList } from './TeacherAssignments.tsx';
 import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon.tsx';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
 import { Spinner } from '../../Spinner/Spinner.tsx';
-import type { Assignment, Course } from '../../../types/domain.ts';
+import type {
+  Assignment,
+  AssignmentDraft,
+  AssignmentStudentRow,
+  Course,
+} from '../../../types/domain.ts';
 
 /** Id de canal de la liste des devoirs (`/assignment/0`) ; un autre id ouvre ce devoir. */
 export const ASSIGNMENT_LIST_ID = 0;
@@ -18,6 +25,13 @@ export interface AssignmentHandlers {
     assignmentId: number,
     fileName: string
   ) => Promise<Assignment>;
+  onCreateAssignment: (courseId: number, draft: AssignmentDraft) => Promise<Assignment>;
+  onUpdateAssignment: (
+    courseId: number,
+    assignmentId: number,
+    draft: AssignmentDraft
+  ) => Promise<Assignment>;
+  onFetchSubmissions: (assignment: Assignment) => Promise<AssignmentStudentRow[]>;
   /** La liste a changé (ex. une remise) : le parent met à jour le compte du panneau. */
   onAssignmentsChanged?: () => void;
 }
@@ -27,6 +41,11 @@ interface AssignmentViewProps {
   /** {@link ASSIGNMENT_LIST_ID} : la liste ; sinon, le devoir ouvert. */
   assignmentId: number;
   handlers: AssignmentHandlers;
+  /**
+   * Personnel du cours : voit les brouillons et le suivi, crée et modifie les devoirs.
+   * Gating COSMÉTIQUE : le permission-service tranchera quand l'API existera.
+   */
+  canManage?: boolean;
   /** Ouvre un devoir, ou revient à la liste. L'URL porte la vue (#63). */
   onOpen: (assignmentId: number) => void;
   /** Date de référence (injectée par les tests). */
@@ -43,17 +62,20 @@ export default function AssignmentView({
   course,
   assignmentId,
   handlers,
+  canManage = false,
   onOpen,
   now = new Date(),
 }: AssignmentViewProps): React.ReactElement {
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   /** Incrémenté par « Réessayer » : relance le chargement. */
   const [attempt, setAttempt] = useState(0);
+  /** Fenêtre ouverte : `null` pour un nouveau devoir, sinon le devoir à modifier. */
+  const [form, setForm] = useState<{ assignment: Assignment | null } | null>(null);
   const { onFetchAssignments } = handlers;
 
   useEffect(() => {
     let cancelled = false;
-    onFetchAssignments(course.id)
+    onFetchAssignments(course.id, canManage)
       .then((assignments) => {
         if (!cancelled) setLoad({ status: 'ready', assignments: [...assignments] });
       })
@@ -63,7 +85,7 @@ export default function AssignmentView({
     return () => {
       cancelled = true;
     };
-  }, [course.id, onFetchAssignments, attempt]);
+  }, [course.id, canManage, onFetchAssignments, attempt]);
 
   const assignments = load.status === 'ready' ? load.assignments : [];
   const opened =
@@ -76,6 +98,20 @@ export default function AssignmentView({
     setLoad({
       status: 'ready',
       assignments: assignments.map((a) => (a.id === updated.id ? { ...updated } : a)),
+    });
+    handlers.onAssignmentsChanged?.();
+  }
+
+  async function saveForm(draft: AssignmentDraft) {
+    const editing = form?.assignment;
+    const saved = editing
+      ? await handlers.onUpdateAssignment(course.id, editing.id, draft)
+      : await handlers.onCreateAssignment(course.id, draft);
+    setLoad({
+      status: 'ready',
+      assignments: editing
+        ? assignments.map((a) => (a.id === saved.id ? { ...saved } : a))
+        : [{ ...saved }, ...assignments],
     });
     handlers.onAssignmentsChanged?.();
   }
@@ -107,7 +143,17 @@ export default function AssignmentView({
       );
     }
     if (assignmentId === ASSIGNMENT_LIST_ID) {
-      return <AssignmentList assignments={assignments} now={now} onOpen={onOpen} />;
+      return canManage ? (
+        <TeacherAssignmentList
+          assignments={assignments}
+          now={now}
+          onOpen={onOpen}
+          onNew={() => setForm({ assignment: null })}
+          onEditDraft={(assignment) => setForm({ assignment })}
+        />
+      ) : (
+        <AssignmentList assignments={assignments} now={now} onOpen={onOpen} />
+      );
     }
     if (!opened) {
       return (
@@ -115,6 +161,16 @@ export default function AssignmentView({
           <BackLink onBack={() => onOpen(ASSIGNMENT_LIST_ID)} />
           <p className={styles.empty}>Ce devoir n'existe plus.</p>
         </div>
+      );
+    }
+    if (canManage) {
+      return (
+        <SubmissionTracking
+          assignment={opened}
+          onBack={() => onOpen(ASSIGNMENT_LIST_ID)}
+          onEdit={() => setForm({ assignment: opened })}
+          onFetchSubmissions={handlers.onFetchSubmissions}
+        />
       );
     }
     return (
@@ -143,6 +199,14 @@ export default function AssignmentView({
         </p>
       </header>
       <div className={styles.content}>{renderContent()}</div>
+      {form && (
+        <AssignmentFormPopup
+          courseLabel={getCourseDisplayLabel(course)}
+          assignment={form.assignment ?? undefined}
+          onClose={() => setForm(null)}
+          onSave={saveForm}
+        />
+      )}
     </div>
   );
 }

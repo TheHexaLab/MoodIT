@@ -529,6 +529,26 @@ export interface AssignmentFile {
   size: string;
 }
 
+/** Ce que le prof saisit dans la fenêtre « Nouveau devoir ». */
+export interface AssignmentDraft {
+  title: string;
+  instructions: string;
+  dueAt?: string;
+  weight?: number;
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+}
+
+/** Une ligne du suivi des remises, côté prof. */
+export interface AssignmentStudentRow {
+  studentName: string;
+  status: 'graded' | 'submitted' | 'late' | 'missing';
+  submittedAt?: string;
+  fileName?: string;
+  grade?: string;
+}
+
 /** Devoir d'un cours, vu par l'étudiant (sa remise) ou le prof (les compteurs). */
 export interface Assignment {
   id: number;

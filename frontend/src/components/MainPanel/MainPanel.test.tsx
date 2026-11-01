@@ -110,6 +110,9 @@ describe('MainPanel', () => {
             },
           ]),
           onSubmitAssignment: vi.fn(),
+          onCreateAssignment: vi.fn(),
+          onUpdateAssignment: vi.fn(),
+          onFetchSubmissions: vi.fn(),
         },
       });
 

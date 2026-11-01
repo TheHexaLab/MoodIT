@@ -11,10 +11,12 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
-import { demoAssignments } from '../../mocks/assignmentsData.ts';
+import { demoAssignments, demoStudentRows } from '../../mocks/assignmentsData.ts';
 import type {
   AnswerResponse,
   Assignment,
+  AssignmentDraft,
+  AssignmentStudentRow,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1282,4 +1284,42 @@ export async function submitAssignment(
     late: assignment.dueAt != null && now > new Date(assignment.dueAt),
   };
   return assignment;
+}
+
+/** Crée un devoir, publié ou en brouillon, dans le cours. */
+export async function createAssignment(
+  courseId: number,
+  draft: AssignmentDraft
+): Promise<Assignment> {
+  const assignments = courseAssignments(courseId);
+  const assignment: Assignment = {
+    ...draft,
+    id: Math.max(...assignments.map((a) => a.id)) + 1,
+    courseId,
+    submittedCount: 0,
+    gradedCount: 0,
+    studentCount: 32,
+  };
+  assignments.unshift(assignment);
+  return assignment;
+}
+
+/** Enregistre les changements d'un devoir. */
+export async function updateAssignment(
+  courseId: number,
+  assignmentId: number,
+  draft: AssignmentDraft
+): Promise<Assignment> {
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Devoir introuvable');
+  // Un champ vidé dans la fenêtre doit disparaître : `...draft` le met à undefined.
+  Object.assign(assignment, draft);
+  return assignment;
+}
+
+/** Suivi des remises d'un devoir, une ligne par étudiant. */
+export async function fetchAssignmentSubmissions(
+  assignment: Assignment
+): Promise<AssignmentStudentRow[]> {
+  return demoStudentRows(assignment, new Date());
 }

@@ -1680,7 +1680,7 @@ describe('Dashboard — compléments', () => {
       fireEvent.click(
         within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Rejoindre des cours' })
       );
-      fireEvent.click(await screen.findByRole('button', { name: /Algèbre/ }));
+      fireEvent.click(await within(screen.getByRole('dialog')).findByRole('button', { name: /Algèbre/ }));
       fireEvent.click(screen.getByRole('button', { name: joinCoursesLabels.join }));
       expect(await screen.findByRole('button', { name: /MAT100/ })).toBeTruthy();
       expect(api.joinCourses).toHaveBeenCalledWith(3, [30]);

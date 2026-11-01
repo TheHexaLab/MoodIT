@@ -1,6 +1,7 @@
-import type { Assignment } from '../types/domain.ts';
+import type { Assignment, AssignmentStudentRow } from '../types/domain.ts';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 /** Date limite à 23 h 59, `days` jours après `now` : les maquettes restent à jour dans le temps. */
 function dueIn(now: Date, days: number): string {
@@ -22,6 +23,16 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
   // Ids dérivés du cours : un devoir ouvert dans un cours n'existe pas dans un autre.
   const id = (n: number) => courseId * 100 + n;
   return [
+    {
+      ...base,
+      id: id(7),
+      title: 'Devoir 7 : Graphes',
+      instructions: 'Parcours en largeur et en profondeur.',
+      isPublished: false,
+      publishedBy: undefined,
+      expectedFormats: [],
+      files: [],
+    },
     {
       ...base,
       id: id(6),
@@ -85,4 +96,35 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       },
     },
   ];
+}
+
+const FIRST_NAMES = ['Camille', 'Thomas', 'Léa', 'Samuel', 'Maya', 'Noah', 'Alice', 'Félix'];
+const LAST_NAMES = ['Lavoie', 'Bélanger', 'Morin', 'Roy', 'Tran', 'Gagnon'];
+
+/**
+ * Remises fictives d'un devoir, cohérentes avec ses compteurs : les premiers étudiants sont
+ * corrigés, puis remis, puis manquants. Une remise n'est en retard que si la date limite est passée.
+ */
+export function demoStudentRows(assignment: Assignment, now: Date): AssignmentStudentRow[] {
+  const due = assignment.dueAt ? new Date(assignment.dueAt) : now;
+  const isOver = due < now;
+  return Array.from({ length: assignment.studentCount }, (_, index) => {
+    const first = FIRST_NAMES[index % FIRST_NAMES.length];
+    // Décalage à chaque tour de prénoms : un nom complet ne revient pas, même pour 48 étudiants.
+    const last = LAST_NAMES[(index + Math.floor(index / 24)) % LAST_NAMES.length];
+    const studentName = `${first} ${last}`;
+    if (index >= assignment.submittedCount) return { studentName, status: 'missing' };
+
+    const isLate = isOver && index >= assignment.submittedCount - 3;
+    const submittedAt = new Date(
+      isLate
+        ? due.getTime() + (index + 1) * HOUR_MS
+        : Math.min(due.getTime(), now.getTime()) - (index + 1) * HOUR_MS
+    ).toISOString();
+    const fileName = `${assignment.title.split(' :')[0].replace(' ', '').toLowerCase()}-${last.toLowerCase()}.zip`;
+    if (index < assignment.gradedCount) {
+      return { studentName, status: 'graded', submittedAt, fileName, grade: `${14 + (index % 7)} / 20` };
+    }
+    return { studentName, status: isLate ? 'late' : 'submitted', submittedAt, fileName };
+  });
 }

@@ -56,6 +56,9 @@ function setup(
   const handlers: AssignmentHandlers = {
     onFetchAssignments: vi.fn().mockResolvedValue(props.assignments ?? [LATER, TO_DO, GRADED]),
     onSubmitAssignment: vi.fn(),
+    onCreateAssignment: vi.fn(),
+    onUpdateAssignment: vi.fn(),
+    onFetchSubmissions: vi.fn(),
     onAssignmentsChanged: vi.fn(),
     ...overrides,
   };

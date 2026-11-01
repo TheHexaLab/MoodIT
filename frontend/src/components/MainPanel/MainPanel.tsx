@@ -230,6 +230,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
           course={course}
           assignmentId={selectedChannel.id}
           handlers={assignmentHandlers}
+          canManage={isAdmin}
           onOpen={(assignmentId) => onOpenAssignment?.(assignmentId)}
         />
       );

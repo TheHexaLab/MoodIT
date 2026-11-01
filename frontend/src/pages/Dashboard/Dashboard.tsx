@@ -914,6 +914,9 @@ export default function Dashboard() {
     ? {
         onFetchAssignments: api.fetchAssignments,
         onSubmitAssignment: api.submitAssignment,
+        onCreateAssignment: api.createAssignment,
+        onUpdateAssignment: api.updateAssignment,
+        onFetchSubmissions: api.fetchAssignmentSubmissions,
         onAssignmentsChanged: () => refreshAssignmentsCount(effectiveSelectedCourseId),
       }
     : undefined;
