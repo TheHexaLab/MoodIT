@@ -110,7 +110,9 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
         }}
         aria-current={isSelected ? 'page' : undefined}
       >
-        <span className={styles.channelPrefix}>
+        <span
+          className={`${styles.channelPrefix} ${channel.type === 'announcement' ? styles.announcementPrefix : ''}`}
+        >
           <ChannelTypeIcon type={channel.type} />
         </span>
         <span className={styles.channelName}>{channel.name}</span>

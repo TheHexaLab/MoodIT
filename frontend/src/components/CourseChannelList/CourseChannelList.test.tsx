@@ -33,6 +33,14 @@ describe('CourseChannelList — canal d’annonces', () => {
     expect(onOpen).toHaveBeenCalledWith(CHANNELS[2]);
   });
 
+  it('seule l’icône du canal d’annonces porte la teinte jaune', () => {
+    const { container } = render(<CourseChannelList channels={CHANNELS} />);
+
+    const yellow = container.querySelectorAll('[class*="announcementPrefix"]');
+    expect(yellow).toHaveLength(1);
+    expect(yellow[0].closest('button')?.textContent).toContain('Annonces');
+  });
+
   it('marque le canal d’annonces sélectionné', () => {
     render(<CourseChannelList channels={CHANNELS} selectedChannel={{ id: 11, type: 'announcement' }} />);
 
