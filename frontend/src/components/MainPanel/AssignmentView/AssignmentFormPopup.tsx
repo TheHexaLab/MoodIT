@@ -33,6 +33,14 @@ function timeInput(iso?: string): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** Garde la pondération entre 0 et 100 % pendant la saisie. */
+function clampWeight(raw: string): string {
+  const value = Number(raw);
+  if (value > 100) return '100';
+  if (value < 0) return '0';
+  return raw;
+}
+
 /** « 240 Ko » : la taille d'un fichier joint. */
 function fileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} Mo`;
@@ -91,11 +99,6 @@ export function AssignmentFormPopup({
       setError('Choisissez une date limite pour publier le devoir.');
       return;
     }
-    const parsedWeight = weight.trim() === '' ? undefined : Number(weight);
-    if (parsedWeight != null && !(parsedWeight >= 0 && parsedWeight <= 100)) {
-      setError('La pondération doit être entre 0 et 100 %.');
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -103,7 +106,7 @@ export function AssignmentFormPopup({
         title: title.trim(),
         instructions: instructions.trim(),
         dueAt: date ? new Date(`${date}T${time || DEFAULT_TIME}`).toISOString() : undefined,
-        weight: parsedWeight,
+        weight: weight === '' ? undefined : Number(weight),
         expectedFormats: formats,
         files,
         isPublished: publish,
@@ -185,7 +188,7 @@ export function AssignmentFormPopup({
                 min={0}
                 max={100}
                 value={weight}
-                onChange={(event) => setWeight(event.target.value)}
+                onChange={(event) => setWeight(clampWeight(event.target.value))}
               />
             </label>
           </div>

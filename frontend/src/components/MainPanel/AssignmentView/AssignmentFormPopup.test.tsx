@@ -101,7 +101,18 @@ describe('AssignmentFormPopup', () => {
     });
   });
 
-  it('exige un titre, une date pour publier et une pondération valide', () => {
+  it('garde la pondération entre 0 et 100 pendant la saisie', () => {
+    setup();
+    const weight = () => (screen.getByLabelText('Pondération (%)') as HTMLInputElement).value;
+    fill('Pondération (%)', '140');
+    expect(weight()).toBe('100');
+    fill('Pondération (%)', '-5');
+    expect(weight()).toBe('0');
+    fill('Pondération (%)', '12.5');
+    expect(weight()).toBe('12.5');
+  });
+
+  it('exige un titre, et une date pour publier', () => {
     const { onSave } = setup();
     saveDraft();
     expect(screen.getByRole('alert').textContent).toContain('Donnez un titre');
@@ -109,11 +120,6 @@ describe('AssignmentFormPopup', () => {
     fill('Titre', 'Devoir');
     publish();
     expect(screen.getByRole('alert').textContent).toContain('date limite');
-
-    fill('Date limite', '2026-11-20');
-    fill('Pondération (%)', '140');
-    publish();
-    expect(screen.getByRole('alert').textContent).toContain('entre 0 et 100');
     expect(onSave).not.toHaveBeenCalled();
   });
 
