@@ -252,7 +252,8 @@
 
 .primary:hover:not(:disabled) {
     background: var(--brand-teal-strong);
-    filter: brightness(1.1);
+    filter: brightness(1.12);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--brand-teal) 45%, transparent);
 }
 
 .button:disabled {
