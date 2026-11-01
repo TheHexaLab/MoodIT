@@ -126,7 +126,11 @@ Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
    source ; la règle de branche interdit le push direct).
 2. La fusionner une fois la CI verte.
 3. Sur le serveur : `./deploy/update.sh` (sauvegarde, migrations Flyway, build, redémarrage,
-   vérification de santé, retour à l'ancienne version du code si le build échoue).
+   vérification de santé, retour à l'ancienne version du code si le build échoue). Si le
+   Caddyfile chargé par Caddy diffère de celui du dépôt, le script recrée Caddy : un simple
+   `restart` garderait l'ancien fichier monté (#241).
+4. Si la PR modifie `deploy/update.sh` lui-même, c'est encore l'ancienne version qui s'exécute
+   à ce lancement : relancer `./deploy/update.sh --force` pour appliquer la nouvelle.
 
 ### Sauvegarde de la base
 
