@@ -426,7 +426,7 @@
     font: inherit;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    transition: background 0.15s ease, filter 0.15s ease;
 }
 
 .button:hover:not(:disabled) {
@@ -439,12 +439,10 @@
     color: var(--text-on-brand);
 }
 
-/* Survol franc : plus clair, soulevé et avec une ombre teintée. Le texte blanc garde 4,5:1. */
+/* Survol : plus clair seulement ; le texte blanc garde 4,5:1. */
 .primary:hover:not(:disabled):not(.soon) {
     background: var(--brand-teal-strong);
     filter: brightness(1.12);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--brand-teal) 45%, transparent);
 }
 
 .button:disabled {
@@ -595,7 +593,6 @@
         transition: none;
     }
 
-    .primary:hover:not(:disabled):not(.soon),
     .back:hover svg {
         transform: none;
     }
