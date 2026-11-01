@@ -26,18 +26,21 @@ export function AssignmentRow({
   detail,
   meta,
   badge,
+  muted = false,
   onOpen,
 }: {
   assignment: Assignment;
   detail: string;
   meta?: string;
   badge: Badge;
+  /** Tuile grise : un brouillon n'attend encore rien de personne. */
+  muted?: boolean;
   onOpen: (assignmentId: number) => void;
 }): React.ReactElement {
   return (
     <li>
       <button type="button" className={styles.row} onClick={() => onOpen(assignment.id)}>
-        <span className={`${styles.tile} ${styles[badge.tone]}`}>
+        <span className={`${styles.tile} ${styles[badge.tone]} ${muted ? styles.muted : ''}`}>
           <ChannelTypeIcon type="assignment" />
         </span>
         <span className={styles.rowText}>

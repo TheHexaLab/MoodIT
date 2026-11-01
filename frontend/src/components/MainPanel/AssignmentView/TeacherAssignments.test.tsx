@@ -124,6 +124,14 @@ describe('devoirs, côté prof — liste', () => {
     expect(screen.getByText('3 publiés, 2 brouillons')).toBeTruthy();
   });
 
+  it('seule la tuile d’un brouillon est grise', async () => {
+    setup(0);
+    const tile = async (name: RegExp) =>
+      (await screen.findByRole('button', { name })).querySelector('span')!.className;
+    expect(await tile(/Brouillon A/)).toContain('muted');
+    expect(await tile(/En cours/)).not.toContain('muted');
+  });
+
   it('un seul brouillon : au singulier', async () => {
     setup(0, {}, [OPEN, DRAFT]);
     expect(await screen.findByText('1 publié, 1 brouillon')).toBeTruthy();

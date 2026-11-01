@@ -249,6 +249,11 @@
     color: var(--badge-warn-fg);
 }
 
+.tile.muted {
+    background: var(--bg-vote-pill);
+    color: var(--text-muted);
+}
+
 .card {
     padding: 1rem;
     border: 1px solid var(--border);

@@ -74,6 +74,7 @@ export function TeacherAssignmentList({
                   : undefined
               }
               badge={teacherBadge(assignment, now)}
+              muted={!assignment.isPublished}
               onOpen={assignment.isPublished ? onOpen : () => onEditDraft(assignment)}
             />
           ))}
