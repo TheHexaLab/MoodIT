@@ -1088,7 +1088,7 @@ class PermissionServiceRulesTest {
     /**
      * FAILLE (intégrité, gravité moindre) : un Administrateur DE programme peut attribuer
      * n'importe quel roleId dans son programme, y compris le Gardien (Role.program_assignable =
-     * FALSE dans init.sql). La règle ne résout jamais le rôle ciblé, et le core
+     * FALSE dans les données de référence). La règle ne résout jamais le rôle ciblé, et le core
      * (RoleService.changeRole) insère la ligne User_Program_Role sans vérifier program_assignable.
      * Aujourd'hui ce « Gardien de programme » n'ouvre aucune règle (le Gardien est testé sur
      * User_Role), mais toute future règle lisant les rôles de programme hériterait du trou.

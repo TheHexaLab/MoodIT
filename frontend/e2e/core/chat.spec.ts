@@ -8,7 +8,7 @@ import {
   uniqueSuffix,
 } from './helpers';
 
-// Canal texte du cours 1 (seed d'init.sql). Les messages s'y accumulent d'un run à l'autre :
+// Canal texte du cours 1 (données de démo, db/demo). Les messages s'y accumulent d'un run à l'autre :
 // chaque test n'agit que sur les messages qu'il a lui-même envoyés (contenu unique).
 const CHANNEL = 'Discussion — Mathématiques pour ingénieurs I';
 

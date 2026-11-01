@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>{@code app.mcp.llm.base-url} (http://localhost:11434/v1 — Ollama)</li>
  *   <li>{@code app.mcp.llm.api-key}  (ollama — placeholder non vide requis par Ollama)</li>
- *   <li>{@code app.mcp.llm.model}    (qwen2.5:3b)</li>
+ *   <li>{@code app.mcp.llm.model}    (qwen2.5:7b-instruct)</li>
  *   <li>{@code app.mcp.llm.timeout-ms} (60000)</li>
  * </ul>
  */
@@ -72,9 +72,9 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
 
     public OpenAiCompatibleMcpAnalysisClient(
             ObjectMapper objectMapper,
-            @Value("${app.mcp.llm.base-url:https://api.groq.com/openai/v1}") String baseUrl,
+            @Value("${app.mcp.llm.base-url:http://localhost:11434/v1}") String baseUrl,
             @Value("${app.mcp.llm.api-key:}") String apiKey,
-            @Value("${app.mcp.llm.model:llama-3.3-70b-versatile}") String model,
+            @Value("${app.mcp.llm.model:qwen2.5:7b-instruct}") String model,
             @Value("${app.mcp.llm.timeout-ms:60000}") int timeoutMs) {
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
@@ -282,8 +282,8 @@ public class OpenAiCompatibleMcpAnalysisClient implements McpAnalysisClient {
     /**
      * Met en forme les extraits de messages en liste à puces (ou une mention si vide). Chaque
      * extrait est ANONYMISÉ ({@link ForumTextRedactor}) avant d'être injecté dans le prompt :
-     * le texte part vers un LLM externe (Groq), on retire donc le PII à haut risque (courriels,
-     * liens, numéros) tout en préservant le ressenti.
+     * le texte peut partir vers un LLM externe (Groq en prod), on retire donc le PII à haut
+     * risque (courriels, liens, numéros) tout en préservant le ressenti.
      */
     private static String formatForumSamples(List<String> samples) {
         if (samples == null || samples.isEmpty()) {

@@ -21,8 +21,8 @@ public class PendingRegistration {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Integer id;
 
-  // unique = true : documentaire (schéma géré par init.sql, ddl-auto=none). La contrainte
-  // réelle est dans init.sql et protège contre une course concurrente entre deux inscriptions.
+  // unique = true : documentaire (schéma géré par les migrations Flyway, ddl-auto=none). La contrainte
+  // réelle est dans db/migration/V1__schema.sql et protège contre une course concurrente entre deux inscriptions.
   @Column(nullable = false, unique = true, length = 64)
   private String username;
 

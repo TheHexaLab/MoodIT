@@ -62,7 +62,7 @@ step() { printf '\n[%s] ===== %s =====\n' "$(date '+%F %T')" "$*" >>"$LOG"
 fail() { printf '[%s] ÉCHEC : %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
          printf '\n%s✖ ÉCHEC : %s%s\n' "$RED" "$*" "$RST"; exit 1; }
 
-# Conteneurs à longue durée de vie (piston_init est one-shot, traité à part).
+# Conteneurs à longue durée de vie (piston_init et db_migrate sont one-shot, traités à part).
 SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_piston moodit_execution"
 BOX_H="${BOX_H:-14}"   # hauteur (lignes) de la boîte de sortie du build
 
@@ -172,6 +172,11 @@ hcheck() {
   st="$(docker inspect -f '{{.State.Status}}' moodit_piston_init 2>/dev/null || echo absent)"
   health="$(docker inspect -f '{{.State.ExitCode}}' moodit_piston_init 2>/dev/null || echo '?')"
   printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "piston_init" "$DIM" "$st" "$health" "$RST"
+  st="$(docker inspect -f '{{.State.Status}}' moodit_db_migrate 2>/dev/null || echo absent)"
+  health="$(docker inspect -f '{{.State.ExitCode}}' moodit_db_migrate 2>/dev/null || echo '?')"
+  printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "db_migrate" "$DIM" "$st" "$health" "$RST"
+  # Migration en échec : les services ne démarrent pas, on le signale ici aussi.
+  [ "$st" = "absent" ] || [ "$health" = "0" ] || allok=0
   return $(( allok ? 0 : 1 ))
 }
 
@@ -235,41 +240,21 @@ ok "Code aligné sur origin/$BRANCH (${REMOTE:0:8})"
 log "Résumé des changements :"
 git --no-pager log --oneline --no-decorate "${LOCAL}..${REMOTE}" 2>/dev/null | head -n 15 | sed 's/^/     /' || true
 
-# --- 2b. Migrations de schéma : appliquer les nouvelles, avec suivi ----------
-# init.sql ne rejoue JAMAIS sur un volume existant → les évolutions de schéma
-# passent par migrations/*.sql (générées par deploy/generate-migration.sh). On
-# applique, dans l'ordre, celles pas encore enregistrées dans `schema_migrations`,
-# chacune en transaction (rollback atomique si elle échoue). AVANT le rebuild :
-# le schéma doit être prêt avant que les services (profil `validate`) ne démarrent.
-#
-# ⚠️ Un volume VIERGE possède déjà tout le schéma via init.sql : NE PAS y rejouer
-# les migrations (elles feraient doublon). Après un 1er `compose up` sur volume
-# neuf, marque-les comme appliquées sans les exécuter (cf. DEPLOY.md, section
-# « Changement de schéma »).
-step "3/5 · Migrations de base de données"
+# --- 2b. Migrations de schéma : Flyway (#96) ------------------------------------
+# Le conteneur one-shot `db-migrate` applique les versions de db/migration pas encore
+# enregistrées dans flyway_schema_history, chacune dans sa transaction (une migration qui
+# échoue est annulée, les précédentes restent). Lancé ICI, avant le build : une migration
+# en échec arrête la mise à jour avant de toucher aux services. `up -d` le relance ensuite
+# (les services en dépendent), sans effet puisque tout est déjà appliqué. La première fois
+# (base existante sans historique), Flyway la marque à la version 2 sans rien rejouer.
+step "3/5 · Migrations de base de données (Flyway)"
 if docker ps --format '{{.Names}}' | grep -q '^moodit_postgres$'; then
-  psql_db() { docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDB" "$@"; }
-  psql_db -q -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" \
-    || fail "Création de la table schema_migrations impossible."
-  MIGRATED=0
-  for m in $(ls -1 "$REPO_DIR"/migrations/*.sql 2>/dev/null | sort); do
-    base="$(basename "$m")"
-    seen="$(docker exec moodit_postgres psql -tAX -U "$PGUSER" -d "$PGDB" \
-      -c "SELECT 1 FROM schema_migrations WHERE filename='$base'" 2>/dev/null)"
-    [ "$seen" = "1" ] && continue
-    log "Migration BD : $base"
-    # -c (enregistrement) PUIS -f (migration) dans UNE transaction : si la migration
-    # échoue, l'enregistrement est annulé aussi → elle sera retentée au prochain run.
-    if psql_db -q --single-transaction \
-         -c "INSERT INTO schema_migrations(filename) VALUES ('$base')" -f - < "$m" >>"$LOG" 2>&1; then
-      MIGRATED=$((MIGRATED + 1))
-    else
-      fail "Migration '$base' échouée — déploiement interrompu (BD sauvegardée : $BACKUP_FILE). Corrige la migration puis relance."
-    fi
-  done
-  if [ "$MIGRATED" -gt 0 ]; then ok "$MIGRATED migration(s) BD appliquée(s)."; else ok "Aucune migration BD en attente."; fi
+  if ! stream "Migrations Flyway" $COMPOSE run --rm --no-deps db-migrate; then
+    fail "Migration Flyway échouée — déploiement interrompu (BD sauvegardée : $BACKUP_FILE). Corrige la migration (nouvelle version) puis relance."
+  fi
+  ok "Schéma à jour."
 else
-  warn "Conteneur postgres absent, migrations BD non appliquées."
+  warn "Conteneur postgres absent : les migrations s'appliqueront au démarrage (compose up)."
 fi
 
 # --- 3. Rebuild + redéploiement (rollback du code si échec) -----------------

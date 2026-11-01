@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { DEV_2FA_CODE, TEST_COURSE_ID, TEST_PASSWORD, TEST_PROGRAM_ID } from '../setup/accounts';
 
-/** Noms du seed d'init.sql pour le programme / cours de test (ids 1). */
+/** Noms de la démo (db/demo) pour le programme / cours de test (ids 1). */
 export const PROGRAM_NAME = 'Génie informatique';
 export const FORUM_NAME = 'Thread — Mathématiques pour ingénieurs I';
 export const QUIZ_NAME = 'Quiz découverte — tous les types (sauf code)';

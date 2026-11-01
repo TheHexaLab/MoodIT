@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Journal d'audit. La lecture paginée/filtrée passe par {@link AuditLogRepositoryCustom#search}
- * (requête Criteria dynamique → prédicats sargables, cf. les index GIN trigram d'init.sql).
+ * (requête Criteria dynamique → prédicats sargables, cf. les index GIN trigram de db/migration/V1__schema.sql).
  */
 @Repository
 public interface AuditLogRepository

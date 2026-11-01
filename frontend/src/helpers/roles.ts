@@ -1,7 +1,7 @@
 /**
  * Noms des rôles (table Role) référencés dans la logique de permissions. Source UNIQUE côté
  * front : évite les littéraux dupliqués (un renommage ne casse plus le code silencieusement).
- * Doit rester aligné avec les seeds d'init.sql ET les constantes backend (model/RoleNames.java).
+ * Doit rester aligné avec les données de référence (db/migration) ET les constantes backend (model/RoleNames.java).
  */
 export const ROLE = {
   /** Enseignant : gère le contenu d'un programme (cours, canaux, quiz, forums). */

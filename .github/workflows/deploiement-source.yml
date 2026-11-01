@@ -1,0 +1,29 @@
+# `deploiement` (la prod) ne reçoit que `main` (#235) : une PR vers `deploiement` doit venir de la
+# branche `main` de ce dépôt. Check obligatoire de la règle de branche de `deploiement` : une PR
+# depuis une autre branche (ou une fourche) ne peut pas être fusionnée.
+name: Source des PR vers deploiement
+
+on:
+  pull_request:
+    branches: [deploiement]
+    # `edited` : une PR dont on change la branche cible vers deploiement est revérifiée.
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+jobs:
+  source:
+    name: source = main
+    runs-on: ubuntu-latest
+    steps:
+      - name: La PR vient de main
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REF" != "main" ] || [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::error::Une PR vers deploiement doit venir de main ($REPO), pas de $HEAD_REPO:$HEAD_REF."
+            exit 1
+          fi
+          echo "Source : $HEAD_REPO:$HEAD_REF"

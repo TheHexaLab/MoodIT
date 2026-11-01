@@ -34,7 +34,7 @@ public class Quiz {
     @Column(name = "allow_retry", nullable = false)
     private Boolean allowRetry;
 
-    /** Ordre d'affichage dans la section Quiz du cours (cf. init.sql Quiz.position). */
+    /** Ordre d'affichage dans la section Quiz du cours (cf. db/migration, Quiz.position). */
     @Column(nullable = false)
     private Integer position;
 

@@ -1,7 +1,7 @@
 # Déploiement MoodIT sur un VPS Hetzner (~8 €/mois)
 
 Guide de bout en bout : d'un compte Hetzner vide à l'app en HTTPS.
-LLM = **Groq** (gratuit). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
+LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
 
 ---
 
@@ -70,7 +70,7 @@ openssl rand -base64 64   # à coller dans INTERNAL_TOKEN
 ```
 
 Points clés :
-- `LLM_API_KEY=gsk_...` (ta clé Groq).
+- `LLM_API_KEY=gsk_...` (ta clé Groq ; voir « Modèle d'IA » pour un autre modèle).
 - `FRONT_ORIGIN=https://moodit.example.com` : l'origine HTTPS réelle du site, la seule par laquelle on y accède. Le gateway refuse le WebSocket **et toutes les écritures** (connexion comprise, réponse 403) venues d'une autre origine (#234). Plusieurs valeurs possibles, séparées par des virgules ; le Caddyfile redirige `www.` vers le domaine principal pour qu'il n'y en ait qu'une.
 - `SPRING_PROFILES_ACTIVE=prod`.
 - `MAIL_USERNAME` / `MAIL_PASSWORD`.
@@ -90,8 +90,8 @@ docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
 Le premier build prend quelques minutes (6 services Java + frontend + Piston).
-`piston-init` installe les 12 langages puis s'arrête (normal). Au **tout premier**
-démarrage, `init.sql` crée le schéma dans un volume Postgres vierge.
+`piston-init` installe les 12 langages puis s'arrête (normal), de même que `db-migrate`, qui crée
+le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
 
 Suivre les logs :
 
@@ -114,9 +114,19 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 |---|---|
 | Voir l'état | `docker compose -f docker-compose-hetzner.yml ps` |
 | Logs d'un service | `docker compose -f docker-compose-hetzner.yml logs -f <service>` |
-| Mettre à jour le code | `git pull && docker compose -f docker-compose-hetzner.yml up -d --build` |
+| Mettre à jour le code | `./deploy/update.sh` (voir « Mettre à jour la prod ») |
 | Redémarrer | `docker compose -f docker-compose-hetzner.yml restart <service>` |
 | Tout arrêter | `docker compose -f docker-compose-hetzner.yml down` |
+
+### Mettre à jour la prod
+
+Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
+
+1. Ouvrir une PR **de `main` vers `deploiement`** (le check « source = main » refuse toute autre
+   source ; la règle de branche interdit le push direct).
+2. La fusionner une fois la CI verte.
+3. Sur le serveur : `./deploy/update.sh` (sauvegarde, migrations Flyway, build, redémarrage,
+   vérification de santé, retour à l'ancienne version du code si le build échoue).
 
 ### Sauvegarde de la base
 
@@ -124,68 +134,79 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 ```
 
-### Changement de schéma après le 1er déploiement
+### Changement de schéma : migrations Flyway
 
-`init.sql` ne rejoue **que** sur un volume vierge, et le profil prod tourne en
-`validate`. Pour toute évolution de schéma, applique les scripts de `migrations/`
-sur la base en cours (ne supprime pas le volume `postgres_data` en prod).
+Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
+service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de
+`db/migration/` pas encore enregistrées dans la table `flyway_schema_history` ; les services qui
+utilisent la base (auth, core, permission, mcp) ne démarrent qu'après lui. `deploy/update.sh` le
+lance aussi avant le build, pour qu'une migration en échec arrête la mise à jour.
 
-#### 1. Générer la migration automatiquement (dev)
+| Dossier | Contenu | Où |
+|---|---|---|
+| `db/migration/` | Schéma (V1), données de référence (V2 : rôles, types de forum et de question, langages), puis chaque évolution | Partout, prod comprise |
+| `db/demo/` | Données de démo, un script par thème : établissements, comptes, programme et cours de base (V2.1), démo MCP (V2.2), quiz de code (V2.3), annonces (V2.4) | Dev, e2e et CI, **jamais en prod** |
 
-Tu édites `init.sql` (source de vérité du schéma complet) comme d'habitude, puis :
+#### Écrire une migration
 
-```bash
-./deploy/generate-migration.sh <nom_migration>     # ex. add_bio_colonne_user
-```
+1. Créer `db/migration/V<n>__<sujet>.sql`, `<n>` = la version suivante (ex. `V3__bio_utilisateur.sql`).
+   Le SQL est appliqué tel quel, dans une transaction.
+2. **Ne jamais modifier ni supprimer une migration fusionnée** : Flyway refuserait de démarrer
+   (somme de contrôle différente), et le job CI `schema` bloque déjà ce cas. Une correction passe
+   par une nouvelle version.
+3. Si la démo doit suivre (nouvelle colonne obligatoire, nouvelles données), ajouter
+   `db/demo/V<n>_1__<sujet>.sql`.
+4. Vérifier en local : `docker compose -f docker-compose-dev.yml up -d` (applique les migrations
+   manquantes à la base de dev), puis le job CI `schema` démarre chaque service en `validate`.
 
-Le script diffe le schéma de `init.sql@HEAD` (avant ta modif) contre le `init.sql`
-courant, via deux Postgres jetables + [migra](https://github.com/djrobstep/migra),
-et écrit le SQL dans `migrations/<date>_<nom>.sql`. **Prérequis : Docker.** Rien à
-installer localement.
+#### Appliquer en prod
 
-> ⚠️ Le fichier généré est un **point de départ, à RELIRE** : un renommage de
-> colonne apparaît comme `DROP + ADD` (perte de données), et les conversions de
-> type peuvent nécessiter un `USING`. Corrige à la main puis committe le `.sql`
-> **avec** ta modif de `init.sql`.
-
-Diff contre la vraie prod plutôt que `HEAD` (optionnel) : fournis un dump et
-`REF=prod PROD_DUMP=backups/db-XX.sql.gz ./deploy/generate-migration.sh <nom>`.
-
-#### 2. Appliquer la migration (prod)
-
-`init.sql` contient déjà la version à jour du schéma → un **volume vierge** n'a
-**pas** besoin des migrations (elles feraient doublon et échoueraient, p. ex.
-`ADD COLUMN` d'une colonne déjà présente). Les migrations ne servent qu'aux bases
-**déjà peuplées**. Applique-les avec un suivi (pour ne jamais rejouer une migration) :
+Rien à faire à la main : `./deploy/update.sh` applique les nouvelles versions (après sa
+sauvegarde de la base). Pour voir l'état :
 
 ```bash
-PGUSER="$(grep -E '^POSTGRES_USER=' .env.docker | cut -d= -f2-)"
-PGDB="$(grep -E '^POSTGRES_DB=' .env.docker | cut -d= -f2-)"
-# Table de suivi (idempotent)
-docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDB" -c \
-  "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());"
-# Appliquer chaque migration non encore enregistrée, en transaction
-for m in $(ls -1 migrations/*.sql | sort); do
-  base="$(basename "$m")"
-  seen="$(docker exec moodit_postgres psql -tAX -U "$PGUSER" -d "$PGDB" -c \
-    "SELECT 1 FROM schema_migrations WHERE filename='$base'")"
-  [ "$seen" = "1" ] && continue
-  echo "Migration : $base"
-  docker exec -i moodit_postgres psql -v ON_ERROR_STOP=1 --single-transaction -U "$PGUSER" -d "$PGDB" \
-    -c "INSERT INTO schema_migrations(filename) VALUES ('$base')" -f - < "$m" \
-    || { echo "ÉCHEC : $base"; break; }
-done
+docker compose --env-file .env.docker -f docker-compose-hetzner.yml run --rm --no-deps db-migrate
+docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT version, description, installed_on, success FROM flyway_schema_history ORDER BY installed_rank"
 ```
 
-Sur un **volume neuf** créé depuis `init.sql`, enregistre les migrations comme
-déjà appliquées **sans les exécuter** (sinon doublon) :
+#### Passage à Flyway d'une base existante (une seule fois)
+
+Une base créée par l'ancien `init.sql` n'a pas d'historique Flyway. Au premier lancement,
+`db-migrate` la marque à la version 2 (`FLYWAY_BASELINE_ON_MIGRATE`) sans rien rejouer : son schéma
+doit donc être **exactement** celui de V1. À vérifier avant ce premier déploiement :
 
 ```bash
-for m in migrations/*.sql; do
-  docker exec -i moodit_postgres psql -U "$PGUSER" -d "$PGDB" -c \
-    "INSERT INTO schema_migrations(filename) VALUES ('$(basename "$m")') ON CONFLICT DO NOTHING"
-done
+./deploy/check-schema.sh        # « ✓ Schéma identique à db/migration », sinon le SQL d'écart
 ```
+
+En cas d'écart, corriger la base (ou ajouter une migration) avant de déployer. L'ancienne table
+de suivi `schema_migrations` peut ensuite être supprimée.
+
+#### Détecter une dérive
+
+`./deploy/check-schema.sh` compare à tout moment la base de `moodit_postgres` (ou un dump passé
+en argument) au schéma produit par `db/migration`, et affiche le SQL d'écart.
+
+---
+
+## Modèle d'IA (analyse MCP)
+
+L'analyse MCP passe par une API compatible OpenAI (`/chat/completions`), configurée par trois
+variables : `LLM_BASE_URL`, `LLM_MODEL` et `LLM_API_KEY` (#33).
+
+| Où | Modèle | Pourquoi |
+|---|---|---|
+| Défaut (`mcp-service`, dev, tests) | Ollama local, `qwen2.5:7b-instruct` sur `http://localhost:11434/v1` | Aucune donnée du forum ne sort vers un tiers |
+| `docker-compose-prod.yml` | Conteneur Ollama du réseau interne | Même raison, pour un serveur qui a la mémoire nécessaire |
+| VPS (`docker-compose-hetzner.yml`) | **Groq**, `llama-3.3-70b-versatile` | **Coût** : un modèle 7B ne tient pas dans les 8 Go du VPS à côté du reste, et Groq est gratuit. Les extraits du forum, anonymisés (`ForumTextRedactor`), partent alors chez Groq |
+
+Changer de modèle sur le VPS (par exemple vers un modèle hébergé par l'équipe) : définir
+`LLM_BASE_URL` et `LLM_MODEL` dans `.env.docker`, puis `./deploy/update.sh --force`. Ces valeurs
+remplacent celles du compose, et `update.sh` ne les écrase pas : `.env.docker` est hors du dépôt.
+
+Si le modèle est injoignable ou la clé absente, `mcp-service` produit une analyse **déterministe**
+à partir des vraies statistiques du cours : l'analyse aboutit toujours.
 
 ---
 
@@ -193,7 +214,7 @@ done
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
   dans le compose). Total observé ≈ 3,5-4 Go → marge confortable.
-- **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU.
+- **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
 - Pour réduire la RAM : externaliser Postgres vers **Neon**/**Supabase** (offre gratuite)

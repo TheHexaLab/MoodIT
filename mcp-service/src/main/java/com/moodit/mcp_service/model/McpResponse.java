@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * Feedback généré par le service MCP sur un COURS (table mcp_response, partagée avec
  * core-service). Une ligne par analyse ; `user` = celui qui l'a déclenchée (verrou
- * « en cours » par (cours, user), via l'index unique partiel de init.sql). `content`
+ * « en cours » par (cours, user), via l'index unique partiel du schéma, db/migration). `content`
  * porte le JSON {@link com.moodit.mcp_service.dto.McpAnalysis} — null tant que PENDING/FAILED.
  */
 @Entity
