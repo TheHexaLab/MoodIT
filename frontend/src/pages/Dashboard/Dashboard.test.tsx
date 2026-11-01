@@ -545,6 +545,18 @@ describe('Dashboard', () => {
       expect(handle.getAttribute('aria-valuenow')).toBe('272');
     });
 
+    it('la tuile du cours ouvert garde le canal affiché, celle d’un autre cours repart de zéro', async () => {
+      renderDashboard({ path: '/home/p/1/c/10/text/5' });
+      await waitForCourseSelector('IFT101');
+
+      // Nom complet de la tuile : le sélecteur du panneau, lui, s'appelle seulement « IFT101 ».
+      fireEvent.click(screen.getByRole('button', { name: /^IFT101.+/ }));
+      expect(currentPath()).toBe('/home/p/1/c/10/text/5');
+
+      fireEvent.click(screen.getByRole('button', { name: /^IFT102.+/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
+    });
+
     it('ouvrir un cours rouvre le panneau réduit', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');

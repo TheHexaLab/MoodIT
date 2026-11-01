@@ -1064,7 +1064,12 @@ export default function Dashboard() {
             }}
             onOpenCourse={(programId, courseId) => {
               setCoursePanelCollapsed(false);
-              setView({ programId, courseId });
+              // La tuile du cours déjà ouvert garde le canal affiché ; un autre cours repart de zéro.
+              setView((previous) =>
+                previous.programId === programId && previous.courseId === courseId
+                  ? previous
+                  : { programId, courseId }
+              );
             }}
             onJoinProgram={handleJoinFromPortal}
             onAddProgram={isMobile ? handleAddProgram : undefined}
