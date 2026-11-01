@@ -46,7 +46,7 @@
        pour garder 4,5:1 sur le fond du menu du compte (--bg-surface). */
     --logout-text: #db2e2e;
     --badge-warn-bg: #fdf3d7;
-    --badge-warn-fg: #9a6700;
+    --badge-warn-fg: #8a5a00;
     /* Luminosité du texte des pastilles colorées par teinte (journal d'audit) : 4,5:1 mini. */
     --badge-hue-lightness: 28%;
     --scrim: rgba(0, 0, 0, 0.45);
