@@ -229,6 +229,11 @@
     color: var(--badge-success-fg);
 }
 
+.info {
+    background: var(--badge-info-bg);
+    color: var(--badge-info-fg);
+}
+
 .warn {
     background: var(--badge-warn-bg);
     color: var(--badge-warn-fg);

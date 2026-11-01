@@ -11,7 +11,7 @@ import { type Badge, formatDateTime } from './assignmentFormat.ts';
 function teacherBadge(assignment: Assignment, now: Date): Badge {
   if (!assignment.isPublished) return { label: 'Brouillon', tone: 'neutral' };
   if (!assignment.dueAt || new Date(assignment.dueAt) >= now) {
-    return { label: 'Publié', tone: 'success' };
+    return { label: 'Publié', tone: 'info' };
   }
   return assignment.gradedCount >= assignment.submittedCount
     ? { label: 'Corrigé', tone: 'success' }

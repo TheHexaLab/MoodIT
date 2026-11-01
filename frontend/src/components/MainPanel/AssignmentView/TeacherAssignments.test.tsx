@@ -124,6 +124,14 @@ describe('devoirs, côté prof — liste', () => {
     expect(screen.getByText('3 publiés, 2 brouillons')).toBeTruthy();
   });
 
+  it('« Publié » et « Corrigé » n’ont pas la même couleur', async () => {
+    setup(0);
+    const pill = async (name: RegExp, label: string) =>
+      within(await screen.findByRole('button', { name })).getByText(label).className;
+    expect(await pill(/En cours/, 'Publié')).toContain('info');
+    expect(await pill(/Fini/, 'Corrigé')).toContain('success');
+  });
+
   it('seule la tuile d’un brouillon est grise', async () => {
     setup(0);
     const tile = async (name: RegExp) =>

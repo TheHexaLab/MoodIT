@@ -48,7 +48,7 @@ export function daysUntil(iso: string, now: Date): number {
   return Math.round((startOfDay(new Date(iso)) - startOfDay(now)) / DAY_MS);
 }
 
-export type Tone = 'success' | 'warn' | 'danger' | 'neutral';
+export type Tone = 'success' | 'info' | 'warn' | 'danger' | 'neutral';
 
 export interface Badge {
   label: string;

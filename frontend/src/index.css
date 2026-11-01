@@ -47,6 +47,8 @@
     --logout-text: #db2e2e;
     --badge-warn-bg: #fdf3d7;
     --badge-warn-fg: #8a5a00;
+    --badge-info-bg: #e9f1fc;
+    --badge-info-fg: #0a5cc0;
     /* Luminosité du texte des pastilles colorées par teinte (journal d'audit) : 4,5:1 mini. */
     --badge-hue-lightness: 28%;
     --scrim: rgba(0, 0, 0, 0.45);
@@ -129,6 +131,8 @@
         --danger: #db2e2e;
         --badge-warn-bg: rgba(245, 166, 35, 0.18);
         --badge-warn-fg: #f5c87a;
+        --badge-info-bg: rgba(96, 165, 250, 0.18);
+        --badge-info-fg: #8ab8f5;
         --badge-hue-lightness: 72%;
         --brand-teal: #14b8a6;
         --brand-teal-hover: brightness(2);
@@ -187,6 +191,8 @@
     --danger: #db2e2e;
     --badge-warn-bg: rgba(245, 166, 35, 0.18);
     --badge-warn-fg: #f5c87a;
+    --badge-info-bg: rgba(96, 165, 250, 0.18);
+    --badge-info-fg: #8ab8f5;
     --badge-hue-lightness: 72%;
     --brand-teal: #14b8a6;
     --brand-teal-hover: brightness(2);
@@ -275,6 +281,8 @@
     --logout-text: #ec8080;
     --badge-warn-bg: rgba(245, 166, 35, 0.18);
     --badge-warn-fg: #f5c87a;
+    --badge-info-bg: rgba(96, 165, 250, 0.18);
+    --badge-info-fg: #8ab8f5;
     --brand-teal: #ffd21a;
     --brand-teal-hover: brightness(1.12);
     --brand-teal-surface: rgba(255, 210, 26, 0.10);
@@ -315,6 +323,8 @@
     --logout-text: #e25a5a;
     --badge-warn-bg: rgba(255, 156, 34, 0.18);
     --badge-warn-fg: #ffc266;
+    --badge-info-bg: rgba(96, 165, 250, 0.18);
+    --badge-info-fg: #8ab8f5;
     --brand-teal: #ffcc00;
     --brand-teal-hover: brightness(1.12);
     --brand-teal-surface: rgba(255, 204, 0, 0.10);
