@@ -6,15 +6,15 @@ describe('defaultTypeDefinitions', () => {
     expect(defaultTypeDefinitions).toHaveLength(3);
   });
 
-  it('conserve l\'ordre d\'affichage quiz, text, forum', () => {
-    expect(defaultTypeDefinitions.map((d) => d.type)).toEqual(['quiz', 'text', 'forum']);
+  it('conserve l\'ordre d\'affichage text, forum, quiz', () => {
+    expect(defaultTypeDefinitions.map((d) => d.type)).toEqual(['text', 'forum', 'quiz']);
   });
 
   it('associe chaque type à son label et emptyLabel attendus', () => {
     expect(defaultTypeDefinitions).toEqual([
-      { type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' },
       { type: 'text', label: 'Canaux', emptyLabel: 'Aucun canal' },
       { type: 'forum', label: 'Forums', emptyLabel: 'Aucun forum' },
+      { type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' },
     ]);
   });
 
