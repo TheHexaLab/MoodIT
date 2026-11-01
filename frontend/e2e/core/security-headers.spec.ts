@@ -42,6 +42,8 @@ test('en-têtes de sécurité sur la page, les fichiers du build et une erreur d
   const home = await request.get('/');
   expect(home.status()).toBe(200);
   expectSecurityHeaders(home, '/');
+  // Page revalidée à chaque chargement : pas d'ancienne version réaffichée depuis le cache (#242).
+  expect(home.headers()['cache-control'], 'Cache-Control sur /').toBe('no-cache');
 
   // Fichier haché du build : la location /assets/ peut poser ses propres en-têtes (cache), elle
   // doit garder ceux de sécurité (add_header_inherit merge).
