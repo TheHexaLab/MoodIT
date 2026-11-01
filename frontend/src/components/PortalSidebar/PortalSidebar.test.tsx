@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import PortalSidebar from './PortalSidebar';
 import { ROLE } from '../../helpers/roles';
@@ -201,6 +201,56 @@ describe('PortalSidebar', () => {
     cleanup();
     renderSidebar({ onWidthChange: vi.fn(), collapsed: true });
     expect(screen.queryByRole('separator')).toBeNull();
+  });
+
+  it('la couche de glissement n’existe que le temps de réduire ou déplier la barre', () => {
+    vi.useFakeTimers();
+    try {
+      const sidebar = (collapsed: boolean) => (
+        <MemoryRouter>
+          <PortalSidebar
+            programs={programs}
+            loading={false}
+            loadError={null}
+            onReload={vi.fn()}
+            onOpenCourse={vi.fn()}
+            onJoinProgram={vi.fn()}
+            userMenu={<span>compte</span>}
+            collapsed={collapsed}
+          />
+        </MemoryRouter>
+      );
+      const { container, rerender } = render(sidebar(false));
+      const root = container.firstElementChild!;
+      expect(root.className).not.toMatch(/sidebarSliding/);
+      rerender(sidebar(true));
+      expect(root.className).toMatch(/sidebarSliding/);
+      act(() => vi.advanceTimersByTime(300));
+      expect(root.className).not.toMatch(/sidebarSliding/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('le « + » de la version réduite est le bouton « Rejoindre un cours » du dernier programme', () => {
+    const sidebar = (collapsed: boolean) => (
+      <MemoryRouter>
+        <PortalSidebar
+          programs={programs}
+          loading={false}
+          loadError={null}
+          onReload={vi.fn()}
+          onOpenCourse={vi.fn()}
+          onJoinProgram={vi.fn()}
+          userMenu={<span>compte</span>}
+          collapsed={collapsed}
+        />
+      </MemoryRouter>
+    );
+    const { rerender } = render(sidebar(false));
+    const button = screen.getByRole('button', { name: 'Rejoindre un cours : Mathématiques' });
+    rerender(sidebar(true));
+    expect(screen.getByRole('button', { name: 'Rejoindre un cours' })).toBe(button);
   });
 
   it('« Rejoindre un cours » vise son programme, même sans cours', () => {

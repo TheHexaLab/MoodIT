@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import styles from './PortalSidebar.module.css';
 import ProgramMenu from '../ProgramMenu/ProgramMenu.tsx';
@@ -58,6 +58,9 @@ interface PortalSidebarProps {
   selectedCourseId?: number;
 }
 
+/** Durée du glissement (CSS : --sidebar-speed), avec une marge pour la dernière image. */
+const SLIDE_MS = 250;
+
 function NavIcon({ path }: { path: string }): React.ReactElement {
   return (
     <svg className={styles.navIcon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -114,6 +117,20 @@ export default function PortalSidebar({
   const inCourse = activeProgramId >= 0;
   const isHome = !inCourse && !activePage;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
+
+  // Barre en plein glissement (voir .sidebarSliding). Posé pendant le rendu : dès la première image.
+  const [sliding, setSliding] = useState(false);
+  const [lastCollapsed, setLastCollapsed] = useState(collapsed);
+  if (collapsed !== lastCollapsed) {
+    setLastCollapsed(collapsed);
+    setSliding(true);
+  }
+  useEffect(() => {
+    if (!sliding) return;
+    const timer = window.setTimeout(() => setSliding(false), SLIDE_MS);
+    return () => window.clearTimeout(timer);
+  }, [sliding, collapsed]);
+
   const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
     width,
     onChange: (next) => onWidthChange?.(next),
@@ -197,7 +214,7 @@ export default function PortalSidebar({
   return (
     <div
       ref={sidebarRef}
-      className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''} ${isResizing ? styles.sidebarResizing : ''}`}
+      className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''} ${isResizing ? styles.sidebarResizing : ''} ${sliding ? styles.sidebarSliding : ''}`}
     >
       <div className={styles.inner}>
       {pageLinks}
@@ -245,15 +262,30 @@ export default function PortalSidebar({
                   </button>
                 );
               })}
-              <button
-                type="button"
-                className={`${styles.navItem} ${styles.join} ${styles.expandedOnly}`}
-                aria-label={`Rejoindre un cours : ${program.name}`}
-                onClick={() => programActions?.onJoinCourses?.(program.id)}
-              >
-                <NavIcon path={PLUS_ICON} />
-                <span className={styles.label}>Rejoindre un cours</span>
-              </button>
+              {/* Le « + » de la version réduite est ce bouton, sous le dernier programme : un seul
+                  élément qui glisse et perd son texte, plutôt que deux qui se croisent en fondu. */}
+              {program.id === programs[programs.length - 1].id ? (
+                <button
+                  type="button"
+                  className={`${styles.navItem} ${styles.join}`}
+                  aria-label={collapsed ? 'Rejoindre un cours' : `Rejoindre un cours : ${program.name}`}
+                  title={collapsed ? 'Rejoindre un cours' : undefined}
+                  onClick={collapsed ? handleCollapsedJoin : () => programActions?.onJoinCourses?.(program.id)}
+                >
+                  <NavIcon path={PLUS_ICON} />
+                  <span className={styles.label}>Rejoindre un cours</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`${styles.navItem} ${styles.join} ${styles.expandedOnly}`}
+                  aria-label={`Rejoindre un cours : ${program.name}`}
+                  onClick={() => programActions?.onJoinCourses?.(program.id)}
+                >
+                  <NavIcon path={PLUS_ICON} />
+                  <span className={styles.label}>Rejoindre un cours</span>
+                </button>
+              )}
               {getProgramPermissions(program, isGlobalAdmin).canManageContent && (
                 <button
                   type="button"
@@ -288,8 +320,8 @@ export default function PortalSidebar({
             <span className={styles.label}>Rejoindre un programme</span>
           </button>
         )}
-        {/* Le « + » unique de la version réduite. */}
-        {!loading && !loadError && (
+        {/* Sans programme, aucun bouton de cours ne peut servir de « + » à la version réduite. */}
+        {!loading && !loadError && programs.length === 0 && (
           <button
             type="button"
             className={`${styles.navItem} ${styles.join} ${styles.collapsedOnly}`}

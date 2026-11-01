@@ -138,6 +138,14 @@
     padding: 0 0.75rem 0.5rem;
 }
 
+/* Ces lignes glissent à la verticale quand la barre change : sans couche à part, le texte s'aligne sur
+   le pixel entier mais pas le fond de la tuile, et il tremble dedans. La couche ne dure que le temps du
+   glissement : au repos, le texte garde son rendu net. */
+.sidebarSliding .course,
+.sidebarSliding .join {
+    will-change: transform;
+}
+
 .course {
     position: relative;
     box-sizing: border-box;
@@ -193,11 +201,24 @@
     font-size: 0.75rem;
 }
 
+/* Contenu calé en haut de la ligne, et coupé à la verticale seulement (la barre de survol dépasse à
+   gauche) : quand sa hauteur s'anime, il suit la ligne au lieu de glisser à l'intérieur. */
 .join {
     flex: none;
+    align-items: flex-start;
     max-height: 2.75rem;
     margin-top: 0.25rem;
+    overflow-x: visible;
+    overflow-y: clip;
     color: var(--text-muted);
+}
+
+.join .navIcon {
+    margin-top: 0.8125rem;
+}
+
+.join .label {
+    line-height: 2.75rem;
 }
 
 /* Lignes propres à une version : leur hauteur s'anime pour que les tuiles glissent sans saut. */
@@ -209,7 +230,6 @@
 .sidebarCollapsed .expandedOnly {
     max-height: 0;
     margin-top: 0;
-    overflow: hidden;
     padding-top: 0;
     padding-bottom: 0;
     opacity: 0;
@@ -219,7 +239,6 @@
 .sidebarCollapsed .collapsedOnly {
     max-height: 2.75rem;
     margin-top: 0.25rem;
-    overflow: visible;
     opacity: 1;
     visibility: visible;
 }
