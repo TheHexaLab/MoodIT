@@ -34,6 +34,18 @@ function hamburger(): HTMLElement {
 }
 
 describe('LeftMenuGroup', () => {
+  it('changer d’écran referme le tiroir ; un nouveau rendu du même écran le laisse ouvert', () => {
+    const group = (drawerScope: string) => (
+      <LeftMenuGroup programMenu={<div />} courseMenu={<div />} drawerScope={drawerScope} />
+    );
+    const { rerender } = render(group('portal'));
+    fireEvent.click(hamburger());
+    rerender(group('portal'));
+    expect(hamburger().getAttribute('aria-expanded')).toBe('true');
+    rerender(group('course'));
+    expect(hamburger().getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('rend les deux menus dans le tiroir et le titre par défaut « Accueil »', () => {
     renderGroup();
     const drawer = screen.getByRole('complementary', { name: 'Menus lateraux' });

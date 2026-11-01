@@ -247,7 +247,8 @@ export async function enterProgram(page: Page, name: string) {
   }
   await page
     .getByRole('group', { name: `Cours de ${name}` })
-    .getByRole('button')
+    // Le premier cours, pas « Rejoindre un cours » : tant que les cours chargent, il serait le premier.
+    .getByRole('button', { name: /^(?!Rejoindre un cours|Ajouter un cours)/ })
     .first()
     .click();
   await expect(page.getByRole('navigation', { name: 'Cours' })).toBeVisible();

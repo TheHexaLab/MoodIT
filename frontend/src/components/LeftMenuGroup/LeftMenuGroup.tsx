@@ -13,6 +13,8 @@ interface LeftMenuGroupProps {
    * défini, le tiroir mobile se referme. Absent : le titre mobile sert d'identifiant.
    */
   selectionKey?: string | number;
+  /** Écran affiché (portail ou cours) : le tiroir se referme quand il change. */
+  drawerScope?: string;
   /** Icône/préfixe du titre (ex. `<ChannelTypeIcon />`). */
   mobileTitlePrefix?: React.ReactNode;
   /** Initiale affichée dans l'avatar mobile (repli si aucun menu fourni). */
@@ -30,6 +32,7 @@ export default function LeftMenuGroup({
   courseMenu,
   mobileTitle,
   selectionKey,
+  drawerScope,
   mobileTitlePrefix = '',
   mobileUserInitial = 'U',
   mobileUserMenu,
@@ -50,6 +53,14 @@ export default function LeftMenuGroup({
     setLastSelection(selection);
     setPickedInDrawer(false);
     if (pickedInDrawer && selection !== undefined) setIsDrawerOpen(false);
+  }
+
+  // Changer d'écran referme le tiroir, mais pas une rotation de l'appareil, qui garde le même écran.
+  const [lastScope, setLastScope] = useState(drawerScope);
+  if (drawerScope !== lastScope) {
+    setLastScope(drawerScope);
+    setPickedInDrawer(false);
+    setIsDrawerOpen(false);
   }
 
   useEffect(() => {

@@ -992,9 +992,8 @@ export default function Dashboard() {
     <PortalBand establishmentName={establishment?.name} onAddProgram={handleAddProgram} />
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
-        // Mobile : remonté au passage portail ↔ cours, pour que le tiroir se referme à l'ouverture
-        // d'un cours. Bureau : jamais remonté, pour que la barre glisse au lieu de changer d'un coup.
-        key={isMobile ? (isPortal ? 'portal' : 'course') : 'desktop'}
+        // Sans remontage : la barre glisse au lieu de changer d'un coup, et le tiroir survit à une rotation.
+        drawerScope={isPortal ? 'portal' : 'course'}
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }

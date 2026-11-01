@@ -304,8 +304,11 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                   </button>
                 </li>
                 {renderCourses && (
-                  <li className={styles.programCourses} role="group" aria-label={`Cours de ${programLabel}`}>
-                    {renderCourses(prog)}
+                  <li>
+                    {/* Le rôle sur un élément à part : une liste ne peut contenir que des listitem. */}
+                    <div className={styles.programCourses} role="group" aria-label={`Cours de ${programLabel}`}>
+                      {renderCourses(prog)}
+                    </div>
                   </li>
                 )}
               </React.Fragment>
