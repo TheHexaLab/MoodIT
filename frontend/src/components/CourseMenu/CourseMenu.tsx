@@ -49,6 +49,8 @@ interface CourseMenuProps {
   courses?: Course[];
   /** Cours actuellement ouvert (par défaut, le premier). */
   selectedCourseId?: number;
+  /** Affiche l'entrée « Devoirs » du cours (voir CourseChannelList). */
+  assignments?: { count?: number };
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
   /** Canal actuellement sélectionné (type + id). */
@@ -128,6 +130,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   activeProgram,
   courses = [],
   selectedCourseId,
+  assignments,
   channelTypeDefinitions,
   selectedChannel,
   onSelectChannel,
@@ -351,6 +354,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             onSelectChannel={onSelectChannel}
             onOpenChannel={onOpenChannel}
             onEditSection={isAdmin && onSectionChange ? setEditingSection : undefined}
+            assignments={assignments}
           />
         )}
       </main>
@@ -444,6 +448,8 @@ function getEffectiveSelectedChannel(
   selectedChannel: ChannelRef | undefined
 ): ChannelRef | undefined {
   if (selectedChannel === undefined) return undefined;
+  // Les devoirs ne sont pas des canaux normalisés : leur entrée suit l'URL directement.
+  if (selectedChannel.type === 'assignment') return selectedChannel;
   return channels.some((channel) => isSameChannel(channel, selectedChannel))
     ? selectedChannel
     : undefined;

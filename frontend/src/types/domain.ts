@@ -510,3 +510,42 @@ export interface PostVoteUserDTO {
   childrenCount?: number;
   children?: PostVoteUserDTO[];
 }
+
+/** Remise d'un étudiant : toujours un fichier (#252). */
+export interface AssignmentSubmission {
+  fileName: string;
+  /** Date ISO de la remise. */
+  submittedAt: string;
+  /** Remis après la date limite. */
+  late: boolean;
+  /** Note publiée, ex. « 17 / 20 » ; absente tant que le devoir n'est pas corrigé. */
+  grade?: string;
+}
+
+/** Fichier joint par le prof à un devoir. */
+export interface AssignmentFile {
+  name: string;
+  /** Taille lisible, ex. « 240 Ko ». */
+  size: string;
+}
+
+/** Devoir d'un cours, vu par l'étudiant (sa remise) ou le prof (les compteurs). */
+export interface Assignment {
+  id: number;
+  courseId: number;
+  title: string;
+  instructions: string;
+  /** Date ISO ; absente tant qu'un brouillon n'a pas de date limite. */
+  dueAt?: string;
+  /** Pondération en pourcentage. */
+  weight?: number;
+  /** Formats attendus (facultatifs) ; vide : tous les formats sont acceptés. */
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+  publishedBy?: string;
+  submission?: AssignmentSubmission;
+  submittedCount: number;
+  gradedCount: number;
+  studentCount: number;
+}

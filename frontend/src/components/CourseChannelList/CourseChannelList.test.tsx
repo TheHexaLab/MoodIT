@@ -39,3 +39,42 @@ describe('CourseChannelList — canal d’annonces', () => {
     expect(screen.getByText('Annonces').closest('button')?.getAttribute('aria-current')).toBe('page');
   });
 });
+
+describe('CourseChannelList — entrée Devoirs', () => {
+  it('absente par défaut', () => {
+    render(<CourseChannelList channels={CHANNELS} />);
+    expect(screen.queryByText('Devoirs')).toBeNull();
+  });
+
+  it('épinglée après Annonces, hors sections, même sans canal d’annonces', () => {
+    const { container, rerender } = render(<CourseChannelList channels={CHANNELS} assignments={{}} />);
+    const buttons = within(container).getAllByRole('button');
+    expect(buttons[0].textContent).toContain('Annonces');
+    expect(buttons[1].textContent).toContain('Devoirs');
+
+    rerender(<CourseChannelList channels={[]} assignments={{}} />);
+    expect(within(container).getByRole('list', { name: 'Épinglés' }).textContent).toBe('Devoirs');
+  });
+
+  it('ouvre la liste des devoirs, et reste active sur un devoir ouvert', () => {
+    const onSelect = vi.fn();
+    render(
+      <CourseChannelList
+        assignments={{}}
+        onSelectChannel={onSelect}
+        selectedChannel={{ id: 1005, type: 'assignment' }}
+      />
+    );
+    const entry = screen.getByText('Devoirs').closest('button')!;
+    expect(entry.getAttribute('aria-current')).toBe('page');
+    fireEvent.click(entry);
+    expect(onSelect).toHaveBeenCalledWith({ id: 0, type: 'assignment' });
+  });
+
+  it('montre le nombre à remettre, et rien à zéro', () => {
+    const { rerender } = render(<CourseChannelList assignments={{ count: 2 }} />);
+    expect(screen.getByLabelText('2 à remettre').textContent).toBe('2');
+    rerender(<CourseChannelList assignments={{ count: 0 }} />);
+    expect(screen.queryByLabelText(/à remettre/)).toBeNull();
+  });
+});

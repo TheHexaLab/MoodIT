@@ -86,6 +86,43 @@ describe('MainPanel', () => {
     expect(screen.getByRole('region', { name: 'Contenu principal' })).toBeTruthy();
   });
 
+  describe('canal Devoirs', () => {
+    const channel = { type: 'assignment', id: 0 };
+
+    it('s’affiche avec ses accès, et transmet l’ouverture d’un devoir', async () => {
+      const onOpenAssignment = vi.fn();
+      renderPanel({
+        selectedChannel: channel,
+        onOpenAssignment,
+        assignmentHandlers: {
+          onFetchAssignments: vi.fn().mockResolvedValue([
+            {
+              id: 5,
+              courseId: 10,
+              title: 'Devoir 5',
+              instructions: '',
+              expectedFormats: [],
+              files: [],
+              isPublished: true,
+              submittedCount: 0,
+              gradedCount: 0,
+              studentCount: 0,
+            },
+          ]),
+          onSubmitAssignment: vi.fn(),
+        },
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: /Devoir 5/ }));
+      expect(onOpenAssignment).toHaveBeenCalledWith(5);
+    });
+
+    it('sans accès (production) : aucun canal actif', () => {
+      renderPanel({ selectedChannel: channel });
+      expect(screen.queryByText('Chargement des devoirs…')).toBeNull();
+    });
+  });
+
   describe('états vides', () => {
     it('1 — aucun programme : NoProgramState, actions transmises', () => {
       const onJoinProgram = vi.fn();

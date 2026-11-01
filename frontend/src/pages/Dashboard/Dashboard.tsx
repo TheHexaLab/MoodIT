@@ -884,7 +884,10 @@ export default function Dashboard() {
       })
     : [];
   const selectedChannel =
-    selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
+    selectedChannelRef?.type === 'assignment' && api.assignmentsAvailable()
+      ? { id: selectedChannelRef.id, type: selectedChannelRef.type, name: 'Devoirs' }
+      : (selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ??
+        null);
   // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
   const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
   // La ref (lue depuis les closures WS, ex. resync) est synchronisée hors rendu :
@@ -893,6 +896,27 @@ export default function Dashboard() {
     openQuizIdRef.current = openQuizId;
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
+
+  // Devoirs (données fictives, jamais en production) : la pastille du panneau suit ce qui reste à
+  // remettre dans le cours ouvert, et une remise la remet à jour.
+  const canManageActiveProgram = permsForProgram(activeProgramId).canManageContent;
+  const [assignmentsToSubmit, setAssignmentsToSubmit] = useState<number | undefined>(undefined);
+  const refreshAssignmentsCount = useCallback((courseId: number | undefined) => {
+    if (courseId == null || !api.assignmentsAvailable()) return;
+    void api.fetchAssignments(courseId).then((assignments) => {
+      setAssignmentsToSubmit(assignments.filter((a) => !a.submission).length);
+    });
+  }, []);
+  useEffect(() => {
+    refreshAssignmentsCount(effectiveSelectedCourseId);
+  }, [effectiveSelectedCourseId, refreshAssignmentsCount]);
+  const assignmentHandlers = api.assignmentsAvailable()
+    ? {
+        onFetchAssignments: api.fetchAssignments,
+        onSubmitAssignment: api.submitAssignment,
+        onAssignmentsChanged: () => refreshAssignmentsCount(effectiveSelectedCourseId),
+      }
+    : undefined;
 
   // Établissement de l'utilisateur : celui dont le domaine courriel correspond au sien. Le bandeau
   // retombe sur « MoodIT » si aucun ne correspond ou si la liste ne se charge pas.
@@ -1073,6 +1097,11 @@ export default function Dashboard() {
             courses={coursesEnabled ? courses : []}
             selectedCourseId={effectiveSelectedCourseId}
             selectedChannel={selectedChannelRef}
+            assignments={
+              api.assignmentsAvailable()
+                ? { count: canManageActiveProgram ? undefined : assignmentsToSubmit }
+                : undefined
+            }
             onSelectChannel={(channel) =>
               setView({
                 programId: activeProgramId,
@@ -1107,6 +1136,14 @@ export default function Dashboard() {
         <AccueilPage firstName={currentUser.firstName} />
       ) : (
       <MainPanel
+        assignmentHandlers={assignmentHandlers}
+        onOpenAssignment={(assignmentId) =>
+          setView({
+            programId: activeProgramId,
+            courseId: effectiveSelectedCourseId,
+            channel: { type: 'assignment', id: assignmentId },
+          })
+        }
         loading={mainPanelLoading}
         isAdmin={permsForProgram(activeProgramId).canManageContent}
         // Modération (supprimer le contenu d'autrui) : admin GLOBAL ou Administrateur du

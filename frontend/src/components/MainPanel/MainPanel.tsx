@@ -41,12 +41,17 @@ import {
   type RunCodeHandler,
   type SubmitQuizHandler,
 } from './QuizView/quizAttempt.ts';
+import AssignmentView, { type AssignmentHandlers } from './AssignmentView/AssignmentView.tsx';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
 import EmptyCourseState from './states/EmptyCourseState/EmptyCourseState.tsx';
 import NoActiveChannelState from './states/NoActiveChannelState/NoActiveChannelState.tsx';
 
 interface MainPanelProps {
+  /** Accès aux devoirs ; absent : le canal Devoirs n'existe pas (production, #252). */
+  assignmentHandlers?: AssignmentHandlers;
+  /** Ouvre un devoir, ou la liste des devoirs. */
+  onOpenAssignment?: (assignmentId: number) => void;
   /**
    * Gestion du CONTENU du programme actif (Enseignant / Administrateur / admin global) :
    * débloque les actions de création dans les états vides. N'accorde PAS la modération.
@@ -142,6 +147,8 @@ interface MainPanelProps {
  * (canal 'Discussion', forum 'Thread', quiz).
  */
 const MainPanel: React.FC<MainPanelProps> = ({
+  assignmentHandlers,
+  onOpenAssignment,
   isAdmin = false,
   isGlobalAdmin = false,
   program,
@@ -214,8 +221,20 @@ const MainPanel: React.FC<MainPanelProps> = ({
         <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} onJoinCourse={onJoinCourse} />
       );
     }
-    // 3 — le cours sélectionné est vide (aucun canal/forum/quiz).
     const course = courses.find((c) => c.id === selectedCourse) ?? null;
+    // Canal Devoirs : hors des canaux normalisés, il existe même dans un cours sans contenu.
+    if (course && assignmentHandlers && selectedChannel?.type === 'assignment') {
+      return (
+        <AssignmentView
+          key={`assignment-${course.id}`}
+          course={course}
+          assignmentId={selectedChannel.id}
+          handlers={assignmentHandlers}
+          onOpen={(assignmentId) => onOpenAssignment?.(assignmentId)}
+        />
+      );
+    }
+    // 3 — le cours sélectionné est vide (aucun canal/forum/quiz).
     const courseChannels = course
       ? normalizeCourseChannelsFromSources({
           quizzes: course.quizzes,

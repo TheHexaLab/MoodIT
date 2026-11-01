@@ -2,8 +2,8 @@
 // vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
 // Dashboard se contente d'orchestrer l'état autour.
 //
-// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE) et evaluateCode
-// (service d'exécution). Elles utilisent encore les helpers simulate* ci-dessous.
+// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE), evaluateCode (service
+// d'exécution), qui utilisent encore les helpers simulate* ci-dessous, et les devoirs (fin du fichier).
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -11,8 +11,10 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
+import { demoAssignments } from '../../mocks/assignmentsData.ts';
 import type {
   AnswerResponse,
+  Assignment,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1237,4 +1239,47 @@ export async function votePost(
     body: JSON.stringify({ forumId, postId, voteValue: value }),
   });
   if (!res.ok) throw new Error('Échec du vote');
+}
+
+// ── Devoirs (#252) : données FICTIVES, en mémoire, en attendant une API ───────────────────────────
+
+/** Pas d'API de devoirs : l'interface n'existe qu'en développement, jamais en production. */
+export function assignmentsAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+const demoAssignmentsByCourse = new Map<number, Assignment[]>();
+
+function courseAssignments(courseId: number): Assignment[] {
+  let assignments = demoAssignmentsByCourse.get(courseId);
+  if (!assignments) {
+    assignments = demoAssignments(courseId, new Date());
+    demoAssignmentsByCourse.set(courseId, assignments);
+  }
+  return assignments;
+}
+
+/** Devoirs d'un cours ; les brouillons pour le prof seulement. */
+export async function fetchAssignments(
+  courseId: number,
+  includeDrafts = false
+): Promise<Assignment[]> {
+  return courseAssignments(courseId).filter((a) => includeDrafts || a.isPublished);
+}
+
+/** Simule la remise d'un fichier : remplace la remise précédente, s'il y en a une. */
+export async function submitAssignment(
+  courseId: number,
+  assignmentId: number,
+  fileName: string
+): Promise<Assignment> {
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Devoir introuvable');
+  const now = new Date();
+  assignment.submission = {
+    fileName,
+    submittedAt: now.toISOString(),
+    late: assignment.dueAt != null && now > new Date(assignment.dueAt),
+  };
+  return assignment;
 }

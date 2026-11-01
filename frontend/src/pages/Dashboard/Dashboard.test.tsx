@@ -331,6 +331,81 @@ afterEach(() => {
 });
 
 describe('Dashboard', () => {
+  describe('devoirs', () => {
+    const TO_SUBMIT = {
+      id: 5,
+      courseId: 10,
+      title: 'Devoir 5',
+      instructions: 'Lire.',
+      expectedFormats: [],
+      files: [],
+      isPublished: true,
+      submittedCount: 0,
+      gradedCount: 0,
+      studentCount: 1,
+    };
+    const courseNav = () => within(screen.getByRole('navigation', { name: 'Cours' }));
+
+    beforeEach(() => {
+      vi.mocked(api.assignmentsAvailable).mockReturnValue(true);
+      vi.mocked(api.fetchAssignments).mockResolvedValue([TO_SUBMIT]);
+    });
+
+    afterEach(() => {
+      vi.mocked(api.assignmentsAvailable).mockReset();
+      vi.mocked(api.fetchAssignments).mockReset();
+    });
+
+    it('l’entrée du panneau ouvre la liste, et une ligne ouvre le devoir, dans l’URL', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      expect(await courseNav().findByLabelText('1 à remettre')).toBeTruthy();
+
+      fireEvent.click(courseNav().getByRole('button', { name: /Devoirs/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/assignment/0'));
+      expect(lastNavigation()).toBe('PUSH');
+
+      fireEvent.click(await screen.findByRole('button', { name: /Devoir 5/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/assignment/5'));
+      expect(await screen.findByRole('heading', { name: 'Devoir 5' })).toBeTruthy();
+    });
+
+    it('une remise met à jour la pastille du panneau', async () => {
+      vi.mocked(api.submitAssignment).mockResolvedValue({
+        ...TO_SUBMIT,
+        submission: { fileName: 'a.pdf', submittedAt: new Date().toISOString(), late: false },
+      });
+      renderDashboard({ path: '/home/p/1/c/10/assignment/5' });
+      await screen.findByRole('heading', { name: 'Devoir 5' });
+      await courseNav().findByLabelText('1 à remettre');
+
+      vi.mocked(api.fetchAssignments).mockResolvedValue([]);
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [new File(['x'], 'a.pdf')] },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Remettre le devoir' }));
+
+      await waitFor(() => expect(courseNav().queryByLabelText(/à remettre/)).toBeNull());
+    });
+
+    it('le personnel n’a pas de pastille de devoirs à remettre', async () => {
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      await courseNav().findByRole('button', { name: /Devoirs/ });
+      expect(courseNav().queryByLabelText(/à remettre/)).toBeNull();
+    });
+
+    it('en production : aucune entrée, et l’URL d’un devoir n’affiche rien de fictif', async () => {
+      vi.mocked(api.assignmentsAvailable).mockReturnValue(false);
+      renderDashboard({ path: '/home/p/1/c/10/assignment/5' });
+      await waitForCourseSelector('IFT101');
+
+      expect(courseNav().queryByRole('button', { name: /Devoirs/ })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Devoir 5' })).toBeNull();
+      expect(api.fetchAssignments).not.toHaveBeenCalled();
+    });
+  });
+
   describe('chargement initial', () => {
     it('ouvre la connexion WS, charge les programmes et affiche le portail', async () => {
       renderDashboard({ path: '/home' });

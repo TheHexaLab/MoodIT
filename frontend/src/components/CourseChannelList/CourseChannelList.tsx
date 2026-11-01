@@ -63,6 +63,11 @@ interface CourseChannelListProps {
    * Si absent, l'icône d'édition n'est pas rendue.
    */
   onEditSection?: (section: ChannelTypeDefinition) => void;
+  /**
+   * Affiche l'entrée épinglée « Devoirs » (toujours une seule, même avec plusieurs devoirs).
+   * `count` : pastille du nombre de devoirs à remettre, absente si `undefined` ou 0.
+   */
+  assignments?: { count?: number };
 }
 
 /**
@@ -77,6 +82,7 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
   onSelectChannel,
   onOpenChannel,
   onEditSection,
+  assignments,
 }) => {
   /** Types de sections actuellement repliés (etat local, non persiste). */
   const [collapsedTypes, setCollapsedTypes] = useState<Record<string, boolean>>({});
@@ -114,14 +120,37 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
 
   return (
     <div className={styles.channelSections}>
-      {/* Canal d'annonces : en tête, hors sections (un seul par cours, rien à éditer). */}
-      {(channelsByType.announcement ?? []).length > 0 && (
+      {/* Annonces et Devoirs : en tête, hors sections (un seul de chaque par cours, rien à éditer). */}
+      {((channelsByType.announcement ?? []).length > 0 || assignments) && (
         <ul className={styles.pinned} role="list" aria-label="Épinglés">
-          {channelsByType.announcement.map((channel) => (
+          {(channelsByType.announcement ?? []).map((channel) => (
             <li key={`announcement-${channel.id}`} className={styles.channelItem}>
               {channelButton(channel, styles.channelButton, styles.channelButtonActive)}
             </li>
           ))}
+          {assignments && (
+            <li className={styles.channelItem}>
+              <button
+                type="button"
+                className={`${styles.channelButton} ${selectedChannel?.type === 'assignment' ? styles.channelButtonActive : ''}`}
+                aria-current={selectedChannel?.type === 'assignment' ? 'page' : undefined}
+                onClick={() => onSelectChannel?.({ id: 0, type: 'assignment' })}
+              >
+                <span className={styles.channelPrefix}>
+                  <ChannelTypeIcon type="assignment" />
+                </span>
+                <span className={styles.channelName}>Devoirs</span>
+                {assignments.count ? (
+                  <span
+                    className={styles.channelCount}
+                    aria-label={`${assignments.count} à remettre`}
+                  >
+                    {assignments.count}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          )}
         </ul>
       )}
 
