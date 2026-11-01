@@ -115,11 +115,15 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
   return (
     <div className={styles.channelSections}>
       {/* Canal d'annonces : en tête, hors sections (un seul par cours, rien à éditer). */}
-      {(channelsByType.announcement ?? []).map((channel) => (
-        <div key={`announcement-${channel.id}`} className={styles.announcementItem}>
-          {channelButton(channel, styles.announcementButton, styles.announcementButtonActive)}
-        </div>
-      ))}
+      {(channelsByType.announcement ?? []).length > 0 && (
+        <ul className={styles.pinned} role="list" aria-label="Épinglés">
+          {channelsByType.announcement.map((channel) => (
+            <li key={`announcement-${channel.id}`} className={styles.channelItem}>
+              {channelButton(channel, styles.channelButton, styles.channelButtonActive)}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {typeDefinitions.map((definition) => {
         const typedChannels = channelsByType[definition.type] ?? [];

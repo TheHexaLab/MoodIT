@@ -128,9 +128,9 @@ test('sections QUIZ / CANAUX / FORUMS : repli et dépli', async ({ browser, base
   const { context, page } = await openProgramWithTwoCourses(browser, baseURL!);
 
   for (const [section, item] of [
-    ['QUIZ', QUIZ_NAME],
-    ['CANAUX', CHANNEL_NAME],
-    ['FORUMS', FORUM_NAME],
+    ['Quiz', QUIZ_NAME],
+    ['Canaux', CHANNEL_NAME],
+    ['Forums', FORUM_NAME],
   ]) {
     const region = courseNav(page).getByRole('region', { name: section });
     const toggle = region.getByRole('button', { name: section, exact: true });

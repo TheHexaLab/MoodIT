@@ -5,7 +5,7 @@ import { type ChannelTypeDefinition } from './CourseChannelList.tsx';
  *  retrouvent la définition d'un type afin d'ouvrir le SectionEditorPopup
  *  correspondant — sans casser le fast-refresh de CourseChannelList. */
 export const defaultTypeDefinitions: ChannelTypeDefinition[] = [
-  { type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' },
-  { type: 'text', label: 'CANAUX', emptyLabel: 'Aucun canal' },
-  { type: 'forum', label: 'FORUMS', emptyLabel: 'Aucun forum' },
+  { type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' },
+  { type: 'text', label: 'Canaux', emptyLabel: 'Aucun canal' },
+  { type: 'forum', label: 'Forums', emptyLabel: 'Aucun forum' },
 ];

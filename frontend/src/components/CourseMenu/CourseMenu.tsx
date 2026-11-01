@@ -173,6 +173,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   const courseOptions = courses.map((course) => ({
     id: course.id,
     code: formatCourseCode(course),
+    title: course.title,
     channels: normalizeCourseChannelsFromSources({
       quizzes: course.quizzes,
       forums: course.forums,
@@ -285,6 +286,12 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             >
               <span className={styles.courseSelectCode}>
                 {selectedCourse?.code ?? dropdownLabels.selectFallback}
+                {/* Repère visuel : le nom accessible du bouton reste le code du cours. */}
+                {selectedCourse?.title && (
+                  <span className={styles.courseSelectTitle} aria-hidden="true">
+                    {selectedCourse.title}
+                  </span>
+                )}
               </span>
             </button>
           </div>

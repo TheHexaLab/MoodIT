@@ -423,7 +423,7 @@ test('popups de gestion : cours, programme, sections, rôles, MCP', async ({ bro
 
     // Sections CANAUX (crayon de la section) : liste, ajout, « ✕ ».
     await openDrawer(page, hasTouch);
-    await press(courseNav(page).getByRole('button', { name: 'Modifier la section CANAUX' }), hasTouch);
+    await press(courseNav(page).getByRole('button', { name: 'Modifier la section Canaux' }), hasTouch);
     await expectPopup(page, 'Modifier les canaux', ['+ Ajouter un canal'], hasTouch);
     await noteTarget(page.getByRole('button', { name: '✕' }), hasTouch);
     await expectReachable(page.getByRole('listitem').filter({ hasText: /^⠿/ }).first());
@@ -475,7 +475,7 @@ test('éditeur de quiz : liste, formulaire, question (6 types), harnais et test'
   try {
     await selectProgram(page, PROGRAM_NAME, hasTouch);
     await openDrawer(page, hasTouch);
-    await press(courseNav(page).getByRole('button', { name: 'Modifier la section QUIZ' }), hasTouch);
+    await press(courseNav(page).getByRole('button', { name: 'Modifier la section Quiz' }), hasTouch);
 
     // Liste. « Fermer » / « Retour » du bandeau (✕ / chevron) font 15 px de large : atteignables,
     // taille annotée dans le rapport.

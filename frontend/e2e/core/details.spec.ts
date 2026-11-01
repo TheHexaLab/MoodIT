@@ -253,7 +253,7 @@ const bolt = (row: Locator, on: boolean) =>
   row.locator(`svg[fill="${on ? 'currentColor' : 'none'}"]:has(path[d^="M13 2"])`);
 
 async function openQuizEditor(page: Page) {
-  await courseNav(page).getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+  await courseNav(page).getByRole('button', { name: 'Modifier la section Quiz' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
 }
 
@@ -363,7 +363,7 @@ test('quiz:reordered : l’étudiant voit le nouvel ordre des quiz sans recharge
   try {
     const student = await member(baseURL!, fx);
     const s = await openProgram(browser, student.storageState, fx.program);
-    const quizButtons = courseNav(s.page).getByRole('region', { name: 'QUIZ' }).getByRole('button');
+    const quizButtons = courseNav(s.page).getByRole('region', { name: 'Quiz' }).getByRole('button');
     const order = async () => {
       const names = await quizButtons.allInnerTexts();
       return [names.findIndex((n) => n.includes(first)), names.findIndex((n) => n.includes(second))];

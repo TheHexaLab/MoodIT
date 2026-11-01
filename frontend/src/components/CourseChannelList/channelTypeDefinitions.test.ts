@@ -12,9 +12,9 @@ describe('defaultTypeDefinitions', () => {
 
   it('associe chaque type à son label et emptyLabel attendus', () => {
     expect(defaultTypeDefinitions).toEqual([
-      { type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' },
-      { type: 'text', label: 'CANAUX', emptyLabel: 'Aucun canal' },
-      { type: 'forum', label: 'FORUMS', emptyLabel: 'Aucun forum' },
+      { type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' },
+      { type: 'text', label: 'Canaux', emptyLabel: 'Aucun canal' },
+      { type: 'forum', label: 'Forums', emptyLabel: 'Aucun forum' },
     ]);
   });
 

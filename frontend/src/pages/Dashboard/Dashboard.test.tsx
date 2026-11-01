@@ -877,7 +877,7 @@ describe('Dashboard', () => {
       renderDashboard({ isAdmin: true });
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
-      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section CANAUX' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section Canaux' }));
       // Ligne « general » DANS le popup (celle qui porte les icônes d'action).
       const li = screen
         .getAllByText('general')
