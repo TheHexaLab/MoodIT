@@ -35,9 +35,14 @@ server {
     add_header_inherit merge;
     include /etc/nginx/security-headers.conf;
 
+    # Pages (index.html et pages statiques de public/) : revalidées à chaque chargement (304 si
+    # rien n'a changé). Sans Cache-Control, le navigateur les garde en cache par heuristique et
+    # réaffiche une ancienne page : après un déploiement, elle référence des /assets/ disparus ;
+    # sur www.moodit.ca, redirigé depuis (#238), ses appels à l'API sont bloqués par la CSP (#242).
     location / {
         root /usr/share/nginx/html;
         index index.html;
+        add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 
