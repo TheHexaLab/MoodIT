@@ -303,7 +303,11 @@ const ProgramMenu: React.FC<ProgramMenuProps> = ({
                     {programLabel}
                   </button>
                 </li>
-                {renderCourses && <li className={styles.programCourses}>{renderCourses(prog)}</li>}
+                {renderCourses && (
+                  <li className={styles.programCourses} role="group" aria-label={`Cours de ${programLabel}`}>
+                    {renderCourses(prog)}
+                  </li>
+                )}
               </React.Fragment>
             );
           })}

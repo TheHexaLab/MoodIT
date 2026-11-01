@@ -403,7 +403,7 @@ test.describe('menus', () => {
     await expect(nav.getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
   });
 
-  test('panneau du cours : Entrée le réduit, Entrée le rouvre, le focus reste sur le bouton', async ({
+  test('panneau du cours : Entrée le réduit, le focus va à la tuile du cours, Entrée le rouvre', async ({
     browser,
     baseURL,
   }) => {
@@ -413,10 +413,11 @@ test.describe('menus', () => {
 
     await page.getByRole('button', { name: 'Réduire le panneau du cours' }).focus();
     await page.keyboard.press('Enter');
-    const reopen = page.getByRole('button', { name: 'Déplier le panneau du cours' });
-    await expect(reopen).toBeFocused();
+    const collapse = page.getByRole('button', { name: 'Réduire le panneau du cours' });
+    await expect(collapse).toBeHidden();
+    await expect(page.locator('button[aria-current="page"]')).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('button', { name: 'Réduire le panneau du cours' })).toBeFocused();
+    await expect(collapse).toBeVisible();
   });
 
   // L'éditeur Markdown ne capture Tab (indentation) que dans un bloc de code : ailleurs, Tab mène

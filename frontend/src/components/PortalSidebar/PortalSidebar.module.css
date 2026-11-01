@@ -1,8 +1,9 @@
 .sidebar {
     --sidebar-speed: 0.2s;
+    position: relative;
     box-sizing: border-box;
     flex: none;
-    width: 17rem;
+    width: var(--portal-sidebar-width, 17rem);
     height: 100%;
     overflow: hidden;
     transition: width var(--sidebar-speed) ease;
@@ -15,7 +16,7 @@
 /* Largeur fixe : la barre glisse par-dessus ce contenu, qui ne se réorganise jamais à l'horizontale.
    Le centre des icônes et des tuiles reste à 2,25rem du bord, soit le milieu de la barre réduite. */
 .inner {
-    width: 17rem;
+    width: var(--portal-sidebar-width, 17rem);
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -30,6 +31,7 @@
 }
 
 .navItem {
+    position: relative;
     box-sizing: border-box;
     width: 100%;
     height: 2.75rem;
@@ -48,7 +50,7 @@
     cursor: pointer;
     transition: width var(--sidebar-speed) ease, max-height var(--sidebar-speed) ease,
         margin var(--sidebar-speed) ease, opacity var(--sidebar-speed) ease,
-        visibility var(--sidebar-speed);
+        visibility var(--sidebar-speed), color 0.15s ease;
 }
 
 /* Le libellé s'efface en place : il ne pousse rien pendant le glissement. */
@@ -57,25 +59,29 @@
     transition: opacity var(--sidebar-speed) ease;
 }
 
-.navItem[aria-disabled='true'] {
-    cursor: default;
-}
+/* Survol : la barre verticale de l'élément actif, moins haute et plus pâle, et le texte plus franc. */
+@media (hover: hover) {
+    .navItem:not(.navItemActive):hover {
+        color: var(--text);
+    }
 
-.navItem:not([aria-disabled='true']):hover,
-.course:hover {
-    background: var(--bg-active-channel);
+    .navItem:hover::before,
+    .course:hover::before {
+        opacity: 0.55;
+        transform: translateY(-50%) scaleY(0.7);
+    }
 }
 
 .navItemActive {
-    position: relative;
     background: var(--badge-success-bg);
     color: var(--brand-teal);
     font-weight: 600;
 }
 
-/* Élément actif : barre de 4 px au bord gauche de la barre. */
-.navItemActive::before,
-.courseActive::before {
+/* Barre de 4 px au bord gauche de la barre : un seul élément, qui s'anime en scaleY, pour que le
+   passage du survol à l'élément actif soit fluide. */
+.navItem::before,
+.course::before {
     content: '';
     position: absolute;
     left: -0.75rem;
@@ -84,7 +90,16 @@
     height: 2rem;
     border-radius: 0 0.1875rem 0.1875rem 0;
     background: var(--brand-teal);
-    transform: translateY(-50%);
+    opacity: 0;
+    transform: translateY(-50%) scaleY(0);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.navItem.navItemActive::before,
+.course.courseActive::before {
+    opacity: 1;
+    transform: translateY(-50%) scaleY(1);
 }
 
 .navItem:focus-visible,
@@ -123,11 +138,8 @@
     padding: 0 0.75rem 0.5rem;
 }
 
-.courseActive {
-    position: relative;
-}
-
 .course {
+    position: relative;
     box-sizing: border-box;
     width: 100%;
     min-height: 3rem;
@@ -185,7 +197,6 @@
     flex: none;
     max-height: 2.75rem;
     margin-top: 0.25rem;
-    overflow: hidden;
     color: var(--text-muted);
 }
 
@@ -198,6 +209,7 @@
 .sidebarCollapsed .expandedOnly {
     max-height: 0;
     margin-top: 0;
+    overflow: hidden;
     padding-top: 0;
     padding-bottom: 0;
     opacity: 0;
@@ -207,13 +219,14 @@
 .sidebarCollapsed .collapsedOnly {
     max-height: 2.75rem;
     margin-top: 0.25rem;
+    overflow: visible;
     opacity: 1;
     visibility: visible;
 }
 
 /* Bouton réduire / déplier : hors de la zone qui défile, au-dessus du compte. */
 .toggle {
-    width: 15.5rem;
+    width: calc(100% - 1.5rem);
     margin: 0 0.75rem 0.5rem;
 }
 
@@ -258,6 +271,49 @@
     .sidebar {
         --sidebar-speed: 0s;
     }
+
+    .navItem::before,
+    .course::before {
+        transition: none;
+    }
+}
+
+/* Pendant le glissement de la poignée, la largeur suit la souris sans retard. */
+.sidebarResizing {
+    transition: none;
+}
+
+/* Poignée de redimensionnement (bord droit), comme celle du panneau du cours. */
+.resizeHandle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.resizeHandle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after,
+.resizeHandleActive::after {
+    background: var(--brand-teal);
+}
+
+.resizeHandle:focus-visible {
+    outline: none;
 }
 
 .status {
@@ -267,11 +323,12 @@
     font-size: 0.8125rem;
 }
 
-/* L'avatar (2rem, dans 0,5rem de marge) reste centré à 2,25rem du bord dans les deux versions. */
+/* L'avatar (2rem) reste centré à 2,25rem du bord dans les deux versions. Le bouton remplit le pied
+   jusqu'au bord : son survol n'est pas coupé. */
 .footer {
+    --user-menu-inset: 1.25rem;
     flex: none;
     height: 3.5rem;
-    padding-left: 0.75rem;
     box-sizing: border-box;
     background: var(--bg-user-panel);
     border-top: 1px solid var(--border);
@@ -286,6 +343,10 @@
 
     .sidebar:not(.sidebarCollapsed) .inner {
         width: 100%;
+    }
+
+    .resizeHandle {
+        display: none;
     }
 
     /* Le compte est dans la barre mobile du haut (LeftMenuGroup), comme avant le portail. */

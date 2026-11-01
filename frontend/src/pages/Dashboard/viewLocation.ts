@@ -1,5 +1,6 @@
 // Vue courante du Dashboard (programme → cours → canal) portée par l'URL (#63) :
 //   /home                                      aucun programme
+//   /home/horaire, /home/factures…             page du portail (portalPages.ts), aucun programme
 //   /home/p/:programId                         programme (son premier cours s'affiche)
 //   /home/p/:programId/c/:courseId             cours
 //   /home/p/:programId/c/:courseId/:type/:id   canal du cours (type : text, quiz, forum)

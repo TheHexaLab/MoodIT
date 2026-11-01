@@ -1,23 +1,16 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import styles from './PortalSidebar.module.css';
 import ProgramMenu from '../ProgramMenu/ProgramMenu.tsx';
 import { courseTileColor } from './courseTile.ts';
+import { PORTAL_PAGES, type PortalPage } from './portalPages.ts';
+import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from './sidebarPreference.ts';
+import { useResizeHandle } from '../../hooks/useResizeHandle.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import type { Course, Program } from '../../types/domain.ts';
 
 const HOME_ICON = 'M3 11l9-8 9 8M5 9.5V21h14V9.5M10 21v-6h4v6';
 const PLUS_ICON = 'M12 5v14M5 12h14';
-
-/** Pages du portail à venir : présentes pour la maquette, sans action pour l'instant. */
-const UPCOMING_PAGES = [
-  { label: 'Horaire', path: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4' },
-  { label: 'Factures', path: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6' },
-  {
-    label: "Centre d'aide",
-    path: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01',
-  },
-];
 
 type ProgramActions = Pick<
   React.ComponentProps<typeof ProgramMenu>,
@@ -51,6 +44,14 @@ interface PortalSidebarProps {
   collapsed?: boolean;
   /** Réduit ou déplie la barre. Absent : pas de bouton (mobile, où la barre reste un tiroir). */
   onToggleCollapsed?: () => void;
+  /** Bouton du cours ouvert : le focus y arrive quand le panneau du cours se réduit. */
+  activeCourseRef?: React.Ref<HTMLButtonElement>;
+  /** Largeur demandée pour la version complète (px) ; null = par défaut. */
+  width?: number | null;
+  /** Change la largeur. Absent : pas de poignée (mobile). */
+  onWidthChange?: (width: number | null) => void;
+  /** Page du portail ouverte (Horaire, Factures…). */
+  activePage?: PortalPage;
   /** Programme ouvert (-1 : aucun, on est sur l'Accueil). */
   activeProgramId?: number;
   /** Cours ouvert : mis en évidence dans la liste. */
@@ -103,10 +104,24 @@ export default function PortalSidebar({
   userMenu,
   collapsed = false,
   onToggleCollapsed,
+  activeCourseRef,
+  width = null,
+  onWidthChange,
+  activePage,
   activeProgramId = -1,
   selectedCourseId,
 }: PortalSidebarProps): React.ReactElement {
-  const isHome = activeProgramId < 0;
+  const inCourse = activeProgramId >= 0;
+  const isHome = !inCourse && !activePage;
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
+    width,
+    onChange: (next) => onWidthChange?.(next),
+    min: SIDEBAR_MIN_WIDTH,
+    max: SIDEBAR_MAX_WIDTH,
+    fallback: SIDEBAR_DEFAULT_WIDTH,
+    getRenderedWidth: () => sidebarRef.current?.offsetWidth,
+  });
 
   // Calculé ici, pas pendant le rendu de ProgramMenu : un rendu doit rester pur (StrictMode rend
   // deux fois, et un second passage verrait tous les cours comme déjà affichés).
@@ -138,19 +153,22 @@ export default function PortalSidebar({
         <NavIcon path={HOME_ICON} />
         <span className={styles.label}>Accueil</span>
       </Link>
-      {UPCOMING_PAGES.map(({ label, path }) => (
-        <button
-          key={label}
-          type="button"
-          className={styles.navItem}
-          aria-disabled="true"
-          aria-label={collapsed ? label : undefined}
-          title={collapsed ? label : 'Bientôt disponible'}
-        >
-          <NavIcon path={path} />
-          <span className={styles.label}>{label}</span>
-        </button>
-      ))}
+      {PORTAL_PAGES.map((page) => {
+        const isActive = !inCourse && page.slug === activePage?.slug;
+        return (
+          <Link
+            key={page.slug}
+            to={`/home/${page.slug}`}
+            className={`${styles.navItem} ${isActive ? styles.navItemActive : ''}`}
+            aria-current={isActive ? 'page' : undefined}
+            aria-label={collapsed ? page.label : undefined}
+            title={collapsed ? page.label : undefined}
+          >
+            <NavIcon path={page.path} />
+            <span className={styles.label}>{page.label}</span>
+          </Link>
+        );
+      })}
     </nav>
   );
 
@@ -169,7 +187,7 @@ export default function PortalSidebar({
 
   // Le « + » de la version réduite vise le programme ouvert ou le seul programme. Avec plusieurs
   // programmes, il déplie la barre, où chaque programme a son propre « Rejoindre un cours ».
-  const joinTarget = !isHome ? activeProgramId : programs.length === 1 ? programs[0].id : null;
+  const joinTarget = inCourse ? activeProgramId : programs.length === 1 ? programs[0].id : null;
   const handleCollapsedJoin = () => {
     if (programs.length === 0) onJoinProgram();
     else if (joinTarget != null) programActions?.onJoinCourses?.(joinTarget);
@@ -177,7 +195,10 @@ export default function PortalSidebar({
   };
 
   return (
-    <div className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
+    <div
+      ref={sidebarRef}
+      className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''} ${isResizing ? styles.sidebarResizing : ''}`}
+    >
       <div className={styles.inner}>
       {pageLinks}
 
@@ -202,6 +223,7 @@ export default function PortalSidebar({
                 return (
                   <button
                     key={course.id}
+                    ref={isActive ? activeCourseRef : undefined}
                     type="button"
                     className={`${styles.course} ${isActive ? styles.courseActive : ''}`}
                     aria-current={isActive ? 'page' : undefined}
@@ -283,6 +305,13 @@ export default function PortalSidebar({
       {toggleButton}
       <div className={styles.footer}>{userMenu}</div>
       </div>
+      {onWidthChange && !collapsed && (
+        <div
+          className={`${styles.resizeHandle} ${isResizing ? styles.resizeHandleActive : ''}`}
+          aria-label="Redimensionner le menu"
+          {...resizeHandleProps}
+        />
+      )}
     </div>
   );
 }

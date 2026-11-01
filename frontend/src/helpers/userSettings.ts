@@ -3,24 +3,11 @@
 // c'est ici qu'on définit la forme, qu'on parse à la lecture (GET /api/me) et qu'on
 // sérialise à l'écriture (PUT /api/me/settings — cf. helpers/api.ts `updateMeSettings`).
 //
-// Deux volets aujourd'hui :
-//   - `theme`    : dark/light, source de vérité BD (suit l'appareil). Cf. ThemeProvider.
-//   - `location` : dernière position dans le Dashboard (programme → cours → canal), pour
-//                  replacer l'utilisateur là où il était à la session précédente.
-
-import type { ChannelRef } from '../components/CourseChannelList/CourseChannelList.tsx';
-
-/** Dernière localisation de l'utilisateur dans le Dashboard (tous champs optionnels). */
-export interface SavedLocation {
-  programId?: number;
-  courseId?: number;
-  channel?: ChannelRef;
-}
+// `theme` : dark/light, source de vérité BD (suit l'appareil). Cf. ThemeProvider.
 
 /** Forme du blob `settings`. Tous les champs sont optionnels (compte neuf → objet vide). */
 export interface UserSettings {
   theme?: 'light' | 'dark';
-  location?: SavedLocation;
 }
 
 /**

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useLocation } from 'react-router-dom';
 import { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
@@ -49,9 +50,13 @@ import PortalBand from '../../components/PortalBand/PortalBand.tsx';
 import PortalSidebar from '../../components/PortalSidebar/PortalSidebar.tsx';
 import {
   readSidebarCollapsed,
+  readSidebarWidth,
+  storeSidebarWidth,
   storeSidebarCollapsed,
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
+import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
+import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
@@ -139,6 +144,8 @@ export default function Dashboard() {
   const selectedChannelRef = view.channel;
   // Aucun programme dans l'URL (/home) : le portail (Accueil). Sinon, l'interface du cours.
   const isPortal = activeProgramId < 0;
+  const { pathname } = useLocation();
+  const portalPage = isPortal ? portalPageFromPath(pathname) : undefined;
   const isMobile = useSyncExternalStore(subscribeToMobile, () => window.matchMedia(MOBILE_QUERY).matches);
   // Barre de gauche : le choix mémorisé sur l'Accueil, toujours réduite dans un cours, à côté du
   // panneau du cours. Sur mobile, complète sur l'Accueil, sans bouton pour la changer.
@@ -148,8 +155,20 @@ export default function Dashboard() {
     storeSidebarCollapsed(!homeSidebarCollapsed);
     setHomeSidebarCollapsed(!homeSidebarCollapsed);
   };
-  // Panneau du cours réduit en mince bande. Ouvrir un cours le rouvre : ses canaux y sont.
+  // Largeur choisie pour la barre complète : le panneau du cours s'en sert aussi (voir son CSS).
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const changeSidebarWidth = (width: number | null) => {
+    storeSidebarWidth(width);
+    setSidebarWidth(width);
+  };
+  // Panneau du cours réduit : il disparaît. Un clic sur un cours, même celui ouvert, le rouvre.
   const [coursePanelCollapsed, setCoursePanelCollapsed] = useState(false);
+  const activeCourseRef = useRef<HTMLButtonElement>(null);
+  // Le bouton activé disparaît avec le panneau : le focus passe à la tuile du cours, qui le rouvre.
+  const collapseCoursePanel = () => {
+    setCoursePanelCollapsed(true);
+    activeCourseRef.current?.focus();
+  };
   // Programmes dont les cours ont répondu au moins une fois : avant, « aucun cours » ne veut rien dire.
   const [fetchedProgramIds, setFetchedProgramIds] = useState<number[]>([]);
   // Programmes dont les cours n'ont pas pu être chargés (barre du portail).
@@ -962,7 +981,14 @@ export default function Dashboard() {
       : null;
 
   return (
-    <div className={styles.portalRoot}>
+    <div
+      className={styles.portalRoot}
+      style={
+        sidebarWidth != null
+          ? ({ '--portal-sidebar-width': `${sidebarWidth}px` } as CSSProperties)
+          : undefined
+      }
+    >
     <PortalBand establishmentName={establishment?.name} onAddProgram={handleAddProgram} />
     <div className={styles.dashboardLayout}>
       <LeftMenuGroup
@@ -972,13 +998,15 @@ export default function Dashboard() {
         mobileTitlePrefix={
           selectedChannel ? <ChannelTypeIcon type={selectedChannel.type} /> : undefined
         }
-        mobileTitle={selectedChannel ? selectedChannel.name : undefined}
+        mobileTitle={selectedChannel ? selectedChannel.name : portalPage?.label}
         // Identifiant unique de l'élément ouvert : cours, type et id. Le nom seul confondrait deux
         // « general » de cours différents, et le tiroir ne se refermerait pas en passant de l'un à l'autre.
         selectionKey={
           selectedChannel
             ? `${effectiveSelectedCourseId ?? ''}:${selectedChannel.type}:${selectedChannel.id}`
-            : undefined
+            : isPortal
+              ? (portalPage?.slug ?? 'accueil')
+              : undefined
         }
         mobileUserInitial={mobileUserInitial}
         mobileUserMenu={
@@ -1016,6 +1044,10 @@ export default function Dashboard() {
             onAddProgram={isMobile ? handleAddProgram : undefined}
             collapsed={sidebarCollapsed}
             onToggleCollapsed={isPortal && !isMobile ? toggleHomeSidebar : undefined}
+            activeCourseRef={activeCourseRef}
+            width={sidebarWidth}
+            onWidthChange={isMobile ? undefined : changeSidebarWidth}
+            activePage={portalPage}
             activeProgramId={activeProgramId}
             selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
             userMenu={
@@ -1035,7 +1067,7 @@ export default function Dashboard() {
           isPortal ? null : (
           <CourseMenu
             collapsed={!isMobile && coursePanelCollapsed}
-            onToggleCollapsed={isMobile ? undefined : () => setCoursePanelCollapsed(!coursePanelCollapsed)}
+            onCollapse={isMobile ? undefined : collapseCoursePanel}
             activeProgram={activeProgram}
             // Tant que les programmes ne sont pas chargés (chaînage), on ne montre
             // pas les cours en cache : CourseMenu reste neutre jusqu'au fetch des cours.
@@ -1070,7 +1102,9 @@ export default function Dashboard() {
         }
       />
 
-      {isPortal ? (
+      {portalPage ? (
+        <PortalPlaceholder title={portalPage.label} />
+      ) : isPortal ? (
         <AccueilPage firstName={currentUser.firstName} />
       ) : (
       <MainPanel

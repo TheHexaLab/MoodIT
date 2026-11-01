@@ -16,6 +16,7 @@ import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseC
 import { type Course, type Quiz } from '../../types/domain.ts';
 import { type QuizEditorHandlers } from '../QuizEditor/editorTypes.ts';
 import { isContextMenuKey } from '../../hooks/useMenuKeyboard.ts';
+import { useResizeHandle } from '../../hooks/useResizeHandle.ts';
 
 // Entité ré-exportée depuis le modèle de domaine (source unique : src/types/domain.ts).
 export type { Course };
@@ -33,10 +34,6 @@ const MIN_WIDTH = 176; // 11rem
 const MAX_WIDTH = 448; // 28rem
 const DEFAULT_WIDTH = 200; // 12,5rem, comme le CSS (repli quand la largeur rendue est illisible)
 const WIDTH_STORAGE_KEY = 'courseMenu:width';
-
-function clampWidth(px: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, px));
-}
 
 /** Largeur persistée valide, ou null (→ largeur par défaut). */
 function readStoredWidth(): number | null {
@@ -108,10 +105,10 @@ interface CourseMenuProps {
    * destructive : retire le cours pour tous. Absent → item du menu contextuel masqué.
    */
   onDeleteCourse?: (courseId: number) => void;
-  /** Panneau réduit en mince bande : seul le bouton pour le rouvrir reste. */
+  /** Panneau réduit : il disparaît ; un clic sur un cours de la barre du portail le rouvre. */
   collapsed?: boolean;
-  /** Réduit ou rouvre le panneau (bouton de l'en-tête). Absent : pas de bouton (mobile). */
-  onToggleCollapsed?: () => void;
+  /** Réduit le panneau (bouton de l'en-tête). Absent : pas de bouton (mobile). */
+  onCollapse?: () => void;
   /**
    * Handlers CRUD de l'éditeur de quiz (crayon de la section « quiz »). Fournit
    * notamment `onFetchQuiz` pour charger les questions à l'édition. Sans eux,
@@ -145,7 +142,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   onLeaveCourse,
   onDeleteCourse,
   collapsed = false,
-  onToggleCollapsed,
+  onCollapse,
   quizHandlers,
   onQuizzesChange,
 }) => {
@@ -153,8 +150,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   const [editingSection, setEditingSection] = useState<ChannelTypeDefinition | null>(null);
   /** Largeur du panneau (px) ; null = largeur par défaut (jamais redimensionné). */
   const [width, setWidth] = useState<number | null>(readStoredWidth);
-  /** Drag en cours (handle de redimensionnement) ? */
-  const [isResizing, setIsResizing] = useState(false);
   /** Position du menu contextuel (clic droit sur le titre) ; null si fermé. */
   const [ctxMenuPos, setCtxMenuPos] = useState<{
     x: number;
@@ -163,8 +158,14 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   } | null>(null);
   /** Racine du panneau (pour lire la largeur rendue au début d'un drag). */
   const navRef = useRef<HTMLElement | null>(null);
-  /** État du drag : position et largeur de départ. */
-  const resizeStart = useRef<{ x: number; width: number } | null>(null);
+  const { isResizing, handleProps: resizeHandleProps } = useResizeHandle({
+    width,
+    onChange: setWidth,
+    min: MIN_WIDTH,
+    max: MAX_WIDTH,
+    fallback: DEFAULT_WIDTH,
+    getRenderedWidth: () => navRef.current?.offsetWidth,
+  });
 
   // Long-press tactile sur le titre du cours (ouvre le menu contextuel sur mobile).
   const longPressTimer = useRef<number | null>(null);
@@ -196,52 +197,6 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
     if (width == null) localStorage.removeItem(WIDTH_STORAGE_KEY);
     else localStorage.setItem(WIDTH_STORAGE_KEY, String(width));
   }, [width]);
-
-  // Pendant le drag : curseur col-resize global + sélection de texte désactivée.
-  useEffect(() => {
-    if (!isResizing) return;
-    const prevCursor = document.body.style.cursor;
-    const prevSelect = document.body.style.userSelect;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    return () => {
-      document.body.style.cursor = prevCursor;
-      document.body.style.userSelect = prevSelect;
-    };
-  }, [isResizing]);
-
-  // ── Redimensionnement (handle bord droit, façon Discord) ──
-  function handleResizePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    resizeStart.current = {
-      x: event.clientX,
-      width: navRef.current?.offsetWidth ?? width ?? DEFAULT_WIDTH,
-    };
-    setIsResizing(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function handleResizePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const start = resizeStart.current;
-    if (!start) return;
-    setWidth(clampWidth(start.width + (event.clientX - start.x)));
-  }
-
-  function handleResizePointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    if (!resizeStart.current) return;
-    resizeStart.current = null;
-    setIsResizing(false);
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
-  // Ajustement fin au clavier ; double-clic → retour à la largeur par défaut.
-  function handleResizeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    event.preventDefault();
-    // La largeur demandée d'abord : celle rendue peut être en pleine transition.
-    const base = width ?? navRef.current?.offsetWidth ?? DEFAULT_WIDTH;
-    setWidth(clampWidth(base + (event.key === 'ArrowLeft' ? -16 : 16)));
-  }
 
   // Actions admin du menu contextuel (modifier, gestion MCP) ; « quitter le cours »
   // reste accessible à TOUS. On n'ouvre le menu que s'il aura au moins un item.
@@ -336,18 +291,17 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
         ) : (
           <span className={styles.headerTitle}>{activeProgram?.label ?? 'Accueil'}</span>
         )}
-        {onToggleCollapsed && (
+        {onCollapse && (
           <button
             type="button"
             className={styles.collapseButton}
-            aria-label={collapsed ? 'Déplier le panneau du cours' : 'Réduire le panneau du cours'}
-            title={collapsed ? 'Déplier le panneau du cours' : 'Réduire le panneau du cours'}
-            aria-expanded={!collapsed}
-            onClick={onToggleCollapsed}
+            aria-label="Réduire le panneau du cours"
+            title="Réduire le panneau du cours"
+            onClick={onCollapse}
           >
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
-                d={collapsed ? 'M6 7l5 5-5 5M13 7l5 5-5 5' : 'M18 7l-5 5 5 5M11 7l-5 5 5 5'}
+                d="M18 7l-5 5 5 5M11 7l-5 5 5 5"
                 stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
@@ -397,19 +351,8 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
       {/* Poignée de redimensionnement (bord droit) */}
       <div
         className={`${styles.resizeHandle}${isResizing ? ` ${styles.resizeHandleActive}` : ''}`}
-        role="separator"
-        aria-orientation="vertical"
         aria-label="Redimensionner le menu des cours"
-        // Séparateur focusable = « splitter » : sa valeur (largeur en px) est requise par ARIA.
-        aria-valuenow={width ?? DEFAULT_WIDTH}
-        aria-valuemin={MIN_WIDTH}
-        aria-valuemax={MAX_WIDTH}
-        tabIndex={0}
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerUp}
-        onDoubleClick={() => setWidth(null)}
-        onKeyDown={handleResizeKeyDown}
+        {...resizeHandleProps}
       />
 
       {/* Menu contextuel du titre du cours (clic droit). Actions admin (modifier,

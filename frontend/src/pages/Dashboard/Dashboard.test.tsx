@@ -420,13 +420,54 @@ describe('Dashboard', () => {
       expect(screen.queryByRole('button', { name: 'Réduire le menu' })).toBeNull();
     });
 
-    it('dans un cours : réduire le panneau le garde en place, avec un bouton pour le rouvrir', async () => {
+    it('dans un cours : réduire le panneau donne le focus à la tuile du cours, qui le rouvre', async () => {
       renderDashboard({ path: '/home/p/1/c/10' });
       await waitForCourseSelector('IFT101');
+      const panel = document.querySelector('nav[aria-label="Cours"]')!;
       fireEvent.click(screen.getByRole('button', { name: 'Réduire le panneau du cours' }));
-      expect(document.querySelector('nav[aria-label="Cours"]')).not.toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Déplier le panneau du cours' }));
-      expect(screen.getByRole('button', { name: 'Réduire le panneau du cours' })).toBeTruthy();
+      expect(panel.className).toMatch(/sidebarCollapsed/);
+      expect(screen.queryByRole('button', { name: /Déplier/ })).toBeNull();
+      const tile = screen.getByRole('button', { name: /^IFT101/ });
+      expect(document.activeElement).toBe(tile);
+      fireEvent.click(tile);
+      expect(panel.className).not.toMatch(/sidebarCollapsed/);
+    });
+
+    it.each([
+      ['horaire', 'Horaire'],
+      ['bulletin', 'Bulletin'],
+      ['factures', 'Factures'],
+      ['aide', "Centre d'aide"],
+    ])('la page /home/%s affiche son écran d’attente, active dans la barre', async (slug, label) => {
+      renderDashboard({ path: `/home/${slug}` });
+      expect(await screen.findByRole('heading', { level: 1, name: label })).toBeTruthy();
+      expect(screen.getByText("Cette page n'est pas encore disponible.")).toBeTruthy();
+      const link = within(screen.getByRole('navigation', { name: 'Portail' })).getByRole('link', {
+        name: label,
+      });
+      expect(link.getAttribute('aria-current')).toBe('page');
+      expect(screen.queryByRole('heading', { name: /Bonjour/ })).toBeNull();
+    });
+
+    it('un clic sur une page du portail l’ouvre ; Accueil y ramène', async () => {
+      renderDashboard({ path: '/home' });
+      const portal = await screen.findByRole('navigation', { name: 'Portail' });
+      fireEvent.click(within(portal).getByRole('link', { name: 'Bulletin' }));
+      expect(await screen.findByRole('heading', { level: 1, name: 'Bulletin' })).toBeTruthy();
+      fireEvent.click(within(portal).getByRole('link', { name: 'Accueil' }));
+      expect(await screen.findByRole('heading', { name: /Bonjour/ })).toBeTruthy();
+    });
+
+    it('la largeur de la barre est mémorisée, et le double-clic sur la poignée l’oublie', async () => {
+      localStorage.setItem('portalSidebar:width', '320');
+      renderDashboard({ path: '/home' });
+      const handle = await screen.findByRole('separator', { name: 'Redimensionner le menu' });
+      expect(handle.getAttribute('aria-valuenow')).toBe('320');
+      fireEvent.keyDown(handle, { key: 'ArrowRight' });
+      expect(localStorage.getItem('portalSidebar:width')).toBe('336');
+      fireEvent.doubleClick(handle);
+      expect(localStorage.getItem('portalSidebar:width')).toBeNull();
+      expect(handle.getAttribute('aria-valuenow')).toBe('272');
     });
 
     it('ouvrir un cours rouvre le panneau réduit', async () => {
@@ -632,7 +673,7 @@ describe('Dashboard', () => {
     });
 
     it('arrivée sur /home : l’Accueil s’affiche, la localisation enregistrée est ignorée', async () => {
-      renderDashboard({ path: '/home', settings: { location: { programId: 1, courseId: 11 } } });
+      renderDashboard({ path: '/home', settings: { location: { programId: 1, courseId: 11 } } as UserSettings });
       expect(await screen.findByRole('button', { name: programName('Génie logiciel') })).toBeTruthy();
       expect(currentPath()).toBe('/home');
       expect(screen.getByRole('heading', { name: /^Bonjour/ })).toBeTruthy();

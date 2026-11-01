@@ -94,7 +94,7 @@ describe('PortalSidebar', () => {
     it('les pages et les cours gardent un nom accessible et une infobulle', () => {
       renderSidebar({ collapsed: true });
       expect(screen.getByRole('link', { name: 'Accueil' }).getAttribute('title')).toBe('Accueil');
-      expect(screen.getByRole('button', { name: 'Horaire' }).getAttribute('title')).toBe('Horaire');
+      expect(screen.getByRole('link', { name: 'Horaire' }).getAttribute('title')).toBe('Horaire');
       expect(screen.getByRole('button', { name: 'IFT101 · Algo' }).getAttribute('title')).toBe('IFT101 · Algo');
     });
 
@@ -172,9 +172,35 @@ describe('PortalSidebar', () => {
     });
   });
 
-  it('les pages à venir n’ont pas d’action', () => {
+  it('les pages du portail sont des liens, dans l’ordre, avec Bulletin entre Horaire et Factures', () => {
     renderSidebar();
-    expect(screen.getByRole('button', { name: 'Horaire' }).getAttribute('aria-disabled')).toBe('true');
+    const links = within(screen.getByRole('navigation', { name: 'Portail' })).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual([
+      'Accueil',
+      'Horaire',
+      'Bulletin',
+      'Factures',
+      "Centre d'aide",
+    ]);
+    expect(links[2].getAttribute('href')).toBe('/home/bulletin');
+    expect(links[0].getAttribute('aria-current')).toBe('page');
+  });
+
+  it('les cours de chaque programme forment un groupe nommé', () => {
+    renderSidebar();
+    const group = screen.getByRole('group', { name: 'Cours de Génie logiciel' });
+    expect(within(group).getByRole('button', { name: /IFT101/ })).toBeTruthy();
+  });
+
+  it('la poignée n’existe que sur la barre complète, et si la largeur peut changer', () => {
+    renderSidebar();
+    expect(screen.queryByRole('separator')).toBeNull();
+    cleanup();
+    renderSidebar({ onWidthChange: vi.fn() });
+    expect(screen.getByRole('separator', { name: 'Redimensionner le menu' })).toBeTruthy();
+    cleanup();
+    renderSidebar({ onWidthChange: vi.fn(), collapsed: true });
+    expect(screen.queryByRole('separator')).toBeNull();
   });
 
   it('« Rejoindre un cours » vise son programme, même sans cours', () => {

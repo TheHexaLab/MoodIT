@@ -245,9 +245,9 @@ export async function enterProgram(page: Page, name: string) {
     await expect(page.getByRole('navigation', { name: 'Cours' })).toBeVisible();
     return;
   }
-  await programButton(page, name)
-    .locator('xpath=ancestor::li[1]/following-sibling::li[1]')
-    .locator('button:not([aria-label])')
+  await page
+    .getByRole('group', { name: `Cours de ${name}` })
+    .getByRole('button')
     .first()
     .click();
   await expect(page.getByRole('navigation', { name: 'Cours' })).toBeVisible();

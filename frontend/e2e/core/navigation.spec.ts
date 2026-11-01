@@ -85,7 +85,7 @@ test('la barre de l’Accueil se réduit et se déplie sans déplacer ses icône
   await context.close();
 });
 
-test('dans un cours : barre toujours réduite, panneau qui se réduit en bande sans disparaître', async ({
+test('dans un cours : barre toujours réduite ; panneau réduit, un clic sur le cours le rouvre', async ({
   browser,
   baseURL,
 }) => {
@@ -94,12 +94,10 @@ test('dans un cours : barre toujours réduite, panneau qui se réduit en bande s
   await expect(page.getByRole('button', { name: 'Réduire le menu' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Réduire le panneau du cours' }).click();
-  const reopen = page.getByRole('button', { name: 'Déplier le panneau du cours' });
-  await expect(reopen).toBeVisible();
-  await expect.poll(async () => Math.round((await reopen.locator('xpath=ancestor::nav[1]').boundingBox())!.width)).toBe(48);
-  await expect(courseNav(page).getByRole('button', { name: CHANNEL_NAME })).toBeHidden();
+  await expect(courseNav(page)).toBeHidden();
+  await expect(page.getByRole('button', { name: /Déplier/ })).toHaveCount(0);
 
-  await reopen.click();
+  await page.locator('button[aria-current="page"]').click();
   await expect(courseNav(page).getByRole('button', { name: CHANNEL_NAME })).toBeVisible();
 
   // Réduit, puis un autre cours : le panneau se rouvre, avec les canaux de ce cours.

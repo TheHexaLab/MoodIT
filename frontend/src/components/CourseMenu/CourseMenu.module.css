@@ -3,15 +3,16 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    /* Largeur pilotée par le drag (--cm-width). Par défaut 12,5rem : avec la barre du portail réduite
-       (4,5rem), le total égale la barre étendue (17rem), et le contenu à droite ne bouge pas. */
-    width: var(--cm-width, 12.5rem);
-    min-width: var(--cm-width, 12.5rem);
+    /* Largeur pilotée par le drag (--cm-width). Par défaut, avec la barre du portail réduite (4,5rem),
+       le total égale la barre étendue, et le contenu à droite ne bouge pas. */
+    --cm-default-width: calc(var(--portal-sidebar-width, 17rem) - 4.5rem);
+    width: var(--cm-width, var(--cm-default-width));
+    min-width: var(--cm-width, var(--cm-default-width));
     height: 100%;
     background: var(--bg-sidebar);
     box-sizing: border-box;
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
+    transition: width 0.2s ease, min-width 0.2s ease, visibility 0.2s;
 }
 
 /* À l'ouverture d'un cours, le panneau s'ouvre pendant que la barre de gauche se réduit : le contenu
@@ -34,22 +35,11 @@
     transition: none;
 }
 
-/* Réduit : une mince bande, avec le seul bouton pour rouvrir le panneau. */
+/* Réduit : le panneau disparaît ; un clic sur un cours de la barre du portail le rouvre. */
 .sidebarCollapsed {
-    width: 3rem;
-    min-width: 3rem;
-    border-right: 1px solid var(--border);
-}
-
-.sidebarCollapsed .header,
-.sidebarCollapsed .main,
-.sidebarCollapsed .resizeHandle {
+    width: 0;
+    min-width: 0;
     visibility: hidden;
-}
-
-.sidebarCollapsed .collapseButton {
-    right: 0.625rem;
-    visibility: visible;
 }
 
 @media (prefers-reduced-motion: reduce) {

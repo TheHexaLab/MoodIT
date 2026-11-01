@@ -35,7 +35,7 @@
     border: none;
     background: transparent;
     color: inherit;
-    padding: 0.5rem 0.5rem;
+    padding: 0.5rem 0.5rem 0.5rem var(--user-menu-inset, 0.5rem);
     text-align: left;
     transition: background 0.15s ease;
     cursor: pointer;
@@ -48,7 +48,7 @@
 
 .userMenu:focus-visible {
     outline: 2px solid var(--brand-teal);
-    outline-offset: 1px;
+    outline-offset: -2px;
 }
 
 .userAvatarImage,

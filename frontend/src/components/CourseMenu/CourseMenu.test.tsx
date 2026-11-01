@@ -348,19 +348,11 @@ describe('CourseMenu', () => {
     });
   });
 
-  it('le bouton de l’en-tête réduit ou rouvre le panneau ; sans callback, pas de bouton', () => {
-    const onToggleCollapsed = vi.fn();
-    renderMenu({ onToggleCollapsed });
-    const collapse = screen.getByRole('button', { name: 'Réduire le panneau du cours' });
-    expect(collapse.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(collapse);
-    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
-    cleanup();
-    renderMenu({ collapsed: true, onToggleCollapsed });
-    const expand = screen.getByRole('button', { name: 'Déplier le panneau du cours' });
-    expect(expand.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(expand);
-    expect(onToggleCollapsed).toHaveBeenCalledTimes(2);
+  it('le bouton de l’en-tête réduit le panneau ; sans callback, pas de bouton', () => {
+    const onCollapse = vi.fn();
+    renderMenu({ onCollapse });
+    fireEvent.click(screen.getByRole('button', { name: 'Réduire le panneau du cours' }));
+    expect(onCollapse).toHaveBeenCalledTimes(1);
     cleanup();
     renderMenu();
     expect(screen.queryByRole('button', { name: 'Réduire le panneau du cours' })).toBeNull();

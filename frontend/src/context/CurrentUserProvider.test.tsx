@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, act, fireEvent } from '@testing-library/react';
 import { useEffect, type ReactNode } from 'react';
+import type { UserSettings } from '../helpers/userSettings';
 
 // --- Mocks des dépendances externes du provider ------------------------------
 // helpers/api : appels réseau (GET /api/me, PUT settings, PATCH me).
@@ -266,6 +267,9 @@ async function renderAuthed(user: Record<string, unknown> = baseUser) {
   return utils;
 }
 
+/** Une clé hors de `theme` : la fusion doit garder les deux, quelle que soit la forme des réglages. */
+const otherSetting = (value: unknown) => ({ other: value }) as Partial<UserSettings>;
+
 function settingsBlob() {
   return JSON.parse(screen.getByTestId('settings').textContent ?? '{}');
 }
@@ -280,11 +284,11 @@ describe('CurrentUserProvider — saveSettings (debounce)', () => {
     await renderAuthed({ ...baseUser, settings: JSON.stringify({ theme: 'light' }) });
     vi.useFakeTimers();
 
-    act(() => ctxApi().saveSettings({ location: { programId: 1 } }));
-    act(() => ctxApi().saveSettings({ location: { programId: 2, courseId: 9 } }));
+    act(() => ctxApi().saveSettings(otherSetting({ programId: 1 })));
+    act(() => ctxApi().saveSettings(otherSetting({ programId: 2, courseId: 9 })));
 
     // Optimiste : le blob local reflète immédiatement la fusion (thème conservé).
-    expect(settingsBlob()).toEqual({ theme: 'light', location: { programId: 2, courseId: 9 } });
+    expect(settingsBlob()).toEqual({ theme: 'light', other: { programId: 2, courseId: 9 } });
     // Pas encore d'appel réseau pendant la rafale.
     act(() => vi.advanceTimersByTime(999));
     expect(updateMeSettings).not.toHaveBeenCalled();
@@ -293,7 +297,7 @@ describe('CurrentUserProvider — saveSettings (debounce)', () => {
     expect(updateMeSettings).toHaveBeenCalledTimes(1);
     expect(updateMeSettings).toHaveBeenCalledWith({
       theme: 'light',
-      location: { programId: 2, courseId: 9 },
+      other: { programId: 2, courseId: 9 },
     });
   });
 
@@ -459,7 +463,7 @@ describe('CurrentUserProvider — enregistrement juste après le chargement du p
   function EarlySaver() {
     const { status, saveSettings } = useCurrentUser();
     useEffect(() => {
-      if (status === 'authed') saveSettings({ location: { programId: 5 } });
+      if (status === 'authed') saveSettings(otherSetting({ programId: 5 }));
     }, [status, saveSettings]);
     return null;
   }
@@ -475,9 +479,9 @@ describe('CurrentUserProvider — enregistrement juste après le chargement du p
     await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('authed'));
     // L'enregistrement de l'enfant a lieu dans SON useEffect, qui peut passer après l'affichage
     // de « authed » : on attend qu'il soit appliqué, puis on vérifie que rien n'a été perdu.
-    await waitFor(() => expect(settingsBlob().location).toEqual({ programId: 5 }));
-    expect(settingsBlob()).toEqual({ theme: 'light', location: { programId: 5 } });
+    await waitFor(() => expect(settingsBlob().other).toEqual({ programId: 5 }));
+    expect(settingsBlob()).toEqual({ theme: 'light', other: { programId: 5 } });
     await waitFor(() => expect(updateMeSettings).toHaveBeenCalled(), { timeout: 2500 });
-    expect(updateMeSettings).toHaveBeenLastCalledWith({ theme: 'light', location: { programId: 5 } });
+    expect(updateMeSettings).toHaveBeenLastCalledWith({ theme: 'light', other: { programId: 5 } });
   });
 });
