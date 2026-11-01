@@ -31,7 +31,7 @@ const TO_DO = assignment({
   title: 'Devoir 5',
   dueAt: iso(3),
   weight: 20,
-  expectedFormats: ['PDF', 'ZIP'],
+  expectedFormats: ['.pdf', '.zip'],
   instructions: 'Première consigne.\n\nDeuxième consigne.',
   files: [{ name: 'enonce.pdf', size: '240 Ko' }],
   publishedBy: 'Prof. Tremblay',

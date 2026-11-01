@@ -5,32 +5,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Taille maximale d'une remise. */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-/** Formats proposés au prof, avec leurs extensions. Un autre format est son extension elle-même. */
-export const FILE_FORMATS: Record<string, string[]> = {
-  PDF: ['.pdf'],
-  ZIP: ['.zip'],
-  Word: ['.doc', '.docx'],
-  Image: ['.png', '.jpg', '.jpeg'],
-};
-
-export function formatExtensions(formats: string[]): string[] {
-  return formats.flatMap((format) => FILE_FORMATS[format] ?? [format.toLowerCase()]);
-}
+/** Extensions proposées au prof, qui peut en ajouter d'autres. */
+export const FILE_FORMATS = ['.pdf', '.zip', '.docx', '.xlsx', '.pptx', '.png', '.jpg'];
 
 /** Le fichier respecte-t-il les formats attendus ? Sans format attendu, tout est accepté. */
 export function isAcceptedFile(fileName: string, formats: string[]): boolean {
   if (formats.length === 0) return true;
   const name = fileName.toLowerCase();
-  return formatExtensions(formats).some((extension) => name.endsWith(extension));
+  return formats.some((extension) => name.endsWith(extension));
 }
 
 /** « .zip ou .pdf, 25 Mo au maximum » : la consigne affichée sous la zone de dépôt. */
 export function formatHint(formats: string[]): string {
   const limit = '25 Mo au maximum';
   if (formats.length === 0) return `Tous les formats, ${limit}`;
-  const extensions = formatExtensions(formats);
-  const head = extensions.slice(0, -1).join(', ');
-  return `${head ? `${head} ou ` : ''}${extensions[extensions.length - 1]}, ${limit}`;
+  const head = formats.slice(0, -1).join(', ');
+  return `${head ? `${head} ou ` : ''}${formats[formats.length - 1]}, ${limit}`;
 }
 
 /** « 3 novembre, 23 h 59 ». */

@@ -60,10 +60,10 @@ export function AssignmentFormPopup({
   const [saving, setSaving] = useState(false);
 
   const isPublished = assignment?.isPublished ?? false;
-  // Les formats proposés, puis ceux que le prof a ajoutés (« Autre »).
+  // Les extensions proposées, puis celles que le prof a ajoutées (« Autre »).
   const formatChoices = [
-    ...Object.keys(FILE_FORMATS),
-    ...formats.filter((format) => !(format in FILE_FORMATS)),
+    ...FILE_FORMATS,
+    ...formats.filter((format) => !FILE_FORMATS.includes(format)),
   ];
 
   function toggleFormat(format: string) {

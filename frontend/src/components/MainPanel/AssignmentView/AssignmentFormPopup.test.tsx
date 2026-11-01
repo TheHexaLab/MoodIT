@@ -24,7 +24,7 @@ const EXISTING: Assignment = {
   instructions: 'Lire.',
   dueAt: new Date(2026, 10, 3, 18, 30).toISOString(),
   weight: 20,
-  expectedFormats: ['PDF', '.py'],
+  expectedFormats: ['.pdf', '.py'],
   files: [{ name: 'enonce.pdf', size: '240 Ko' }],
   isPublished: true,
   submittedCount: 0,
@@ -71,7 +71,7 @@ describe('AssignmentFormPopup', () => {
     fill('Consignes', 'Coder un arbre.');
     fill('Date limite', '2026-11-20');
     fill('Pondération (%)', '20');
-    fireEvent.click(screen.getByRole('button', { name: 'ZIP' }));
+    fireEvent.click(screen.getByRole('button', { name: '.zip' }));
     publish();
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
@@ -80,7 +80,7 @@ describe('AssignmentFormPopup', () => {
       instructions: 'Coder un arbre.',
       dueAt: new Date('2026-11-20T23:59').toISOString(),
       weight: 20,
-      expectedFormats: ['ZIP'],
+      expectedFormats: ['.zip'],
       files: [],
       isPublished: true,
     });
@@ -127,13 +127,19 @@ describe('AssignmentFormPopup', () => {
     expect(onSave.mock.calls[0][0].dueAt).toBe(new Date('2026-11-20T23:59').toISOString());
   });
 
+  it('propose des extensions, dont .zip et .xlsx', () => {
+    setup();
+    expect(screen.getByRole('button', { name: '.zip' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '.xlsx' })).toBeTruthy();
+  });
+
   it('un format se sélectionne et se désélectionne', () => {
     setup();
-    const pdf = screen.getByRole('button', { name: 'PDF' });
+    const pdf = screen.getByRole('button', { name: '.pdf' });
     fireEvent.click(pdf);
-    expect(screen.getByRole('button', { name: /PDF/ }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(screen.getByRole('button', { name: /PDF/ }));
-    expect(screen.getByRole('button', { name: 'PDF' }).getAttribute('aria-pressed')).toBe('false');
+    expect(pdf.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(pdf);
+    expect(pdf.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('« Autre » ajoute une extension, avec ou sans point, une seule fois', () => {

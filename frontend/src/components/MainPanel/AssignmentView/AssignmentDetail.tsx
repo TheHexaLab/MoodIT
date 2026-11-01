@@ -6,7 +6,6 @@ import {
   MAX_FILE_BYTES,
   dueBadge,
   formatDateTime,
-  formatExtensions,
   formatHint,
   isAcceptedFile,
   submissionBadge,
@@ -128,7 +127,7 @@ function SubmissionCard({
             <input
               type="file"
               className={styles.fileInput}
-              accept={formatExtensions(expectedFormats).join(',') || undefined}
+              accept={expectedFormats.join(',') || undefined}
               onChange={(event) => pick(event.target.files?.[0])}
             />
             <svg {...ICON} className={styles.dropIcon}>

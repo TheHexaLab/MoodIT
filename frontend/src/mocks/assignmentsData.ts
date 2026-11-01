@@ -41,7 +41,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
         "Implémentez un arbre AVL en Java, avec l'insertion, la suppression et les rotations.\n\nRemettez une archive .zip contenant votre code et un court rapport.",
       dueAt: dueIn(now, 21),
       weight: 20,
-      expectedFormats: ['ZIP'],
+      expectedFormats: ['.zip'],
       files: [],
     },
     {
@@ -52,7 +52,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
         "Implémentez une liste doublement chaînée en Java, avec les opérations d'insertion, de suppression et de recherche.\n\nPensez aux cas limites : liste vide, un seul nœud, insertion en tête et en queue.\n\nRemettez une archive .zip contenant votre code et un court rapport de deux pages.",
       dueAt: dueIn(now, 4),
       weight: 20,
-      expectedFormats: ['PDF', 'ZIP'],
+      expectedFormats: ['.pdf', '.zip'],
       files: [
         { name: 'enonce-devoir-5.pdf', size: '240 Ko' },
         { name: 'squelette-liste.zip', size: '18 Ko' },
@@ -67,7 +67,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       instructions: 'Comparez trois algorithmes de tri et justifiez leur complexité.',
       dueAt: dueIn(now, -14),
       weight: 15,
-      expectedFormats: ['PDF'],
+      expectedFormats: ['.pdf'],
       files: [],
       submittedCount: 32,
       gradedCount: 32,

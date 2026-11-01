@@ -4,7 +4,6 @@ import {
   daysUntil,
   dueBadge,
   formatDateTime,
-  formatExtensions,
   formatHint,
   isAcceptedFile,
   submissionBadge,
@@ -32,24 +31,20 @@ function assignment(overrides: Partial<Assignment> = {}): Assignment {
 const inDays = (days: number) => new Date(2026, 9, 30 + days, 23, 59).toISOString();
 
 describe('formats de fichier', () => {
-  it('traduit un format connu en ses extensions, et garde un autre format tel quel', () => {
-    expect(formatExtensions(['Word', 'PDF', '.PY'])).toEqual(['.doc', '.docx', '.pdf', '.py']);
-  });
-
   it('accepte tout sans format attendu', () => {
     expect(isAcceptedFile('photo.heic', [])).toBe(true);
   });
 
   it('vérifie l’extension sans tenir compte de la casse', () => {
-    expect(isAcceptedFile('RAPPORT.PDF', ['PDF'])).toBe(true);
-    expect(isAcceptedFile('rapport.docx', ['PDF', 'ZIP'])).toBe(false);
+    expect(isAcceptedFile('RAPPORT.PDF', ['.pdf'])).toBe(true);
+    expect(isAcceptedFile('rapport.docx', ['.pdf', '.zip'])).toBe(false);
   });
 
   it('rédige la consigne selon le nombre de formats', () => {
     expect(formatHint([])).toBe('Tous les formats, 25 Mo au maximum');
-    expect(formatHint(['PDF'])).toBe('.pdf, 25 Mo au maximum');
-    expect(formatHint(['PDF', 'ZIP'])).toBe('.pdf ou .zip, 25 Mo au maximum');
-    expect(formatHint(['Word', 'PDF'])).toBe('.doc, .docx ou .pdf, 25 Mo au maximum');
+    expect(formatHint(['.pdf'])).toBe('.pdf, 25 Mo au maximum');
+    expect(formatHint(['.pdf', '.zip'])).toBe('.pdf ou .zip, 25 Mo au maximum');
+    expect(formatHint(['.docx', '.xlsx', '.pdf'])).toBe('.docx, .xlsx ou .pdf, 25 Mo au maximum');
   });
 });
 
