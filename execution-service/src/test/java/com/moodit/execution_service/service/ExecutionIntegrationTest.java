@@ -198,64 +198,68 @@ class ExecutionIntegrationTest {
                 "function Composant(): JSX.Element { return React.createElement('span', null, 99); }", h)).isFalse();
     }
 
-    // ─────────────────────── Compilés (nonce, déjà sûrs) : non-régression ───────────────────────
+    // ─────────── Compilés (secret injecté au runtime via stdin + suppression source) ───────────
+    // Pour chacun : (1) bonne réponse réussit, (2) réponse fausse échoue, (3) exception/panic échoue,
+    // (4) SÉCURITÉ lecture SOURCE : le fichier est supprimé avant le code étudiant → fopen NULL,
+    // (5) SÉCURITÉ lecture BINAIRE : le nonce n'est PAS dans le binaire (lu depuis stdin) → un scan
+    //     de /proc/self/exe ne trouve rien.
+
     @Test
-    void compiled_nonce_still_works() {
+    void c_source_supprimee_avant_code_etudiant() {
+        requireRuntime("c");
         assertThat(passes("C", "int doubler(int n){ return n * 2; }", "return doubler(5) == 10;")).isTrue();
         assertThat(passes("C", "int doubler(int n){ return 0; }", "return doubler(5) == 10;")).isFalse();
-        // ANTI-TRICHE (RPC) : un exit(0) anticipé tue le serveur étudiant → l'appel proxifié échoue,
-        // le harnais lève, aucun nonce émis → échec (le nonce vit dans le noteur, pas chez l'étudiant).
-        assertThat(passes("Python", "import sys\nsys.exit(0)", "return doubler(5) == 10")).isFalse();
-    }
-
-    // ─────────────────────── Compilés : le programme assemblé s'exécute ───────────────────────
-    // Pendant comportemental des tests de PROPRIÉTÉS de CodeAssemblerLanguagesTest : pour chaque
-    // langage compilé, avec un main étudiant présent (qui doit être neutralisé), une bonne réponse
-    // réussit, une mauvaise échoue, et une erreur à l'exécution (exception/panic) vaut échec.
-
-    @Test
-    void go_s_execute_et_note() {
-        requireRuntime("go");
-        String good = "package main\n\nfunc doubler(n int) int { return n * 2 }\n\nfunc main() {}";
-        assertThat(passes("Go", good, "return doubler(5) == 10")).isTrue();
-        assertThat(passes("Go", good.replace("n * 2", "0"), "return doubler(5) == 10")).isFalse();
-        assertThat(passes("Go", "package main\n\nfunc doubler(n int) int { panic(\"x\") }\n\nfunc main() {}",
-                "return doubler(5) == 10")).isFalse();
-    }
-
-    @Test
-    void rust_s_execute_et_note() {
-        requireRuntime("rust");
-        String good = "fn doubler(n: i32) -> i32 { n * 2 }\nfn main() {}";
-        assertThat(passes("Rust", good, "doubler(5) == 10")).isTrue();
-        assertThat(passes("Rust", good.replace("n * 2", "0 * n"), "doubler(5) == 10")).isFalse();
-        assertThat(passes("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
-                "doubler(5) == 10")).isFalse();
+        // SÉCURITÉ : l'étudiant tente de lire main.c → supprimé → fopen retourne NULL → pas de nonce.
+        assertThat(passes("C",
+                "int doubler(int n){\n"
+                + "    FILE *f=fopen(\"main.c\",\"r\");\n"
+                + "    if(f){char buf[4096];size_t len=fread(buf,1,sizeof(buf)-1,f);fclose(f);\n"
+                + "    buf[len]=0;char *p=strstr(buf,\"MOODIT_OK_\");if(p)fwrite(p,1,58,stderr);}\n"
+                + "    return 0;}",
+                "return doubler(5) == 10;")).isFalse();
+        // SÉCURITÉ lecture BINAIRE : scanner /proc/self/exe ne révèle aucun nonce (il vient de stdin).
+        assertThat(passes("C",
+                "int doubler(int n){\n"
+                + "    FILE *f=fopen(\"/proc/self/exe\",\"rb\");\n"
+                + "    if(f){char buf[65536];size_t len=fread(buf,1,sizeof(buf),f);fclose(f);\n"
+                + "    for(size_t i=0;i+58<len;i++) if(!memcmp(buf+i,\"MOODIT_OK_\",10)){fwrite(buf+i,1,58,stderr);break;}}\n"
+                + "    return 0;}",
+                "return doubler(5) == 10;")).isFalse();
     }
 
     @Test
-    void cpp_s_execute_et_note() {
+    void cpp_constructeur_statique_ne_peut_pas_voler_le_secret() {
+        requireRuntime("c++");
+        // Un objet global dont le constructeur tente de lire stdin/source s'exécute APRÈS notre
+        // constructor(101) (qui a déjà drainé stdin et supprimé la source) → échec.
+        assertThat(passes("C++",
+                "#include <cstdio>\n#include <cstring>\n"
+                + "struct Spy { Spy(){ char b[128]; if(fgets(b,sizeof(b),stdin)){"
+                + " char*p=strstr(b,\"MOODIT_OK_\"); if(p) fputs(p,stderr);} } } __spy;\n"
+                + "int doubler(int n){ return 0; }\nint main(){ return 0; }",
+                "return doubler(5) == 10;")).isFalse();
+    }
+
+    @Test
+    void cpp_source_supprimee_avant_code_etudiant() {
         requireRuntime("c++");
         String good = "int doubler(int n){ return n * 2; }\nint main(){ return 0; }";
         assertThat(passes("C++", good, "return doubler(5) == 10;")).isTrue();
         assertThat(passes("C++", good.replace("n * 2", "0"), "return doubler(5) == 10;")).isFalse();
         assertThat(passes("C++", "int doubler(int n){ throw 1; }\nint main(){ return 0; }",
                 "return doubler(5) == 10;")).isFalse();
+        // SÉCURITÉ
+        assertThat(passes("C++",
+                "#include <cstdio>\n#include <cstring>\nint doubler(int n){\n"
+                + "    FILE *f=fopen(\"main.cpp\",\"r\");\n"
+                + "    if(f){char buf[4096];size_t l=fread(buf,1,sizeof(buf)-1,f);fclose(f);\n"
+                + "    buf[l]=0;char *p=strstr(buf,\"MOODIT_OK_\");if(p)fwrite(p,1,58,stderr);}\n"
+                + "    return 0;}\nint main(){ return 0; }",
+                "return doubler(5) == 10;")).isFalse();
     }
 
     @Test
-    void csharp_s_execute_et_note() {
-        requireRuntime("csharp");
-        String good = "class S { public static int Doubler(int n) { return n * 2; } static void Main(string[] a) {} }";
-        assertThat(passes("C#", good, "return S.Doubler(5) == 10;")).isTrue();
-        assertThat(passes("C#", good.replace("n * 2", "0"), "return S.Doubler(5) == 10;")).isFalse();
-        assertThat(passes("C#",
-                "class S { public static int Doubler(int n) { throw new System.Exception(); } }",
-                "return S.Doubler(5) == 10;")).isFalse();
-    }
-
-    @Test
-    void java_s_execute_et_note() {
+    void java_source_supprimee_avant_code_etudiant() {
         requireRuntime("java");
         String good = "public class Main { static int doubler(int n){ return n * 2; } "
                 + "public static void main(String[] a){} }";
@@ -263,7 +267,80 @@ class ExecutionIntegrationTest {
         assertThat(passes("Java", good.replace("n * 2", "0"), "return Main.doubler(5) == 10;")).isFalse();
         assertThat(passes("Java", "class Main { static int doubler(int n){ throw new RuntimeException(); } }",
                 "return Main.doubler(5) == 10;")).isFalse();
+        // SÉCURITÉ
+        assertThat(passes("Java",
+                "class Main { static int doubler(int n) {\n"
+                + "    try { var s=new String(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(\"Main.java\")));\n"
+                + "    var m=java.util.regex.Pattern.compile(\"MOODIT_OK_[0-9a-f]+\").matcher(s);\n"
+                + "    if(m.find())System.err.print(m.group()); } catch(Exception e){}\n"
+                + "    return 0; } }",
+                "return Main.doubler(5) == 10;")).isFalse();
     }
+
+    @Test
+    void go_source_supprimee_avant_code_etudiant() {
+        requireRuntime("go");
+        String good = "package main\n\nfunc doubler(n int) int { return n * 2 }\n\nfunc main() {}";
+        assertThat(passes("Go", good, "return doubler(5) == 10")).isTrue();
+        assertThat(passes("Go", good.replace("n * 2", "0"), "return doubler(5) == 10")).isFalse();
+        assertThat(passes("Go", "package main\n\nfunc doubler(n int) int { panic(\"x\") }\n\nfunc main() {}",
+                "return doubler(5) == 10")).isFalse();
+        // SÉCURITÉ lecture source
+        assertThat(passes("Go",
+                "package main\nimport \"os\"\nfunc doubler(n int) int {\n"
+                + "    b,err:=os.ReadFile(\"main.go\")\n"
+                + "    if err==nil{ for i,c:=range b{ if i+10<=len(b) && string(b[i:i+10])==\"MOODIT_OK_\"{\n"
+                + "        os.Stderr.Write(b[i:i+58]); break } }}\n"
+                + "    return 0\n}\nfunc main(){}",
+                "return doubler(5) == 10")).isFalse();
+        // SÉCURITÉ ordre : un initialiseur de variable de paquet étudiant qui tente de lire stdin
+        // s'exécute APRÈS le nôtre (déclaré en premier) → stdin déjà drainé → échec.
+        assertThat(passes("Go",
+                "package main\nimport (\"bufio\"\n\"os\")\n"
+                + "var _spy = func() int { l,_:=bufio.NewReader(os.Stdin).ReadString('\\n'); os.Stderr.WriteString(l); return 0 }()\n"
+                + "func doubler(n int) int { return 0 }\nfunc main(){}",
+                "return doubler(5) == 10")).isFalse();
+    }
+
+    @Test
+    void rust_source_supprimee_avant_code_etudiant() {
+        requireRuntime("rust");
+        String good = "fn doubler(n: i32) -> i32 { n * 2 }\nfn main() {}";
+        assertThat(passes("Rust", good, "doubler(5) == 10")).isTrue();
+        assertThat(passes("Rust", good.replace("n * 2", "0 * n"), "doubler(5) == 10")).isFalse();
+        assertThat(passes("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
+                "doubler(5) == 10")).isFalse();
+        // SÉCURITÉ
+        assertThat(passes("Rust",
+                "fn doubler(_n: i32) -> i32 {\n"
+                + "    if let Ok(s)=std::fs::read_to_string(\"main.rs\"){\n"
+                + "        let mut i=0usize;\n"
+                + "        while i+10<=s.len(){\n"
+                + "            if &s[i..i+10]==\"MOODIT_OK_\"{ eprint!(\"{}\",&s[i..i+58]); break; }\n"
+                + "            i+=1;\n"
+                + "        }\n    }\n    0\n}\nfn main(){}",
+                "doubler(5) == 10")).isFalse();
+    }
+
+    @Test
+    void csharp_source_supprimee_avant_code_etudiant() {
+        requireRuntime("csharp");
+        String good = "class S { public static int Doubler(int n) { return n * 2; } static void Main(string[] a) {} }";
+        assertThat(passes("C#", good, "return S.Doubler(5) == 10;")).isTrue();
+        assertThat(passes("C#", good.replace("n * 2", "0"), "return S.Doubler(5) == 10;")).isFalse();
+        assertThat(passes("C#",
+                "class S { public static int Doubler(int n) { throw new System.Exception(); } }",
+                "return S.Doubler(5) == 10;")).isFalse();
+        // SÉCURITÉ
+        assertThat(passes("C#",
+                "class S { public static int Doubler(int n) {\n"
+                + "    try { var s=System.IO.File.ReadAllText(\"main.cs\");\n"
+                + "    var m=System.Text.RegularExpressions.Regex.Match(s,@\"MOODIT_OK_[0-9a-f]+\");\n"
+                + "    if(m.Success)System.Console.Error.Write(m.Value); } catch{}\n"
+                + "    return 0; } }",
+                "return S.Doubler(5) == 10;")).isFalse();
+    }
+
 
     /**
      * Le runtime est-il installé dans Piston ? Même politique que {@link #gate} : ignoré en local

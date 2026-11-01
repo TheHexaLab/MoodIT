@@ -21,8 +21,11 @@ import java.util.List;
  * déduit le verdict. ANTI-TRICHE : le verdict ne dépend PAS de l'exit code (falsifiable par un
  * {@code exit(0)} anticipé ou une neutralisation d'exit), mais de la présence d'un NONCE ALÉATOIRE
  * secret que SEUL le harnais émet en cas de succès. Chaque test tourne dans une exécution Piston
- * ISOLÉE. (Résiduel connu : un étudiant qui LIT la source assemblée peut extraire le nonce/harnais
- * — non éliminable dans ce modèle sans passer au « juge par sortie ».)
+ * ISOLÉE. Pour les langages interprétés : isolation bi-processus RPC (le code étudiant ne voit
+ * jamais le nonce). Pour les langages compilés : le nonce n'est PAS gravé dans le source — il est
+ * injecté au RUNTIME via l'entrée standard (le programme le lit avant tout code étudiant, puis le
+ * réémet s'il réussit) et le fichier source est supprimé. Un étudiant ne peut donc l'extraire ni en
+ * lisant la source (supprimée), ni en lisant le binaire compilé (le nonce n'y figure pas).
  */
 @Service
 public class ExecutionService {
@@ -51,7 +54,13 @@ public class ExecutionService {
 
     /** Un appel au sandbox, dans une place de la limite globale (#24) : file bornée, sinon 429. */
     private PistonClient.Result execute(String language, String version, List<PistonClient.File> files) {
-        return limiter.withSandboxSlot(() -> piston.execute(language, version, files));
+        return execute(language, version, files, null);
+    }
+
+    /** Variante avec {@code stdin} (secret injecté au runtime pour les langages compilés). */
+    private PistonClient.Result execute(String language, String version, List<PistonClient.File> files,
+            String stdin) {
+        return limiter.withSandboxSlot(() -> piston.execute(language, version, files, stdin));
     }
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
@@ -109,7 +118,11 @@ public class ExecutionService {
         }
 
         CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
-        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files());
+        // Langages compilés : le nonce N'EST PAS gravé dans le source — il est lu au runtime depuis
+        // stdin (le programme assemblé le lit avant tout code étudiant, puis le réémet s'il réussit).
+        // Un étudiant qui lirait le binaire (/proc/self/exe) n'y trouve donc aucun nonce.
+        String stdin = CodeAssembler.isCompiled(language) ? nonce + "\n" : null;
+        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files(), stdin);
 
         // Échec de compilation (langages compilés) → test échoué, message = stderr de compilation.
         PistonClient.Stage compile = result.compile();

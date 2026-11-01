@@ -172,6 +172,29 @@ class PistonClientTest {
     }
 
     @Test
+    void stdin_est_transmis_quand_fourni() throws Exception {
+        respond(200, OK_RESPONSE);
+
+        client(20000).execute("c", "*", oneFile(), "MOODIT_OK_abc\n");
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("stdin").asString()).isEqualTo("MOODIT_OK_abc\n");
+        assertThat(body.size()).isEqualTo(8); // les 7 champs habituels + stdin
+    }
+
+    @Test
+    void stdin_nul_ou_vide_n_est_pas_transmis() throws Exception {
+        respond(200, OK_RESPONSE);
+        PistonClient c = client(20000);
+
+        c.execute("python", "*", oneFile(), null);
+        assertThat(JSON.readTree(lastBody.get()).has("stdin")).isFalse();
+
+        c.execute("python", "*", oneFile(), "");
+        assertThat(JSON.readTree(lastBody.get()).has("stdin")).isFalse();
+    }
+
+    @Test
     void interprete_les_etapes_compile_et_run_de_la_reponse() {
         respond(200, OK_RESPONSE);
 

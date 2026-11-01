@@ -157,7 +157,7 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void java_puts_our_entry_first_and_renames_student_main() {
+    void java_puts_our_entry_first_and_reads_secret_from_stdin() {
         var a = assembler.assemble("Java",
                 "public class Solution { public static int solution(){ return 5; } "
                         + "public static void main(String[] a){} }",
@@ -166,17 +166,26 @@ class CodeAssemblerTest {
         String c = onlyFileContent(a);
         assertThat(c).startsWith("public class __MooditMain");   // notre classe d'entrée en 1er
         assertThat(c).contains("__moodit_student_main");         // main étudiant neutralisé
-        assertThat(c).contains("MOODIT_OK_java");
+        // ANTI-TRICHE : le nonce n'est PAS gravé — lu depuis stdin ; source supprimée.
+        assertThat(c).doesNotContain("MOODIT_OK_java");
+        assertThat(c).contains("System.in").contains("Main.java");
+        // Le secret est lu AVANT l'appel au harnais.
+        int readIdx    = c.indexOf("readLine");
+        int harnessIdx = c.indexOf("__moodit_harness();");
+        assertThat(readIdx).isPositive();
+        assertThat(harnessIdx).isGreaterThan(readIdx);
     }
 
     @Test
-    void c_neutralizes_main_via_macro() {
+    void c_neutralizes_main_via_macro_and_reads_secret_from_stdin() {
         var a = assembler.assemble("C", "int solution(void){ return 5; }",
                 "return solution() == 5;", "MOODIT_OK_c");
         String c = onlyFileContent(a);
         assertThat(c).contains("#define main __moodit_student_main");
         assertThat(c).contains("#undef main");
-        assertThat(c).contains("MOODIT_OK_c");
+        // ANTI-TRICHE : le nonce n'est PAS gravé — lu via stdin dans un constructeur ; source supprimée.
+        assertThat(c).doesNotContain("MOODIT_OK_c");
+        assertThat(c).contains("constructor(101)").contains("stdin").contains("remove(\"main.c\")");
     }
 
     @Test

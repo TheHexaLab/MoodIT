@@ -64,9 +64,12 @@ class CodeAssemblerLanguagesTest {
 
     static Stream<Compiled> compiledLanguages() {
         return Stream.of(
+                // Go : l'assembleur insère `import __moodit_os "os"` après la ligne package, donc
+                // le studentSegment commence APRÈS cette ligne pour que la recherche dans le programme
+                // fonctionne (le segment cherché doit être contigu dans le texte assemblé).
                 new Compiled("Go", "go", "main.go",
                         "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
+                        "// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
                         "return solution() == 5", "func __moodit_harness() bool {", "__moodit_harness()",
                         "func\\s+main\\s*\\(", false),
                 // Espaces autour de « main » : le renommage doit quand même s'appliquer.
@@ -150,20 +153,29 @@ class CodeAssemblerLanguagesTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("compiledLanguages")
-    void compile_harnais_intact_et_nonce_emis_par_notre_main_apres_le_harnais(Compiled c) {
+    void compile_harnais_intact_et_secret_jamais_grave(Compiled c) {
         Split s = assembleCompiled(c);
         String grader = s.grader();
 
         // Le harnais est le corps exact de SA fonction, dans le noteur.
         assertThat(occurrences(grader, c.harnessSignature() + "\n" + c.harness() + "\n")).isEqualTo(1);
 
-        // Notre main appelle le harnais, puis seulement émet le nonce (une seule émission en tout).
-        assertThat(occurrences(s.program(), NONCE)).isEqualTo(1);
-        Matcher entry = Pattern.compile(c.entryPoint()).matcher(grader);
-        assertThat(entry.find()).isTrue();
-        int callAt = grader.indexOf(c.harnessCall(), entry.end());
-        assertThat(callAt).isPositive();
-        assertThat(grader.indexOf(NONCE)).isGreaterThan(callAt);
+        // ANTI-TRICHE (option 2) : le secret N'EST JAMAIS gravé dans le source — il est lu au
+        // RUNTIME depuis l'entrée standard. Un étudiant qui lirait le binaire n'y trouve aucun nonce.
+        assertThat(s.program()).doesNotContain(NONCE);
+        assertThat(s.program()).as("le programme doit lire le secret depuis stdin")
+                .containsPattern("(?i)stdin|Console\\.In|System\\.in");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("compiledLanguages")
+    void compile_source_supprimee(Compiled c) {
+        // Le fichier source (qui n'a plus le nonce, mais reste supprimé par principe : empêche la
+        // lecture de la source assemblée) est effacé dans la partie noteur. Selon le langage la
+        // suppression est dans le point d'entrée (Rust/Java/C#), un constructeur (C/C++) ou un
+        // initialiseur de variable de paquet (Go) — toujours avant le code étudiant.
+        Split s = assembleCompiled(c);
+        assertThat(s.grader()).as("suppression de " + c.fileName() + " absente").contains(c.fileName());
     }
 
     @Test

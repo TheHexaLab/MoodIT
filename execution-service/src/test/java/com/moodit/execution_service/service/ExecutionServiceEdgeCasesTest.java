@@ -62,7 +62,7 @@ class ExecutionServiceEdgeCasesTest {
     private void piston(Function<List<PistonClient.File>, PistonClient.Result> fn) {
         // Re-programmation : on repart d'un mock vierge (sinon when(...) rappelle l'ancienne réponse).
         reset(piston);
-        when(piston.execute(anyString(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv ->
+        when(piston.execute(anyString(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv ->
                 fn.apply(inv.getArgument(2)));
     }
 
@@ -86,7 +86,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_envoie_le_code_brut_avec_la_version_et_renvoie_la_sortie() {
-        when(piston.execute(eq("python"), eq("3.12"), any()))
+        when(piston.execute(eq("python"), eq("3.12"), any(), any()))
                 .thenReturn(new PistonClient.Result(null, stage("bonjour\n", "", 0, null, null), null));
 
         RunResult r = service.run(new RunRequest("Python", "3.12", "print('bonjour')"));
@@ -94,7 +94,7 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(r).isEqualTo(new RunResult("bonjour\n", "", 0, null, null, false));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<PistonClient.File>> files = ArgumentCaptor.forClass(List.class);
-        verify(piston).execute(eq("python"), eq("3.12"), files.capture());
+        verify(piston).execute(eq("python"), eq("3.12"), files.capture(), any());
         assertThat(files.getValue()).containsExactly(new PistonClient.File("main.py", "print('bonjour')"));
     }
 
@@ -179,12 +179,12 @@ class ExecutionServiceEdgeCasesTest {
     void run_langage_non_supporte_n_appelle_pas_piston() {
         assertThatThrownBy(() -> service.run(new RunRequest("HTML", null, "<p>")))
                 .isInstanceOf(UnsupportedLanguageException.class);
-        verify(piston, never()).execute(anyString(), any(), any());
+        verify(piston, never()).execute(anyString(), any(), any(), any());
     }
 
     @Test
     void run_erreur_piston_est_propagee() {
-        when(piston.execute(anyString(), any(), any())).thenThrow(new PistonException("injoignable"));
+        when(piston.execute(anyString(), any(), any(), any())).thenThrow(new PistonException("injoignable"));
 
         assertThatThrownBy(() -> service.run(new RunRequest("Python", null, "")))
                 .isInstanceOf(PistonException.class).hasMessage("injoignable");
@@ -199,7 +199,7 @@ class ExecutionServiceEdgeCasesTest {
         service.evaluate(new EvaluateRequest("Python", "3.10.0", "def f(): pass",
                 List.of(new TestCaseInput("t", "return True", 1))));
 
-        verify(piston).execute(eq("python"), eq("3.10.0"), any());
+        verify(piston).execute(eq("python"), eq("3.10.0"), any(), any());
     }
 
     @Test
@@ -283,10 +283,26 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void evaluate_compilation_reussie_puis_nonce_vaut_reussite() {
-        piston(f -> new PistonClient.Result(stage("", "", 0, null, null), stage("", nonceIn(f), 0, null, null), null));
+    void evaluate_compile_lit_le_secret_depuis_stdin_et_le_reemet() {
+        // Langage COMPILÉ : le nonce N'EST PAS gravé dans les fichiers — il est passé via stdin, et
+        // le programme le réémet sur stderr s'il réussit. On simule ce comportement : stderr = stdin.
+        reset(piston);
+        when(piston.execute(anyString(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
+            String stdin = inv.getArgument(3);
+            String secret = stdin == null ? "" : stdin.trim();
+            return new PistonClient.Result(stage("", "", 0, null, null), stage("", secret, 0, null, null), null);
+        });
 
+        // Le secret n'apparaît dans AUCUN fichier soumis (il vient de stdin) et le verdict passe.
         assertThat(single("C", "int s(){return 1;}", "return s();").passed()).isTrue();
+
+        ArgumentCaptor<String> stdinCap = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PistonClient.File>> filesCap = ArgumentCaptor.forClass(List.class);
+        verify(piston).execute(eq("c"), any(), filesCap.capture(), stdinCap.capture());
+        assertThat(stdinCap.getValue()).isNotBlank();
+        String secret = stdinCap.getValue().trim();
+        assertThat(filesCap.getValue()).allSatisfy(f -> assertThat(f.content()).doesNotContain(secret));
     }
 
     // ── SQL lecture seule : verdict dégradé ─────────────────────────────────────
@@ -406,7 +422,7 @@ class ExecutionServiceEdgeCasesTest {
         TestResult t = single("SQL", "x", MUTATION_HARNESS);
 
         assertThat(t.detail()).isEqualTo("near \"x\": syntax error");
-        verify(piston, times(1)).execute(eq("sqlite3"), any(), any());
+        verify(piston, times(1)).execute(eq("sqlite3"), any(), any(), any());
     }
 
     @Test
@@ -425,7 +441,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base introuvable après ton code");
-        verify(piston, times(1)).execute(anyString(), any(), any());
+        verify(piston, times(1)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -437,7 +453,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base trop volumineux");
-        verify(piston, times(1)).execute(anyString(), any(), any());
+        verify(piston, times(1)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -452,7 +468,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(body).hasSize(50);
         assertThat(t.passed()).isTrue();
-        verify(piston, times(2)).execute(anyString(), any(), any());
+        verify(piston, times(2)).execute(anyString(), any(), any(), any());
     }
 
     @Test

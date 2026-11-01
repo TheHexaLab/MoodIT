@@ -112,6 +112,17 @@ public class CodeAssembler {
         return "sql".equals(canon(language));
     }
 
+    /**
+     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Ces langages lisent le secret
+     * anti-triche depuis stdin au runtime plutôt que de le graver dans le source (cf. ExecutionService).
+     */
+    public static boolean isCompiled(String language) {
+        return switch (canon(language)) {
+            case "c", "c++", "go", "rust", "csharp", "java" -> true;
+            default -> false;
+        };
+    }
+
     /** Nom de langage normalisé (minuscules, alias unifiés) pour le switch d'assemblage. */
     private static String canon(String language) {
         String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
@@ -429,22 +440,54 @@ public class CodeAssembler {
                 new PistonClient.File("student_server.sh", server)));
     }
 
+    // ══ Langages COMPILÉS ══════════════════════════════════════════════════════════
+    //
+    // Isolation anti-triche en DEUX volets, sans RPC ni second processus (OOP, classes et types
+    // complexes fonctionnent, le code étudiant est AVANT le harnais dans le même fichier) :
+    //   1. Le nonce n'est PAS gravé dans le source : il est lu au RUNTIME depuis l'entrée standard
+    //      (fournie par ExecutionService via Piston) AVANT tout code étudiant, puis réémis par le
+    //      harnais en cas de succès. Un scan du binaire compilé n'y trouve donc aucun nonce.
+    //   2. Le fichier source est supprimé avant tout code étudiant (fopen de la source → NULL).
+    // L'amorçage « avant tout code étudiant » varie par langage : début de main (Rust/Java/C#),
+    // constructeur à priorité réservée (C/C++), initialiseur de variable de paquet déclaré en
+    // premier (Go). Résiduel documenté : en C/C++ un constructeur étudiant à priorité EXPLICITE
+    // (0–100, réservée, warning du compilateur) pourrait précéder le nôtre — cas exotique.
+
     // ── Go ───────────────────────────────────────────────────────────────────────
 
     /**
-     * Go : on neutralise le {@code func main} de l'étudiant (renommé) pour installer le nôtre, qui
-     * appelle le harnais. Réussi → sortie normale (exit 0) ; échec → {@code panic} (exit non nul) —
-     * ainsi aucun import supplémentaire (os/fmt) n'est requis, évitant les conflits d'imports.
+     * Go : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au runtime. La lecture se
+     * fait dans l'INITIALISEUR d'une variable de paquet déclarée EN PREMIER : Go initialise les
+     * variables de paquet dans l'ordre de déclaration (avant toute fonction {@code init} et avant
+     * {@code main}), donc notre lecture précède tout code étudiant, même un {@code init()} ou un
+     * initialiseur de variable malveillant. On en profite pour supprimer {@code main.go}. Les imports
+     * sont aliasés {@code __moodit_*} pour ne pas heurter ceux de l'étudiant.
      */
     private Assembled assembleGo(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
-        String program = neutralized
-                + "\n\nfunc __moodit_harness() bool {\n"
+        String code = studentCode == null ? "" : studentCode;
+        String neutralized = code.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
+        // Insère nos imports + l'initialiseur du secret après la déclaration package (1ère ligne),
+        // AVANT le code étudiant, sans toucher aux imports existants de l'étudiant.
+        int nl = neutralized.indexOf('\n');
+        String pkgLine = nl >= 0 ? neutralized.substring(0, nl + 1) : neutralized + "\n";
+        String rest     = nl >= 0 ? neutralized.substring(nl + 1) : "";
+        String program = pkgLine
+                + "import __moodit_os \"os\"\n"
+                + "import __moodit_bufio \"bufio\"\n"
+                + "import __moodit_strings \"strings\"\n"
+                + "var __moodit_secret = __moodit_readSecret()\n"
+                + "func __moodit_readSecret() string {\n"
+                + "\t__moodit_os.Remove(\"main.go\")\n"
+                + "\t__moodit_l, _ := __moodit_bufio.NewReader(__moodit_os.Stdin).ReadString('\\n')\n"
+                + "\treturn __moodit_strings.TrimSpace(__moodit_l)\n"
+                + "}\n"
+                + rest
+                + "\nfunc __moodit_harness() bool {\n"
                 + harnessCode
                 + "\n}\n"
                 + "func main() {\n"
                 + "\tif __moodit_harness() {\n"
-                + "\t\tprint(\"" + nonce + "\")\n"
+                + "\t\t__moodit_os.Stderr.WriteString(__moodit_secret)\n"
                 + "\t}\n"
                 + "}\n";
         return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
@@ -453,19 +496,24 @@ public class CodeAssembler {
     // ── Rust ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Rust : on neutralise le {@code fn main} éventuel de l'étudiant, puis notre main asserte le
-     * harnais (dernière expression = valeur de retour). {@code assert!} panique (exit non nul) si
-     * faux ; un {@code panic!} de l'étudiant vaut aussi échec. Aucun import requis.
+     * Rust : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au début de notre
+     * {@code main} (Rust n'exécute aucun code utilisateur avant {@code main}, donc aucune course).
+     * On supprime aussi {@code main.rs}. Le {@code fn main} de l'étudiant est neutralisé.
      */
     private Assembled assembleRust(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll("fn\\s+main\\s*\\(", "fn __moodit_student_main(");
+        String neutralized = (studentCode == null ? "" : studentCode)
+                .replaceAll("fn\\s+main\\s*\\(", "fn __moodit_student_main(");
         String program = neutralized
                 + "\n\nfn __moodit_harness() -> bool {\n"
                 + harnessCode
                 + "\n}\n"
                 + "fn main() {\n"
+                + "    use std::io::BufRead;\n"
+                + "    let _ = std::fs::remove_file(\"main.rs\");\n"
+                + "    let mut __moodit_s = String::new();\n"
+                + "    std::io::stdin().lock().read_line(&mut __moodit_s).ok();\n"
                 + "    if __moodit_harness() {\n"
-                + "        eprint!(\"" + nonce + "\");\n"
+                + "        eprint!(\"{}\", __moodit_s.trim());\n"
                 + "    }\n"
                 + "}\n";
         return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
@@ -474,21 +522,31 @@ public class CodeAssembler {
     // ── C ────────────────────────────────────────────────────────────────────────
 
     /**
-     * C : le {@code main} de l'étudiant est renommé par macro ({@code #define main …}) avant son
-     * code, puis rétabli. Le harnais renvoie un {@code int} (non nul = réussi, cf. contrat) ; notre
-     * main en déduit l'exit code. Pas d'exceptions en C.
+     * C : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin dans un CONSTRUCTEUR à
+     * priorité réservée ({@code constructor(101)}) qui s'exécute AVANT les constructeurs étudiant
+     * (priorité par défaut) et avant {@code main}. Ce constructeur supprime aussi {@code main.c} et
+     * draine le secret dans un tampon privé. Notre {@code main} appelle le harnais puis réémet le
+     * secret s'il réussit. Le {@code main} étudiant est renommé par macro ({@code #define main …}).
      */
     private Assembled assembleC(String studentCode, String harnessCode, String nonce) {
         String program = "#define main __moodit_student_main\n"
                 + studentCode
                 + "\n#undef main\n"
                 + "#include <stdio.h>\n"
+                + "#include <stdlib.h>\n"
+                + "#include <string.h>\n"
+                + "static char __moodit_secret[128];\n"
+                + "__attribute__((constructor(101))) static void __moodit_init(void) {\n"
+                + "    remove(\"main.c\");\n"
+                + "    if (!fgets(__moodit_secret, sizeof(__moodit_secret), stdin)) __moodit_secret[0] = 0;\n"
+                + "    __moodit_secret[strcspn(__moodit_secret, \"\\r\\n\")] = 0;\n"
+                + "}\n"
                 + "static int __moodit_harness(void) {\n"
                 + harnessCode
                 + "\n}\n"
                 + "int main(void) {\n"
                 + "    int __moodit_r = __moodit_harness();\n"
-                + "    if (__moodit_r != 0) fputs(\"" + nonce + "\", stderr);\n"
+                + "    if (__moodit_r != 0) fputs(__moodit_secret, stderr);\n"
                 + "    return __moodit_r != 0 ? 0 : 1;\n"
                 + "}\n";
         return new Assembled("c", List.of(new PistonClient.File("main.c", program)));
@@ -497,20 +555,30 @@ public class CodeAssembler {
     // ── C++ ──────────────────────────────────────────────────────────────────────
 
     /**
-     * C++ : même bascule par macro que le C. Le harnais renvoie un {@code bool} ; une exception
-     * (capturée) vaut échec (exit 1).
+     * C++ : même modèle que le C (secret lu via stdin dans un {@code constructor(101)}, source
+     * supprimée). Le harnais renvoie un {@code bool} ; une exception (capturée) vaut échec. Le
+     * constructeur à priorité réservée précède les objets globaux étudiant (priorité par défaut).
      */
     private Assembled assembleCpp(String studentCode, String harnessCode, String nonce) {
         String program = "#define main __moodit_student_main\n"
                 + studentCode
                 + "\n#undef main\n"
                 + "#include <iostream>\n"
+                + "#include <cstdlib>\n"
+                + "#include <cstdio>\n"
+                + "#include <cstring>\n"
+                + "static char __moodit_secret[128];\n"
+                + "__attribute__((constructor(101))) static void __moodit_init() {\n"
+                + "    std::remove(\"main.cpp\");\n"
+                + "    if (!std::fgets(__moodit_secret, sizeof(__moodit_secret), stdin)) __moodit_secret[0] = 0;\n"
+                + "    __moodit_secret[std::strcspn(__moodit_secret, \"\\r\\n\")] = 0;\n"
+                + "}\n"
                 + "static bool __moodit_harness() {\n"
                 + harnessCode
                 + "\n}\n"
                 + "int main() {\n"
                 + "    try {\n"
-                + "        if (__moodit_harness()) { std::cerr << \"" + nonce + "\"; return 0; }\n"
+                + "        if (__moodit_harness()) { std::cerr << __moodit_secret; return 0; }\n"
                 + "        return 1;\n"
                 + "    } catch (...) { return 1; }\n"
                 + "}\n";
@@ -520,12 +588,13 @@ public class CodeAssembler {
     // ── C# ───────────────────────────────────────────────────────────────────────
 
     /**
-     * C# : le {@code Main} de l'étudiant est renommé pour ne laisser qu'UN point d'entrée (le
-     * nôtre). Le harnais renvoie un {@code bool} ; une exception vaut échec. On qualifie tout via
-     * {@code System.*} pour ne dépendre d'aucun {@code using} supplémentaire.
+     * C# : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au début de notre
+     * {@code Main}, AVANT que le harnais ne touche une classe étudiant (les constructeurs statiques
+     * étudiant ne se déclenchent qu'au premier accès, donc après notre lecture). Source supprimée.
+     * Le {@code Main} de l'étudiant est renommé pour ne laisser qu'un point d'entrée.
      */
     private Assembled assembleCSharp(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll(
+        String neutralized = (studentCode == null ? "" : studentCode).replaceAll(
                 "(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
         String program = neutralized
                 + "\n\nclass __MooditHarness {\n"
@@ -533,8 +602,12 @@ public class CodeAssembler {
                 + harnessCode
                 + "\n    }\n"
                 + "    static int Main() {\n"
+                + "        System.IO.File.Delete(\"main.cs\");\n"
+                + "        string __moodit_secret = System.Console.In.ReadLine();\n"
+                + "        if (__moodit_secret == null) __moodit_secret = \"\";\n"
+                + "        __moodit_secret = __moodit_secret.Trim();\n"
                 + "        try {\n"
-                + "            if (__moodit_run()) { System.Console.Error.Write(\"" + nonce + "\"); return 0; }\n"
+                + "            if (__moodit_run()) { System.Console.Error.Write(__moodit_secret); return 0; }\n"
                 + "            return 1;\n"
                 + "        }\n"
                 + "        catch (System.Exception __e) { System.Console.Error.WriteLine(__e); return 1; }\n"
@@ -549,22 +622,29 @@ public class CodeAssembler {
      * Java : Piston exécute en mode « fichier-source unique » ({@code java Fichier.java}), donc la
      * PREMIÈRE classe top-level doit porter le {@code main} (JEP 330) — ce mode tolère plusieurs
      * classes publiques, donc on n'a PAS à toucher aux classes de l'étudiant (POO, abstract,
-     * interface… restent valides). Notre classe d'entrée {@code __MooditMain} (nom improbable pour
-     * ne pas heurter une classe étudiant, ex. « Main ») vient EN PREMIER ; on neutralise seulement
-     * le {@code main} étudiant pour éviter deux entrées. Le harnais référence les classes étudiant
-     * (ex. {@code new Rectangle(...)}, {@code Solution.solution(...)}).
+     * interface… restent valides). Notre classe d'entrée {@code __MooditMain} vient EN PREMIER ;
+     * on neutralise seulement le {@code main} étudiant pour éviter deux entrées. Le secret
+     * anti-triche N'EST PAS gravé : il est lu depuis stdin au début de notre {@code main}, AVANT que
+     * le harnais ne touche une classe étudiant (les initialiseurs statiques étudiant ne se
+     * déclenchent qu'au chargement de leur classe, donc après notre lecture). Source supprimée.
      */
     private Assembled assembleJava(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode
+        String neutralized = (studentCode == null ? "" : studentCode)
                 .replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
         String program = "public class __MooditMain {\n"
                 + "    static boolean __moodit_harness() {\n"
                 + harnessCode
                 + "\n    }\n"
-                + "    public static void main(String[] __args) {\n"
+                + "    public static void main(String[] __args) throws Exception {\n"
+                + "        new java.io.File(\"Main.java\").delete();\n"
+                + "        java.io.BufferedReader __moodit_br ="
+                + " new java.io.BufferedReader(new java.io.InputStreamReader(System.in));\n"
+                + "        String __moodit_secret = __moodit_br.readLine();\n"
+                + "        if (__moodit_secret == null) __moodit_secret = \"\";\n"
+                + "        __moodit_secret = __moodit_secret.trim();\n"
                 + "        try {\n"
                 + "            boolean __moodit_r = __moodit_harness();\n"
-                + "            if (__moodit_r) System.err.print(\"" + nonce + "\");\n"
+                + "            if (__moodit_r) System.err.print(__moodit_secret);\n"
                 + "            System.exit(__moodit_r ? 0 : 1);\n"
                 + "        } catch (Throwable __t) {\n"
                 + "            __t.printStackTrace();\n"

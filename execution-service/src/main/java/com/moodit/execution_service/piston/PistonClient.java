@@ -78,10 +78,23 @@ public class PistonClient {
      * @throws PistonException si Piston est injoignable ou renvoie une erreur de requête.
      */
     public Result execute(String language, String version, List<File> files) {
+        return execute(language, version, files, null);
+    }
+
+    /**
+     * Variante avec {@code stdin} : la chaîne est fournie à l'ENTRÉE STANDARD de l'étape run.
+     * Sert à injecter un secret au RUNTIME (langages compilés) plutôt qu'à le graver dans le source
+     * — un {@code strings} du binaire ne le révèle pas. {@code null}/vide → aucun stdin envoyé.
+     * @throws PistonException si Piston est injoignable ou renvoie une erreur de requête.
+     */
+    public Result execute(String language, String version, List<File> files, String stdin) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("language", language);
         body.put("version", version == null || version.isBlank() ? "*" : version);
         body.put("files", files.stream().map(f -> Map.of("name", f.name(), "content", f.content())).toList());
+        if (stdin != null && !stdin.isEmpty()) {
+            body.put("stdin", stdin);
+        }
         body.put("run_timeout", runTimeoutMs);
         body.put("compile_timeout", compileTimeoutMs);
         if (runMemoryLimit > 0) {
