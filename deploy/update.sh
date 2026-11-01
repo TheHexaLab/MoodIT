@@ -274,13 +274,17 @@ step "5/5 · Redémarrage des services"
 if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
 ok "Services démarrés."
 
-# Le Caddyfile est un fichier monté : `up -d` ne recrée pas Caddy quand seul ce fichier change.
-# Sans redémarrage, Caddy garderait l'ancienne configuration (en-têtes, redirections, domaines).
-if ! git diff --quiet "$LOCAL" "$REMOTE" -- deploy/Caddyfile; then
-  if stream "Redémarrage de Caddy (Caddyfile modifié)" $COMPOSE restart caddy; then
-    ok "Caddy redémarré avec le nouveau Caddyfile."
+# Le Caddyfile est monté comme fichier seul : `up -d` ne recrée pas Caddy quand seul ce fichier
+# change, et `restart` ne suffit pas non plus. git remplace le fichier par un nouveau, alors que
+# le montage du conteneur reste sur l'ancien (#241). Seule la recréation du conteneur relit le
+# fichier ; sans elle, Caddy garderait l'ancienne configuration (en-têtes, redirections, domaines).
+# On compare le fichier vu par le conteneur à celui du dépôt plutôt que les commits : un Caddyfile
+# resté périmé après une mise à jour précédente est ainsi rattrapé, `--force` compris.
+if ! docker exec moodit_caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - deploy/Caddyfile; then
+  if stream "Recréation de Caddy (Caddyfile modifié)" $COMPOSE up -d --force-recreate caddy; then
+    ok "Caddy recréé avec le nouveau Caddyfile."
   else
-    warn "Redémarrage de Caddy échoué : lancer « $COMPOSE restart caddy » à la main."
+    warn "Recréation de Caddy échouée : lancer « $COMPOSE up -d --force-recreate caddy » à la main."
   fi
 fi
 
