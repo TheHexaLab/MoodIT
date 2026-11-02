@@ -3,6 +3,7 @@ import styles from './AssignmentView.module.css';
 import { AssignmentDetail, BackLink } from './AssignmentDetail.tsx';
 import { AssignmentFormPopup } from './AssignmentFormPopup.tsx';
 import { AssignmentList } from './AssignmentList.tsx';
+import { ManageTeamsPopup, StudentTeamCard } from './AssignmentTeams.tsx';
 import { SubmissionGrading } from './SubmissionGrading.tsx';
 import { SubmissionTracking, TeacherAssignmentList } from './TeacherAssignments.tsx';
 import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon.tsx';
@@ -12,6 +13,8 @@ import type {
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
+  AssignmentTeam,
+  AssignmentTeams,
   Course,
   SubmissionGrade,
 } from '../../../types/domain.ts';
@@ -43,6 +46,15 @@ export interface AssignmentHandlers {
     submissionId: number,
     grade: SubmissionGrade
   ) => Promise<AssignmentStudentRow>;
+  onFetchTeams: (courseId: number, assignmentId: number) => Promise<AssignmentTeams>;
+  onSaveTeams: (
+    courseId: number,
+    assignmentId: number,
+    teams: AssignmentTeam[]
+  ) => Promise<Assignment>;
+  onJoinTeam: (courseId: number, assignmentId: number, teamId: number) => Promise<Assignment>;
+  onCreateTeam: (courseId: number, assignmentId: number) => Promise<Assignment>;
+  onLeaveTeam: (courseId: number, assignmentId: number) => Promise<Assignment>;
   /** La liste a changé (ex. une remise) : le parent met à jour le compte du panneau. */
   onAssignmentsChanged?: () => void;
 }
@@ -88,7 +100,15 @@ export default function AssignmentView({
   const [attempt, setAttempt] = useState(0);
   /** Fenêtre ouverte : `null` pour un nouveau devoir, sinon le devoir à modifier. */
   const [form, setForm] = useState<{ assignment: Assignment | null } | null>(null);
-  const { onFetchAssignments, onFetchSubmission } = handlers;
+  /** Fenêtre de gestion des équipes ouverte. */
+  const [managingTeams, setManagingTeams] = useState(false);
+  /** Incrémenté à l'enregistrement des équipes : le suivi relit ses lignes. */
+  const [teamsVersion, setTeamsVersion] = useState(0);
+  const { onFetchAssignments, onFetchSubmission, onFetchTeams } = handlers;
+  const fetchTeams = useCallback(
+    () => onFetchTeams(course.id, assignmentId),
+    [course.id, assignmentId, onFetchTeams]
+  );
   const fetchSubmission = useCallback(
     (id: number) => onFetchSubmission(course.id, id),
     [course.id, onFetchSubmission]
@@ -133,6 +153,15 @@ export default function AssignmentView({
       assignments: editing
         ? assignments.map((a) => (a.id === saved.id ? { ...saved } : a))
         : [{ ...saved }, ...assignments],
+    });
+    handlers.onAssignmentsChanged?.();
+  }
+
+  /** Remplace un devoir modifié par une action d'équipe. */
+  function applyTeamChange(updated: Assignment) {
+    setLoad({
+      status: 'ready',
+      assignments: assignments.map((a) => (a.id === updated.id ? { ...updated } : a)),
     });
     handlers.onAssignmentsChanged?.();
   }
@@ -208,6 +237,8 @@ export default function AssignmentView({
           onEdit={() => setForm({ assignment: opened })}
           onFetchSubmissions={handlers.onFetchSubmissions}
           onGrade={(id) => onOpenSubmission?.(id)}
+          onManageTeams={() => setManagingTeams(true)}
+          refreshKey={teamsVersion}
         />
       );
     }
@@ -217,6 +248,23 @@ export default function AssignmentView({
         now={now}
         onBack={() => onOpen(ASSIGNMENT_LIST_ID)}
         onSubmit={submit}
+        teamCard={
+          opened.teamSize != null && (
+            <StudentTeamCard
+              assignment={opened}
+              onFetchTeams={fetchTeams}
+              onJoin={async (teamId) =>
+                applyTeamChange(await handlers.onJoinTeam(course.id, opened.id, teamId))
+              }
+              onCreate={async () =>
+                applyTeamChange(await handlers.onCreateTeam(course.id, opened.id))
+              }
+              onLeave={async () =>
+                applyTeamChange(await handlers.onLeaveTeam(course.id, opened.id))
+              }
+            />
+          )
+        }
       />
     );
   }
@@ -232,6 +280,17 @@ export default function AssignmentView({
         </p>
       </header>
       <div className={styles.content}>{renderContent()}</div>
+      {managingTeams && opened && (
+        <ManageTeamsPopup
+          assignment={opened}
+          onFetch={fetchTeams}
+          onSave={async (teams) => {
+            applyTeamChange(await handlers.onSaveTeams(course.id, opened.id, teams));
+            setTeamsVersion((previous) => previous + 1);
+          }}
+          onClose={() => setManagingTeams(false)}
+        />
+      )}
       {form && (
         <AssignmentFormPopup
           courseLabel={getCourseDisplayLabel(course)}

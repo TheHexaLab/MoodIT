@@ -1,4 +1,4 @@
-import type { Assignment, AssignmentStudentRow } from '../types/domain.ts';
+import type { Assignment, AssignmentStudentRow, AssignmentTeam } from '../types/domain.ts';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -25,6 +25,19 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
   return [
     {
       ...base,
+      id: id(9),
+      title: 'Laboratoire 2 : Tables de hachage',
+      instructions:
+        'En équipe de trois, comparez deux stratégies de résolution de collisions et présentez vos mesures.',
+      dueAt: dueIn(now, 14),
+      weight: 10,
+      expectedFormats: ['.pdf'],
+      files: [],
+      teamSize: 3,
+      teamFormation: 'students',
+    },
+    {
+      ...base,
       id: id(7),
       title: 'Devoir 7 : Graphes',
       instructions: 'Parcours en largeur et en profondeur.',
@@ -44,10 +57,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       expectedFormats: ['.zip', '.pdf'],
       files: [{ name: 'enonce-projet.pdf', size: '410 Ko' }],
       teamSize: 4,
-      team: {
-        name: 'Équipe 3',
-        members: ['Camille Lavoie', 'Thomas Bélanger', 'Léa Morin', 'Samuel Roy'],
-      },
+      teamFormation: 'teacher',
       studentCount: 8,
       submittedCount: 5,
       gradedCount: 2,
@@ -138,18 +148,10 @@ export function demoStudentRows(assignment: Assignment, now: Date): AssignmentSt
     // Décalage à chaque tour de prénoms : un nom complet ne revient pas, même pour 48 étudiants.
     const last = LAST_NAMES[(index + Math.floor(index / 24)) % LAST_NAMES.length];
     const isTeam = assignment.teamSize != null;
-    const studentName = isTeam ? `Équipe ${index + 1}` : `${first} ${last}`;
-    // Membres fictifs : des noms consécutifs de la liste, jusqu'à la taille maximale.
-    const members = isTeam
-      ? Array.from({ length: assignment.teamSize ?? 0 }, (_, member) => {
-          const position = index * (assignment.teamSize ?? 0) + member;
-          const memberLast = LAST_NAMES[(position + Math.floor(position / 24)) % LAST_NAMES.length];
-          return `${FIRST_NAMES[position % FIRST_NAMES.length]} ${memberLast}`;
-        })
-      : undefined;
+    const studentName = `${first} ${last}`;
     const id = assignment.id * 100 + index;
     if (index >= assignment.submittedCount) {
-      return { id, studentName, members, status: 'missing', files: [] };
+      return { id, studentName, status: 'missing', files: [] };
     }
 
     const isLate = isOver && index >= assignment.submittedCount - 3;
@@ -170,7 +172,6 @@ export function demoStudentRows(assignment: Assignment, now: Date): AssignmentSt
       return {
         id,
         studentName,
-        members,
         status: 'graded',
         submittedAt,
         files,
@@ -178,6 +179,43 @@ export function demoStudentRows(assignment: Assignment, now: Date): AssignmentSt
         comment: 'Bon travail, code clair.',
       };
     }
-    return { id, studentName, members, status: isLate ? 'late' : 'submitted', submittedAt, files };
+    return { id, studentName, status: isLate ? 'late' : 'submitted', submittedAt, files };
   });
+}
+
+/** L'étudiant fictif : c'est lui qui rejoint et quitte les équipes dans les maquettes. */
+export const DEMO_STUDENT = 'Camille Lavoie';
+
+/** Les étudiants fictifs du cours. */
+export function demoCourseStudents(): string[] {
+  return Array.from({ length: 32 }, (_, index) => {
+    const first = FIRST_NAMES[index % FIRST_NAMES.length];
+    const last = LAST_NAMES[(index + Math.floor(index / 24)) % LAST_NAMES.length];
+    return `${first} ${last}`;
+  });
+}
+
+/**
+ * Équipes fictives de départ. Formées par le prof : tout le cours est réparti, et l'étudiant fictif
+ * est dans l'Équipe 3. Formées par les étudiants : quelques équipes commencées, sans lui.
+ */
+export function demoTeams(assignment: Assignment): AssignmentTeam[] {
+  const size = assignment.teamSize ?? 0;
+  const names = demoCourseStudents();
+  const team = (index: number, members: string[]): AssignmentTeam => ({
+    id: assignment.id * 100 + index,
+    name: `Équipe ${index + 1}`,
+    members,
+  });
+  if (assignment.teamFormation === 'students') {
+    return [
+      team(0, names.slice(1, 1 + size)),
+      team(1, names.slice(1 + size, size + 3)),
+      team(2, names.slice(size + 3, size + 4)),
+    ];
+  }
+  [names[0], names[size * 2]] = [names[size * 2], names[0]];
+  return Array.from({ length: Math.ceil(names.length / size) }, (_, index) =>
+    team(index, names.slice(index * size, (index + 1) * size))
+  );
 }

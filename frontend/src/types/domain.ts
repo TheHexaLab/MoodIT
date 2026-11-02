@@ -529,9 +529,19 @@ export interface AssignmentSubmission {
 
 /** Équipe d'un étudiant pour un devoir : une seule remise, visible par tous ses membres. */
 export interface AssignmentTeam {
+  id: number;
   name: string;
   members: string[];
 }
+
+/** Les équipes d'un devoir, et les étudiants qui n'en ont pas encore. */
+export interface AssignmentTeams {
+  teams: AssignmentTeam[];
+  unassigned: string[];
+}
+
+/** Qui forme les équipes d'un devoir. */
+export type TeamFormation = 'students' | 'teacher';
 
 /** Fichier joint par le prof à un devoir. */
 export interface AssignmentFile {
@@ -551,6 +561,7 @@ export interface AssignmentDraft {
   isPublished: boolean;
   /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
   teamSize?: number;
+  teamFormation?: TeamFormation;
 }
 
 /** Une ligne du suivi des remises, côté prof. */
@@ -591,7 +602,8 @@ export interface Assignment {
   publishedBy?: string;
   /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
   teamSize?: number;
-  /** Devoir en équipe : l'équipe de l'étudiant. */
+  teamFormation?: TeamFormation;
+  /** Devoir en équipe : l'équipe de l'étudiant, s'il en a une. */
   team?: AssignmentTeam;
   submission?: AssignmentSubmission;
   submittedCount: number;

@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import styles from './AssignmentFormPopup.module.css';
 import { Popup } from '../../Popup/Popup';
 import { PopupVariant } from '../../Popup/popupVariant';
 import { usePopupController } from '../../Popup/popupController';
 import { FILE_FORMATS, clampInput } from './assignmentFormat.ts';
-import type { Assignment, AssignmentDraft, AssignmentFile } from '../../../types/domain.ts';
+import type {
+  Assignment,
+  AssignmentDraft,
+  AssignmentFile,
+  TeamFormation,
+} from '../../../types/domain.ts';
 
 const WIDTH = { '--popup-width': '40rem' } as React.CSSProperties;
 const DEFAULT_TIME = '23:59';
@@ -57,7 +62,19 @@ export function AssignmentFormPopup({
   const [formats, setFormats] = useState<string[]>(assignment?.expectedFormats ?? []);
   const [isTeam, setIsTeam] = useState(assignment?.teamSize != null);
   const [teamSize, setTeamSize] = useState(String(assignment?.teamSize ?? DEFAULT_TEAM_SIZE));
+  const [teamFormation, setTeamFormation] = useState<TeamFormation>(
+    assignment?.teamFormation ?? 'students'
+  );
   const [otherOpen, setOtherOpen] = useState(false);
+  const instructionsRef = useRef<HTMLTextAreaElement>(null);
+
+  // La zone des consignes grandit avec son texte : on voit toute la description.
+  useLayoutEffect(() => {
+    const area = instructionsRef.current;
+    if (!area) return;
+    area.style.height = 'auto';
+    area.style.height = `${area.scrollHeight + 2}px`;
+  }, [instructions]);
   const [other, setOther] = useState('');
   const [files, setFiles] = useState<AssignmentFile[]>(assignment?.files ?? []);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +128,7 @@ export function AssignmentFormPopup({
         files,
         isPublished: publish,
         teamSize: isTeam ? Number(teamSize) : undefined,
+        teamFormation: isTeam ? teamFormation : undefined,
       });
       popup.requestClose(onClose);
     } catch {
@@ -166,6 +184,8 @@ export function AssignmentFormPopup({
           <label className={styles.field}>
             <span>Consignes</span>
             <textarea
+              ref={instructionsRef}
+              className={styles.instructions}
               rows={3}
               value={instructions}
               placeholder="Ce que les étudiants doivent faire et remettre."
@@ -232,6 +252,35 @@ export function AssignmentFormPopup({
               </p>
             )}
           </div>
+
+          {isTeam && (
+            <div className={styles.field} role="group" aria-labelledby="assignment-formation">
+              <span id="assignment-formation">Qui forme les équipes ?</span>
+              <div className={styles.chips}>
+                {(
+                  [
+                    { label: 'Les étudiants', value: 'students' },
+                    { label: 'Moi', value: 'teacher' },
+                  ] as const
+                ).map(({ label, value }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`${styles.chip} ${teamFormation === value ? styles.chipOn : ''}`}
+                    aria-pressed={teamFormation === value}
+                    onClick={() => setTeamFormation(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className={styles.hint}>
+                {teamFormation === 'students'
+                  ? 'Les étudiants rejoignent ou créent une équipe depuis le devoir.'
+                  : 'Vous formez les équipes depuis le suivi du devoir, une fois publié.'}
+              </p>
+            </div>
+          )}
 
           <div className={styles.field} role="group" aria-labelledby="assignment-formats">
             <span id="assignment-formats">Format de fichier attendu (facultatif)</span>

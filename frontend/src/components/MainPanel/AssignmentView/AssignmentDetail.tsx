@@ -16,6 +16,8 @@ interface AssignmentDetailProps {
   now: Date;
   onBack: () => void;
   onSubmit: (fileNames: string[]) => Promise<unknown>;
+  /** Carte d'équipe, pour un devoir en équipe. */
+  teamCard?: React.ReactNode;
 }
 
 const ICON = {
@@ -213,7 +215,10 @@ export function AssignmentDetail({
   now,
   onBack,
   onSubmit,
+  teamCard,
 }: AssignmentDetailProps): React.ReactElement {
+  // Sans équipe, rien à remettre : la remise est commune à toute l'équipe.
+  const waitsForTeam = assignment.teamSize != null && !assignment.team;
   return (
     <div className={styles.columns}>
       <div className={styles.main}>
@@ -256,20 +261,8 @@ export function AssignmentDetail({
       </div>
 
       <aside className={styles.side} aria-label="Remise">
-        {assignment.team && (
-          <section className={styles.card} aria-label="Votre équipe">
-            <h2 className={styles.cardTitle}>{assignment.team.name}</h2>
-            <ul className={styles.members}>
-              {assignment.team.members.map((member) => (
-                <li key={member}>{member}</li>
-              ))}
-            </ul>
-            <p className={styles.hint}>
-              Une seule remise par équipe : chaque membre peut la voir et la remplacer.
-            </p>
-          </section>
-        )}
-        <SubmissionCard assignment={assignment} now={now} onSubmit={onSubmit} />
+        {teamCard}
+        {!waitsForTeam && <SubmissionCard assignment={assignment} now={now} onSubmit={onSubmit} />}
       </aside>
     </div>
   );

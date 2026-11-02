@@ -96,6 +96,8 @@ export function SubmissionTracking({
   onEdit,
   onFetchSubmissions,
   onGrade,
+  onManageTeams,
+  refreshKey = 0,
 }: {
   assignment: Assignment;
   onBack: () => void;
@@ -103,6 +105,10 @@ export function SubmissionTracking({
   onFetchSubmissions: (assignment: Assignment) => Promise<AssignmentStudentRow[]>;
   /** Ouvre la page de notation d'une remise. */
   onGrade: (submissionId: number) => void;
+  /** Devoir en équipe : ouvre la fenêtre de gestion des équipes. */
+  onManageTeams?: () => void;
+  /** Change après l'enregistrement des équipes : relit les remises. */
+  refreshKey?: number;
 }): React.ReactElement {
   const [rows, setRows] = useState<AssignmentStudentRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -119,7 +125,7 @@ export function SubmissionTracking({
     return () => {
       cancelled = true;
     };
-  }, [assignment, onFetchSubmissions]);
+  }, [assignment, onFetchSubmissions, refreshKey]);
 
   const count = (status: AssignmentStudentRow['status']) =>
     (rows ?? []).filter((row) => row.status === status).length;
@@ -145,6 +151,11 @@ export function SubmissionTracking({
             {assignment.weight != null && ` · ${assignment.weight} % de la note`}
           </p>
         </div>
+        {assignment.teamSize != null && onManageTeams && (
+          <button type="button" className={styles.button} onClick={onManageTeams}>
+            Gérer les équipes
+          </button>
+        )}
         <button type="button" className={styles.button} onClick={onEdit}>
           Modifier le devoir
         </button>
@@ -185,7 +196,10 @@ export function SubmissionTracking({
             aria-label="Remises des étudiants"
             tabIndex={0}
           >
-            <table className={styles.table}>
+            {rows.length === 0 && (
+              <p className={styles.empty}>Aucune équipe pour l'instant.</p>
+            )}
+            <table className={styles.table} hidden={rows.length === 0}>
               <thead>
                 <tr>
                   <th scope="col">{assignment.teamSize ? 'Équipe' : 'Étudiant'}</th>

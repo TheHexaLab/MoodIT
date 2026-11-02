@@ -91,6 +91,12 @@
     line-height: 1.5;
 }
 
+/* Grandit avec son texte (voir AssignmentFormPopup) : c'est la fenêtre qui défile, pas le champ. */
+.field textarea.instructions {
+    overflow: hidden;
+    resize: none;
+}
+
 .field input::placeholder,
 .field textarea::placeholder {
     color: var(--text-muted);

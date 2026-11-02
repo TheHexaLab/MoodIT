@@ -920,6 +920,11 @@ export default function Dashboard() {
         onFetchSubmissions: api.fetchAssignmentSubmissions,
         onFetchSubmission: api.fetchSubmission,
         onGradeSubmission: api.gradeSubmission,
+        onFetchTeams: api.fetchAssignmentTeams,
+        onSaveTeams: api.saveAssignmentTeams,
+        onJoinTeam: api.joinAssignmentTeam,
+        onCreateTeam: api.createAssignmentTeam,
+        onLeaveTeam: api.leaveAssignmentTeam,
         onAssignmentsChanged: () => refreshAssignmentsCount(effectiveSelectedCourseId),
       }
     : undefined;
