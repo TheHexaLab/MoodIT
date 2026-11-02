@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './AssignmentView.module.css';
 import formStyles from './AssignmentFormPopup.module.css';
 import { Popup } from '../../Popup/Popup';
@@ -50,6 +50,17 @@ export function StudentTeamCard({
   const [teams, setTeams] = useState<AssignmentTeam[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const teamId = team?.id;
+  const previousTeamId = useRef(teamId);
+
+  // Rejoindre, créer ou quitter retire le bouton cliqué : sans ça, le focus tomberait hors de la
+  // page. On le pose sur le titre de la carte, qui annonce le nouvel état.
+  useEffect(() => {
+    if (previousTeamId.current === teamId) return;
+    previousTeamId.current = teamId;
+    headingRef.current?.focus();
+  }, [teamId]);
 
   useEffect(() => {
     if (team || !canChoose) return;
@@ -88,7 +99,9 @@ export function StudentTeamCard({
     return (
       <section className={styles.card} aria-label="Votre équipe">
         <div className={styles.teamChoiceLine}>
-          <h2 className={styles.cardTitle}>{team.name}</h2>
+          <h2 className={styles.cardTitle} ref={headingRef} tabIndex={-1}>
+            {team.name}
+          </h2>
           <TeamCount count={team.members.length} max={teamSize ?? 0} />
         </div>
         <MemberList members={team.members} />
@@ -120,7 +133,9 @@ export function StudentTeamCard({
 
   return (
     <section className={styles.card} aria-label="Choisir une équipe">
-      <h2 className={styles.cardTitle}>Choisir une équipe</h2>
+      <h2 className={styles.cardTitle} ref={headingRef} tabIndex={-1}>
+        Choisir une équipe
+      </h2>
       <p className={styles.hint}>
         {teamSize} membres au maximum. Rejoignez une équipe pour remettre ce devoir.
       </p>
@@ -192,6 +207,24 @@ export function ManageTeamsPopup({
   /** Ids négatifs : équipes pas encore enregistrées. */
   const [nextTempId, setNextTempId] = useState(-1);
   const maxSize = assignment.teamSize ?? 0;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /**
+   * Retirer un membre, une équipe ou placer un étudiant fait disparaître le contrôle cliqué. Le focus
+   * sortirait alors de la fenêtre (Échap et Tab ne marcheraient plus) : on le pose au prochain rendu
+   * sur le premier sélecteur trouvé, sinon sur « Ajouter une équipe ».
+   */
+  const focusAfterRender = useRef<string[] | null>(null);
+
+  useEffect(() => {
+    const selectors = focusAfterRender.current;
+    if (!selectors) return;
+    focusAfterRender.current = null;
+    const root = bodyRef.current;
+    const target = [...selectors, '[data-focus-fallback]']
+      .map((selector) => root?.querySelector<HTMLElement>(selector))
+      .find((element) => element != null);
+    target?.focus();
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -222,11 +255,13 @@ export function ManageTeamsPopup({
   }
 
   function removeTeam(team: AssignmentTeam) {
+    focusAfterRender.current = [];
     setTeams((previous) => (previous ?? []).filter((t) => t.id !== team.id));
     setUnassigned((previous) => [...previous, ...team.members]);
   }
 
   function removeMember(teamId: number, member: string) {
+    focusAfterRender.current = [`[data-team="${teamId}"] li button`, `[data-team="${teamId}"] button`];
     setTeams((previous) =>
       (previous ?? []).map((team) =>
         team.id === teamId
@@ -238,6 +273,11 @@ export function ManageTeamsPopup({
   }
 
   function assign(member: string, teamId: number) {
+    const position = unassigned.indexOf(member);
+    focusAfterRender.current = [
+      `[data-unassigned] li:nth-child(${position + 1}) select`,
+      '[data-unassigned] li:last-child select',
+    ];
     setTeams((previous) =>
       (previous ?? []).map((team) =>
         team.id === teamId ? { ...team, members: [...team.members, member] } : team
@@ -308,7 +348,7 @@ export function ManageTeamsPopup({
           </button>
         </header>
 
-        <div className={formStyles.body}>
+        <div className={formStyles.body} ref={bodyRef}>
           <p className={formStyles.hint}>
             {assignment.teamFormation === 'students'
               ? 'Les étudiants forment leurs équipes eux-mêmes. Vous pouvez quand même les ajuster ici.'
@@ -324,7 +364,12 @@ export function ManageTeamsPopup({
           {teams && (
             <>
               <div className={styles.teamActions}>
-                <button type="button" className={formStyles.button} onClick={addTeam}>
+                <button
+                  type="button"
+                  className={formStyles.button}
+                  data-focus-fallback
+                  onClick={addTeam}
+                >
                   Ajouter une équipe
                 </button>
                 <button
@@ -339,7 +384,7 @@ export function ManageTeamsPopup({
 
               <ul className={styles.teamGrid}>
                 {teams.map((team) => (
-                  <li key={team.id} className={styles.teamBox}>
+                  <li key={team.id} className={styles.teamBox} data-team={team.id}>
                     <div className={styles.teamBoxHead}>
                       <strong>{team.name}</strong>
                       <TeamCount count={team.members.length} max={maxSize} />
@@ -381,7 +426,7 @@ export function ManageTeamsPopup({
                 {unassigned.length === 0 ? (
                   <p className={styles.hint}>Tous les étudiants ont une équipe.</p>
                 ) : (
-                  <ul className={styles.teamUnassigned}>
+                  <ul className={styles.teamUnassigned} data-unassigned>
                     {unassigned.map((member) => (
                       <li key={member}>
                         <span>{member}</span>

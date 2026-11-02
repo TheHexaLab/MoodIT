@@ -175,6 +175,26 @@ describe('ManageTeamsPopup', () => {
     expect(screen.queryByText('Équipe 1')).toBeNull();
   });
 
+  it('garde le focus dans la fenêtre quand le contrôle cliqué disparaît', async () => {
+    popup();
+    fireEvent.click(await screen.findByRole('button', { name: 'Retirer A de Équipe 1' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retirer B de Équipe 1' }));
+
+    fireEvent.change(screen.getByLabelText('Équipe de E'), { target: { value: '2' } });
+    expect(document.activeElement).toBe(screen.getByLabelText('Équipe de F'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer Équipe 1' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
+  });
+
+  it('le dernier étudiant placé envoie le focus sur le précédent, puis sur « Ajouter une équipe »', async () => {
+    popup({ onFetch: vi.fn().mockResolvedValue({ teams: [OPEN], unassigned: ['E', 'F'] }) });
+    fireEvent.change(await screen.findByLabelText('Équipe de F'), { target: { value: '2' } });
+    expect(document.activeElement).toBe(screen.getByLabelText('Équipe de E'));
+    fireEvent.change(screen.getByLabelText('Équipe de E'), { target: { value: '2' } });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
+  });
+
   it('ajoute une équipe vide, au premier numéro libre', async () => {
     popup();
     fireEvent.click(await screen.findByRole('button', { name: 'Ajouter une équipe' }));
@@ -285,6 +305,8 @@ describe('AssignmentView — devoirs en équipe', () => {
 
     expect(await screen.findByText('Votre remise')).toBeTruthy();
     expect(onJoinTeam).toHaveBeenCalledWith(10, 9, 2);
+    // Le bouton cliqué a disparu : le focus va au titre de la carte d'équipe.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Équipe 2' }));
     expect(handlers.onAssignmentsChanged).toHaveBeenCalled();
   });
 

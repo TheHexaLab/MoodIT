@@ -153,6 +153,21 @@ describe('SubmissionGrading', () => {
     expect((screen.getByRole('button', { name: 'Précédent' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('en passant à une autre remise, le focus va au nom de l’étudiant, pas à la première ouverture', async () => {
+    const props = {
+      onFetch: vi.fn().mockResolvedValue({ assignment: ASSIGNMENT, rows: ROWS }),
+      onGrade: vi.fn(),
+      onBack: vi.fn(),
+      onOpenSubmission: vi.fn(),
+    };
+    const { rerender } = render(<SubmissionGrading submissionId={500} {...props} />);
+    const first = await screen.findByRole('heading', { name: 'Camille Lavoie' });
+    expect(document.activeElement).not.toBe(first);
+
+    rerender(<SubmissionGrading submissionId={501} {...props} />);
+    expect(await screen.findByRole('heading', { name: 'Thomas Bélanger' })).toBe(document.activeElement);
+  });
+
   it('une remise d’équipe montre ses membres, et la note vaut pour toute l’équipe', async () => {
     setup(502);
     await screen.findByRole('heading', { name: 'Équipe 3' });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import styles from './AssignmentView.module.css';
 import { BackLink } from './AssignmentDetail.tsx';
 import { StatusPill } from './AssignmentList.tsx';
@@ -167,6 +167,16 @@ export function SubmissionGrading({
     rows: AssignmentStudentRow[];
   } | null>(null);
   const [failed, setFailed] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const shownId = useRef<number | null>(null);
+
+  // En passant d'une remise à l'autre, le bouton cliqué disparaît avec le formulaire : le focus va
+  // au nom de l'étudiant, qui annonce la nouvelle remise. Pas à la première ouverture de la page.
+  useEffect(() => {
+    if (!data) return;
+    if (shownId.current != null && shownId.current !== submissionId) titleRef.current?.focus();
+    shownId.current = submissionId;
+  }, [data, submissionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,7 +247,9 @@ export function SubmissionGrading({
         <BackLink label="Toutes les remises" onBack={() => onBack(assignment.id)} />
         <div className={styles.titleRow}>
           <div className={styles.titleText}>
-            <h1 className={styles.title}>{row.studentName}</h1>
+            <h1 className={styles.title} ref={titleRef} tabIndex={-1}>
+              {row.studentName}
+            </h1>
             <p className={styles.meta}>
               <StatusPill badge={STUDENT_ROW_BADGE[row.status]} />
               <span>{assignment.title}</span>

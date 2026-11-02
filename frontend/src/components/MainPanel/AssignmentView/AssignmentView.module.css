@@ -716,6 +716,12 @@
     font-size: 0.6875rem;
 }
 
+/* Titres qui reçoivent le focus après une action : pas de contour, le lecteur d'écran les annonce. */
+.title:focus,
+.cardTitle:focus {
+    outline: none;
+}
+
 .teamActions {
     display: flex;
     flex-wrap: wrap;
