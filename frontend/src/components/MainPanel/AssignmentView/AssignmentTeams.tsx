@@ -9,6 +9,15 @@ import type { Assignment, AssignmentTeam, AssignmentTeams } from '../../../types
 
 const WIDTH = { '--popup-width': '40rem' } as React.CSSProperties;
 
+/** Places prises dans une équipe : vert si elle est complète, jaune s'il reste de la place. */
+function TeamCount({ count, max }: { count: number; max: number }): React.ReactElement {
+  return (
+    <span className={`${styles.teamPill} ${count >= max ? styles.success : styles.warn}`}>
+      {count}/{max}
+    </span>
+  );
+}
+
 function MemberList({ members }: { members: string[] }): React.ReactElement {
   return (
     <ul className={styles.members}>
@@ -127,24 +136,25 @@ export function StudentTeamCard({
             const isFull = candidate.members.length >= (teamSize ?? 0);
             return (
               <li key={candidate.id} className={styles.teamChoice}>
-                <span className={styles.teamChoiceText}>
-                  <strong>
-                    {candidate.name}{' '}
-                    <span className={styles.teamCount}>
-                      {candidate.members.length}/{teamSize}
-                    </span>
-                  </strong>
-                  <span>{candidate.members.join(', ')}</span>
-                </span>
-                <button
-                  type="button"
-                  className={styles.gradeAction}
-                  disabled={isFull || busy}
-                  aria-label={`Rejoindre ${candidate.name}`}
-                  onClick={() => void run(() => onJoin(candidate.id))}
-                >
-                  {isFull ? 'Complète' : 'Rejoindre'}
-                </button>
+                <div className={styles.teamChoiceLine}>
+                  <strong>{candidate.name}</strong>
+                  <TeamCount count={candidate.members.length} max={teamSize ?? 0} />
+                </div>
+                <div className={styles.teamChoiceLine}>
+                  <span className={styles.teamChoiceMembers}>{candidate.members.join(', ')}</span>
+                  {/* Une équipe complète n'offre aucune action : sa pastille verte le dit. */}
+                  {!isFull && (
+                    <button
+                      type="button"
+                      className={styles.gradeAction}
+                      disabled={busy}
+                      aria-label={`Rejoindre ${candidate.name}`}
+                      onClick={() => void run(() => onJoin(candidate.id))}
+                    >
+                      Rejoindre
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -331,12 +341,9 @@ export function ManageTeamsPopup({
                 {teams.map((team) => (
                   <li key={team.id} className={styles.teamBox}>
                     <div className={styles.teamBoxHead}>
-                      <strong>
-                        {team.name}{' '}
-                        <span className={styles.teamCount}>
-                          {team.members.length}/{maxSize}
-                        </span>
-                      </strong>
+                      <strong>{team.name}</strong>
+                      <TeamCount count={team.members.length} max={maxSize} />
+                      <span className={styles.teamBoxSpacer} />
                       <button
                         type="button"
                         className={styles.teamRemove}
