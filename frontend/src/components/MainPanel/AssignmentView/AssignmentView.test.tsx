@@ -42,7 +42,7 @@ const GRADED = assignment({
   title: 'Devoir 4',
   dueAt: new Date(2026, 9, 16).toISOString(),
   submission: {
-    fileName: 'devoir4.pdf',
+    fileNames: ['devoir4.pdf'],
     submittedAt: new Date(2026, 9, 15, 21, 12).toISOString(),
     late: false,
     grade: '17 / 20',
@@ -59,6 +59,13 @@ function setup(
     onCreateAssignment: vi.fn(),
     onUpdateAssignment: vi.fn(),
     onFetchSubmissions: vi.fn(),
+    onFetchSubmission: vi.fn(),
+    onGradeSubmission: vi.fn(),
+    onFetchTeams: vi.fn(),
+    onSaveTeams: vi.fn(),
+    onJoinTeam: vi.fn(),
+    onCreateTeam: vi.fn(),
+    onLeaveTeam: vi.fn(),
     onAssignmentsChanged: vi.fn(),
     ...overrides,
   };
@@ -123,7 +130,7 @@ describe('AssignmentView — liste, côté étudiant', () => {
         assignment({
           id: 3,
           title: 'Devoir 3',
-          submission: { fileName: 'a.zip', submittedAt: iso(1), late: true },
+          submission: { fileNames: ['a.zip'], submittedAt: iso(1), late: true },
         }),
       ],
     });
@@ -154,7 +161,7 @@ describe('AssignmentView — devoir ouvert, côté étudiant', () => {
     expect(screen.getByText('Première consigne.')).toBeTruthy();
     expect(screen.getByText('Deuxième consigne.')).toBeTruthy();
     expect(screen.getByText('enonce.pdf')).toBeTruthy();
-    expect(screen.getByText('20 % de la note')).toBeTruthy();
+    expect(screen.getByText('20 %').parentElement?.textContent).toContain('de la note');
     expect(screen.getByText('Publié par Prof. Tremblay')).toBeTruthy();
     expect(screen.getByText('.pdf ou .zip, 25 Mo au maximum')).toBeTruthy();
     expect(fileInput().accept).toBe('.pdf,.zip');
@@ -176,7 +183,7 @@ describe('AssignmentView — devoir ouvert, côté étudiant', () => {
   it('remet un fichier accepté et prévient le parent', async () => {
     const updated = {
       ...TO_DO,
-      submission: { fileName: 'mon.zip', submittedAt: iso(1), late: false },
+      submission: { fileNames: ['mon.zip'], submittedAt: iso(1), late: false },
     };
     const onSubmitAssignment = vi.fn().mockResolvedValue(updated);
     const { handlers } = setup({ assignmentId: 5 }, { onSubmitAssignment });
@@ -184,14 +191,52 @@ describe('AssignmentView — devoir ouvert, côté étudiant', () => {
     const send = await screen.findByRole('button', { name: 'Remettre le devoir' });
     expect((send as HTMLButtonElement).disabled).toBe(true);
     pickFile('mon.zip');
-    expect(screen.getByText('Prêt à remettre')).toBeTruthy();
+    expect(screen.getByText('mon.zip')).toBeTruthy();
     fireEvent.click(send);
 
     await waitFor(() => expect(screen.getByText('mon.zip')).toBeTruthy());
-    expect(onSubmitAssignment).toHaveBeenCalledWith(10, 5, 'mon.zip');
+    expect(onSubmitAssignment).toHaveBeenCalledWith(10, 5, ['mon.zip']);
     expect(handlers.onAssignmentsChanged).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Remplacer ma remise' })).toBeTruthy();
     expect(screen.getByText('Remis')).toBeTruthy();
+  });
+
+  it('remet plusieurs fichiers : un même nom remplace, et un fichier se retire', async () => {
+    const onSubmitAssignment = vi.fn().mockResolvedValue(TO_DO);
+    setup({ assignmentId: 5 }, { onSubmitAssignment });
+    await screen.findByRole('heading', { name: 'Devoir 5' });
+
+    pickFile('code.zip');
+    pickFile('rapport.pdf');
+    pickFile('rapport.pdf');
+    pickFile('brouillon.pdf');
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer brouillon.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remettre le devoir' }));
+
+    await waitFor(() =>
+      expect(onSubmitAssignment).toHaveBeenCalledWith(10, 5, ['code.zip', 'rapport.pdf'])
+    );
+  });
+
+  it('montre tous les fichiers remis, le déposant et le commentaire', async () => {
+    const submitted = assignment({
+      id: 9,
+      title: 'En équipe',
+      submission: {
+        fileNames: ['a.zip', 'b.pdf'],
+        submittedAt: iso(1),
+        late: false,
+        submittedBy: 'Thomas Bélanger',
+        grade: '18 / 20',
+        comment: 'Bravo',
+      },
+    });
+    setup({ assignmentId: 9, assignments: [submitted] });
+    await screen.findByRole('heading', { name: 'En équipe' });
+    expect(screen.getByText('a.zip')).toBeTruthy();
+    expect(screen.getByText('b.pdf')).toBeTruthy();
+    expect(screen.getByText(/par Thomas Bélanger/)).toBeTruthy();
+    expect(screen.getByText(/Commentaire : Bravo/)).toBeTruthy();
   });
 
   it('refuse un mauvais format et un fichier trop gros', async () => {
@@ -253,7 +298,7 @@ describe('AssignmentView — devoir ouvert, côté étudiant', () => {
       id: 7,
       title: 'Passé',
       dueAt: new Date(2026, 9, 20).toISOString(),
-      submission: { fileName: 'a.pdf', submittedAt: new Date(2026, 9, 19).toISOString(), late: false },
+      submission: { fileNames: ['a.pdf'], submittedAt: new Date(2026, 9, 19).toISOString(), late: false },
     });
     setup({ assignmentId: 7, assignments: [late] });
     await screen.findByRole('heading', { name: 'Passé' });

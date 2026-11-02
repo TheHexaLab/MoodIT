@@ -113,6 +113,13 @@ describe('MainPanel', () => {
           onCreateAssignment: vi.fn(),
           onUpdateAssignment: vi.fn(),
           onFetchSubmissions: vi.fn(),
+          onFetchSubmission: vi.fn(),
+          onGradeSubmission: vi.fn(),
+          onFetchTeams: vi.fn(),
+          onSaveTeams: vi.fn(),
+          onJoinTeam: vi.fn(),
+          onCreateTeam: vi.fn(),
+          onLeaveTeam: vi.fn(),
         },
       });
 

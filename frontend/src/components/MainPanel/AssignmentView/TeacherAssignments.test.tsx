@@ -66,15 +66,24 @@ const GRADING = assignment({
 
 const ROWS: AssignmentStudentRow[] = [
   {
+    id: 500,
     studentName: 'Camille Lavoie',
     status: 'graded',
     submittedAt: new Date(2026, 10, 1, 19, 4).toISOString(),
-    fileName: 'a.zip',
+    files: [{ name: 'a.zip', size: '1 Ko' }],
     grade: '18 / 20',
   },
-  { studentName: 'Thomas Bélanger', status: 'submitted', fileName: 'b.zip' },
-  { studentName: 'Samuel Roy', status: 'late', fileName: 'c.zip' },
-  { studentName: 'Maya Tran', status: 'missing' },
+  {
+    id: 501,
+    studentName: 'Thomas Bélanger',
+    status: 'submitted',
+    files: [
+      { name: 'b.zip', size: '1 Ko' },
+      { name: 'rapport.pdf', size: '2 Ko' },
+    ],
+  },
+  { id: 502, studentName: 'Samuel Roy', status: 'late', files: [{ name: 'c.zip', size: '1 Ko' }] },
+  { id: 503, studentName: 'Maya Tran', status: 'missing', files: [] },
 ];
 
 function setup(
@@ -88,10 +97,18 @@ function setup(
     onCreateAssignment: vi.fn(),
     onUpdateAssignment: vi.fn(),
     onFetchSubmissions: vi.fn().mockResolvedValue(ROWS),
+    onFetchSubmission: vi.fn(),
+    onGradeSubmission: vi.fn(),
+    onFetchTeams: vi.fn(),
+    onSaveTeams: vi.fn(),
+    onJoinTeam: vi.fn(),
+    onCreateTeam: vi.fn(),
+    onLeaveTeam: vi.fn(),
     onAssignmentsChanged: vi.fn(),
     ...overrides,
   };
   const onOpen = vi.fn();
+  const onOpenSubmission = vi.fn();
   render(
     <AssignmentView
       course={course}
@@ -99,10 +116,11 @@ function setup(
       handlers={handlers}
       canManage
       onOpen={onOpen}
+      onOpenSubmission={onOpenSubmission}
       now={NOW}
     />
   );
-  return { handlers, onOpen };
+  return { handlers, onOpen, onOpenSubmission };
 }
 
 describe('devoirs, côté prof — liste', () => {
@@ -197,9 +215,27 @@ describe('devoirs, côté prof — suivi des remises', () => {
     const camille = within(table).getByRole('row', { name: /Camille Lavoie/ });
     expect(camille.textContent).toContain('18 / 20');
     expect(camille.textContent).toContain('1 novembre, 19 h 04');
-    expect(within(table).getByRole('row', { name: /Thomas Bélanger/ }).textContent).toContain('À noter');
+    expect(within(table).getByRole('row', { name: /Thomas Bélanger/ }).textContent).toContain('Noter');
     expect(within(table).getByRole('row', { name: /Maya Tran/ }).textContent).toContain('Manquant');
-    expect(screen.getByText(/Date limite : 3 novembre, 23 h 59 · 20 % de la note/)).toBeTruthy();
+    expect(screen.getByText('Date limite : 3 novembre, 23 h 59')).toBeTruthy();
+    expect(screen.getByText('20 %').parentElement?.textContent).toContain('de la note');
+  });
+
+  it('« Noter » et une note ouvrent la page de notation ; un manquant n’a rien à noter', async () => {
+    const { onOpenSubmission } = setup(5);
+    const table = await screen.findByRole('table');
+    expect(within(table).getByRole('columnheader', { name: 'Fichier(s)' })).toBeTruthy();
+    expect(within(table).getByRole('row', { name: /Thomas Bélanger/ }).textContent).toContain(
+      'rapport.pdf'
+    );
+
+    fireEvent.click(within(table).getByRole('button', { name: 'Noter Thomas Bélanger' }));
+    expect(onOpenSubmission).toHaveBeenLastCalledWith(501);
+
+    fireEvent.click(within(table).getByRole('button', { name: /Modifier la note de Camille/ }));
+    expect(onOpenSubmission).toHaveBeenLastCalledWith(500);
+
+    expect(within(table).queryByRole('button', { name: /Maya Tran/ })).toBeNull();
   });
 
   it('sans date limite ni pondération : le sous-titre le dit', async () => {

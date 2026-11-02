@@ -352,6 +352,8 @@ describe('Dashboard', () => {
     });
 
     afterEach(() => {
+      // Démonter d'abord : une vue encore montée relirait des accès déjà réinitialisés.
+      cleanup();
       vi.mocked(api.assignmentsAvailable).mockReset();
       vi.mocked(api.fetchAssignments).mockReset();
     });
@@ -373,7 +375,7 @@ describe('Dashboard', () => {
     it('une remise met à jour la pastille du panneau', async () => {
       vi.mocked(api.submitAssignment).mockResolvedValue({
         ...TO_SUBMIT,
-        submission: { fileName: 'a.pdf', submittedAt: new Date().toISOString(), late: false },
+        submission: { fileNames: ['a.pdf'], submittedAt: new Date().toISOString(), late: false },
       });
       renderDashboard({ path: '/home/p/1/c/10/assignment/5' });
       await screen.findByRole('heading', { name: 'Devoir 5' });
@@ -386,6 +388,51 @@ describe('Dashboard', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Remettre le devoir' }));
 
       await waitFor(() => expect(courseNav().queryByLabelText(/à remettre/)).toBeNull());
+    });
+
+    it('une remise à noter s’ouvre dans l’URL, avec l’entrée Devoirs active', async () => {
+      vi.mocked(api.fetchSubmission).mockResolvedValue({
+        assignment: TO_SUBMIT,
+        rows: [
+          {
+            id: 500,
+            studentName: 'Camille Lavoie',
+            status: 'submitted',
+            files: [{ name: 'a.zip', size: '1 Ko' }],
+          },
+        ],
+      });
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10/submission/500' });
+
+      expect(
+        await screen.findByRole('heading', { name: 'Camille Lavoie' }, { timeout: 5000 })
+      ).toBeTruthy();
+      expect(api.fetchSubmission).toHaveBeenCalledWith(10, 500);
+      expect(
+        courseNav()
+          .getByRole('button', { name: /Devoirs/ })
+          .getAttribute('aria-current')
+      ).toBe('page');
+    });
+
+    it('le personnel ouvre une remise depuis le suivi, dans l’URL', async () => {
+      vi.mocked(api.fetchAssignmentSubmissions).mockResolvedValue([
+        {
+          id: 500,
+          studentName: 'Camille Lavoie',
+          status: 'submitted',
+          files: [{ name: 'a.zip', size: '1 Ko' }],
+        },
+      ]);
+      vi.mocked(api.fetchSubmission).mockResolvedValue({ assignment: TO_SUBMIT, rows: [] });
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10/assignment/5' });
+
+      // Programmes, cours, devoirs puis remises : quatre chargements, plus lents en suite complète.
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Noter Camille Lavoie' }, { timeout: 5000 })
+      );
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/submission/500'));
+      expect(lastNavigation()).toBe('PUSH');
     });
 
     it('le personnel n’a pas de pastille de devoirs à remettre', async () => {

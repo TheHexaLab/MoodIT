@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   byDueDate,
+  clampInput,
   daysUntil,
   dueBadge,
   formatDateTime,
   formatHint,
+  gradeScore,
   isAcceptedFile,
   submissionBadge,
+  withTeamLabel,
 } from './assignmentFormat';
 import type { Assignment } from '../../../types/domain';
 
@@ -48,6 +51,27 @@ describe('formats de fichier', () => {
   });
 });
 
+describe('saisie des nombres', () => {
+  it('garde la valeur entre 0 et le maximum, sans toucher au reste', () => {
+    expect(clampInput('140', 100)).toBe('100');
+    expect(clampInput('-5', 100)).toBe('0');
+    expect(clampInput('12.5', 20)).toBe('12.5');
+    expect(clampInput('', 20)).toBe('');
+  });
+
+  it('retrouve le nombre d’une note', () => {
+    expect(gradeScore('17 / 20')).toBe('17');
+    expect(gradeScore(undefined)).toBe('');
+  });
+});
+
+describe('devoirs en équipe', () => {
+  it('ajoute le repère à la ligne d’un devoir en équipe seulement', () => {
+    expect(withTeamLabel('À remettre', assignment({ teamSize: 4 }))).toBe('À remettre · En équipe');
+    expect(withTeamLabel('À remettre', assignment({}))).toBe('À remettre');
+  });
+});
+
 describe('dates', () => {
   it('écrit la date et l’heure à la québécoise', () => {
     expect(formatDateTime(new Date(2026, 10, 3, 23, 59).toISOString())).toBe('3 novembre, 23 h 59');
@@ -82,7 +106,7 @@ describe('pastilles', () => {
   });
 
   it('une remise corrigée prime sur le retard', () => {
-    const submission = { fileName: 'a.pdf', submittedAt: inDays(0), late: true };
+    const submission = { fileNames: ['a.pdf'], submittedAt: inDays(0), late: true };
     expect(submissionBadge(assignment({ submission: { ...submission, grade: '17 / 20' } })).label).toBe(
       'Corrigé'
     );

@@ -249,3 +249,59 @@ describe('AssignmentFormPopup', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+describe('AssignmentFormPopup — travail en équipe', () => {
+  const team = () => fireEvent.click(screen.getByRole('button', { name: 'En équipe' }));
+
+  it('individuel par défaut : ni taille ni formation', async () => {
+    const { onSave } = setup();
+    expect(screen.queryByText('Qui forme les équipes ?')).toBeNull();
+    fill('Titre', 'Devoir');
+    saveDraft();
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ teamSize: undefined, teamFormation: undefined });
+  });
+
+  it('en équipe : les étudiants forment les équipes par défaut, et le prof peut le faire', async () => {
+    const { onSave } = setup();
+    fill('Titre', 'Projet');
+    team();
+    expect(screen.getByText(/rejoignent ou créent une équipe/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Moi' }));
+    expect(screen.getByText(/depuis le suivi du devoir/)).toBeTruthy();
+    fill('Maximum par équipe', '5');
+    saveDraft();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ teamSize: 5, teamFormation: 'teacher' });
+  });
+
+  it('garde la taille entre 2 et 10', () => {
+    const { onSave } = setup();
+    fill('Titre', 'Projet');
+    team();
+    fill('Maximum par équipe', '40');
+    expect((screen.getByLabelText('Maximum par équipe') as HTMLInputElement).value).toBe('10');
+    fill('Maximum par équipe', '1');
+    saveDraft();
+    expect(screen.getByRole('alert').textContent).toContain('au moins 2 membres');
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('pré-remplit un devoir en équipe', () => {
+    setup({ ...EXISTING, teamSize: 3, teamFormation: 'teacher' });
+    expect(screen.getByRole('button', { name: 'En équipe' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Moi' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByLabelText('Maximum par équipe') as HTMLInputElement).value).toBe('3');
+  });
+
+  it('la zone des consignes grandit avec son texte', () => {
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockReturnValue(300);
+    setup();
+    fill('Consignes', 'Un long texte');
+    expect((screen.getByLabelText('Consignes') as HTMLTextAreaElement).style.height).toBe('302px');
+    scrollHeight.mockRestore();
+  });
+});
