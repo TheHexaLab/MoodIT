@@ -56,6 +56,8 @@ import {
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
+import SchedulePage from '../../components/SchedulePage/SchedulePage.tsx';
+import { type ScheduleCourse } from '../../types/domain.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -894,6 +896,22 @@ export default function Dashboard() {
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
+  // Ouvre un cours depuis le portail (barre de gauche, horaire) : son panneau se rouvre.
+  const openCourse = (programId: number, courseId: number) => {
+    setCoursePanelCollapsed(false);
+    setView({ programId, courseId });
+  };
+  // Cours de l'horaire : ceux de tous les programmes, une seule fois chacun, ouverts par leur
+  // premier programme (comme dans la barre de gauche).
+  const scheduleCourses: ScheduleCourse[] = [];
+  for (const program of dashboardPrograms) {
+    for (const course of program.courses ?? []) {
+      if (!scheduleCourses.some((known) => known.id === course.id)) {
+        scheduleCourses.push({ id: course.id, code: course.code?.trim() || course.title?.trim() || 'Cours', programId: program.id });
+      }
+    }
+  }
+
   // Établissement de l'utilisateur : celui dont le domaine courriel correspond au sien. Le bandeau
   // retombe sur « MoodIT » si aucun ne correspond ou si la liste ne se charge pas.
   const userEmailDomain = currentUser.email?.split('@')[1]?.toLowerCase();
@@ -1035,10 +1053,7 @@ export default function Dashboard() {
               onJoinCourses: handleJoinCourses,
               onLeaveProgram: handleLeaveProgram,
             }}
-            onOpenCourse={(programId, courseId) => {
-              setCoursePanelCollapsed(false);
-              setView({ programId, courseId });
-            }}
+            onOpenCourse={openCourse}
             onJoinProgram={handleJoinFromPortal}
             onAddProgram={isMobile ? handleAddProgram : undefined}
             collapsed={sidebarCollapsed}
@@ -1101,7 +1116,14 @@ export default function Dashboard() {
         }
       />
 
-      {portalPage ? (
+      {portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
+        <SchedulePage
+          courses={scheduleCourses}
+          onFetchSchedule={api.fetchSchedule}
+          onOpenCourse={openCourse}
+          compact={isMobile}
+        />
+      ) : portalPage ? (
         <PortalPlaceholder title={portalPage.label} />
       ) : isPortal ? (
         <AccueilPage firstName={currentUser.firstName} />

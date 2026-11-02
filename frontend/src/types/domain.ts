@@ -510,3 +510,22 @@ export interface PostVoteUserDTO {
   childrenCount?: number;
   children?: PostVoteUserDTO[];
 }
+
+/** Cours de l'étudiant, tel que l'horaire en a besoin : son programme sert à l'ouvrir (#206). */
+export interface ScheduleCourse {
+  id: number;
+  code: string;
+  programId: number;
+}
+
+/** Séance de cours dans l'horaire de la semaine. */
+export interface ScheduleSession {
+  id: number;
+  courseId: number;
+  /** Cours, Travaux dirigés, Laboratoire… */
+  kind: string;
+  room: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+}

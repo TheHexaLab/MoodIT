@@ -11,8 +11,11 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
+import { demoSchedule } from '../../mocks/scheduleData.ts';
 import type {
   AnswerResponse,
+  ScheduleCourse,
+  ScheduleSession,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1237,4 +1240,19 @@ export async function votePost(
     body: JSON.stringify({ forumId, postId, voteValue: value }),
   });
   if (!res.ok) throw new Error('Échec du vote');
+}
+
+// ── Horaire (#206) : données FICTIVES, en attendant une API ────────────────────────────────────────
+
+/** Pas d'API d'horaire : la page n'existe qu'en développement ; en production, l'écran d'attente. */
+export function scheduleAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+/** Séances de la semaine qui commence au lundi `weekStart`, pour les cours donnés. */
+export async function fetchSchedule(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleSession[]> {
+  return demoSchedule(weekStart, courses);
 }
