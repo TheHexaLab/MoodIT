@@ -378,6 +378,33 @@ describe('AnnouncementView', () => {
     expect(card.textContent).toContain(t.expires);
   });
 
+  it('étudiant : une annonce expirée pendant le chargement du canal disparaît aussitôt', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const inOneSecond = new Date(Date.now() + 1_000).toISOString();
+      let deliver: (posts: ForumPost[]) => void = () => {};
+      render(
+        <AnnouncementView
+          course={COURSE}
+          channel={CHANNEL}
+          onFetchAnnouncements={() => new Promise<ForumPost[]>((resolve) => (deliver = resolve))}
+        />
+      );
+      // Le canal s'ouvre, puis les annonces arrivent après leur heure d'expiration.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        deliver([post(1, { title: 'Déjà finie', expiresAt: inOneSecond })]);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(0);
+      });
+
+      expect(screen.queryByText('Déjà finie')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('étudiant : une annonce disparaît à son heure d’expiration, sans recharger', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -390,6 +417,9 @@ describe('AnnouncementView', () => {
         />
       );
       expect(await screen.findByText('Bientôt finie')).toBeTruthy();
+      // L'annonce peut s'afficher avant que l'effet du minuteur ait tourné : on le laisse tourner
+      // avant d'avancer l'horloge, sinon le minuteur serait posé après l'avance.
+      await act(async () => {});
 
       await act(async () => {
         vi.advanceTimersByTime(61_000);

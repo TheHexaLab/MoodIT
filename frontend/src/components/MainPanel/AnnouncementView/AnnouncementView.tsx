@@ -154,8 +154,10 @@ const AnnouncementView: React.FC<AnnouncementViewProps> = ({
       .map((a) => (a.expiresAt ? Date.parse(a.expiresAt) : NaN))
       .filter((time) => time > now);
     if (upcoming.length === 0) return;
+    // Délai depuis l'heure ACTUELLE, pas depuis `now` : les annonces arrivent après l'ouverture du
+    // canal, et une expiration passée entre-temps doit s'appliquer tout de suite (délai nul).
     // setTimeout plafonne à ~24,8 jours (2^31 - 1 ms) : au-delà, on revérifie à ce terme.
-    const delay = Math.min(Math.min(...upcoming) - now, 2 ** 31 - 1);
+    const delay = Math.min(Math.max(0, Math.min(...upcoming) - Date.now()), 2 ** 31 - 1);
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
   }, [announcements, now]);
