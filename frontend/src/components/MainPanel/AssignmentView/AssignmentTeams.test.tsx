@@ -318,6 +318,56 @@ describe('AssignmentView — devoirs en équipe', () => {
     await waitFor(() => expect(handlers.onFetchSubmissions).toHaveBeenCalledTimes(2));
   });
 
+  it('une note enregistrée passe par la vue, qui relit les devoirs', async () => {
+    const lab = assignment({ teamSize: undefined, teamFormation: undefined });
+    const row = {
+      id: 900,
+      studentName: 'Camille Lavoie',
+      status: 'submitted' as const,
+      files: [{ name: 'a.zip', size: '1 Ko' }],
+    };
+    const onFetchAssignments = vi.fn().mockResolvedValue([lab]);
+    const onGradeSubmission = vi.fn().mockResolvedValue({ ...row, status: 'graded', grade: '15 / 20' });
+    const onFetchSubmission = vi.fn().mockResolvedValue({ assignment: lab, rows: [row] });
+    const onOpen = vi.fn();
+    const handlers = {
+      onFetchAssignments,
+      onSubmitAssignment: vi.fn(),
+      onCreateAssignment: vi.fn(),
+      onUpdateAssignment: vi.fn(),
+      onFetchSubmissions: vi.fn().mockResolvedValue([]),
+      onFetchSubmission,
+      onGradeSubmission,
+      onFetchTeams: vi.fn(),
+      onSaveTeams: vi.fn(),
+      onJoinTeam: vi.fn(),
+      onCreateTeam: vi.fn(),
+      onLeaveTeam: vi.fn(),
+    };
+    render(
+      <AssignmentView
+        course={{ id: 10, code: 'INF201' }}
+        assignmentId={0}
+        submissionId={900}
+        handlers={handlers}
+        canManage
+        onOpen={onOpen}
+      />
+    );
+
+    await screen.findByRole('heading', { name: 'Camille Lavoie' });
+    expect(onFetchSubmission).toHaveBeenCalledWith(10, 900);
+    fireEvent.change(screen.getByLabelText(/^Note sur 20/), { target: { value: '15' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la note' }));
+
+    await waitFor(() =>
+      expect(onGradeSubmission).toHaveBeenCalledWith(10, 900, { score: 15, comment: '' })
+    );
+    await waitFor(() => expect(onFetchAssignments).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Toutes les remises' }));
+    expect(onOpen).toHaveBeenCalledWith(lab.id);
+  });
+
   it('un devoir individuel n’offre pas de gestion d’équipes', async () => {
     view({
       assignmentId: 9,
