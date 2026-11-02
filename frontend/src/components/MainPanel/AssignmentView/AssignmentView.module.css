@@ -676,6 +676,14 @@
     font-weight: 600;
 }
 
+/* Places prises : un repère discret à côté du nom de l'équipe. */
+.teamCount {
+    margin-left: 0.125rem;
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    font-weight: 400;
+}
+
 .teamActions {
     display: flex;
     flex-wrap: wrap;

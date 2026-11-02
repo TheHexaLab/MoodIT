@@ -129,7 +129,10 @@ export function StudentTeamCard({
               <li key={candidate.id} className={styles.teamChoice}>
                 <span className={styles.teamChoiceText}>
                   <strong>
-                    {candidate.name} ({candidate.members.length} / {teamSize})
+                    {candidate.name}{' '}
+                    <span className={styles.teamCount}>
+                      {candidate.members.length}/{teamSize}
+                    </span>
                   </strong>
                   <span>{candidate.members.join(', ')}</span>
                 </span>
@@ -329,7 +332,10 @@ export function ManageTeamsPopup({
                   <li key={team.id} className={styles.teamBox}>
                     <div className={styles.teamBoxHead}>
                       <strong>
-                        {team.name} ({team.members.length} / {maxSize})
+                        {team.name}{' '}
+                        <span className={styles.teamCount}>
+                          {team.members.length}/{maxSize}
+                        </span>
                       </strong>
                       <button
                         type="button"
