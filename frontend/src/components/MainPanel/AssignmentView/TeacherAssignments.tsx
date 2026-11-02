@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import styles from './AssignmentView.module.css';
-import { BackLink } from './AssignmentDetail.tsx';
+import { BackLink, WeightBadge } from './AssignmentDetail.tsx';
 import { AssignmentRow, StatusPill } from './AssignmentList.tsx';
 import { Plus } from '../../../assets/Plus.tsx';
 import { Spinner } from '../../Spinner/Spinner.tsx';
@@ -148,9 +148,9 @@ export function SubmissionTracking({
             {assignment.dueAt
               ? `Date limite : ${formatDateTime(assignment.dueAt)}`
               : 'Sans date limite'}
-            {assignment.weight != null && ` · ${assignment.weight} % de la note`}
           </p>
         </div>
+        {assignment.weight != null && <WeightBadge weight={assignment.weight} />}
         {assignment.teamSize != null && onManageTeams && (
           <button type="button" className={styles.button} onClick={onManageTeams}>
             Gérer les équipes

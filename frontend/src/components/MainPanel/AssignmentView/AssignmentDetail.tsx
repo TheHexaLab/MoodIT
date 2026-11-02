@@ -47,6 +47,16 @@ export function BackLink({
   );
 }
 
+/** Pondération d'un devoir : le repère mis en évidence dans le coin de son en-tête. */
+export function WeightBadge({ weight }: { weight: number }): React.ReactElement {
+  return (
+    <p className={styles.weightBadge}>
+      <strong>{weight} %</strong>
+      <span>de la note</span>
+    </p>
+  );
+}
+
 /** Carte « Votre remise » : l'envoi est simulé tant que le service de fichiers n'existe pas. */
 function SubmissionCard({
   assignment,
@@ -223,14 +233,16 @@ export function AssignmentDetail({
     <div className={styles.columns}>
       <div className={styles.main}>
         <BackLink onBack={onBack} />
-        <div>
-          <h1 className={styles.title}>{assignment.title}</h1>
-          <p className={styles.meta}>
-            {!assignment.submission && <StatusPill badge={dueBadge(assignment, now)} />}
-            {assignment.dueAt && <span>{formatDateTime(assignment.dueAt)}</span>}
-            {assignment.weight != null && <span>{assignment.weight} % de la note</span>}
-            {assignment.publishedBy && <span>Publié par {assignment.publishedBy}</span>}
-          </p>
+        <div className={styles.titleRow}>
+          <div className={styles.titleText}>
+            <h1 className={styles.title}>{assignment.title}</h1>
+            <p className={styles.meta}>
+              {!assignment.submission && <StatusPill badge={dueBadge(assignment, now)} />}
+              {assignment.dueAt && <span>{formatDateTime(assignment.dueAt)}</span>}
+              {assignment.publishedBy && <span>Publié par {assignment.publishedBy}</span>}
+            </p>
+          </div>
+          {assignment.weight != null && <WeightBadge weight={assignment.weight} />}
         </div>
 
         <section className={styles.card} aria-label="Consignes">
