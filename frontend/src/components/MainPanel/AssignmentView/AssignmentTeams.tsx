@@ -92,9 +92,6 @@ export function StudentTeamCard({
           <TeamCount count={team.members.length} max={teamSize ?? 0} />
         </div>
         <MemberList members={team.members} />
-        <p className={styles.hint}>
-          Une seule remise par équipe : chaque membre peut la voir et la remplacer.
-        </p>
         {errorLine}
         {canChoose && !submission && (
           <button
