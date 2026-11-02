@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styles from './CourseChannelList.module.css';
 import { ChannelTypeIcon } from './ChannelTypeIcon';
-import { defaultTypeDefinitions } from './channelTypeDefinitions.ts';
+import { defaultTypeDefinitions, isAssignmentChannel } from './channelTypeDefinitions.ts';
 import { Edit } from '../../assets/Edit.tsx';
 import { type ChannelMessage, type CourseChannel, type User } from '../../types/domain.ts';
 
@@ -134,8 +134,8 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
             <li className={styles.channelItem}>
               <button
                 type="button"
-                className={`${styles.channelButton} ${selectedChannel?.type === 'assignment' ? styles.channelButtonActive : ''}`}
-                aria-current={selectedChannel?.type === 'assignment' ? 'page' : undefined}
+                className={`${styles.channelButton} ${isAssignmentChannel(selectedChannel?.type) ? styles.channelButtonActive : ''}`}
+                aria-current={isAssignmentChannel(selectedChannel?.type) ? 'page' : undefined}
                 onClick={() => onSelectChannel?.({ id: 0, type: 'assignment' })}
               >
                 <span className={styles.channelPrefix}>

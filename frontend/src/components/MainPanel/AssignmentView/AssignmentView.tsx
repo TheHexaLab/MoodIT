@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import styles from './AssignmentView.module.css';
 import { AssignmentDetail, BackLink } from './AssignmentDetail.tsx';
 import { AssignmentFormPopup } from './AssignmentFormPopup.tsx';
 import { AssignmentList } from './AssignmentList.tsx';
+import { SubmissionGrading } from './SubmissionGrading.tsx';
 import { SubmissionTracking, TeacherAssignmentList } from './TeacherAssignments.tsx';
 import { ChannelTypeIcon } from '../../CourseChannelList/ChannelTypeIcon.tsx';
 import { getCourseDisplayLabel } from '../../CourseMenu/courseLabel';
@@ -12,6 +13,7 @@ import type {
   AssignmentDraft,
   AssignmentStudentRow,
   Course,
+  SubmissionGrade,
 } from '../../../types/domain.ts';
 
 /** Id de canal de la liste des devoirs (`/assignment/0`) ; un autre id ouvre ce devoir. */
@@ -23,7 +25,7 @@ export interface AssignmentHandlers {
   onSubmitAssignment: (
     courseId: number,
     assignmentId: number,
-    fileName: string
+    fileNames: string[]
   ) => Promise<Assignment>;
   onCreateAssignment: (courseId: number, draft: AssignmentDraft) => Promise<Assignment>;
   onUpdateAssignment: (
@@ -32,6 +34,15 @@ export interface AssignmentHandlers {
     draft: AssignmentDraft
   ) => Promise<Assignment>;
   onFetchSubmissions: (assignment: Assignment) => Promise<AssignmentStudentRow[]>;
+  onFetchSubmission: (
+    courseId: number,
+    submissionId: number
+  ) => Promise<{ assignment: Assignment; rows: AssignmentStudentRow[] }>;
+  onGradeSubmission: (
+    courseId: number,
+    submissionId: number,
+    grade: SubmissionGrade
+  ) => Promise<AssignmentStudentRow>;
   /** La liste a changé (ex. une remise) : le parent met à jour le compte du panneau. */
   onAssignmentsChanged?: () => void;
 }
@@ -40,6 +51,8 @@ interface AssignmentViewProps {
   course: Course;
   /** {@link ASSIGNMENT_LIST_ID} : la liste ; sinon, le devoir ouvert. */
   assignmentId: number;
+  /** Remise ouverte sur la page de notation (personnel du cours) ; prime sur `assignmentId`. */
+  submissionId?: number;
   handlers: AssignmentHandlers;
   /**
    * Personnel du cours : voit les brouillons et le suivi, crée et modifie les devoirs.
@@ -48,6 +61,8 @@ interface AssignmentViewProps {
   canManage?: boolean;
   /** Ouvre un devoir, ou revient à la liste. L'URL porte la vue (#63). */
   onOpen: (assignmentId: number) => void;
+  /** Ouvre la page de notation d'une remise. */
+  onOpenSubmission?: (submissionId: number) => void;
   /** Date de référence (injectée par les tests). */
   now?: Date;
 }
@@ -61,9 +76,11 @@ type Load =
 export default function AssignmentView({
   course,
   assignmentId,
+  submissionId,
   handlers,
   canManage = false,
   onOpen,
+  onOpenSubmission,
   now = new Date(),
 }: AssignmentViewProps): React.ReactElement {
   const [load, setLoad] = useState<Load>({ status: 'loading' });
@@ -71,7 +88,11 @@ export default function AssignmentView({
   const [attempt, setAttempt] = useState(0);
   /** Fenêtre ouverte : `null` pour un nouveau devoir, sinon le devoir à modifier. */
   const [form, setForm] = useState<{ assignment: Assignment | null } | null>(null);
-  const { onFetchAssignments } = handlers;
+  const { onFetchAssignments, onFetchSubmission } = handlers;
+  const fetchSubmission = useCallback(
+    (id: number) => onFetchSubmission(course.id, id),
+    [course.id, onFetchSubmission]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -93,8 +114,8 @@ export default function AssignmentView({
       ? undefined
       : assignments.find((assignment) => assignment.id === assignmentId);
 
-  async function submit(fileName: string) {
-    const updated = await handlers.onSubmitAssignment(course.id, assignmentId, fileName);
+  async function submit(fileNames: string[]) {
+    const updated = await handlers.onSubmitAssignment(course.id, assignmentId, fileNames);
     setLoad({
       status: 'ready',
       assignments: assignments.map((a) => (a.id === updated.id ? { ...updated } : a)),
@@ -142,6 +163,22 @@ export default function AssignmentView({
         </div>
       );
     }
+    if (canManage && submissionId != null) {
+      return (
+        <SubmissionGrading
+          submissionId={submissionId}
+          onFetch={fetchSubmission}
+          onGrade={async (id, grade) => {
+            const row = await handlers.onGradeSubmission(course.id, id, grade);
+            // Les compteurs des devoirs ont changé : on les relit, sans repasser par le chargement.
+            setAttempt((previous) => previous + 1);
+            return row;
+          }}
+          onBack={(id) => onOpen(id ?? ASSIGNMENT_LIST_ID)}
+          onOpenSubmission={(id) => onOpenSubmission?.(id)}
+        />
+      );
+    }
     if (assignmentId === ASSIGNMENT_LIST_ID) {
       return canManage ? (
         <TeacherAssignmentList
@@ -170,6 +207,7 @@ export default function AssignmentView({
           onBack={() => onOpen(ASSIGNMENT_LIST_ID)}
           onEdit={() => setForm({ assignment: opened })}
           onFetchSubmissions={handlers.onFetchSubmissions}
+          onGrade={(id) => onOpenSubmission?.(id)}
         />
       );
     }

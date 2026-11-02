@@ -9,3 +9,8 @@ export const defaultTypeDefinitions: ChannelTypeDefinition[] = [
   { type: 'forum', label: 'Forums', emptyLabel: 'Aucun forum' },
   { type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' },
 ];
+
+/** Vues de l'entrée « Devoirs » : la liste ou un devoir (`assignment`), une remise à noter (`submission`). */
+export function isAssignmentChannel(type: string | undefined): boolean {
+  return type === 'assignment' || type === 'submission';
+}

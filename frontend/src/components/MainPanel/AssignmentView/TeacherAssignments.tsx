@@ -5,7 +5,12 @@ import { AssignmentRow, StatusPill } from './AssignmentList.tsx';
 import { Plus } from '../../../assets/Plus.tsx';
 import { Spinner } from '../../Spinner/Spinner.tsx';
 import type { Assignment, AssignmentStudentRow } from '../../../types/domain.ts';
-import { type Badge, formatDateTime } from './assignmentFormat.ts';
+import {
+  type Badge,
+  STUDENT_ROW_BADGE,
+  formatDateTime,
+  withTeamLabel,
+} from './assignmentFormat.ts';
 
 /** Statut d'un devoir pour le prof. */
 function teacherBadge(assignment: Assignment, now: Date): Badge {
@@ -67,7 +72,7 @@ export function TeacherAssignmentList({
             <AssignmentRow
               key={assignment.id}
               assignment={assignment}
-              detail={rowDetail(assignment, now)}
+              detail={withTeamLabel(rowDetail(assignment, now), assignment)}
               meta={
                 assignment.isPublished
                   ? `${assignment.submittedCount} / ${assignment.studentCount} remis`
@@ -84,24 +89,20 @@ export function TeacherAssignmentList({
   );
 }
 
-const ROW_BADGE: Record<AssignmentStudentRow['status'], Badge> = {
-  graded: { label: 'Corrigé', tone: 'success' },
-  submitted: { label: 'Remis', tone: 'neutral' },
-  late: { label: 'En retard', tone: 'danger' },
-  missing: { label: 'Manquant', tone: 'warn' },
-};
-
 /** Suivi des remises d'un devoir : les chiffres, puis une ligne par étudiant. */
 export function SubmissionTracking({
   assignment,
   onBack,
   onEdit,
   onFetchSubmissions,
+  onGrade,
 }: {
   assignment: Assignment;
   onBack: () => void;
   onEdit: () => void;
   onFetchSubmissions: (assignment: Assignment) => Promise<AssignmentStudentRow[]>;
+  /** Ouvre la page de notation d'une remise. */
+  onGrade: (submissionId: number) => void;
 }): React.ReactElement {
   const [rows, setRows] = useState<AssignmentStudentRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -147,7 +148,7 @@ export function SubmissionTracking({
         <button type="button" className={styles.button} onClick={onEdit}>
           Modifier le devoir
         </button>
-        {/* Saisie des notes à venir : présent pour la maquette, sans action pour l'instant. */}
+        {/* Envoi des notes aux étudiants à venir : présent pour la maquette, sans action pour l'instant. */}
         <button
           type="button"
           className={`${styles.button} ${styles.primary} ${styles.soon}`}
@@ -187,24 +188,53 @@ export function SubmissionTracking({
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th scope="col">Étudiant</th>
+                  <th scope="col">{assignment.teamSize ? 'Équipe' : 'Étudiant'}</th>
                   <th scope="col">Statut</th>
                   <th scope="col">Remis le</th>
-                  <th scope="col">Fichier</th>
+                  <th scope="col">Fichier(s)</th>
                   <th scope="col">Note</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.studentName}>
-                    <th scope="row">{row.studentName}</th>
+                  <tr key={row.id}>
+                    <th scope="row">
+                      {row.studentName}
+                      {row.members && (
+                        <span className={styles.memberLine}>{row.members.join(', ')}</span>
+                      )}
+                    </th>
                     <td>
-                      <StatusPill badge={ROW_BADGE[row.status]} />
+                      <StatusPill badge={STUDENT_ROW_BADGE[row.status]} />
                     </td>
                     <td>{row.submittedAt ? formatDateTime(row.submittedAt) : '—'}</td>
-                    <td>{row.fileName ?? '—'}</td>
                     <td>
-                      {row.grade ?? (row.status === 'missing' ? '—' : <em>À noter</em>)}
+                      {row.files.length === 0
+                        ? '—'
+                        : row.files.map((file) => <div key={file.name}>{file.name}</div>)}
+                    </td>
+                    <td>
+                      {row.status === 'missing' ? (
+                        '—'
+                      ) : row.grade ? (
+                        <button
+                          type="button"
+                          className={styles.gradeLink}
+                          aria-label={`Modifier la note de ${row.studentName} : ${row.grade}`}
+                          onClick={() => onGrade(row.id)}
+                        >
+                          {row.grade}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={styles.gradeAction}
+                          aria-label={`Noter ${row.studentName}`}
+                          onClick={() => onGrade(row.id)}
+                        >
+                          Noter
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

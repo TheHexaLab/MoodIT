@@ -1,9 +1,30 @@
-import type { Assignment } from '../../../types/domain.ts';
+import type { Assignment, AssignmentStudentRow } from '../../../types/domain.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Taille maximale d'une remise. */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/** Barème des notes. */
+export const GRADE_MAX = 20;
+
+/** Garde un nombre saisi entre 0 et `max` pendant la saisie. */
+export function clampInput(raw: string, max: number): string {
+  const value = Number(raw);
+  if (value > max) return String(max);
+  if (value < 0) return '0';
+  return raw;
+}
+
+/** « 17 / 20 » devient « 17 » : la valeur du champ de note. */
+export function gradeScore(grade?: string): string {
+  return grade?.split(' / ')[0] ?? '';
+}
+
+/** Devoir en équipe : le repère ajouté à sa ligne. */
+export function withTeamLabel(detail: string, assignment: Assignment): string {
+  return assignment.teamSize ? `${detail} · En équipe` : detail;
+}
 
 /** Extensions proposées au prof, qui peut en ajouter d'autres. */
 export const FILE_FORMATS = ['.pdf', '.zip', '.docx', '.xlsx', '.pptx', '.png', '.jpg'];
@@ -61,6 +82,14 @@ export function submissionBadge(assignment: Assignment): Badge {
   if (assignment.submission?.late) return { label: 'En retard', tone: 'danger' };
   return { label: 'Remis', tone: 'neutral' };
 }
+
+/** Pastille d'une remise dans le suivi du prof. */
+export const STUDENT_ROW_BADGE: Record<AssignmentStudentRow['status'], Badge> = {
+  graded: { label: 'Corrigé', tone: 'success' },
+  submitted: { label: 'Remis', tone: 'neutral' },
+  late: { label: 'En retard', tone: 'danger' },
+  missing: { label: 'Manquant', tone: 'warn' },
+};
 
 /** Plus proche date limite d'abord ; un devoir sans date passe à la fin. */
 export function byDueDate(a: Assignment, b: Assignment): number {

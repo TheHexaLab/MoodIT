@@ -17,6 +17,7 @@ import type {
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
+  SubmissionGrade,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1273,15 +1274,16 @@ export async function fetchAssignments(
 export async function submitAssignment(
   courseId: number,
   assignmentId: number,
-  fileName: string
+  fileNames: string[]
 ): Promise<Assignment> {
   const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
   if (!assignment) throw new Error('Devoir introuvable');
   const now = new Date();
   assignment.submission = {
-    fileName,
+    fileNames,
     submittedAt: now.toISOString(),
     late: assignment.dueAt != null && now > new Date(assignment.dueAt),
+    submittedBy: assignment.team ? 'Vous' : undefined,
   };
   return assignment;
 }
@@ -1298,7 +1300,8 @@ export async function createAssignment(
     courseId,
     submittedCount: 0,
     gradedCount: 0,
-    studentCount: 32,
+    // 32 étudiants dans le cours fictif : regroupés en équipes pour un devoir en équipe.
+    studentCount: draft.teamSize ? Math.ceil(32 / draft.teamSize) : 32,
   };
   assignments.unshift(assignment);
   return assignment;
@@ -1317,9 +1320,47 @@ export async function updateAssignment(
   return assignment;
 }
 
+const demoRowsByAssignment = new Map<number, AssignmentStudentRow[]>();
+
+function assignmentRows(assignment: Assignment): AssignmentStudentRow[] {
+  let rows = demoRowsByAssignment.get(assignment.id);
+  if (!rows) {
+    rows = demoStudentRows(assignment, new Date());
+    demoRowsByAssignment.set(assignment.id, rows);
+  }
+  return rows;
+}
+
 /** Suivi des remises d'un devoir, une ligne par étudiant. */
 export async function fetchAssignmentSubmissions(
   assignment: Assignment
 ): Promise<AssignmentStudentRow[]> {
-  return demoStudentRows(assignment, new Date());
+  return assignmentRows(assignment).map((row) => ({ ...row }));
+}
+
+/** Remise à noter, avec son devoir et les remises voisines. L'id porte celui du devoir. */
+export async function fetchSubmission(
+  courseId: number,
+  submissionId: number
+): Promise<{ assignment: Assignment; rows: AssignmentStudentRow[] }> {
+  const assignmentId = Math.floor(submissionId / 100);
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Remise introuvable');
+  return { assignment, rows: await fetchAssignmentSubmissions(assignment) };
+}
+
+/** Enregistre la note et le commentaire d'une remise. */
+export async function gradeSubmission(
+  courseId: number,
+  submissionId: number,
+  grade: SubmissionGrade
+): Promise<AssignmentStudentRow> {
+  const { assignment } = await fetchSubmission(courseId, submissionId);
+  const row = assignmentRows(assignment).find((r) => r.id === submissionId);
+  if (!row || row.status === 'missing') throw new Error('Remise introuvable');
+  if (row.status !== 'graded') assignment.gradedCount += 1;
+  row.status = 'graded';
+  row.grade = `${grade.score} / 20`;
+  row.comment = grade.comment;
+  return { ...row };
 }

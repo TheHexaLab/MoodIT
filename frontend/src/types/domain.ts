@@ -513,13 +513,24 @@ export interface PostVoteUserDTO {
 
 /** Remise d'un étudiant : toujours un fichier (#252). */
 export interface AssignmentSubmission {
-  fileName: string;
+  /** Une remise peut compter plusieurs fichiers. */
+  fileNames: string[];
   /** Date ISO de la remise. */
   submittedAt: string;
   /** Remis après la date limite. */
   late: boolean;
   /** Note publiée, ex. « 17 / 20 » ; absente tant que le devoir n'est pas corrigé. */
   grade?: string;
+  /** Commentaire du prof. */
+  comment?: string;
+  /** Devoir en équipe : le membre qui a déposé la remise, commune à toute l'équipe. */
+  submittedBy?: string;
+}
+
+/** Équipe d'un étudiant pour un devoir : une seule remise, visible par tous ses membres. */
+export interface AssignmentTeam {
+  name: string;
+  members: string[];
 }
 
 /** Fichier joint par le prof à un devoir. */
@@ -538,15 +549,29 @@ export interface AssignmentDraft {
   expectedFormats: string[];
   files: AssignmentFile[];
   isPublished: boolean;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
 }
 
 /** Une ligne du suivi des remises, côté prof. */
 export interface AssignmentStudentRow {
+  /** Id de la remise : porté par l'URL de la page de notation. */
+  id: number;
+  /** Nom de l'étudiant ou, pour un devoir en équipe, de l'équipe. */
   studentName: string;
+  /** Devoir en équipe : ses membres. */
+  members?: string[];
   status: 'graded' | 'submitted' | 'late' | 'missing';
   submittedAt?: string;
-  fileName?: string;
+  files: AssignmentFile[];
   grade?: string;
+  comment?: string;
+}
+
+/** Ce que le prof saisit sur la page de notation. */
+export interface SubmissionGrade {
+  score: number;
+  comment: string;
 }
 
 /** Devoir d'un cours, vu par l'étudiant (sa remise) ou le prof (les compteurs). */
@@ -564,8 +589,13 @@ export interface Assignment {
   files: AssignmentFile[];
   isPublished: boolean;
   publishedBy?: string;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
+  /** Devoir en équipe : l'équipe de l'étudiant. */
+  team?: AssignmentTeam;
   submission?: AssignmentSubmission;
   submittedCount: number;
   gradedCount: number;
+  /** Nombre d'étudiants ou, pour un devoir en équipe, d'équipes. */
   studentCount: number;
 }

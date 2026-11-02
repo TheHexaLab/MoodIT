@@ -3,11 +3,13 @@ import styles from './AssignmentFormPopup.module.css';
 import { Popup } from '../../Popup/Popup';
 import { PopupVariant } from '../../Popup/popupVariant';
 import { usePopupController } from '../../Popup/popupController';
-import { FILE_FORMATS } from './assignmentFormat.ts';
+import { FILE_FORMATS, clampInput } from './assignmentFormat.ts';
 import type { Assignment, AssignmentDraft, AssignmentFile } from '../../../types/domain.ts';
 
 const WIDTH = { '--popup-width': '40rem' } as React.CSSProperties;
 const DEFAULT_TIME = '23:59';
+const DEFAULT_TEAM_SIZE = 4;
+const MAX_TEAM_SIZE = 10;
 
 interface AssignmentFormPopupProps {
   /** Sous-titre : le cours. */
@@ -33,14 +35,6 @@ function timeInput(iso?: string): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** Garde la pondération entre 0 et 100 % pendant la saisie. */
-function clampWeight(raw: string): string {
-  const value = Number(raw);
-  if (value > 100) return '100';
-  if (value < 0) return '0';
-  return raw;
-}
-
 /** « 240 Ko » : la taille d'un fichier joint. */
 function fileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} Mo`;
@@ -61,6 +55,8 @@ export function AssignmentFormPopup({
   const [time, setTime] = useState(timeInput(assignment?.dueAt));
   const [weight, setWeight] = useState(assignment?.weight?.toString() ?? '');
   const [formats, setFormats] = useState<string[]>(assignment?.expectedFormats ?? []);
+  const [isTeam, setIsTeam] = useState(assignment?.teamSize != null);
+  const [teamSize, setTeamSize] = useState(String(assignment?.teamSize ?? DEFAULT_TEAM_SIZE));
   const [otherOpen, setOtherOpen] = useState(false);
   const [other, setOther] = useState('');
   const [files, setFiles] = useState<AssignmentFile[]>(assignment?.files ?? []);
@@ -99,6 +95,10 @@ export function AssignmentFormPopup({
       setError('Choisissez une date limite pour publier le devoir.');
       return;
     }
+    if (isTeam && !(Number(teamSize) >= 2)) {
+      setError('Une équipe compte au moins 2 membres.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -110,6 +110,7 @@ export function AssignmentFormPopup({
         expectedFormats: formats,
         files,
         isPublished: publish,
+        teamSize: isTeam ? Number(teamSize) : undefined,
       });
       popup.requestClose(onClose);
     } catch {
@@ -188,9 +189,48 @@ export function AssignmentFormPopup({
                 min={0}
                 max={100}
                 value={weight}
-                onChange={(event) => setWeight(clampWeight(event.target.value))}
+                onChange={(event) => setWeight(clampInput(event.target.value, 100))}
               />
             </label>
+          </div>
+
+          <div className={styles.field} role="group" aria-labelledby="assignment-work">
+            <span id="assignment-work">Travail</span>
+            <div className={styles.chips}>
+              {[
+                { label: 'Individuel', team: false },
+                { label: 'En équipe', team: true },
+              ].map(({ label, team }) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={`${styles.chip} ${isTeam === team ? styles.chipOn : ''}`}
+                  aria-pressed={isTeam === team}
+                  onClick={() => setIsTeam(team)}
+                >
+                  {label}
+                </button>
+              ))}
+              {isTeam && (
+                <label className={styles.teamSize}>
+                  <span>Maximum par équipe</span>
+                  <input
+                    type="number"
+                    min={2}
+                    max={MAX_TEAM_SIZE}
+                    value={teamSize}
+                    onChange={(event) =>
+                      setTeamSize(clampInput(event.target.value, MAX_TEAM_SIZE))
+                    }
+                  />
+                </label>
+              )}
+            </div>
+            {isTeam && (
+              <p className={styles.hint}>
+                Une seule remise par équipe, que chaque membre peut voir et remplacer.
+              </p>
+            )}
           </div>
 
           <div className={styles.field} role="group" aria-labelledby="assignment-formats">

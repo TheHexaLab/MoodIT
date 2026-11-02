@@ -56,6 +56,7 @@ import {
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
+import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -884,7 +885,7 @@ export default function Dashboard() {
       })
     : [];
   const selectedChannel =
-    selectedChannelRef?.type === 'assignment' && api.assignmentsAvailable()
+    isAssignmentChannel(selectedChannelRef?.type) && selectedChannelRef && api.assignmentsAvailable()
       ? { id: selectedChannelRef.id, type: selectedChannelRef.type, name: 'Devoirs' }
       : (selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ??
         null);
@@ -917,6 +918,8 @@ export default function Dashboard() {
         onCreateAssignment: api.createAssignment,
         onUpdateAssignment: api.updateAssignment,
         onFetchSubmissions: api.fetchAssignmentSubmissions,
+        onFetchSubmission: api.fetchSubmission,
+        onGradeSubmission: api.gradeSubmission,
         onAssignmentsChanged: () => refreshAssignmentsCount(effectiveSelectedCourseId),
       }
     : undefined;
@@ -1150,6 +1153,13 @@ export default function Dashboard() {
             programId: activeProgramId,
             courseId: effectiveSelectedCourseId,
             channel: { type: 'assignment', id: assignmentId },
+          })
+        }
+        onOpenSubmission={(submissionId) =>
+          setView({
+            programId: activeProgramId,
+            courseId: effectiveSelectedCourseId,
+            channel: { type: 'submission', id: submissionId },
           })
         }
         loading={mainPanelLoading}

@@ -8,6 +8,7 @@ import {
   dueBadge,
   formatDateTime,
   submissionBadge,
+  withTeamLabel,
 } from './assignmentFormat.ts';
 
 interface AssignmentListProps {
@@ -84,11 +85,12 @@ export function AssignmentList({
                 <AssignmentRow
                   key={assignment.id}
                   assignment={assignment}
-                  detail={
+                  detail={withTeamLabel(
                     assignment.dueAt
                       ? `À remettre le ${formatDateTime(assignment.dueAt)}`
-                      : 'Sans date limite'
-                  }
+                      : 'Sans date limite',
+                    assignment
+                  )}
                   meta={assignment.weight != null ? `${assignment.weight} %` : undefined}
                   badge={dueBadge(assignment, now)}
                   onOpen={onOpen}
@@ -108,7 +110,10 @@ export function AssignmentList({
                   <AssignmentRow
                     key={assignment.id}
                     assignment={assignment}
-                    detail={`Remis le ${formatDateTime(submission.submittedAt)}${submission.late ? ', en retard' : ''}`}
+                    detail={withTeamLabel(
+                      `Remis le ${formatDateTime(submission.submittedAt)}${submission.late ? ', en retard' : ''}`,
+                      assignment
+                    )}
                     meta={submission.grade ?? 'En correction'}
                     badge={submissionBadge(assignment)}
                     onOpen={onOpen}

@@ -573,10 +573,199 @@
     color: var(--text-body);
 }
 
-.table em {
-    color: var(--badge-warn-fg);
-    font-style: normal;
+.gradeAction,
+.gradeLink {
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+/* « Noter » : une action, pas un état. */
+.gradeAction {
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--brand-teal);
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--brand-teal);
+}
+
+.gradeAction:hover {
+    background: var(--badge-success-bg);
+}
+
+.gradeLink {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 0.2em;
+}
+
+.gradeLink:hover {
+    color: var(--brand-teal);
+    text-decoration-color: currentColor;
+}
+
+.gradeAction:focus-visible,
+.gradeLink:focus-visible,
+.quickComment:focus-visible,
+.picked button:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 1px;
+}
+
+.members {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.625rem 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--text-body);
+}
+
+.memberLine {
+    display: block;
+    margin-top: 0.125rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+.pager {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+
+.gradeField {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    color: var(--text-muted);
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.gradeField input {
+    box-sizing: border-box;
+    width: 5.5rem;
+    padding: 0.375rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    color: var(--text);
+    font: inherit;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.commentField {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-top: 1rem;
+    color: var(--text-body);
+    font-size: 0.8125rem;
     font-weight: 500;
+}
+
+.commentField textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.5625rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.gradeField input:focus,
+.commentField textarea:focus {
+    border-color: var(--brand-teal);
+    outline: none;
+}
+
+.commentField textarea::placeholder,
+.gradeField input::placeholder {
+    color: var(--text-muted);
+}
+
+.quickComments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
+}
+
+.quickComment {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.quickComment:hover {
+    background: var(--bg-active-channel);
+}
+
+.savedNote {
+    margin: 0.5rem 0 0;
+    color: var(--badge-success-fg);
+    font-size: 0.8125rem;
+}
+
+.blockTight {
+    margin-top: 0.5rem;
+}
+
+.picked {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.8125rem;
+}
+
+.picked li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.picked button {
+    flex: none;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.visuallyHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

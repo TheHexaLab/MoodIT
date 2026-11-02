@@ -15,7 +15,7 @@ interface AssignmentDetailProps {
   assignment: Assignment;
   now: Date;
   onBack: () => void;
-  onSubmit: (fileName: string) => Promise<unknown>;
+  onSubmit: (fileNames: string[]) => Promise<unknown>;
 }
 
 const ICON = {
@@ -28,13 +28,19 @@ const ICON = {
   'aria-hidden': true,
 };
 
-export function BackLink({ onBack }: { onBack: () => void }): React.ReactElement {
+export function BackLink({
+  onBack,
+  label = 'Tous les devoirs',
+}: {
+  onBack: () => void;
+  label?: string;
+}): React.ReactElement {
   return (
     <button type="button" className={styles.back} onClick={onBack}>
       <svg {...ICON}>
         <path d="M19 12H5M11 18l-6-6 6-6" />
       </svg>
-      Tous les devoirs
+      {label}
     </button>
   );
 }
@@ -46,7 +52,7 @@ function SubmissionCard({
   onSubmit,
 }: Pick<AssignmentDetailProps, 'assignment' | 'now' | 'onSubmit'>): React.ReactElement {
   const { submission, expectedFormats, dueAt } = assignment;
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -54,27 +60,33 @@ function SubmissionCard({
   // Une remise se remplace jusqu'à la date limite, et jamais après la correction.
   const canSubmit = !submission || (!submission.grade && (!dueAt || new Date(dueAt) >= now));
 
-  function pick(candidate: File | undefined) {
-    if (!candidate) return;
-    if (!isAcceptedFile(candidate.name, expectedFormats)) {
-      setFile(null);
-      setError(`Format non accepté. ${formatHint(expectedFormats)}.`);
-    } else if (candidate.size > MAX_FILE_BYTES) {
-      setFile(null);
-      setError('Ce fichier dépasse 25 Mo.');
-    } else {
-      setFile(candidate);
-      setError(null);
+  function pick(candidates: File[]) {
+    if (candidates.length === 0) return;
+    const accepted: File[] = [];
+    let problem: string | null = null;
+    for (const candidate of candidates) {
+      if (!isAcceptedFile(candidate.name, expectedFormats)) {
+        problem = `Format non accepté. ${formatHint(expectedFormats)}.`;
+      } else if (candidate.size > MAX_FILE_BYTES) {
+        problem = 'Ce fichier dépasse 25 Mo.';
+      } else {
+        accepted.push(candidate);
+      }
     }
+    // Un fichier du même nom remplace le précédent.
+    setFiles((previous) => [
+      ...previous.filter((file) => !accepted.some((added) => added.name === file.name)),
+      ...accepted,
+    ]);
+    setError(problem);
   }
 
   async function send() {
-    if (!file) return;
     setSending(true);
     setError(null);
     try {
-      await onSubmit(file.name);
-      setFile(null);
+      await onSubmit(files.map((file) => file.name));
+      setFiles([]);
     } catch {
       setError("La remise n'a pas pu être envoyée. Réessayez.");
     } finally {
@@ -97,13 +109,24 @@ function SubmissionCard({
 
       {submission && (
         <p className={styles.submitted}>
-          <strong>{submission.fileName}</strong>
-          <br />
+          {submission.fileNames.map((name) => (
+            <React.Fragment key={name}>
+              <strong>{name}</strong>
+              <br />
+            </React.Fragment>
+          ))}
           Remis le {formatDateTime(submission.submittedAt)}
+          {submission.submittedBy && ` par ${submission.submittedBy}`}
           {submission.grade && (
             <>
               <br />
               Note : {submission.grade}
+            </>
+          )}
+          {submission.comment && (
+            <>
+              <br />
+              Commentaire : {submission.comment}
             </>
           )}
         </p>
@@ -121,25 +144,44 @@ function SubmissionCard({
             onDrop={(event) => {
               event.preventDefault();
               setDragging(false);
-              pick(event.dataTransfer.files[0]);
+              pick([...event.dataTransfer.files]);
             }}
           >
             <input
               type="file"
+              multiple
               className={styles.fileInput}
               accept={expectedFormats.join(',') || undefined}
-              onChange={(event) => pick(event.target.files?.[0])}
+              onChange={(event) => {
+                pick([...(event.target.files ?? [])]);
+                // Rechoisir le même fichier après l'avoir retiré doit redéclencher le choix.
+                event.target.value = '';
+              }}
             />
             <svg {...ICON} className={styles.dropIcon}>
               <path d="M12 16V5M7 10l5-5 5 5M5 20h14" />
             </svg>
-            <span className={styles.dropTitle}>
-              {file ? file.name : 'Glissez votre fichier ici'}
-            </span>
-            <span className={styles.dropHint}>
-              {file ? 'Prêt à remettre' : 'ou cliquez pour le choisir'}
-            </span>
+            <span className={styles.dropTitle}>Glissez vos fichiers ici</span>
+            <span className={styles.dropHint}>ou cliquez pour les choisir</span>
           </label>
+          {files.length > 0 && (
+            <ul className={styles.picked}>
+              {files.map((file) => (
+                <li key={file.name}>
+                  <span className={styles.fileName}>{file.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Retirer ${file.name}`}
+                    onClick={() =>
+                      setFiles((previous) => previous.filter((f) => f.name !== file.name))
+                    }
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <p className={styles.hint}>{formatHint(expectedFormats)}</p>
           {error && (
             <p className={styles.fieldError} role="alert">
@@ -149,14 +191,14 @@ function SubmissionCard({
           <button
             type="button"
             className={`${styles.button} ${styles.primary} ${styles.block}`}
-            disabled={!file || sending}
+            disabled={files.length === 0 || sending}
             onClick={() => void send()}
           >
             {submission ? 'Remplacer ma remise' : 'Remettre le devoir'}
           </button>
           {dueAt && (
             <p className={styles.hint}>
-              Vous pouvez remplacer votre fichier jusqu'à la date limite.
+              Vous pouvez remplacer vos fichiers jusqu'à la date limite.
             </p>
           )}
         </>
@@ -214,6 +256,19 @@ export function AssignmentDetail({
       </div>
 
       <aside className={styles.side} aria-label="Remise">
+        {assignment.team && (
+          <section className={styles.card} aria-label="Votre équipe">
+            <h2 className={styles.cardTitle}>{assignment.team.name}</h2>
+            <ul className={styles.members}>
+              {assignment.team.members.map((member) => (
+                <li key={member}>{member}</li>
+              ))}
+            </ul>
+            <p className={styles.hint}>
+              Une seule remise par équipe : chaque membre peut la voir et la remplacer.
+            </p>
+          </section>
+        )}
         <SubmissionCard assignment={assignment} now={now} onSubmit={onSubmit} />
       </aside>
     </div>

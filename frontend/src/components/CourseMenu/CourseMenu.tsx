@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './CourseMenu.module.css';
 import { type Program } from '../ProgramMenu/ProgramMenu';
+import { isAssignmentChannel } from '../CourseChannelList/channelTypeDefinitions.ts';
 import CourseChannelList, {
   type ChannelRef,
   type ChannelTypeDefinition,
@@ -449,7 +450,7 @@ function getEffectiveSelectedChannel(
 ): ChannelRef | undefined {
   if (selectedChannel === undefined) return undefined;
   // Les devoirs ne sont pas des canaux normalisés : leur entrée suit l'URL directement.
-  if (selectedChannel.type === 'assignment') return selectedChannel;
+  if (isAssignmentChannel(selectedChannel.type)) return selectedChannel;
   return channels.some((channel) => isSameChannel(channel, selectedChannel))
     ? selectedChannel
     : undefined;
