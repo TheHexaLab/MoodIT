@@ -87,7 +87,10 @@ export function StudentTeamCard({
   if (team) {
     return (
       <section className={styles.card} aria-label="Votre équipe">
-        <h2 className={styles.cardTitle}>{team.name}</h2>
+        <div className={styles.teamChoiceLine}>
+          <h2 className={styles.cardTitle}>{team.name}</h2>
+          <TeamCount count={team.members.length} max={teamSize ?? 0} />
+        </div>
         <MemberList members={team.members} />
         <p className={styles.hint}>
           Une seule remise par équipe : chaque membre peut la voir et la remplacer.
