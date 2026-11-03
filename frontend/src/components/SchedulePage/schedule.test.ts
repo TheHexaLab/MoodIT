@@ -13,6 +13,7 @@ import {
   isSameDay,
   minutesFromStart,
   placeItems,
+  shiftTimes,
   shortDay,
   startOfWeek,
   taskDraft,
@@ -64,7 +65,7 @@ describe('semaine', () => {
 describe('événements', () => {
   it('écrit l’heure, la position dans la grille et le jour', () => {
     expect(formatTime(at(0, 8, 5))).toBe('8 h 05');
-    expect(minutesFromStart(at(0, 10, 30))).toBe(150);
+    expect(minutesFromStart(at(0, 10, 30))).toBe(630);
     expect(dayIndex(at(0, 9))).toBe(0);
     expect(dayIndex(at(4, 9))).toBe(4);
     expect(dayIndex(at(5, 9))).toBe(-1);
@@ -100,6 +101,25 @@ describe('événements', () => {
   });
 });
 
+describe('glisser une tâche', () => {
+  const times = { start: at(2, 14), end: at(2, 15) };
+
+  it('la déplace d’heure et de jour, en gardant sa durée', () => {
+    expect(shiftTimes(times, 'move', 90, -1)).toEqual({ start: at(1, 15, 30), end: at(1, 16, 30) });
+  });
+
+  it('la garde dans sa journée, de 0 h à 23 h 45', () => {
+    expect(shiftTimes(times, 'move', -900, 0)).toEqual({ start: at(2, 0), end: at(2, 1) });
+    expect(shiftTimes(times, 'move', 900, 0)).toEqual({ start: at(2, 22, 45), end: at(2, 23, 45) });
+  });
+
+  it('l’allonge ou la raccourcit par le bas, sans changer de jour ni passer sous un quart d’heure', () => {
+    expect(shiftTimes(times, 'resize', 45, 2)).toEqual({ start: times.start, end: at(2, 15, 45) });
+    expect(shiftTimes(times, 'resize', -120, 0)).toEqual({ start: times.start, end: at(2, 14, 15) });
+    expect(shiftTimes(times, 'resize', 900, 0)).toEqual({ start: times.start, end: at(2, 23, 45) });
+  });
+});
+
 describe('couleurs', () => {
   it('sept couleurs de tâche ; un cours garde la sienne', () => {
     expect(COLOR_KEYS).toHaveLength(7);
@@ -111,16 +131,16 @@ describe('couleurs', () => {
 describe('brouillon', () => {
   const monday = new Date(2026, 9, 26);
 
-  it('heures au quart d’heure, de 8 h à 18 h', () => {
-    expect(TIME_OPTIONS[0]).toEqual({ value: '08:00', label: '8 h 00' });
-    expect(TIME_OPTIONS.at(-1)).toEqual({ value: '18:00', label: '18 h 00' });
-    expect(TIME_OPTIONS).toHaveLength(41);
+  it('heures au quart d’heure, de 0 h à 23 h 45', () => {
+    expect(TIME_OPTIONS[0]).toEqual({ value: '00:00', label: '0 h 00' });
+    expect(TIME_OPTIONS.at(-1)).toEqual({ value: '23:45', label: '23 h 45' });
+    expect(TIME_OPTIONS).toHaveLength(96);
   });
 
   it('un brouillon vide commence à l’heure donnée, ramenée dans la journée', () => {
     expect(emptyDraft('task', monday, 13, null)).toMatchObject({ date: '2026-10-26', start: '13:00', end: '14:00' });
-    expect(emptyDraft('task', monday, 6, null)).toMatchObject({ start: '08:00', end: '09:00' });
-    expect(emptyDraft('task', monday, 23, null)).toMatchObject({ start: '17:00', end: '18:00' });
+    expect(emptyDraft('task', monday, -1, null)).toMatchObject({ start: '00:00', end: '01:00' });
+    expect(emptyDraft('task', monday, 23, null)).toMatchObject({ start: '22:00', end: '23:00' });
   });
 
   it('une tâche donne son brouillon, et le brouillon redonne la tâche', () => {
@@ -132,6 +152,7 @@ describe('brouillon', () => {
       reminder: 30,
       notes: 'Salle B',
       color: 'rose' as const,
+      done: true,
     };
     const draft = taskDraft({ ...task, id: 1 });
     expect(draft).toMatchObject({ kind: 'task', date: '2026-10-28', start: '14:00', end: '15:30' });

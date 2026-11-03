@@ -83,6 +83,7 @@ function seedTasks(): ScheduleTask[] {
     reminder: null,
     notes: '',
     color,
+    done: false,
   });
   return [
     task(1, 'Tutorat', 2, 14 * 60, 15 * 60, 'rose'),

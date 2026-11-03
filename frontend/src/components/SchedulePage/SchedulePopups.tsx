@@ -61,9 +61,6 @@ export function SessionPopup({ session, course, onOpenCourse, onClose }: Session
             </>
           )}
         </dl>
-        {!course.canManage && (
-          <p className={styles.hint}>Séance fixée par le personnel du cours : vous ne pouvez pas la déplacer.</p>
-        )}
         <div className={styles.actions}>
           <button type="button" className={styles.button} onClick={() => controller.requestClose()}>
             Fermer

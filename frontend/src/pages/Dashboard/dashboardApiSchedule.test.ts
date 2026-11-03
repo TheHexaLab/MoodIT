@@ -70,6 +70,7 @@ describe('agenda : tâches et séances fictives', () => {
     reminder: null,
     notes: '',
     color: 'teal' as const,
+    done: false,
   });
 
   it('trois tâches d’exemple dans la semaine courante, aucune la suivante', async () => {

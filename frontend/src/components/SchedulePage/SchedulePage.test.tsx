@@ -39,8 +39,8 @@ const weekly = async (weekStart: Date): Promise<ScheduleSession[]> => [
 
 /** Une tâche le mercredi, par-dessus le laboratoire de MAT265, et une liée à INF201 le vendredi. */
 const weeklyTasks = async (weekStart: Date): Promise<ScheduleTask[]> => [
-  { id: 7, title: 'Tutorat', start: at(weekStart, 2, 14), end: at(weekStart, 2, 15), courseId: null, reminder: null, notes: '', color: 'rose' },
-  { id: 8, title: 'Lire le chapitre 4', start: at(weekStart, 4, 9), end: at(weekStart, 4, 10), courseId: 10, reminder: 30, notes: 'p. 80', color: 'green' },
+  { id: 7, title: 'Tutorat', start: at(weekStart, 2, 14), end: at(weekStart, 2, 15), courseId: null, reminder: null, notes: '', color: 'rose', done: false },
+  { id: 8, title: 'Lire le chapitre 4', start: at(weekStart, 4, 9), end: at(weekStart, 4, 10), courseId: 10, reminder: 30, notes: 'p. 80', color: 'green', done: true },
 ];
 
 function makeApi(overrides: Partial<ScheduleApi> = {}) {
@@ -62,7 +62,8 @@ function setup(props: Partial<React.ComponentProps<typeof SchedulePage>> = {}) {
   return { onOpenCourse, api };
 }
 
-const block = (name: RegExp) => screen.findByRole('button', { name });
+/** Un événement de la grille (la liste des tâches a aussi un bouton par tâche). */
+const block = async (name: RegExp) => within(await screen.findByRole('group')).findByRole('button', { name });
 
 describe('SchedulePage — grille', () => {
   it('annonce le chargement, puis montre la semaine et le jour courant', async () => {
@@ -80,7 +81,7 @@ describe('SchedulePage — grille', () => {
     expect(session.textContent).toContain('8 h 30 à 10 h 15');
     // Le nom accessible reprend le texte visible, puis le jour.
     expect(session.textContent).toContain('lundi 26 octobre');
-    expect(session.style.top).toBe(`${0.5 * 4.375}rem`);
+    expect(session.style.top).toBe(`${8.5 * 4.375}rem`);
     expect(session.style.getPropertyValue('--hue')).toBe('174');
   });
 
@@ -165,14 +166,13 @@ describe('SchedulePage — détail d’une séance', () => {
     expect(within(dialog).getByText('Structures de données')).toBeTruthy();
     expect(within(dialog).getByText('Lundi 26 octobre, 8 h 30 à 10 h 15')).toBeTruthy();
     expect(within(dialog).getByText('C1-3125')).toBeTruthy();
-    expect(within(dialog).getByText(/vous ne pouvez pas la déplacer/)).toBeTruthy();
     expect(within(dialog).queryByText('Répétition')).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Voir le cours' }));
     expect(onOpenCourse).toHaveBeenCalledWith(1, 10);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('une séance hebdomadaire dit sa répétition ; l’enseignant n’a pas l’avertissement', async () => {
+  it('une séance hebdomadaire dit sa répétition', async () => {
     const fetchSessions = vi.fn(async (weekStart: Date) => [
       { ...(await weekly(weekStart))[1], until: new Date(2026, 11, 9).toISOString() },
     ]);
@@ -180,7 +180,6 @@ describe('SchedulePage — détail d’une séance', () => {
     fireEvent.click(await block(/^MAT265/));
     const dialog = screen.getByRole('dialog', { name: 'MAT265 · Laboratoire' });
     expect(within(dialog).getByText("Chaque mercredi, jusqu'au 9 décembre")).toBeTruthy();
-    expect(within(dialog).queryByText(/vous ne pouvez pas la déplacer/)).toBeNull();
     // La croix de l'en-tête et le bouton du bas ferment tous deux.
     fireEvent.click(within(dialog).getAllByRole('button', { name: 'Fermer' }).at(-1)!);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -391,5 +390,100 @@ describe('SchedulePage — mobile', () => {
     expect(screen.queryByRole('complementary')).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Fermer' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('SchedulePage — glisser une tâche', () => {
+  /** Colonnes de 150 px côte à côte (jsdom n'a pas de mise en page). */
+  function layoutColumns() {
+    document.querySelectorAll<HTMLElement>('[class*="dayColumn"]').forEach((column, index) => {
+      column.getBoundingClientRect = () => ({ left: index * 150, right: (index + 1) * 150 }) as DOMRect;
+    });
+  }
+
+  it('la déplace vers un autre jour et une autre heure, au quart d’heure ; le clic qui suit n’ouvre rien', async () => {
+    const { api } = setup();
+    const tutorat = await block(/^Tutorat/);
+    layoutColumns();
+    fireEvent.pointerDown(tutorat, { button: 0, clientX: 320, clientY: 500 });
+    // 70 px font une heure ; de mercredi (300-450) à jeudi (450-600).
+    fireEvent.pointerMove(window, { clientX: 470, clientY: 540 });
+    fireEvent.pointerMove(window, { clientX: 470, clientY: 570 });
+    expect((await block(/^Tutorat/)).className).toMatch(/dragging/);
+    expect((await block(/^Tutorat/)).textContent).toContain('15 h 00 à 16 h 00, jeudi 29 octobre');
+    fireEvent.pointerUp(window);
+    // Le clic arrive dans la même tâche du navigateur que le pointerup : sans attente.
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: /^Tutorat/ }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(api.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({
+      title: 'Tutorat',
+      start: new Date(2026, 9, 29, 15).toISOString(),
+      end: new Date(2026, 9, 29, 16).toISOString(),
+    }));
+    // Le geste fini, un clic ouvre la tâche de nouveau.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(await block(/^Tutorat/));
+    expect(screen.getByRole('dialog', { name: 'Modifier la tâche' })).toBeTruthy();
+  });
+
+  it('l’allonge par sa poignée du bas, sans changer de jour', async () => {
+    const { api } = setup();
+    const tutorat = await block(/^Tutorat/);
+    layoutColumns();
+    fireEvent.pointerDown(tutorat.querySelector('[class*="resizeHandle"]')!, { button: 0, clientX: 320, clientY: 570 });
+    fireEvent.pointerMove(window, { clientX: 700, clientY: 605 });
+    fireEvent.pointerUp(window);
+    expect((await block(/^Tutorat/)).textContent).toContain('14 h 00 à 15 h 30, mercredi 28 octobre');
+    expect(api.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({ end: new Date(2026, 9, 28, 15, 30).toISOString() }));
+  });
+
+  it('un petit tremblement reste un clic ; le bouton droit ne glisse pas ; un échec remet la tâche', async () => {
+    const { api } = setup({ api: makeApi({ updateTask: vi.fn().mockRejectedValue(new Error('panne')) }) });
+    const tutorat = await block(/^Tutorat/);
+    layoutColumns();
+    fireEvent.pointerDown(tutorat, { button: 2, clientX: 320, clientY: 500 });
+    fireEvent.pointerDown(tutorat, { button: 0, clientX: 320, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 322, clientY: 502 });
+    fireEvent.pointerUp(window);
+    expect(api.updateTask).not.toHaveBeenCalled();
+
+    // Glissé hors des colonnes : même jour ; ramené à son heure : rien à enregistrer.
+    fireEvent.pointerDown(tutorat, { button: 0, clientX: 320, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 2000, clientY: 520 });
+    fireEvent.pointerMove(window, { clientX: 2000, clientY: 500 });
+    fireEvent.pointerUp(window);
+    expect(api.updateTask).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(tutorat, { button: 0, clientX: 320, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 320, clientY: 640 });
+    fireEvent.pointerUp(window);
+    expect(api.updateTask).toHaveBeenCalledTimes(1);
+    await waitFor(async () => expect((await block(/^Tutorat/)).textContent).toContain('14 h 00 à 15 h 00'));
+  });
+});
+
+describe('SchedulePage — liste des tâches', () => {
+  it('liste les tâches de la semaine, dans l’ordre ; une tâche se coche comme terminée', async () => {
+    const { api } = setup();
+    const list = await screen.findByRole('region', { name: 'Mes tâches de la semaine' });
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'TutoratMercredi 28 octobre, 14 h 00 à 15 h 00',
+      'Lire le chapitre 4Vendredi 30 octobre, 9 h 00 à 10 h 00',
+    ]);
+    expect((within(list).getByRole('checkbox', { name: 'Lire le chapitre 4 : terminée' }) as HTMLInputElement).checked).toBe(true);
+    expect((await block(/^Lire le chapitre 4/)).textContent).toContain(', terminée');
+
+    fireEvent.click(within(list).getByRole('checkbox', { name: 'Tutorat : terminée' }));
+    expect((within(list).getByRole('checkbox', { name: 'Tutorat : terminée' }) as HTMLInputElement).checked).toBe(true);
+    expect((await block(/^Tutorat/)).className).toMatch(/done/);
+    expect(api.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({ done: true }));
+
+    fireEvent.click(within(list).getByRole('button', { name: /^Lire le chapitre 4/ }));
+    expect(screen.getByRole('dialog', { name: 'Modifier la tâche' })).toBeTruthy();
+  });
+
+  it('une semaine sans tâche le dit', async () => {
+    setup({ api: makeApi({ fetchTasks: vi.fn().mockResolvedValue([]) }) });
+    expect(await screen.findByText('Aucune tâche cette semaine.')).toBeTruthy();
   });
 });

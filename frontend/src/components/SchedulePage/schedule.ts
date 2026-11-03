@@ -5,9 +5,13 @@ import type {
   ScheduleTaskInput,
 } from '../../types/domain.ts';
 
-/** Heures affichées dans la grille : de 8 h à 18 h. */
-export const FIRST_HOUR = 8;
-export const LAST_HOUR = 18;
+/** Heures de la grille : toute la journée ; elle défile, ouverte sur le matin. */
+export const FIRST_HOUR = 0;
+export const LAST_HOUR = 24;
+/** Fin au plus tard d'un événement : 23 h 45, pour rester dans sa journée. */
+export const DAY_END = LAST_HOUR * 60 - 15;
+/** Heure où la grille s'ouvre, sauf événement plus tôt dans la semaine. */
+export const OPENING_HOUR = 8;
 
 const DAY_NAMES = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi'];
 
@@ -89,6 +93,35 @@ interface Timed {
   end: string;
 }
 
+export type DragMode = 'move' | 'resize';
+
+/** Minutes depuis minuit, en heure locale. */
+const minutesOfDay = (iso: string) => {
+  const date = new Date(iso);
+  return date.getHours() * 60 + date.getMinutes();
+};
+
+/**
+ * Tâche glissée de `delta` minutes : déplacée (et changée de jour de `dayShift`) ou allongée par
+ * le bas. Elle reste dans la grille et dure au moins un quart d'heure.
+ */
+export function shiftTimes(times: Timed, mode: DragMode, delta: number, dayShift: number): Timed {
+  const start = minutesOfDay(times.start);
+  const end = minutesOfDay(times.end);
+  const at = (minutes: number) => {
+    const date = new Date(times.start);
+    date.setDate(date.getDate() + (mode === 'move' ? dayShift : 0));
+    date.setHours(0, minutes, 0, 0);
+    return date.toISOString();
+  };
+  if (mode === 'resize') {
+    return { start: times.start, end: at(Math.min(Math.max(end + delta, start + 15), DAY_END)) };
+  }
+  const length = end - start;
+  const moved = Math.min(Math.max(start + delta, FIRST_HOUR * 60), DAY_END - length);
+  return { start: at(moved), end: at(moved + length) };
+}
+
 export interface Placed<T extends Timed> {
   item: T;
   /** Profondeur dans la cascade : un événement qui en chevauche un autre se décale d'un cran
@@ -153,6 +186,7 @@ export interface Draft {
   reminder: number | null;
   notes: string;
   color: ScheduleColor;
+  done: boolean;
   /** Séance : type, local et répétition. */
   sessionKind: string;
   room: string;
@@ -190,15 +224,15 @@ export function toIso(date: string, time = '00:00'): string {
   return new Date(year, month - 1, day, hours, minutes).toISOString();
 }
 
-/** Heures proposées : de 8 h à 18 h, au quart d'heure. */
-export const TIME_OPTIONS = Array.from({ length: (LAST_HOUR - FIRST_HOUR) * 4 + 1 }, (_, i) => {
+/** Heures proposées : de 0 h à 23 h 45, au quart d'heure. */
+export const TIME_OPTIONS = Array.from({ length: (DAY_END - FIRST_HOUR * 60) / 15 + 1 }, (_, i) => {
   const minutes = FIRST_HOUR * 60 + i * 15;
   return { value: `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`, label: `${Math.floor(minutes / 60)} h ${pad(minutes % 60)}` };
 });
 
 /** Brouillon vide : le jour donné, l'heure qui suit, d'une heure. */
 export function emptyDraft(kind: DraftKind, day: Date, hour: number, courseId: number | null): Draft {
-  const start = Math.min(Math.max(hour, FIRST_HOUR), LAST_HOUR - 1);
+  const start = Math.min(Math.max(hour, FIRST_HOUR), LAST_HOUR - 2);
   return {
     kind,
     title: '',
@@ -209,6 +243,7 @@ export function emptyDraft(kind: DraftKind, day: Date, hour: number, courseId: n
     reminder: null,
     notes: '',
     color: 'teal',
+    done: false,
     sessionKind: SESSION_KINDS[0],
     room: '',
     weekly: false,
@@ -225,6 +260,7 @@ export function taskDraft(task: ScheduleTask): Draft {
     reminder: task.reminder,
     notes: task.notes,
     color: task.color,
+    done: task.done,
   };
 }
 
@@ -251,6 +287,7 @@ export function draftToTask(draft: Draft): ScheduleTaskInput {
     reminder: draft.reminder,
     notes: draft.notes.trim(),
     color: draft.color,
+    done: draft.done,
   };
 }
 
