@@ -240,13 +240,13 @@ describe('CourseMenu', () => {
   describe('édition des sections', () => {
     it('non-admin : pas de crayon de section', () => {
       renderMenu({ onSectionChange: vi.fn() });
-      expect(screen.queryByRole('button', { name: 'Modifier la section CANAUX' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Modifier la section Canaux' })).toBeNull();
     });
 
     it('admin : le crayon d’une section ouvre l’éditeur, et le changement porte cours + type', async () => {
       const onSectionChange = vi.fn().mockResolvedValue(undefined);
       renderMenu({ isAdmin: true, onSectionChange });
-      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section CANAUX' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section Canaux' }));
       expect(screen.getByText('Modifier les canaux')).toBeTruthy();
       // Supprime « general » (id 1) via la corbeille de sa ligne puis confirme.
       const li = screen.getAllByText('general').map((el) => el.closest('li')).find((el) =>
@@ -263,7 +263,7 @@ describe('CourseMenu', () => {
     it('admin : le crayon de la section quiz ouvre l’éditeur de quiz du cours', () => {
       const onQuizzesChange = vi.fn();
       renderMenu({ isAdmin: true, onSectionChange: vi.fn(), onQuizzesChange });
-      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section QUIZ' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section Quiz' }));
       expect(quizEditorProps).toHaveBeenCalledWith(
         expect.objectContaining({ courseId: 10, courseSubtitle: 'IFT101' })
       );
@@ -384,5 +384,20 @@ describe('CourseMenu — clavier', () => {
     selector().focus();
     await user.keyboard('{Shift>}{F10}{/Shift}');
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
+describe('CourseMenu — en-tête du cours', () => {
+  it('affiche le nom du cours sous son code, sans changer le nom accessible du bouton', () => {
+    renderMenu({ courses: [{ id: 1, code: 'INF201', title: 'Structures de données' }] });
+
+    expect(screen.getByText('Structures de données').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByRole('button', { name: 'INF201' })).toBeTruthy();
+  });
+
+  it('sans nom de cours : le code seul', () => {
+    renderMenu({ courses: [{ id: 1, code: 'INF201' }] });
+
+    expect(selector().textContent).toBe('INF201');
   });
 });

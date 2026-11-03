@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styles from './CourseChannelList.module.css';
 import { ChannelTypeIcon } from './ChannelTypeIcon';
-import { defaultTypeDefinitions } from './channelTypeDefinitions.ts';
+import { defaultTypeDefinitions, isAssignmentChannel } from './channelTypeDefinitions.ts';
 import { Edit } from '../../assets/Edit.tsx';
 import { type ChannelMessage, type CourseChannel, type User } from '../../types/domain.ts';
 
@@ -63,6 +63,11 @@ interface CourseChannelListProps {
    * Si absent, l'icône d'édition n'est pas rendue.
    */
   onEditSection?: (section: ChannelTypeDefinition) => void;
+  /**
+   * Affiche l'entrée épinglée « Devoirs » (toujours une seule, même avec plusieurs devoirs).
+   * `count` : pastille du nombre de devoirs à remettre, absente si `undefined` ou 0.
+   */
+  assignments?: { count?: number };
 }
 
 /**
@@ -77,6 +82,7 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
   onSelectChannel,
   onOpenChannel,
   onEditSection,
+  assignments,
 }) => {
   /** Types de sections actuellement repliés (etat local, non persiste). */
   const [collapsedTypes, setCollapsedTypes] = useState<Record<string, boolean>>({});
@@ -104,7 +110,9 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
         }}
         aria-current={isSelected ? 'page' : undefined}
       >
-        <span className={styles.channelPrefix}>
+        <span
+          className={`${styles.channelPrefix} ${channel.type === 'announcement' ? styles.announcementPrefix : ''}`}
+        >
           <ChannelTypeIcon type={channel.type} />
         </span>
         <span className={styles.channelName}>{channel.name}</span>
@@ -114,12 +122,39 @@ const CourseChannelList: React.FC<CourseChannelListProps> = ({
 
   return (
     <div className={styles.channelSections}>
-      {/* Canal d'annonces : en tête, hors sections (un seul par cours, rien à éditer). */}
-      {(channelsByType.announcement ?? []).map((channel) => (
-        <div key={`announcement-${channel.id}`} className={styles.announcementItem}>
-          {channelButton(channel, styles.announcementButton, styles.announcementButtonActive)}
-        </div>
-      ))}
+      {/* Annonces et Devoirs : en tête, hors sections (un seul de chaque par cours, rien à éditer). */}
+      {((channelsByType.announcement ?? []).length > 0 || assignments) && (
+        <ul className={styles.pinned} role="list" aria-label="Épinglés">
+          {(channelsByType.announcement ?? []).map((channel) => (
+            <li key={`announcement-${channel.id}`} className={styles.channelItem}>
+              {channelButton(channel, styles.channelButton, styles.channelButtonActive)}
+            </li>
+          ))}
+          {assignments && (
+            <li className={styles.channelItem}>
+              <button
+                type="button"
+                className={`${styles.channelButton} ${isAssignmentChannel(selectedChannel?.type) ? styles.channelButtonActive : ''}`}
+                aria-current={isAssignmentChannel(selectedChannel?.type) ? 'page' : undefined}
+                onClick={() => onSelectChannel?.({ id: 0, type: 'assignment' })}
+              >
+                <span className={styles.channelPrefix}>
+                  <ChannelTypeIcon type="assignment" />
+                </span>
+                <span className={styles.channelName}>Devoirs</span>
+                {assignments.count ? (
+                  <span
+                    className={styles.channelCount}
+                    aria-label={`${assignments.count} à remettre`}
+                  >
+                    {assignments.count}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
 
       {typeDefinitions.map((definition) => {
         const typedChannels = channelsByType[definition.type] ?? [];

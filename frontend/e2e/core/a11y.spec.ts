@@ -236,7 +236,7 @@ for (const theme of THEMES) {
     await expectTheme(page, theme);
 
     // Sections (canaux) : liste puis formulaire d'ajout ; fermeture par « ✕ » (sans nom accessible).
-    await nav.getByRole('button', { name: 'Modifier la section CANAUX' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Canaux' }).click();
     await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toBeVisible();
     await auditScreen(page, 'popup Modifier les canaux', theme);
     await page.getByRole('button', { name: '+ Ajouter un canal' }).click();
@@ -247,7 +247,7 @@ for (const theme of THEMES) {
     await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toHaveCount(0);
 
     // Éditeur de quiz : liste, formulaire, une question de chaque type, harnais, test, confirmation.
-    await nav.getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Quiz' }).click();
     await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
     await auditScreen(page, 'éditeur de quiz : liste', theme);
     await page.locator('[data-reorder-id]').filter({ hasText: quizTitle }).click();

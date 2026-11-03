@@ -3,7 +3,10 @@
 //   /home/horaire, /home/factures…             page du portail (portalPages.ts), aucun programme
 //   /home/p/:programId                         programme (son premier cours s'affiche)
 //   /home/p/:programId/c/:courseId             cours
-//   /home/p/:programId/c/:courseId/:type/:id   canal du cours (type : text, quiz, forum)
+//   /home/p/:programId/c/:courseId/:type/:id   canal du cours (type : text, quiz, forum…)
+//   /home/p/:programId/c/:courseId/assignment/0    liste des devoirs (l'id 0 n'est pas un devoir)
+//   /home/p/:programId/c/:courseId/assignment/:id  devoir ouvert
+//   /home/p/:programId/c/:courseId/submission/:id  remise à noter (personnel du cours)
 // Le bouton « back » du navigateur navigue ainsi entre les vues, au lieu de quitter l'app, et
 // une vue se partage par son lien. Les choix de l'utilisateur AJOUTENT une entrée à l'historique ;
 // les replis automatiques (programme quitté, cours supprimé, restauration) la REMPLACENT.

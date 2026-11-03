@@ -75,7 +75,7 @@ test('accueil : rail, sélecteur de cours, sections, canaux et compte', async ({
   const controls: [Locator, string][] = [
     [page.getByRole('button', { name: 'Ajouter un programme', exact: true }), 'Ajouter un programme'],
     [nav.getByRole('button', { name: 'MAT115', exact: true }), 'titre du cours'],
-    [nav.getByRole('button', { name: 'CANAUX', exact: true }), 'repli de section'],
+    [nav.getByRole('button', { name: 'Canaux', exact: true }), 'repli de section'],
     [nav.getByRole('button', { name: FORUM_NAME }), 'élément de section (forum)'],
     [page.getByRole('button', { name: 'Compte utilisateur' }), 'bouton du compte'],
   ];

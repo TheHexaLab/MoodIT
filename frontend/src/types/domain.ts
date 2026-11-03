@@ -510,3 +510,104 @@ export interface PostVoteUserDTO {
   childrenCount?: number;
   children?: PostVoteUserDTO[];
 }
+
+/** Remise d'un étudiant : toujours un fichier (#252). */
+export interface AssignmentSubmission {
+  /** Une remise peut compter plusieurs fichiers. */
+  fileNames: string[];
+  /** Date ISO de la remise. */
+  submittedAt: string;
+  /** Remis après la date limite. */
+  late: boolean;
+  /** Note publiée, ex. « 17 / 20 » ; absente tant que le devoir n'est pas corrigé. */
+  grade?: string;
+  /** Commentaire du prof. */
+  comment?: string;
+  /** Devoir en équipe : le membre qui a déposé la remise, commune à toute l'équipe. */
+  submittedBy?: string;
+}
+
+/** Équipe d'un étudiant pour un devoir : une seule remise, visible par tous ses membres. */
+export interface AssignmentTeam {
+  id: number;
+  name: string;
+  members: string[];
+}
+
+/** Les équipes d'un devoir, et les étudiants qui n'en ont pas encore. */
+export interface AssignmentTeams {
+  teams: AssignmentTeam[];
+  unassigned: string[];
+}
+
+/** Qui forme les équipes d'un devoir. */
+export type TeamFormation = 'students' | 'teacher';
+
+/** Fichier joint par le prof à un devoir. */
+export interface AssignmentFile {
+  name: string;
+  /** Taille lisible, ex. « 240 Ko ». */
+  size: string;
+}
+
+/** Ce que le prof saisit dans la fenêtre « Nouveau devoir ». */
+export interface AssignmentDraft {
+  title: string;
+  instructions: string;
+  dueAt?: string;
+  weight?: number;
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
+  teamFormation?: TeamFormation;
+}
+
+/** Une ligne du suivi des remises, côté prof. */
+export interface AssignmentStudentRow {
+  /** Id de la remise : porté par l'URL de la page de notation. */
+  id: number;
+  /** Nom de l'étudiant ou, pour un devoir en équipe, de l'équipe. */
+  studentName: string;
+  /** Devoir en équipe : ses membres. */
+  members?: string[];
+  status: 'graded' | 'submitted' | 'late' | 'missing';
+  submittedAt?: string;
+  files: AssignmentFile[];
+  grade?: string;
+  comment?: string;
+}
+
+/** Ce que le prof saisit sur la page de notation. */
+export interface SubmissionGrade {
+  score: number;
+  comment: string;
+}
+
+/** Devoir d'un cours, vu par l'étudiant (sa remise) ou le prof (les compteurs). */
+export interface Assignment {
+  id: number;
+  courseId: number;
+  title: string;
+  instructions: string;
+  /** Date ISO ; absente tant qu'un brouillon n'a pas de date limite. */
+  dueAt?: string;
+  /** Pondération en pourcentage. */
+  weight?: number;
+  /** Formats attendus (facultatifs) ; vide : tous les formats sont acceptés. */
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+  publishedBy?: string;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
+  teamFormation?: TeamFormation;
+  /** Devoir en équipe : l'équipe de l'étudiant, s'il en a une. */
+  team?: AssignmentTeam;
+  submission?: AssignmentSubmission;
+  submittedCount: number;
+  gradedCount: number;
+  /** Nombre d'étudiants ou, pour un devoir en équipe, d'équipes. */
+  studentCount: number;
+}
