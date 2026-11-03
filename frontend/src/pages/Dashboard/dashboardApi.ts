@@ -16,11 +16,14 @@ import {
   addDemoTask,
   deleteDemoTask,
   demoSchedule,
+  demoCourseColors,
   demoTasks,
+  setDemoCourseColor,
   updateDemoTask,
 } from '../../mocks/scheduleData.ts';
 import type {
   AnswerResponse,
+  ScheduleColor,
   ScheduleCourse,
   ScheduleSession,
   ScheduleSessionInput,
@@ -1285,6 +1288,15 @@ export async function deleteScheduleTask(id: number): Promise<void> {
 }
 
 /** Séance ajoutée par l'enseignant : toutes ses occurrences, si elle se répète. */
+/** Couleurs que l'utilisateur a choisies pour ses cours dans l'horaire. */
+export async function fetchScheduleCourseColors(): Promise<Record<number, ScheduleColor>> {
+  return demoCourseColors();
+}
+
+export async function setScheduleCourseColor(courseId: number, color: ScheduleColor): Promise<void> {
+  setDemoCourseColor(courseId, color);
+}
+
 export async function createScheduleSessions(input: ScheduleSessionInput): Promise<ScheduleSession[]> {
   return addDemoSessions(input);
 }

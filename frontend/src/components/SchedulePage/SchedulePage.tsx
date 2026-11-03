@@ -50,6 +50,11 @@ const STEP_REM = 1.25;
 const DETAIL_MIN_REM = 3.25;
 /** Déplacement du pointeur, en px, au-delà duquel un clic devient un glisser. */
 const DRAG_THRESHOLD = 4;
+/** Distance au bord de la grille, en px, où le glisser la fait défiler. */
+const SCROLL_EDGE = 48;
+/** Hauteur, en rem, des lignes fixes d'un bloc (titre, deux détails, marges) ; et d'une ligne de description. */
+const BLOCK_LINES_REM = 4.25;
+const DESCRIPTION_LINE_REM = 0.9375;
 const HOURS = Array.from({ length: LAST_HOUR - FIRST_HOUR }, (_, i) => FIRST_HOUR + i);
 
 /** Accès aux données de l'agenda (dashboardApi : données fictives, #206). */
@@ -62,6 +67,9 @@ export interface ScheduleApi {
   deleteTask: (id: number) => Promise<void>;
   /** Toutes les occurrences de la séance ajoutée. */
   createSessions: (input: ScheduleSessionInput) => Promise<ScheduleSession[]>;
+  /** Couleurs choisies par l'utilisateur pour ses cours (les autres gardent la leur). */
+  fetchCourseColors: () => Promise<Record<number, ScheduleColor>>;
+  setCourseColor: (courseId: number, color: ScheduleColor) => Promise<void>;
 }
 
 interface SchedulePageProps {
@@ -79,7 +87,22 @@ interface SchedulePageProps {
 type Load =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; sessions: ScheduleSession[]; tasks: ScheduleTask[] };
+  | {
+      status: 'ready';
+      sessions: ScheduleSession[];
+      tasks: ScheduleTask[];
+      courseColors: Record<number, ScheduleColor>;
+    };
+
+/** Tâche glissée : heures où elle tombera (au quart d'heure) et décalage libre du bloc, en px. */
+interface DragState {
+  taskId: number;
+  mode: DragMode;
+  start: string;
+  end: string;
+  dx: number;
+  dy: number;
+}
 
 /** Ce que montre la grille : une séance, une tâche, ou l'aperçu de l'ajout en cours. */
 type GridItem = { start: string; end: string } & (
@@ -115,6 +138,16 @@ const Pencil = () => (
   </svg>
 );
 
+const Trash = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path
+      d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 const hueStyle = (color: ScheduleColor) => ({
   ['--hue' as string]: COLORS[color].hue,
   ['--sat' as string]: `${COLORS[color].saturation}%`,
@@ -144,12 +177,13 @@ export default function SchedulePage({
   const [addBusy, setAddBusy] = useState(false);
   const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
-  /** Tâche glissée : ses heures provisoires, affichées pendant le geste. */
-  const [drag, setDrag] = useState<{ taskId: number; start: string; end: string } | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
   /** Colonnes des jours, pour savoir sur quel jour le pointeur dépose la tâche. */
   const columnsRef = useRef<(HTMLDivElement | null)[]>([]);
   /** Zone qui défile : la grille fait 24 h. */
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** Défilement gardé d'une semaine à l'autre : les heures restent alignées. */
+  const savedScroll = useRef<number | null>(null);
   /** Le clic qui suit un glisser n'ouvre pas la tâche. */
   const suppressClick = useRef(false);
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -165,9 +199,13 @@ export default function SchedulePage({
   useEffect(() => {
     let cancelled = false;
     const weekStart = new Date(mondayTime);
-    Promise.all([api.fetchSessions(weekStart, courses), api.fetchTasks(weekStart)])
-      .then(([sessions, tasks]) => {
-        if (!cancelled) setLoad({ status: 'ready', sessions, tasks });
+    Promise.all([
+      api.fetchSessions(weekStart, courses),
+      api.fetchTasks(weekStart),
+      api.fetchCourseColors(),
+    ])
+      .then(([sessions, tasks, courseColors]) => {
+        if (!cancelled) setLoad({ status: 'ready', sessions, tasks, courseColors });
       })
       .catch(() => {
         if (!cancelled) setLoad({ status: 'error' });
@@ -179,7 +217,8 @@ export default function SchedulePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mondayTime, courseKey, api, attempt]);
 
-  // À chaque semaine chargée, la grille s'ouvre sur 8 h, ou sur le premier événement s'il est plus tôt.
+  // La grille s'ouvre sur 8 h, ou sur le premier événement s'il est plus tôt ; d'une semaine à
+  // l'autre, elle reprend où l'utilisateur l'avait laissée.
   const firstHour =
     load.status === 'ready'
       ? Math.min(
@@ -191,8 +230,8 @@ export default function SchedulePage({
     const scroller = scrollRef.current;
     if (!scroller) return;
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    scroller.scrollTop = (firstHour - FIRST_HOUR) * HOUR_REM * rem;
-  }, [load.status, mondayTime, firstHour]);
+    scroller.scrollTop = savedScroll.current ?? (firstHour - FIRST_HOUR) * HOUR_REM * rem;
+  }, [load.status, firstHour]);
 
   // Le panneau d'ajout prend le focus à l'ouverture.
   useEffect(() => {
@@ -208,6 +247,27 @@ export default function SchedulePage({
   const byId = new Map(courses.map((course) => [course.id, course]));
   const sessions = load.status === 'ready' ? load.sessions : [];
   const tasks = load.status === 'ready' ? load.tasks : [];
+  const colorOf = (courseId: number) =>
+    (load.status === 'ready' ? load.courseColors[courseId] : undefined) ?? courseColor(courseId);
+
+  /** Change la couleur d'un cours tout de suite ; la remet si l'enregistrement échoue. */
+  async function changeCourseColor(courseId: number, color: ScheduleColor) {
+    const previousColor = load.status === 'ready' ? load.courseColors[courseId] : undefined;
+    const put = (value: ScheduleColor | undefined) =>
+      setLoad((previous) => {
+        if (previous.status !== 'ready') return previous;
+        const courseColors = { ...previous.courseColors };
+        if (value) courseColors[courseId] = value;
+        else delete courseColors[courseId];
+        return { ...previous, courseColors };
+      });
+    put(color);
+    try {
+      await api.setCourseColor(courseId, color);
+    } catch {
+      put(previousColor);
+    }
+  }
   const inShownWeek = (iso: string) =>
     dayIndex(iso) !== -1 && startOfWeek(new Date(iso)).getTime() === mondayTime;
 
@@ -295,27 +355,76 @@ export default function SchedulePage({
     }
   }
 
-  /** Glisser une tâche dans la grille : la déplacer (heure, jour) ou l'allonger par sa poignée du bas. */
+  /**
+   * Glisser une tâche dans la grille : la déplacer (heure, jour) ou l'allonger par sa poignée du
+   * bas. Le bloc suit le pointeur librement, sans quitter la grille ; un emplacement de sa couleur
+   * montre où il tombera, au quart d'heure. Près du haut ou du bas, la grille défile avec lui.
+   */
   function startDrag(event: React.PointerEvent, task: ScheduleTask, mode: DragMode) {
     if (event.button !== 0) return;
     event.stopPropagation();
-    const origin = { x: event.clientX, y: event.clientY, day: dayIndex(task.start) };
+    const scroller = scrollRef.current;
+    const blockRect = (event.currentTarget as HTMLElement)
+      .closest('button')!
+      .getBoundingClientRect();
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const pxPerMinute = (HOUR_REM * rem) / 60;
+    const columns = columnsRef.current.filter((el): el is HTMLDivElement => el != null);
+    const gridLeft = columns[0].getBoundingClientRect().left;
+    const gridRight = columns[columns.length - 1].getBoundingClientRect().right;
+    const top = minutesFromStart(task.start) * pxPerMinute;
+    const bottom = minutesFromStart(task.end) * pxPerMinute;
+    const columnHeight = HOURS.length * HOUR_REM * rem;
+    const origin = {
+      x: event.clientX,
+      y: event.clientY,
+      scroll: scroller?.scrollTop ?? 0,
+      day: dayIndex(task.start),
+    };
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+    let pointer = { x: origin.x, y: origin.y };
     let current: { start: string; end: string } | null = null;
-    const onMove = (move: PointerEvent) => {
-      const dx = move.clientX - origin.x;
-      const dy = move.clientY - origin.y;
+    let frame = 0;
+
+    const update = () => {
+      const dx = pointer.x - origin.x;
+      const dy = pointer.y - origin.y + (scroller?.scrollTop ?? 0) - origin.scroll;
       if (!current && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
-      const column = columnsRef.current.findIndex((el) => {
-        const rect = el?.getBoundingClientRect();
-        return rect != null && move.clientX >= rect.left && move.clientX < rect.right;
+      const freeDy =
+        mode === 'move'
+          ? clamp(dy, -top, columnHeight - bottom)
+          : clamp(dy, 15 * pxPerMinute - (bottom - top), columnHeight - bottom);
+      const freeDx =
+        mode === 'move' ? clamp(dx, gridLeft - blockRect.left, gridRight - blockRect.right) : 0;
+      const x = clamp(pointer.x, gridLeft, gridRight - 1);
+      const column = columns.findIndex((el) => {
+        const rect = el.getBoundingClientRect();
+        return x >= rect.left && x < rect.right;
       });
-      const delta = Math.round(dy / pxPerMinute / 15) * 15;
+      const delta = Math.round(freeDy / pxPerMinute / 15) * 15;
       current = shiftTimes(task, mode, delta, column === -1 ? 0 : column - origin.day);
-      setDrag({ taskId: task.id, ...current });
+      setDrag({ taskId: task.id, mode, ...current, dx: freeDx, dy: freeDy });
+    };
+    // Défilement automatique, tant que le pointeur reste près d'un bord de la grille.
+    const tick = () => {
+      const rect = scroller?.getBoundingClientRect();
+      if (scroller && rect && rect.height > 0 && current) {
+        const above = rect.top + SCROLL_EDGE - pointer.y;
+        const below = pointer.y - (rect.bottom - SCROLL_EDGE);
+        const speed = above > 0 ? -above : below > 0 ? below : 0;
+        if (speed !== 0) {
+          scroller.scrollTop += speed / 3;
+          update();
+        }
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    const onMove = (move: PointerEvent) => {
+      pointer = { x: move.clientX, y: move.clientY };
+      update();
     };
     const onUp = () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       setDrag(null);
@@ -329,6 +438,27 @@ export default function SchedulePage({
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    frame = window.requestAnimationFrame(tick);
+  }
+
+  /** Emplacement où tombera la tâche glissée, dans la colonne de son jour d'arrivée. */
+  function renderDropSpot(index: number): React.ReactNode {
+    const task =
+      drag && dayIndex(drag.start) === index ? tasks.find((t) => t.id === drag.taskId) : undefined;
+    if (!drag || !task) return null;
+    return (
+      <div
+        className={styles.dropSpot}
+        aria-hidden="true"
+        style={{
+          ...hueStyle(task.color),
+          top: `${(minutesFromStart(drag.start) / 60) * HOUR_REM}rem`,
+          height: `${((minutesFromStart(drag.end) - minutesFromStart(drag.start)) / 60) * HOUR_REM}rem`,
+        }}
+      >
+        {formatTime(drag.start)} à {formatTime(drag.end)}
+      </div>
+    );
   }
 
   async function removeTask(id: number) {
@@ -349,9 +479,8 @@ export default function SchedulePage({
         items.push({ kind: 'session', session, course, start: session.start, end: session.end });
     }
     for (const task of tasks) {
-      const times = drag?.taskId === task.id ? drag : task;
-      if (dayIndex(times.start) === index)
-        items.push({ kind: 'task', task, start: times.start, end: times.end });
+      if (dayIndex(task.start) === index)
+        items.push({ kind: 'task', task, start: task.start, end: task.end });
     }
     if (adding && adding.date && adding.end > adding.start) {
       const start = toIso(adding.date, adding.start);
@@ -362,10 +491,18 @@ export default function SchedulePage({
     return items;
   }
 
-  /** `layout` : position dans la grille ; `titleOnly` quand un autre événement le recouvre tôt. */
+  /**
+   * `layout` : position dans la grille ; `titleOnly` quand un autre événement le recouvre tôt ;
+   * `visibleRem`, la hauteur visible, qui dit combien de lignes de description y tiennent.
+   */
   function renderItem(
     item: GridItem,
-    layout?: { style: React.CSSProperties; stacked: boolean; titleOnly: boolean }
+    layout?: {
+      style: React.CSSProperties;
+      stacked: boolean;
+      titleOnly: boolean;
+      visibleRem: number;
+    }
   ): React.ReactNode {
     const style = layout?.style;
     const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''}`;
@@ -378,7 +515,7 @@ export default function SchedulePage({
           key={`s${session.id}`}
           type="button"
           className={`${styles.block} ${styles.session} ${extra}`}
-          style={{ ...style, ...hueStyle(courseColor(course.id)) }}
+          style={{ ...style, ...hueStyle(colorOf(course.id)) }}
           onClick={() => setOpenSession(session)}
         >
           <span className={styles.blockTitle}>{course.code}</span>
@@ -394,6 +531,18 @@ export default function SchedulePage({
     if (item.kind === 'task') {
       const { task } = item;
       const linked = task.courseId != null ? byId.get(task.courseId)?.code : undefined;
+      const dragged = drag?.taskId === task.id ? drag : null;
+      // Le bloc glissé suit le pointeur : déplacé, ou allongé par le bas.
+      const dragStyle: React.CSSProperties = !dragged
+        ? {}
+        : dragged.mode === 'move'
+          ? { transform: `translate(${dragged.dx}px, ${dragged.dy}px)` }
+          : { height: `calc(${style?.height} + ${dragged.dy}px)` };
+      // Description sous les détails, sur les lignes que la hauteur visible laisse libres.
+      const descriptionLines =
+        layout && !layout.titleOnly && task.notes
+          ? Math.floor((layout.visibleRem - BLOCK_LINES_REM) / DESCRIPTION_LINE_REM)
+          : 0;
       return (
         <button
           key={`t${task.id}`}
@@ -403,9 +552,9 @@ export default function SchedulePage({
             styles.task,
             extra,
             task.done ? styles.done : '',
-            drag?.taskId === task.id ? styles.dragging : '',
+            dragged ? styles.dragging : '',
           ].join(' ')}
-          style={{ ...style, ...hueStyle(task.color) }}
+          style={{ ...style, ...dragStyle, ...hueStyle(task.color) }}
           onPointerDown={layout ? (event) => startDrag(event, task, 'move') : undefined}
           onClick={() => {
             if (!suppressClick.current) setOpenTask(task);
@@ -414,6 +563,16 @@ export default function SchedulePage({
           <span className={styles.blockTitle}>{task.title}</span>
           <span className={styles.blockDetail}>{linked ?? 'Tâche personnelle'}</span>
           <span className={styles.blockDetail}>{time}</span>
+          {descriptionLines > 0 && (
+            // Hors du nom accessible : la fenêtre de la tâche la donne en entier.
+            <span
+              className={styles.blockDescription}
+              style={{ WebkitLineClamp: descriptionLines }}
+              aria-hidden="true"
+            >
+              {task.notes}
+            </span>
+          )}
           {day}
           {task.done && <span className={styles.visuallyHidden}>, terminée</span>}
           <Pencil />
@@ -435,7 +594,7 @@ export default function SchedulePage({
       <div
         key="preview"
         className={`${styles.block} ${isTask ? styles.task : styles.session} ${styles.preview}`}
-        style={{ ...style, ...hueStyle(isTask ? draft.color : courseColor(draft.courseId ?? 0)) }}
+        style={{ ...style, ...hueStyle(isTask ? draft.color : colorOf(draft.courseId ?? 0)) }}
         aria-hidden="true"
       >
         <span className={styles.blockTitle}>
@@ -508,7 +667,13 @@ export default function SchedulePage({
     return (
       <div className={styles.gridWrap}>
         {empty && <p className={styles.emptyOverlay}>{empty}</p>}
-        <div ref={scrollRef} className={styles.gridScroll}>
+        <div
+          ref={scrollRef}
+          className={styles.gridScroll}
+          onScroll={(event) => {
+            savedScroll.current = event.currentTarget.scrollTop;
+          }}
+        >
           <div className={styles.grid} role="group" aria-label={weekLabel(monday)}>
             <div className={styles.corner} aria-hidden="true" />
             {days.map((day, index) => (
@@ -547,8 +712,10 @@ export default function SchedulePage({
                     },
                     stacked: depth > 0,
                     titleOnly: (visible / 60) * HOUR_REM < DETAIL_MIN_REM,
+                    visibleRem: (visible / 60) * HOUR_REM,
                   })
                 )}
+                {renderDropSpot(index)}
               </div>
             ))}
           </div>
@@ -619,15 +786,21 @@ export default function SchedulePage({
       <div className={styles.body}>
         <div className={styles.main}>{renderBody()}</div>
         <div className={styles.sidebar}>
+          {/* Pendant l'ajout, le formulaire prend toute la colonne ; la liste revient après. */}
           {panelOpen && (
-            <aside id={panelId} ref={panelRef} className={styles.panel} aria-label={addLabel}>
+            <aside
+              id={panelId}
+              ref={panelRef}
+              className={`${styles.panel} ${styles.panelFill}`}
+              aria-label={addLabel}
+            >
               <h2 className={styles.panelTitle}>
                 {managesCourse ? "Ajouter à l'horaire" : 'Nouvelle tâche'}
               </h2>
               {form}
             </aside>
           )}
-          {load.status === 'ready' && (
+          {!panelOpen && load.status === 'ready' && (
             <section
               className={`${styles.panel} ${styles.taskList}`}
               aria-labelledby={`${panelId}-tasks`}
@@ -653,12 +826,25 @@ export default function SchedulePage({
                           aria-label={`${task.title} : terminée`}
                           onChange={() => void patchTask(task, { done: !task.done })}
                         />
-                        <button type="button" onClick={() => setOpenTask(task)}>
+                        <button
+                          type="button"
+                          className={styles.taskOpen}
+                          onClick={() => setOpenTask(task)}
+                        >
                           <span className={styles.blockTitle}>{task.title}</span>
                           <span className={styles.taskWhen}>
                             {dayTitle(new Date(task.start))}, {formatTime(task.start)} à{' '}
                             {formatTime(task.end)}
                           </span>
+                        </button>
+                        {/* Visible au survol de la ligne, ou au focus du clavier. */}
+                        <button
+                          type="button"
+                          className={styles.taskDelete}
+                          aria-label={`Supprimer « ${task.title} »`}
+                          onClick={() => void removeTask(task.id).catch(() => undefined)}
+                        >
+                          <Trash />
                         </button>
                       </li>
                     ))}
@@ -677,6 +863,8 @@ export default function SchedulePage({
         <SessionPopup
           session={openSession}
           course={sessionCourse}
+          color={colorOf(sessionCourse.id)}
+          onColorChange={(color) => void changeCourseColor(sessionCourse.id, color)}
           onClose={() => setOpenSession(null)}
           onOpenCourse={() => {
             setOpenSession(null);

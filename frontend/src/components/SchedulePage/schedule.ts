@@ -30,7 +30,9 @@ export function addDays(date: Date, days: number): Date {
 
 export function isSameDay(a: Date, b: Date): boolean {
   return (
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
 }
 
@@ -47,9 +49,11 @@ export function shortDay(date: Date, index: number): string {
 
 /** « lundi 26 octobre » : pour les lecteurs d'écran et l'affichage mobile. */
 export function longDay(date: Date): string {
-  return new Intl.DateTimeFormat('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' }).format(
-    date
-  );
+  return new Intl.DateTimeFormat('fr-CA', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(date);
 }
 
 /** « Lundi 26 octobre » : un titre commence par une majuscule. */
@@ -134,9 +138,12 @@ export interface Placed<T extends Timed> {
 /** Place les événements d'une journée en cascade, du plus tôt au plus tard. */
 export function placeItems<T extends Timed>(items: T[]): Placed<T>[] {
   // À début égal, le plus long passe dessous : le plus court reste entier par-dessus.
-  const sorted = [...items].sort((a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end));
+  const sorted = [...items].sort(
+    (a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end)
+  );
   const placed: Placed<T>[] = [];
-  const minutes = (from: string, to: string) => (new Date(to).getTime() - new Date(from).getTime()) / 60_000;
+  const minutes = (from: string, to: string) =>
+    (new Date(to).getTime() - new Date(from).getTime()) / 60_000;
   for (const item of sorted) {
     const covered = placed.filter((p) => p.item.end > item.start);
     for (const p of covered) p.visible = Math.min(p.visible, minutes(p.item.start, item.start));
@@ -227,11 +234,19 @@ export function toIso(date: string, time = '00:00'): string {
 /** Heures proposées : de 0 h à 23 h 45, au quart d'heure. */
 export const TIME_OPTIONS = Array.from({ length: (DAY_END - FIRST_HOUR * 60) / 15 + 1 }, (_, i) => {
   const minutes = FIRST_HOUR * 60 + i * 15;
-  return { value: `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`, label: `${Math.floor(minutes / 60)} h ${pad(minutes % 60)}` };
+  return {
+    value: `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`,
+    label: `${Math.floor(minutes / 60)} h ${pad(minutes % 60)}`,
+  };
 });
 
 /** Brouillon vide : le jour donné, l'heure qui suit, d'une heure. */
-export function emptyDraft(kind: DraftKind, day: Date, hour: number, courseId: number | null): Draft {
+export function emptyDraft(
+  kind: DraftKind,
+  day: Date,
+  hour: number,
+  courseId: number | null
+): Draft {
   const start = Math.min(Math.max(hour, FIRST_HOUR), LAST_HOUR - 2);
   return {
     kind,

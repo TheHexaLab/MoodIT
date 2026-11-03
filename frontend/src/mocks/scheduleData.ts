@@ -1,4 +1,5 @@
 import type {
+  ScheduleColor,
   ScheduleCourse,
   ScheduleSession,
   ScheduleSessionInput,
@@ -32,25 +33,27 @@ const ROOMS = ['C1-3125', 'C1-4016', 'D7-2021', 'A5-1120'];
 export function demoSchedule(weekStart: Date, courses: ScheduleCourse[]): ScheduleSession[] {
   const ids = new Set(courses.map((course) => course.id));
   const added = addedSessions.filter((s) => ids.has(s.courseId) && inWeek(s.start, weekStart));
-  return courses.flatMap((course, index) =>
-    [0, 1].map((half) => {
-      const slot = SLOTS[(index * 2 + half) % SLOTS.length];
-      const at = (minutes: number) => {
-        const date = new Date(weekStart);
-        date.setDate(date.getDate() + slot.day);
-        date.setHours(0, minutes, 0, 0);
-        return date.toISOString();
-      };
-      return {
-        id: course.id * 10 + half,
-        courseId: course.id,
-        kind: half === 0 ? 'Cours' : KINDS[(index + 1) % KINDS.length],
-        room: ROOMS[(index + half) % ROOMS.length],
-        start: at(slot.start),
-        end: at(slot.end),
-      };
-    })
-  ).concat(added);
+  return courses
+    .flatMap((course, index) =>
+      [0, 1].map((half) => {
+        const slot = SLOTS[(index * 2 + half) % SLOTS.length];
+        const at = (minutes: number) => {
+          const date = new Date(weekStart);
+          date.setDate(date.getDate() + slot.day);
+          date.setHours(0, minutes, 0, 0);
+          return date.toISOString();
+        };
+        return {
+          id: course.id * 10 + half,
+          courseId: course.id,
+          kind: half === 0 ? 'Cours' : KINDS[(index + 1) % KINDS.length],
+          room: ROOMS[(index + half) % ROOMS.length],
+          start: at(slot.start),
+          end: at(slot.end),
+        };
+      })
+    )
+    .concat(added);
 }
 
 // ── Agenda fictif : tâches et séances ajoutées, gardées en mémoire le temps de la session ──
@@ -74,20 +77,36 @@ function thisWeekAt(day: number, minutes: number): string {
 }
 
 function seedTasks(): ScheduleTask[] {
-  const task = (id: number, title: string, day: number, start: number, end: number, color: ScheduleTask['color']) => ({
+  const task = (
+    id: number,
+    title: string,
+    day: number,
+    start: number,
+    end: number,
+    color: ScheduleTask['color'],
+    notes = ''
+  ) => ({
     id,
     title,
     start: thisWeekAt(day, start),
     end: thisWeekAt(day, end),
     courseId: null,
     reminder: null,
-    notes: '',
+    notes,
     color,
     done: false,
   });
   return [
     task(1, 'Tutorat', 2, 14 * 60, 15 * 60, 'rose'),
-    task(2, "Rencontre d'équipe", 2, 14 * 60 + 30, 15 * 60 + 30, 'gray'),
+    task(
+      2,
+      "Rencontre d'équipe",
+      2,
+      14 * 60 + 30,
+      16 * 60 + 30,
+      'gray',
+      'Préparer la démo du projet et répartir les tâches du prochain sprint.'
+    ),
     task(3, 'Appel de stage', 4, 14 * 60, 15 * 60, 'green'),
   ];
 }
@@ -95,12 +114,23 @@ function seedTasks(): ScheduleTask[] {
 let tasks: ScheduleTask[] = seedTasks();
 let addedSessions: ScheduleSession[] = [];
 let nextId = 1000;
+let courseColors: Record<number, ScheduleColor> = {};
 
 /** Remet l'agenda fictif à son état de départ (tests). */
 export function resetDemoAgenda(): void {
   tasks = seedTasks();
   addedSessions = [];
   nextId = 1000;
+  courseColors = {};
+}
+
+/** Couleurs choisies pour les cours ; un cours absent garde sa couleur par défaut. */
+export function demoCourseColors(): Record<number, ScheduleColor> {
+  return { ...courseColors };
+}
+
+export function setDemoCourseColor(courseId: number, color: ScheduleColor): void {
+  courseColors = { ...courseColors, [courseId]: color };
 }
 
 /** Tâches de la semaine qui commence à `weekStart`. */

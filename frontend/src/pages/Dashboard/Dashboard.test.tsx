@@ -445,6 +445,7 @@ describe('Dashboard', () => {
         })
       );
       vi.mocked(api.fetchScheduleTasks).mockResolvedValue([]);
+      vi.mocked(api.fetchScheduleCourseColors).mockResolvedValue({});
       try {
         renderDashboard({ path: '/home/horaire' });
         const block = await screen.findByRole('button', { name: /^IFT101 ?Cours/ }, { timeout: 5000 });

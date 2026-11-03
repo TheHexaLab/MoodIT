@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createScheduleSessions,
   createScheduleTask,
+  fetchScheduleCourseColors,
+  setScheduleCourseColor,
   deleteScheduleTask,
   fetchSchedule,
   fetchScheduleTasks,
@@ -54,7 +56,9 @@ describe('horaire : données fictives', () => {
     const courses = [{ id: 10, code: 'INF201', programId: 1 }];
     const a = await fetchSchedule(new Date(2026, 9, 26), courses);
     const b = await fetchSchedule(new Date(2026, 10, 2), courses);
-    expect(b.map((s) => new Date(s.start).getDay())).toEqual(a.map((s) => new Date(s.start).getDay()));
+    expect(b.map((s) => new Date(s.start).getDay())).toEqual(
+      a.map((s) => new Date(s.start).getDay())
+    );
     // En jours de calendrier : le changement d'heure du 1er novembre ajoute une heure à l'écart.
     const days = (new Date(b[0].start).getTime() - new Date(a[0].start).getTime()) / 86_400_000;
     expect(Math.round(days)).toBe(7);
@@ -75,7 +79,11 @@ describe('agenda : tâches et séances fictives', () => {
 
   it('trois tâches d’exemple dans la semaine courante, aucune la suivante', async () => {
     const monday = thisMonday();
-    expect((await fetchScheduleTasks(monday)).map((t) => t.title)).toEqual(['Tutorat', "Rencontre d'équipe", 'Appel de stage']);
+    expect((await fetchScheduleTasks(monday)).map((t) => t.title)).toEqual([
+      'Tutorat',
+      "Rencontre d'équipe",
+      'Appel de stage',
+    ]);
     const next = new Date(monday);
     next.setDate(next.getDate() + 7);
     expect(await fetchScheduleTasks(next)).toEqual([]);
@@ -90,7 +98,9 @@ describe('agenda : tâches et séances fictives', () => {
 
     const updated = await updateScheduleTask(created.id, task(start, 'Relire'));
     expect(updated).toEqual({ ...created, title: 'Relire' });
-    expect((await fetchScheduleTasks(monday)).filter((t) => t.id === created.id)).toEqual([updated]);
+    expect((await fetchScheduleTasks(monday)).filter((t) => t.id === created.id)).toEqual([
+      updated,
+    ]);
 
     await deleteScheduleTask(created.id);
     expect((await fetchScheduleTasks(monday)).some((t) => t.id === created.id)).toBe(false);
@@ -110,11 +120,32 @@ describe('agenda : tâches et séances fictives', () => {
     });
     // 30 octobre, 6 et 13 novembre, à 16 h malgré le changement d'heure.
     expect(created.map((s) => new Date(s.start).getDate())).toEqual([30, 6, 13]);
-    expect(created.every((s) => new Date(s.start).getHours() === 16 && new Date(s.end).getHours() === 17)).toBe(true);
-    expect((await fetchSchedule(monday, courses)).filter((s) => s.kind === 'Atelier')).toHaveLength(1);
-    expect(await fetchSchedule(monday, [{ id: 11, code: 'MAT265', programId: 1 }])).not.toContainEqual(created[0]);
+    expect(
+      created.every((s) => new Date(s.start).getHours() === 16 && new Date(s.end).getHours() === 17)
+    ).toBe(true);
+    expect((await fetchSchedule(monday, courses)).filter((s) => s.kind === 'Atelier')).toHaveLength(
+      1
+    );
+    expect(
+      await fetchSchedule(monday, [{ id: 11, code: 'MAT265', programId: 1 }])
+    ).not.toContainEqual(created[0]);
 
-    const once = await createScheduleSessions({ courseId: 10, kind: 'Cours', room: 'A', start: at(0, 8), end: at(0, 9), until: null });
+    const once = await createScheduleSessions({
+      courseId: 10,
+      kind: 'Cours',
+      room: 'A',
+      start: at(0, 8),
+      end: at(0, 9),
+      until: null,
+    });
     expect(once).toHaveLength(1);
+  });
+});
+
+describe('agenda : couleurs des cours', () => {
+  it('aucune au départ ; une couleur choisie est gardée', async () => {
+    expect(await fetchScheduleCourseColors()).toEqual({});
+    await setScheduleCourseColor(10, 'purple');
+    expect(await fetchScheduleCourseColors()).toEqual({ 10: 'purple' });
   });
 });

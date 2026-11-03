@@ -122,6 +122,8 @@ const scheduleApi: ScheduleApi = {
   updateTask: (id, input) => api.updateScheduleTask(id, input),
   deleteTask: (id) => api.deleteScheduleTask(id),
   createSessions: (input) => api.createScheduleSessions(input),
+  fetchCourseColors: () => api.fetchScheduleCourseColors(),
+  setCourseColor: (courseId, color) => api.setScheduleCourseColor(courseId, color),
 };
 
 const MOBILE_QUERY = '(max-width: 900px)';

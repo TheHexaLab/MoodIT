@@ -115,7 +115,10 @@ describe('glisser une tâche', () => {
 
   it('l’allonge ou la raccourcit par le bas, sans changer de jour ni passer sous un quart d’heure', () => {
     expect(shiftTimes(times, 'resize', 45, 2)).toEqual({ start: times.start, end: at(2, 15, 45) });
-    expect(shiftTimes(times, 'resize', -120, 0)).toEqual({ start: times.start, end: at(2, 14, 15) });
+    expect(shiftTimes(times, 'resize', -120, 0)).toEqual({
+      start: times.start,
+      end: at(2, 14, 15),
+    });
     expect(shiftTimes(times, 'resize', 900, 0)).toEqual({ start: times.start, end: at(2, 23, 45) });
   });
 });
@@ -138,7 +141,11 @@ describe('brouillon', () => {
   });
 
   it('un brouillon vide commence à l’heure donnée, ramenée dans la journée', () => {
-    expect(emptyDraft('task', monday, 13, null)).toMatchObject({ date: '2026-10-26', start: '13:00', end: '14:00' });
+    expect(emptyDraft('task', monday, 13, null)).toMatchObject({
+      date: '2026-10-26',
+      start: '13:00',
+      end: '14:00',
+    });
     expect(emptyDraft('task', monday, -1, null)).toMatchObject({ start: '00:00', end: '01:00' });
     expect(emptyDraft('task', monday, 23, null)).toMatchObject({ start: '22:00', end: '23:00' });
   });
@@ -160,7 +167,12 @@ describe('brouillon', () => {
   });
 
   it('une séance hebdomadaire va jusqu’à sa date de fin ; sinon une seule fois', () => {
-    const draft = { ...emptyDraft('session', monday, 9, 10), room: ' C1-4016 ', weekly: true, until: '2026-12-07' };
+    const draft = {
+      ...emptyDraft('session', monday, 9, 10),
+      room: ' C1-4016 ',
+      weekly: true,
+      until: '2026-12-07',
+    };
     expect(draftToSession(draft)).toEqual({
       courseId: 10,
       kind: 'Cours',
@@ -184,7 +196,9 @@ describe('brouillon', () => {
     expect(draftError(session)).toBeNull();
     expect(draftError({ ...session, courseId: null })).toBe('Choisissez un cours.');
     expect(draftError({ ...session, room: '' })).toBe('Indiquez le local.');
-    expect(draftError({ ...session, weekly: true, until: '' })).toBe('La répétition doit finir après la première séance.');
+    expect(draftError({ ...session, weekly: true, until: '' })).toBe(
+      'La répétition doit finir après la première séance.'
+    );
     expect(draftError({ ...session, weekly: true, until: '2026-10-19' })).toBe(
       'La répétition doit finir après la première séance.'
     );

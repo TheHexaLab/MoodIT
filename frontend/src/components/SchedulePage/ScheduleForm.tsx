@@ -1,6 +1,6 @@
 import React, { useId } from 'react';
 import styles from './SchedulePage.module.css';
-import type { ScheduleCourse } from '../../types/domain.ts';
+import type { ScheduleColor, ScheduleCourse } from '../../types/domain.ts';
 import {
   COLORS,
   COLOR_KEYS,
@@ -26,6 +26,40 @@ interface ScheduleFormProps {
   onCancel: () => void;
   /** Modification : bouton « Supprimer ». */
   onDelete?: () => void;
+}
+
+/** Pastilles de couleur : des boutons radio natifs, redessinés. */
+export function ColorPicker({
+  legend,
+  value,
+  onChange,
+}: {
+  legend: string;
+  value: ScheduleColor;
+  onChange: (color: ScheduleColor) => void;
+}): React.ReactElement {
+  const name = useId();
+  return (
+    <fieldset className={styles.colors}>
+      <legend>{legend}</legend>
+      <div>
+        {COLOR_KEYS.map((key) => (
+          <input
+            key={key}
+            type="radio"
+            name={name}
+            aria-label={COLORS[key].label}
+            checked={value === key}
+            style={{
+              ['--hue' as string]: COLORS[key].hue,
+              ['--sat' as string]: `${COLORS[key].saturation}%`,
+            }}
+            onChange={() => onChange(key)}
+          />
+        ))}
+      </div>
+    </fieldset>
+  );
 }
 
 /** Formulaire d'une tâche ou d'une séance : panneau d'ajout et fenêtre de modification. */
@@ -112,7 +146,10 @@ export default function ScheduleForm({
           </label>
           <label className={styles.field}>
             <span>Type</span>
-            <select value={draft.sessionKind} onChange={(event) => set({ sessionKind: event.target.value })}>
+            <select
+              value={draft.sessionKind}
+              onChange={(event) => set({ sessionKind: event.target.value })}
+            >
               {SESSION_KINDS.map((kind) => (
                 <option key={kind}>{kind}</option>
               ))}
@@ -123,7 +160,11 @@ export default function ScheduleForm({
 
       <label className={styles.field}>
         <span>Date</span>
-        <input type="date" value={draft.date} onChange={(event) => set({ date: event.target.value })} />
+        <input
+          type="date"
+          value={draft.date}
+          onChange={(event) => set({ date: event.target.value })}
+        />
       </label>
       <div className={styles.fieldRow}>
         {timeSelect('start', 'Début')}
@@ -132,27 +173,14 @@ export default function ScheduleForm({
 
       {isTask ? (
         <>
-          <fieldset className={styles.colors}>
-            <legend>Couleur</legend>
-            <div>
-              {COLOR_KEYS.map((key) => (
-                <input
-                  key={key}
-                  type="radio"
-                  name={`${id}-color`}
-                  aria-label={COLORS[key].label}
-                  checked={draft.color === key}
-                  style={{ ['--hue' as string]: COLORS[key].hue, ['--sat' as string]: `${COLORS[key].saturation}%` }}
-                  onChange={() => set({ color: key })}
-                />
-              ))}
-            </div>
-          </fieldset>
+          <ColorPicker legend="Couleur" value={draft.color} onChange={(color) => set({ color })} />
           <label className={styles.field}>
             <span>Cours lié (facultatif)</span>
             <select
               value={draft.courseId ?? ''}
-              onChange={(event) => set({ courseId: event.target.value ? Number(event.target.value) : null })}
+              onChange={(event) =>
+                set({ courseId: event.target.value ? Number(event.target.value) : null })
+              }
             >
               <option value="">Aucun</option>
               {courses.map((course) => (
@@ -166,7 +194,9 @@ export default function ScheduleForm({
             <span>Rappel</span>
             <select
               value={draft.reminder ?? ''}
-              onChange={(event) => set({ reminder: event.target.value ? Number(event.target.value) : null })}
+              onChange={(event) =>
+                set({ reminder: event.target.value ? Number(event.target.value) : null })
+              }
             >
               {REMINDERS.map((reminder) => (
                 <option key={reminder.label} value={reminder.value ?? ''}>
@@ -175,12 +205,13 @@ export default function ScheduleForm({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
-            <span>Notes (facultatif)</span>
+          {/* La description s'agrandit avec son texte : elle se lit toujours en entier. */}
+          <label className={`${styles.field} ${styles.fieldGrow}`}>
+            <span>Description</span>
             <textarea
-              rows={2}
+              rows={3}
               value={draft.notes}
-              maxLength={500}
+              maxLength={2000}
               onChange={(event) => set({ notes: event.target.value })}
             />
           </label>
@@ -189,12 +220,21 @@ export default function ScheduleForm({
         <>
           <label className={styles.field}>
             <span>Local</span>
-            <input type="text" value={draft.room} maxLength={20} onChange={(event) => set({ room: event.target.value })} />
+            <input
+              type="text"
+              value={draft.room}
+              maxLength={20}
+              onChange={(event) => set({ room: event.target.value })}
+            />
           </label>
           <div className={styles.field}>
             <span id={`${id}-repeat`}>Répétition</span>
             <div className={styles.chips} role="group" aria-labelledby={`${id}-repeat`}>
-              <button type="button" aria-pressed={!draft.weekly} onClick={() => set({ weekly: false })}>
+              <button
+                type="button"
+                aria-pressed={!draft.weekly}
+                onClick={() => set({ weekly: false })}
+              >
                 Une fois
               </button>
               <button
@@ -209,10 +249,16 @@ export default function ScheduleForm({
           {draft.weekly && (
             <label className={styles.field}>
               <span>Jusqu'au</span>
-              <input type="date" value={draft.until} onChange={(event) => set({ until: event.target.value })} />
+              <input
+                type="date"
+                value={draft.until}
+                onChange={(event) => set({ until: event.target.value })}
+              />
             </label>
           )}
-          <p className={styles.hint}>Les étudiants du cours la verront, sans pouvoir la déplacer.</p>
+          <p className={styles.hint}>
+            Les étudiants du cours la verront, sans pouvoir la déplacer.
+          </p>
         </>
       )}
 
@@ -224,7 +270,12 @@ export default function ScheduleForm({
 
       <div className={styles.actions}>
         {onDelete && (
-          <button type="button" className={`${styles.button} ${styles.danger}`} disabled={busy} onClick={onDelete}>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.danger}`}
+            disabled={busy}
+            onClick={onDelete}
+          >
             Supprimer
           </button>
         )}
