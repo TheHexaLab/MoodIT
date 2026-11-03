@@ -68,6 +68,7 @@ const weeklyTasks = async (weekStart: Date): Promise<ScheduleTask[]> => [
     notes: '',
     color: 'rose',
     done: false,
+    allDay: false,
   },
   {
     id: 8,
@@ -79,6 +80,7 @@ const weeklyTasks = async (weekStart: Date): Promise<ScheduleTask[]> => [
     notes: 'p. 80',
     color: 'green',
     done: true,
+    allDay: false,
   },
 ];
 
@@ -134,8 +136,9 @@ describe('SchedulePage — grille', () => {
   it('montre les tâches, en cascade par-dessus la séance qu’elles chevauchent', async () => {
     setup();
     const tutorat = await block(/^Tutorat/);
-    expect(tutorat.textContent).toContain('Tâche personnelle');
-    expect(tutorat.textContent).toContain('14 h 00 à 15 h 00');
+    // L'heure en court : « 14 h – 15 h » ; le cours lié, s'il y en a un, à la suite.
+    expect(tutorat.textContent).toContain('14 h – 15 h');
+    expect(tutorat.textContent).not.toContain('Tâche personnelle');
     expect(tutorat.style.left).toBe('calc(1.5rem)');
     expect(tutorat.className).toMatch(/stacked/);
     // Recouvert après 30 minutes : le laboratoire ne montre plus que son sigle.
@@ -305,7 +308,7 @@ describe('SchedulePage — modifier une tâche', () => {
         notes: 'p. 95',
       })
     );
-    expect((await block(/^Lire le chapitre 5/)).textContent).toContain('9 h 00 à 10 h 30');
+    expect((await block(/^Lire le chapitre 5/)).textContent).toContain('9 h – 10 h 30');
   });
 
   it('refuse un titre vide, et dit quand l’enregistrement échoue', async () => {
@@ -566,7 +569,7 @@ describe('SchedulePage — glisser une tâche', () => {
         end: new Date(2026, 9, 29, 16).toISOString(),
       })
     );
-    expect((await block(/^Tutorat/)).textContent).toContain('15 h 00 à 16 h 00, jeudi 29 octobre');
+    expect((await block(/^Tutorat/)).textContent).toContain('15 h – 16 h, jeudi 29 octobre');
     // Le geste fini, un clic ouvre la tâche de nouveau.
     await new Promise((resolve) => setTimeout(resolve, 0));
     fireEvent.click(await block(/^Tutorat/));
@@ -580,7 +583,9 @@ describe('SchedulePage — glisser une tâche', () => {
     fireEvent.pointerDown(tutorat, { button: 0, clientX: 320, clientY: 500 });
     fireEvent.pointerMove(window, { clientX: 2000, clientY: -5000 });
     // Jusqu'au bord droit (750 px) et jusqu'à 0 h, pas plus loin.
-    expect((await block(/^Tutorat/)).style.transform).toMatch(/^translate\(750px, -980(\.0+\d*)?px\)$/);
+    expect((await block(/^Tutorat/)).style.transform).toMatch(
+      /^translate\(750px, -980(\.0+\d*)?px\)$/
+    );
     expect(dropSpot()?.textContent).toBe('0 h 00 à 1 h 00');
     fireEvent.pointerUp(window);
   });
@@ -595,12 +600,12 @@ describe('SchedulePage — glisser une tâche', () => {
       clientY: 570,
     });
     fireEvent.pointerMove(window, { clientX: 700, clientY: 605 });
-    expect((await block(/^Tutorat/)).style.height).toMatch(/^calc\((4\.375rem \+ 35px|35px \+ 4\.375rem)\)$/);
+    expect((await block(/^Tutorat/)).style.height).toMatch(
+      /^calc\((4\.375rem \+ 35px|35px \+ 4\.375rem)\)$/
+    );
     expect(dropSpot()?.textContent).toBe('14 h 00 à 15 h 30');
     fireEvent.pointerUp(window);
-    expect((await block(/^Tutorat/)).textContent).toContain(
-      '14 h 00 à 15 h 30, mercredi 28 octobre'
-    );
+    expect((await block(/^Tutorat/)).textContent).toContain('14 h – 15 h 30, mercredi 28 octobre');
     expect(api.updateTask).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ end: new Date(2026, 9, 28, 15, 30).toISOString() })
@@ -631,7 +636,7 @@ describe('SchedulePage — glisser une tâche', () => {
     fireEvent.pointerUp(window);
     expect(api.updateTask).toHaveBeenCalledTimes(1);
     await waitFor(async () =>
-      expect((await block(/^Tutorat/)).textContent).toContain('14 h 00 à 15 h 00')
+      expect((await block(/^Tutorat/)).textContent).toContain('14 h – 15 h,')
     );
   });
 
@@ -671,10 +676,7 @@ describe('SchedulePage — liste des tâches', () => {
       within(list)
         .getAllByRole('listitem')
         .map((li) => li.textContent)
-    ).toEqual([
-      'TutoratMercredi 28 octobre, 14 h 00 à 15 h 00',
-      'Lire le chapitre 4Vendredi 30 octobre, 9 h 00 à 10 h 00',
-    ]);
+    ).toEqual(['TutoratMer. 28 oct. · 14 h – 15 h', 'Lire le chapitre 4Ven. 30 oct. · 9 h – 10 h']);
     expect(
       (
         within(list).getByRole('checkbox', {
@@ -716,7 +718,7 @@ describe('SchedulePage — description, corbeille, couleur des cours, défilemen
         id: 9,
         title: 'Court',
         start: at(weekStart, 3, 9),
-        end: at(weekStart, 3, 10),
+        end: at(weekStart, 3, 9, 45),
         notes: 'Caché',
       },
     ]);
@@ -724,7 +726,7 @@ describe('SchedulePage — description, corbeille, couleur des cours, défilemen
     const long = await block(/^Lire le chapitre 4/);
     const description = long.querySelector<HTMLElement>('[class*="blockDescription"]')!;
     expect(description.textContent).toBe('Lire les pages 80 à 95');
-    expect(description.style.webkitLineClamp).toBe('9');
+    expect(description.style.webkitLineClamp).toBe('10');
     expect((await block(/^Court/)).querySelector('[class*="blockDescription"]')).toBeNull();
   });
 
@@ -798,5 +800,99 @@ describe('SchedulePage — description, corbeille, couleur des cours, défilemen
       get.mockRestore();
       set.mockRestore();
     }
+  });
+});
+
+describe('SchedulePage — petits blocs et tâches sans heure', () => {
+  const taskAt = (
+    weekStart: Date,
+    id: number,
+    title: string,
+    day: number,
+    from: [number, number],
+    to: [number, number]
+  ) => ({
+    id,
+    title,
+    start: at(weekStart, day, ...from),
+    end: at(weekStart, day, ...to),
+    courseId: null,
+    reminder: null,
+    notes: '',
+    color: 'blue' as const,
+    done: false,
+    allDay: false,
+  });
+
+  it('un petit bloc garde son titre ; les lignes qui n’y tiennent pas sont retirées', async () => {
+    const fetchTasks = vi.fn(async (weekStart: Date) => [
+      taskAt(weekStart, 1, 'Appel', 1, [9, 0], [9, 15]),
+      taskAt(weekStart, 2, 'Lecture', 1, [11, 0], [11, 45]),
+    ]);
+    setup({ api: makeApi({ fetchTasks }) });
+    expect((await block(/^Appel/)).className).toMatch(/tiny/);
+    expect((await block(/^Lecture/)).className).toMatch(/short/);
+    expect((await block(/^INF201/)).className).not.toMatch(/tiny|short/);
+  });
+
+  it('une tâche sans heure va dans la rangée « Journée » et dans la liste, et s’ouvre', async () => {
+    const fetchTasks = vi.fn(async (weekStart: Date) => [
+      { ...taskAt(weekStart, 3, 'Remise du TP2', 3, [0, 0], [0, 0]), allDay: true, done: true },
+    ]);
+    setup({ api: makeApi({ fetchTasks }) });
+    const chip = await block(/^Remise du TP2/);
+    expect(chip.textContent).toContain('jeudi 29 octobre, toute la journée, terminée');
+    expect(screen.getByText('Journée')).toBeTruthy();
+    const list = screen.getByRole('region', { name: 'Mes tâches de la semaine' });
+    expect(within(list).getByRole('listitem').textContent).toBe(
+      'Remise du TP2Jeu. 29 oct. · toute la journée'
+    );
+    fireEvent.click(chip);
+    const dialog = screen.getByRole('dialog', { name: 'Modifier la tâche' });
+    expect(
+      (within(dialog).getByRole('checkbox', { name: 'Toute la journée' }) as HTMLInputElement)
+        .checked
+    ).toBe(true);
+    expect(within(dialog).queryByRole('combobox', { name: 'Début' })).toBeNull();
+  });
+
+  it('sans tâche sans heure, pas de rangée « Journée »', async () => {
+    setup();
+    await block(/^INF201/);
+    expect(screen.queryByText('Journée')).toBeNull();
+  });
+
+  it('« Toute la journée » cache les heures ; l’aperçu va dans la rangée ; la tâche s’ajoute sans heure', async () => {
+    const { api } = setup();
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter une tâche' }));
+    const panel = screen.getByRole('complementary');
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Titre' }), {
+      target: { value: 'Remise' },
+    });
+    fireEvent.click(within(panel).getByRole('checkbox', { name: 'Toute la journée' }));
+    expect(within(panel).queryByRole('combobox', { name: 'Début' })).toBeNull();
+    expect(screen.getByText('Journée')).toBeTruthy();
+    expect(screen.getByText('Remise').closest('[aria-hidden]')).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
+    await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+    expect(api.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Remise',
+        allDay: true,
+        start: new Date(2026, 9, 28).toISOString(),
+      })
+    );
+    expect(await block(/^Remise/)).toBeTruthy();
+  });
+
+  it('sur mobile, la tâche sans heure ouvre sa journée', async () => {
+    const fetchTasks = vi.fn(async (weekStart: Date) => [
+      { ...taskAt(weekStart, 3, 'Remise du TP2', 0, [0, 0], [0, 0]), allDay: true },
+    ]);
+    setup({ compact: true, api: makeApi({ fetchTasks }) });
+    const monday = await screen.findByRole('region', { name: 'lundi 26 octobre' });
+    const buttons = within(monday).getAllByRole('button');
+    expect(buttons[0].textContent).toContain('Toute la journée');
   });
 });

@@ -166,10 +166,22 @@ export default function ScheduleForm({
           onChange={(event) => set({ date: event.target.value })}
         />
       </label>
-      <div className={styles.fieldRow}>
-        {timeSelect('start', 'Début')}
-        {timeSelect('end', 'Fin')}
-      </div>
+      {isTask && (
+        <label className={styles.checkField}>
+          <input
+            type="checkbox"
+            checked={draft.allDay}
+            onChange={(event) => set({ allDay: event.target.checked })}
+          />
+          <span>Toute la journée</span>
+        </label>
+      )}
+      {!(isTask && draft.allDay) && (
+        <div className={styles.fieldRow}>
+          {timeSelect('start', 'Début')}
+          {timeSelect('end', 'Fin')}
+        </div>
+      )}
 
       {isTask ? (
         <>

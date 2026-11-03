@@ -29,14 +29,17 @@ import {
   draftToSession,
   draftToTask,
   emptyDraft,
+  formatRange,
   formatTime,
   isSameDay,
   longDay,
   minutesFromStart,
   placeItems,
   shiftTimes,
+  shortDate,
   shortDay,
   startOfWeek,
+  toDateInput,
   toIso,
   weekDays,
   weekLabel,
@@ -52,8 +55,13 @@ const DETAIL_MIN_REM = 3.25;
 const DRAG_THRESHOLD = 4;
 /** Distance au bord de la grille, en px, où le glisser la fait défiler. */
 const SCROLL_EDGE = 48;
+/** Défilement automatique le plus rapide, en px par image. */
+const MAX_SCROLL_STEP = 8;
+/** Sous ces hauteurs (rem), un bloc ne garde que son titre, puis son titre et une ligne. */
+const TINY_REM = 2.5;
+const SHORT_REM = 3.6;
 /** Hauteur, en rem, des lignes fixes d'un bloc (titre, deux détails, marges) ; et d'une ligne de description. */
-const BLOCK_LINES_REM = 4.25;
+const BLOCK_LINES_REM = 3.25;
 const DESCRIPTION_LINE_REM = 0.9375;
 const HOURS = Array.from({ length: LAST_HOUR - FIRST_HOUR }, (_, i) => FIRST_HOUR + i);
 
@@ -223,7 +231,9 @@ export default function SchedulePage({
     load.status === 'ready'
       ? Math.min(
           OPENING_HOUR,
-          ...[...load.sessions, ...load.tasks].map((event) => new Date(event.start).getHours())
+          ...[...load.sessions, ...load.tasks.filter((task) => !task.allDay)].map((event) =>
+            new Date(event.start).getHours()
+          )
         )
       : OPENING_HOUR;
   useEffect(() => {
@@ -411,9 +421,11 @@ export default function SchedulePage({
       if (scroller && rect && rect.height > 0 && current) {
         const above = rect.top + SCROLL_EDGE - pointer.y;
         const below = pointer.y - (rect.bottom - SCROLL_EDGE);
-        const speed = above > 0 ? -above : below > 0 ? below : 0;
-        if (speed !== 0) {
-          scroller.scrollTop += speed / 3;
+        // Plus le pointeur s'approche du bord, plus la grille défile vite, jusqu'à MAX_SCROLL_STEP.
+        const depth =
+          above > 0 ? -Math.min(above, SCROLL_EDGE) : below > 0 ? Math.min(below, SCROLL_EDGE) : 0;
+        if (depth !== 0) {
+          scroller.scrollTop += (depth / SCROLL_EDGE) * MAX_SCROLL_STEP;
           update();
         }
       }
@@ -471,7 +483,17 @@ export default function SchedulePage({
   }
 
   /** Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = lundi). */
-  function itemsOf(index: number): GridItem[] {
+  /** Tâches sans heure du jour `index`, qui vont dans la rangée « Journée ». */
+  const allDayOf = (index: number) =>
+    tasks.filter((task) => task.allDay && dayIndex(task.start) === index);
+  const allDayDraft =
+    adding?.kind === 'task' && adding.allDay && adding.date && inShownWeek(toIso(adding.date))
+      ? adding
+      : null;
+  const hasAllDay = tasks.some((task) => task.allDay) || allDayDraft != null;
+
+  /** `withAllDay` : la liste mobile met aussi les tâches sans heure, en tête de leur jour. */
+  function itemsOf(index: number, withAllDay = false): GridItem[] {
     const items: GridItem[] = [];
     for (const session of sessions) {
       const course = byId.get(session.courseId);
@@ -479,10 +501,10 @@ export default function SchedulePage({
         items.push({ kind: 'session', session, course, start: session.start, end: session.end });
     }
     for (const task of tasks) {
-      if (dayIndex(task.start) === index)
+      if (dayIndex(task.start) === index && (withAllDay || !task.allDay))
         items.push({ kind: 'task', task, start: task.start, end: task.end });
     }
-    if (adding && adding.date && adding.end > adding.start) {
+    if (adding && !allDayDraft && adding.date && adding.end > adding.start) {
       const start = toIso(adding.date, adding.start);
       if (inShownWeek(start) && dayIndex(start) === index) {
         items.push({ kind: 'preview', draft: adding, start, end: toIso(adding.date, adding.end) });
@@ -502,10 +524,18 @@ export default function SchedulePage({
       stacked: boolean;
       titleOnly: boolean;
       visibleRem: number;
+      heightRem: number;
     }
   ): React.ReactNode {
     const style = layout?.style;
-    const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''}`;
+    // Petit bloc : le titre reste toujours lisible ; les lignes qui n'y tiennent pas sont retirées.
+    const size =
+      layout && layout.heightRem < TINY_REM
+        ? styles.tiny
+        : layout && layout.heightRem < SHORT_REM
+          ? styles.short
+          : '';
+    const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''} ${size}`;
     const time = `${formatTime(item.start)} à ${formatTime(item.end)}`;
     const day = <span className={styles.visuallyHidden}>, {longDay(new Date(item.start))}</span>;
     if (item.kind === 'session') {
@@ -561,8 +591,10 @@ export default function SchedulePage({
           }}
         >
           <span className={styles.blockTitle}>{task.title}</span>
-          <span className={styles.blockDetail}>{linked ?? 'Tâche personnelle'}</span>
-          <span className={styles.blockDetail}>{time}</span>
+          <span className={styles.blockDetail}>
+            {task.allDay ? 'Toute la journée' : formatRange(item.start, item.end)}
+            {linked && ` · ${linked}`}
+          </span>
           {descriptionLines > 0 && (
             // Hors du nom accessible : la fenêtre de la tâche la donne en entier.
             <span
@@ -643,7 +675,7 @@ export default function SchedulePage({
         <div className={styles.dayList}>
           {empty && <p className={styles.empty}>{empty}</p>}
           {days.map((day, index) => {
-            const ofDay = itemsOf(index)
+            const ofDay = itemsOf(index, true)
               .filter((item) => item.kind !== 'preview')
               .sort((a, b) => a.start.localeCompare(b.start));
             if (ofDay.length === 0) return null;
@@ -685,6 +717,40 @@ export default function SchedulePage({
                 {shortDay(day, index)}
               </div>
             ))}
+            {hasAllDay && (
+              <>
+                <div className={styles.allDayLabel} aria-hidden="true">
+                  Journée
+                </div>
+                {days.map((day, index) => (
+                  <div key={day.getTime()} className={styles.allDayCell}>
+                    {allDayOf(index).map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        className={`${styles.allDayChip} ${task.done ? styles.done : ''}`}
+                        style={hueStyle(task.color)}
+                        onClick={() => setOpenTask(task)}
+                      >
+                        <span className={styles.blockTitle}>{task.title}</span>
+                        <span className={styles.visuallyHidden}>
+                          , {longDay(day)}, toute la journée{task.done ? ', terminée' : ''}
+                        </span>
+                      </button>
+                    ))}
+                    {allDayDraft && toIso(allDayDraft.date) === toIso(toDateInput(day)) && (
+                      <div
+                        className={`${styles.allDayChip} ${styles.preview}`}
+                        style={hueStyle(allDayDraft.color)}
+                        aria-hidden="true"
+                      >
+                        {allDayDraft.title.trim() || 'Nouvelle tâche'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
             <div className={styles.hours} aria-hidden="true">
               {HOURS.map((hour) => (
                 <span key={hour} style={{ height: `${HOUR_REM}rem` }}>
@@ -713,6 +779,8 @@ export default function SchedulePage({
                     stacked: depth > 0,
                     titleOnly: (visible / 60) * HOUR_REM < DETAIL_MIN_REM,
                     visibleRem: (visible / 60) * HOUR_REM,
+                    heightRem:
+                      ((minutesFromStart(item.end) - minutesFromStart(item.start)) / 60) * HOUR_REM,
                   })
                 )}
                 {renderDropSpot(index)}
@@ -831,10 +899,10 @@ export default function SchedulePage({
                           className={styles.taskOpen}
                           onClick={() => setOpenTask(task)}
                         >
-                          <span className={styles.blockTitle}>{task.title}</span>
+                          <span className={styles.taskTitle}>{task.title}</span>
                           <span className={styles.taskWhen}>
-                            {dayTitle(new Date(task.start))}, {formatTime(task.start)} à{' '}
-                            {formatTime(task.end)}
+                            {shortDate(task.start)} ·{' '}
+                            {task.allDay ? 'toute la journée' : formatRange(task.start, task.end)}
                           </span>
                         </button>
                         {/* Visible au survol de la ligne, ou au focus du clavier. */}

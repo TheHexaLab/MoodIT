@@ -73,6 +73,30 @@ export function weekLabel(monday: Date): string {
   return `Semaine du ${monday.getDate()} ${month(monday)}${sameYear ? '' : ` ${monday.getFullYear()}`} au ${end}`;
 }
 
+/** « 14 h », ou « 14 h 30 ». */
+export function formatShortTime(iso: string): string {
+  const date = new Date(iso);
+  const minutes = date.getMinutes();
+  return minutes
+    ? `${date.getHours()} h ${String(minutes).padStart(2, '0')}`
+    : `${date.getHours()} h`;
+}
+
+/** « 14 h – 15 h 30 ». */
+export function formatRange(start: string, end: string): string {
+  return `${formatShortTime(start)} – ${formatShortTime(end)}`;
+}
+
+/** « Mer. 4 nov. ». */
+export function shortDate(iso: string): string {
+  const label = new Intl.DateTimeFormat('fr-CA', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(iso));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /** « 8 h 30 ». */
 export function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -194,6 +218,8 @@ export interface Draft {
   notes: string;
   color: ScheduleColor;
   done: boolean;
+  /** Tâche : toute la journée, sans heure. */
+  allDay: boolean;
   /** Séance : type, local et répétition. */
   sessionKind: string;
   room: string;
@@ -259,6 +285,7 @@ export function emptyDraft(
     notes: '',
     color: 'teal',
     done: false,
+    allDay: false,
     sessionKind: SESSION_KINDS[0],
     room: '',
     weekly: false,
@@ -267,15 +294,18 @@ export function emptyDraft(
 }
 
 export function taskDraft(task: ScheduleTask): Draft {
+  const base = emptyDraft('task', new Date(task.start), 9, task.courseId);
   return {
-    ...emptyDraft('task', new Date(task.start), FIRST_HOUR, task.courseId),
+    ...base,
     title: task.title,
-    start: toTimeInput(task.start),
-    end: toTimeInput(task.end),
+    // Sans heure : les heures proposées si l'utilisateur décoche « Toute la journée ».
+    start: task.allDay ? base.start : toTimeInput(task.start),
+    end: task.allDay ? base.end : toTimeInput(task.end),
     reminder: task.reminder,
     notes: task.notes,
     color: task.color,
     done: task.done,
+    allDay: task.allDay,
   };
 }
 
@@ -285,7 +315,8 @@ export function draftError(draft: Draft): string | null {
   if (draft.kind === 'session' && draft.courseId == null) return 'Choisissez un cours.';
   if (!draft.date) return 'Choisissez une date.';
   if (dayIndex(toIso(draft.date)) === -1) return 'Choisissez un jour de semaine.';
-  if (draft.end <= draft.start) return 'La fin doit suivre le début.';
+  const timed = !(draft.kind === 'task' && draft.allDay);
+  if (timed && draft.end <= draft.start) return 'La fin doit suivre le début.';
   if (draft.kind === 'session' && !draft.room.trim()) return 'Indiquez le local.';
   if (draft.kind === 'session' && draft.weekly && (!draft.until || draft.until < draft.date)) {
     return 'La répétition doit finir après la première séance.';
@@ -296,13 +327,14 @@ export function draftError(draft: Draft): string | null {
 export function draftToTask(draft: Draft): ScheduleTaskInput {
   return {
     title: draft.title.trim(),
-    start: toIso(draft.date, draft.start),
-    end: toIso(draft.date, draft.end),
+    start: toIso(draft.date, draft.allDay ? '00:00' : draft.start),
+    end: toIso(draft.date, draft.allDay ? '00:00' : draft.end),
     courseId: draft.courseId,
     reminder: draft.reminder,
     notes: draft.notes.trim(),
     color: draft.color,
     done: draft.done,
+    allDay: draft.allDay,
   };
 }
 

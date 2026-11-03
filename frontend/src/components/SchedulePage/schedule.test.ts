@@ -9,11 +9,13 @@ import {
   draftToSession,
   draftToTask,
   emptyDraft,
+  formatRange,
   formatTime,
   isSameDay,
   minutesFromStart,
   placeItems,
   shiftTimes,
+  shortDate,
   shortDay,
   startOfWeek,
   taskDraft,
@@ -160,6 +162,7 @@ describe('brouillon', () => {
       notes: 'Salle B',
       color: 'rose' as const,
       done: true,
+      allDay: false,
     };
     const draft = taskDraft({ ...task, id: 1 });
     expect(draft).toMatchObject({ kind: 'task', date: '2026-10-28', start: '14:00', end: '15:30' });
@@ -203,5 +206,33 @@ describe('brouillon', () => {
       'La répétition doit finir après la première séance.'
     );
     expect(draftError({ ...session, weekly: true, until: '2026-10-26' })).toBeNull();
+  });
+});
+
+describe('heures courtes et tâches sans heure', () => {
+  it('écrit les heures en court et la date en abrégé', () => {
+    expect(formatRange(at(0, 14), at(0, 15, 30))).toBe('14 h – 15 h 30');
+    expect(shortDate(at(2, 9))).toBe('Mer. 28 oct.');
+  });
+
+  it('une tâche sans heure tient à minuit, sans vérifier les heures', () => {
+    const draft = {
+      ...emptyDraft('task', new Date(2026, 9, 26), 9, null),
+      title: 'Remise',
+      allDay: true,
+      end: '08:00',
+    };
+    expect(draftError(draft)).toBeNull();
+    expect(draftToTask(draft)).toMatchObject({
+      allDay: true,
+      start: toIso('2026-10-26'),
+      end: toIso('2026-10-26'),
+    });
+    // Rouverte : les heures proposées reviennent si on décoche.
+    expect(taskDraft({ ...draftToTask(draft), id: 1 })).toMatchObject({
+      allDay: true,
+      start: '09:00',
+      end: '10:00',
+    });
   });
 });

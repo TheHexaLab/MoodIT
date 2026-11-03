@@ -95,6 +95,7 @@ function seedTasks(): ScheduleTask[] {
     notes,
     color,
     done: false,
+    allDay: false,
   });
   return [
     task(1, 'Tutorat', 2, 14 * 60, 15 * 60, 'rose'),
@@ -108,6 +109,7 @@ function seedTasks(): ScheduleTask[] {
       'Préparer la démo du projet et répartir les tâches du prochain sprint.'
     ),
     task(3, 'Appel de stage', 4, 14 * 60, 15 * 60, 'green'),
+    { ...task(4, 'Remise du TP2', 3, 0, 0, 'orange'), allDay: true },
   ];
 }
 

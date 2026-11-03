@@ -75,14 +75,16 @@ describe('agenda : tâches et séances fictives', () => {
     notes: '',
     color: 'teal' as const,
     done: false,
+    allDay: false,
   });
 
-  it('trois tâches d’exemple dans la semaine courante, aucune la suivante', async () => {
+  it('quatre tâches d’exemple dans la semaine courante, aucune la suivante', async () => {
     const monday = thisMonday();
     expect((await fetchScheduleTasks(monday)).map((t) => t.title)).toEqual([
       'Tutorat',
       "Rencontre d'équipe",
       'Appel de stage',
+      'Remise du TP2',
     ]);
     const next = new Date(monday);
     next.setDate(next.getDate() + 7);

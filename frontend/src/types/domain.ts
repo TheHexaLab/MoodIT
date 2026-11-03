@@ -557,6 +557,8 @@ export interface ScheduleTask {
   color: ScheduleColor;
   /** Cochée dans la liste des tâches. */
   done: boolean;
+  /** Toute la journée : pas d'heure, seulement un jour (`start` à minuit). */
+  allDay: boolean;
 }
 
 export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;
