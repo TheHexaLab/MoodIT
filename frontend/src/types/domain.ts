@@ -515,7 +515,11 @@ export interface PostVoteUserDTO {
 export interface ScheduleCourse {
   id: number;
   code: string;
+  /** Nom complet du cours (« Structures de données »), affiché dans le détail d'une séance. */
+  title?: string;
   programId: number;
+  /** Enseignant ou responsable : peut ajouter des séances à ce cours. */
+  canManage?: boolean;
 }
 
 /** Séance de cours dans l'horaire de la semaine. */
@@ -528,4 +532,29 @@ export interface ScheduleSession {
   /** Dates ISO. */
   start: string;
   end: string;
+  /** Séance hebdomadaire : date ISO de la dernière occurrence ; null ou absent = une seule fois. */
+  until?: string | null;
 }
+
+/** Séance à ajouter par l'enseignant ; `until` répète chaque semaine jusqu'à cette date ISO. */
+export type ScheduleSessionInput = Omit<ScheduleSession, 'id'>;
+
+/** Couleur d'une tâche, choisie par l'étudiant. */
+export type ScheduleColor = 'teal' | 'blue' | 'purple' | 'rose' | 'orange' | 'green' | 'gray';
+
+/** Tâche personnelle dans l'agenda : visible seulement de son auteur. */
+export interface ScheduleTask {
+  id: number;
+  title: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+  /** Cours lié, facultatif. */
+  courseId: number | null;
+  /** Rappel, en minutes avant le début ; null = aucun. */
+  reminder: number | null;
+  notes: string;
+  color: ScheduleColor;
+}
+
+export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;

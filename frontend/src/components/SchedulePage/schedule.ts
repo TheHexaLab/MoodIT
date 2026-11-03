@@ -1,4 +1,9 @@
-import type { ScheduleSession } from '../../types/domain.ts';
+import type {
+  ScheduleColor,
+  ScheduleSessionInput,
+  ScheduleTask,
+  ScheduleTaskInput,
+} from '../../types/domain.ts';
 
 /** Heures affichées dans la grille : de 8 h à 18 h. */
 export const FIRST_HOUR = 8;
@@ -78,36 +83,184 @@ export function dayIndex(iso: string): number {
   return day === 0 || day === 6 ? -1 : day - 1;
 }
 
-export interface PlacedSession {
-  session: ScheduleSession;
-  /** Couloir de la séance et nombre de couloirs de son groupe : deux séances qui se chevauchent
-   *  se partagent la largeur de la colonne. */
-  lane: number;
-  lanes: number;
+/** Événement de la grille : une séance ou une tâche, réduit à ses heures. */
+interface Timed {
+  start: string;
+  end: string;
 }
 
-/** Place les séances d'une journée en couloirs, pour qu'aucune ne cache l'autre. */
-export function placeSessions(sessions: ScheduleSession[]): PlacedSession[] {
-  const sorted = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  const placed: PlacedSession[] = [];
-  let group: PlacedSession[] = [];
-  let groupEnd = '';
-  const closeGroup = () => {
-    const lanes = Math.max(1, ...group.map((p) => p.lane + 1));
-    for (const p of group) p.lanes = lanes;
-    group = [];
-  };
-  for (const session of sorted) {
-    if (group.length > 0 && session.start >= groupEnd) closeGroup();
-    const busy = new Set(group.filter((p) => p.session.end > session.start).map((p) => p.lane));
-    let lane = 0;
-    while (busy.has(lane)) lane += 1;
-    const entry = { session, lane, lanes: 1 };
-    group.push(entry);
-    placed.push(entry);
-    // Une séance plus tardive que tout le groupe repousse sa fin ; au départ, groupEnd vaut ''.
-    if (session.end > groupEnd) groupEnd = session.end;
+export interface Placed<T extends Timed> {
+  item: T;
+  /** Profondeur dans la cascade : un événement qui en chevauche un autre se décale d'un cran
+   *  vers la droite, par-dessus, pour que le début de chacun reste lisible. */
+  depth: number;
+  /** Minutes visibles avant qu'un événement plus tardif ne le recouvre ; sa durée s'il n'y en a pas. */
+  visible: number;
+}
+
+/** Place les événements d'une journée en cascade, du plus tôt au plus tard. */
+export function placeItems<T extends Timed>(items: T[]): Placed<T>[] {
+  // À début égal, le plus long passe dessous : le plus court reste entier par-dessus.
+  const sorted = [...items].sort((a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end));
+  const placed: Placed<T>[] = [];
+  const minutes = (from: string, to: string) => (new Date(to).getTime() - new Date(from).getTime()) / 60_000;
+  for (const item of sorted) {
+    const covered = placed.filter((p) => p.item.end > item.start);
+    for (const p of covered) p.visible = Math.min(p.visible, minutes(p.item.start, item.start));
+    placed.push({
+      item,
+      depth: covered.length === 0 ? 0 : Math.max(...covered.map((p) => p.depth)) + 1,
+      visible: minutes(item.start, item.end),
+    });
   }
-  closeGroup();
   return placed;
+}
+
+// ── Couleurs : une teinte par cours ou par tâche, que le thème éclaircit ou fonce ──
+
+/** Teinte et saturation HSL ; la luminosité vient du thème (--badge-hue-lightness). */
+export const COLORS: Record<ScheduleColor, { label: string; hue: number; saturation: number }> = {
+  teal: { label: 'Sarcelle', hue: 174, saturation: 62 },
+  blue: { label: 'Bleu', hue: 220, saturation: 62 },
+  purple: { label: 'Violet', hue: 258, saturation: 52 },
+  rose: { label: 'Rose', hue: 345, saturation: 62 },
+  orange: { label: 'Orange', hue: 28, saturation: 80 },
+  green: { label: 'Vert', hue: 142, saturation: 58 },
+  gray: { label: 'Gris', hue: 240, saturation: 10 },
+};
+
+export const COLOR_KEYS = Object.keys(COLORS) as ScheduleColor[];
+
+/** Couleur des séances d'un cours, stable d'une semaine à l'autre. */
+const COURSE_COLORS: ScheduleColor[] = ['teal', 'gray', 'orange', 'blue', 'purple'];
+
+export function courseColor(courseId: number): ScheduleColor {
+  return COURSE_COLORS[courseId % COURSE_COLORS.length];
+}
+
+// ── Formulaire : brouillon d'une tâche ou d'une séance ──
+
+export type DraftKind = 'task' | 'session';
+
+/** Champs du formulaire, en texte comme les contrôles : dates « 2026-11-05 », heures « 13:30 ». */
+export interface Draft {
+  kind: DraftKind;
+  title: string;
+  date: string;
+  start: string;
+  end: string;
+  courseId: number | null;
+  reminder: number | null;
+  notes: string;
+  color: ScheduleColor;
+  /** Séance : type, local et répétition. */
+  sessionKind: string;
+  room: string;
+  weekly: boolean;
+  until: string;
+}
+
+export const SESSION_KINDS = ['Cours', 'Travaux dirigés', 'Laboratoire', 'Atelier'];
+
+export const REMINDERS: { value: number | null; label: string }[] = [
+  { value: null, label: 'Aucun rappel' },
+  { value: 10, label: '10 minutes avant' },
+  { value: 30, label: '30 minutes avant' },
+  { value: 60, label: '1 heure avant' },
+  { value: 1440, label: '1 jour avant' },
+];
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** « 2026-11-05 », en heure locale. */
+export function toDateInput(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** « 13:30 », en heure locale. */
+export function toTimeInput(iso: string): string {
+  const date = new Date(iso);
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** Date ISO du jour `date` à l'heure `time` (heure locale). */
+export function toIso(date: string, time = '00:00'): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hours, minutes] = time.split(':').map(Number);
+  return new Date(year, month - 1, day, hours, minutes).toISOString();
+}
+
+/** Heures proposées : de 8 h à 18 h, au quart d'heure. */
+export const TIME_OPTIONS = Array.from({ length: (LAST_HOUR - FIRST_HOUR) * 4 + 1 }, (_, i) => {
+  const minutes = FIRST_HOUR * 60 + i * 15;
+  return { value: `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`, label: `${Math.floor(minutes / 60)} h ${pad(minutes % 60)}` };
+});
+
+/** Brouillon vide : le jour donné, l'heure qui suit, d'une heure. */
+export function emptyDraft(kind: DraftKind, day: Date, hour: number, courseId: number | null): Draft {
+  const start = Math.min(Math.max(hour, FIRST_HOUR), LAST_HOUR - 1);
+  return {
+    kind,
+    title: '',
+    date: toDateInput(day),
+    start: `${pad(start)}:00`,
+    end: `${pad(start + 1)}:00`,
+    courseId,
+    reminder: null,
+    notes: '',
+    color: 'teal',
+    sessionKind: SESSION_KINDS[0],
+    room: '',
+    weekly: false,
+    until: '',
+  };
+}
+
+export function taskDraft(task: ScheduleTask): Draft {
+  return {
+    ...emptyDraft('task', new Date(task.start), FIRST_HOUR, task.courseId),
+    title: task.title,
+    start: toTimeInput(task.start),
+    end: toTimeInput(task.end),
+    reminder: task.reminder,
+    notes: task.notes,
+    color: task.color,
+  };
+}
+
+/** Ce qui empêche d'enregistrer le brouillon, ou null. */
+export function draftError(draft: Draft): string | null {
+  if (draft.kind === 'task' && !draft.title.trim()) return 'Donnez un titre à la tâche.';
+  if (draft.kind === 'session' && draft.courseId == null) return 'Choisissez un cours.';
+  if (!draft.date) return 'Choisissez une date.';
+  if (dayIndex(toIso(draft.date)) === -1) return 'Choisissez un jour de semaine.';
+  if (draft.end <= draft.start) return 'La fin doit suivre le début.';
+  if (draft.kind === 'session' && !draft.room.trim()) return 'Indiquez le local.';
+  if (draft.kind === 'session' && draft.weekly && (!draft.until || draft.until < draft.date)) {
+    return 'La répétition doit finir après la première séance.';
+  }
+  return null;
+}
+
+export function draftToTask(draft: Draft): ScheduleTaskInput {
+  return {
+    title: draft.title.trim(),
+    start: toIso(draft.date, draft.start),
+    end: toIso(draft.date, draft.end),
+    courseId: draft.courseId,
+    reminder: draft.reminder,
+    notes: draft.notes.trim(),
+    color: draft.color,
+  };
+}
+
+export function draftToSession(draft: Draft): ScheduleSessionInput {
+  return {
+    courseId: draft.courseId as number,
+    kind: draft.sessionKind,
+    room: draft.room.trim(),
+    start: toIso(draft.date, draft.start),
+    end: toIso(draft.date, draft.end),
+    until: draft.weekly ? toIso(draft.until) : null,
+  };
 }

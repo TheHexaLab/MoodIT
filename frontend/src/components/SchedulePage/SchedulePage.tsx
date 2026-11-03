@@ -1,37 +1,71 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import styles from './SchedulePage.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
-import { courseTileColor } from '../PortalSidebar/courseTile.ts';
-import type { ScheduleCourse, ScheduleSession } from '../../types/domain.ts';
+import { Popup } from '../Popup/Popup.tsx';
+import { PopupVariant } from '../Popup/popupVariant.ts';
+import { usePopupController } from '../Popup/popupController.ts';
+import ScheduleForm from './ScheduleForm.tsx';
+import { Header, SessionPopup, TaskPopup } from './SchedulePopups.tsx';
+import type {
+  ScheduleColor,
+  ScheduleCourse,
+  ScheduleSession,
+  ScheduleSessionInput,
+  ScheduleTask,
+  ScheduleTaskInput,
+} from '../../types/domain.ts';
 import {
+  COLORS,
   FIRST_HOUR,
   LAST_HOUR,
+  type Draft,
   addDays,
+  courseColor,
   dayIndex,
   dayTitle,
+  draftError,
+  draftToSession,
+  draftToTask,
+  emptyDraft,
   formatTime,
   isSameDay,
   longDay,
   minutesFromStart,
-  placeSessions,
+  placeItems,
   shortDay,
   startOfWeek,
+  toIso,
   weekDays,
   weekLabel,
 } from './schedule.ts';
 
 /** Hauteur d'une heure dans la grille, en rem. */
 const HOUR_REM = 4.375;
+/** Décalage d'un cran de cascade, en rem. */
+const STEP_REM = 1.25;
+/** Hauteur visible sous laquelle un événement recouvert ne montre plus que son titre. */
+const DETAIL_MIN_REM = 3.25;
 const HOURS = Array.from({ length: LAST_HOUR - FIRST_HOUR }, (_, i) => FIRST_HOUR + i);
 
+/** Accès aux données de l'agenda (dashboardApi : données fictives, #206). */
+export interface ScheduleApi {
+  /** Séances de la semaine qui commence au lundi donné. */
+  fetchSessions: (weekStart: Date, courses: ScheduleCourse[]) => Promise<ScheduleSession[]>;
+  fetchTasks: (weekStart: Date) => Promise<ScheduleTask[]>;
+  createTask: (input: ScheduleTaskInput) => Promise<ScheduleTask>;
+  updateTask: (id: number, input: ScheduleTaskInput) => Promise<ScheduleTask>;
+  deleteTask: (id: number) => Promise<void>;
+  /** Toutes les occurrences de la séance ajoutée. */
+  createSessions: (input: ScheduleSessionInput) => Promise<ScheduleSession[]>;
+}
+
 interface SchedulePageProps {
-  /** Cours de l'étudiant, tous programmes confondus. */
+  /** Cours de l'utilisateur, tous programmes confondus. */
   courses: ScheduleCourse[];
-  /** Séances de la semaine qui commence au lundi donné (dashboardApi : données fictives, #206). */
-  onFetchSchedule: (weekStart: Date, courses: ScheduleCourse[]) => Promise<ScheduleSession[]>;
+  api: ScheduleApi;
   /** Ouvre le cours d'une séance. */
   onOpenCourse: (programId: number, courseId: number) => void;
-  /** Mobile : une liste par jour plutôt que la grille. */
+  /** Mobile : une liste par jour plutôt que la grille, et l'ajout dans une fenêtre. */
   compact?: boolean;
   /** Date de référence (injectée par les tests). */
   now?: Date;
@@ -40,7 +74,14 @@ interface SchedulePageProps {
 type Load =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; sessions: ScheduleSession[] };
+  | { status: 'ready'; sessions: ScheduleSession[]; tasks: ScheduleTask[] };
+
+/** Ce que montre la grille : une séance, une tâche, ou l'aperçu de l'ajout en cours. */
+type GridItem = { start: string; end: string } & (
+  | { kind: 'session'; session: ScheduleSession; course: ScheduleCourse }
+  | { kind: 'task'; task: ScheduleTask }
+  | { kind: 'preview'; draft: Draft }
+);
 
 const Chevron = ({ direction }: { direction: 'left' | 'right' }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -52,10 +93,25 @@ const Chevron = ({ direction }: { direction: 'left' | 'right' }) => (
   </svg>
 );
 
-/** Page Horaire du portail : la semaine de cours de l'étudiant, du lundi au vendredi. */
+const Pencil = () => (
+  <svg className={styles.editIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const hueStyle = (color: ScheduleColor) => ({
+  ['--hue' as string]: COLORS[color].hue,
+  ['--sat' as string]: `${COLORS[color].saturation}%`,
+});
+
+/**
+ * Page Horaire du portail, qui est aussi l'agenda : les séances des cours (fixées par leur
+ * personnel) et les tâches personnelles de l'utilisateur, du lundi au vendredi. L'enseignant ou le
+ * responsable d'un cours y ajoute aussi des séances.
+ */
 export default function SchedulePage({
   courses,
-  onFetchSchedule,
+  api,
   onOpenCourse,
   compact = false,
   now = new Date(),
@@ -66,15 +122,28 @@ export default function SchedulePage({
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   /** Incrémenté par « Réessayer » : relance le chargement. */
   const [attempt, setAttempt] = useState(0);
+  /** Ajout en cours (panneau ouvert), avec son brouillon. */
+  const [adding, setAdding] = useState<Draft | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addBusy, setAddBusy] = useState(false);
+  const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
+  const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const panelId = useId();
   const monday = addDays(new Date(thisWeek), offset * 7);
   const mondayTime = monday.getTime();
   const courseKey = courses.map((course) => course.id).join(',');
+  const managesCourse = courses.some((course) => course.canManage);
+  const addLabel = managesCourse ? "Ajouter à l'horaire" : 'Ajouter une tâche';
+  const panelOpen = adding != null && !compact;
 
   useEffect(() => {
     let cancelled = false;
-    onFetchSchedule(new Date(mondayTime), courses)
-      .then((sessions) => {
-        if (!cancelled) setLoad({ status: 'ready', sessions });
+    const weekStart = new Date(mondayTime);
+    Promise.all([api.fetchSessions(weekStart, courses), api.fetchTasks(weekStart)])
+      .then(([sessions, tasks]) => {
+        if (!cancelled) setLoad({ status: 'ready', sessions, tasks });
       })
       .catch(() => {
         if (!cancelled) setLoad({ status: 'error' });
@@ -84,7 +153,12 @@ export default function SchedulePage({
     };
     // `courses` est suivi par ses ids (courseKey) : un nouveau tableau aux mêmes cours ne recharge pas.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mondayTime, courseKey, onFetchSchedule, attempt]);
+  }, [mondayTime, courseKey, api, attempt]);
+
+  // Le panneau d'ajout prend le focus à l'ouverture.
+  useEffect(() => {
+    if (panelOpen) panelRef.current?.querySelector<HTMLElement>('input, select')?.focus();
+  }, [panelOpen]);
 
   function goTo(nextOffset: number) {
     setLoad({ status: 'loading' });
@@ -94,28 +168,149 @@ export default function SchedulePage({
   const days = weekDays(monday);
   const byId = new Map(courses.map((course) => [course.id, course]));
   const sessions = load.status === 'ready' ? load.sessions : [];
-  const sessionsOf = (index: number) => sessions.filter((s) => dayIndex(s.start) === index);
+  const tasks = load.status === 'ready' ? load.tasks : [];
+  const inShownWeek = (iso: string) => dayIndex(iso) !== -1 && startOfWeek(new Date(iso)).getTime() === mondayTime;
 
-  function sessionButton(session: ScheduleSession, style?: React.CSSProperties) {
-    const course = byId.get(session.courseId);
-    if (!course) return null;
-    const time = `${formatTime(session.start)} à ${formatTime(session.end)}`;
+  function openAdd() {
+    if (adding) {
+      closeAdd();
+      return;
+    }
+    const today = days.find((day) => isSameDay(day, now));
+    setAdding(emptyDraft('task', today ?? monday, now.getHours() + 1, null));
+    setAddError(null);
+  }
+
+  function closeAdd() {
+    setAdding(null);
+    if (!compact) addButtonRef.current?.focus();
+  }
+
+  async function submitAdd() {
+    if (!adding) return;
+    const problem = draftError(adding);
+    if (problem) {
+      setAddError(problem);
+      return;
+    }
+    setAddBusy(true);
+    try {
+      if (adding.kind === 'task') {
+        const task = await api.createTask(draftToTask(adding));
+        setLoad((previous) =>
+          previous.status === 'ready' && inShownWeek(task.start) ? { ...previous, tasks: [...previous.tasks, task] } : previous
+        );
+      } else {
+        const created = (await api.createSessions(draftToSession(adding))).filter((s) => inShownWeek(s.start));
+        setLoad((previous) =>
+          previous.status === 'ready' ? { ...previous, sessions: [...previous.sessions, ...created] } : previous
+        );
+      }
+      closeAdd();
+    } catch {
+      setAddError("L'ajout a échoué. Réessayez.");
+    } finally {
+      setAddBusy(false);
+    }
+  }
+
+  async function saveTask(id: number, input: ScheduleTaskInput) {
+    const task = await api.updateTask(id, input);
+    setLoad((previous) =>
+      previous.status === 'ready'
+        ? {
+            ...previous,
+            tasks: previous.tasks.filter((known) => known.id !== id).concat(inShownWeek(task.start) ? [task] : []),
+          }
+        : previous
+    );
+  }
+
+  async function removeTask(id: number) {
+    await api.deleteTask(id);
+    setLoad((previous) =>
+      previous.status === 'ready' ? { ...previous, tasks: previous.tasks.filter((known) => known.id !== id) } : previous
+    );
+  }
+
+  /** Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = lundi). */
+  function itemsOf(index: number): GridItem[] {
+    const items: GridItem[] = [];
+    for (const session of sessions) {
+      const course = byId.get(session.courseId);
+      if (course && dayIndex(session.start) === index) items.push({ kind: 'session', session, course, start: session.start, end: session.end });
+    }
+    for (const task of tasks) {
+      if (dayIndex(task.start) === index) items.push({ kind: 'task', task, start: task.start, end: task.end });
+    }
+    if (adding && adding.date && adding.end > adding.start) {
+      const start = toIso(adding.date, adding.start);
+      if (inShownWeek(start) && dayIndex(start) === index) {
+        items.push({ kind: 'preview', draft: adding, start, end: toIso(adding.date, adding.end) });
+      }
+    }
+    return items;
+  }
+
+  /** `layout` : position dans la grille ; `titleOnly` quand un autre événement le recouvre tôt. */
+  function renderItem(item: GridItem, layout?: { style: React.CSSProperties; stacked: boolean; titleOnly: boolean }): React.ReactNode {
+    const style = layout?.style;
+    const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''}`;
+    const time = `${formatTime(item.start)} à ${formatTime(item.end)}`;
+    const day = <span className={styles.visuallyHidden}>, {longDay(new Date(item.start))}</span>;
+    if (item.kind === 'session') {
+      const { session, course } = item;
+      return (
+        <button
+          key={`s${session.id}`}
+          type="button"
+          className={`${styles.block} ${styles.session} ${extra}`}
+          style={{ ...style, ...hueStyle(courseColor(course.id)) }}
+          onClick={() => setOpenSession(session)}
+        >
+          <span className={styles.blockTitle}>{course.code}</span>
+          <span className={styles.blockDetail}>
+            {session.kind} · {session.room}
+          </span>
+          <span className={styles.blockDetail}>{time}</span>
+          {/* Le nom accessible reprend le texte visible (WCAG 2.5.3), suivi du jour. */}
+          {day}
+        </button>
+      );
+    }
+    if (item.kind === 'task') {
+      const { task } = item;
+      const linked = task.courseId != null ? byId.get(task.courseId)?.code : undefined;
+      return (
+        <button
+          key={`t${task.id}`}
+          type="button"
+          className={`${styles.block} ${styles.task} ${extra}`}
+          style={{ ...style, ...hueStyle(task.color) }}
+          onClick={() => setOpenTask(task)}
+        >
+          <span className={styles.blockTitle}>{task.title}</span>
+          <span className={styles.blockDetail}>{linked ?? 'Tâche personnelle'}</span>
+          <span className={styles.blockDetail}>{time}</span>
+          {day}
+          <Pencil />
+        </button>
+      );
+    }
+    const { draft } = item;
+    const isTask = draft.kind === 'task';
+    const course = draft.courseId != null ? byId.get(draft.courseId) : undefined;
     return (
-      <button
-        key={session.id}
-        type="button"
-        className={styles.session}
-        style={{ ...style, ['--course-color' as string]: courseTileColor(course.id) }}
-        onClick={() => onOpenCourse(course.programId, course.id)}
+      <div
+        key="preview"
+        className={`${styles.block} ${isTask ? styles.task : styles.session} ${styles.preview}`}
+        style={{ ...style, ...hueStyle(isTask ? draft.color : courseColor(draft.courseId ?? 0)) }}
+        aria-hidden="true"
       >
-        <span className={styles.sessionCode}>{course.code}</span>
-        <span className={styles.sessionDetail}>
-          {session.kind} · {session.room}
-        </span>
-        <span className={styles.sessionDetail}>{time}</span>
-        {/* Le nom accessible reprend le texte visible (WCAG 2.5.3), suivi du jour. */}
-        <span className={styles.visuallyHidden}>, {longDay(new Date(session.start))}</span>
-      </button>
+        <span className={styles.blockTitle}>{isTask ? draft.title.trim() || 'Nouvelle tâche' : course?.code}</span>
+        <span className={styles.blockDetail}>{isTask ? 'Nouvelle tâche' : 'Nouvelle séance'}</span>
+        <span className={styles.blockDetail}>{time}</span>
+      </div>
     );
   }
 
@@ -145,15 +340,20 @@ export default function SchedulePage({
         </div>
       );
     }
-    if (courses.length === 0) {
-      return <p className={styles.empty}>Rejoignez un cours pour voir votre horaire.</p>;
-    }
+    const empty =
+      sessions.length + tasks.length > 0
+        ? null
+        : courses.length === 0
+          ? 'Rejoignez un cours pour voir votre horaire.'
+          : "Rien à l'horaire cette semaine.";
     if (compact) {
       return (
         <div className={styles.dayList}>
-          {sessions.length === 0 && <p className={styles.empty}>Aucun cours cette semaine.</p>}
+          {empty && <p className={styles.empty}>{empty}</p>}
           {days.map((day, index) => {
-            const ofDay = sessionsOf(index).sort((a, b) => a.start.localeCompare(b.start));
+            const ofDay = itemsOf(index)
+              .filter((item) => item.kind !== 'preview')
+              .sort((a, b) => a.start.localeCompare(b.start));
             if (ofDay.length === 0) return null;
             return (
               <section
@@ -165,7 +365,7 @@ export default function SchedulePage({
                   {dayTitle(day)}
                   {isSameDay(day, now) && <span className={styles.todayTag}>Aujourd'hui</span>}
                 </h2>
-                <div className={styles.dayItems}>{ofDay.map((session) => sessionButton(session))}</div>
+                <div className={styles.dayItems}>{ofDay.map((item) => renderItem(item))}</div>
               </section>
             );
           })}
@@ -174,9 +374,7 @@ export default function SchedulePage({
     }
     return (
       <div className={styles.gridWrap}>
-        {sessions.length === 0 && (
-          <p className={styles.emptyOverlay}>Aucun cours cette semaine.</p>
-        )}
+        {empty && <p className={styles.emptyOverlay}>{empty}</p>}
         <div className={styles.grid} role="group" aria-label={weekLabel(monday)}>
           <div className={styles.corner} aria-hidden="true" />
           {days.map((day, index) => (
@@ -201,12 +399,17 @@ export default function SchedulePage({
               className={`${styles.dayColumn} ${isSameDay(day, now) ? styles.today : ''}`}
               style={{ height: `${HOURS.length * HOUR_REM}rem` }}
             >
-              {placeSessions(sessionsOf(index)).map(({ session, lane, lanes }) =>
-                sessionButton(session, {
-                  top: `${(minutesFromStart(session.start) / 60) * HOUR_REM}rem`,
-                  height: `${((minutesFromStart(session.end) - minutesFromStart(session.start)) / 60) * HOUR_REM}rem`,
-                  left: `calc(${(lane / lanes) * 100}% + 0.25rem)`,
-                  width: `calc(${100 / lanes}% - 0.5rem)`,
+              {placeItems(itemsOf(index)).map(({ item, depth, visible }) =>
+                renderItem(item, {
+                  style: {
+                    top: `${(minutesFromStart(item.start) / 60) * HOUR_REM}rem`,
+                    height: `${((minutesFromStart(item.end) - minutesFromStart(item.start)) / 60) * HOUR_REM}rem`,
+                    left: `calc(${depth * STEP_REM}rem + 0.25rem)`,
+                    width: `calc(100% - ${depth * STEP_REM}rem - 0.5rem)`,
+                    zIndex: depth + 1,
+                  },
+                  stacked: depth > 0,
+                  titleOnly: (visible / 60) * HOUR_REM < DETAIL_MIN_REM,
                 })
               )}
             </div>
@@ -216,6 +419,21 @@ export default function SchedulePage({
     );
   }
 
+  const form = adding && (
+    <ScheduleForm
+      draft={adding}
+      onChange={setAdding}
+      courses={courses}
+      allowSessions
+      error={addError}
+      busy={addBusy}
+      submitLabel={adding.kind === 'task' ? 'Ajouter la tâche' : 'Ajouter la séance'}
+      onSubmit={() => void submitAdd()}
+      onCancel={closeAdd}
+    />
+  );
+  const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
+
   return (
     <section className={styles.page} aria-label="Contenu principal">
       <header className={styles.header}>
@@ -224,14 +442,6 @@ export default function SchedulePage({
           <p className={styles.subtitle}>{weekLabel(monday)}</p>
         </div>
         <div className={styles.nav}>
-          <button
-            type="button"
-            className={styles.button}
-            disabled={offset === 0}
-            onClick={() => goTo(0)}
-          >
-            Aujourd'hui
-          </button>
           <button
             type="button"
             className={`${styles.button} ${styles.iconButton}`}
@@ -248,9 +458,64 @@ export default function SchedulePage({
           >
             <Chevron direction="right" />
           </button>
+          <button type="button" className={styles.button} disabled={offset === 0} onClick={() => goTo(0)}>
+            Aujourd'hui
+          </button>
+          <button
+            ref={addButtonRef}
+            type="button"
+            className={`${styles.button} ${styles.primary}`}
+            aria-expanded={compact ? undefined : panelOpen}
+            aria-controls={panelOpen ? panelId : undefined}
+            onClick={openAdd}
+          >
+            {addLabel}
+          </button>
         </div>
       </header>
-      {renderBody()}
+      <div className={styles.body}>
+        <div className={styles.main}>{renderBody()}</div>
+        {panelOpen && (
+          <aside id={panelId} ref={panelRef} className={styles.panel} aria-label={addLabel}>
+            <h2 className={styles.panelTitle}>{managesCourse ? "Ajouter à l'horaire" : 'Nouvelle tâche'}</h2>
+            {form}
+          </aside>
+        )}
+      </div>
+      {compact && adding && <AddPopup label={addLabel} onClose={closeAdd}>{form}</AddPopup>}
+      {openSession && sessionCourse && (
+        <SessionPopup
+          session={openSession}
+          course={sessionCourse}
+          onClose={() => setOpenSession(null)}
+          onOpenCourse={() => {
+            setOpenSession(null);
+            onOpenCourse(sessionCourse.programId, sessionCourse.id);
+          }}
+        />
+      )}
+      {openTask && (
+        <TaskPopup
+          task={openTask}
+          courses={courses}
+          onClose={() => setOpenTask(null)}
+          onSave={(input) => saveTask(openTask.id, input)}
+          onDelete={() => removeTask(openTask.id)}
+        />
+      )}
     </section>
+  );
+}
+
+/** Mobile : l'ajout dans une fenêtre plutôt qu'un panneau. */
+function AddPopup({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+  const controller = usePopupController();
+  return (
+    <Popup variant={PopupVariant.Form} label={label} onClose={onClose} controller={controller}>
+      <div className={styles.dialog}>
+        <Header title={label} onClose={() => controller.requestClose()} />
+        {children}
+      </div>
+    </Popup>
   );
 }

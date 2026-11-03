@@ -56,7 +56,7 @@ import {
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
-import SchedulePage from '../../components/SchedulePage/SchedulePage.tsx';
+import SchedulePage, { type ScheduleApi } from '../../components/SchedulePage/SchedulePage.tsx';
 import { type ScheduleCourse } from '../../types/domain.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
@@ -113,6 +113,16 @@ type PopupState =
   | { kind: 'deleteCourse'; courseId: number }
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
+
+// Agenda de la page Horaire (#206) : données fictives de dashboardApi, lues à l'appel (vi.mock).
+const scheduleApi: ScheduleApi = {
+  fetchSessions: (weekStart, courses) => api.fetchSchedule(weekStart, courses),
+  fetchTasks: (weekStart) => api.fetchScheduleTasks(weekStart),
+  createTask: (input) => api.createScheduleTask(input),
+  updateTask: (id, input) => api.updateScheduleTask(id, input),
+  deleteTask: (id) => api.deleteScheduleTask(id),
+  createSessions: (input) => api.createScheduleSessions(input),
+};
 
 const MOBILE_QUERY = '(max-width: 900px)';
 
@@ -907,7 +917,14 @@ export default function Dashboard() {
   for (const program of dashboardPrograms) {
     for (const course of program.courses ?? []) {
       if (!scheduleCourses.some((known) => known.id === course.id)) {
-        scheduleCourses.push({ id: course.id, code: course.code?.trim() || course.title?.trim() || 'Cours', programId: program.id });
+        scheduleCourses.push({
+          id: course.id,
+          code: course.code?.trim() || course.title?.trim() || 'Cours',
+          title: course.title?.trim() || undefined,
+          programId: program.id,
+          // Enseignant ou responsable du programme : peut ajouter des séances au cours.
+          canManage: permsForProgram(program.id).canManageContent,
+        });
       }
     }
   }
@@ -1119,7 +1136,7 @@ export default function Dashboard() {
       {portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
         <SchedulePage
           courses={scheduleCourses}
-          onFetchSchedule={api.fetchSchedule}
+          api={scheduleApi}
           onOpenCourse={openCourse}
           compact={isMobile}
         />

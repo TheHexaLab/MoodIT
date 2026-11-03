@@ -444,16 +444,20 @@ describe('Dashboard', () => {
           return { id: 1, courseId: course.id, kind: 'Cours', room: 'A', start: start.toISOString(), end: end.toISOString() };
         })
       );
+      vi.mocked(api.fetchScheduleTasks).mockResolvedValue([]);
       try {
         renderDashboard({ path: '/home/horaire' });
         const block = await screen.findByRole('button', { name: /^IFT101 ?Cours/ }, { timeout: 5000 });
         const courses = vi.mocked(api.fetchSchedule).mock.calls.at(-1)![1];
         expect(new Set(courses.map((c) => c.id)).size).toBe(courses.length);
+        expect(api.fetchScheduleTasks).toHaveBeenCalled();
         fireEvent.click(block);
+        fireEvent.click(await screen.findByRole('button', { name: 'Voir le cours' }));
         await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
       } finally {
         vi.mocked(api.scheduleAvailable).mockReset();
         vi.mocked(api.fetchSchedule).mockReset();
+        vi.mocked(api.fetchScheduleTasks).mockReset();
       }
     });
 

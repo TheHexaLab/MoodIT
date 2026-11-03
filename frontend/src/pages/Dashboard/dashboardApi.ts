@@ -11,11 +11,21 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
-import { demoSchedule } from '../../mocks/scheduleData.ts';
+import {
+  addDemoSessions,
+  addDemoTask,
+  deleteDemoTask,
+  demoSchedule,
+  demoTasks,
+  updateDemoTask,
+} from '../../mocks/scheduleData.ts';
 import type {
   AnswerResponse,
   ScheduleCourse,
   ScheduleSession,
+  ScheduleSessionInput,
+  ScheduleTask,
+  ScheduleTaskInput,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1255,4 +1265,26 @@ export async function fetchSchedule(
   courses: ScheduleCourse[]
 ): Promise<ScheduleSession[]> {
   return demoSchedule(weekStart, courses);
+}
+
+/** Tâches personnelles de la semaine qui commence au lundi `weekStart`. */
+export async function fetchScheduleTasks(weekStart: Date): Promise<ScheduleTask[]> {
+  return demoTasks(weekStart);
+}
+
+export async function createScheduleTask(input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return addDemoTask(input);
+}
+
+export async function updateScheduleTask(id: number, input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return updateDemoTask(id, input);
+}
+
+export async function deleteScheduleTask(id: number): Promise<void> {
+  deleteDemoTask(id);
+}
+
+/** Séance ajoutée par l'enseignant : toutes ses occurrences, si elle se répète. */
+export async function createScheduleSessions(input: ScheduleSessionInput): Promise<ScheduleSession[]> {
+  return addDemoSessions(input);
 }

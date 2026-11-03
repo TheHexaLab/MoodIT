@@ -1,16 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import SchedulePage from './SchedulePage';
-import type { ScheduleCourse, ScheduleSession } from '../../types/domain';
+import SchedulePage, { type ScheduleApi } from './SchedulePage';
+import type { ScheduleCourse, ScheduleSession, ScheduleTask } from '../../types/domain';
+
+// jsdom ne fournit pas matchMedia ; reduced-motion → les fenêtres se ferment sans animation.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }),
+});
 
 afterEach(cleanup);
 
 /** Mercredi 28 octobre 2026 : la semaine du 26 au 30 octobre. */
 const NOW = new Date(2026, 9, 28, 12, 0);
 const COURSES: ScheduleCourse[] = [
-  { id: 10, code: 'INF201', programId: 1 },
+  { id: 10, code: 'INF201', title: 'Structures de données', programId: 1 },
   { id: 11, code: 'MAT265', programId: 2 },
 ];
+const TEACHER: ScheduleCourse[] = [COURSES[0], { ...COURSES[1], canManage: true }];
 
 const at = (week: Date, day: number, hour: number, minute = 0) => {
   const date = new Date(week);
@@ -20,24 +32,37 @@ const at = (week: Date, day: number, hour: number, minute = 0) => {
 };
 
 /** Deux séances par semaine, aux mêmes jours que la semaine demandée. */
-const weekly = vi.fn(async (weekStart: Date): Promise<ScheduleSession[]> => [
+const weekly = async (weekStart: Date): Promise<ScheduleSession[]> => [
   { id: 1, courseId: 10, kind: 'Cours', room: 'C1-3125', start: at(weekStart, 0, 8, 30), end: at(weekStart, 0, 10, 15) },
   { id: 2, courseId: 11, kind: 'Laboratoire', room: 'D7-2021', start: at(weekStart, 2, 13, 30), end: at(weekStart, 2, 15, 15) },
-]);
+];
+
+/** Une tâche le mercredi, par-dessus le laboratoire de MAT265, et une liée à INF201 le vendredi. */
+const weeklyTasks = async (weekStart: Date): Promise<ScheduleTask[]> => [
+  { id: 7, title: 'Tutorat', start: at(weekStart, 2, 14), end: at(weekStart, 2, 15), courseId: null, reminder: null, notes: '', color: 'rose' },
+  { id: 8, title: 'Lire le chapitre 4', start: at(weekStart, 4, 9), end: at(weekStart, 4, 10), courseId: 10, reminder: 30, notes: 'p. 80', color: 'green' },
+];
+
+function makeApi(overrides: Partial<ScheduleApi> = {}) {
+  return {
+    fetchSessions: vi.fn(weekly),
+    fetchTasks: vi.fn(weeklyTasks),
+    createTask: vi.fn(async (input) => ({ ...input, id: 50 })),
+    updateTask: vi.fn(async (id, input) => ({ ...input, id })),
+    deleteTask: vi.fn(async () => {}),
+    createSessions: vi.fn(async (input) => [{ ...input, id: 60 }]),
+    ...overrides,
+  } satisfies ScheduleApi;
+}
 
 function setup(props: Partial<React.ComponentProps<typeof SchedulePage>> = {}) {
   const onOpenCourse = vi.fn();
-  render(
-    <SchedulePage
-      courses={COURSES}
-      onFetchSchedule={weekly}
-      onOpenCourse={onOpenCourse}
-      now={NOW}
-      {...props}
-    />
-  );
-  return { onOpenCourse };
+  const api = (props.api as ReturnType<typeof makeApi> | undefined) ?? makeApi();
+  render(<SchedulePage courses={COURSES} onOpenCourse={onOpenCourse} now={NOW} {...props} api={api} />);
+  return { onOpenCourse, api };
 }
+
+const block = (name: RegExp) => screen.findByRole('button', { name });
 
 describe('SchedulePage — grille', () => {
   it('annonce le chargement, puis montre la semaine et le jour courant', async () => {
@@ -48,31 +73,38 @@ describe('SchedulePage — grille', () => {
     expect(screen.getByText('Lun 26').getAttribute('aria-current')).toBeNull();
   });
 
-  it('montre chaque séance avec son cours, son type, son local et ses heures', async () => {
+  it('montre chaque séance avec son cours, son type, son local, ses heures et sa couleur', async () => {
     setup();
-    const block = await screen.findByRole('button', { name: /^INF201/ });
-    expect(block.textContent).toContain('Cours · C1-3125');
-    expect(block.textContent).toContain('8 h 30 à 10 h 15');
+    const session = await block(/^INF201/);
+    expect(session.textContent).toContain('Cours · C1-3125');
+    expect(session.textContent).toContain('8 h 30 à 10 h 15');
     // Le nom accessible reprend le texte visible, puis le jour.
-    expect(block.textContent).toContain('lundi 26 octobre');
-    expect(block.style.top).toBe(`${0.5 * 4.375}rem`);
+    expect(session.textContent).toContain('lundi 26 octobre');
+    expect(session.style.top).toBe(`${0.5 * 4.375}rem`);
+    expect(session.style.getPropertyValue('--hue')).toBe('174');
   });
 
-  it('un clic sur une séance ouvre son cours, dans son programme', async () => {
-    const { onOpenCourse } = setup();
-    fireEvent.click(await screen.findByRole('button', { name: /^MAT265/ }));
-    expect(onOpenCourse).toHaveBeenCalledWith(2, 11);
+  it('montre les tâches, en cascade par-dessus la séance qu’elles chevauchent', async () => {
+    setup();
+    const tutorat = await block(/^Tutorat/);
+    expect(tutorat.textContent).toContain('Tâche personnelle');
+    expect(tutorat.textContent).toContain('14 h 00 à 15 h 00');
+    expect(tutorat.style.left).toBe('calc(1.5rem)');
+    expect(tutorat.className).toMatch(/stacked/);
+    // Recouvert après 30 minutes : le laboratoire ne montre plus que son sigle.
+    expect((await block(/^MAT265/)).className).toMatch(/titleOnly/);
+    expect((await block(/^Lire le chapitre 4/)).textContent).toContain('INF201');
   });
 
   it('passe d’une semaine à l’autre, et « Aujourd’hui » revient à la semaine en cours', async () => {
     setup();
-    await screen.findByRole('button', { name: /^INF201/ });
+    await block(/^INF201/);
     const today = screen.getByRole('button', { name: "Aujourd'hui" }) as HTMLButtonElement;
     expect(today.disabled).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Semaine suivante' }));
     expect(screen.getByText('Semaine du 2 au 6 novembre 2026')).toBeTruthy();
-    await screen.findByRole('button', { name: /^INF201/ });
+    await block(/^INF201/);
     expect(screen.queryByText((_, element) => element?.getAttribute('aria-current') === 'date')).toBeNull();
     expect(today.disabled).toBe(false);
 
@@ -82,49 +114,255 @@ describe('SchedulePage — grille', () => {
 
     fireEvent.click(today);
     expect(screen.getByText('Semaine du 26 au 30 octobre 2026')).toBeTruthy();
-    await screen.findByRole('button', { name: /^INF201/ });
+    await block(/^INF201/);
   });
 
   it('ignore une séance d’un cours inconnu', async () => {
-    setup({ onFetchSchedule: vi.fn().mockResolvedValue([{ id: 9, courseId: 99, kind: 'Cours', room: 'X', start: at(new Date(2026, 9, 26), 0, 9), end: at(new Date(2026, 9, 26), 0, 10) }]) });
+    const api = makeApi({
+      fetchSessions: vi.fn().mockResolvedValue([
+        { id: 9, courseId: 99, kind: 'Cours', room: 'X', start: at(new Date(2026, 9, 26), 0, 9), end: at(new Date(2026, 9, 26), 0, 10) },
+      ]),
+      fetchTasks: vi.fn().mockResolvedValue([]),
+    });
+    setup({ api });
     await screen.findByRole('group');
     expect(screen.queryByRole('button', { name: /Cours/ })).toBeNull();
   });
 
-  it('une semaine sans séance le dit, sans cacher la grille', async () => {
-    setup({ onFetchSchedule: vi.fn().mockResolvedValue([]) });
-    expect(await screen.findByText('Aucun cours cette semaine.')).toBeTruthy();
+  it('une semaine vide le dit, sans cacher la grille', async () => {
+    setup({ api: makeApi({ fetchSessions: vi.fn().mockResolvedValue([]), fetchTasks: vi.fn().mockResolvedValue([]) }) });
+    expect(await screen.findByText("Rien à l'horaire cette semaine.")).toBeTruthy();
     expect(screen.getByRole('group')).toBeTruthy();
   });
 
-  it('sans cours, invite à en rejoindre un', async () => {
-    setup({ courses: [], onFetchSchedule: vi.fn().mockResolvedValue([]) });
+  it('sans cours ni tâche, invite à rejoindre un cours', async () => {
+    setup({ courses: [], api: makeApi({ fetchSessions: vi.fn().mockResolvedValue([]), fetchTasks: vi.fn().mockResolvedValue([]) }) });
     expect(await screen.findByText('Rejoignez un cours pour voir votre horaire.')).toBeTruthy();
   });
 
   it('un échec de chargement propose de réessayer', async () => {
-    const onFetchSchedule = vi.fn().mockRejectedValueOnce(new Error('panne')).mockImplementation(weekly);
-    setup({ onFetchSchedule });
+    const fetchTasks = vi.fn().mockRejectedValueOnce(new Error('panne')).mockImplementation(weeklyTasks);
+    setup({ api: makeApi({ fetchTasks }) });
     fireEvent.click(await screen.findByRole('button', { name: 'Réessayer' }));
-    expect(await screen.findByRole('button', { name: /^INF201/ })).toBeTruthy();
-    expect(onFetchSchedule).toHaveBeenCalledTimes(2);
+    expect(await block(/^INF201/)).toBeTruthy();
+    expect(fetchTasks).toHaveBeenCalledTimes(2);
   });
 
   it('ne recharge pas pour un nouveau tableau aux mêmes cours', async () => {
-    const onFetchSchedule = vi.fn(weekly);
-    const { rerender } = render(
-      <SchedulePage courses={COURSES} onFetchSchedule={onFetchSchedule} onOpenCourse={vi.fn()} now={NOW} />
-    );
-    await screen.findByRole('button', { name: /^INF201/ });
-    rerender(
-      <SchedulePage courses={[...COURSES]} onFetchSchedule={onFetchSchedule} onOpenCourse={vi.fn()} now={NOW} />
-    );
-    await waitFor(() => expect(onFetchSchedule).toHaveBeenCalledTimes(1));
+    const api = makeApi();
+    const { rerender } = render(<SchedulePage courses={COURSES} api={api} onOpenCourse={vi.fn()} now={NOW} />);
+    await block(/^INF201/);
+    rerender(<SchedulePage courses={[...COURSES]} api={api} onOpenCourse={vi.fn()} now={NOW} />);
+    await waitFor(() => expect(api.fetchSessions).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('SchedulePage — détail d’une séance', () => {
+  it('un clic montre la séance ; « Voir le cours » ouvre le cours, dans son programme', async () => {
+    const { onOpenCourse } = setup();
+    fireEvent.click(await block(/^INF201/));
+    const dialog = screen.getByRole('dialog', { name: 'INF201 · Cours' });
+    expect(within(dialog).getByText('Structures de données')).toBeTruthy();
+    expect(within(dialog).getByText('Lundi 26 octobre, 8 h 30 à 10 h 15')).toBeTruthy();
+    expect(within(dialog).getByText('C1-3125')).toBeTruthy();
+    expect(within(dialog).getByText(/vous ne pouvez pas la déplacer/)).toBeTruthy();
+    expect(within(dialog).queryByText('Répétition')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Voir le cours' }));
+    expect(onOpenCourse).toHaveBeenCalledWith(1, 10);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('une séance hebdomadaire dit sa répétition ; l’enseignant n’a pas l’avertissement', async () => {
+    const fetchSessions = vi.fn(async (weekStart: Date) => [
+      { ...(await weekly(weekStart))[1], until: new Date(2026, 11, 9).toISOString() },
+    ]);
+    setup({ courses: TEACHER, api: makeApi({ fetchSessions }) });
+    fireEvent.click(await block(/^MAT265/));
+    const dialog = screen.getByRole('dialog', { name: 'MAT265 · Laboratoire' });
+    expect(within(dialog).getByText("Chaque mercredi, jusqu'au 9 décembre")).toBeTruthy();
+    expect(within(dialog).queryByText(/vous ne pouvez pas la déplacer/)).toBeNull();
+    // La croix de l'en-tête et le bouton du bas ferment tous deux.
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Fermer' }).at(-1)!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('SchedulePage — modifier une tâche', () => {
+  it('un clic ouvre la fenêtre, remplie ; « Enregistrer » met la tâche à jour', async () => {
+    const { api } = setup();
+    fireEvent.click(await block(/^Lire le chapitre 4/));
+    const dialog = screen.getByRole('dialog', { name: 'Modifier la tâche' });
+    const title = within(dialog).getByRole('textbox', { name: 'Titre' }) as HTMLInputElement;
+    expect(title.value).toBe('Lire le chapitre 4');
+    expect((within(dialog).getByRole('radio', { name: 'Vert' }) as HTMLInputElement).checked).toBe(true);
+    expect((within(dialog).getByRole('combobox', { name: 'Cours lié (facultatif)' }) as HTMLSelectElement).value).toBe('10');
+    expect((within(dialog).getByRole('combobox', { name: 'Rappel' }) as HTMLSelectElement).value).toBe('30');
+
+    fireEvent.change(title, { target: { value: 'Lire le chapitre 5' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Violet' }));
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Cours lié (facultatif)' }), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Rappel' }), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Fin' }), { target: { value: '10:30' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Notes (facultatif)' }), { target: { value: 'p. 95' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(api.updateTask).toHaveBeenCalledWith(8, expect.objectContaining({
+      title: 'Lire le chapitre 5',
+      color: 'purple',
+      courseId: null,
+      reminder: null,
+      notes: 'p. 95',
+    }));
+    expect((await block(/^Lire le chapitre 5/)).textContent).toContain('9 h 00 à 10 h 30');
+  });
+
+  it('refuse un titre vide, et dit quand l’enregistrement échoue', async () => {
+    setup({ api: makeApi({ updateTask: vi.fn().mockRejectedValue(new Error('panne')) }) });
+    fireEvent.click(await block(/^Tutorat/));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Titre' }), { target: { value: ' ' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect(within(dialog).getByRole('alert').textContent).toBe('Donnez un titre à la tâche.');
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Titre' }), { target: { value: 'Tutorat' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe("L'enregistrement a échoué. Réessayez.");
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('une tâche déplacée à une autre semaine quitte la grille', async () => {
+    setup();
+    fireEvent.click(await block(/^Tutorat/));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Date'), { target: { value: '2026-11-04' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Tutorat/ })).toBeNull());
+  });
+
+  it('« Supprimer » retire la tâche ; « Annuler » et la croix ferment sans rien changer', async () => {
+    const { api } = setup();
+    fireEvent.click(await block(/^Tutorat/));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Annuler' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(await block(/^Tutorat/));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fermer' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(await block(/^Tutorat/));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Tutorat/ })).toBeNull());
+    expect(api.deleteTask).toHaveBeenCalledWith(7);
+    expect(api.updateTask).not.toHaveBeenCalled();
+  });
+});
+
+describe('SchedulePage — ajouter', () => {
+  it('« Ajouter une tâche » ouvre le panneau ; la tâche s’affiche pendant la saisie, puis s’ajoute', async () => {
+    const { api } = setup();
+    await block(/^INF201/);
+    const open = screen.getByRole('button', { name: 'Ajouter une tâche' });
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(open);
+    expect(open.getAttribute('aria-expanded')).toBe('true');
+    const panel = screen.getByRole('complementary', { name: 'Ajouter une tâche' });
+    expect(within(panel).getByRole('heading', { name: 'Nouvelle tâche' })).toBeTruthy();
+    expect(within(panel).queryByRole('group', { name: "Type d'ajout" })).toBeNull();
+    const title = within(panel).getByRole('textbox', { name: 'Titre' });
+    expect(document.activeElement).toBe(title);
+
+    // Aperçu : le jour courant, l'heure qui suit.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
+    expect(within(panel).getByRole('alert').textContent).toBe('Donnez un titre à la tâche.');
+    expect(screen.getByText('13 h 00 à 14 h 00').closest('[aria-hidden]')?.textContent).toContain('Nouvelle tâche');
+    fireEvent.change(title, { target: { value: 'Réviser l’intra' } });
+    fireEvent.click(within(panel).getByRole('radio', { name: 'Orange' }));
+    expect(screen.getByText('Réviser l’intra').closest('[aria-hidden]')).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
+    await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+    expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Réviser l’intra', color: 'orange', courseId: null }));
+    expect(await block(/^Réviser l’intra/)).toBeTruthy();
+    expect(document.activeElement).toBe(open);
+  });
+
+  it('le bouton ou « Annuler » referme le panneau ; une tâche d’une autre semaine ne s’affiche pas', async () => {
+    setup();
+    await block(/^INF201/);
+    const open = screen.getByRole('button', { name: 'Ajouter une tâche' });
+    fireEvent.click(open);
+    fireEvent.click(open);
+    expect(screen.queryByRole('complementary')).toBeNull();
+    fireEvent.click(open);
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
+    expect(screen.queryByRole('complementary')).toBeNull();
+
+    fireEvent.click(open);
+    const panel = screen.getByRole('complementary');
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Titre' }), { target: { value: 'Plus tard' } });
+    fireEvent.change(within(panel).getByLabelText('Date'), { target: { value: '2026-11-04' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
+    await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+    expect(screen.queryByRole('button', { name: /^Plus tard/ })).toBeNull();
+  });
+
+  it('dit quand l’ajout échoue, et garde le panneau ouvert', async () => {
+    setup({ api: makeApi({ createTask: vi.fn().mockRejectedValue(new Error('panne')) }) });
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter une tâche' }));
+    const panel = screen.getByRole('complementary');
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Titre' }), { target: { value: 'Lire' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
+    expect((await within(panel).findByRole('alert')).textContent).toBe("L'ajout a échoué. Réessayez.");
+  });
+
+  it('l’enseignant ajoute une séance à son cours, chaque semaine jusqu’à une date', async () => {
+    const { api } = setup({ courses: TEACHER });
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
+    const panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Séance du cours' }));
+    expect(within(panel).getByRole('button', { name: 'Séance du cours' }).getAttribute('aria-pressed')).toBe('true');
+    // Seuls les cours qu'il gère.
+    const course = within(panel).getByRole('combobox', { name: 'Cours' }) as HTMLSelectElement;
+    expect([...course.options].map((o) => o.textContent)).toEqual(['MAT265']);
+    fireEvent.change(course, { target: { value: '11' } });
+    fireEvent.change(within(panel).getByRole('combobox', { name: 'Type' }), { target: { value: 'Atelier' } });
+    expect(screen.getByText('Nouvelle séance')).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la séance' }));
+    expect(within(panel).getByRole('alert').textContent).toBe('Indiquez le local.');
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Local' }), { target: { value: 'C1-4016' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Chaque semaine' }));
+    const until = within(panel).getByLabelText("Jusqu'au") as HTMLInputElement;
+    expect(until.value).toBe('2026-10-28');
+    fireEvent.change(until, { target: { value: '2026-12-09' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la séance' }));
+
+    await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+    expect(api.createSessions).toHaveBeenCalledWith(expect.objectContaining({ courseId: 11, kind: 'Atelier', room: 'C1-4016' }));
+    expect(vi.mocked(api.createSessions).mock.calls[0][0].until).toBe(new Date(2026, 11, 9).toISOString());
+    expect(await block(/^MAT265 ?Atelier/)).toBeTruthy();
+  });
+
+  it('« Une fois » retire la répétition ; revenir à « Tâche » oublie le cours de la séance', async () => {
+    setup({ courses: TEACHER });
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
+    const panel = screen.getByRole('complementary');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Tâche' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Séance du cours' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Chaque semaine' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Une fois' }));
+    expect(within(panel).queryByLabelText("Jusqu'au")).toBeNull();
+    fireEvent.change(within(panel).getByRole('combobox', { name: 'Début' }), { target: { value: '08:00' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Tâche' }));
+    expect((within(panel).getByRole('combobox', { name: 'Cours lié (facultatif)' }) as HTMLSelectElement).value).toBe('');
   });
 });
 
 describe('SchedulePage — mobile', () => {
-  it('une liste par jour, sans les jours vides, avec le jour courant marqué', async () => {
+  it('une liste par jour, séances et tâches, sans les jours vides, avec le jour courant marqué', async () => {
     setup({ compact: true });
     const monday = await screen.findByRole('region', { name: 'lundi 26 octobre' });
     expect(within(monday).getByRole('heading', { name: 'Lundi 26 octobre' })).toBeTruthy();
@@ -132,12 +370,26 @@ describe('SchedulePage — mobile', () => {
 
     const wednesday = screen.getByRole('region', { name: 'mercredi 28 octobre' });
     expect(within(wednesday).getByText("Aujourd'hui")).toBeTruthy();
+    expect(within(wednesday).getAllByRole('button').map((b) => b.textContent?.slice(0, 6))).toEqual(['MAT265', 'Tutora']);
     expect(screen.queryByRole('region', { name: 'mardi 27 octobre' })).toBeNull();
     expect(screen.queryByRole('group')).toBeNull();
   });
 
-  it('une semaine sans séance le dit', async () => {
-    setup({ compact: true, onFetchSchedule: vi.fn().mockResolvedValue([]) });
-    expect(await screen.findByText('Aucun cours cette semaine.')).toBeTruthy();
+  it('une semaine vide le dit', async () => {
+    setup({ compact: true, api: makeApi({ fetchSessions: vi.fn().mockResolvedValue([]), fetchTasks: vi.fn().mockResolvedValue([]) }) });
+    expect(await screen.findByText("Rien à l'horaire cette semaine.")).toBeTruthy();
+  });
+
+  it('l’ajout s’ouvre dans une fenêtre, que la croix referme', async () => {
+    setup({ compact: true });
+    await screen.findByRole('region', { name: 'lundi 26 octobre' });
+    const open = screen.getByRole('button', { name: 'Ajouter une tâche' });
+    expect(open.getAttribute('aria-expanded')).toBeNull();
+    fireEvent.click(open);
+    const dialog = screen.getByRole('dialog', { name: 'Ajouter une tâche' });
+    expect(within(dialog).getByRole('textbox', { name: 'Titre' })).toBeTruthy();
+    expect(screen.queryByRole('complementary')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fermer' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
