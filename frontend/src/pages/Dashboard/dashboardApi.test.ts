@@ -402,6 +402,35 @@ describe('evaluateCode', () => {
     expect(out).toEqual([{ name: 't', passed: true, weight: 1 }]);
   });
 
+  it('cas structurés (entry) → POST /exec/evaluate-structured avec args/attendu parsés en JSON', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([{ name: 'c1', passed: true, weight: 1 }]));
+    const out = await evaluateCode({
+      language: 'Java',
+      code: 'class Solution{}',
+      testCases: [
+        {
+          name: 'c1',
+          harnessCode: '',
+          entry: 'Solution.solution',
+          argsJson: '[5]',
+          expectedJson: '10',
+          compareMode: 'exact',
+          weight: 2,
+        } as never,
+      ],
+    });
+    const [url, init] = callArgs();
+    expect(url).toBe('/exec/evaluate-structured');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      language: 'Java',
+      code: 'class Solution{}',
+      cases: [
+        { name: 'c1', entry: 'Solution.solution', args: [5], expected: 10, compare: 'exact', weight: 2 },
+      ],
+    });
+    expect(out).toEqual([{ name: 'c1', passed: true, weight: 1 }]);
+  });
+
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(

@@ -181,4 +181,55 @@ describe('HarnessBody', () => {
       expect(save.disabled).toBe(true);
     });
   });
+
+  // ── Cas STRUCTURÉS (#116) : langage compilé → champs entry/args/attendu, pas de harnais-code ──
+  describe('cas structurés (langage compilé)', () => {
+    const JAVA: Language = { id: 5, name: 'Java' };
+
+    it("affiche le bandeau structuré et les champs de cas (pas d'éditeur de harnais)", () => {
+      renderHarness({
+        harnessLanguage: JAVA,
+        testCases: [
+          {
+            id: 1,
+            name: 'Cas A',
+            harnessCode: '',
+            entry: 'Solution.solution',
+            argsJson: '[5]',
+            expectedJson: '10',
+            compareMode: 'exact',
+            weight: 1,
+          },
+        ],
+      });
+      expect(screen.getByText(t.structuredInfoBanner)).toBeTruthy();
+      const entry = screen.getByPlaceholderText(t.entryPlaceholder) as HTMLInputElement;
+      expect(entry.value).toBe('Solution.solution');
+      // Pas d'éditeur de code harnais en mode structuré.
+      expect(screen.queryByLabelText(t.codeAria(1))).toBeNull();
+    });
+
+    it('ajoute un cas structuré et remonte ses champs à la sauvegarde', () => {
+      const { onSave } = renderHarness({ harnessLanguage: JAVA, testCases: [] });
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(t.add) }));
+      fireEvent.change(screen.getByPlaceholderText(t.namePlaceholder), { target: { value: 'Cas 1' } });
+      fireEvent.change(screen.getByPlaceholderText(t.entryPlaceholder), { target: { value: 'solution' } });
+      fireEvent.click(screen.getByText(t.save));
+      const saved = onSave.mock.calls[0][0] as TestCaseDraft[];
+      expect(saved[0].entry).toBe('solution');
+      expect(saved[0].compareMode).toBe('exact');
+      expect(saved[0].argsJson).toBe('[]');
+    });
+
+    it("enregistrement bloqué tant que l'entrée (fonction) est vide", () => {
+      renderHarness({
+        harnessLanguage: JAVA,
+        testCases: [
+          { id: 1, name: 'A', harnessCode: '', entry: '', argsJson: '[]', expectedJson: '1', compareMode: 'exact', weight: 1 },
+        ],
+      });
+      const save = screen.getByText(t.save).closest('button') as HTMLButtonElement;
+      expect(save.disabled).toBe(true);
+    });
+  });
 });

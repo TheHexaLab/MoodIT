@@ -1187,6 +1187,7 @@ public class QuizService {
             TestCase tc = new TestCase();
             tc.setName(td.getName());
             tc.setHarnessCode(td.getHarnessCode());
+            applyStructuredFields(tc, td);
             tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
             tc.setQuestion(question);
             testCases.add(tc);
@@ -1218,8 +1219,17 @@ public class QuizService {
             }
             tc.setName(td.getName());
             tc.setHarnessCode(td.getHarnessCode());
+            applyStructuredFields(tc, td);
             tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
         }
+    }
+
+    /** Copie les champs d'un cas STRUCTURÉ (#116) du DTO vers l'entité (null pour un harnais-code). */
+    private static void applyStructuredFields(TestCase tc, TestCaseDTO td) {
+        tc.setEntry(td.getEntry());
+        tc.setArgsJson(td.getArgsJson());
+        tc.setExpectedJson(td.getExpectedJson());
+        tc.setCompareMode(td.getCompareMode());
     }
 
     // ── Mapping entité → DTO ─────────────────────────────────────────────────────
@@ -1293,6 +1303,10 @@ public class QuizService {
                 .id(testCase.getId())
                 .name(testCase.getName())
                 .harnessCode(testCase.getHarnessCode())
+                .entry(testCase.getEntry())
+                .argsJson(testCase.getArgsJson())
+                .expectedJson(testCase.getExpectedJson())
+                .compareMode(testCase.getCompareMode())
                 .weight(testCase.getWeight())
                 .build();
     }

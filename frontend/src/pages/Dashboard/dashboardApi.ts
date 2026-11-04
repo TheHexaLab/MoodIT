@@ -262,22 +262,50 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  const res = await apiFetch('/exec/evaluate', {
+  // #116 : si les cas sont STRUCTURÉS (un `entry` renseigné), on passe par le serveur RPC pur —
+  // les attendus (args/expected, parsés en JSON) sont comparés hors sandbox, jamais exposés au code.
+  const structured = input.testCases.some((t) => t.entry != null && t.entry !== '');
+  const path = structured ? '/exec/evaluate-structured' : '/exec/evaluate';
+  const body = structured
+    ? {
+        language: input.language,
+        code: input.code,
+        cases: input.testCases.map((t) => ({
+          name: t.name,
+          entry: t.entry,
+          args: parseJsonOrNull(t.argsJson),
+          expected: parseJsonOrNull(t.expectedJson),
+          compare: t.compareMode,
+          weight: t.weight,
+        })),
+      }
+    : {
+        language: input.language,
+        code: input.code,
+        testCases: input.testCases.map((t) => ({
+          name: t.name,
+          harnessCode: t.harnessCode,
+          weight: t.weight,
+        })),
+      };
+  const res = await apiFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      language: input.language,
-      code: input.code,
-      testCases: input.testCases.map((t) => ({
-        name: t.name,
-        harnessCode: t.harnessCode,
-        weight: t.weight,
-      })),
-    }),
+    body: JSON.stringify(body),
   });
   if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'évaluation du code");
   return await res.json();
+}
+
+/** Parse un JSON (args/attendu d'un cas structuré) ; `null` si vide ou invalide. */
+function parseJsonOrNull(json?: string): unknown {
+  if (json == null || json.trim() === '') return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 /**

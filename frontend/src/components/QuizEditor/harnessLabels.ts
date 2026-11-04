@@ -19,6 +19,21 @@ export interface HarnessLabels {
   cancel: string;
   /** Bouton enregistrer. */
   save: string;
+  // ── Cas STRUCTURÉS (#116) — questions « appel de fonction » (langages compilés) ──
+  /** Bandeau d'info pour les cas structurés. */
+  structuredInfoBanner: string;
+  /** Placeholder du symbole appelé (entry). */
+  entryPlaceholder: string;
+  /** Label du champ arguments (JSON). */
+  argsLabel: string;
+  /** Placeholder des arguments (JSON). */
+  argsPlaceholder: string;
+  /** Label du champ valeur attendue (JSON). */
+  expectedLabel: string;
+  /** Placeholder de la valeur attendue (JSON). */
+  expectedPlaceholder: string;
+  /** Label du champ mode de comparaison. */
+  compareLabel: string;
 }
 
 /** Textes par défaut (FR) de l'éditeur de harnais. */
@@ -32,4 +47,12 @@ export const defaultHarnessLabels: HarnessLabels = {
   add: 'Ajouter un harnais',
   cancel: 'Annuler',
   save: 'Enregistrer',
+  structuredInfoBanner:
+    "Cachés à l'étudiant · on appelle la fonction avec les arguments et on compare la sortie à l'attendu · note = part des poids réussis",
+  entryPlaceholder: 'Fonction appelée (ex. solution, Solution.solution)',
+  argsLabel: 'Arguments (JSON)',
+  argsPlaceholder: '[5]',
+  expectedLabel: 'Résultat attendu (JSON)',
+  expectedPlaceholder: '10',
+  compareLabel: 'Comparaison',
 };

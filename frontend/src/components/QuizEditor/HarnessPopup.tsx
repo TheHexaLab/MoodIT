@@ -7,6 +7,30 @@ import { type TestCaseDraft } from './editorTypes';
 import { type Language } from '../../types/domain';
 import { defaultHarnessLabels, type HarnessLabels } from './harnessLabels';
 
+/**
+ * Vrai si le langage (du harnais = de la question pour les compilés) est COMPILÉ → la question
+ * se note par CAS STRUCTURÉS (#116 : appeler une fonction, comparer la sortie hors sandbox), et non
+ * par harnais-code. Miroir de la décision backend (CodeAssembler.isCompiled / QuizService).
+ */
+function isCompiledHarnessLang(name?: string): boolean {
+  switch ((name ?? '').trim().toLowerCase()) {
+    case 'c':
+    case 'c++':
+    case 'cpp':
+    case 'go':
+    case 'rust':
+    case 'c#':
+    case 'csharp':
+    case 'java':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Modes de comparaison d'un cas structuré (valeur envoyée au backend). */
+const COMPARE_MODES = ['exact', 'float', 'unordered'] as const;
+
 interface HarnessBodyProps {
   /** Harnais courants (édités en place ; renvoyés par `onSave`). */
   testCases: TestCaseDraft[];
@@ -95,6 +119,8 @@ export function HarnessBody({
   onSave,
 }: HarnessBodyProps): React.ReactElement {
   const t = { ...defaultHarnessLabels, ...labels };
+  // Langage compilé → cas STRUCTURÉS (entry/args/attendu) ; sinon harnais-code (#116).
+  const structured = isCompiledHarnessLang(harnessLanguage?.name);
   // On reflète les harnais existants tels quels (liste vide si aucun) : pas d'ajout
   // automatique — l'utilisateur ajoute via « + Ajouter un harnais ».
   const [cases, setCases] = useState<TestCaseDraft[]>(() => testCases.map((tc) => ({ ...tc })));
@@ -111,17 +137,29 @@ export function HarnessBody({
     setCases((prev) => prev.filter((_, i) => i !== index));
   }
   function add() {
+    if (structured) {
+      // Cas structuré : symbole + arguments + attendu + mode de comparaison (pas de harnais-code).
+      setCases((prev) => [
+        ...prev,
+        { name: '', harnessCode: '', entry: '', argsJson: '[]', expectedJson: '', compareMode: 'exact', weight: 1 },
+      ]);
+      return;
+    }
     // Squelette du langage de la question (ex. HTML → harnais JS spécifique), pas un stub fixe.
     setCases((prev) => [...prev, { name: '', harnessCode: defaultHarnessCode ?? '', weight: 1 }]);
   }
 
-  // Enregistrement bloqué s'il n'y a aucun harnais, ou si l'un n'a pas de nom OU a un
-  // poids ≤ 0.
-  const isValid = cases.length > 0 && cases.every((c) => c.name.trim() !== '' && c.weight > 0);
+  // Enregistrement bloqué s'il n'y a aucun cas, ou si l'un n'a pas de nom / poids ≤ 0 ; en mode
+  // structuré, l'entrée (fonction appelée) est aussi requise.
+  const isValid =
+    cases.length > 0 &&
+    cases.every(
+      (c) => c.name.trim() !== '' && c.weight > 0 && (!structured || (c.entry ?? '').trim() !== '')
+    );
 
   return (
     <>
-      <div className={styles.infoBanner}>{t.infoBanner}</div>
+      <div className={styles.infoBanner}>{structured ? t.structuredInfoBanner : t.infoBanner}</div>
 
       <div className={[styles.list, styles.harnessList].join(' ')}>
         {cases.map((c, i) => (
@@ -155,12 +193,59 @@ export function HarnessBody({
                 <TrashCan width={15} height={15} />
               </button>
             </div>
-            <CodeEditor
-              value={c.harnessCode}
-              onChange={(harnessCode) => update(i, { harnessCode })}
-              language={harnessLanguage?.name}
-              ariaLabel={t.codeAria(i + 1)}
-            />
+            {structured ? (
+              <div className={styles.harnessFields}>
+                <input
+                  className={styles.input}
+                  aria-invalid={(c.entry ?? '').trim() === ''}
+                  value={c.entry ?? ''}
+                  placeholder={t.entryPlaceholder}
+                  maxLength={200}
+                  onChange={(e) => update(i, { entry: e.target.value })}
+                />
+                <label className={styles.weightField}>
+                  <span className={styles.weightLabel}>{t.argsLabel}</span>
+                  <textarea
+                    className={styles.input}
+                    value={c.argsJson ?? ''}
+                    placeholder={t.argsPlaceholder}
+                    rows={2}
+                    onChange={(e) => update(i, { argsJson: e.target.value })}
+                  />
+                </label>
+                <label className={styles.weightField}>
+                  <span className={styles.weightLabel}>{t.expectedLabel}</span>
+                  <textarea
+                    className={styles.input}
+                    value={c.expectedJson ?? ''}
+                    placeholder={t.expectedPlaceholder}
+                    rows={2}
+                    onChange={(e) => update(i, { expectedJson: e.target.value })}
+                  />
+                </label>
+                <label className={styles.weightField}>
+                  <span className={styles.weightLabel}>{t.compareLabel}</span>
+                  <select
+                    className={styles.input}
+                    value={c.compareMode ?? 'exact'}
+                    onChange={(e) => update(i, { compareMode: e.target.value })}
+                  >
+                    {COMPARE_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <CodeEditor
+                value={c.harnessCode}
+                onChange={(harnessCode) => update(i, { harnessCode })}
+                language={harnessLanguage?.name}
+                ariaLabel={t.codeAria(i + 1)}
+              />
+            )}
           </div>
         ))}
       </div>
