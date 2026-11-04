@@ -214,6 +214,13 @@ services:
       # Sortie max par flux (caractères). Le défaut de Piston (1 024) tronque tout extrait SQL de
       # plus de 1 Ko ; il faut au moins app.sql.max-dump-chars (512 Ki) plus la sortie de l'étudiant.
       PISTON_OUTPUT_MAX_SIZE: "1048576"
+      # Temps CPU max par exécution (ms). Le modèle deux-processus des langages compilés (#116) lance
+      # un 2e processus pour isoler le code étudiant ; en Java, les DEUX JVM compilent (mode
+      # source-launch) et cumulent ~3,5 s de temps CPU — alors que le temps MURAL reste ~1,5 s (le
+      # travail est parallèle). Le défaut Piston (3 s CPU) tuerait donc une BONNE réponse Java. On relève
+      # le plafond CPU ; le mur (run_timeout, envoyé par execution-service) reste à 3 s — c'est lui le
+      # vrai bornage anti-DoS (#24), inchangé.
+      PISTON_RUN_CPU_TIME: "6000"
       # Plafonds mémoire (octets) appliqués aussi quand l'appelant n'en envoie pas (piston-init).
       # execution-service envoie les siens (PISTON_RUN/COMPILE_MEMORY_LIMIT_BYTES), qui ne doivent
       # pas les dépasser : Piston refuserait l'exécution.

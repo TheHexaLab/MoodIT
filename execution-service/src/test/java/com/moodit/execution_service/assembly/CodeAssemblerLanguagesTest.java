@@ -12,8 +12,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,155 +34,100 @@ class CodeAssemblerLanguagesTest {
         return a.files().get(0).content();
     }
 
-    // ── Langages compilés : propriétés du programme assemblé ────────────────────
+    // ── Langages compilés : propriétés du programme assemblé (modèle deux-processus, #116) ──────
     //
     // On ne compare plus le programme caractère par caractère (fragile, et ça ne prouve pas qu'il
     // s'exécute : c'est le rôle d'ExecutionIntegrationTest contre un vrai Piston). On vérifie les
-    // INVARIANTS dont dépend la correction : un seul point d'entrée (le nôtre), le code étudiant
-    // présent tel quel (au renommage de son main près), le harnais intact dans sa fonction, le nonce
-    // émis une seule fois, par notre main, APRÈS l'appel du harnais, et aucun code étudiant dans la
-    // partie « noteur ». Un harnais = un programme : le nonce est le marqueur propre à chaque test.
+    // INVARIANTS du modèle RPC : (a) le binaire se dédouble (fork/re-exec) pour isoler le code
+    // étudiant ; (b) les symboles étudiant appelés par le harnais sont RENOMMÉS (le réel) et exposés
+    // via un STUB de même nom ; (c) le harnais est présent ; (d) le nonce n'est JAMAIS gravé et est lu
+    // sur stdin (par le parent). Un harnais = un programme : le nonce est le marqueur propre à chaque test.
 
     /**
-     * Cas d'un langage compilé. {@code studentSegment} = code étudiant attendu dans le programme
-     * (identique à la soumission pour C/C++, main renommé ailleurs) ; {@code macroGuard} = le main
-     * étudiant est neutralisé par {@code #define main} (C/C++) plutôt que par renommage.
+     * Cas d'un langage compilé. {@code secondProcess} prouve le dédoublement (fork/re-exec) ;
+     * {@code renamedMarker} prouve le renommage du vrai symbole étudiant ; {@code stubMarker} prouve
+     * le stub de même nom (le harnais compile sans le vrai code) ; {@code stdinMarker} prouve la
+     * lecture du nonce sur l'entrée standard.
      */
     private record Compiled(String language, String pistonLanguage, String fileName, String studentCode,
-            String studentSegment, String harness, String harnessSignature, String harnessCall,
-            String entryPoint, boolean macroGuard) {
+            String harness, String secondProcess, String renamedMarker, String stubMarker, String stdinMarker) {
         @Override
         public String toString() {
             return language;
         }
     }
 
-    private static final String MARK = "ETUDIANT_SEULEMENT";
     private static final String NONCE = "MOODIT_OK_n0nce";
 
     static Stream<Compiled> compiledLanguages() {
         return Stream.of(
-                // Go : l'assembleur insère `import __moodit_os "os"` après la ligne package, donc
-                // le studentSegment commence APRÈS cette ligne pour que la recherche dans le programme
-                // fonctionne (le segment cherché doit être contigu dans le texte assemblé).
                 new Compiled("Go", "go", "main.go",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                        "// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
-                        "return solution() == 5", "func __moodit_harness() bool {", "__moodit_harness()",
-                        "func\\s+main\\s*\\(", false),
-                // Espaces autour de « main » : le renommage doit quand même s'appliquer.
+                        "package main\n\nfunc solution() int { return 5 }\n\nfunc main() {}",
+                        "return solution() == 5",
+                        "/proc/self/exe", "func __moodit_s_solution", "func solution(", "Stdin"),
                 new Compiled("Rust", "rust", "main.rs",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn  main ()  {}",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn __moodit_student_main()  {}",
-                        "solution() == 5", "fn __moodit_harness() -> bool {", "__moodit_harness()",
-                        "fn\\s+main\\s*\\(", false),
+                        "fn solution() -> i32 { 5 }\nfn main() {}",
+                        "solution() == 5",
+                        "current_exe", "fn __moodit_s_solution", "fn solution(", "stdin"),
                 new Compiled("C", "c", "main.c",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "return solution() == 5;", "static int __moodit_harness(void) {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
+                        "int solution(void){ return 5; }\nint main(void){ return 0; }",
+                        "return solution() == 5;",
+                        "fork(", "#define solution __moodit_s_solution", "int solution(void) {", "__rd1(0)"),
                 new Compiled("C++", "c++", "main.cpp",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "return solution() == 5;", "static bool __moodit_harness() {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
-                // Les deux formes de Main (void et int) doivent être renommées.
+                        "int solution(){ return 5; }\nint main(){ return 0; }",
+                        "return solution() == 5;",
+                        "fork(", "#define solution __moodit_s_solution", "int solution(void) {", "__rd1(0)"),
                 new Compiled("C#", "csharp", "main.cs",
-                        "// " + MARK + "\nclass A { static void Main(string[] a) {} }\n"
-                                + "class B { static int Main () { return 0; } }",
-                        "// " + MARK + "\nclass A { static void __moodit_student_main(string[] a) {} }\n"
-                                + "class B { static int __moodit_student_main () { return 0; } }",
-                        "return true;", "static bool __moodit_run() {", "__moodit_run()",
-                        "static\\s+(?:void|int)\\s+Main\\s*\\(", false),
+                        "class S { public static int solution(){ return 5; } static void Main(string[] a){} }",
+                        "return S.solution() == 5;",
+                        "Process.Start", "__MooditStudent_S", "class S {", "Console.In"),
                 new Compiled("Java", "java", "Main.java",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
+                        "public class Solution { public static int solution(){ return 5; } "
                                 + "public static void main(String[] a){} }",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
-                                + "public static void __moodit_student_main(String[] a){} }",
-                        "return Solution.solution() == 5;", "static boolean __moodit_harness() {",
-                        "__moodit_harness()", "static\\s+void\\s+main\\s*\\(\\s*String", false));
+                        "return Solution.solution() == 5;",
+                        "ProcessBuilder", "__MooditStudent_Solution", "class Solution {", "System.in"));
     }
 
-    private static int occurrences(String text, String needle) {
-        return text.split(Pattern.quote(needle), -1).length - 1;
-    }
-
-    private static int matches(String regex, String text) {
-        return (int) Pattern.compile(regex).matcher(text).results().count();
-    }
-
-    /** Programme assemblé, découpé en segment étudiant et partie « noteur » (tout le reste). */
-    private record Split(String program, int studentStart, int studentEnd) {
-        String grader() {
-            return program.substring(0, studentStart) + program.substring(studentEnd);
-        }
-    }
-
-    private Split assembleCompiled(Compiled c) {
+    private String assembleCompiled(Compiled c) {
         var a = assembler.assemble(c.language(), c.studentCode(), c.harness(), NONCE);
         assertThat(a.pistonLanguage()).isEqualTo(c.pistonLanguage());
         assertThat(a.files()).extracting(PistonClient.File::name).containsExactly(c.fileName());
-        String program = onlyFileContent(a);
-        // Le code étudiant figure une seule fois, tel quel (main renommé le cas échéant).
-        assertThat(occurrences(program, c.studentSegment())).isEqualTo(1);
-        int start = program.indexOf(c.studentSegment());
-        return new Split(program, start, start + c.studentSegment().length());
+        return onlyFileContent(a);
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("compiledLanguages")
-    void compile_un_seul_point_d_entree_et_le_code_etudiant_intact(Compiled c) {
-        Split s = assembleCompiled(c);
+    void compile_deux_processus_avec_stub_et_symbole_renomme(Compiled c) {
+        String program = assembleCompiled(c);
 
-        // Exactement UN point d'entrée effectif : le nôtre, dans la partie noteur.
-        assertThat(matches(c.entryPoint(), s.grader())).isEqualTo(1);
-        if (c.macroGuard()) {
-            // C/C++ : le main étudiant reste dans le texte, mais encadré par la macro qui le renomme.
-            assertThat(s.program().substring(0, s.studentStart())).isEqualTo("#define main __moodit_student_main\n");
-            assertThat(s.program().substring(s.studentEnd())).startsWith("\n#undef main\n");
-        } else {
-            assertThat(matches(c.entryPoint(), c.studentSegment())).isZero();
-        }
-
-        // Aucun fragment étudiant dans le noteur, ni harnais/nonce dans le segment étudiant.
-        assertThat(s.grader()).doesNotContain(MARK);
-        assertThat(c.studentSegment()).doesNotContain(NONCE).doesNotContain(c.harness());
+        // (a) Le binaire se dédouble (fork ou re-exec) : le code étudiant vit dans un autre processus.
+        assertThat(program).as("marqueur de second processus").contains(c.secondProcess());
+        // (b) Le vrai symbole étudiant est renommé, et un STUB de même nom l'expose au harnais.
+        assertThat(program).as("symbole étudiant renommé (le réel)").contains(c.renamedMarker());
+        assertThat(program).as("stub de même nom pour le harnais").contains(c.stubMarker());
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("compiledLanguages")
-    void compile_harnais_intact_et_secret_jamais_grave(Compiled c) {
-        Split s = assembleCompiled(c);
-        String grader = s.grader();
+    void compile_harnais_present_nonce_jamais_grave_lu_sur_stdin(Compiled c) {
+        String program = assembleCompiled(c);
 
-        // Le harnais est le corps exact de SA fonction, dans le noteur.
-        assertThat(occurrences(grader, c.harnessSignature() + "\n" + c.harness() + "\n")).isEqualTo(1);
-
-        // ANTI-TRICHE (option 2) : le secret N'EST JAMAIS gravé dans le source — il est lu au
-        // RUNTIME depuis l'entrée standard. Un étudiant qui lirait le binaire n'y trouve aucun nonce.
-        assertThat(s.program()).doesNotContain(NONCE);
-        assertThat(s.program()).as("le programme doit lire le secret depuis stdin")
-                .containsPattern("(?i)stdin|Console\\.In|System\\.in");
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_source_supprimee(Compiled c) {
-        // Le fichier source (qui n'a plus le nonce, mais reste supprimé par principe : empêche la
-        // lecture de la source assemblée) est effacé dans la partie noteur. Selon le langage la
-        // suppression est dans le point d'entrée (Rust/Java/C#), un constructeur (C/C++) ou un
-        // initialiseur de variable de paquet (Go) — toujours avant le code étudiant.
-        Split s = assembleCompiled(c);
-        assertThat(s.grader()).as("suppression de " + c.fileName() + " absente").contains(c.fileName());
+        // Le harnais (corps exact fourni par le prof) est présent dans le noteur.
+        assertThat(program).contains(c.harness());
+        // ANTI-TRICHE : le nonce n'est JAMAIS gravé — il est lu au RUNTIME sur stdin (par le parent).
+        assertThat(program).doesNotContain(NONCE);
+        assertThat(program).as("le parent doit lire le secret depuis stdin").contains(c.stdinMarker());
     }
 
     @Test
     void java_notre_classe_d_entree_vient_en_premier() {
-        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté.
+        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté. Les imports
+        // (hissés en tête) la précèdent ; aucune classe étudiant ne vient avant __MooditMain.
         String program = onlyFileContent(assembler.assemble("Java",
                 "public class Main { public static void main(String[] a){} }", "return true;", "N"));
 
-        assertThat(program).startsWith("public class __MooditMain {");
+        assertThat(program).contains("public class __MooditMain {");
+        assertThat(program.indexOf("__MooditMain")).isLessThan(program.indexOf("__MooditStudent_Main"));
     }
 
     // ── HTML (bundle vendor) ────────────────────────────────────────────────────

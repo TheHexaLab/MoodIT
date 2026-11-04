@@ -113,8 +113,10 @@ public class CodeAssembler {
     }
 
     /**
-     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Ces langages lisent le secret
-     * anti-triche depuis stdin au runtime plutôt que de le graver dans le source (cf. ExecutionService).
+     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Comme les interprétés, ils sont
+     * notés en DEUX processus (le code étudiant ne voit jamais le nonce) ; le binaire unique de Piston
+     * se dédouble par {@code fork()} (C/C++) ou re-exec de soi-même (Go/Rust/C#/Java). Le nonce est lu
+     * sur le stdin du PARENT (noteur) au runtime, pas gravé dans le source (cf. ExecutionService).
      */
     public static boolean isCompiled(String language) {
         return switch (canon(language)) {
@@ -442,219 +444,1461 @@ public class CodeAssembler {
 
     // ══ Langages COMPILÉS ══════════════════════════════════════════════════════════
     //
-    // Isolation anti-triche en DEUX volets, sans RPC ni second processus (OOP, classes et types
-    // complexes fonctionnent, le code étudiant est AVANT le harnais dans le même fichier) :
-    //   1. Le nonce n'est PAS gravé dans le source : il est lu au RUNTIME depuis l'entrée standard
-    //      (fournie par ExecutionService via Piston) AVANT tout code étudiant, puis réémis par le
-    //      harnais en cas de succès. Un scan du binaire compilé n'y trouve donc aucun nonce.
-    //   2. Le fichier source est supprimé avant tout code étudiant (fopen de la source → NULL).
-    // L'amorçage « avant tout code étudiant » varie par langage : début de main (Rust/Java/C#),
-    // constructeur à priorité réservée (C/C++), initialiseur de variable de paquet déclaré en
-    // premier (Go). Résiduel documenté : en C/C++ un constructeur étudiant à priorité EXPLICITE
-    // (0–100, réservée, warning du compilateur) pourrait précéder le nôtre — cas exotique.
+    // Isolation anti-triche en DEUX PROCESSUS, comme les interprétés (cf. #116). Piston compile en UN
+    // binaire ; ce binaire se DÉDOUBLE : fork() (C/C++) ou re-exec de soi-même avec un drapeau de rôle
+    // (Go/Rust via /proc/self/exe & current_exe ; C#/Java en relançant mono/le JVM sur la source).
+    //   - PARENT (noteur) : lit le nonce sur SON stdin (le child reçoit un canal distinct), exécute le
+    //     harnais INCHANGÉ, réémet le nonce en cas de succès. Il détient SEUL le nonce (mémoire privée).
+    //   - CHILD (serveur étudiant) : héberge le vrai code étudiant, répond aux appels par RPC. Il ne
+    //     voit jamais le nonce — ni en mémoire (espace séparé, /proc/<ppid>/mem refusé par ptrace/yama),
+    //     ni sur stdin (canal distinct). C/C++ : le child ferme fd 0 et le parent lit le nonce APRÈS le
+    //     fork, donc il n'est ni dans la mémoire copiée ni lisible via le tube.
+    // Les symboles étudiant appelés par le harnais deviennent des STUBS typés (générés depuis les
+    // signatures) qui délèguent au child ; les définitions/appels étudiant sont renommés
+    // (__moodit_s_* ; via #define en C/C++, régex ailleurs). Marshalling JSON (Go) ou netstring (autres).
+    // Périmètre pilote par langage : types scalaires (+ slices en Go) ; un type hors périmètre rend la
+    // fonction inappelable (stub qui échoue), sans casser les autres.
 
     // ── Go ───────────────────────────────────────────────────────────────────────
 
+    /** Fonctions Go de premier niveau : {@code func nom(params) ret {} }. */
+    private static final Pattern GO_FUNC =
+            Pattern.compile("(?m)^func\\s+([A-Za-z_]\\w*)\\s*\\(([^)]*)\\)\\s*([^{]*)\\{");
+
     /**
-     * Go : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au runtime. La lecture se
-     * fait dans l'INITIALISEUR d'une variable de paquet déclarée EN PREMIER : Go initialise les
-     * variables de paquet dans l'ordre de déclaration (avant toute fonction {@code init} et avant
-     * {@code main}), donc notre lecture précède tout code étudiant, même un {@code init()} ou un
-     * initialiseur de variable malveillant. On en profite pour supprimer {@code main.go}. Les imports
-     * sont aliasés {@code __moodit_*} pour ne pas heurter ceux de l'étudiant.
+     * Go : exécution ISOLÉE en DEUX processus (comme les interprétés, mais obtenue autrement — cf. #116).
+     * Piston compile {@code main.go} en UN binaire natif ; ce binaire se RE-EXÉCUTE lui-même
+     * ({@code /proc/self/exe __moodit_student}) pour obtenir un second processus :
+     * <ul>
+     *   <li>le PARENT est le NOTEUR : il lit le nonce sur SON stdin (le child reçoit un stdin distinct),
+     *       exécute le harnais INCHANGÉ, et réémet le nonce en cas de succès ;</li>
+     *   <li>le CHILD est le SERVEUR étudiant : il héberge le vrai code étudiant et répond aux appels par
+     *       RPC (JSON sur stdin/stdout). Il ne voit jamais le nonce (mémoire du parent, hors ptrace) ;</li>
+     *   <li>les symboles étudiant appelés par le harnais sont des STUBS typés (générés depuis les
+     *       signatures) qui délèguent au child ; les définitions/appels étudiant sont renommés
+     *       {@code __moodit_s_*} pour laisser les noms d'origine aux stubs.</li>
+     * </ul>
+     * Périmètre : fonctions top-level à paramètres/retour parmi {@code int}, {@code int64},
+     * {@code float64}, {@code bool}, {@code string} et slices {@code []T} de ceux-ci ; un type hors
+     * périmètre rend la fonction inappelable (stub qui panique), sans casser les autres (pilote #116).
      */
     private Assembled assembleGo(String studentCode, String harnessCode, String nonce) {
-        String code = studentCode == null ? "" : studentCode;
-        String neutralized = code.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
-        // Insère nos imports + l'initialiseur du secret après la déclaration package (1ère ligne),
-        // AVANT le code étudiant, sans toucher aux imports existants de l'étudiant.
-        int nl = neutralized.indexOf('\n');
-        String pkgLine = nl >= 0 ? neutralized.substring(0, nl + 1) : neutralized + "\n";
-        String rest     = nl >= 0 ? neutralized.substring(nl + 1) : "";
-        String program = pkgLine
-                + "import __moodit_os \"os\"\n"
+        String student = studentCode == null ? "" : studentCode;
+        String harness = harnessCode == null ? "" : harnessCode;
+
+        // 1) Collecter les fonctions top-level (nom, params, type de retour), hors main.
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = GO_FUNC.matcher(student);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(1))) {
+                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3).trim()});
+            }
+        }
+
+        // 2) Neutraliser le main étudiant, puis renommer définitions ET appels des fonctions étudiant
+        //    en __moodit_s_* (nom entier, jamais précédé d'un point → on épargne les appels de méthode).
+        String code = student.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
+        for (String[] f : funcs) {
+            code = code.replaceAll("(?<![\\w.])" + Pattern.quote(f[0]) + "(?=\\s*\\()", "__moodit_s_" + f[0]);
+        }
+
+        // 3) Insérer notre infrastructure APRÈS la déclaration `package` (PAS la 1ère ligne : elle peut
+        //    être un commentaire — c'était le bug qui plaçait nos imports avant `package`).
+        Matcher pm = Pattern.compile("(?m)^package\\s+\\w+.*$").matcher(code);
+        int pkgEnd = pm.find() ? pm.end() : 0;
+        String head = code.substring(0, pkgEnd);
+        String tail = code.substring(pkgEnd);
+
+        StringBuilder stubs = new StringBuilder();
+        StringBuilder cases = new StringBuilder();
+        Set<String> sliceTypes = new java.util.LinkedHashSet<>();
+        for (String[] f : funcs) {
+            String name = f[0];
+            List<String[]> params = goExpandParams(f[1]);
+            String ret = f[2];
+            for (String[] p : params) {
+                if (p[1].startsWith("[]")) sliceTypes.add(p[1].substring(2));
+            }
+            if (ret.startsWith("[]")) sliceTypes.add(ret.substring(2));
+
+            String sig = params.stream().map(p -> p[0] + " " + p[1]).collect(Collectors.joining(", "));
+            String callArgs = params.stream().map(p -> p[0]).collect(Collectors.joining(", "));
+
+            // Supporté ssi params + retour sont tous marshalables.
+            boolean supported = (ret.isEmpty() || goConv("x", ret) != null)
+                    && params.stream().allMatch(p -> goConv("x", p[1]) != null);
+            if (!supported) {
+                // Stub + case qui paniquent : la fonction reste déclarée (les autres compilent).
+                stubs.append("func ").append(name).append("(").append(sig).append(")")
+                        .append(ret.isEmpty() ? "" : " " + ret)
+                        .append(" { panic(\"type non supporte par l'isolation RPC\") }\n");
+                cases.append("\t\tcase \"").append(name).append("\":\n\t\t\tpanic(\"type non supporte\")\n");
+                continue;
+            }
+
+            String rpcCall = "__moodit_rpc(\"" + name + "\""
+                    + (callArgs.isEmpty() ? "" : ", " + callArgs) + ")";
+            if (ret.isEmpty()) {
+                stubs.append("func ").append(name).append("(").append(sig).append(") { ")
+                        .append(rpcCall).append(" }\n");
+            } else {
+                stubs.append("func ").append(name).append("(").append(sig).append(") ").append(ret)
+                        .append(" { return ").append(goConv(rpcCall, ret)).append(" }\n");
+            }
+
+            StringBuilder realCall = new StringBuilder("__moodit_s_").append(name).append("(");
+            for (int i = 0; i < params.size(); i++) {
+                if (i > 0) realCall.append(", ");
+                realCall.append(goConv("__a[" + i + "]", params.get(i)[1]));
+            }
+            realCall.append(")");
+            cases.append("\t\tcase \"").append(name).append("\":\n");
+            if (ret.isEmpty()) {
+                cases.append("\t\t\t").append(realCall)
+                        .append("\n\t\t\t__resp = map[string]interface{}{\"ok\": true, \"value\": nil}\n");
+            } else {
+                cases.append("\t\t\t__resp = map[string]interface{}{\"ok\": true, \"value\": ")
+                        .append(realCall).append("}\n");
+            }
+        }
+
+        StringBuilder helpers = new StringBuilder();
+        for (String t : sliceTypes) {
+            String h = goSliceHelper(t);
+            if (h != null) helpers.append(h).append("\n");
+        }
+
+        String program = head + "\n"
                 + "import __moodit_bufio \"bufio\"\n"
+                + "import __moodit_json \"encoding/json\"\n"
+                + "import __moodit_fmt \"fmt\"\n"
+                + "import __moodit_exec \"os/exec\"\n"
+                + "import __moodit_os \"os\"\n"
                 + "import __moodit_strings \"strings\"\n"
-                + "var __moodit_secret = __moodit_readSecret()\n"
-                + "func __moodit_readSecret() string {\n"
-                + "\t__moodit_os.Remove(\"main.go\")\n"
-                + "\t__moodit_l, _ := __moodit_bufio.NewReader(__moodit_os.Stdin).ReadString('\\n')\n"
-                + "\treturn __moodit_strings.TrimSpace(__moodit_l)\n"
+                + tail + "\n"
+                + helpers
+                + "var __moodit_cin *__moodit_bufio.Writer\n"
+                + "var __moodit_cout *__moodit_bufio.Reader\n"
+                + "func __moodit_rpc(name string, args ...interface{}) interface{} {\n"
+                + "\treq := map[string]interface{}{\"name\": name, \"args\": args}\n"
+                + "\tb, _ := __moodit_json.Marshal(req)\n"
+                + "\t__moodit_cin.Write(b); __moodit_cin.WriteByte('\\n'); __moodit_cin.Flush()\n"
+                + "\tline, err := __moodit_cout.ReadString('\\n')\n"
+                + "\tif err != nil { panic(\"serveur etudiant termine\") }\n"
+                + "\tvar resp map[string]interface{}\n"
+                + "\t__moodit_json.Unmarshal([]byte(line), &resp)\n"
+                + "\tif ok, _ := resp[\"ok\"].(bool); !ok { panic(\"rpc echec\") }\n"
+                + "\treturn resp[\"value\"]\n"
                 + "}\n"
-                + rest
-                + "\nfunc __moodit_harness() bool {\n"
-                + harnessCode
+                + stubs
+                + "func __moodit_serve() {\n"
+                + "\t__in := __moodit_bufio.NewReader(__moodit_os.Stdin)\n"
+                + "\t__out := __moodit_bufio.NewWriter(__moodit_os.Stdout)\n"
+                + "\tfor {\n"
+                + "\t\t__line, __e := __in.ReadString('\\n')\n"
+                + "\t\tif __e != nil { break }\n"
+                + "\t\t__line = __moodit_strings.TrimSpace(__line)\n"
+                + "\t\tif __line == \"\" { continue }\n"
+                + "\t\tvar __req map[string]interface{}\n"
+                + "\t\tif __moodit_json.Unmarshal([]byte(__line), &__req) != nil { continue }\n"
+                + "\t\t__name, _ := __req[\"name\"].(string)\n"
+                + "\t\t__a, _ := __req[\"args\"].([]interface{})\n"
+                + "\t\t_ = __a\n"
+                + "\t\tvar __resp map[string]interface{}\n"
+                + "\t\tfunc() {\n"
+                + "\t\t\tdefer func() { if r := recover(); r != nil { __resp = map[string]interface{}{\"ok\": false, \"error\": __moodit_fmt.Sprint(r)} } }()\n"
+                + "\t\t\tswitch __name {\n"
+                + cases
+                + "\t\t\tdefault:\n"
+                + "\t\t\t\t__resp = map[string]interface{}{\"ok\": false, \"error\": \"symbole inconnu\"}\n"
+                + "\t\t\t}\n"
+                + "\t\t}()\n"
+                + "\t\t__b, _ := __moodit_json.Marshal(__resp)\n"
+                + "\t\t__out.Write(__b); __out.WriteByte('\\n'); __out.Flush()\n"
+                + "\t}\n"
+                + "}\n"
+                + "func __moodit_harness() bool {\n"
+                + harness
                 + "\n}\n"
                 + "func main() {\n"
-                + "\tif __moodit_harness() {\n"
-                + "\t\t__moodit_os.Stderr.WriteString(__moodit_secret)\n"
-                + "\t}\n"
+                + "\tif len(__moodit_os.Args) > 1 && __moodit_os.Args[1] == \"__moodit_student\" { __moodit_serve(); return }\n"
+                + "\t__secret, _ := __moodit_bufio.NewReader(__moodit_os.Stdin).ReadString('\\n')\n"
+                + "\t__secret = __moodit_strings.TrimSpace(__secret)\n"
+                + "\t__child := __moodit_exec.Command(\"/proc/self/exe\", \"__moodit_student\")\n"
+                + "\t__wIn, _ := __child.StdinPipe()\n"
+                + "\t__rOut, _ := __child.StdoutPipe()\n"
+                + "\t__child.Stderr = __moodit_os.Stderr\n"
+                + "\t__moodit_cin = __moodit_bufio.NewWriter(__wIn)\n"
+                + "\t__moodit_cout = __moodit_bufio.NewReader(__rOut)\n"
+                + "\tif __child.Start() != nil { __moodit_os.Exit(1) }\n"
+                + "\t__ok := false\n"
+                + "\tfunc() { defer func() { recover() }(); __ok = __moodit_harness() }()\n"
+                + "\tif __ok { __moodit_fmt.Fprint(__moodit_os.Stderr, __secret) }\n"
+                + "\t__wIn.Close()\n"
+                + "\tif __ok { __moodit_os.Exit(0) }\n"
+                + "\t__moodit_os.Exit(1)\n"
                 + "}\n";
         return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
     }
 
+    /** Éclate une liste de paramètres Go en couples {@code {nom, type}} (gère {@code n, m int}). */
+    private static List<String[]> goExpandParams(String params) {
+        List<String[]> out = new ArrayList<>();
+        String trimmed = params == null ? "" : params.trim();
+        if (trimmed.isEmpty()) {
+            return out;
+        }
+        List<String> pending = new ArrayList<>();
+        for (String part : trimmed.split(",")) {
+            String p = part.trim();
+            if (p.isEmpty()) continue;
+            String[] toks = p.split("\\s+", 2);
+            if (toks.length == 1) {
+                pending.add(toks[0]); // nom seul : hérite du type du prochain segment typé
+            } else {
+                for (String nm : pending) out.add(new String[] {nm, toks[1]});
+                pending.clear();
+                out.add(new String[] {toks[0], toks[1]});
+            }
+        }
+        return out;
+    }
+
+    /** Expression Go convertissant une valeur JSON décodée ({@code interface{}}) vers {@code type},
+     *  ou {@code null} si le type n'est pas marshalable (hors périmètre pilote). */
+    private static String goConv(String expr, String type) {
+        return switch (type) {
+            case "int" -> "int(" + expr + ".(float64))";
+            case "int64" -> "int64(" + expr + ".(float64))";
+            case "float64" -> expr + ".(float64)";
+            case "bool" -> expr + ".(bool)";
+            case "string" -> expr + ".(string)";
+            case "[]int", "[]string" -> "__moodit_slice_" + type.substring(2) + "(" + expr + ")";
+            default -> null;
+        };
+    }
+
+    /** Fonction d'aide Go convertissant {@code []interface{}} (JSON) en {@code []T}, ou {@code null}. */
+    private static String goSliceHelper(String element) {
+        return switch (element) {
+            case "int" -> "func __moodit_slice_int(v interface{}) []int { a,_ := v.([]interface{}); "
+                    + "r := make([]int, len(a)); for i := range a { r[i] = int(a[i].(float64)) }; return r }";
+            case "string" -> "func __moodit_slice_string(v interface{}) []string { a,_ := v.([]interface{}); "
+                    + "r := make([]string, len(a)); for i := range a { r[i] = a[i].(string) }; return r }";
+            default -> null;
+        };
+    }
+
+    // ══ SERVEUR RPC PUR (cas structurés, #116) ═════════════════════════════════════
+    //
+    // Le code étudiant est assemblé en un SERVEUR sans harnais ni nonce : il lit des requêtes
+    // {@code {"name":…,"args":[…]}} (une par ligne) sur stdin et répond {@code {"ok":…,"value":…}}
+    // (une par ligne) sur stdout. ExecutionService envoie TOUS les cas d'un coup (Piston est one-shot)
+    // et compare LUI-MÊME les sorties aux attendus — qui ne touchent donc jamais le sandbox.
+
+    /** Assemble le code étudiant en serveur RPC pur (sans harnais ni attendus). Cf. {@link #assemble}. */
+    public Assembled assembleServer(String language, String studentCode) {
+        String code = studentCode == null ? "" : studentCode;
+        return switch (canon(language)) {
+            case "go" -> assembleServerGo(code);
+            case "rust" -> assembleServerRust(code);
+            case "c" -> assembleServerCLike(code, false);
+            case "c++" -> assembleServerCLike(code, true);
+            case "csharp" -> assembleServerCSharp(code);
+            case "java" -> assembleServerJava(code);
+            default -> throw new UnsupportedLanguageException(
+                    language + " (serveur RPC de cas structurés pas encore porté)");
+        };
+    }
+
+    private Assembled assembleServerGo(String student) {
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = GO_FUNC.matcher(student);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(1))) {
+                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3).trim()});
+            }
+        }
+        String code = student.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
+        Matcher pm = Pattern.compile("(?m)^package\\s+\\w+.*$").matcher(code);
+        int pkgEnd = pm.find() ? pm.end() : 0;
+        String head = code.substring(0, pkgEnd);
+        String tail = code.substring(pkgEnd);
+
+        StringBuilder cases = new StringBuilder();
+        Set<String> sliceTypes = new java.util.LinkedHashSet<>();
+        for (String[] f : funcs) {
+            String name = f[0];
+            List<String[]> params = goExpandParams(f[1]);
+            String ret = f[2];
+            for (String[] p : params) {
+                if (p[1].startsWith("[]")) sliceTypes.add(p[1].substring(2));
+            }
+            if (ret.startsWith("[]")) sliceTypes.add(ret.substring(2));
+            boolean supported = (ret.isEmpty() || goConv("x", ret) != null)
+                    && params.stream().allMatch(p -> goConv("x", p[1]) != null);
+            cases.append("\t\tcase \"").append(name).append("\":\n");
+            if (!supported) {
+                cases.append("\t\t\t__moodit_fail(__w, \"type non supporte\")\n");
+                continue;
+            }
+            StringBuilder call = new StringBuilder(name).append("(");
+            for (int i = 0; i < params.size(); i++) {
+                cases.append("\t\t\t__a").append(i).append(", _ := __moodit_nsRead(__r)\n");
+                if (i > 0) call.append(", ");
+                call.append(goConv("__moodit_arg(__a" + i + ")", params.get(i)[1]));
+            }
+            call.append(")");
+            if (ret.isEmpty()) {
+                cases.append("\t\t\t").append(call).append("\n")
+                        .append("\t\t\t__moodit_ok(__w, \"null\")\n");
+            } else {
+                cases.append("\t\t\t__moodit_v := ").append(call).append("\n")
+                        .append("\t\t\t__moodit_b, _ := __moodit_json.Marshal(__moodit_v)\n")
+                        .append("\t\t\t__moodit_ok(__w, string(__moodit_b))\n");
+            }
+        }
+        StringBuilder helpers = new StringBuilder();
+        for (String t : sliceTypes) {
+            String h = goSliceHelper(t);
+            if (h != null) helpers.append(h).append("\n");
+        }
+        String program = head + "\n"
+                + "import __moodit_bufio \"bufio\"\n"
+                + "import __moodit_json \"encoding/json\"\n"
+                + "import __moodit_fmt \"fmt\"\n"
+                + "import __moodit_io \"io\"\n"
+                + "import __moodit_os \"os\"\n"
+                + "import __moodit_strconv \"strconv\"\n"
+                + tail + "\n"
+                + helpers
+                + "func __moodit_arg(s string) interface{} { var v interface{}; __moodit_json.Unmarshal([]byte(s), &v); return v }\n"
+                + "func __moodit_nsRead(r *__moodit_bufio.Reader) (string, bool) {\n"
+                + "\tnum := \"\"\n"
+                + "\tfor {\n"
+                + "\t\tb, err := r.ReadByte()\n"
+                + "\t\tif err != nil { return \"\", false }\n"
+                + "\t\tif b == ':' { break }\n"
+                + "\t\tif b >= '0' && b <= '9' { num += string(b) } else if b == '\\n' || b == '\\r' { continue } else { return \"\", false }\n"
+                + "\t}\n"
+                + "\tn, _ := __moodit_strconv.Atoi(num)\n"
+                + "\tbuf := make([]byte, n)\n"
+                + "\tif _, err := __moodit_io.ReadFull(r, buf); err != nil { return \"\", false }\n"
+                + "\tr.ReadByte()\n"
+                + "\treturn string(buf), true\n"
+                + "}\n"
+                + "func __moodit_nsWrite(w *__moodit_bufio.Writer, s string) { w.WriteString(__moodit_strconv.Itoa(len(s))); w.WriteByte(':'); w.WriteString(s); w.WriteByte(',') }\n"
+                + "func __moodit_ok(w *__moodit_bufio.Writer, v string) { __moodit_nsWrite(w, \"1\"); __moodit_nsWrite(w, v) }\n"
+                + "func __moodit_fail(w *__moodit_bufio.Writer, m string) { __moodit_nsWrite(w, \"0\"); __moodit_nsWrite(w, m) }\n"
+                + "func __moodit_serve() {\n"
+                + "\t__r := __moodit_bufio.NewReader(__moodit_os.Stdin)\n"
+                + "\t__w := __moodit_bufio.NewWriter(__moodit_os.Stdout)\n"
+                + "\tdefer __w.Flush()\n"
+                + "\tfor {\n"
+                + "\t\t__entry, __eok := __moodit_nsRead(__r)\n"
+                + "\t\tif !__eok { break }\n"
+                + "\t\tfunc() {\n"
+                + "\t\t\tdefer func() { if rec := recover(); rec != nil { __moodit_fail(__w, __moodit_fmt.Sprint(rec)) } }()\n"
+                + "\t\t\tswitch __entry {\n"
+                + cases
+                + "\t\t\tdefault:\n"
+                + "\t\t\t\t__moodit_fail(__w, \"symbole inconnu\")\n"
+                + "\t\t\t}\n"
+                + "\t\t}()\n"
+                + "\t\t__w.Flush()\n"
+                + "\t}\n"
+                + "}\n"
+                + "func main() { __moodit_serve() }\n";
+        return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
+    }
+
+    private Assembled assembleServerRust(String student) {
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = RUST_FUNC.matcher(student);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(1))) {
+                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3) == null ? "" : fm.group(3).trim()});
+            }
+        }
+        // Serveur pur : aucun harnais → pas de stub, les fonctions gardent leur nom ; on neutralise main.
+        String code = student.replaceAll("\\bfn\\s+main\\s*\\(", "fn __moodit_student_main(");
+        StringBuilder cases = new StringBuilder();
+        for (String[] f : funcs) {
+            String name = f[0];
+            List<String[]> params = rustParseParams(f[1]);
+            String ret = f[2];
+            boolean supported = (ret.isEmpty() || RUST_SCALARS.contains(ret))
+                    && params.stream().allMatch(p -> RUST_SCALARS.contains(p[1]));
+            cases.append("        \"").append(name).append("\" => {\n");
+            if (!supported) {
+                cases.append("          __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"type non supporte\");\n        }\n");
+                continue;
+            }
+            StringBuilder reads = new StringBuilder();
+            StringBuilder decls = new StringBuilder();
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                reads.append("          let __s").append(i).append(" = __moodit_ns_read(&mut __r).unwrap_or_default();\n");
+                decls.append("let __a").append(i).append(": ").append(params.get(i)[1]).append(" = ")
+                        .append(rustDec("__s" + i, params.get(i)[1])).append("; ");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append("__a").append(i);
+            }
+            String realCall = name + "(" + callArgs + ")";
+            cases.append(reads)
+                    .append("          let __res = std::panic::catch_unwind(move || { ").append(decls);
+            if (ret.isEmpty()) {
+                cases.append(realCall).append("; });\n")
+                        .append("          match __res { Ok(_) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, \"null\"); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"erreur\"); } }\n        }\n");
+            } else {
+                String enc = "String".equals(ret) ? "format!(\"{:?}\", __v)" : "format!(\"{}\", __v)";
+                cases.append(realCall).append(" });\n")
+                        .append("          match __res { Ok(__v) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, &").append(enc).append("); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"erreur\"); } }\n        }\n");
+            }
+        }
+        String program = "use std::io::{Read, Write};\n\n"
+                + code + "\n\n"
+                + "fn __moodit_ns_write<W: Write>(w: &mut W, s: &str) {\n"
+                + "    let b = s.as_bytes();\n"
+                + "    write!(w, \"{}:\", b.len()).unwrap();\n"
+                + "    w.write_all(b).unwrap(); w.write_all(b\",\").unwrap(); w.flush().unwrap();\n"
+                + "}\n"
+                + "fn __moodit_ns_read<R: Read>(r: &mut R) -> Option<String> {\n"
+                + "    let mut n: usize = 0; let mut any = false;\n"
+                + "    loop {\n"
+                + "        let mut one = [0u8; 1];\n"
+                + "        if r.read(&mut one).ok()? == 0 { return None; }\n"
+                + "        if one[0] == b':' { break; }\n"
+                + "        if one[0] == b'\\n' || one[0] == b'\\r' { continue; }\n"
+                + "        n = n * 10 + (one[0] - b'0') as usize; any = true;\n"
+                + "    }\n"
+                + "    if !any { return None; }\n"
+                + "    let mut buf = vec![0u8; n]; let mut off = 0;\n"
+                + "    while off < n { let k = r.read(&mut buf[off..]).ok()?; if k == 0 { return None; } off += k; }\n"
+                + "    let mut comma = [0u8; 1]; let _ = r.read(&mut comma);\n"
+                + "    Some(String::from_utf8_lossy(&buf).into_owned())\n"
+                + "}\n"
+                + "fn __moodit_serve() {\n"
+                + "    std::panic::set_hook(Box::new(|_| {}));\n"
+                + "    let __stdin = std::io::stdin(); let mut __r = __stdin.lock();\n"
+                + "    let __stdout = std::io::stdout(); let mut __w = __stdout.lock();\n"
+                + "    loop {\n"
+                + "        let __key = match __moodit_ns_read(&mut __r) { Some(k) => k, None => break };\n"
+                + "        match __key.as_str() {\n"
+                + cases
+                + "        _ => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"symbole inconnu\"); }\n"
+                + "        }\n"
+                + "    }\n"
+                + "}\n"
+                + "fn main() { __moodit_serve(); }\n";
+        return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
+    }
+
+    private Assembled assembleServerCLike(String student, boolean cpp) {
+        String s = student == null ? "" : student;
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = C_FUNC.matcher(s);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(2))) {
+                funcs.add(new String[] {fm.group(1).trim(), fm.group(2), fm.group(3)});
+            }
+        }
+        StringBuilder cases = new StringBuilder();
+        for (String[] f : funcs) {
+            String ret = f[0];
+            String name = f[1];
+            List<String[]> params = cParseParams(f[2]);
+            boolean supported = ("void".equals(ret) || C_SCALARS.contains(ret))
+                    && params.stream().allMatch(p -> C_SCALARS.contains(p[1]));
+            int n = name.length();
+            cases.append("    if (__keylen == ").append(n).append(" && __eq(__key, \"").append(name)
+                    .append("\", ").append(n).append(")) {\n");
+            if (!supported) {
+                cases.append("      __ns_write_s(1, \"0\"); __ns_write_s(1, \"type non supporte\"); continue;\n    }\n");
+                continue;
+            }
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                cases.append("      char __s").append(i).append("[128]; long __l").append(i)
+                        .append(" = __ns_read(0, __s").append(i).append(", sizeof(__s").append(i)
+                        .append(")); if (__l").append(i).append(" < 0) return 0; __s").append(i)
+                        .append("[__l").append(i).append(" < 128 ? __l").append(i).append(" : 127] = 0;\n");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append(cDec("__s" + i, params.get(i)[1]));
+            }
+            String realCall = name + "(" + callArgs + ")";
+            if (cpp) cases.append("      try {\n");
+            if ("void".equals(ret)) {
+                cases.append("      ").append(realCall).append(";\n")
+                        .append("      __ns_write_s(1, \"1\"); __ns_write_s(1, \"null\");\n");
+            } else {
+                cases.append("      ").append(ret).append(" __r = ").append(realCall).append(";\n")
+                        .append("      char __ob[64]; int __ol = snprintf(__ob, sizeof(__ob), \"").append(cFmt(ret))
+                        .append("\", __r); __ns_write_s(1, \"1\"); __ns_write(1, __ob, __ol);\n");
+            }
+            if (cpp) cases.append("      } catch (...) { __ns_write_s(1, \"0\"); __ns_write_s(1, \"erreur\"); }\n");
+            cases.append("      continue;\n    }\n");
+        }
+        String includes = cpp
+                ? "#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\n"
+                : "#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n";
+        String program = includes
+                + "#define main __moodit_student_main\n"
+                + s + "\n"
+                + "#undef main\n"
+                + "static void __w_all(int fd, const char* b, long n) { long o = 0; while (o < n) { long k = write(fd, b + o, n - o); if (k <= 0) _exit(1); o += k; } }\n"
+                + "static int __rd1(int fd) { unsigned char c; long k = read(fd, &c, 1); if (k <= 0) return -1; return c; }\n"
+                + "static void __ns_write(int fd, const char* s, long len) {\n"
+                + "  char num[24]; int i = 0; long t = len; char tmp[24]; int j = 0;\n"
+                + "  if (t == 0) tmp[j++] = '0'; while (t > 0) { tmp[j++] = '0' + (t % 10); t /= 10; }\n"
+                + "  while (j > 0) num[i++] = tmp[--j]; num[i++] = ':';\n"
+                + "  __w_all(fd, num, i); __w_all(fd, s, len); __w_all(fd, \",\", 1);\n"
+                + "}\n"
+                + "static void __ns_write_s(int fd, const char* s) { long n = 0; while (s[n]) n++; __ns_write(fd, s, n); }\n"
+                + "static long __ns_read(int fd, char* buf, long cap) {\n"
+                + "  long n = 0; int any = 0, c;\n"
+                + "  while ((c = __rd1(fd)) != ':') { if (c < 0) return -1; n = n * 10 + (c - '0'); any = 1; }\n"
+                + "  if (!any) return -1;\n"
+                + "  long o = 0; while (o < n) { int d = __rd1(fd); if (d < 0) return -1; if (o < cap) buf[o] = (char)d; o++; }\n"
+                + "  __rd1(fd);\n"
+                + "  return n;\n"
+                + "}\n"
+                + "static int __eq(const char* a, const char* b, long n) { for (long i = 0; i < n; i++) if (a[i] != b[i]) return 0; return 1; }\n"
+                + "int main(void) {\n"
+                + "  for (;;) {\n"
+                + "    char __key[64]; long __keylen = __ns_read(0, __key, sizeof(__key));\n"
+                + "    if (__keylen < 0) return 0;\n"
+                + cases
+                + "    __ns_write_s(1, \"0\"); __ns_write_s(1, \"symbole inconnu\");\n"
+                + "  }\n"
+                + "}\n";
+        return new Assembled(cpp ? "c++" : "c", List.of(new PistonClient.File(cpp ? "main.cpp" : "main.c", program)));
+    }
+
+    private Assembled assembleServerCSharp(String studentCode) {
+        String student = studentCode == null ? "" : studentCode;
+        student = student.replaceAll("(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
+        StringBuilder usings = new StringBuilder("using System;\nusing System.IO;\n");
+        Matcher um = CS_USING.matcher(student);
+        while (um.find()) {
+            String u = um.group().strip();
+            if (!"using System;".equals(u) && !"using System.IO;".equals(u)) usings.append(u).append("\n");
+        }
+        student = CS_USING.matcher(student).replaceAll("");
+
+        StringBuilder cases = new StringBuilder();
+        Matcher cm = CS_CLASS_DECL.matcher(student);
+        while (cm.find()) {
+            String className = cm.group(1);
+            int open = student.indexOf('{', cm.start());
+            int close = javaMatchBrace(student, open);
+            String body = student.substring(open + 1, close);
+            Matcher mm = CS_STATIC_METHOD.matcher(body);
+            while (mm.find()) {
+                String vis = mm.group(1);
+                String ret = mm.group(2);
+                String method = mm.group(3);
+                if ("Main".equals(method) || "__moodit_student_main".equals(method)) continue;
+                if (!("public".equals(vis) || "internal".equals(vis))) continue;
+                List<String[]> params = javaParseParams(mm.group(4));
+                String key = className + "." + method;
+                boolean supported = ("void".equals(ret) || CS_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> CS_SCALARS.contains(p[1]));
+                cases.append("          case \"").append(key).append("\": {\n");
+                if (!supported) {
+                    cases.append("            __s = \"0\"; __p = \"type non supporte\"; break;\n          }\n");
+                    continue;
+                }
+                StringBuilder callArgs = new StringBuilder();
+                for (int i = 0; i < params.size(); i++) {
+                    cases.append("            string __a").append(i).append(" = __NsRead(__in);\n");
+                    if (i > 0) callArgs.append(", ");
+                    callArgs.append(csDec("__a" + i, params.get(i)[1]));
+                }
+                String call = className + "." + method + "(" + callArgs + ")";
+                if ("void".equals(ret)) {
+                    cases.append("            ").append(call).append("; __s = \"1\"; __p = \"null\"; break;\n          }\n");
+                } else {
+                    String payload = "bool".equals(ret) ? "(__r ? \"true\" : \"false\")"
+                            : "string".equals(ret) ? "__r" : csEnc("__r", ret);
+                    cases.append("            var __r = ").append(call).append("; __s = \"1\"; __p = ")
+                            .append(payload).append("; break;\n          }\n");
+                }
+            }
+        }
+        String program = usings + "\n" + student + "\n"
+                + "static class __MooditServer {\n"
+                + "  static void __NsWrite(Stream o, string s) { var b = System.Text.Encoding.UTF8.GetBytes(s); var h = System.Text.Encoding.UTF8.GetBytes(b.Length + \":\"); o.Write(h, 0, h.Length); o.Write(b, 0, b.Length); o.WriteByte((byte)','); o.Flush(); }\n"
+                + "  static string __NsRead(Stream r) { int n = 0; bool any = false; int c; while ((c = r.ReadByte()) != ':') { if (c < 0) return null; if (c == '\\n' || c == '\\r') continue; n = n * 10 + (c - '0'); any = true; } if (!any) return null; var buf = new byte[n]; int off = 0; while (off < n) { int k = r.Read(buf, off, n - off); if (k <= 0) return null; off += k; } r.ReadByte(); return System.Text.Encoding.UTF8.GetString(buf); }\n"
+                + "  static void Main() {\n"
+                + "    var __in = Console.OpenStandardInput(); var __out = Console.OpenStandardOutput();\n"
+                + "    while (true) {\n"
+                + "      string __entry = __NsRead(__in); if (__entry == null) break;\n"
+                + "      string __s = \"0\"; string __p = \"symbole inconnu\";\n"
+                + "      try {\n"
+                + "        switch (__entry) {\n"
+                + cases
+                + "          default: __s = \"0\"; __p = \"symbole inconnu\"; break;\n"
+                + "        }\n"
+                + "      } catch (Exception) { __s = \"0\"; __p = \"erreur\"; }\n"
+                + "      __NsWrite(__out, __s); __NsWrite(__out, __p);\n"
+                + "    }\n"
+                + "  }\n"
+                + "}\n";
+        return new Assembled("csharp", List.of(new PistonClient.File("main.cs", program)));
+    }
+
+    private Assembled assembleServerJava(String studentCode) {
+        String student = studentCode == null ? "" : studentCode;
+        student = student.replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
+        StringBuilder imports = new StringBuilder("import java.io.*;\n");
+        Matcher im = JAVA_IMPORT.matcher(student);
+        while (im.find()) {
+            String s = im.group().strip();
+            if (!"import java.io.*;".equals(s)) imports.append(s).append("\n");
+        }
+        student = JAVA_IMPORT.matcher(student).replaceAll("");
+
+        StringBuilder cases = new StringBuilder();
+        Matcher cm = JAVA_CLASS_DECL.matcher(student);
+        while (cm.find()) {
+            String className = cm.group(1);
+            int open = student.indexOf('{', cm.start());
+            int close = javaMatchBrace(student, open);
+            String body = student.substring(open + 1, close);
+            Matcher mm = JAVA_STATIC_METHOD.matcher(body);
+            while (mm.find()) {
+                String vis = mm.group(1);
+                String ret = mm.group(2);
+                String method = mm.group(3);
+                if ("main".equals(method) || "__moodit_student_main".equals(method)) continue;
+                if ("private".equals(vis) || "protected".equals(vis)) continue;
+                List<String[]> params = javaParseParams(mm.group(4));
+                String key = className + "." + method;
+                boolean supported = ("void".equals(ret) || JAVA_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> JAVA_SCALARS.contains(p[1]));
+                cases.append("        case \"").append(key).append("\": {\n");
+                if (!supported) {
+                    cases.append("          __st = \"0\"; __p = \"type non supporte\"; break;\n        }\n");
+                    continue;
+                }
+                StringBuilder callArgs = new StringBuilder();
+                for (int i = 0; i < params.size(); i++) {
+                    cases.append("          String __a").append(i).append(" = __nsRead(__in);\n");
+                    if (i > 0) callArgs.append(", ");
+                    callArgs.append(javaDec("__a" + i, params.get(i)[1]));
+                }
+                String call = className + "." + method + "(" + callArgs + ")";
+                if ("void".equals(ret)) {
+                    cases.append("          ").append(call).append("; __st = \"1\"; __p = \"null\"; break;\n        }\n");
+                } else {
+                    cases.append("          ").append(ret).append(" __r = ").append(call)
+                            .append("; __st = \"1\"; __p = String.valueOf(__r); break;\n        }\n");
+                }
+            }
+        }
+        String program = imports + "\n"
+                + "public class __MooditMain {\n"
+                + "  static void __nsWrite(OutputStream o, String s) { try { byte[] b = s.getBytes(\"UTF-8\"); o.write((b.length + \":\").getBytes(\"UTF-8\")); o.write(b); o.write(','); o.flush(); } catch (IOException e) { throw new RuntimeException(e); } }\n"
+                + "  static String __nsRead(InputStream in) { try { int n = 0, c; boolean any = false; while ((c = in.read()) != ':') { if (c < 0) throw new EOFException(); if (c == '\\n' || c == '\\r') continue; n = n * 10 + (c - '0'); any = true; } if (!any) throw new IOException(\"ns\"); byte[] b = new byte[n]; int off = 0; while (off < n) { int k = in.read(b, off, n - off); if (k < 0) throw new EOFException(); off += k; } in.read(); return new String(b, \"UTF-8\"); } catch (IOException e) { throw new RuntimeException(e); } }\n"
+                + "  public static void main(String[] __args) throws Exception {\n"
+                + "    InputStream __in = new FileInputStream(FileDescriptor.in);\n"
+                + "    OutputStream __out = new FileOutputStream(FileDescriptor.out);\n"
+                + "    while (true) {\n"
+                + "      String __entry; try { __entry = __nsRead(__in); } catch (RuntimeException e) { break; }\n"
+                + "      String __st = \"0\"; String __p = \"symbole inconnu\";\n"
+                + "      try {\n"
+                + "        switch (__entry) {\n"
+                + cases
+                + "        default: __st = \"0\"; __p = \"symbole inconnu\"; break;\n"
+                + "        }\n"
+                + "      } catch (Throwable __t) { __st = \"0\"; __p = \"erreur\"; }\n"
+                + "      __nsWrite(__out, __st); __nsWrite(__out, __p);\n"
+                + "    }\n"
+                + "  }\n"
+                + "}\n\n"
+                + student + "\n";
+        return new Assembled("java", List.of(new PistonClient.File("Main.java", program)));
+    }
+
     // ── Rust ─────────────────────────────────────────────────────────────────────
 
+    /** Fonction Rust de premier niveau : {@code fn nom(params) -> ret {} } (ret optionnel). */
+    private static final Pattern RUST_FUNC =
+            Pattern.compile("(?m)^fn\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:->\\s*([^{]+?))?\\s*\\{");
+    /** Types scalaires marshalables Rust. */
+    private static final Set<String> RUST_SCALARS = Set.of("i32", "i64", "f64", "bool", "String");
+
     /**
-     * Rust : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au début de notre
-     * {@code main} (Rust n'exécute aucun code utilisateur avant {@code main}, donc aucune course).
-     * On supprime aussi {@code main.rs}. Le {@code fn main} de l'étudiant est neutralisé.
+     * Rust : exécution ISOLÉE en DEUX processus (cf. #116, même modèle que {@link #assembleGo}). Le
+     * binaire natif se RE-EXÉCUTE ({@code current_exe() __moodit_student}) comme serveur étudiant. Le
+     * PARENT (noteur) lit le nonce sur SON stdin, exécute le harnais INCHANGÉ et réémet le nonce en cas
+     * de succès ; le CHILD héberge le vrai code étudiant et répond par RPC (netstring). Les fonctions
+     * étudiant (défs + appels) sont renommées {@code __moodit_s_*} ; des STUBS de même nom délèguent au
+     * child. Périmètre : fonctions à paramètres/retour scalaires ({@code i32, i64, f64, bool, String}).
      */
     private Assembled assembleRust(String studentCode, String harnessCode, String nonce) {
-        String neutralized = (studentCode == null ? "" : studentCode)
-                .replaceAll("fn\\s+main\\s*\\(", "fn __moodit_student_main(");
-        String program = neutralized
-                + "\n\nfn __moodit_harness() -> bool {\n"
-                + harnessCode
-                + "\n}\n"
-                + "fn main() {\n"
-                + "    use std::io::BufRead;\n"
-                + "    let _ = std::fs::remove_file(\"main.rs\");\n"
-                + "    let mut __moodit_s = String::new();\n"
-                + "    std::io::stdin().lock().read_line(&mut __moodit_s).ok();\n"
-                + "    if __moodit_harness() {\n"
-                + "        eprint!(\"{}\", __moodit_s.trim());\n"
+        String student = studentCode == null ? "" : studentCode;
+        String harness = harnessCode == null ? "" : harnessCode;
+
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = RUST_FUNC.matcher(student);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(1))) {
+                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3) == null ? "" : fm.group(3).trim()});
+            }
+        }
+        String code = student.replaceAll("\\bfn\\s+main\\s*\\(", "fn __moodit_student_main(");
+        for (String[] f : funcs) {
+            code = code.replaceAll("(?<![\\w.])" + Pattern.quote(f[0]) + "(?=\\s*\\()", "__moodit_s_" + f[0]);
+        }
+
+        StringBuilder stubs = new StringBuilder();
+        StringBuilder cases = new StringBuilder();
+        for (String[] f : funcs) {
+            String name = f[0];
+            List<String[]> params = rustParseParams(f[1]);
+            String ret = f[2];
+            String sig = params.stream().map(p -> p[0] + ": " + p[1]).collect(Collectors.joining(", "));
+            boolean supported = (ret.isEmpty() || RUST_SCALARS.contains(ret))
+                    && params.stream().allMatch(p -> RUST_SCALARS.contains(p[1]));
+            if (!supported) {
+                stubs.append("fn ").append(name).append("(").append(sig).append(")")
+                        .append(ret.isEmpty() ? "" : " -> " + ret)
+                        .append(" { panic!(\"type non supporte\"); }\n");
+                continue;
+            }
+            String encArgs = params.stream().map(p -> "format!(\"{}\", " + p[0] + ")").collect(Collectors.joining(", "));
+            String rpc = "__moodit_rpc(\"" + name + "\", &[" + encArgs + "])";
+            if (ret.isEmpty()) {
+                stubs.append("fn ").append(name).append("(").append(sig).append(") { ").append(rpc).append("; }\n");
+            } else {
+                stubs.append("fn ").append(name).append("(").append(sig).append(") -> ").append(ret)
+                        .append(" { ").append(rustDec(rpc, ret)).append(" }\n");
+            }
+            StringBuilder reads = new StringBuilder();
+            StringBuilder decls = new StringBuilder();
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                reads.append("          let __s").append(i).append(" = __moodit_ns_read(&mut __r).unwrap_or_default();\n");
+                decls.append("let __a").append(i).append(": ").append(params.get(i)[1]).append(" = ")
+                        .append(rustDec("__s" + i, params.get(i)[1])).append("; ");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append("__a").append(i);
+            }
+            String realCall = "__moodit_s_" + name + "(" + callArgs + ")";
+            cases.append("        \"").append(name).append("\" => {\n").append(reads)
+                    .append("          let __res = std::panic::catch_unwind(move || { ").append(decls);
+            if (ret.isEmpty()) {
+                cases.append(realCall).append("; });\n")
+                        .append("          match __res { Ok(_) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, \"\"); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); } }\n        }\n");
+            } else {
+                cases.append(realCall).append(" });\n")
+                        .append("          match __res { Ok(__v) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, &format!(\"{}\", __v)); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); } }\n        }\n");
+            }
+        }
+
+        String program = "use std::io::{Read, Write, BufRead};\n\n"
+                + code + "\n\n"
+                + "thread_local! {\n"
+                + "    static __MOODIT_CHILD: std::cell::RefCell<Option<(std::process::ChildStdin, std::process::ChildStdout)>> = std::cell::RefCell::new(None);\n"
+                + "}\n"
+                + "fn __moodit_ns_write<W: Write>(w: &mut W, s: &str) {\n"
+                + "    let b = s.as_bytes();\n"
+                + "    write!(w, \"{}:\", b.len()).unwrap();\n"
+                + "    w.write_all(b).unwrap(); w.write_all(b\",\").unwrap(); w.flush().unwrap();\n"
+                + "}\n"
+                + "fn __moodit_ns_read<R: Read>(r: &mut R) -> Option<String> {\n"
+                + "    let mut n: usize = 0; let mut any = false;\n"
+                + "    loop {\n"
+                + "        let mut one = [0u8; 1];\n"
+                + "        if r.read(&mut one).ok()? == 0 { return None; }\n"
+                + "        if one[0] == b':' { break; }\n"
+                + "        n = n * 10 + (one[0] - b'0') as usize; any = true;\n"
                 + "    }\n"
+                + "    if !any { return None; }\n"
+                + "    let mut buf = vec![0u8; n]; let mut off = 0;\n"
+                + "    while off < n { let k = r.read(&mut buf[off..]).ok()?; if k == 0 { return None; } off += k; }\n"
+                + "    let mut comma = [0u8; 1]; let _ = r.read(&mut comma);\n"
+                + "    Some(String::from_utf8_lossy(&buf).into_owned())\n"
+                + "}\n"
+                + "fn __moodit_rpc(name: &str, args: &[String]) -> String {\n"
+                + "    __MOODIT_CHILD.with(|c| {\n"
+                + "        let mut b = c.borrow_mut();\n"
+                + "        let (cin, cout) = b.as_mut().expect(\"child\");\n"
+                + "        __moodit_ns_write(cin, name);\n"
+                + "        for a in args { __moodit_ns_write(cin, a); }\n"
+                + "        let st = __moodit_ns_read(cout).expect(\"st\");\n"
+                + "        let rv = __moodit_ns_read(cout).expect(\"rv\");\n"
+                + "        if st != \"1\" { panic!(\"appel etudiant en echec\"); }\n"
+                + "        rv\n"
+                + "    })\n"
+                + "}\n"
+                + stubs
+                + "fn __moodit_harness() -> bool {\n"
+                + harness
+                + "\n}\n"
+                + "fn __moodit_serve() {\n"
+                + "    std::panic::set_hook(Box::new(|_| {}));\n"
+                + "    let __stdin = std::io::stdin(); let mut __r = __stdin.lock();\n"
+                + "    let __stdout = std::io::stdout(); let mut __w = __stdout.lock();\n"
+                + "    loop {\n"
+                + "        let __key = match __moodit_ns_read(&mut __r) { Some(k) => k, None => break };\n"
+                + "        match __key.as_str() {\n"
+                + cases
+                + "        _ => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); }\n"
+                + "        }\n"
+                + "    }\n"
+                + "}\n"
+                + "fn main() {\n"
+                + "    std::panic::set_hook(Box::new(|_| {}));\n"
+                + "    let mut __args = std::env::args(); let _ = __args.next();\n"
+                + "    if let Some(a) = __args.next() { if a == \"__moodit_student\" { __moodit_serve(); return; } }\n"
+                + "    let mut __secret = String::new();\n"
+                + "    std::io::stdin().lock().read_line(&mut __secret).ok();\n"
+                + "    let __secret = __secret.trim().to_string();\n"
+                + "    let __exe = std::env::current_exe().unwrap();\n"
+                + "    let mut __child = std::process::Command::new(__exe).arg(\"__moodit_student\")\n"
+                + "        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())\n"
+                + "        .spawn().unwrap();\n"
+                + "    let __cin = __child.stdin.take().unwrap();\n"
+                + "    let __cout = __child.stdout.take().unwrap();\n"
+                + "    __MOODIT_CHILD.with(|c| *c.borrow_mut() = Some((__cin, __cout)));\n"
+                + "    let __ok = std::panic::catch_unwind(|| __moodit_harness()).unwrap_or(false);\n"
+                + "    if __ok { eprint!(\"{}\", __secret); }\n"
+                + "    __MOODIT_CHILD.with(|c| { c.borrow_mut().take(); });\n"
+                + "    std::process::exit(if __ok { 0 } else { 1 });\n"
                 + "}\n";
         return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
     }
 
+    /** Paramètres Rust {@code "n: i32, s: String"} → couples {@code {nom, type}}. */
+    private static List<String[]> rustParseParams(String params) {
+        List<String[]> out = new ArrayList<>();
+        String trimmed = params == null ? "" : params.trim();
+        if (trimmed.isEmpty()) {
+            return out;
+        }
+        for (String seg : trimmed.split(",")) {
+            String s = seg.trim();
+            if (s.isEmpty()) continue;
+            int colon = s.indexOf(':');
+            if (colon < 0) continue;
+            String[] left = s.substring(0, colon).trim().split("\\s+");
+            out.add(new String[] {left[left.length - 1], s.substring(colon + 1).trim()});
+        }
+        return out;
+    }
+
+    /** Expression Rust décodant une chaîne {@code s} du fil vers le type {@code type}. */
+    private static String rustDec(String s, String type) {
+        return "String".equals(type) ? s : s + ".parse::<" + type + ">().unwrap()";
+    }
+
     // ── C ────────────────────────────────────────────────────────────────────────
 
+    /** Fonction C/C++ de premier niveau (colonne 0) : {@code TYPE nom(params) {} }. */
+    private static final Pattern C_FUNC =
+            Pattern.compile("(?m)^([A-Za-z_][\\w \\*]*?[ \\*]+)(\\w+)\\s*\\(([^)]*)\\)\\s*\\{");
+    /** Types scalaires marshalables C/C++ (numériques — pas de {@code char*} au pilote). */
+    private static final Set<String> C_SCALARS = Set.of("int", "long", "double");
+
     /**
-     * C : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin dans un CONSTRUCTEUR à
-     * priorité réservée ({@code constructor(101)}) qui s'exécute AVANT les constructeurs étudiant
-     * (priorité par défaut) et avant {@code main}. Ce constructeur supprime aussi {@code main.c} et
-     * draine le secret dans un tampon privé. Notre {@code main} appelle le harnais puis réémet le
-     * secret s'il réussit. Le {@code main} étudiant est renommé par macro ({@code #define main …}).
+     * C : exécution ISOLÉE en DEUX processus (cf. #116). Le programme se {@code fork()} : le PARENT
+     * (noteur) lit le nonce sur SON stdin APRÈS le fork (donc absent de la mémoire du child), exécute
+     * le harnais INCHANGÉ et réémet le nonce en cas de succès ; le CHILD (qui ferme fd 0 avant tout
+     * code étudiant) héberge le vrai code étudiant et répond par RPC (netstring sur des tubes dédiés).
+     * Les symboles étudiant (défs + appels) sont renommés par macro ({@code #define nom __moodit_s_nom})
+     * ; des STUBS de même nom délèguent au child. Les includes sont MINIMAUX et placés AVANT le code
+     * étudiant (plus de {@code <string.h>} : un étudiant qui redéfinit {@code strlen} compile — cf.
+     * revue). Périmètre : fonctions à paramètres/retour {@code int, long, double}.
      */
     private Assembled assembleC(String studentCode, String harnessCode, String nonce) {
-        String program = "#define main __moodit_student_main\n"
-                + studentCode
-                + "\n#undef main\n"
-                + "#include <stdio.h>\n"
-                + "#include <stdlib.h>\n"
-                + "#include <string.h>\n"
-                + "static char __moodit_secret[128];\n"
-                + "__attribute__((constructor(101))) static void __moodit_init(void) {\n"
-                + "    remove(\"main.c\");\n"
-                + "    if (!fgets(__moodit_secret, sizeof(__moodit_secret), stdin)) __moodit_secret[0] = 0;\n"
-                + "    __moodit_secret[strcspn(__moodit_secret, \"\\r\\n\")] = 0;\n"
+        return assembleCLike(studentCode, harnessCode, false);
+    }
+
+    /**
+     * Génère le programme C/C++ deux-processus (cf. {@link #assembleC}). {@code cpp=true} ajoute les
+     * en-têtes C++ et enveloppe l'appel réel dans un {@code try/catch} (une exception = échec).
+     */
+    private Assembled assembleCLike(String studentCode, String harnessCode, boolean cpp) {
+        String student = studentCode == null ? "" : studentCode;
+        String harness = harnessCode == null ? "" : harnessCode;
+
+        List<String[]> funcs = new ArrayList<>();
+        Matcher fm = C_FUNC.matcher(student);
+        while (fm.find()) {
+            if (!"main".equals(fm.group(2))) {
+                funcs.add(new String[] {fm.group(1).trim(), fm.group(2), fm.group(3)});
+            }
+        }
+        StringBuilder defines = new StringBuilder();
+        StringBuilder undefs = new StringBuilder();
+        for (String[] f : funcs) {
+            defines.append("#define ").append(f[1]).append(" __moodit_s_").append(f[1]).append("\n");
+            undefs.append("#undef ").append(f[1]).append("\n");
+        }
+        defines.append("#define main __moodit_student_main\n");
+        undefs.append("#undef main\n");
+
+        StringBuilder stubs = new StringBuilder();
+        StringBuilder cases = new StringBuilder();
+        for (String[] f : funcs) {
+            String ret = f[0];
+            String name = f[1];
+            List<String[]> params = cParseParams(f[2]);
+            String sig = params.isEmpty() ? "void"
+                    : params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+            boolean supported = ("void".equals(ret) || C_SCALARS.contains(ret))
+                    && params.stream().allMatch(p -> C_SCALARS.contains(p[1]));
+            if (!supported) {
+                stubs.append(ret).append(" ").append(name).append("(").append(sig).append(") { _exit(1); }\n");
+                continue;
+            }
+            // Stub (parent).
+            stubs.append(ret).append(" ").append(name).append("(").append(sig).append(") {\n")
+                    .append("  __ns_write_s(__moodit_wfd, \"").append(name).append("\");\n");
+            for (String[] p : params) {
+                stubs.append("  { char __b[64]; int __l = snprintf(__b, sizeof(__b), \"").append(cFmt(p[1]))
+                        .append("\", ").append(p[0]).append("); __ns_write(__moodit_wfd, __b, __l); }\n");
+            }
+            stubs.append("  char __st[4]; long __sl = __ns_read(__moodit_rfd, __st, sizeof(__st));\n")
+                    .append("  char __rv[128]; long __rl = __ns_read(__moodit_rfd, __rv, sizeof(__rv)); if (__rl < 0) _exit(1); __rv[__rl < 128 ? __rl : 127] = 0;\n")
+                    .append("  if (!(__sl == 1 && __st[0] == '1')) _exit(1);\n");
+            if (!"void".equals(ret)) {
+                stubs.append("  return ").append(cDec("__rv", ret)).append(";\n");
+            }
+            stubs.append("}\n");
+            // Dispatch (child).
+            cases.append("    if (__keylen == ").append(name.length()).append(" && __eq(__key, \"")
+                    .append(name).append("\", ").append(name.length()).append(")) {\n");
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                cases.append("      char __s").append(i).append("[128]; long __l").append(i)
+                        .append(" = __ns_read(__moodit_rfd, __s").append(i).append(", sizeof(__s").append(i)
+                        .append(")); __s").append(i).append("[__l").append(i).append(" < 128 ? __l").append(i)
+                        .append(" : 127] = 0;\n");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append(cDec("__s" + i, params.get(i)[1]));
+            }
+            String realCall = "__moodit_s_" + name + "(" + callArgs + ")";
+            if (cpp) {
+                cases.append("      try {\n");
+            }
+            if ("void".equals(ret)) {
+                cases.append("      ").append(realCall).append(";\n")
+                        .append("      __ns_write_s(__moodit_wfd, \"1\"); __ns_write_s(__moodit_wfd, \"\");\n");
+            } else {
+                cases.append("      ").append(ret).append(" __r = ").append(realCall).append(";\n")
+                        .append("      char __ob[64]; int __ol = snprintf(__ob, sizeof(__ob), \"").append(cFmt(ret))
+                        .append("\", __r); __ns_write_s(__moodit_wfd, \"1\"); __ns_write(__moodit_wfd, __ob, __ol);\n");
+            }
+            if (cpp) {
+                cases.append("      } catch (...) { __ns_write_s(__moodit_wfd, \"0\"); __ns_write_s(__moodit_wfd, \"\"); }\n");
+            }
+            cases.append("      continue;\n    }\n");
+        }
+
+        String includes = cpp
+                ? "#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\n#include <sys/types.h>\n"
+                : "#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n#include <sys/types.h>\n";
+        String harnessType = cpp ? "bool" : "int";
+        String program = includes + "\n"
+                + defines
+                + student + "\n"
+                + undefs + "\n"
+                + "static int __moodit_rfd, __moodit_wfd;\n"
+                + "static void __w_all(int fd, const char* b, long n) { long o = 0; while (o < n) { long k = write(fd, b + o, n - o); if (k <= 0) _exit(1); o += k; } }\n"
+                + "static int __rd1(int fd) { unsigned char c; long k = read(fd, &c, 1); if (k <= 0) return -1; return c; }\n"
+                + "static void __ns_write(int fd, const char* s, long len) {\n"
+                + "  char num[24]; int i = 0; long t = len; char tmp[24]; int j = 0;\n"
+                + "  if (t == 0) tmp[j++] = '0'; while (t > 0) { tmp[j++] = '0' + (t % 10); t /= 10; }\n"
+                + "  while (j > 0) num[i++] = tmp[--j]; num[i++] = ':';\n"
+                + "  __w_all(fd, num, i); __w_all(fd, s, len); __w_all(fd, \",\", 1);\n"
                 + "}\n"
-                + "static int __moodit_harness(void) {\n"
-                + harnessCode
+                + "static void __ns_write_s(int fd, const char* s) { long n = 0; while (s[n]) n++; __ns_write(fd, s, n); }\n"
+                + "static long __ns_read(int fd, char* buf, long cap) {\n"
+                + "  long n = 0; int any = 0, c;\n"
+                + "  while ((c = __rd1(fd)) != ':') { if (c < 0) return -1; n = n * 10 + (c - '0'); any = 1; }\n"
+                + "  if (!any) return -1;\n"
+                + "  long o = 0; while (o < n) { int d = __rd1(fd); if (d < 0) return -1; if (o < cap) buf[o] = (char)d; o++; }\n"
+                + "  __rd1(fd);\n"
+                + "  return n;\n"
+                + "}\n"
+                + "static int __eq(const char* a, const char* b, long n) { for (long i = 0; i < n; i++) if (a[i] != b[i]) return 0; return 1; }\n"
+                + stubs
+                + "static " + harnessType + " __moodit_harness(void) {\n"
+                + harness
                 + "\n}\n"
+                + "static void __moodit_serve(void) {\n"
+                + "  for (;;) {\n"
+                + "    char __key[64]; long __keylen = __ns_read(__moodit_rfd, __key, sizeof(__key));\n"
+                + "    if (__keylen < 0) return;\n"
+                + cases
+                + "    __ns_write_s(__moodit_wfd, \"0\"); __ns_write_s(__moodit_wfd, \"\");\n"
+                + "  }\n"
+                + "}\n"
                 + "int main(void) {\n"
-                + "    int __moodit_r = __moodit_harness();\n"
-                + "    if (__moodit_r != 0) fputs(__moodit_secret, stderr);\n"
-                + "    return __moodit_r != 0 ? 0 : 1;\n"
+                + "  int toC[2], toP[2]; if (pipe(toC) || pipe(toP)) _exit(1);\n"
+                + "  pid_t pid = fork(); if (pid < 0) _exit(1);\n"
+                + "  if (pid == 0) {\n"
+                + "    close(0);\n"
+                + "    close(toC[1]); close(toP[0]);\n"
+                + "    __moodit_rfd = toC[0]; __moodit_wfd = toP[1];\n"
+                + "    __moodit_serve(); _exit(0);\n"
+                + "  }\n"
+                + "  close(toC[0]); close(toP[1]);\n"
+                + "  __moodit_wfd = toC[1]; __moodit_rfd = toP[0];\n"
+                + "  char __secret[128]; int __sn = 0, ch;\n"
+                + "  while (__sn < 127 && (ch = __rd1(0)) >= 0 && ch != '\\n') __secret[__sn++] = (char)ch;\n"
+                + "  __secret[__sn] = 0;\n"
+                + "  int __ok = __moodit_harness() ? 1 : 0;\n"
+                + "  if (__ok) __w_all(2, __secret, __sn);\n"
+                + "  close(__moodit_wfd);\n"
+                + "  _exit(__ok ? 0 : 1);\n"
                 + "}\n";
-        return new Assembled("c", List.of(new PistonClient.File("main.c", program)));
+        return new Assembled(cpp ? "c++" : "c",
+                List.of(new PistonClient.File(cpp ? "main.cpp" : "main.c", program)));
+    }
+
+    /** Paramètres C/C++ ({@code "int a, long b"} ; {@code void} = aucun) → couples {@code {nom, type}}. */
+    private static List<String[]> cParseParams(String params) {
+        List<String[]> out = new ArrayList<>();
+        String trimmed = params == null ? "" : params.trim();
+        if (trimmed.isEmpty() || "void".equals(trimmed)) {
+            return out;
+        }
+        for (String seg : trimmed.split(",")) {
+            String[] toks = seg.trim().split("\\s+");
+            String name = toks[toks.length - 1].replace("*", "");
+            String type = String.join(" ", java.util.Arrays.copyOf(toks, toks.length - 1));
+            out.add(new String[] {name, type});
+        }
+        return out;
+    }
+
+    /** Spécificateur {@code printf} pour {@code snprintf} selon le type C. */
+    private static String cFmt(String type) {
+        return switch (type) {
+            case "long" -> "%ld";
+            case "double" -> "%.17g";
+            default -> "%d";
+        };
+    }
+
+    /** Expression C décodant une chaîne C {@code s} vers le type {@code type}. */
+    private static String cDec(String s, String type) {
+        return switch (type) {
+            case "long" -> "strtol(" + s + ", 0, 10)";
+            case "double" -> "strtod(" + s + ", 0)";
+            default -> "(int)strtol(" + s + ", 0, 10)";
+        };
     }
 
     // ── C++ ──────────────────────────────────────────────────────────────────────
 
     /**
-     * C++ : même modèle que le C (secret lu via stdin dans un {@code constructor(101)}, source
-     * supprimée). Le harnais renvoie un {@code bool} ; une exception (capturée) vaut échec. Le
-     * constructeur à priorité réservée précède les objets globaux étudiant (priorité par défaut).
+     * C++ : même modèle deux-processus que le C (cf. {@link #assembleC}/{@link #assembleCLike}), avec
+     * en-têtes C++ et appel réel enveloppé dans un {@code try/catch} (une exception = échec). Le harnais
+     * renvoie un {@code bool}. Périmètre identique : fonctions à paramètres/retour {@code int, long, double}.
      */
     private Assembled assembleCpp(String studentCode, String harnessCode, String nonce) {
-        String program = "#define main __moodit_student_main\n"
-                + studentCode
-                + "\n#undef main\n"
-                + "#include <iostream>\n"
-                + "#include <cstdlib>\n"
-                + "#include <cstdio>\n"
-                + "#include <cstring>\n"
-                + "static char __moodit_secret[128];\n"
-                + "__attribute__((constructor(101))) static void __moodit_init() {\n"
-                + "    std::remove(\"main.cpp\");\n"
-                + "    if (!std::fgets(__moodit_secret, sizeof(__moodit_secret), stdin)) __moodit_secret[0] = 0;\n"
-                + "    __moodit_secret[std::strcspn(__moodit_secret, \"\\r\\n\")] = 0;\n"
-                + "}\n"
-                + "static bool __moodit_harness() {\n"
-                + harnessCode
-                + "\n}\n"
-                + "int main() {\n"
-                + "    try {\n"
-                + "        if (__moodit_harness()) { std::cerr << __moodit_secret; return 0; }\n"
-                + "        return 1;\n"
-                + "    } catch (...) { return 1; }\n"
-                + "}\n";
-        return new Assembled("c++", List.of(new PistonClient.File("main.cpp", program)));
+        return assembleCLike(studentCode, harnessCode, true);
     }
 
     // ── C# ───────────────────────────────────────────────────────────────────────
 
+    /** Déclaration de classe C# top-level (capture le nom). */
+    private static final Pattern CS_CLASS_DECL = Pattern.compile(
+            "(?:public\\s+|internal\\s+|sealed\\s+|abstract\\s+|static\\s+|partial\\s+)*class\\s+(\\w+)[^{]*\\{");
+    /** Méthode statique C# : {@code [vis] static RET nom(params) {} } (vis capturée). */
+    private static final Pattern CS_STATIC_METHOD = Pattern.compile(
+            "(public|private|protected|internal)?\\s*static\\s+([\\w\\[\\]<>]+)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{");
+    /** Directive {@code using …;}, à hisser en tête (un using après une classe ne compile pas). */
+    private static final Pattern CS_USING = Pattern.compile("(?m)^[ \\t]*using\\s+[^;]+;[ \\t]*\\n?");
+
     /**
-     * C# : le secret anti-triche N'EST PAS gravé — il est lu depuis stdin au début de notre
-     * {@code Main}, AVANT que le harnais ne touche une classe étudiant (les constructeurs statiques
-     * étudiant ne se déclenchent qu'au premier accès, donc après notre lecture). Source supprimée.
-     * Le {@code Main} de l'étudiant est renommé pour ne laisser qu'un point d'entrée.
+     * C# : exécution ISOLÉE en DEUX processus (cf. #116, même modèle que {@link #assembleJava}). mono
+     * compile en {@code .exe} à l'étape COMPILE ; notre {@code Main} RE-EXÉCUTE {@code mono <exe>
+     * __moodit_student} (pas de recompilation → rapide) comme serveur étudiant. Le PARENT (noteur) lit
+     * le nonce sur SON stdin, exécute le harnais INCHANGÉ et réémet le nonce en cas de succès ; le
+     * CHILD héberge le vrai code étudiant et répond par RPC (netstring). Classes étudiant renommées
+     * {@code __MooditStudent_*} + classes STUB de même nom. Périmètre : méthodes STATIQUES
+     * {@code public}/{@code internal} à paramètres/retour scalaires ({@code int, long, double, bool, string}).
      */
     private Assembled assembleCSharp(String studentCode, String harnessCode, String nonce) {
-        String neutralized = (studentCode == null ? "" : studentCode).replaceAll(
-                "(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
-        String program = neutralized
-                + "\n\nclass __MooditHarness {\n"
-                + "    static bool __moodit_run() {\n"
-                + harnessCode
-                + "\n    }\n"
-                + "    static int Main() {\n"
-                + "        System.IO.File.Delete(\"main.cs\");\n"
-                + "        string __moodit_secret = System.Console.In.ReadLine();\n"
-                + "        if (__moodit_secret == null) __moodit_secret = \"\";\n"
-                + "        __moodit_secret = __moodit_secret.Trim();\n"
-                + "        try {\n"
-                + "            if (__moodit_run()) { System.Console.Error.Write(__moodit_secret); return 0; }\n"
-                + "            return 1;\n"
-                + "        }\n"
-                + "        catch (System.Exception __e) { System.Console.Error.WriteLine(__e); return 1; }\n"
+        String student = studentCode == null ? "" : studentCode;
+        String harness = harnessCode == null ? "" : harnessCode;
+
+        // Hisser les using étudiant (interdits après les classes).
+        java.util.LinkedHashSet<String> usings = new java.util.LinkedHashSet<>(
+                List.of("using System;", "using System.IO;", "using System.Diagnostics;"));
+        Matcher um = CS_USING.matcher(student);
+        while (um.find()) usings.add(um.group().strip());
+        student = CS_USING.matcher(student).replaceAll("");
+        // Neutraliser le Main étudiant (un seul point d'entrée : le nôtre).
+        student = student.replaceAll("(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
+
+        StringBuilder stubs = new StringBuilder();
+        StringBuilder cases = new StringBuilder();
+        List<String> classNames = new ArrayList<>();
+        Matcher cm = CS_CLASS_DECL.matcher(student);
+        while (cm.find()) {
+            String className = cm.group(1);
+            classNames.add(className);
+            int bodyOpen = student.indexOf('{', cm.start());
+            int bodyClose = javaMatchBrace(student, bodyOpen);
+            String body = student.substring(bodyOpen + 1, bodyClose);
+            stubs.append("class ").append(className).append(" {\n");
+            Matcher mm = CS_STATIC_METHOD.matcher(body);
+            while (mm.find()) {
+                String vis = mm.group(1);
+                String ret = mm.group(2);
+                String method = mm.group(3);
+                // Appelable par le harnais (autre classe) ⇒ public ou internal seulement.
+                if ("__moodit_student_main".equals(method)
+                        || !("public".equals(vis) || "internal".equals(vis))) continue;
+                List<String[]> params = javaParseParams(mm.group(4));
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                String key = className + "." + method;
+                boolean supported = ("void".equals(ret) || CS_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> CS_SCALARS.contains(p[1]));
+                if (!supported) {
+                    stubs.append("  public static ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { throw new System.Exception(\"type non supporte\"); }\n");
+                    continue;
+                }
+                String encArgs = params.stream().map(p -> csEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                String rpc = "__MooditMain.__rpc(\"" + key + "\", new string[]{" + encArgs + "})";
+                if ("void".equals(ret)) {
+                    stubs.append("  public static void ").append(method).append("(").append(sig).append(") { ")
+                            .append(rpc).append("; }\n");
+                } else {
+                    stubs.append("  public static ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { return ").append(csDec(rpc, ret)).append("; }\n");
+                }
+                StringBuilder readRaw = new StringBuilder();
+                StringBuilder callArgs = new StringBuilder();
+                for (int i = 0; i < params.size(); i++) {
+                    readRaw.append("      string __s").append(i).append(" = __MooditMain.__nsRead(__in);\n");
+                    if (i > 0) callArgs.append(", ");
+                    callArgs.append(csDec("__s" + i, params.get(i)[1]));
+                }
+                String realCall = "__MooditStudent_" + key + "(" + callArgs + ")";
+                cases.append("    case \"").append(key).append("\": {\n").append(readRaw);
+                if ("void".equals(ret)) {
+                    cases.append("      try { ").append(realCall)
+                            .append("; __MooditMain.__nsWrite(__out, \"1\"); __MooditMain.__nsWrite(__out, \"\"); }")
+                            .append(" catch (System.Exception) { __MooditMain.__nsWrite(__out, \"0\"); __MooditMain.__nsWrite(__out, \"\"); }\n");
+                } else {
+                    cases.append("      try { ").append(ret).append(" __r = ").append(realCall)
+                            .append("; __MooditMain.__nsWrite(__out, \"1\"); __MooditMain.__nsWrite(__out, ")
+                            .append(csEnc("__r", ret)).append("); }")
+                            .append(" catch (System.Exception) { __MooditMain.__nsWrite(__out, \"0\"); __MooditMain.__nsWrite(__out, \"\"); }\n");
+                }
+                cases.append("      break;\n    }\n");
+            }
+            stubs.append("}\n");
+        }
+
+        String renamed = student;
+        for (String className : classNames) {
+            renamed = renamed.replaceAll("\\b" + Pattern.quote(className) + "\\b", "__MooditStudent_" + className);
+        }
+
+        String program = String.join("\n", usings) + "\n"
+                + "public class __MooditMain {\n"
+                + "  static Stream __rpcOut; static Stream __rpcIn;\n"
+                + "  public static void __nsWrite(Stream o, string s) {\n"
+                + "    byte[] b = System.Text.Encoding.UTF8.GetBytes(s);\n"
+                + "    byte[] h = System.Text.Encoding.ASCII.GetBytes(b.Length + \":\");\n"
+                + "    o.Write(h,0,h.Length); o.Write(b,0,b.Length); o.WriteByte((byte)','); o.Flush();\n"
+                + "  }\n"
+                + "  public static string __nsRead(Stream ins) {\n"
+                + "    int n = 0, c; bool any = false;\n"
+                + "    while ((c = ins.ReadByte()) != ':') { if (c < 0) throw new EndOfStreamException(); n = n*10 + (c - '0'); any = true; }\n"
+                + "    if (!any) throw new IOException(\"ns\");\n"
+                + "    byte[] b = new byte[n]; int off = 0; while (off < n) { int k = ins.Read(b, off, n - off); if (k <= 0) throw new EndOfStreamException(); off += k; }\n"
+                + "    ins.ReadByte();\n"
+                + "    return System.Text.Encoding.UTF8.GetString(b);\n"
+                + "  }\n"
+                + "  public static string __rpc(string key, string[] args) {\n"
+                + "    __nsWrite(__rpcOut, key);\n"
+                + "    foreach (var a in args) __nsWrite(__rpcOut, a);\n"
+                + "    string st = __nsRead(__rpcIn); string rv = __nsRead(__rpcIn);\n"
+                + "    if (st != \"1\") throw new System.Exception(\"appel etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                + "  static bool __moodit_harness() {\n"
+                + harness
+                + "\n  }\n"
+                + "  static void __serve() {\n"
+                + "    Stream __in = Console.OpenStandardInput(); Stream __out = Console.OpenStandardOutput();\n"
+                + "    Console.SetOut(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });\n"
+                + "    while (true) {\n"
+                + "      string __key;\n"
+                + "      try { __key = __nsRead(__in); } catch (System.Exception) { break; }\n"
+                + "      switch (__key) {\n"
+                + cases
+                + "      default: __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); break;\n"
+                + "      }\n"
                 + "    }\n"
-                + "}\n";
+                + "  }\n"
+                + "  public static void Main(string[] __args) {\n"
+                + "    if (__args.Length > 0 && __args[0] == \"__moodit_student\") { __serve(); return; }\n"
+                + "    string __secret = Console.In.ReadLine(); __secret = __secret == null ? \"\" : __secret.Trim();\n"
+                + "    string __exe = System.Reflection.Assembly.GetEntryAssembly().Location;\n"
+                + "    var __psi = new ProcessStartInfo(\"mono\", \"\\\"\" + __exe + \"\\\" __moodit_student\");\n"
+                + "    __psi.RedirectStandardInput = true; __psi.RedirectStandardOutput = true; __psi.UseShellExecute = false;\n"
+                + "    var __child = Process.Start(__psi);\n"
+                + "    __rpcOut = __child.StandardInput.BaseStream; __rpcIn = __child.StandardOutput.BaseStream;\n"
+                + "    bool __ok = false;\n"
+                + "    try { __ok = __moodit_harness(); } catch (System.Exception) {}\n"
+                + "    if (__ok) Console.Error.Write(__secret);\n"
+                + "    try { __rpcOut.Close(); } catch (System.Exception) {}\n"
+                + "    Environment.Exit(__ok ? 0 : 1);\n"
+                + "  }\n"
+                + "}\n\n"
+                + stubs + "\n"
+                + renamed + "\n";
         return new Assembled("csharp", List.of(new PistonClient.File("main.cs", program)));
+    }
+
+    /** Types scalaires marshalables C#. */
+    private static final Set<String> CS_SCALARS = Set.of("int", "long", "double", "bool", "string");
+
+    /** Expression C# encodant {@code var} (type {@code type}) en chaîne pour le fil netstring. */
+    private static String csEnc(String var, String type) {
+        if ("string".equals(type)) return var;
+        if ("double".equals(type)) return var + ".ToString(System.Globalization.CultureInfo.InvariantCulture)";
+        return var + ".ToString()";
+    }
+
+    /** Expression C# décodant une chaîne {@code s} du fil vers le type {@code type}. */
+    private static String csDec(String s, String type) {
+        return switch (type) {
+            case "int" -> "int.Parse(" + s + ")";
+            case "long" -> "long.Parse(" + s + ")";
+            case "double" -> "double.Parse(" + s + ", System.Globalization.CultureInfo.InvariantCulture)";
+            case "bool" -> "bool.Parse(" + s + ")";
+            default -> s;
+        };
     }
 
     // ── Java ─────────────────────────────────────────────────────────────────────
 
+    /** Déclaration de classe top-level (capture le nom). */
+    private static final Pattern JAVA_CLASS_DECL =
+            Pattern.compile("(?:public\\s+|final\\s+|abstract\\s+)*class\\s+(\\w+)[^{]*\\{");
+    /** Méthode statique : {@code [vis] static RET nom(params) [throws …] {} } (vis capturée). */
+    private static final Pattern JAVA_STATIC_METHOD = Pattern.compile(
+            "(public|private|protected)?\\s*static\\s+([\\w\\[\\]<>]+)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws[^{]*)?\\{");
+    /** Directive d'import, à hisser en tête (un import après une classe ne compile pas). */
+    private static final Pattern JAVA_IMPORT = Pattern.compile("(?m)^[ \\t]*import\\s+[^;]+;[ \\t]*\\n?");
+    /** Types scalaires marshalables (périmètre pilote Java/C#). */
+    private static final Set<String> JAVA_SCALARS = Set.of("int", "long", "double", "boolean", "String");
+
     /**
-     * Java : Piston exécute en mode « fichier-source unique » ({@code java Fichier.java}), donc la
-     * PREMIÈRE classe top-level doit porter le {@code main} (JEP 330) — ce mode tolère plusieurs
-     * classes publiques, donc on n'a PAS à toucher aux classes de l'étudiant (POO, abstract,
-     * interface… restent valides). Notre classe d'entrée {@code __MooditMain} vient EN PREMIER ;
-     * on neutralise seulement le {@code main} étudiant pour éviter deux entrées. Le secret
-     * anti-triche N'EST PAS gravé : il est lu depuis stdin au début de notre {@code main}, AVANT que
-     * le harnais ne touche une classe étudiant (les initialiseurs statiques étudiant ne se
-     * déclenchent qu'au chargement de leur classe, donc après notre lecture). Source supprimée.
+     * Java : exécution ISOLÉE en DEUX processus (cf. #116). Piston lance {@code java <src>} en mode
+     * fichier-source ; notre {@code main} RE-EXÉCUTE un 2e JVM ({@code java <src> __moodit_student})
+     * pour obtenir le serveur étudiant. Le PARENT (noteur) lit le nonce sur SON stdin, exécute le
+     * harnais INCHANGÉ et réémet le nonce en cas de succès ; le CHILD héberge le vrai code étudiant et
+     * répond par RPC (protocole netstring sur stdin/stdout). Le child ne voit jamais le nonce (mémoire
+     * du parent). Les classes étudiant sont renommées {@code __MooditStudent_*} et remplacées par des
+     * classes STUB de même nom dont les méthodes statiques délèguent au child — le harnais
+     * {@code Classe.methode(...)} compile donc sans le vrai code. Périmètre : méthodes STATIQUES à
+     * paramètres/retour scalaires ({@code int, long, double, boolean, String}).
      */
     private Assembled assembleJava(String studentCode, String harnessCode, String nonce) {
-        String neutralized = (studentCode == null ? "" : studentCode)
-                .replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
-        String program = "public class __MooditMain {\n"
-                + "    static boolean __moodit_harness() {\n"
-                + harnessCode
-                + "\n    }\n"
-                + "    public static void main(String[] __args) throws Exception {\n"
-                + "        new java.io.File(\"Main.java\").delete();\n"
-                + "        java.io.BufferedReader __moodit_br ="
-                + " new java.io.BufferedReader(new java.io.InputStreamReader(System.in));\n"
-                + "        String __moodit_secret = __moodit_br.readLine();\n"
-                + "        if (__moodit_secret == null) __moodit_secret = \"\";\n"
-                + "        __moodit_secret = __moodit_secret.trim();\n"
-                + "        try {\n"
-                + "            boolean __moodit_r = __moodit_harness();\n"
-                + "            if (__moodit_r) System.err.print(__moodit_secret);\n"
-                + "            System.exit(__moodit_r ? 0 : 1);\n"
-                + "        } catch (Throwable __t) {\n"
-                + "            __t.printStackTrace();\n"
-                + "            System.exit(1);\n"
-                + "        }\n"
+        String student = studentCode == null ? "" : studentCode;
+        String harness = harnessCode == null ? "" : harnessCode;
+
+        // Hisser les imports étudiant en tête (un import placé après une classe ne compile pas).
+        StringBuilder imports = new StringBuilder("import java.io.*;\n");
+        Matcher im = JAVA_IMPORT.matcher(student);
+        while (im.find()) {
+            String stmt = im.group().strip();
+            if (!"import java.io.*;".equals(stmt)) imports.append(stmt).append("\n");
+        }
+        student = JAVA_IMPORT.matcher(student).replaceAll("");
+
+        // 1) Classes étudiant + leurs méthodes statiques (dispatch par clé "Classe.methode").
+        StringBuilder stubs = new StringBuilder();
+        StringBuilder cases = new StringBuilder();
+        Matcher cm = JAVA_CLASS_DECL.matcher(student);
+        List<String> classNames = new ArrayList<>();
+        while (cm.find()) {
+            String className = cm.group(1);
+            classNames.add(className);
+            int bodyOpen = student.indexOf('{', cm.start());
+            int bodyClose = javaMatchBrace(student, bodyOpen);
+            String body = student.substring(bodyOpen + 1, bodyClose);
+            stubs.append("class ").append(className).append(" {\n");
+            Matcher mm = JAVA_STATIC_METHOD.matcher(body);
+            while (mm.find()) {
+                String vis = mm.group(1);
+                String ret = mm.group(2);
+                String method = mm.group(3);
+                // Seules les méthodes appelables par le harnais (autre classe, même paquet) sont
+                // exposées : public ou package-private. Les private/protected restent internes au réel.
+                if ("main".equals(method) || "private".equals(vis) || "protected".equals(vis)) continue;
+                List<String[]> params = javaParseParams(mm.group(4));
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                String key = className + "." + method;
+                boolean supported = ("void".equals(ret) || JAVA_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> JAVA_SCALARS.contains(p[1]));
+                if (!supported) {
+                    stubs.append("  static ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { throw new RuntimeException(\"type non supporte par l'isolation RPC\"); }\n");
+                    continue;
+                }
+                String encArgs = params.stream().map(p -> javaEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                String rpc = "__MooditMain.__rpc(\"" + key + "\", new String[]{" + encArgs + "})";
+                if ("void".equals(ret)) {
+                    stubs.append("  static void ").append(method).append("(").append(sig).append(") { ")
+                            .append(rpc).append("; }\n");
+                } else {
+                    stubs.append("  static ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { return ").append(javaDec(rpc, ret)).append("; }\n");
+                }
+                // Child : lire N args bruts (jamais d'échec de lecture), puis décoder + appeler dans un try.
+                StringBuilder readRaw = new StringBuilder();
+                StringBuilder callArgs = new StringBuilder();
+                for (int i = 0; i < params.size(); i++) {
+                    readRaw.append("      String __s").append(i).append(" = __MooditMain.__nsRead(__in);\n");
+                    if (i > 0) callArgs.append(", ");
+                    callArgs.append(javaDec("__s" + i, params.get(i)[1]));
+                }
+                String realCall = "__MooditStudent_" + key + "(" + callArgs + ")";
+                cases.append("    case \"").append(key).append("\": {\n").append(readRaw);
+                if ("void".equals(ret)) {
+                    cases.append("      try { ").append(realCall)
+                            .append("; __MooditMain.__nsWrite(__out, \"1\"); __MooditMain.__nsWrite(__out, \"\"); }")
+                            .append(" catch (Throwable __t) { __MooditMain.__nsWrite(__out, \"0\"); __MooditMain.__nsWrite(__out, \"\"); }\n");
+                } else {
+                    cases.append("      try { ").append(ret).append(" __r = ").append(realCall)
+                            .append("; __MooditMain.__nsWrite(__out, \"1\"); __MooditMain.__nsWrite(__out, ")
+                            .append(javaEnc("__r", ret)).append("); }")
+                            .append(" catch (Throwable __t) { __MooditMain.__nsWrite(__out, \"0\"); __MooditMain.__nsWrite(__out, \"\"); }\n");
+                }
+                cases.append("      break;\n    }\n");
+            }
+            stubs.append("}\n");
+        }
+
+        // 2) Renommer les classes étudiant partout → __MooditStudent_* (le dispatch appelle le réel,
+        //    les stubs gardent les noms d'origine pour le harnais).
+        String renamed = student;
+        for (String className : classNames) {
+            renamed = renamed.replaceAll("\\b" + Pattern.quote(className) + "\\b", "__MooditStudent_" + className);
+        }
+
+        String program = imports.toString()
+                + "public class __MooditMain {\n"
+                + "  static OutputStream __rpcOut; static InputStream __rpcIn;\n"
+                + "  static void __nsWrite(OutputStream o, String s) { try {\n"
+                + "    byte[] b = s.getBytes(\"UTF-8\"); o.write((b.length + \":\").getBytes(\"UTF-8\")); o.write(b); o.write(','); o.flush();\n"
+                + "  } catch (IOException e) { throw new RuntimeException(e); } }\n"
+                + "  static String __nsRead(InputStream in) { try {\n"
+                + "    int n = 0, c; boolean any = false;\n"
+                + "    while ((c = in.read()) != ':') { if (c < 0) throw new EOFException(); n = n*10 + (c - '0'); any = true; }\n"
+                + "    if (!any) throw new IOException(\"netstring\");\n"
+                + "    byte[] b = new byte[n]; int off = 0; while (off < n) { int k = in.read(b, off, n - off); if (k < 0) throw new EOFException(); off += k; }\n"
+                + "    in.read();\n"
+                + "    return new String(b, \"UTF-8\");\n"
+                + "  } catch (IOException e) { throw new RuntimeException(e); } }\n"
+                + "  static String __rpc(String key, String[] args) {\n"
+                + "    __nsWrite(__rpcOut, key);\n"
+                + "    for (String a : args) __nsWrite(__rpcOut, a);\n"
+                + "    String st = __nsRead(__rpcIn); String rv = __nsRead(__rpcIn);\n"
+                + "    if (!st.equals(\"1\")) throw new RuntimeException(\"appel etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                + "  static boolean __moodit_harness() {\n"
+                + harness
+                + "\n  }\n"
+                + "  static void __serve() throws Exception {\n"
+                + "    InputStream __in = new FileInputStream(FileDescriptor.in);\n"
+                + "    OutputStream __out = new FileOutputStream(FileDescriptor.out);\n"
+                + "    System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.err)));\n"
+                + "    while (true) {\n"
+                + "      String __key;\n"
+                + "      try { __key = __nsRead(__in); } catch (RuntimeException e) { break; }\n"
+                + "      switch (__key) {\n"
+                + cases
+                + "      default: __nsWrite(__out, \"0\"); __nsWrite(__out, \"\");\n"
+                + "      }\n"
                 + "    }\n"
+                + "  }\n"
+                + "  public static void main(String[] __args) throws Exception {\n"
+                + "    if (__args.length > 0 && __args[0].equals(\"__moodit_student\")) { __serve(); return; }\n"
+                + "    BufferedReader __sin = new BufferedReader(new InputStreamReader(System.in));\n"
+                + "    String __secret = __sin.readLine(); __secret = __secret == null ? \"\" : __secret.trim();\n"
+                + "    String __javaBin = System.getProperty(\"java.home\") + \"/bin/java\";\n"
+                + "    File __dir = new File(System.getProperty(\"user.dir\")); String __src = null;\n"
+                + "    for (File __f : __dir.listFiles()) if (__f.getName().endsWith(\".java\")) { __src = __f.getName(); break; }\n"
+                + "    ProcessBuilder __pb = new ProcessBuilder(__javaBin, __src, \"__moodit_student\");\n"
+                + "    __pb.redirectError(ProcessBuilder.Redirect.INHERIT);\n"
+                + "    Process __child = __pb.start();\n"
+                + "    __rpcOut = __child.getOutputStream(); __rpcIn = __child.getInputStream();\n"
+                + "    boolean __ok = false;\n"
+                + "    try { __ok = __moodit_harness(); } catch (Throwable __t) {}\n"
+                + "    if (__ok) System.err.print(__secret);\n"
+                + "    try { __rpcOut.close(); } catch (Exception e) {}\n"
+                + "    System.exit(__ok ? 0 : 1);\n"
+                + "  }\n"
                 + "}\n\n"
-                + neutralized
+                + stubs
+                + "\n"
+                + renamed
                 + "\n";
         return new Assembled("java", List.of(new PistonClient.File("Main.java", program)));
+    }
+
+    /** Index du {@code '}'} fermant le bloc ouvert au {@code '{'} d'indice {@code open}. */
+    private static int javaMatchBrace(String s, int open) {
+        int depth = 0;
+        for (int i = open; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}') {
+                depth--;
+                if (depth == 0) return i;
+            }
+        }
+        return s.length() - 1;
+    }
+
+    /** Paramètres Java {@code "int a, String s"} → couples {@code {nom, type}}. */
+    private static List<String[]> javaParseParams(String params) {
+        List<String[]> out = new ArrayList<>();
+        String trimmed = params == null ? "" : params.trim();
+        if (trimmed.isEmpty()) {
+            return out;
+        }
+        for (String p : trimmed.split(",")) {
+            String[] toks = p.trim().split("\\s+");
+            String name = toks[toks.length - 1];
+            String type = String.join(" ", java.util.Arrays.copyOf(toks, toks.length - 1));
+            out.add(new String[] {name, type});
+        }
+        return out;
+    }
+
+    /** Expression Java encodant {@code var} (de type {@code type}) en chaîne pour le fil netstring. */
+    private static String javaEnc(String var, String type) {
+        return "String".equals(type) ? var : "String.valueOf(" + var + ")";
+    }
+
+    /** Expression Java décodant une chaîne {@code s} du fil netstring vers le type {@code type}. */
+    private static String javaDec(String s, String type) {
+        return switch (type) {
+            case "int" -> "Integer.parseInt(" + s + ")";
+            case "long" -> "Long.parseLong(" + s + ")";
+            case "double" -> "Double.parseDouble(" + s + ")";
+            case "boolean" -> "Boolean.parseBoolean(" + s + ")";
+            default -> s;
+        };
     }
 
     /**

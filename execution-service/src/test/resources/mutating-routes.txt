@@ -2,4 +2,5 @@
 # MutatingRouteManifestTest (introspection Spring) — NE PAS éditer à la main.
 # Lu par le RouteCoverageTest du permission-service (couverture des règles).
 POST /exec/evaluate
+POST /exec/evaluate-structured
 POST /exec/run

@@ -164,11 +164,13 @@ class CodeAssemblerTest {
                 "return Solution.solution() == 5;", "MOODIT_OK_java");
         assertThat(a.pistonLanguage()).isEqualTo("java");
         String c = onlyFileContent(a);
-        assertThat(c).startsWith("public class __MooditMain");   // notre classe d'entrée en 1er
-        assertThat(c).contains("__moodit_student_main");         // main étudiant neutralisé
-        // ANTI-TRICHE : le nonce n'est PAS gravé — lu depuis stdin ; source supprimée.
+        assertThat(c).contains("public class __MooditMain");    // notre classe d'entrée (JEP 330)
+        assertThat(c.indexOf("__MooditMain")).isLessThan(c.indexOf("__MooditStudent_Solution"));
+        assertThat(c).contains("__MooditStudent_Solution");     // classe étudiant renommée (le réel)
+        assertThat(c).contains("class Solution {");             // stub de même nom pour le harnais
+        // ANTI-TRICHE : le nonce n'est PAS gravé — lu depuis stdin par le parent (noteur).
         assertThat(c).doesNotContain("MOODIT_OK_java");
-        assertThat(c).contains("System.in").contains("Main.java");
+        assertThat(c).contains("System.in").contains("ProcessBuilder");   // 2e JVM (serveur étudiant)
         // Le secret est lu AVANT l'appel au harnais.
         int readIdx    = c.indexOf("readLine");
         int harnessIdx = c.indexOf("__moodit_harness();");
@@ -177,15 +179,17 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void c_neutralizes_main_via_macro_and_reads_secret_from_stdin() {
+    void c_forks_isolated_process_and_reads_secret_from_stdin() {
         var a = assembler.assemble("C", "int solution(void){ return 5; }",
                 "return solution() == 5;", "MOODIT_OK_c");
         String c = onlyFileContent(a);
-        assertThat(c).contains("#define main __moodit_student_main");
-        assertThat(c).contains("#undef main");
-        // ANTI-TRICHE : le nonce n'est PAS gravé — lu via stdin dans un constructeur ; source supprimée.
+        // Renommage étudiant par macro + second processus par fork().
+        assertThat(c).contains("#define solution __moodit_s_solution");
+        assertThat(c).contains("#define main __moodit_student_main").contains("#undef main");
+        assertThat(c).contains("fork(");
+        assertThat(c).contains("int solution(void) {");         // stub de même nom pour le harnais
+        // ANTI-TRICHE : le nonce n'est PAS gravé — lu sur stdin par le parent (noteur).
         assertThat(c).doesNotContain("MOODIT_OK_c");
-        assertThat(c).contains("constructor(101)").contains("stdin").contains("remove(\"main.c\")");
     }
 
     @Test

@@ -165,6 +165,7 @@ public class PermissionService {
             rule("PATCH", "/me", (user, vars, body) -> true),
             rule("PUT", "/me/settings", (user, vars, body) -> true),
             execRule("POST", "/evaluate", (user, vars, body) -> true),
+            execRule("POST", "/evaluate-structured", (user, vars, body) -> true),
             execRule("POST", "/run", (user, vars, body) -> true),
 
             // ── Lectures VOLONTAIREMENT ouvertes (tout authentifie) ───────────────────────

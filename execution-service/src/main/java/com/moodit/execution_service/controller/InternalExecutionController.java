@@ -1,6 +1,7 @@
 package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.dto.EvaluateRequest;
+import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionLimiter;
@@ -44,6 +45,14 @@ public class InternalExecutionController {
             @Valid @RequestBody EvaluateRequest request) {
         if (unauthorized(token)) return ResponseEntity.status(403).build();
         return ResponseEntity.ok(limiter.asInternal(() -> executionService.evaluate(request)));
+    }
+
+    @PostMapping("/evaluate-structured")
+    public ResponseEntity<List<TestResult>> evaluateStructured(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @Valid @RequestBody StructuredEvaluateRequest request) {
+        if (unauthorized(token)) return ResponseEntity.status(403).build();
+        return ResponseEntity.ok(limiter.asInternal(() -> executionService.evaluateStructured(request)));
     }
 
     private boolean unauthorized(String token) {

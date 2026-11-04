@@ -1,9 +1,13 @@
 package com.moodit.execution_service.service;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
+import com.moodit.execution_service.dto.StructuredCase;
+import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
@@ -21,16 +25,17 @@ import java.util.List;
  * déduit le verdict. ANTI-TRICHE : le verdict ne dépend PAS de l'exit code (falsifiable par un
  * {@code exit(0)} anticipé ou une neutralisation d'exit), mais de la présence d'un NONCE ALÉATOIRE
  * secret que SEUL le harnais émet en cas de succès. Chaque test tourne dans une exécution Piston
- * ISOLÉE. Pour les langages interprétés : isolation bi-processus RPC (le code étudiant ne voit
- * jamais le nonce). Pour les langages compilés : le nonce n'est PAS gravé dans le source — il est
- * injecté au RUNTIME via l'entrée standard (le programme le lit avant tout code étudiant, puis le
- * réémet s'il réussit) et le fichier source est supprimé. Un étudiant ne peut donc l'extraire ni en
- * lisant la source (supprimée), ni en lisant le binaire compilé (le nonce n'y figure pas).
+ * ISOLÉE. Interprétés comme compilés sont notés en DEUX processus : le code étudiant vit dans un
+ * processus SÉPARÉ et ne voit jamais le nonce (détenu par le noteur ; cf. {@link CodeAssembler}).
+ * Pour les compilés, le binaire unique se dédouble (fork / re-exec) et le nonce est injecté au RUNTIME
+ * via l'entrée standard, lue par le seul PARENT. Un étudiant ne peut donc l'extraire : il n'est ni
+ * dans sa mémoire (processus distinct), ni dans la source, ni dans le binaire.
  */
 @Service
 public class ExecutionService {
 
     private static final SecureRandom RNG = new SecureRandom();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final CodeAssembler assembler;
     private final PistonClient piston;
@@ -80,6 +85,127 @@ public class ExecutionService {
     }
 
     /**
+     * Évalue une question « appel de fonction » par CAS STRUCTURÉS (#116). Le code étudiant est lancé
+     * comme SERVEUR RPC pur (aucun harnais, aucun nonce) ; on lui envoie TOUS les cas sur stdin (Piston
+     * est one-shot : une requête JSON par ligne) et on compare ICI chaque sortie à l'attendu — qui ne
+     * touche JAMAIS le sandbox. Le verdict vit donc hors de portée de l'étudiant, pour tout langage.
+     * L'ordre des réponses suit l'ordre des cas (le serveur répond séquentiellement).
+     */
+    public List<TestResult> evaluateStructured(StructuredEvaluateRequest request) {
+        CodeAssembler.Assembled asm = assembler.assembleServer(request.language(), request.code());
+        // Requêtes en NETSTRING (lisibles sans lib JSON, requis pour C/Rust) : pour chaque cas,
+        // l'entrée puis chaque argument (scalaire → texte brut ; tableau → son JSON). Le serveur
+        // connaît le nombre/les types d'arguments par symbole (généré depuis la signature).
+        StringBuilder stdin = new StringBuilder();
+        for (StructuredCase c : request.cases()) {
+            ns(stdin, c.entry());
+            JsonNode args = c.args();
+            if (args != null && args.isArray()) {
+                for (JsonNode arg : args) {
+                    ns(stdin, (arg.isArray() || arg.isObject()) ? arg.toString() : arg.asText());
+                }
+            }
+        }
+        PistonClient.Result result = execute(asm.pistonLanguage(), request.version(), asm.files(), stdin.toString());
+
+        // Échec de compilation → tous les cas échouent avec le message de compilation.
+        PistonClient.Stage compile = result.compile();
+        if (compile != null && compile.code() != null && compile.code() != 0) {
+            String msg = firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation");
+            return request.cases().stream()
+                    .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, msg)).toList();
+        }
+
+        // Réponses en NETSTRING : (status, payload) par cas. payload = valeur JSON (succès) ou message.
+        PistonClient.Stage run = result.run();
+        NetstringReader reader = new NetstringReader(run == null ? null : run.stdout());
+        List<TestResult> out = new ArrayList<>();
+        for (StructuredCase c : request.cases()) {
+            int weight = c.effectiveWeight();
+            if (run != null && run.signal() != null) {
+                out.add(new TestResult(c.name(), weight, false,
+                        "Interrompu (signal " + run.signal() + ") — dépassement de temps ou de mémoire probable"));
+                continue;
+            }
+            String status = reader.next();
+            String payload = reader.next();
+            if (status == null || payload == null) {
+                out.add(new TestResult(c.name(), weight, false,
+                        firstNonBlank(run == null ? null : run.stderr(), "Aucune réponse du serveur pour ce cas")));
+                continue;
+            }
+            if (!"1".equals(status)) {
+                out.add(new TestResult(c.name(), weight, false, "L'appel a échoué : " + payload));
+                continue;
+            }
+            JsonNode value;
+            try {
+                value = MAPPER.readTree(payload);
+            } catch (RuntimeException e) {
+                // Valeur non-JSON (ex. chaîne brute émise par un serveur sans lib JSON) → traitée en chaîne.
+                value = MAPPER.readTree(MAPPER.writeValueAsString(payload));
+            }
+            boolean passed = jsonMatches(value, c.expected(), c.compareMode());
+            out.add(new TestResult(c.name(), weight, passed, passed ? null
+                    : "Attendu " + c.expected() + ", obtenu " + value));
+        }
+        return out;
+    }
+
+    /** Ajoute {@code s} à {@code b} en netstring ({@code <longueur octets>:<s>,}). */
+    private static void ns(StringBuilder b, String s) {
+        int len = s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        b.append(len).append(':').append(s).append(',');
+    }
+
+    /** Lecture séquentielle de netstrings dans une sortie (ASCII ; {@code next()} = {@code null} si fini). */
+    private static final class NetstringReader {
+        private final String s;
+        private int i;
+        NetstringReader(String stdout) { this.s = stdout == null ? "" : stdout; }
+        String next() {
+            while (i < s.length() && (s.charAt(i) == '\n' || s.charAt(i) == '\r')) i++;
+            int colon = s.indexOf(':', i);
+            if (colon < 0) return null;
+            int len;
+            try { len = Integer.parseInt(s.substring(i, colon).trim()); } catch (NumberFormatException e) { return null; }
+            int start = colon + 1;
+            if (start + len > s.length()) return null;
+            String val = s.substring(start, start + len);
+            i = start + len;
+            if (i < s.length() && s.charAt(i) == ',') i++;
+            return val;
+        }
+    }
+
+    /** Compare une sortie à l'attendu selon le mode : {@code exact}, {@code float} (tolérance),
+     *  {@code unordered} (collection sans ordre). */
+    private static boolean jsonMatches(JsonNode actual, JsonNode expected, String mode) {
+        if (actual == null) actual = MAPPER.nullNode();
+        if (expected == null) expected = MAPPER.nullNode();
+        switch (mode) {
+            case "float":
+                if (!actual.isNumber() || !expected.isNumber()) {
+                    return actual.equals(expected);
+                }
+                return Math.abs(actual.asDouble() - expected.asDouble()) < 1e-9;
+            case "unordered":
+                if (!actual.isArray() || !expected.isArray() || actual.size() != expected.size()) {
+                    return actual.equals(expected);
+                }
+                List<String> a = new ArrayList<>();
+                List<String> b = new ArrayList<>();
+                actual.forEach(n -> a.add(n.toString()));
+                expected.forEach(n -> b.add(n.toString()));
+                a.sort(null);
+                b.sort(null);
+                return a.equals(b);
+            default: // exact
+                return actual.equals(expected);
+        }
+    }
+
+    /**
      * Exécute le code TEL QUEL (sans harnais) et renvoie sa sortie brute (stdout/stderr/exit).
      * Sert au bouton « play » des éditeurs — l'étudiant/prof voit sa sortie et, en cas d'exception,
      * la stack trace (stderr). Un échec du programme (exit ≠ 0) n'est PAS une erreur HTTP : la
@@ -118,9 +244,8 @@ public class ExecutionService {
         }
 
         CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
-        // Langages compilés : le nonce N'EST PAS gravé dans le source — il est lu au runtime depuis
-        // stdin (le programme assemblé le lit avant tout code étudiant, puis le réémet s'il réussit).
-        // Un étudiant qui lirait le binaire (/proc/self/exe) n'y trouve donc aucun nonce.
+        // Langages compilés : le nonce est injecté au runtime via stdin — lu par le seul PROCESSUS
+        // NOTEUR (parent), jamais par le processus qui exécute le code étudiant (cf. CodeAssembler).
         String stdin = CodeAssembler.isCompiled(language) ? nonce + "\n" : null;
         PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files(), stdin);
 

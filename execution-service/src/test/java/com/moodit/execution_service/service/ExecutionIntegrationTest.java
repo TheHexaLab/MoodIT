@@ -2,9 +2,12 @@ package com.moodit.execution_service.service;
 
 import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
+import com.moodit.execution_service.dto.StructuredCase;
+import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +82,102 @@ class ExecutionIntegrationTest {
                 List.of(new TestCaseInput("t", harness, 1)));
         List<TestResult> res = service.evaluate(req);
         return !res.isEmpty() && res.stream().allMatch(TestResult::passed);
+    }
+
+    private static final ObjectMapper M = new ObjectMapper();
+
+    /** Vrai si tous les CAS STRUCTURÉS passent (serveur RPC pur ; attendus comparés hors sandbox). */
+    private boolean passesStructured(String language, String code, StructuredCase... cases) {
+        List<TestResult> res = service.evaluateStructured(
+                new StructuredEvaluateRequest(language, null, code, List.of(cases)));
+        return !res.isEmpty() && res.stream().allMatch(TestResult::passed);
+    }
+
+    private StructuredCase cas(String entry, String argsJson, String expectedJson) {
+        return new StructuredCase("t", entry, M.readTree(argsJson), M.readTree(expectedJson), "exact", 1);
+    }
+
+    @Test
+    void go_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("go");
+        String code = "package main\nfunc doubler(n int) int { return n * 2 }\n"
+                + "func somme(xs []int) int { t := 0; for _, x := range xs { t += x }; return t }\n"
+                + "func main() {}";
+        // Bonne réponse : les cas passent. Le harnais/attendu ne sont JAMAIS dans le sandbox.
+        assertThat(passesStructured("Go", code,
+                cas("doubler", "[5]", "10"), cas("somme", "[[1,2,3]]", "6"))).isTrue();
+        // Mauvaise valeur attendue → échec : c'est execution-service (hors sandbox) qui tranche.
+        assertThat(passesStructured("Go", code, cas("doubler", "[5]", "11"))).isFalse();
+        // Mauvaise réponse étudiant → échec.
+        assertThat(passesStructured("Go", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
+
+        // SÉCURITÉ : un étudiant qui fouille sa propre source/son binaire pour deviner l'attendu NE PEUT
+        // PAS — l'attendu (10) n'est nulle part dans le sandbox (ni harnais, ni stdin). Il renvoie faux.
+        String triche = "package main\nimport (\n\t\"os\"\n\t\"regexp\"\n\t\"strconv\"\n)\n"
+                + "func doubler(n int) int {\n"
+                + "\tb, _ := os.ReadFile(\"main.go\")\n"
+                + "\tm := regexp.MustCompile(`[0-9]+`).FindString(string(b))\n"
+                + "\tv, _ := strconv.Atoi(m)\n\treturn v\n}\nfunc main() {}";
+        assertThat(passesStructured("Go", triche, cas("doubler", "[5]", "10"))).isFalse();
+    }
+
+    @Test
+    void rust_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("rust");
+        String code = "fn doubler(n: i32) -> i32 { n * 2 }\n"
+                + "fn crier(s: String) -> String { format!(\"{}!\", s) }\nfn main() {}";
+        assertThat(passesStructured("Rust", code,
+                cas("doubler", "[5]", "10"), cas("crier", "[\"hi\"]", "\"hi!\""))).isTrue();
+        assertThat(passesStructured("Rust", code, cas("doubler", "[5]", "11"))).isFalse();
+        assertThat(passesStructured("Rust", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
+        // panic étudiant → échec du cas (pas de faux positif).
+        assertThat(passesStructured("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
+                cas("doubler", "[5]", "10"))).isFalse();
+    }
+
+    @Test
+    void c_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("c");
+        String code = "int doubler(int n){ return n * 2; }\nint main(void){ return 0; }";
+        assertThat(passesStructured("C", code, cas("doubler", "[5]", "10"))).isTrue();
+        assertThat(passesStructured("C", code, cas("doubler", "[5]", "11"))).isFalse();
+        assertThat(passesStructured("C", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
+    }
+
+    @Test
+    void cpp_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("c++");
+        String code = "int doubler(int n){ return n * 2; }\nint main(){ return 0; }";
+        assertThat(passesStructured("C++", code, cas("doubler", "[5]", "10"))).isTrue();
+        assertThat(passesStructured("C++", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
+        // exception étudiant → échec du cas.
+        assertThat(passesStructured("C++", "int doubler(int n){ throw 1; }\nint main(){ return 0; }",
+                cas("doubler", "[5]", "10"))).isFalse();
+    }
+
+    @Test
+    void csharp_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("csharp");
+        String code = "class S { public static int solution(int n){ return n * 2; } "
+                + "public static string crier(string s){ return s + \"!\"; } static void Main(){} }";
+        assertThat(passesStructured("C#", code,
+                cas("S.solution", "[5]", "10"), cas("S.crier", "[\"hi\"]", "\"hi!\""))).isTrue();
+        assertThat(passesStructured("C#", code, cas("S.solution", "[5]", "11"))).isFalse();
+        assertThat(passesStructured("C#", code.replace("n * 2", "0"), cas("S.solution", "[5]", "10"))).isFalse();
+    }
+
+    @Test
+    void java_structured_cases_keep_expected_out_of_sandbox() {
+        requireRuntime("java");
+        String code = "public class Solution { public static int solution(int n){ return n * 2; } "
+                + "public static String crier(String s){ return s + \"!\"; } public static void main(String[] a){} }";
+        assertThat(passesStructured("Java", code,
+                cas("Solution.solution", "[5]", "10"), cas("Solution.crier", "[\"hi\"]", "\"hi!\""))).isTrue();
+        assertThat(passesStructured("Java", code, cas("Solution.solution", "[5]", "11"))).isFalse();
+        assertThat(passesStructured("Java", code.replace("n * 2", "0"), cas("Solution.solution", "[5]", "10"))).isFalse();
+        assertThat(passesStructured("Java",
+                "public class Solution { public static int solution(int n){ throw new RuntimeException(); } }",
+                cas("Solution.solution", "[5]", "10"))).isFalse();
     }
 
     // ─────────────────────── Langages interprétés (RPC isolé) ───────────────────────
@@ -198,68 +297,68 @@ class ExecutionIntegrationTest {
                 "function Composant(): JSX.Element { return React.createElement('span', null, 99); }", h)).isFalse();
     }
 
-    // ─────────── Compilés (secret injecté au runtime via stdin + suppression source) ───────────
+    // ─────────── Compilés (isolation RPC en deux processus : fork/re-exec, cf. #116) ───────────
     // Pour chacun : (1) bonne réponse réussit, (2) réponse fausse échoue, (3) exception/panic échoue,
-    // (4) SÉCURITÉ lecture SOURCE : le fichier est supprimé avant le code étudiant → fopen NULL,
-    // (5) SÉCURITÉ lecture BINAIRE : le nonce n'est PAS dans le binaire (lu depuis stdin) → un scan
-    //     de /proc/self/exe ne trouve rien.
+    // (4) appel interne (le serveur appelle le vrai symbole, pas le stub), (5) SÉCURITÉ : le code
+    //     étudiant (qui COMPILE et s'exécute vraiment, dans le child) fouille son processus ET celui du
+    //     parent (environ/cmdline/mem) sans jamais trouver le nonce → verdict faux pour la bonne raison.
+
+    // Scan manuel (sans <string.h>, non inclus par l'assembleur → un étudiant qui redéfinit strlen
+    // compile) : si « MOOD » (début de MOODIT_OK_) apparaît dans un fichier /proc, on le crache.
+    private static final String C_SCAN =
+            "int __scan(const char* path){ FILE* f=fopen(path,\"r\"); if(!f) return 0;\n"
+            + "  char b[8192]; long l=fread(b,1,sizeof(b),f); fclose(f);\n"
+            + "  for(long i=0;i+4<=l;i++) if(b[i]=='M'&&b[i+1]=='O'&&b[i+2]=='O'&&b[i+3]=='D'){ fwrite(b+i,1,(l-i>40?40:l-i),stderr); return 1; }\n"
+            + "  return 0; }\n";
 
     @Test
-    void c_source_supprimee_avant_code_etudiant() {
+    void c_isolation_rpc_deux_processus() {
         requireRuntime("c");
         assertThat(passes("C", "int doubler(int n){ return n * 2; }", "return doubler(5) == 10;")).isTrue();
         assertThat(passes("C", "int doubler(int n){ return 0; }", "return doubler(5) == 10;")).isFalse();
-        // SÉCURITÉ : l'étudiant tente de lire main.c → supprimé → fopen retourne NULL → pas de nonce.
+        // Appel interne : la fonction exposée délègue à un helper étudiant (appelé réellement côté serveur).
+        assertThat(passes("C", "int h(int n){ return n*2; } int d(int n){ return h(n); }",
+                "return d(5) == 10;")).isTrue();
+        // RÉGRESSION P2 : un étudiant qui redéfinit une fonction de <string.h> compile (on ne l'inclut
+        // plus) — avant, les includes après le code donnaient « conflicting types ».
+        assertThat(passes("C", "int strlen2(char* s){ return 0; } int doubler(int n){ return n*2; }",
+                "return doubler(5) == 10;")).isTrue();
+
+        // SÉCURITÉ (le code étudiant COMPILE et s'exécute dans le CHILD, sans le nonce) : fouiller son
+        // processus et celui du parent (environ + mémoire) ne révèle rien ; verdict faux.
         assertThat(passes("C",
-                "int doubler(int n){\n"
-                + "    FILE *f=fopen(\"main.c\",\"r\");\n"
-                + "    if(f){char buf[4096];size_t len=fread(buf,1,sizeof(buf)-1,f);fclose(f);\n"
-                + "    buf[len]=0;char *p=strstr(buf,\"MOODIT_OK_\");if(p)fwrite(p,1,58,stderr);}\n"
-                + "    return 0;}",
-                "return doubler(5) == 10;")).isFalse();
-        // SÉCURITÉ lecture BINAIRE : scanner /proc/self/exe ne révèle aucun nonce (il vient de stdin).
-        assertThat(passes("C",
-                "int doubler(int n){\n"
-                + "    FILE *f=fopen(\"/proc/self/exe\",\"rb\");\n"
-                + "    if(f){char buf[65536];size_t len=fread(buf,1,sizeof(buf),f);fclose(f);\n"
-                + "    for(size_t i=0;i+58<len;i++) if(!memcmp(buf+i,\"MOODIT_OK_\",10)){fwrite(buf+i,1,58,stderr);break;}}\n"
-                + "    return 0;}",
+                C_SCAN
+                + "int doubler(int n){ char p[64]; long pp=getppid();\n"
+                + "  __scan(\"/proc/self/environ\"); __scan(\"/proc/self/cmdline\");\n"
+                + "  snprintf(p,sizeof(p),\"/proc/%ld/environ\",pp); __scan(p);\n"
+                + "  snprintf(p,sizeof(p),\"/proc/%ld/mem\",pp); __scan(p);\n"
+                + "  return 0; }",
                 "return doubler(5) == 10;")).isFalse();
     }
 
     @Test
-    void cpp_constructeur_statique_ne_peut_pas_voler_le_secret() {
-        requireRuntime("c++");
-        // Un objet global dont le constructeur tente de lire stdin/source s'exécute APRÈS notre
-        // constructor(101) (qui a déjà drainé stdin et supprimé la source) → échec.
-        assertThat(passes("C++",
-                "#include <cstdio>\n#include <cstring>\n"
-                + "struct Spy { Spy(){ char b[128]; if(fgets(b,sizeof(b),stdin)){"
-                + " char*p=strstr(b,\"MOODIT_OK_\"); if(p) fputs(p,stderr);} } } __spy;\n"
-                + "int doubler(int n){ return 0; }\nint main(){ return 0; }",
-                "return doubler(5) == 10;")).isFalse();
-    }
-
-    @Test
-    void cpp_source_supprimee_avant_code_etudiant() {
+    void cpp_isolation_rpc_deux_processus() {
         requireRuntime("c++");
         String good = "int doubler(int n){ return n * 2; }\nint main(){ return 0; }";
         assertThat(passes("C++", good, "return doubler(5) == 10;")).isTrue();
         assertThat(passes("C++", good.replace("n * 2", "0"), "return doubler(5) == 10;")).isFalse();
+        // Une exception côté étudiant (attrapée dans le serveur) vaut échec.
         assertThat(passes("C++", "int doubler(int n){ throw 1; }\nint main(){ return 0; }",
                 "return doubler(5) == 10;")).isFalse();
-        // SÉCURITÉ
+        assertThat(passes("C++", "int h(int n){ return n*2; } int d(int n){ return h(n); }\nint main(){ return 0; }",
+                "return d(5) == 10;")).isTrue();
+
+        // SÉCURITÉ : idem C — fouiller /proc ne révèle pas le nonce (mémoire du parent, /proc/mem refusé).
         assertThat(passes("C++",
-                "#include <cstdio>\n#include <cstring>\nint doubler(int n){\n"
-                + "    FILE *f=fopen(\"main.cpp\",\"r\");\n"
-                + "    if(f){char buf[4096];size_t l=fread(buf,1,sizeof(buf)-1,f);fclose(f);\n"
-                + "    buf[l]=0;char *p=strstr(buf,\"MOODIT_OK_\");if(p)fwrite(p,1,58,stderr);}\n"
-                + "    return 0;}\nint main(){ return 0; }",
+                C_SCAN
+                + "int doubler(int n){ char p[64]; long pp=getppid();\n"
+                + "  __scan(\"/proc/self/environ\"); snprintf(p,sizeof(p),\"/proc/%ld/environ\",pp); __scan(p);\n"
+                + "  snprintf(p,sizeof(p),\"/proc/%ld/mem\",pp); __scan(p); return 0; }\nint main(){ return 0; }",
                 "return doubler(5) == 10;")).isFalse();
     }
 
     @Test
-    void java_source_supprimee_avant_code_etudiant() {
+    void java_isolation_rpc_deux_processus() {
         requireRuntime("java");
         String good = "public class Main { static int doubler(int n){ return n * 2; } "
                 + "public static void main(String[] a){} }";
@@ -267,63 +366,106 @@ class ExecutionIntegrationTest {
         assertThat(passes("Java", good.replace("n * 2", "0"), "return Main.doubler(5) == 10;")).isFalse();
         assertThat(passes("Java", "class Main { static int doubler(int n){ throw new RuntimeException(); } }",
                 "return Main.doubler(5) == 10;")).isFalse();
-        // SÉCURITÉ
+        // Appel interne + import étudiant + helper PRIVÉ : la méthode publique délègue à un helper
+        // privé (non exposé, appelé en interne par le vrai code) ; l'import est hissé en tête.
         assertThat(passes("Java",
-                "class Main { static int doubler(int n) {\n"
-                + "    try { var s=new String(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(\"Main.java\")));\n"
-                + "    var m=java.util.regex.Pattern.compile(\"MOODIT_OK_[0-9a-f]+\").matcher(s);\n"
-                + "    if(m.find())System.err.print(m.group()); } catch(Exception e){}\n"
-                + "    return 0; } }",
+                "import java.util.List;\n"
+                + "public class Main { private static int h(int n){ return List.of(n, n).size() * n; }\n"
+                + "  public static int d(int n){ return h(n); } }",
+                "return Main.d(5) == 10;")).isTrue();
+
+        // SÉCURITÉ (le code étudiant COMPILE et s'exécute vraiment, dans le CHILD, sans le nonce) :
+        // une réponse fausse qui fouille son propre processus ET celui du parent pour le nonce ÉCHOUE.
+        // Le nonce ne vit que dans la mémoire du PARENT (lu sur son stdin) : environ/cmdline (child
+        // comme parent) ne le contiennent pas, et /proc/<ppid>/mem est refusé.
+        assertThat(passes("Java",
+                "public class Main { static int doubler(int n) {\n"
+                + "  try {\n"
+                + "    long __ppid = ProcessHandle.current().parent().map(ProcessHandle::pid).orElse(-1L);\n"
+                + "    for (String __p : new String[]{\"/proc/self/environ\", \"/proc/self/cmdline\",\n"
+                + "         \"/proc/\" + __ppid + \"/environ\", \"/proc/\" + __ppid + \"/cmdline\", \"/proc/\" + __ppid + \"/mem\"}) {\n"
+                + "      try { byte[] __b = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(__p));\n"
+                + "        var __m = java.util.regex.Pattern.compile(\"MOODIT_OK_[0-9a-f]+\").matcher(new String(__b));\n"
+                + "        if (__m.find()) System.err.print(__m.group()); } catch (Throwable __t) {}\n"
+                + "    }\n"
+                + "  } catch (Throwable __e) {}\n"
+                + "  return 0; } }",
                 "return Main.doubler(5) == 10;")).isFalse();
     }
 
     @Test
-    void go_source_supprimee_avant_code_etudiant() {
+    void go_isolation_rpc_deux_processus() {
         requireRuntime("go");
-        String good = "package main\n\nfunc doubler(n int) int { return n * 2 }\n\nfunc main() {}";
+        // Commentaire en 1ère ligne (comme le gabarit livré) : nos imports vont APRÈS `package`, pas
+        // avant — non-régression du bug où le noteur était inséré à la 1ère ligne (ne compilait plus).
+        String good = "// commentaire\npackage main\n\nimport \"fmt\"\n"
+                + "func doubler(n int) int { return n * 2 }\n\nfunc main() { fmt.Println(doubler(5)) }";
         assertThat(passes("Go", good, "return doubler(5) == 10")).isTrue();
         assertThat(passes("Go", good.replace("n * 2", "0"), "return doubler(5) == 10")).isFalse();
         assertThat(passes("Go", "package main\n\nfunc doubler(n int) int { panic(\"x\") }\n\nfunc main() {}",
                 "return doubler(5) == 10")).isFalse();
-        // SÉCURITÉ lecture source
+        // Appel interne : doubler délègue à un helper étudiant ; le renommage défs+appels préserve la
+        // résolution dans le serveur (le vrai helper, pas le stub).
+        assertThat(passes("Go", "package main\n"
+                + "func doubler(n int) int { return helper(n) }\nfunc helper(n int) int { return n * 2 }\n"
+                + "func main() {}", "return doubler(5) == 10")).isTrue();
+
+        // SÉCURITÉ (le code étudiant COMPILE et s'exécute vraiment, dans le CHILD, sans le nonce) :
+        // une réponse fausse qui fouille /proc pour trouver le nonce et le cracher sur stderr ÉCHOUE.
+        // Le nonce ne vit que dans la mémoire du PARENT (lu sur son stdin) : cmdline/environ (du child
+        // comme du parent) ne le contiennent pas, et /proc/<ppid>/mem est refusé (ptrace/yama).
         assertThat(passes("Go",
-                "package main\nimport \"os\"\nfunc doubler(n int) int {\n"
-                + "    b,err:=os.ReadFile(\"main.go\")\n"
-                + "    if err==nil{ for i,c:=range b{ if i+10<=len(b) && string(b[i:i+10])==\"MOODIT_OK_\"{\n"
-                + "        os.Stderr.Write(b[i:i+58]); break } }}\n"
-                + "    return 0\n}\nfunc main(){}",
+                "package main\nimport (\"fmt\"\n\"os\")\n"
+                + "func doubler(n int) int {\n"
+                + "    ppid := os.Getppid()\n"
+                + "    for _, p := range []string{\"/proc/self/cmdline\", \"/proc/self/environ\",\n"
+                + "        fmt.Sprintf(\"/proc/%d/cmdline\", ppid), fmt.Sprintf(\"/proc/%d/environ\", ppid),\n"
+                + "        fmt.Sprintf(\"/proc/%d/mem\", ppid)} {\n"
+                + "        if b, e := os.ReadFile(p); e == nil { os.Stderr.Write(b) }\n"
+                + "    }\n"
+                + "    return 0\n}\nfunc main() {}",
                 "return doubler(5) == 10")).isFalse();
-        // SÉCURITÉ ordre : un initialiseur de variable de paquet étudiant qui tente de lire stdin
-        // s'exécute APRÈS le nôtre (déclaré en premier) → stdin déjà drainé → échec.
+        // SÉCURITÉ : lire son propre stdin ne donne pas le nonce (c'est le tube RPC, pas le stdin du
+        // parent) — au pire l'étudiant s'auto-bloque (verdict faux), jamais il n'obtient le secret.
         assertThat(passes("Go",
                 "package main\nimport (\"bufio\"\n\"os\")\n"
-                + "var _spy = func() int { l,_:=bufio.NewReader(os.Stdin).ReadString('\\n'); os.Stderr.WriteString(l); return 0 }()\n"
-                + "func doubler(n int) int { return 0 }\nfunc main(){}",
+                + "func doubler(n int) int {\n"
+                + "    l, _ := bufio.NewReader(os.Stdin).ReadString('\\n'); os.Stderr.WriteString(l)\n"
+                + "    return 0\n}\nfunc main() {}",
                 "return doubler(5) == 10")).isFalse();
     }
 
     @Test
-    void rust_source_supprimee_avant_code_etudiant() {
+    void rust_isolation_rpc_deux_processus() {
         requireRuntime("rust");
         String good = "fn doubler(n: i32) -> i32 { n * 2 }\nfn main() {}";
         assertThat(passes("Rust", good, "doubler(5) == 10")).isTrue();
         assertThat(passes("Rust", good.replace("n * 2", "0 * n"), "doubler(5) == 10")).isFalse();
         assertThat(passes("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
                 "doubler(5) == 10")).isFalse();
-        // SÉCURITÉ
+        // Appel interne : la fonction exposée délègue à un helper étudiant (appelé réellement dans le
+        // serveur, pas le stub).
+        assertThat(passes("Rust",
+                "fn h(n: i32) -> i32 { n * 2 }\nfn d(n: i32) -> i32 { h(n) }\nfn main() {}",
+                "d(5) == 10")).isTrue();
+
+        // SÉCURITÉ (le code étudiant COMPILE et s'exécute dans le CHILD, sans le nonce) : fouiller son
+        // processus et celui du parent ne révèle rien (nonce en mémoire du parent, /proc/mem refusé).
         assertThat(passes("Rust",
                 "fn doubler(_n: i32) -> i32 {\n"
-                + "    if let Ok(s)=std::fs::read_to_string(\"main.rs\"){\n"
-                + "        let mut i=0usize;\n"
-                + "        while i+10<=s.len(){\n"
-                + "            if &s[i..i+10]==\"MOODIT_OK_\"{ eprint!(\"{}\",&s[i..i+58]); break; }\n"
-                + "            i+=1;\n"
-                + "        }\n    }\n    0\n}\nfn main(){}",
+                + "    let ppid = std::process::id();\n"
+                + "    for p in [\"/proc/self/environ\".to_string(), \"/proc/self/cmdline\".to_string(),\n"
+                + "              format!(\"/proc/{}/environ\", ppid), format!(\"/proc/{}/mem\", ppid)] {\n"
+                + "        if let Ok(s) = std::fs::read_to_string(&p) {\n"
+                + "            if let Some(i) = s.find(\"MOODIT_OK_\") { eprint!(\"{}\", &s[i..]); }\n"
+                + "        }\n"
+                + "    }\n"
+                + "    0\n}\nfn main(){}",
                 "doubler(5) == 10")).isFalse();
     }
 
     @Test
-    void csharp_source_supprimee_avant_code_etudiant() {
+    void csharp_isolation_rpc_deux_processus() {
         requireRuntime("csharp");
         String good = "class S { public static int Doubler(int n) { return n * 2; } static void Main(string[] a) {} }";
         assertThat(passes("C#", good, "return S.Doubler(5) == 10;")).isTrue();
@@ -331,13 +473,26 @@ class ExecutionIntegrationTest {
         assertThat(passes("C#",
                 "class S { public static int Doubler(int n) { throw new System.Exception(); } }",
                 "return S.Doubler(5) == 10;")).isFalse();
-        // SÉCURITÉ
+        // Appel interne + using étudiant + helper PRIVÉ (non exposé, appelé en interne par le réel).
         assertThat(passes("C#",
-                "class S { public static int Doubler(int n) {\n"
-                + "    try { var s=System.IO.File.ReadAllText(\"main.cs\");\n"
-                + "    var m=System.Text.RegularExpressions.Regex.Match(s,@\"MOODIT_OK_[0-9a-f]+\");\n"
-                + "    if(m.Success)System.Console.Error.Write(m.Value); } catch{}\n"
-                + "    return 0; } }",
+                "using System.Linq;\n"
+                + "class S { private static int H(int n) { return new[]{n, n}.Sum(); }\n"
+                + "  public static int D(int n) { return H(n); } }",
+                "return S.D(5) == 10;")).isTrue();
+
+        // SÉCURITÉ (le code étudiant COMPILE et s'exécute dans le CHILD, sans le nonce) : fouiller
+        // son processus et celui du parent ne révèle rien (nonce en mémoire du parent, /proc/mem refusé).
+        assertThat(passes("C#",
+                "using System;\nusing System.IO;\n"
+                + "class S { public static int Doubler(int n) {\n"
+                + "  try { long __p = System.Diagnostics.Process.GetCurrentProcess().Id;\n"
+                + "    foreach (var __f in new[]{\"/proc/self/environ\", \"/proc/self/cmdline\"}) {\n"
+                + "      try { var __s = File.ReadAllText(__f);\n"
+                + "        var __m = System.Text.RegularExpressions.Regex.Match(__s, \"MOODIT_OK_[0-9a-f]+\");\n"
+                + "        if (__m.Success) Console.Error.Write(__m.Value); } catch {}\n"
+                + "    }\n"
+                + "  } catch {}\n"
+                + "  return 0; } }",
                 "return S.Doubler(5) == 10;")).isFalse();
     }
 
