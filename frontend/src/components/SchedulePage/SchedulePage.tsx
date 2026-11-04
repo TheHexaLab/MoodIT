@@ -160,6 +160,12 @@ const Pencil = () => (
   </svg>
 );
 
+const Plus = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+    <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+  </svg>
+);
+
 const Trash = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <path
@@ -1158,7 +1164,7 @@ export default function SchedulePage({
             {!hasSidebar && addButton}
           </div>
         </div>
-        {hasSidebar && <div className={styles.headerSide}>{addButton}</div>}
+        {hasSidebar && <div className={styles.headerSide} />}
       </header>
       <div className={styles.body}>
         <div className={styles.main}>{renderBody()}</div>
@@ -1184,9 +1190,23 @@ export default function SchedulePage({
                 className={`${styles.panel} ${styles.taskList}`}
                 aria-labelledby={`${panelId}-tasks`}
               >
-                <h2 id={`${panelId}-tasks`} className={styles.panelTitle}>
-                  Mes tâches de la semaine
-                </h2>
+                {/* En-tête de la liste : le titre, et « Ajouter » en haut à droite. */}
+                <div className={styles.taskListHeader}>
+                  <h2 id={`${panelId}-tasks`} className={styles.panelTitle}>
+                    Mes tâches
+                  </h2>
+                  <button
+                    ref={addButtonRef}
+                    type="button"
+                    className={styles.addInline}
+                    aria-label={addLabel}
+                    title={addLabel}
+                    onClick={openAdd}
+                  >
+                    <Plus />
+                    Ajouter
+                  </button>
+                </div>
                 {tasks.length === 0 ? (
                   <p className={styles.taskListEmpty}>Aucune tâche cette semaine.</p>
                 ) : listed.length === 0 ? (
