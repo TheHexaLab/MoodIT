@@ -1,6 +1,7 @@
 package com.moodit.core_service.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
@@ -353,7 +354,8 @@ public class QuizService {
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
-            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses) {}
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses,
+            List<ExecutionClient.Case> cases) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -515,10 +517,25 @@ public class QuizService {
             SubmittedAnswerDTO answer = byQuestion.get(question.getId());
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
-            List<ExecutionClient.Harness> inputs = harnesses.stream()
-                    .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
-                    .toList();
-            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs));
+            // Aiguillage PAR LA DONNÉE (#116), pas par le langage : un cas qui porte un `entry` est
+            // structuré (serveur RPC pur, attendus hors sandbox) ; sinon harnais-code (chemin
+            // historique, toujours supporté). Les quiz existants restent donc valides : adoption
+            // progressive sans conversion forcée.
+            boolean structured = harnesses.stream()
+                    .anyMatch(tc -> tc.getEntry() != null && !tc.getEntry().isBlank());
+            if (structured) {
+                List<ExecutionClient.Case> cases = harnesses.stream()
+                        .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getEntry(),
+                                parseJson(tc.getArgsJson()), parseJson(tc.getExpectedJson()),
+                                tc.getCompareMode(), weightOf(tc)))
+                        .toList();
+                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, null, cases));
+            } else {
+                List<ExecutionClient.Harness> inputs = harnesses.stream()
+                        .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
+                        .toList();
+                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs, null));
+            }
         }
         return tasks;
     }
@@ -532,7 +549,9 @@ public class QuizService {
     private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
-            List<Boolean> verdicts = executionClient.evaluate(task.language(), task.code(), task.harnesses());
+            List<Boolean> verdicts = task.cases() != null
+                    ? executionClient.evaluateStructured(task.language(), task.code(), task.cases())
+                    : executionClient.evaluate(task.language(), task.code(), task.harnesses());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -573,6 +592,18 @@ public class QuizService {
 
     private static int weightOf(TestCase testCase) {
         return testCase.getWeight() != null && testCase.getWeight() > 0 ? testCase.getWeight() : 1;
+    }
+
+    /** Parse un JSON stocké (args/attendu d'un cas structuré) ; {@code null} si vide ou invalide. */
+    private JsonNode parseJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(json);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /**
