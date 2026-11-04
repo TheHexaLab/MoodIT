@@ -284,6 +284,8 @@ interface TaskPreviewPopupProps {
   onClose: () => void;
   /** « Modifier » : la fenêtre de modification de la tâche. */
   onEdit: () => void;
+  /** Bouton « Marquer terminée » : reçoit la tâche dans son état courant. */
+  onToggleDone: (task: ScheduleTask) => void;
 }
 
 /** Aperçu d'une tâche (ou d'une remise personnelle) : ce qu'elle est ; « Modifier » pour la changer. */
@@ -292,8 +294,11 @@ export function TaskPreviewPopup({
   course,
   onClose,
   onEdit,
+  onToggleDone,
 }: TaskPreviewPopupProps): React.ReactElement {
   const controller = usePopupController();
+  /** État affiché : le bouton bascule sans fermer l'aperçu. */
+  const [done, setDone] = useState(task.done);
   const when = task.allDay
     ? `${dayTitle(new Date(task.start))}, toute la journée`
     : task.deadline
@@ -343,8 +348,6 @@ export function TaskPreviewPopup({
               <dd>{reminder}</dd>
             </>
           )}
-          <dt>État</dt>
-          <dd>{task.done ? 'Terminée' : 'À faire'}</dd>
           {task.notes && (
             <>
               <dt>Description</dt>
@@ -353,8 +356,26 @@ export function TaskPreviewPopup({
           )}
         </dl>
         <div className={styles.actions}>
-          <button type="button" className={styles.button} onClick={() => controller.requestClose()}>
-            Fermer
+          {/* Bascule : vert et coché une fois terminée ; un clic la remet à faire. */}
+          <button
+            type="button"
+            className={`${styles.button} ${styles.doneToggle}`}
+            aria-pressed={done}
+            onClick={() => {
+              onToggleDone({ ...task, done });
+              setDone(!done);
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              aria-hidden="true"
+            >
+              <path d="m5 12.5 4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {done ? 'Terminée' : 'Marquer terminée'}
           </button>
           <span className={styles.spacer} />
           <button

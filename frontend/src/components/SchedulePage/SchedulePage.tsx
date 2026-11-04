@@ -224,19 +224,12 @@ export default function SchedulePage({
   const [sessionKinds, setSessionKinds] = useState<string[]>(SESSION_KINDS);
   /** Tâches cochées qui sortent de la liste en s'effaçant. */
   const [leaving, setLeaving] = useState<number[]>([]);
-  /** Tâches cochées dont la ligne propose « Annuler » pendant UNDO_MS, à leur place dans la liste. */
-  const [undoIds, setUndoIds] = useState<number[]>([]);
-  const undoTimers = useRef(new Map<number, number>());
   /** Tâches supprimées, encore annulables pendant UNDO_MS ; la suppression part ensuite. */
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const deleteTimers = useRef(new Map<number, number>());
   useEffect(() => {
-    const timers = undoTimers.current;
     const deletes = deleteTimers.current;
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
-      deletes.forEach((timer) => window.clearTimeout(timer));
-    };
+    return () => deletes.forEach((timer) => window.clearTimeout(timer));
   }, []);
   /** Heure courante pour la ligne bleue du jour ; avance chaque minute. */
   const [clock, setClock] = useState(now);
@@ -594,25 +587,12 @@ export default function SchedulePage({
       return;
     }
     void patchTask(task, { done: true });
-    // La ligne devient « terminée · Annuler » ; après UNDO_MS, elle se replie et quitte la liste.
-    setUndoIds((ids) => [...ids, task.id]);
-    undoTimers.current.set(
-      task.id,
-      window.setTimeout(() => {
-        undoTimers.current.delete(task.id);
-        setUndoIds((ids) => ids.filter((id) => id !== task.id));
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        setLeaving((ids) => [...ids, task.id]);
-        window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
-      }, UNDO_MS)
-    );
-    // Le clavier reste sur la ligne : le focus passe à son avis « terminée ».
-    window.requestAnimationFrame(() =>
-      document.getElementById(`${panelId}-undo-${task.id}`)?.focus()
-    );
+    // Sans délai : la ligne s'efface aussitôt (ou disparaît d'un coup si le mouvement est réduit).
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setLeaving((ids) => [...ids, task.id]);
+    window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
   }
 
-  /** « Annuler » : la tâche cochée redevient à faire et reprend sa ligne. */
   /**
    * Supprimer une tâche : elle quitte la grille tout de suite, sa ligne devient « supprimée ·
    * Annuler » pendant UNDO_MS, puis la suppression part. Un échec la fait revenir.
@@ -1152,13 +1132,7 @@ export default function SchedulePage({
     />
   );
   const listed = [...allTasks]
-    .filter(
-      (task) =>
-        !task.done ||
-        leaving.includes(task.id) ||
-        undoIds.includes(task.id) ||
-        deletingIds.includes(task.id)
-    )
+    .filter((task) => !task.done || leaving.includes(task.id) || deletingIds.includes(task.id))
     .sort((a, b) => a.start.localeCompare(b.start));
   const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
 
@@ -1277,13 +1251,6 @@ export default function SchedulePage({
                             Annuler
                           </button>
                         </li>
-                      ) : undoIds.includes(task.id) ? (
-                        // Terminée : la ligne le dit un moment, puis se replie (sans « Annuler »).
-                        <li key={task.id} className={styles.undoRow}>
-                          <span id={`${panelId}-undo-${task.id}`} role="status" tabIndex={-1}>
-                            « {task.title} » terminée
-                          </span>
-                        </li>
                       ) : (
                         <li
                           key={task.id}
@@ -1391,6 +1358,10 @@ export default function SchedulePage({
           onEdit={() => {
             setPreviewTask(null);
             setOpenTask(previewTask);
+          }}
+          onToggleDone={(task) => {
+            toggleDone(task);
+            setPreviewTask({ ...task, done: !task.done });
           }}
         />
       )}

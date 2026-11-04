@@ -334,8 +334,6 @@ export default function ScheduleForm({
   const managed = courses.filter((course) => course.canManage);
   const set = (changes: Partial<Draft>) => onChange({ ...draft, ...changes });
   const isTask = draft.kind === 'task';
-  /** Remise personnelle de l'étudiant (celles d'un cours viennent de ses devoirs). */
-  const isDeadline = isTask && draft.deadline;
 
   const courseLabel = (course: ScheduleCourse) =>
     course.title ? `${course.code} · ${course.title}` : course.code;
@@ -466,16 +464,6 @@ export default function ScheduleForm({
             onChange={(event) => set({ allDay: event.target.checked })}
           />
           <span>Toute la journée</span>
-        </label>
-      )}
-      {isTask && !isDeadline && onDelete && (
-        <label className={styles.checkField}>
-          <input
-            type="checkbox"
-            checked={draft.done}
-            onChange={(event) => set({ done: event.target.checked })}
-          />
-          <span>Tâche terminée</span>
         </label>
       )}
       {isTask &&
