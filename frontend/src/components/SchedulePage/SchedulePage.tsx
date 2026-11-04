@@ -31,8 +31,8 @@ import {
   emptyDraft,
   formatRange,
   formatShortTime,
-  formatTime,
   isSameDay,
+  kindTag,
   longDay,
   minutesFromStart,
   placeItems,
@@ -65,6 +65,8 @@ const TINY_REM = 2.5;
 const MAX_ALL_DAY = 2;
 /** Durée de la sortie d'une tâche cochée de la liste, en ms (comme l'animation CSS). */
 const LEAVE_MS = 450;
+/** Durée de l'avis « Annuler » après avoir coché une tâche, en ms. */
+const UNDO_MS = 3000;
 const SHORT_REM = 3.6;
 /** Hauteur, en rem, des lignes fixes d'un bloc (titre, deux détails, marges) ; et d'une ligne de description. */
 const BLOCK_LINES_REM = 3.25;
@@ -196,6 +198,14 @@ export default function SchedulePage({
   const [openAllDay, setOpenAllDay] = useState<number | null>(null);
   /** Tâches cochées qui sortent de la liste en s'effaçant. */
   const [leaving, setLeaving] = useState<number[]>([]);
+  /** Dernière tâche cochée : « Annuler » la décoche, pendant UNDO_MS. */
+  /** Tâches cochées dont la ligne propose « Annuler » pendant UNDO_MS, à leur place dans la liste. */
+  const [undoIds, setUndoIds] = useState<number[]>([]);
+  const undoTimers = useRef(new Map<number, number>());
+  useEffect(() => {
+    const timers = undoTimers.current;
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, []);
   /** Heure courante pour la ligne bleue du jour ; avance chaque minute. */
   const [clock, setClock] = useState(now);
   useEffect(() => {
@@ -532,9 +542,31 @@ export default function SchedulePage({
       return;
     }
     void patchTask(task, { done: true });
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    setLeaving((ids) => [...ids, task.id]);
-    window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
+    // La ligne devient « terminée · Annuler » ; après UNDO_MS, elle se replie et quitte la liste.
+    setUndoIds((ids) => [...ids, task.id]);
+    undoTimers.current.set(
+      task.id,
+      window.setTimeout(() => {
+        undoTimers.current.delete(task.id);
+        setUndoIds((ids) => ids.filter((id) => id !== task.id));
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        setLeaving((ids) => [...ids, task.id]);
+        window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
+      }, UNDO_MS)
+    );
+    // Le clavier reste sur la ligne : le focus passe à « Annuler ».
+    window.requestAnimationFrame(() =>
+      document.getElementById(`${panelId}-undo-${task.id}`)?.focus()
+    );
+  }
+
+  /** « Annuler » : la tâche cochée redevient à faire et reprend sa ligne. */
+  function undoDone(task: ScheduleTask) {
+    const timer = undoTimers.current.get(task.id);
+    if (timer != null) window.clearTimeout(timer);
+    undoTimers.current.delete(task.id);
+    setUndoIds((ids) => ids.filter((id) => id !== task.id));
+    void patchTask(task, { done: false });
   }
 
   /** Remises du jour `index` : une barre rouge à l'heure de l'échéance, son étiquette au-dessus. */
@@ -543,7 +575,7 @@ export default function SchedulePage({
     const label = (iso: string, title: string) => (
       <span className={styles.deadlineLabel}>
         <span className={styles.deadlineTime}>{formatShortTime(iso)}</span>
-        <span className={styles.deadlineTitle}>{title}</span>
+        <span className={styles.deadlineTitle}>Remise : {title}</span>
       </span>
     );
     // Aperçu de la remise en cours d'ajout : la même barre, en pointillé.
@@ -579,6 +611,23 @@ export default function SchedulePage({
               onClick={() => setOpenTask(task)}
             >
               {label(task.start, task.title)}
+              {/* Détails au survol, sous la barre ; la fenêtre de la tâche les donne au clavier. */}
+              <span
+                className={`${styles.deadlineTip} ${index >= 5 ? styles.deadlineTipEnd : ''}`}
+                aria-hidden="true"
+              >
+                <strong>{task.title}</strong>
+                <span>
+                  {dayTitle(new Date(task.start))} · {formatShortTime(task.start)}
+                </span>
+                {task.courseId != null && byId.get(task.courseId) && (
+                  <span>
+                    {byId.get(task.courseId)!.code}
+                    {byId.get(task.courseId)!.title ? ` · ${byId.get(task.courseId)!.title}` : ''}
+                  </span>
+                )}
+                {task.notes && <span className={styles.deadlineTipNotes}>{task.notes}</span>}
+              </span>
               <span className={styles.visuallyHidden}>
                 , remise, {longDay(new Date(task.start))}
                 {task.done ? ', terminée' : ''}
@@ -670,7 +719,6 @@ export default function SchedulePage({
           ? styles.short
           : '';
     const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''} ${size}`;
-    const time = `${formatTime(item.start)} à ${formatTime(item.end)}`;
     const day = <span className={styles.visuallyHidden}>, {longDay(new Date(item.start))}</span>;
     if (item.kind === 'session') {
       const { session, course } = item;
@@ -682,11 +730,13 @@ export default function SchedulePage({
           style={{ ...style, ...hueStyle(colorOf(course.id)) }}
           onClick={() => setOpenSession(session)}
         >
-          <span className={styles.blockTitle}>{course.code}</span>
-          <span className={styles.blockDetail}>
-            {session.kind} · {session.room}
+          {/* Sigle et type (en pastille), puis le local, puis l'heure. */}
+          <span className={styles.titleRow}>
+            <span className={styles.blockTitle}>{course.code}</span>
+            <span className={styles.kindTag}>{kindTag(session.kind)}</span>
           </span>
-          <span className={styles.blockDetail}>{time}</span>
+          <span className={styles.blockDetail}>{session.room}</span>
+          <span className={styles.blockDetail}>{formatRange(item.start, item.end)}</span>
           {/* Le nom accessible reprend le texte visible (WCAG 2.5.3), suivi du jour. */}
           {day}
         </button>
@@ -793,9 +843,14 @@ export default function SchedulePage({
           layout ? (event) => startDrag(event, 'preview', item, 'move', dropPreview) : undefined
         }
       >
-        <span className={styles.blockTitle}>
-          {isTask ? draft.title.trim() || 'Nouvelle tâche' : course?.code}
-        </span>
+        {isTask ? (
+          <span className={styles.blockTitle}>{draft.title.trim() || 'Nouvelle tâche'}</span>
+        ) : (
+          <span className={styles.titleRow}>
+            <span className={styles.blockTitle}>{course?.code}</span>
+            <span className={styles.kindTag}>{kindTag(draft.sessionKind)}</span>
+          </span>
+        )}
         <span className={styles.blockDetail}>
           {formatRange(dragged?.start ?? item.start, dragged?.end ?? item.end)}
         </span>
@@ -1010,7 +1065,7 @@ export default function SchedulePage({
     />
   );
   const listed = [...tasks]
-    .filter((task) => !task.done || leaving.includes(task.id))
+    .filter((task) => !task.done || leaving.includes(task.id) || undoIds.includes(task.id))
     .sort((a, b) => a.start.localeCompare(b.start));
   const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
 
@@ -1089,48 +1144,62 @@ export default function SchedulePage({
                 <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
               ) : (
                 <ul>
-                  {listed.map((task) => (
-                    <li
-                      key={task.id}
-                      className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
-                      style={hueStyle(task.color)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={task.done}
-                        aria-label={`${task.title} : terminée`}
-                        onChange={() => toggleDone(task)}
-                      />
-                      <button
-                        type="button"
-                        className={styles.taskOpen}
-                        onClick={() => setOpenTask(task)}
+                  {listed.map((task) =>
+                    undoIds.includes(task.id) ? (
+                      <li key={task.id} className={styles.undoRow}>
+                        <span role="status">« {task.title} » terminée</span>
+                        <button
+                          id={`${panelId}-undo-${task.id}`}
+                          type="button"
+                          aria-label={`Annuler : remettre « ${task.title} » à faire`}
+                          onClick={() => undoDone(task)}
+                        >
+                          Annuler
+                        </button>
+                      </li>
+                    ) : (
+                      <li
+                        key={task.id}
+                        className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
+                        style={hueStyle(task.color)}
                       >
-                        <span className={styles.taskTitle}>{task.title}</span>
-                        <span className={styles.taskWhen}>
-                          {shortDate(task.start)} ·{' '}
-                          {task.allDay ? (
-                            'toute la journée'
-                          ) : task.deadline ? (
-                            <strong className={styles.deadlineBadge}>
-                              Remise à {formatShortTime(task.start)}
-                            </strong>
-                          ) : (
-                            formatRange(task.start, task.end)
-                          )}
-                        </span>
-                      </button>
-                      {/* Visible au survol de la ligne, ou au focus du clavier. */}
-                      <button
-                        type="button"
-                        className={styles.taskDelete}
-                        aria-label={`Supprimer « ${task.title} »`}
-                        onClick={() => void removeTask(task.id).catch(() => undefined)}
-                      >
-                        <Trash />
-                      </button>
-                    </li>
-                  ))}
+                        <input
+                          type="checkbox"
+                          checked={task.done}
+                          aria-label={`${task.title} : terminée`}
+                          onChange={() => toggleDone(task)}
+                        />
+                        <button
+                          type="button"
+                          className={styles.taskOpen}
+                          onClick={() => setOpenTask(task)}
+                        >
+                          <span className={styles.taskTitle}>{task.title}</span>
+                          <span className={styles.taskWhen}>
+                            {shortDate(task.start)} ·{' '}
+                            {task.allDay ? (
+                              'toute la journée'
+                            ) : task.deadline ? (
+                              <strong className={styles.deadlineBadge}>
+                                Remise à {formatShortTime(task.start)}
+                              </strong>
+                            ) : (
+                              formatRange(task.start, task.end)
+                            )}
+                          </span>
+                        </button>
+                        {/* Visible au survol de la ligne, ou au focus du clavier. */}
+                        <button
+                          type="button"
+                          className={styles.taskDelete}
+                          aria-label={`Supprimer « ${task.title} »`}
+                          onClick={() => void removeTask(task.id).catch(() => undefined)}
+                        >
+                          <Trash />
+                        </button>
+                      </li>
+                    )
+                  )}
                 </ul>
               )}
             </section>

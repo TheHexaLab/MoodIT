@@ -229,7 +229,14 @@ export interface Draft {
   until: string;
 }
 
-export const SESSION_KINDS = ['Cours', 'Travaux dirigés', 'Laboratoire', 'Atelier'];
+export const SESSION_KINDS = ['Cours', 'Travaux dirigés', 'Laboratoire', 'Atelier', 'Tutorat'];
+
+const KIND_TAGS: Record<string, string> = { 'Travaux dirigés': 'TD', Laboratoire: 'Labo' };
+
+/** Étiquette courte du type d'une séance, pour la pastille du bloc : « Labo », « TD », « Cours »… */
+export function kindTag(kind: string): string {
+  return KIND_TAGS[kind] ?? kind;
+}
 
 export const REMINDERS: { value: number | null; label: string }[] = [
   { value: null, label: 'Aucun rappel' },

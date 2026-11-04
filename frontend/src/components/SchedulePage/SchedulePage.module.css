@@ -1250,8 +1250,11 @@
   outline-offset: 2px;
 }
 
+/* Remise faite : la barre devient d'un rouge grisé, encore reconnaissable. */
 .deadline.done {
-  opacity: 0.55;
+  --deadline: #8a6260;
+  box-shadow: none;
+  opacity: 1;
 }
 
 .deadline.done .deadlineTitle {
@@ -1391,4 +1394,148 @@
 
 .session:hover {
   background: color-mix(in srgb, var(--tint) 56%, var(--bg-surface));
+}
+
+/* Détails d'une remise : une bulle sous la barre, au survol ou au focus. */
+.deadlineTip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0.5rem;
+  z-index: 1;
+  display: flex;
+  width: max-content;
+  max-width: 15rem;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid #b42318;
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-0.25rem);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0.15s;
+  pointer-events: none;
+}
+
+.deadlineTip strong {
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+.deadlineTipNotes {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 0.125rem;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+/* Vendredi et samedi : la bulle s'ouvre vers la gauche pour rester dans la grille. */
+.deadlineTipEnd {
+  right: 0.5rem;
+  left: auto;
+}
+
+.deadline:hover .deadlineTip,
+.deadline:focus-visible .deadlineTip {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deadlineTip {
+    transition: none;
+  }
+}
+
+/* Ligne « terminée · Annuler » : à la place de la tâche cochée, pendant quelques secondes. */
+.taskList li.undoRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.375rem 0.5rem 0.625rem;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-body);
+  font-size: 0.8125rem;
+  animation: undo-in 0.2s ease;
+}
+
+.undoRow span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.taskList .undoRow button {
+  flex: none;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.taskList .undoRow button:hover {
+  border-color: var(--text-muted);
+}
+
+@keyframes undo-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .taskList li.undoRow {
+    animation: none;
+  }
+}
+
+/* Séance : le sigle, puis le type en petite pastille pleine qui ressort. */
+.titleRow {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem 0.375rem;
+}
+
+/* Colonne étroite : la pastille passe sous le sigle plutôt que d'être coupée. */
+.titleRow .blockTitle {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.kindTag {
+  flex: none;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg-surface);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Le crayon ouvre la tâche : curseur de lien, pas de « saisir pour glisser ». */
+.dayColumn .task .editIcon {
+  cursor: pointer;
 }
