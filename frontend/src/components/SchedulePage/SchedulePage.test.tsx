@@ -139,12 +139,32 @@ function setup(props: Partial<React.ComponentProps<typeof SchedulePage>> = {}) {
 const grid = () => screen.findByRole('group', { name: /^Semaine du/ });
 /** Un événement de la grille (la liste des tâches a aussi un bouton par tâche). */
 const block = async (name: RegExp) => within(await grid()).findByRole('button', { name });
-const list = () => screen.findByRole('region', { name: 'Mes tâches de la semaine' });
+const list = () => screen.findByRole('region', { name: 'Mes tâches' });
 
 /** Le bouton de la liste des types : « Type » suivi du type choisi. */
 const typeButton = (panel: HTMLElement) => within(panel).getByRole('button', { name: /^Type / });
 const typeMenu = (panel: HTMLElement) =>
   within(panel).getByRole('group', { name: 'Types de séance' });
+
+/** Liste déroulante du formulaire : son bouton se nomme « Libellé valeur ». */
+const picker = (scope: HTMLElement, label: string) =>
+  within(scope).getByRole('button', {
+    name: new RegExp(`^${label.replace(/[()]/g, '\\$&')} `),
+  });
+const pickerValue = (scope: HTMLElement, label: string) => picker(scope, label).textContent;
+/** Ouvre la liste déroulante `label` et y choisit `option`. */
+function choose(scope: HTMLElement, label: string, option: string) {
+  fireEvent.click(picker(scope, label));
+  fireEvent.click(
+    within(within(scope).getByRole('group', { name: label })).getByRole('button', { name: option })
+  );
+}
+/** Un clic sur une tâche montre son aperçu ; « Modifier » ouvre le formulaire. */
+function openEdit(element: HTMLElement) {
+  fireEvent.click(element);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Modifier' }));
+  return screen.getByRole('dialog', { name: 'Modifier la tâche' });
+}
 
 /** Colonnes de 150 px côte à côte (jsdom n'a pas de mise en page) : mercredi = 450-600. */
 function layoutColumns() {
@@ -344,13 +364,12 @@ describe('SchedulePage — petits blocs, description, tâches sans heure', () =>
       'Remise BJeu. 29 oct. · toute la journée'
     );
 
-    fireEvent.click(chip);
-    const dialog = screen.getByRole('dialog', { name: 'Modifier la tâche' });
+    const dialog = openEdit(chip);
     expect(
       (within(dialog).getByRole('checkbox', { name: 'Toute la journée' }) as HTMLInputElement)
         .checked
     ).toBe(true);
-    expect(within(dialog).queryByRole('combobox', { name: 'Début' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /^Début / })).toBeNull();
   });
 });
 
@@ -388,9 +407,7 @@ describe('SchedulePage — remises', () => {
     fireEvent.change(within(panel).getByRole('textbox', { name: 'Titre' }), {
       target: { value: 'Résumé' },
     });
-    fireEvent.change(within(panel).getByRole('combobox', { name: 'Heure limite' }), {
-      target: { value: '23:59' },
-    });
+    choose(panel, 'Heure limite', '23 h 59');
     expect(document.querySelector('[class*="deadlinePreview"]')?.textContent).toBe(
       '23 h 59Remise : Résumé'
     );
@@ -406,9 +423,8 @@ describe('SchedulePage — remises', () => {
       start: new Date(2026, 9, 28, 23, 59).toISOString(),
     });
     expect(input.end).toBe(input.start);
-    // Sa remise à lui s'ouvre en modification.
-    fireEvent.click(await block(/Résumé/));
-    expect(screen.getByRole('dialog', { name: 'Modifier la tâche' })).toBeTruthy();
+    // Sa remise à lui s'ouvre en aperçu, puis en modification.
+    expect(openEdit(await block(/Résumé/))).toBeTruthy();
   });
 
   it('l’aperçu d’une remise se glisse pendant l’ajout ; le formulaire suit', async () => {
@@ -425,9 +441,7 @@ describe('SchedulePage — remises', () => {
     expect(document.querySelector('[class*="dropSpot"]')).toBeNull();
     fireEvent.pointerUp(window);
     expect((within(panel).getByLabelText('Date') as HTMLInputElement).value).toBe('2026-10-29');
-    expect(
-      (within(panel).getByRole('combobox', { name: 'Heure limite' }) as HTMLSelectElement).value
-    ).toBe('14:00');
+    expect(pickerValue(panel, 'Heure limite')).toBe('14 h 00');
   });
 });
 
@@ -506,41 +520,29 @@ describe('SchedulePage — détail d’une séance', () => {
 });
 
 describe('SchedulePage — modifier une tâche', () => {
-  it('un clic ouvre la fenêtre, remplie ; « Enregistrer » met la tâche à jour', async () => {
+  it('un clic montre l’aperçu ; « Modifier » ouvre la fenêtre, remplie ; « Enregistrer » met la tâche à jour', async () => {
     const { api } = setup();
     fireEvent.click(await block(/^Lire le chapitre 4/));
+    const preview = screen.getByRole('dialog', { name: 'Lire le chapitre 4' });
+    expect(within(preview).getByText('Tâche personnelle')).toBeTruthy();
+    expect(within(preview).getByText('INF201 · Structures de données')).toBeTruthy();
+    expect(within(preview).getByText('30 minutes avant')).toBeTruthy();
+    expect(within(preview).getByText('Terminée')).toBeTruthy();
+    fireEvent.click(within(preview).getByRole('button', { name: 'Modifier' }));
     const dialog = screen.getByRole('dialog', { name: 'Modifier la tâche' });
     const title = within(dialog).getByRole('textbox', { name: 'Titre' }) as HTMLInputElement;
     expect(title.value).toBe('Lire le chapitre 4');
     expect((within(dialog).getByRole('radio', { name: 'Vert' }) as HTMLInputElement).checked).toBe(
       true
     );
-    expect(
-      (within(dialog).getByRole('checkbox', { name: 'Tâche terminée' }) as HTMLInputElement).checked
-    ).toBe(true);
-    expect(
-      (
-        within(dialog).getByRole('combobox', {
-          name: 'Cours lié (facultatif)',
-        }) as HTMLSelectElement
-      ).value
-    ).toBe('10');
-    expect(
-      (within(dialog).getByRole('combobox', { name: 'Rappel' }) as HTMLSelectElement).value
-    ).toBe('30');
+    expect(pickerValue(dialog, 'Cours lié (facultatif)')).toBe('INF201');
+    expect(pickerValue(dialog, 'Rappel')).toBe('30 minutes avant');
 
     fireEvent.change(title, { target: { value: 'Lire le chapitre 5' } });
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Violet' }));
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Tâche terminée' }));
-    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Cours lié (facultatif)' }), {
-      target: { value: '' },
-    });
-    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Rappel' }), {
-      target: { value: '' },
-    });
-    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Fin' }), {
-      target: { value: '10:30' },
-    });
+    choose(dialog, 'Cours lié (facultatif)', 'Aucun');
+    choose(dialog, 'Rappel', 'Aucun rappel');
+    choose(dialog, 'Fin', '10 h 30');
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Description' }), {
       target: { value: 'p. 95' },
     });
@@ -552,7 +554,7 @@ describe('SchedulePage — modifier une tâche', () => {
       expect.objectContaining({
         title: 'Lire le chapitre 5',
         color: 'purple',
-        done: false,
+        done: true,
         courseId: null,
         reminder: null,
         notes: 'p. 95',
@@ -563,8 +565,7 @@ describe('SchedulePage — modifier une tâche', () => {
 
   it('refuse un titre vide, et dit quand l’enregistrement échoue', async () => {
     setup({ api: makeApi({ updateTask: vi.fn().mockRejectedValue(new Error('panne')) }) });
-    fireEvent.click(await block(/^Tutorat/));
-    const dialog = screen.getByRole('dialog');
+    const dialog = openEdit(await block(/^Tutorat/));
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Titre' }), {
       target: { value: ' ' },
     });
@@ -582,28 +583,37 @@ describe('SchedulePage — modifier une tâche', () => {
 
   it('une tâche déplacée à une autre semaine quitte la grille', async () => {
     setup();
-    fireEvent.click(await block(/^Tutorat/));
-    const dialog = screen.getByRole('dialog');
+    const dialog = openEdit(await block(/^Tutorat/));
     fireEvent.change(within(dialog).getByLabelText('Date'), { target: { value: '2026-11-04' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Tutorat/ })).toBeNull());
   });
 
-  it('« Supprimer » retire la tâche ; « Annuler » et la croix ferment sans rien changer', async () => {
+  it('« Supprimer » retire la tâche, la suppression part après le délai ; « Annuler » et la croix ferment sans rien changer', async () => {
     const { api } = setup();
-    fireEvent.click(await block(/^Tutorat/));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Annuler' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(await block(/^Tutorat/));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fermer' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(
+      within(openEdit(await block(/^Tutorat/))).getByRole('button', { name: 'Annuler' })
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(
+      within(openEdit(await block(/^Tutorat/))).getByRole('button', { name: 'Fermer' })
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    fireEvent.click(await block(/^Tutorat/));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Supprimer' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Tutorat/ })).toBeNull());
-    expect(api.deleteTask).toHaveBeenCalledWith(7);
+    fireEvent.click(
+      within(openEdit(await block(/^Tutorat/))).getByRole('button', { name: 'Supprimer' })
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('group', { name: /^Semaine du/ })).queryByRole('button', {
+          name: /^Tutorat/,
+        })
+      ).toBeNull()
+    );
+    expect(within(await list()).getByRole('status').textContent).toBe('« Tutorat » supprimée');
+    await waitFor(() => expect(api.deleteTask).toHaveBeenCalledWith(7), { timeout: 4000 });
     expect(api.updateTask).not.toHaveBeenCalled();
-  });
+  }, 10_000);
 });
 
 describe('SchedulePage — ajouter (étudiant)', () => {
@@ -612,7 +622,7 @@ describe('SchedulePage — ajouter (étudiant)', () => {
     await block(/^INF201/);
     fireEvent.click(screen.getByRole('button', { name: 'Ajouter une tâche' }));
     expect(screen.queryByRole('button', { name: 'Ajouter une tâche' })).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Mes tâches de la semaine' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Mes tâches' })).toBeNull();
     const panel = screen.getByRole('complementary', { name: 'Ajouter une tâche' });
     expect(within(panel).getByRole('heading', { name: 'Nouvelle tâche' })).toBeTruthy();
     const title = within(panel).getByRole('textbox', { name: 'Titre' });
@@ -654,7 +664,7 @@ describe('SchedulePage — ajouter (étudiant)', () => {
       target: { value: 'Plus tard' },
     });
     fireEvent.click(within(panel).getByRole('checkbox', { name: 'Toute la journée' }));
-    expect(within(panel).queryByRole('combobox', { name: 'Début' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: /^Début / })).toBeNull();
     expect(screen.getByText('Plus tard').closest('[aria-hidden]')).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText('Date'), { target: { value: '2026-11-04' } });
     fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
@@ -695,12 +705,8 @@ describe('SchedulePage — ajouter (étudiant)', () => {
     fireEvent.pointerUp(window);
     const panel = screen.getByRole('complementary', { name: 'Ajouter une tâche' });
     expect((within(panel).getByLabelText('Date') as HTMLInputElement).value).toBe('2026-10-29');
-    expect(
-      (within(panel).getByRole('combobox', { name: 'Début' }) as HTMLSelectElement).value
-    ).toBe('14:00');
-    expect((within(panel).getByRole('combobox', { name: 'Fin' }) as HTMLSelectElement).value).toBe(
-      '15:00'
-    );
+    expect(pickerValue(panel, 'Début')).toBe('14 h 00');
+    expect(pickerValue(panel, 'Fin')).toBe('15 h 00');
 
     fireEvent.pointerDown(preview().querySelector('[class*="resizeHandle"]')!, {
       button: 0,
@@ -709,9 +715,7 @@ describe('SchedulePage — ajouter (étudiant)', () => {
     });
     fireEvent.pointerMove(window, { clientX: 620, clientY: 605 });
     fireEvent.pointerUp(window);
-    expect((within(panel).getByRole('combobox', { name: 'Fin' }) as HTMLSelectElement).value).toBe(
-      '15:30'
-    );
+    expect(pickerValue(panel, 'Fin')).toBe('15 h 30');
   });
 });
 
@@ -720,7 +724,7 @@ describe('SchedulePage — enseignant', () => {
     setup({ courses: TEACHER });
     await block(/^INF201/);
     expect(within(await grid()).queryByRole('button', { name: /^Tutorat/ })).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Mes tâches de la semaine' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Mes tâches' })).toBeNull();
     expect(await block(/Rapport de labo/)).toBeTruthy();
   });
 
@@ -924,7 +928,7 @@ describe('SchedulePage — glisser une tâche', () => {
     // Le geste fini, un clic ouvre la tâche de nouveau.
     await new Promise((resolve) => setTimeout(resolve, 0));
     fireEvent.click(await block(/^Tutorat/));
-    expect(screen.getByRole('dialog', { name: 'Modifier la tâche' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Tutorat' })).toBeTruthy();
   });
 
   it('le bloc ne quitte pas la grille', async () => {
@@ -1022,28 +1026,37 @@ describe('SchedulePage — liste des tâches', () => {
     setup();
     const items = within(await list()).getAllByRole('listitem');
     expect(items.map((li) => li.textContent)).toEqual([
-      'Rapport de laboMar. 27 oct. · Remise à 17 h',
+      'Rapport de laboMar. 27 oct. · INF201 · Remise à 17 h',
       'TutoratMer. 28 oct. · 14 h – 15 h',
     ]);
     expect(items[0].className).toMatch(/deadlineItem/);
     fireEvent.click(within(await list()).getByRole('button', { name: /^Tutorat/ }));
-    expect(screen.getByRole('dialog', { name: 'Modifier la tâche' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Tutorat' })).toBeTruthy();
   });
 
-  it('cocher une tâche : « terminée · Annuler » à sa place ; « Annuler » la remet', async () => {
+  it('cocher une tâche : terminée tout de suite, sans « Annuler »', async () => {
     const { api } = setup();
     fireEvent.click(within(await list()).getByRole('checkbox', { name: 'Tutorat : terminée' }));
     expect(api.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({ done: true }));
     expect((await block(/^Tutorat/)).className).toMatch(/done/);
-    expect(within(await list()).getByRole('status').textContent).toBe('« Tutorat » terminée');
-    fireEvent.click(
-      within(await list()).getByRole('button', { name: 'Annuler : remettre « Tutorat » à faire' })
-    );
-    expect(api.updateTask).toHaveBeenLastCalledWith(7, expect.objectContaining({ done: false }));
-    expect(within(await list()).getByRole('checkbox', { name: 'Tutorat : terminée' })).toBeTruthy();
+    expect(within(await list()).queryByRole('button', { name: /^Annuler/ })).toBeNull();
   });
 
-  it('sans « Annuler », la ligne quitte la liste après quelques secondes', async () => {
+  it('l’aperçu marque la tâche terminée, et la remet à faire', async () => {
+    const { api } = setup();
+    fireEvent.click(await block(/^Tutorat/));
+    const preview = screen.getByRole('dialog', { name: 'Tutorat' });
+    const toggle = within(preview).getByRole('button', { name: 'Marquer terminée' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(toggle);
+    expect(api.updateTask).toHaveBeenLastCalledWith(7, expect.objectContaining({ done: true }));
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.textContent).toBe('Terminée');
+    fireEvent.click(toggle);
+    expect(api.updateTask).toHaveBeenLastCalledWith(7, expect.objectContaining({ done: false }));
+  });
+
+  it('la ligne cochée s’efface puis quitte la liste', async () => {
     setup();
     const box = within(await list()).getByRole('checkbox', { name: 'Tutorat : terminée' });
     vi.useFakeTimers();
@@ -1052,9 +1065,7 @@ describe('SchedulePage — liste des tâches', () => {
       vi.advanceTimersByTime(3100);
     });
     expect(
-      within(screen.getByRole('region', { name: 'Mes tâches de la semaine' })).queryByText(
-        /Tutorat/
-      )
+      within(screen.getByRole('region', { name: 'Mes tâches' })).queryByText(/Tutorat/)
     ).toBeNull();
   });
 
@@ -1070,18 +1081,32 @@ describe('SchedulePage — liste des tâches', () => {
     expect(await screen.findByText('Aucune tâche cette semaine.')).toBeTruthy();
   });
 
-  it('la corbeille supprime la tâche ; un échec la garde', async () => {
+  it('la corbeille : « Annuler » garde la tâche ; sinon la suppression part après le délai ; un échec la garde', async () => {
     const deleteTask = vi
       .fn()
       .mockRejectedValueOnce(new Error('panne'))
       .mockResolvedValue(undefined);
     setup({ api: makeApi({ deleteTask }) });
-    fireEvent.click(within(await list()).getByRole('button', { name: 'Supprimer « Tutorat »' }));
-    await waitFor(() => expect(deleteTask).toHaveBeenCalledTimes(1));
+    const trash = async () =>
+      within(await list()).getByRole('button', { name: 'Supprimer « Tutorat »' });
+    const inGrid = async () => within(await grid()).queryByRole('button', { name: /^Tutorat/ });
+
+    fireEvent.click(await trash());
+    expect(within(await list()).getByRole('status').textContent).toBe('« Tutorat » supprimée');
+    expect(await inGrid()).toBeNull();
+    fireEvent.click(
+      within(await list()).getByRole('button', { name: 'Annuler : remettre « Tutorat »' })
+    );
     expect(await block(/^Tutorat/)).toBeTruthy();
-    fireEvent.click(within(await list()).getByRole('button', { name: 'Supprimer « Tutorat »' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Tutorat/ })).toBeNull());
-  });
+
+    fireEvent.click(await trash());
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledTimes(1), { timeout: 4000 });
+    expect(await block(/^Tutorat/)).toBeTruthy();
+    fireEvent.click(await trash());
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    await waitFor(async () => expect(await inGrid()).toBeNull());
+    expect(within(await list()).queryByText(/Tutorat/)).toBeNull();
+  }, 15_000);
 });
 
 describe('SchedulePage — mobile', () => {

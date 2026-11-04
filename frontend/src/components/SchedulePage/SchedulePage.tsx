@@ -807,8 +807,14 @@ export default function SchedulePage({
           type="button"
           className={`${styles.block} ${styles.session} ${extra}`}
           style={{ ...style, ...hueStyle(colorOf(course.id)) }}
-          onClick={() => setOpenSession(session)}
+          onClick={(event) => {
+            // Qui gère le cours : le crayon mène droit à la modification ; le reste, au détail.
+            if (course.canManage && (event.target as Element).closest('[data-edit-icon]')) {
+              setEditSession(session);
+            } else setOpenSession(session);
+          }}
         >
+          {course.canManage && <Pencil />}
           {/* Sigle et type (en pastille), puis le local, puis l'heure. */}
           <span className={styles.titleRow}>
             <span className={styles.blockTitle}>{course.code}</span>

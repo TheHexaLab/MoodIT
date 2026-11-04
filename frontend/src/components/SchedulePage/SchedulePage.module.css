@@ -662,7 +662,9 @@
 }
 
 .task:hover .editIcon,
-.task:focus-visible .editIcon {
+.task:focus-visible .editIcon,
+.session:hover .editIcon,
+.session:focus-visible .editIcon {
   opacity: 1;
 }
 
