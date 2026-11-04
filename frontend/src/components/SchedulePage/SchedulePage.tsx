@@ -5,7 +5,13 @@ import { Popup } from '../Popup/Popup.tsx';
 import { PopupVariant } from '../Popup/popupVariant.ts';
 import { usePopupController } from '../Popup/popupController.ts';
 import ScheduleForm from './ScheduleForm.tsx';
-import { DeadlinePopup, Header, SessionPopup, TaskPopup } from './SchedulePopups.tsx';
+import {
+  DeadlinePopup,
+  Header,
+  SessionPopup,
+  TaskPopup,
+  TaskPreviewPopup,
+} from './SchedulePopups.tsx';
 import type {
   ScheduleColor,
   ScheduleCourse,
@@ -146,6 +152,7 @@ const Chevron = ({ direction }: { direction: 'left' | 'right' }) => (
 const Pencil = () => (
   <svg
     className={styles.editIcon}
+    data-edit-icon
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -206,6 +213,11 @@ export default function SchedulePage({
   const [addBusy, setAddBusy] = useState(false);
   const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
+  /** Tâche vue en aperçu (titre, quand, description) ; « Modifier » ouvre sa fenêtre de modification. */
+  const [previewTask, setPreviewTask] = useState<ScheduleTask | null>(null);
+  /** Un clic sur une tâche montre son aperçu ; une remise de devoir, sa fenêtre à elle. */
+  const showTask = (task: ScheduleTask) =>
+    task.courseDeadline ? setOpenTask(task) : setPreviewTask(task);
   /** Jour dont toutes les tâches sans heure sont affichées (plus de deux). */
   const [openAllDay, setOpenAllDay] = useState<number | null>(null);
   /** Types de séance de la liste, que l'enseignant ajoute ou supprime (pour la session). */
@@ -643,7 +655,7 @@ export default function SchedulePage({
               type="button"
               className={`${styles.deadline} ${task.done ? styles.done : ''}`}
               style={{ top: top(task.start) }}
-              onClick={() => setOpenTask(task)}
+              onClick={() => showTask(task)}
             >
               {label(
                 task.start,
@@ -811,8 +823,11 @@ export default function SchedulePage({
           onPointerDown={
             layout ? (event) => startDrag(event, `t${task.id}`, task, 'move', dropTask) : undefined
           }
-          onClick={() => {
-            if (!suppressClick.current) setOpenTask(task);
+          onClick={(event) => {
+            if (suppressClick.current) return;
+            // Le crayon mène droit à la modification ; le reste du bloc, à l'aperçu.
+            if ((event.target as Element).closest('[data-edit-icon]')) setOpenTask(task);
+            else showTask(task);
           }}
         >
           <span className={styles.blockTitle}>{task.title}</span>
@@ -1002,7 +1017,7 @@ export default function SchedulePage({
                         type="button"
                         className={`${styles.allDayChip} ${task.done ? styles.done : ''}`}
                         style={hueStyle(task.color)}
-                        onClick={() => setOpenTask(task)}
+                        onClick={() => showTask(task)}
                       >
                         <span className={styles.blockTitle}>{task.title}</span>
                         <span className={styles.visuallyHidden}>
@@ -1246,7 +1261,7 @@ export default function SchedulePage({
                           <button
                             type="button"
                             className={styles.taskOpen}
-                            onClick={() => setOpenTask(task)}
+                            onClick={() => showTask(task)}
                           >
                             <span className={styles.taskTitle}>{task.title}</span>
                             <span className={styles.taskWhen}>
@@ -1323,6 +1338,17 @@ export default function SchedulePage({
                 }
               : undefined;
           })()}
+        />
+      )}
+      {previewTask && (
+        <TaskPreviewPopup
+          task={previewTask}
+          course={previewTask.courseId != null ? byId.get(previewTask.courseId) : undefined}
+          onClose={() => setPreviewTask(null)}
+          onEdit={() => {
+            setPreviewTask(null);
+            setOpenTask(previewTask);
+          }}
         />
       )}
       {openTask && !openTask.courseDeadline && (

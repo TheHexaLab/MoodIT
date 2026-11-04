@@ -11,7 +11,17 @@ import type {
   ScheduleTask,
   ScheduleTaskInput,
 } from '../../types/domain.ts';
-import { dayTitle, draftError, draftToTask, formatTime, taskDraft } from './schedule.ts';
+import {
+  COLORS,
+  REMINDERS,
+  dayTitle,
+  draftError,
+  draftToTask,
+  formatRange,
+  formatShortTime,
+  formatTime,
+  taskDraft,
+} from './schedule.ts';
 
 const CloseIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -262,6 +272,99 @@ export function DeadlinePopup({
               Voir le devoir
             </button>
           )}
+        </div>
+      </div>
+    </Popup>
+  );
+}
+
+interface TaskPreviewPopupProps {
+  task: ScheduleTask;
+  course: ScheduleCourse | undefined;
+  onClose: () => void;
+  /** « Modifier » : la fenêtre de modification de la tâche. */
+  onEdit: () => void;
+}
+
+/** Aperçu d'une tâche (ou d'une remise personnelle) : ce qu'elle est ; « Modifier » pour la changer. */
+export function TaskPreviewPopup({
+  task,
+  course,
+  onClose,
+  onEdit,
+}: TaskPreviewPopupProps): React.ReactElement {
+  const controller = usePopupController();
+  const when = task.allDay
+    ? `${dayTitle(new Date(task.start))}, toute la journée`
+    : task.deadline
+      ? `${dayTitle(new Date(task.start))}, remise à ${formatShortTime(task.start)}`
+      : `${dayTitle(new Date(task.start))}, ${formatRange(task.start, task.end)}`;
+  const reminder = REMINDERS.find((r) => r.value === task.reminder && r.value != null)?.label;
+  return (
+    <Popup variant={PopupVariant.Form} label={task.title} onClose={onClose} controller={controller}>
+      <div className={styles.dialog}>
+        <header className={styles.dialogHeader}>
+          <div>
+            <h2 className={styles.previewTitle}>
+              {/* Pastille de la couleur de la tâche (rouge pour une remise). */}
+              <span
+                className={`${styles.previewDot} ${task.deadline ? styles.previewDotDeadline : ''}`}
+                style={{
+                  ['--hue' as string]: COLORS[task.color].hue,
+                  ['--sat' as string]: `${COLORS[task.color].saturation}%`,
+                }}
+                aria-hidden="true"
+              />
+              {task.title}
+            </h2>
+            <p>{task.deadline ? 'Remise personnelle' : 'Tâche personnelle'}</p>
+          </div>
+          <button
+            type="button"
+            className={styles.closeButton}
+            aria-label="Fermer"
+            onClick={() => controller.requestClose()}
+          >
+            <CloseIcon />
+          </button>
+        </header>
+        <dl className={styles.details}>
+          <dt>Quand</dt>
+          <dd>{when}</dd>
+          {course && (
+            <>
+              <dt>Cours</dt>
+              <dd>{course.title ? `${course.code} · ${course.title}` : course.code}</dd>
+            </>
+          )}
+          {reminder && (
+            <>
+              <dt>Rappel</dt>
+              <dd>{reminder}</dd>
+            </>
+          )}
+          <dt>État</dt>
+          <dd>{task.done ? 'Terminée' : 'À faire'}</dd>
+          {task.notes && (
+            <>
+              <dt>Description</dt>
+              <dd className={styles.preLine}>{task.notes}</dd>
+            </>
+          )}
+        </dl>
+        <div className={styles.actions}>
+          <button type="button" className={styles.button} onClick={() => controller.requestClose()}>
+            Fermer
+          </button>
+          <span className={styles.spacer} />
+          <button
+            type="button"
+            className={`${styles.button} ${styles.primary}`}
+            data-autofocus
+            onClick={() => controller.requestClose(onEdit)}
+          >
+            Modifier
+          </button>
         </div>
       </div>
     </Popup>

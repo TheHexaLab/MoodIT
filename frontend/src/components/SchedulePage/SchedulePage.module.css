@@ -1844,3 +1844,23 @@
   outline: 2px solid var(--brand-teal);
   outline-offset: 2px;
 }
+
+/* Aperçu d'une tâche : le titre précédé d'une pastille de sa couleur. */
+.previewTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.previewDot {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+}
+
+.previewDotDeadline {
+  border-radius: 0.1875rem;
+  background: #b42318;
+}
