@@ -17,5 +17,10 @@ public class TestCaseDTO {
     private Integer id;
     private String name;
     private String harnessCode;
+    // Cas structuré (#116) — alternative au harness-code pour les questions « appel de fonction ».
+    private String entry;
+    private String argsJson;
+    private String expectedJson;
+    private String compareMode;
     private Integer weight;
 }

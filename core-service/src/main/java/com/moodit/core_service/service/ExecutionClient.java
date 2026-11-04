@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,6 +12,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -93,6 +95,13 @@ public class ExecutionClient {
     /** Un harnais à exécuter (nom + code + poids). */
     public record Harness(String name, String harnessCode, int weight) {}
 
+    /**
+     * Un CAS STRUCTURÉ (#116) : appeler {@code entry(args)} et comparer la sortie à {@code expected}
+     * selon {@code compare}. {@code args}/{@code expected} sont du JSON (envoyés tels quels, jamais
+     * dans le sandbox). Alternative au harnais-code pour les questions « appel de fonction ».
+     */
+    public record Case(String name, String entry, JsonNode args, JsonNode expected, String compare, int weight) {}
+
     /** Verdict renvoyé par execution-service (on n'exploite que {@code passed} + l'ordre). */
     private record Verdict(String name, int weight, boolean passed, String detail) {}
 
@@ -120,6 +129,43 @@ public class ExecutionClient {
             return Arrays.stream(verdicts).map(Verdict::passed).toList();
         } catch (RestClientException e) {
             log.warn("Exécution du code (langage {}) échouée : {}", language, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Évalue {@code code} par CAS STRUCTURÉS (#116) : une SEULE exécution sandbox (le serveur RPC
+     * traite tous les cas), les attendus comparés hors sandbox. Verdicts dans l'ordre des {@code cases},
+     * ou {@code null} si le service est injoignable.
+     */
+    public List<Boolean> evaluateStructured(String language, String code, List<Case> cases) {
+        List<Map<String, Object>> caseBodies = cases.stream().map(c -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", c.name());
+            m.put("entry", c.entry());
+            m.put("args", c.args());
+            m.put("expected", c.expected());
+            m.put("compare", c.compare());
+            m.put("weight", c.weight());
+            return m;
+        }).toList();
+        Map<String, Object> body = Map.of(
+                "language", language == null ? "" : language,
+                "code", code == null ? "" : code,
+                "cases", caseBodies);
+        try {
+            // Une seule exécution Piston (lot de cas) → budget d'un appel.
+            Verdict[] verdicts = restClient(1).post()
+                    .uri(baseUrl + "/internal/exec/evaluate-structured")
+                    .header("X-Internal-Token", internalToken)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(Verdict[].class);
+            if (verdicts == null) return null;
+            return Arrays.stream(verdicts).map(Verdict::passed).toList();
+        } catch (RestClientException e) {
+            log.warn("Exécution structurée (langage {}) échouée : {}", language, e.getMessage());
             return null;
         }
     }
