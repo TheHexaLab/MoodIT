@@ -728,9 +728,16 @@ describe('SchedulePage — enseignant', () => {
     const panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
     expect(within(panel).queryByRole('textbox', { name: 'Titre' })).toBeNull();
     // Seuls les cours qu'il gère.
-    const course = within(panel).getByRole('combobox', { name: 'Cours' }) as HTMLSelectElement;
-    expect([...course.options].map((o) => o.textContent)).toEqual(['MAT265']);
-    fireEvent.change(course, { target: { value: '11' } });
+    const course = within(panel).getByRole('button', { name: 'Cours MAT265' });
+    fireEvent.click(course);
+    const courses = within(panel).getByRole('group', { name: 'Mes cours' });
+    expect(
+      within(courses)
+        .getAllByRole('button')
+        .map((o) => o.textContent)
+    ).toEqual(['MAT265']);
+    fireEvent.click(within(courses).getByRole('button', { name: 'MAT265' }));
+    expect(screen.queryByRole('group', { name: 'Mes cours' })).toBeNull();
 
     // « Ajouter un type… » change la liste en champ ; Entrée l'ajoute et le sélectionne.
     expect(typeButton(panel).textContent).toBe('Cours');
