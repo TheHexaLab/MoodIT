@@ -87,7 +87,12 @@ export function SessionPopup({
             </>
           )}
         </dl>
-        <ColorPicker legend="Ma couleur pour ce cours" value={color} onChange={onColorChange} />
+        <ColorPicker
+          legend="Ma couleur pour ce cours"
+          value={color}
+          onChange={onColorChange}
+          tone="bright"
+        />
         <div className={styles.actions}>
           <button type="button" className={styles.button} onClick={() => controller.requestClose()}>
             Fermer

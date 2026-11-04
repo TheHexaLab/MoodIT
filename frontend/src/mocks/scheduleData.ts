@@ -7,7 +7,7 @@ import type {
   ScheduleTaskInput,
 } from '../types/domain.ts';
 
-/** Créneaux de la semaine fictive : jour (0 = lundi), début et fin en minutes depuis minuit. */
+/** Créneaux de la semaine fictive : jour (0 = lundi), début et fin en minutes depuis minuit ; la semaine commence le dimanche. */
 const SLOTS: { day: number; start: number; end: number }[] = [
   { day: 0, start: 8 * 60 + 30, end: 10 * 60 + 15 },
   { day: 2, start: 13 * 60 + 30, end: 15 * 60 + 15 },
@@ -39,7 +39,7 @@ export function demoSchedule(weekStart: Date, courses: ScheduleCourse[]): Schedu
         const slot = SLOTS[(index * 2 + half) % SLOTS.length];
         const at = (minutes: number) => {
           const date = new Date(weekStart);
-          date.setDate(date.getDate() + slot.day);
+          date.setDate(date.getDate() + 1 + slot.day);
           date.setHours(0, minutes, 0, 0);
           return date.toISOString();
         };
@@ -71,7 +71,8 @@ function inWeek(iso: string, weekStart: Date): boolean {
 function thisWeekAt(day: number, minutes: number): string {
   const monday = new Date();
   monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + day);
+  // Lundi de la semaine courante, qui commence le dimanche.
+  monday.setDate(monday.getDate() - monday.getDay() + 1 + day);
   monday.setMinutes(minutes);
   return monday.toISOString();
 }
@@ -96,6 +97,7 @@ function seedTasks(): ScheduleTask[] {
     color,
     done: false,
     allDay: false,
+    deadline: false,
   });
   return [
     task(1, 'Tutorat', 2, 14 * 60, 15 * 60, 'rose'),
@@ -110,6 +112,7 @@ function seedTasks(): ScheduleTask[] {
     ),
     task(3, 'Appel de stage', 4, 14 * 60, 15 * 60, 'green'),
     { ...task(4, 'Remise du TP2', 3, 0, 0, 'orange'), allDay: true },
+    { ...task(5, 'Rapport de labo', 1, 17 * 60, 17 * 60, 'rose'), deadline: true, courseId: 10 },
   ];
 }
 

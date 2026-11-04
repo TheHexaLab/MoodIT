@@ -4,6 +4,7 @@ import type { ScheduleColor, ScheduleCourse } from '../../types/domain.ts';
 import {
   COLORS,
   COLOR_KEYS,
+  DEADLINE_OPTIONS,
   type Draft,
   type DraftKind,
   REMINDERS,
@@ -33,14 +34,17 @@ export function ColorPicker({
   legend,
   value,
   onChange,
+  tone = 'pastel',
 }: {
   legend: string;
   value: ScheduleColor;
   onChange: (color: ScheduleColor) => void;
+  /** Vif pour un cours, pastel pour une tâche : comme leurs blocs dans la grille. */
+  tone?: 'bright' | 'pastel';
 }): React.ReactElement {
   const name = useId();
   return (
-    <fieldset className={styles.colors}>
+    <fieldset className={styles.colors} data-tone={tone}>
       <legend>{legend}</legend>
       <div>
         {COLOR_KEYS.map((key) => (
@@ -118,6 +122,27 @@ export default function ScheduleForm({
         </div>
       )}
 
+      {isTask && (
+        <div className={styles.field}>
+          <span id={`${id}-genre`}>Genre</span>
+          <div className={styles.chips} role="group" aria-labelledby={`${id}-genre`}>
+            <button
+              type="button"
+              aria-pressed={!draft.deadline}
+              onClick={() => set({ deadline: false })}
+            >
+              Tâche
+            </button>
+            <button
+              type="button"
+              aria-pressed={draft.deadline}
+              onClick={() => set({ deadline: true })}
+            >
+              Remise
+            </button>
+          </div>
+        </div>
+      )}
       {isTask ? (
         <label className={styles.field}>
           <span>Titre</span>
@@ -166,7 +191,7 @@ export default function ScheduleForm({
           onChange={(event) => set({ date: event.target.value })}
         />
       </label>
-      {isTask && (
+      {isTask && !draft.deadline && (
         <label className={styles.checkField}>
           <input
             type="checkbox"
@@ -176,7 +201,29 @@ export default function ScheduleForm({
           <span>Toute la journée</span>
         </label>
       )}
-      {!(isTask && draft.allDay) && (
+      {isTask && onDelete && (
+        <label className={styles.checkField}>
+          <input
+            type="checkbox"
+            checked={draft.done}
+            onChange={(event) => set({ done: event.target.checked })}
+          />
+          <span>Tâche terminée</span>
+        </label>
+      )}
+      {isTask && draft.deadline && (
+        <label className={styles.field}>
+          <span>Heure limite</span>
+          <select value={draft.start} onChange={(event) => set({ start: event.target.value })}>
+            {DEADLINE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {!(isTask && (draft.allDay || draft.deadline)) && (
         <div className={styles.fieldRow}>
           {timeSelect('start', 'Début')}
           {timeSelect('end', 'Fin')}
@@ -185,7 +232,13 @@ export default function ScheduleForm({
 
       {isTask ? (
         <>
-          <ColorPicker legend="Couleur" value={draft.color} onChange={(color) => set({ color })} />
+          {!draft.deadline && (
+            <ColorPicker
+              legend="Couleur"
+              value={draft.color}
+              onChange={(color) => set({ color })}
+            />
+          )}
           <label className={styles.field}>
             <span>Cours lié (facultatif)</span>
             <select

@@ -13,13 +13,13 @@ export const DAY_END = LAST_HOUR * 60 - 15;
 /** Heure où la grille s'ouvre, sauf événement plus tôt dans la semaine. */
 export const OPENING_HOUR = 8;
 
-const DAY_NAMES = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi'];
+const DAY_NAMES = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 
-/** Lundi 0 h de la semaine de `date` ; un samedi ou un dimanche donne le lundi qui précède. */
+/** Dimanche 0 h de la semaine de `date` : la semaine va du dimanche au samedi. */
 export function startOfWeek(date: Date): Date {
-  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  return monday;
+  const sunday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  sunday.setDate(sunday.getDate() - sunday.getDay());
+  return sunday;
 }
 
 export function addDays(date: Date, days: number): Date {
@@ -36,9 +36,9 @@ export function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-/** Les cinq jours de cours de la semaine qui commence à `monday`. */
-export function weekDays(monday: Date): Date[] {
-  return [0, 1, 2, 3, 4].map((offset) => addDays(monday, offset));
+/** Les sept jours de la semaine qui commence au dimanche `weekStart`, jusqu'au samedi. */
+export function weekDays(weekStart: Date): Date[] {
+  return [0, 1, 2, 3, 4, 5, 6].map((offset) => addDays(weekStart, offset));
 }
 
 /** « Lun 26 ». */
@@ -64,13 +64,14 @@ export function dayTitle(date: Date): string {
 
 const month = (date: Date) => new Intl.DateTimeFormat('fr-CA', { month: 'long' }).format(date);
 
-/** « Semaine du 26 au 30 octobre 2026 », ou « du 30 novembre au 4 décembre 2026 » d'un mois à l'autre. */
-export function weekLabel(monday: Date): string {
-  const friday = addDays(monday, 4);
-  const end = `${friday.getDate()} ${month(friday)} ${friday.getFullYear()}`;
-  if (monday.getMonth() === friday.getMonth()) return `Semaine du ${monday.getDate()} au ${end}`;
-  const sameYear = monday.getFullYear() === friday.getFullYear();
-  return `Semaine du ${monday.getDate()} ${month(monday)}${sameYear ? '' : ` ${monday.getFullYear()}`} au ${end}`;
+/** « Semaine du 1 au 7 novembre 2026 », ou « du 29 novembre au 5 décembre 2026 » d'un mois à l'autre. */
+export function weekLabel(weekStart: Date): string {
+  const saturday = addDays(weekStart, 6);
+  const end = `${saturday.getDate()} ${month(saturday)} ${saturday.getFullYear()}`;
+  if (weekStart.getMonth() === saturday.getMonth())
+    return `Semaine du ${weekStart.getDate()} au ${end}`;
+  const sameYear = weekStart.getFullYear() === saturday.getFullYear();
+  return `Semaine du ${weekStart.getDate()} ${month(weekStart)}${sameYear ? '' : ` ${weekStart.getFullYear()}`} au ${end}`;
 }
 
 /** « 14 h », ou « 14 h 30 ». */
@@ -109,10 +110,9 @@ export function minutesFromStart(iso: string): number {
   return (date.getHours() - FIRST_HOUR) * 60 + date.getMinutes();
 }
 
-/** Indice du jour (0 = lundi) ; -1 en fin de semaine. */
+/** Indice du jour : 0 = dimanche, 6 = samedi. */
 export function dayIndex(iso: string): number {
-  const day = new Date(iso).getDay();
-  return day === 0 || day === 6 ? -1 : day - 1;
+  return new Date(iso).getDay();
 }
 
 /** Événement de la grille : une séance ou une tâche, réduit à ses heures. */
@@ -188,7 +188,7 @@ export const COLORS: Record<ScheduleColor, { label: string; hue: number; saturat
   blue: { label: 'Bleu', hue: 220, saturation: 62 },
   purple: { label: 'Violet', hue: 258, saturation: 52 },
   rose: { label: 'Rose', hue: 345, saturation: 62 },
-  orange: { label: 'Orange', hue: 28, saturation: 80 },
+  orange: { label: 'Orange', hue: 18, saturation: 92 },
   green: { label: 'Vert', hue: 142, saturation: 58 },
   gray: { label: 'Gris', hue: 240, saturation: 10 },
 };
@@ -220,6 +220,8 @@ export interface Draft {
   done: boolean;
   /** Tâche : toute la journée, sans heure. */
   allDay: boolean;
+  /** Tâche : une remise, à une seule heure (`start`). */
+  deadline: boolean;
   /** Séance : type, local et répétition. */
   sessionKind: string;
   room: string;
@@ -266,6 +268,9 @@ export const TIME_OPTIONS = Array.from({ length: (DAY_END - FIRST_HOUR * 60) / 1
   };
 });
 
+/** Échéance d'une remise : les mêmes heures, plus 23 h 59. */
+export const DEADLINE_OPTIONS = [...TIME_OPTIONS, { value: '23:59', label: '23 h 59' }];
+
 /** Brouillon vide : le jour donné, l'heure qui suit, d'une heure. */
 export function emptyDraft(
   kind: DraftKind,
@@ -286,6 +291,7 @@ export function emptyDraft(
     color: 'teal',
     done: false,
     allDay: false,
+    deadline: false,
     sessionKind: SESSION_KINDS[0],
     room: '',
     weekly: false,
@@ -306,6 +312,7 @@ export function taskDraft(task: ScheduleTask): Draft {
     color: task.color,
     done: task.done,
     allDay: task.allDay,
+    deadline: task.deadline,
   };
 }
 
@@ -314,8 +321,7 @@ export function draftError(draft: Draft): string | null {
   if (draft.kind === 'task' && !draft.title.trim()) return 'Donnez un titre à la tâche.';
   if (draft.kind === 'session' && draft.courseId == null) return 'Choisissez un cours.';
   if (!draft.date) return 'Choisissez une date.';
-  if (dayIndex(toIso(draft.date)) === -1) return 'Choisissez un jour de semaine.';
-  const timed = !(draft.kind === 'task' && draft.allDay);
+  const timed = !(draft.kind === 'task' && (draft.allDay || draft.deadline));
   if (timed && draft.end <= draft.start) return 'La fin doit suivre le début.';
   if (draft.kind === 'session' && !draft.room.trim()) return 'Indiquez le local.';
   if (draft.kind === 'session' && draft.weekly && (!draft.until || draft.until < draft.date)) {
@@ -328,13 +334,15 @@ export function draftToTask(draft: Draft): ScheduleTaskInput {
   return {
     title: draft.title.trim(),
     start: toIso(draft.date, draft.allDay ? '00:00' : draft.start),
-    end: toIso(draft.date, draft.allDay ? '00:00' : draft.end),
+    // Une remise n'a qu'une heure : la fin vaut l'échéance.
+    end: toIso(draft.date, draft.allDay ? '00:00' : draft.deadline ? draft.start : draft.end),
     courseId: draft.courseId,
     reminder: draft.reminder,
     notes: draft.notes.trim(),
     color: draft.color,
     done: draft.done,
-    allDay: draft.allDay,
+    allDay: draft.allDay && !draft.deadline,
+    deadline: draft.deadline,
   };
 }
 

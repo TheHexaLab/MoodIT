@@ -30,6 +30,7 @@ import {
   draftToTask,
   emptyDraft,
   formatRange,
+  formatShortTime,
   formatTime,
   isSameDay,
   longDay,
@@ -40,6 +41,7 @@ import {
   shortDay,
   startOfWeek,
   toDateInput,
+  toTimeInput,
   toIso,
   weekDays,
   weekLabel,
@@ -59,6 +61,10 @@ const SCROLL_EDGE = 48;
 const MAX_SCROLL_STEP = 8;
 /** Sous ces hauteurs (rem), un bloc ne garde que son titre, puis son titre et une ligne. */
 const TINY_REM = 2.5;
+/** Tâches sans heure montrées par jour avant « +N de plus ». */
+const MAX_ALL_DAY = 2;
+/** Durée de la sortie d'une tâche cochée de la liste, en ms (comme l'animation CSS). */
+const LEAVE_MS = 450;
 const SHORT_REM = 3.6;
 /** Hauteur, en rem, des lignes fixes d'un bloc (titre, deux détails, marges) ; et d'une ligne de description. */
 const BLOCK_LINES_REM = 3.25;
@@ -104,7 +110,8 @@ type Load =
 
 /** Tâche glissée : heures où elle tombera (au quart d'heure) et décalage libre du bloc, en px. */
 interface DragState {
-  taskId: number;
+  /** `t<id>` pour une tâche, `preview` pour l'aperçu de l'ajout. */
+  key: string;
   mode: DragMode;
   start: string;
   end: string;
@@ -163,7 +170,7 @@ const hueStyle = (color: ScheduleColor) => ({
 
 /**
  * Page Horaire du portail, qui est aussi l'agenda : les séances des cours (fixées par leur
- * personnel) et les tâches personnelles de l'utilisateur, du lundi au vendredi. L'enseignant ou le
+ * personnel) et les tâches personnelles de l'utilisateur, du dimanche au samedi. L'enseignant ou le
  * responsable d'un cours y ajoute aussi des séances.
  */
 export default function SchedulePage({
@@ -185,6 +192,16 @@ export default function SchedulePage({
   const [addBusy, setAddBusy] = useState(false);
   const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
+  /** Jour dont toutes les tâches sans heure sont affichées (plus de trois). */
+  const [openAllDay, setOpenAllDay] = useState<number | null>(null);
+  /** Tâches cochées qui sortent de la liste en s'effaçant. */
+  const [leaving, setLeaving] = useState<number[]>([]);
+  /** Heure courante pour la ligne bleue du jour ; avance chaque minute. */
+  const [clock, setClock] = useState(now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [drag, setDrag] = useState<DragState | null>(null);
   /** Colonnes des jours, pour savoir sur quel jour le pointeur dépose la tâche. */
   const columnsRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -197,8 +214,8 @@ export default function SchedulePage({
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const panelId = useId();
-  const monday = addDays(new Date(thisWeek), offset * 7);
-  const mondayTime = monday.getTime();
+  const weekStart = addDays(new Date(thisWeek), offset * 7);
+  const weekStartTime = weekStart.getTime();
   const courseKey = courses.map((course) => course.id).join(',');
   const managesCourse = courses.some((course) => course.canManage);
   const addLabel = managesCourse ? "Ajouter à l'horaire" : 'Ajouter une tâche';
@@ -206,7 +223,7 @@ export default function SchedulePage({
 
   useEffect(() => {
     let cancelled = false;
-    const weekStart = new Date(mondayTime);
+    const weekStart = new Date(weekStartTime);
     Promise.all([
       api.fetchSessions(weekStart, courses),
       api.fetchTasks(weekStart),
@@ -223,7 +240,7 @@ export default function SchedulePage({
     };
     // `courses` est suivi par ses ids (courseKey) : un nouveau tableau aux mêmes cours ne recharge pas.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mondayTime, courseKey, api, attempt]);
+  }, [weekStartTime, courseKey, api, attempt]);
 
   // La grille s'ouvre sur 8 h, ou sur le premier événement s'il est plus tôt ; d'une semaine à
   // l'autre, elle reprend où l'utilisateur l'avait laissée.
@@ -251,9 +268,10 @@ export default function SchedulePage({
   function goTo(nextOffset: number) {
     setLoad({ status: 'loading' });
     setOffset(nextOffset);
+    setOpenAllDay(null);
   }
 
-  const days = weekDays(monday);
+  const days = weekDays(weekStart);
   const byId = new Map(courses.map((course) => [course.id, course]));
   const sessions = load.status === 'ready' ? load.sessions : [];
   const tasks = load.status === 'ready' ? load.tasks : [];
@@ -279,7 +297,7 @@ export default function SchedulePage({
     }
   }
   const inShownWeek = (iso: string) =>
-    dayIndex(iso) !== -1 && startOfWeek(new Date(iso)).getTime() === mondayTime;
+    dayIndex(iso) !== -1 && startOfWeek(new Date(iso)).getTime() === weekStartTime;
 
   function openAdd() {
     if (adding) {
@@ -287,7 +305,7 @@ export default function SchedulePage({
       return;
     }
     const today = days.find((day) => isSameDay(day, now));
-    setAdding(emptyDraft('task', today ?? monday, now.getHours() + 1, null));
+    setAdding(emptyDraft('task', today ?? weekStart, now.getHours() + 1, null));
     setAddError(null);
   }
 
@@ -366,16 +384,23 @@ export default function SchedulePage({
   }
 
   /**
-   * Glisser une tâche dans la grille : la déplacer (heure, jour) ou l'allonger par sa poignée du
-   * bas. Le bloc suit le pointeur librement, sans quitter la grille ; un emplacement de sa couleur
-   * montre où il tombera, au quart d'heure. Près du haut ou du bas, la grille défile avec lui.
+   * Glisser une tâche, ou l'aperçu de l'ajout, dans la grille : la déplacer (heure, jour) ou
+   * l'allonger par sa poignée du bas. Le bloc suit le pointeur librement, sans quitter la grille ;
+   * une ombre de sa couleur montre où il tombera, au quart d'heure, et le bloc affiche l'heure
+   * d'arrivée. Près du haut ou du bas, la grille défile avec lui. `onDrop` reçoit les nouvelles heures.
    */
-  function startDrag(event: React.PointerEvent, task: ScheduleTask, mode: DragMode) {
+  function startDrag(
+    event: React.PointerEvent,
+    key: string,
+    task: { start: string; end: string },
+    mode: DragMode,
+    onDrop: (times: { start: string; end: string }) => void
+  ) {
     if (event.button !== 0) return;
     event.stopPropagation();
     const scroller = scrollRef.current;
     const blockRect = (event.currentTarget as HTMLElement)
-      .closest('button')!
+      .closest('[data-draggable]')!
       .getBoundingClientRect();
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const pxPerMinute = (HOUR_REM * rem) / 60;
@@ -413,7 +438,7 @@ export default function SchedulePage({
       });
       const delta = Math.round(freeDy / pxPerMinute / 15) * 15;
       current = shiftTimes(task, mode, delta, column === -1 ? 0 : column - origin.day);
-      setDrag({ taskId: task.id, mode, ...current, dx: freeDx, dy: freeDy });
+      setDrag({ key, mode, ...current, dx: freeDx, dy: freeDy });
     };
     // Défilement automatique, tant que le pointeur reste près d'un bord de la grille.
     const tick = () => {
@@ -446,30 +471,132 @@ export default function SchedulePage({
       window.setTimeout(() => {
         suppressClick.current = false;
       }, 0);
-      if (current.start !== task.start || current.end !== task.end) void patchTask(task, current);
+      if (current.start !== task.start || current.end !== task.end) onDrop(current);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     frame = window.requestAnimationFrame(tick);
   }
 
-  /** Emplacement où tombera la tâche glissée, dans la colonne de son jour d'arrivée. */
+  /** Couleur de ce qui est glissé : la tâche, ou l'aperçu de l'ajout (tâche ou séance). */
+  function dragColor(key: string): ScheduleColor | undefined {
+    if (key === 'preview') {
+      if (!adding) return undefined;
+      return adding.kind === 'task' ? adding.color : colorOf(adding.courseId ?? 0);
+    }
+    return tasks.find((t) => `t${t.id}` === key)?.color;
+  }
+
+  /** Durée de ce qui est glissé, en rem de grille. */
+  const durationRem = (times: { start: string; end: string }) =>
+    ((minutesFromStart(times.end) - minutesFromStart(times.start)) / 60) * HOUR_REM;
+
+  /** Style du bloc glissé : il suit le pointeur, déplacé ou allongé par le bas. */
+  function dragStyleOf(dragged: DragState | null): React.CSSProperties {
+    if (!dragged) return {};
+    return dragged.mode === 'move'
+      ? { transform: `translate(${dragged.dx}px, ${dragged.dy}px)` }
+      : { height: `${durationRem(dragged)}rem` };
+  }
+
+  /** Ombre où tombera ce qui est glissé, dans la colonne de son jour d'arrivée. */
   function renderDropSpot(index: number): React.ReactNode {
-    const task =
-      drag && dayIndex(drag.start) === index ? tasks.find((t) => t.id === drag.taskId) : undefined;
-    if (!drag || !task) return null;
+    // Allonger : le bloc montre déjà sa hauteur d'arrivée ; l'ombre ne sert qu'à déplacer.
+    // Une remise n'a pas de durée : pas d'ombre, l'aperçu lui-même suit le pointeur.
+    const color =
+      drag && drag.mode === 'move' && drag.start !== drag.end && dayIndex(drag.start) === index
+        ? dragColor(drag.key)
+        : undefined;
+    if (!drag || !color) return null;
     return (
       <div
         className={styles.dropSpot}
         aria-hidden="true"
         style={{
-          ...hueStyle(task.color),
+          ...hueStyle(color),
           top: `${(minutesFromStart(drag.start) / 60) * HOUR_REM}rem`,
           height: `${((minutesFromStart(drag.end) - minutesFromStart(drag.start)) / 60) * HOUR_REM}rem`,
         }}
-      >
-        {formatTime(drag.start)} à {formatTime(drag.end)}
-      </div>
+      ></div>
+    );
+  }
+
+  /**
+   * Cocher une tâche : elle est terminée tout de suite (pâlie dans la grille) et quitte la liste en
+   * s'effaçant. La décocher pendant sa sortie la garde. On la rouvre depuis la grille.
+   */
+  function toggleDone(task: ScheduleTask) {
+    if (task.done) {
+      setLeaving((ids) => ids.filter((id) => id !== task.id));
+      void patchTask(task, { done: false });
+      return;
+    }
+    void patchTask(task, { done: true });
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setLeaving((ids) => [...ids, task.id]);
+    window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
+  }
+
+  /** Remises du jour `index` : une barre rouge à l'heure de l'échéance, son étiquette au-dessus. */
+  function renderDeadlines(index: number): React.ReactNode {
+    const top = (iso: string) => `${(minutesFromStart(iso) / 60) * HOUR_REM}rem`;
+    const label = (iso: string, title: string) => (
+      <span className={styles.deadlineLabel}>
+        <span className={styles.deadlineTime}>{formatShortTime(iso)}</span>
+        <span className={styles.deadlineTitle}>{title}</span>
+      </span>
+    );
+    // Aperçu de la remise en cours d'ajout : la même barre, en pointillé.
+    const savedStart =
+      adding?.kind === 'task' && adding.deadline && adding.date
+        ? toIso(adding.date, adding.start)
+        : null;
+    // Pendant qu'on la glisse, l'aperçu suit l'heure d'arrivée, au quart d'heure.
+    const draftStart = savedStart && drag?.key === 'preview' ? drag.start : savedStart;
+    // Seul l'aperçu se glisse : une remise enregistrée reste à son heure.
+    const dragDraft = (event: React.PointerEvent) =>
+      savedStart &&
+      startDrag(event, 'preview', { start: savedStart, end: savedStart }, 'move', (times) =>
+        setAdding(
+          (previous) =>
+            previous && {
+              ...previous,
+              date: toDateInput(new Date(times.start)),
+              start: toTimeInput(times.start),
+            }
+        )
+      );
+    return (
+      <>
+        {tasks
+          .filter((task) => task.deadline && dayIndex(task.start) === index)
+          .map((task) => (
+            <button
+              key={task.id}
+              type="button"
+              className={`${styles.deadline} ${task.done ? styles.done : ''}`}
+              style={{ top: top(task.start) }}
+              onClick={() => setOpenTask(task)}
+            >
+              {label(task.start, task.title)}
+              <span className={styles.visuallyHidden}>
+                , remise, {longDay(new Date(task.start))}
+                {task.done ? ', terminée' : ''}
+              </span>
+            </button>
+          ))}
+        {draftStart && inShownWeek(draftStart) && dayIndex(draftStart) === index && (
+          <div
+            className={`${styles.deadline} ${styles.deadlinePreview} ${drag?.key === 'preview' ? styles.dragging : ''}`}
+            style={{ top: top(draftStart) }}
+            aria-hidden="true"
+            data-draggable
+            onPointerDown={dragDraft}
+          >
+            {label(draftStart, adding?.title.trim() || 'Nouvelle remise')}
+          </div>
+        )}
+      </>
     );
   }
 
@@ -482,7 +609,7 @@ export default function SchedulePage({
     );
   }
 
-  /** Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = lundi). */
+  /** Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = dimanche). */
   /** Tâches sans heure du jour `index`, qui vont dans la rangée « Journée ». */
   const allDayOf = (index: number) =>
     tasks.filter((task) => task.allDay && dayIndex(task.start) === index);
@@ -501,10 +628,13 @@ export default function SchedulePage({
         items.push({ kind: 'session', session, course, start: session.start, end: session.end });
     }
     for (const task of tasks) {
-      if (dayIndex(task.start) === index && (withAllDay || !task.allDay))
+      // Remises et tâches sans heure ont leur propre affichage dans la grille.
+      if (dayIndex(task.start) === index && (withAllDay || (!task.allDay && !task.deadline)))
         items.push({ kind: 'task', task, start: task.start, end: task.end });
     }
-    if (adding && !allDayDraft && adding.date && adding.end > adding.start) {
+    // L'aperçu d'une remise est une barre (renderDeadlines), pas un bloc.
+    const deadlineDraft = adding?.kind === 'task' && adding.deadline;
+    if (adding && !allDayDraft && !deadlineDraft && adding.date && adding.end > adding.start) {
       const start = toIso(adding.date, adding.start);
       if (inShownWeek(start) && dayIndex(start) === index) {
         items.push({ kind: 'preview', draft: adding, start, end: toIso(adding.date, adding.end) });
@@ -529,10 +659,14 @@ export default function SchedulePage({
   ): React.ReactNode {
     const style = layout?.style;
     // Petit bloc : le titre reste toujours lisible ; les lignes qui n'y tiennent pas sont retirées.
+    // Glissé : la taille d'arrivée, pour voir le bloc tel qu'il sera une fois lâché.
+    const held =
+      drag && drag.key === (item.kind === 'task' ? `t${item.task.id}` : item.kind) ? drag : null;
+    const heightRem = held ? durationRem(held) : layout?.heightRem;
     const size =
-      layout && layout.heightRem < TINY_REM
+      heightRem != null && heightRem < TINY_REM
         ? styles.tiny
-        : layout && layout.heightRem < SHORT_REM
+        : heightRem != null && heightRem < SHORT_REM
           ? styles.short
           : '';
     const extra = `${layout?.stacked ? styles.stacked : ''} ${layout?.titleOnly ? styles.titleOnly : ''} ${size}`;
@@ -561,17 +695,14 @@ export default function SchedulePage({
     if (item.kind === 'task') {
       const { task } = item;
       const linked = task.courseId != null ? byId.get(task.courseId)?.code : undefined;
-      const dragged = drag?.taskId === task.id ? drag : null;
-      // Le bloc glissé suit le pointeur : déplacé, ou allongé par le bas.
-      const dragStyle: React.CSSProperties = !dragged
-        ? {}
-        : dragged.mode === 'move'
-          ? { transform: `translate(${dragged.dx}px, ${dragged.dy}px)` }
-          : { height: `calc(${style?.height} + ${dragged.dy}px)` };
+      const dragged = drag?.key === `t${task.id}` ? drag : null;
+      const dropTask = (times: { start: string; end: string }) => void patchTask(task, times);
       // Description sous les détails, sur les lignes que la hauteur visible laisse libres.
+      // Glissée, la tâche montre les lignes qu'elle aura à sa hauteur d'arrivée.
+      const roomRem = dragged ? durationRem(dragged) : layout?.visibleRem;
       const descriptionLines =
-        layout && !layout.titleOnly && task.notes
-          ? Math.floor((layout.visibleRem - BLOCK_LINES_REM) / DESCRIPTION_LINE_REM)
+        layout && roomRem != null && (dragged || !layout.titleOnly) && task.notes
+          ? Math.floor((roomRem - BLOCK_LINES_REM) / DESCRIPTION_LINE_REM)
           : 0;
       return (
         <button
@@ -584,15 +715,22 @@ export default function SchedulePage({
             task.done ? styles.done : '',
             dragged ? styles.dragging : '',
           ].join(' ')}
-          style={{ ...style, ...dragStyle, ...hueStyle(task.color) }}
-          onPointerDown={layout ? (event) => startDrag(event, task, 'move') : undefined}
+          style={{ ...style, ...dragStyleOf(dragged), ...hueStyle(task.color) }}
+          data-draggable
+          onPointerDown={
+            layout ? (event) => startDrag(event, `t${task.id}`, task, 'move', dropTask) : undefined
+          }
           onClick={() => {
             if (!suppressClick.current) setOpenTask(task);
           }}
         >
           <span className={styles.blockTitle}>{task.title}</span>
           <span className={styles.blockDetail}>
-            {task.allDay ? 'Toute la journée' : formatRange(item.start, item.end)}
+            {task.allDay
+              ? 'Toute la journée'
+              : task.deadline
+                ? `Remise à ${formatShortTime(task.start)}`
+                : formatRange(dragged?.start ?? item.start, dragged?.end ?? item.end)}
             {linked && ` · ${linked}`}
           </span>
           {descriptionLines > 0 && (
@@ -613,7 +751,7 @@ export default function SchedulePage({
             <span
               className={styles.resizeHandle}
               aria-hidden="true"
-              onPointerDown={(event) => startDrag(event, task, 'resize')}
+              onPointerDown={(event) => startDrag(event, `t${task.id}`, task, 'resize', dropTask)}
             />
           )}
         </button>
@@ -622,18 +760,51 @@ export default function SchedulePage({
     const { draft } = item;
     const isTask = draft.kind === 'task';
     const course = draft.courseId != null ? byId.get(draft.courseId) : undefined;
+    const dragged = drag?.key === 'preview' ? drag : null;
+    // Glisser l'aperçu change le jour et les heures du formulaire.
+    const dropPreview = (times: { start: string; end: string }) =>
+      setAdding(
+        (previous) =>
+          previous && {
+            ...previous,
+            date: toDateInput(new Date(times.start)),
+            start: toTimeInput(times.start),
+            end: toTimeInput(times.end),
+          }
+      );
     return (
       <div
         key="preview"
-        className={`${styles.block} ${isTask ? styles.task : styles.session} ${styles.preview}`}
-        style={{ ...style, ...hueStyle(isTask ? draft.color : colorOf(draft.courseId ?? 0)) }}
+        className={[
+          styles.block,
+          isTask ? styles.task : styles.session,
+          styles.preview,
+          extra,
+          dragged ? styles.dragging : '',
+        ].join(' ')}
+        style={{
+          ...style,
+          ...dragStyleOf(dragged),
+          ...hueStyle(isTask ? draft.color : colorOf(draft.courseId ?? 0)),
+        }}
         aria-hidden="true"
+        data-draggable
+        onPointerDown={
+          layout ? (event) => startDrag(event, 'preview', item, 'move', dropPreview) : undefined
+        }
       >
         <span className={styles.blockTitle}>
           {isTask ? draft.title.trim() || 'Nouvelle tâche' : course?.code}
         </span>
-        <span className={styles.blockDetail}>{isTask ? 'Nouvelle tâche' : 'Nouvelle séance'}</span>
-        <span className={styles.blockDetail}>{time}</span>
+        <span className={styles.blockDetail}>
+          {formatRange(dragged?.start ?? item.start, dragged?.end ?? item.end)}
+        </span>
+        {layout && (
+          <span
+            className={styles.resizeHandle}
+            onPointerDown={(event) => startDrag(event, 'preview', item, 'resize', dropPreview)}
+          />
+        )}
       </div>
     );
   }
@@ -706,25 +877,30 @@ export default function SchedulePage({
             savedScroll.current = event.currentTarget.scrollTop;
           }}
         >
-          <div className={styles.grid} role="group" aria-label={weekLabel(monday)}>
+          <div className={styles.grid} role="group" aria-label={weekLabel(weekStart)}>
             <div className={styles.corner} aria-hidden="true" />
             {days.map((day, index) => (
               <div
                 key={day.getTime()}
-                className={`${styles.dayHead} ${isSameDay(day, now) ? styles.today : ''}`}
+                className={`${styles.dayHead} ${isSameDay(day, now) ? styles.today : ''} ${index === 0 || index === 6 ? styles.weekend : ''}`}
                 aria-current={isSameDay(day, now) ? 'date' : undefined}
               >
                 {shortDay(day, index)}
               </div>
             ))}
+            {/* Rangée « Journée » : par-dessus le haut de la grille, sans la pousser vers le bas. */}
             {hasAllDay && (
               <>
-                <div className={styles.allDayLabel} aria-hidden="true">
-                  Journée
-                </div>
+                <div className={styles.allDayLabel} aria-hidden="true" />
                 {days.map((day, index) => (
-                  <div key={day.getTime()} className={styles.allDayCell}>
-                    {allDayOf(index).map((task) => (
+                  <div
+                    key={day.getTime()}
+                    className={`${styles.allDayCell} ${index === 0 || index === 6 ? styles.weekend : ''}`}
+                  >
+                    {(openAllDay === index
+                      ? allDayOf(index)
+                      : allDayOf(index).slice(0, MAX_ALL_DAY)
+                    ).map((task) => (
                       <button
                         key={task.id}
                         type="button"
@@ -738,6 +914,19 @@ export default function SchedulePage({
                         </span>
                       </button>
                     ))}
+                    {/* Au-delà de trois, « +N de plus » déplie la liste du jour. */}
+                    {allDayOf(index).length > MAX_ALL_DAY && (
+                      <button
+                        type="button"
+                        className={styles.allDayMore}
+                        aria-expanded={openAllDay === index}
+                        onClick={() => setOpenAllDay(openAllDay === index ? null : index)}
+                      >
+                        {openAllDay === index
+                          ? 'Voir moins'
+                          : `+${allDayOf(index).length - MAX_ALL_DAY} de plus`}
+                      </button>
+                    )}
                     {allDayDraft && toIso(allDayDraft.date) === toIso(toDateInput(day)) && (
                       <div
                         className={`${styles.allDayChip} ${styles.preview}`}
@@ -764,7 +953,7 @@ export default function SchedulePage({
                 ref={(el) => {
                   columnsRef.current[index] = el;
                 }}
-                className={`${styles.dayColumn} ${isSameDay(day, now) ? styles.today : ''}`}
+                className={`${styles.dayColumn} ${isSameDay(day, now) ? styles.today : ''} ${index === 0 || index === 6 ? styles.weekend : ''}`}
                 style={{ height: `${HOURS.length * HOUR_REM}rem` }}
               >
                 {placeItems(itemsOf(index)).map(({ item, depth, visible }) =>
@@ -784,6 +973,15 @@ export default function SchedulePage({
                   })
                 )}
                 {renderDropSpot(index)}
+                {renderDeadlines(index)}
+                {/* Ligne bleue de l'heure courante, dans la colonne d'aujourd'hui. */}
+                {isSameDay(day, clock) && (
+                  <div
+                    className={styles.nowLine}
+                    style={{ top: `${(minutesFromStart(clock.toISOString()) / 60) * HOUR_REM}rem` }}
+                    aria-hidden="true"
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -800,11 +998,20 @@ export default function SchedulePage({
       allowSessions
       error={addError}
       busy={addBusy}
-      submitLabel={adding.kind === 'task' ? 'Ajouter la tâche' : 'Ajouter la séance'}
+      submitLabel={
+        adding.kind === 'session'
+          ? 'Ajouter la séance'
+          : adding.deadline
+            ? 'Ajouter la remise'
+            : 'Ajouter la tâche'
+      }
       onSubmit={() => void submitAdd()}
       onCancel={closeAdd}
     />
   );
+  const listed = [...tasks]
+    .filter((task) => !task.done || leaving.includes(task.id))
+    .sort((a, b) => a.start.localeCompare(b.start));
   const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
 
   return (
@@ -812,7 +1019,7 @@ export default function SchedulePage({
       <header className={styles.header}>
         <div className={styles.headerText}>
           <h1 className={styles.title}>Horaire</h1>
-          <p className={styles.subtitle}>{weekLabel(monday)}</p>
+          <p className={styles.subtitle}>{weekLabel(weekStart)}</p>
         </div>
         <div className={styles.nav}>
           <button
@@ -878,44 +1085,52 @@ export default function SchedulePage({
               </h2>
               {tasks.length === 0 ? (
                 <p className={styles.taskListEmpty}>Aucune tâche cette semaine.</p>
+              ) : listed.length === 0 ? (
+                <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
               ) : (
                 <ul>
-                  {[...tasks]
-                    .sort((a, b) => a.start.localeCompare(b.start))
-                    .map((task) => (
-                      <li
-                        key={task.id}
-                        className={task.done ? styles.done : ''}
-                        style={hueStyle(task.color)}
+                  {listed.map((task) => (
+                    <li
+                      key={task.id}
+                      className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
+                      style={hueStyle(task.color)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={task.done}
+                        aria-label={`${task.title} : terminée`}
+                        onChange={() => toggleDone(task)}
+                      />
+                      <button
+                        type="button"
+                        className={styles.taskOpen}
+                        onClick={() => setOpenTask(task)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={task.done}
-                          aria-label={`${task.title} : terminée`}
-                          onChange={() => void patchTask(task, { done: !task.done })}
-                        />
-                        <button
-                          type="button"
-                          className={styles.taskOpen}
-                          onClick={() => setOpenTask(task)}
-                        >
-                          <span className={styles.taskTitle}>{task.title}</span>
-                          <span className={styles.taskWhen}>
-                            {shortDate(task.start)} ·{' '}
-                            {task.allDay ? 'toute la journée' : formatRange(task.start, task.end)}
-                          </span>
-                        </button>
-                        {/* Visible au survol de la ligne, ou au focus du clavier. */}
-                        <button
-                          type="button"
-                          className={styles.taskDelete}
-                          aria-label={`Supprimer « ${task.title} »`}
-                          onClick={() => void removeTask(task.id).catch(() => undefined)}
-                        >
-                          <Trash />
-                        </button>
-                      </li>
-                    ))}
+                        <span className={styles.taskTitle}>{task.title}</span>
+                        <span className={styles.taskWhen}>
+                          {shortDate(task.start)} ·{' '}
+                          {task.allDay ? (
+                            'toute la journée'
+                          ) : task.deadline ? (
+                            <strong className={styles.deadlineBadge}>
+                              Remise à {formatShortTime(task.start)}
+                            </strong>
+                          ) : (
+                            formatRange(task.start, task.end)
+                          )}
+                        </span>
+                      </button>
+                      {/* Visible au survol de la ligne, ou au focus du clavier. */}
+                      <button
+                        type="button"
+                        className={styles.taskDelete}
+                        aria-label={`Supprimer « ${task.title} »`}
+                        onClick={() => void removeTask(task.id).catch(() => undefined)}
+                      >
+                        <Trash />
+                      </button>
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>

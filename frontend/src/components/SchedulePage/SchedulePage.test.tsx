@@ -376,7 +376,7 @@ describe('SchedulePage — ajouter', () => {
     // Aperçu : le jour courant, l'heure qui suit.
     fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la tâche' }));
     expect(within(panel).getByRole('alert').textContent).toBe('Donnez un titre à la tâche.');
-    expect(screen.getByText('13 h 00 à 14 h 00').closest('[aria-hidden]')?.textContent).toContain(
+    expect(screen.getByText('13 h – 14 h').closest('[aria-hidden]')?.textContent).toContain(
       'Nouvelle tâche'
     );
     fireEvent.change(title, { target: { value: 'Réviser l’intra' } });
@@ -445,7 +445,7 @@ describe('SchedulePage — ajouter', () => {
     fireEvent.change(within(panel).getByRole('combobox', { name: 'Type' }), {
       target: { value: 'Atelier' },
     });
-    expect(screen.getByText('Nouvelle séance')).toBeTruthy();
+    expect(document.querySelector('[class*="preview"]')?.textContent).toContain('MAT265');
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la séance' }));
     expect(within(panel).getByRole('alert').textContent).toBe('Indiquez le local.');
@@ -554,7 +554,8 @@ describe('SchedulePage — glisser une tâche', () => {
     const moving = await block(/^Tutorat/);
     expect(moving.className).toMatch(/dragging/);
     expect(moving.style.transform).toBe('translate(150px, 70px)');
-    expect(dropSpot()?.textContent).toBe('15 h 00 à 16 h 00');
+    expect(dropSpot()?.textContent).toBe('');
+    expect(moving.textContent).toContain('15 h – 16 h');
     expect(dropSpot()?.parentElement).toBe(document.querySelectorAll('[class*="dayColumn"]')[3]);
     fireEvent.pointerUp(window);
     expect(dropSpot()).toBeNull();
@@ -586,7 +587,7 @@ describe('SchedulePage — glisser une tâche', () => {
     expect((await block(/^Tutorat/)).style.transform).toMatch(
       /^translate\(750px, -980(\.0+\d*)?px\)$/
     );
-    expect(dropSpot()?.textContent).toBe('0 h 00 à 1 h 00');
+    expect((await block(/^Tutorat/)).textContent).toContain('0 h – 1 h');
     fireEvent.pointerUp(window);
   });
 
@@ -603,7 +604,7 @@ describe('SchedulePage — glisser une tâche', () => {
     expect((await block(/^Tutorat/)).style.height).toMatch(
       /^calc\((4\.375rem \+ 35px|35px \+ 4\.375rem)\)$/
     );
-    expect(dropSpot()?.textContent).toBe('14 h 00 à 15 h 30');
+    expect((await block(/^Tutorat/)).textContent).toContain('14 h – 15 h 30');
     fireEvent.pointerUp(window);
     expect((await block(/^Tutorat/)).textContent).toContain('14 h – 15 h 30, mercredi 28 octobre');
     expect(api.updateTask).toHaveBeenCalledWith(
@@ -894,5 +895,43 @@ describe('SchedulePage — petits blocs et tâches sans heure', () => {
     const monday = await screen.findByRole('region', { name: 'lundi 26 octobre' });
     const buttons = within(monday).getAllByRole('button');
     expect(buttons[0].textContent).toContain('Toute la journée');
+  });
+});
+
+describe('SchedulePage — glisser l’aperçu de l’ajout', () => {
+  it('déplacer l’aperçu change le jour et les heures du formulaire ; l’allonger change la fin', async () => {
+    setup();
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter une tâche' }));
+    document.querySelectorAll<HTMLElement>('[class*="dayColumn"]').forEach((column, index) => {
+      column.getBoundingClientRect = () =>
+        ({ left: index * 150, right: (index + 1) * 150 }) as DOMRect;
+    });
+    const preview = () => document.querySelector<HTMLElement>('[class*="preview"]')!;
+    // Mercredi 13 h – 14 h ; vers jeudi, une heure plus tard.
+    fireEvent.pointerDown(preview(), { button: 0, clientX: 320, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 470, clientY: 570 });
+    expect(preview().textContent).toContain('14 h – 15 h');
+    expect(preview().className).toMatch(/dragging/);
+    fireEvent.pointerUp(window);
+    const panel = screen.getByRole('complementary');
+    expect((within(panel).getByLabelText('Date') as HTMLInputElement).value).toBe('2026-10-29');
+    expect(
+      (within(panel).getByRole('combobox', { name: 'Début' }) as HTMLSelectElement).value
+    ).toBe('14:00');
+    expect((within(panel).getByRole('combobox', { name: 'Fin' }) as HTMLSelectElement).value).toBe(
+      '15:00'
+    );
+
+    fireEvent.pointerDown(preview().querySelector('[class*="resizeHandle"]')!, {
+      button: 0,
+      clientX: 470,
+      clientY: 570,
+    });
+    fireEvent.pointerMove(window, { clientX: 470, clientY: 605 });
+    fireEvent.pointerUp(window);
+    expect((within(panel).getByRole('combobox', { name: 'Fin' }) as HTMLSelectElement).value).toBe(
+      '15:30'
+    );
   });
 });

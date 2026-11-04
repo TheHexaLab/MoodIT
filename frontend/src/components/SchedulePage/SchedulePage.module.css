@@ -297,6 +297,16 @@
   cursor: pointer;
 }
 
+/* Cours : pastilles vives ; tâches : pastilles pastel, bordées pour rester visibles sur le blanc. */
+.colors[data-tone='bright'] input {
+  background: hsl(var(--hue) calc(var(--sat) + 20%) 45%);
+}
+
+.colors[data-tone='pastel'] input {
+  background: hsl(var(--hue) var(--sat) 74%);
+  box-shadow: inset 0 0 0 1px hsl(var(--hue) var(--sat) 45% / 45%);
+}
+
 .colors input:checked {
   outline: 2px solid var(--text);
   outline-offset: 2px;
@@ -413,17 +423,21 @@
 }
 
 /* Rangée « Journée » : les tâches sans heure, sous les jours, fixée en haut avec eux. */
+/* Rangée de hauteur nulle : ses pastilles flottent par-dessus le haut de la grille, fixées sous
+   les jours, sans décaler les heures d'une semaine à l'autre. */
 .allDayLabel,
 .allDayCell {
   position: sticky;
   top: 2.875rem;
   z-index: 39;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
+  height: 0;
+  overflow: visible;
 }
 
 .allDayLabel {
-  padding: 0.375rem 0.5rem 0 0;
+  /* Aucun rembourrage vertical : il donnerait de la hauteur à la rangée. */
+  padding: 0 0.5rem 0 0;
+  transform: translateY(0.375rem);
   color: var(--text-muted);
   font-size: 0.6875rem;
   text-align: right;
@@ -434,8 +448,14 @@
   min-width: 0;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.25rem;
-  border-left: 1px solid var(--border);
+  padding: 0 0.25rem;
+  transform: translateY(0.25rem);
+}
+
+.allDayCell .allDayChip {
+  /* La rangée n'a pas de hauteur : sans ceci, la pastille rétrécirait à rien. */
+  flex: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
 }
 
 .allDayChip {
@@ -465,7 +485,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: 3.5rem repeat(5, minmax(0, 1fr));
+  grid-template-columns: 3.5rem repeat(7, minmax(0, 1fr));
 }
 
 .corner,
@@ -533,7 +553,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.5rem 0.625rem;
+  padding: 0.5rem 0.5rem;
   overflow: hidden;
   border: none;
   border-radius: 0.5rem;
@@ -553,12 +573,35 @@
 }
 
 /* Recouvert tôt par un autre : le titre seul reste lisible ; les détails restent dans le nom accessible. */
+/* Retirés de la vue, mais gardés dans le nom accessible ; ils ne prennent pas de place. */
 .titleOnly .blockDetail {
-  opacity: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .block:hover {
   background: color-mix(in srgb, var(--tint) 28%, var(--bg-surface));
+}
+
+/* Séance : teinte franche ; tâche : pastel, plus pâle, pour qu'on les distingue d'un coup d'œil. */
+.session {
+  background: color-mix(in srgb, var(--tint) 30%, var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) 38%, var(--bg-surface));
+}
+
+.task {
+  background: color-mix(in srgb, var(--tint) 11%, var(--bg-surface));
+}
+
+.task:hover {
+  background: color-mix(in srgb, var(--tint) 17%, var(--bg-surface));
 }
 
 /* Séance : barre de couleur à gauche. */
@@ -579,7 +622,6 @@
 /* Tâche : contour pointillé ; le crayon apparaît au survol. */
 .task {
   border: 1px dashed var(--ink);
-  padding-right: 1.75rem;
 }
 
 .task:hover,
@@ -587,12 +629,18 @@
   border-style: solid;
 }
 
+/* Le texte prend toute la largeur ; au survol, le crayon passe par-dessus le coin, sur le fond
+   du bloc. */
 .editIcon {
   position: absolute;
-  top: 0.375rem;
-  right: 0.375rem;
+  top: 0.25rem;
+  right: 0.25rem;
+  box-sizing: content-box;
   width: 0.875rem;
   height: 0.875rem;
+  padding: 0.1875rem;
+  border-radius: 0.25rem;
+  background: inherit;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -613,16 +661,18 @@
 
 /* Un bloc garde toujours la hauteur de son titre ; les lignes qui n'y tiennent pas sont retirées. */
 .block {
-  min-height: 1.625rem;
+  /* Titre et heure : la plus petite taille d'un bloc, avec la même marge en haut et en bas. */
+  min-height: 2.875rem;
 }
 
-.tiny {
-  justify-content: center;
-  padding-top: 0.1875rem;
-  padding-bottom: 0.1875rem;
+.tiny,
+.dragging {
+  justify-content: flex-start;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
 }
 
-.tiny .blockDetail,
+.tiny .blockDetail ~ .blockDetail,
 .short .blockDetail ~ .blockDetail {
   position: absolute;
   width: 1px;
@@ -724,13 +774,61 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.taskList input {
+/* Case à cocher dessinée : bordure fine, cochée de la couleur de la tâche, en clair comme en sombre. */
+.taskList input,
+.checkField input {
   flex: none;
+  box-sizing: border-box;
   width: 1rem;
   height: 1rem;
   margin: 0.125rem 0 0;
-  accent-color: var(--ink);
+  appearance: none;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 0.25rem;
+  /* Un peu plus sombre que la surface : la case se voit sur le blanc du mode clair. */
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-surface)) center / 0.75rem no-repeat;
   cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.taskList input:hover,
+.checkField input:hover {
+  border-color: var(--text-muted);
+}
+
+.taskList input:checked,
+.checkField input:checked {
+  border-color: transparent;
+  background-color: hsl(var(--hue, 174) calc(var(--sat, 62%) + 15%) 40%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5'/%3E%3C/svg%3E");
+}
+
+/* Tâche cochée : barrée, puis elle glisse et se replie hors de la liste. */
+.leaving {
+  overflow: hidden;
+  animation: task-leave 0.45s ease forwards;
+}
+
+.leaving .taskTitle {
+  text-decoration: line-through;
+}
+
+@keyframes task-leave {
+  0%,
+  35% {
+    max-height: 4rem;
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    transform: translateX(1rem);
+  }
 }
 
 .taskList .taskOpen {
@@ -822,10 +920,7 @@
 }
 
 .checkField input {
-  width: 1rem;
-  height: 1rem;
   margin: 0;
-  accent-color: var(--brand-teal);
 }
 
 .taskListEmpty {
@@ -847,14 +942,19 @@
 }
 
 .blockTitle {
+  flex: none;
   font-weight: 700;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* La description prend la place qui reste, sans jamais agrandir le bloc. */
 .blockDescription {
   display: -webkit-box;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
   margin-top: 0.125rem;
   font-size: 0.75rem;
@@ -866,6 +966,7 @@
 
 .blockDetail {
   font-size: 0.75rem;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -981,4 +1082,313 @@
   .editIcon {
     transition: none;
   }
+}
+
+/* L'aperçu de l'ajout se glisse aussi : il change le jour et les heures du formulaire. */
+.dayColumn .preview {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.preview.dragging {
+  z-index: 25 !important;
+  cursor: grabbing;
+}
+
+/* Pendant un glisser (déplacer ou allonger) : le titre reste fixé en haut, la description et le
+   crayon disparaissent, et rien ne bouge dans le bloc. */
+.dragging,
+.dragging.tiny {
+  justify-content: flex-start;
+}
+
+.dragging .editIcon,
+.dragging .resizeHandle::after {
+  display: none;
+}
+
+.dragging .blockTitle {
+  flex: none;
+}
+
+/* Samedi et dimanche : une teinte discrète, pour distinguer les jours de cours. */
+.dayColumn.weekend,
+.allDayCell.weekend {
+  background-color: color-mix(in srgb, var(--text) 3%, var(--bg-surface));
+}
+
+.dayHead.weekend {
+  color: var(--text-muted);
+}
+
+/* Chiffres de même largeur : les heures s'alignent dans les listes et la grille. */
+.page,
+.dialog,
+.field select,
+.field option {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bloc trop étroit pour lire une description (sept colonnes, cascade) : on la retire. */
+.dayColumn .block {
+  container-type: inline-size;
+}
+
+@container (max-width: 6.5rem) {
+  .blockDescription {
+    display: none !important;
+  }
+}
+
+/* « +N de plus » : déplie toutes les tâches sans heure du jour. */
+.allDayMore {
+  flex: none;
+  align-self: flex-start;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.allDayMore:hover {
+  color: var(--text);
+}
+
+.allDayMore:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+/* Remise : une barre rouge franche à l'heure de l'échéance, par-dessus les événements, avec un
+   halo, une pastille au départ et une étiquette « heure · titre ». */
+.deadline {
+  --deadline: #b42318;
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  left: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--deadline);
+  box-shadow:
+    0 0 0 3px rgb(180 35 24 / 14%),
+    0 2px 8px rgb(180 35 24 / 35%);
+  cursor: pointer;
+}
+
+.deadline::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -0.375rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  box-sizing: border-box;
+  border: 2px solid var(--bg-surface);
+  border-radius: 50%;
+  background: var(--deadline);
+  transform: translateY(-50%);
+}
+
+.deadlineLabel {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 0.5rem;
+  display: inline-flex;
+  max-width: calc(100% - 0.75rem);
+  box-sizing: border-box;
+  align-items: baseline;
+  gap: 0.3125rem;
+  padding: 0.125rem 0.5rem 0.125rem 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--deadline);
+  color: #ffffff;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: left;
+  box-shadow: 0 2px 6px rgb(180 35 24 / 35%);
+}
+
+/* L'heure en évidence, dans une pastille plus foncée. */
+.deadlineTime {
+  flex: none;
+  padding: 0 0.3125rem;
+  border-radius: 0.375rem;
+  background: rgb(0 0 0 / 22%);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.deadlineTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.deadline:hover .deadlineLabel {
+  filter: brightness(1.1);
+}
+
+.deadline:focus-visible {
+  outline: none;
+}
+
+.deadline:focus-visible .deadlineLabel {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+.deadline.done {
+  opacity: 0.55;
+}
+
+.deadline.done .deadlineTitle {
+  text-decoration: line-through;
+}
+
+/* Aperçu d'une remise en cours d'ajout : la même barre, en pointillé et un peu pâle. */
+.deadlinePreview {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--deadline) 0 0.5rem,
+    transparent 0.5rem 0.75rem
+  );
+  box-shadow: none;
+  opacity: 0.85;
+  cursor: default;
+}
+
+/* Remise dans la liste : ligne teintée de rouge, échéance en gras. */
+.taskList li.deadlineItem {
+  background: color-mix(in srgb, #b42318 9%, transparent);
+}
+
+.taskList li.deadlineItem:hover {
+  background: color-mix(in srgb, #b42318 14%, transparent);
+}
+
+.deadlineBadge {
+  color: var(--badge-danger-fg);
+  font-weight: 700;
+}
+
+.deadlineItem .taskTitle::before {
+  border-radius: 0.125rem;
+  background: #b42318;
+}
+
+/* L'aperçu d'une remise se glisse (jour, heure) ; une zone plus haute facilite la prise. */
+.dayColumn .deadlinePreview {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.deadlinePreview::after {
+  content: '';
+  position: absolute;
+  top: -0.5rem;
+  right: 0;
+  bottom: -0.5rem;
+  left: 0;
+}
+
+.deadlinePreview.dragging {
+  z-index: 31 !important;
+  cursor: grabbing;
+  box-shadow: none;
+}
+
+/* Heure courante : une ligne bleue en travers du jour, une pastille au départ. */
+.nowLine {
+  --now: #2563eb;
+  position: absolute;
+  z-index: 29;
+  right: 0;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--now);
+  pointer-events: none;
+}
+
+.nowLine::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -0.3125rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background: var(--now);
+  transform: translateY(-50%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .nowLine {
+    --now: #60a5fa;
+  }
+}
+
+:root[data-theme='dark'] .nowLine {
+  --now: #60a5fa;
+}
+
+/* ── Cours et tâches, au premier coup d'œil ──
+   Séance : bloc teinté, texte coloré, barre à gauche (inchangé).
+   Tâche : carte claire presque de la couleur du fond, contour pointillé de sa couleur, pastille
+   devant le titre et texte neutre : elle se lit comme une note posée sur l'horaire. */
+.task {
+  border: 1.5px dashed color-mix(in srgb, var(--tint) 70%, transparent);
+  background: color-mix(in srgb, var(--tint) 6%, var(--bg-surface));
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 7%);
+}
+
+.task:hover {
+  background: color-mix(in srgb, var(--tint) 11%, var(--bg-surface));
+}
+
+.task .blockTitle::before,
+.allDayChip .blockTitle::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.3125rem;
+  border-radius: 50%;
+  background: var(--tint);
+  vertical-align: 0.0625rem;
+}
+
+.task .blockDetail,
+.task .blockDescription {
+  color: var(--text-body);
+}
+
+.allDayChip {
+  border: 1.5px dashed color-mix(in srgb, var(--tint) 70%, transparent);
+  background: color-mix(in srgb, var(--tint) 6%, var(--bg-surface));
+  color: var(--text);
+}
+
+/* Séance : couleur pleine et lumineuse, nettement plus soutenue que les tâches. */
+.session {
+  background: color-mix(in srgb, var(--tint) 48%, var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) 56%, var(--bg-surface));
 }
