@@ -149,7 +149,7 @@ const typeMenu = (panel: HTMLElement) =>
 /** Liste déroulante du formulaire : son bouton se nomme « Libellé valeur ». */
 const picker = (scope: HTMLElement, label: string) =>
   within(scope).getByRole('button', {
-    name: new RegExp(`^${label.replace(/[()]/g, '\\$&')} `),
+    name: (accessibleName) => accessibleName.startsWith(`${label} `),
   });
 const pickerValue = (scope: HTMLElement, label: string) => picker(scope, label).textContent;
 /** Ouvre la liste déroulante `label` et y choisit `option`. */
