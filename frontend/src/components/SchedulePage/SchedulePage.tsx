@@ -227,9 +227,16 @@ export default function SchedulePage({
   /** Tâches cochées dont la ligne propose « Annuler » pendant UNDO_MS, à leur place dans la liste. */
   const [undoIds, setUndoIds] = useState<number[]>([]);
   const undoTimers = useRef(new Map<number, number>());
+  /** Tâches supprimées, encore annulables pendant UNDO_MS ; la suppression part ensuite. */
+  const [deletingIds, setDeletingIds] = useState<number[]>([]);
+  const deleteTimers = useRef(new Map<number, number>());
   useEffect(() => {
     const timers = undoTimers.current;
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    const deletes = deleteTimers.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      deletes.forEach((timer) => window.clearTimeout(timer));
+    };
   }, []);
   /** Heure courante pour la ligne bleue du jour ; avance chaque minute. */
   const [clock, setClock] = useState(now);
@@ -316,12 +323,14 @@ export default function SchedulePage({
   const byId = new Map(courses.map((course) => [course.id, course]));
   const sessions = load.status === 'ready' ? load.sessions : [];
   // L'enseignant n'a pas de tâches personnelles : il voit les séances et les remises de ses cours.
-  const tasks =
+  const allTasks =
     load.status === 'ready'
       ? managesCourse
         ? load.tasks.filter((task) => task.courseDeadline)
         : load.tasks
       : [];
+  // Une tâche supprimée quitte la grille tout de suite ; la liste propose « Annuler » un moment.
+  const tasks = allTasks.filter((task) => !deletingIds.includes(task.id));
   const colorOf = (courseId: number) =>
     (load.status === 'ready' ? load.courseColors[courseId] : undefined) ?? courseColor(courseId);
 
@@ -597,19 +606,39 @@ export default function SchedulePage({
         window.setTimeout(() => setLeaving((ids) => ids.filter((id) => id !== task.id)), LEAVE_MS);
       }, UNDO_MS)
     );
-    // Le clavier reste sur la ligne : le focus passe à « Annuler ».
+    // Le clavier reste sur la ligne : le focus passe à son avis « terminée ».
     window.requestAnimationFrame(() =>
       document.getElementById(`${panelId}-undo-${task.id}`)?.focus()
     );
   }
 
   /** « Annuler » : la tâche cochée redevient à faire et reprend sa ligne. */
-  function undoDone(task: ScheduleTask) {
-    const timer = undoTimers.current.get(task.id);
+  /**
+   * Supprimer une tâche : elle quitte la grille tout de suite, sa ligne devient « supprimée ·
+   * Annuler » pendant UNDO_MS, puis la suppression part. Un échec la fait revenir.
+   */
+  function scheduleDelete(task: ScheduleTask) {
+    setDeletingIds((ids) => [...ids, task.id]);
+    deleteTimers.current.set(
+      task.id,
+      window.setTimeout(() => {
+        deleteTimers.current.delete(task.id);
+        void removeTask(task.id)
+          .catch(() => undefined)
+          .finally(() => setDeletingIds((ids) => ids.filter((id) => id !== task.id)));
+      }, UNDO_MS)
+    );
+    window.requestAnimationFrame(() =>
+      document.getElementById(`${panelId}-restore-${task.id}`)?.focus()
+    );
+  }
+
+  /** « Annuler » d'une suppression : la tâche reprend sa place, rien n'est supprimé. */
+  function cancelDelete(task: ScheduleTask) {
+    const timer = deleteTimers.current.get(task.id);
     if (timer != null) window.clearTimeout(timer);
-    undoTimers.current.delete(task.id);
-    setUndoIds((ids) => ids.filter((id) => id !== task.id));
-    void patchTask(task, { done: false });
+    deleteTimers.current.delete(task.id);
+    setDeletingIds((ids) => ids.filter((id) => id !== task.id));
   }
 
   /** Remises du jour `index` : une barre rouge à l'heure de l'échéance, son étiquette au-dessus. */
@@ -1122,8 +1151,14 @@ export default function SchedulePage({
       onCancel={closeAdd}
     />
   );
-  const listed = [...tasks]
-    .filter((task) => !task.done || leaving.includes(task.id) || undoIds.includes(task.id))
+  const listed = [...allTasks]
+    .filter(
+      (task) =>
+        !task.done ||
+        leaving.includes(task.id) ||
+        undoIds.includes(task.id) ||
+        deletingIds.includes(task.id)
+    )
     .sort((a, b) => a.start.localeCompare(b.start));
   const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
 
@@ -1222,24 +1257,32 @@ export default function SchedulePage({
                     Ajouter
                   </button>
                 </div>
-                {tasks.length === 0 ? (
+                {allTasks.length === 0 ? (
                   <p className={styles.taskListEmpty}>Aucune tâche cette semaine.</p>
                 ) : listed.length === 0 ? (
                   <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
                 ) : (
                   <ul>
                     {listed.map((task) =>
-                      undoIds.includes(task.id) ? (
+                      deletingIds.includes(task.id) ? (
+                        // Supprimée : « Annuler » la remet, tant que la suppression n'est pas partie.
                         <li key={task.id} className={styles.undoRow}>
-                          <span role="status">« {task.title} » terminée</span>
+                          <span role="status">« {task.title} » supprimée</span>
                           <button
-                            id={`${panelId}-undo-${task.id}`}
+                            id={`${panelId}-restore-${task.id}`}
                             type="button"
-                            aria-label={`Annuler : remettre « ${task.title} » à faire`}
-                            onClick={() => undoDone(task)}
+                            aria-label={`Annuler : remettre « ${task.title} »`}
+                            onClick={() => cancelDelete(task)}
                           >
                             Annuler
                           </button>
+                        </li>
+                      ) : undoIds.includes(task.id) ? (
+                        // Terminée : la ligne le dit un moment, puis se replie (sans « Annuler »).
+                        <li key={task.id} className={styles.undoRow}>
+                          <span id={`${panelId}-undo-${task.id}`} role="status" tabIndex={-1}>
+                            « {task.title} » terminée
+                          </span>
                         </li>
                       ) : (
                         <li
@@ -1289,7 +1332,7 @@ export default function SchedulePage({
                               type="button"
                               className={styles.taskDelete}
                               aria-label={`Supprimer « ${task.title} »`}
-                              onClick={() => void removeTask(task.id).catch(() => undefined)}
+                              onClick={() => scheduleDelete(task)}
                             >
                               <Trash />
                             </button>
@@ -1357,7 +1400,7 @@ export default function SchedulePage({
           courses={courses}
           onClose={() => setOpenTask(null)}
           onSave={(input) => saveTask(openTask.id, input)}
-          onDelete={() => removeTask(openTask.id)}
+          onDelete={async () => scheduleDelete(openTask)}
         />
       )}
     </section>
