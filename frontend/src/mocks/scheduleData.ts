@@ -112,12 +112,6 @@ function seedTasks(): ScheduleTask[] {
     ),
     task(3, 'Appel de stage', 4, 14 * 60, 15 * 60, 'green'),
     { ...task(4, 'Remise du TP2', 3, 0, 0, 'orange'), allDay: true },
-    {
-      ...task(5, 'Rapport de labo', 1, 17 * 60, 17 * 60, 'rose'),
-      deadline: true,
-      courseDeadline: true,
-      courseId: 10,
-    },
   ];
 }
 

@@ -87,6 +87,8 @@ export interface ScheduleApi {
   /** Couleurs choisies par l'utilisateur pour ses cours (les autres gardent la leur). */
   fetchCourseColors: () => Promise<Record<number, ScheduleColor>>;
   setCourseColor: (courseId: number, color: ScheduleColor) => Promise<void>;
+  /** Remises de la semaine : les dates de remise des devoirs des cours (#258). */
+  fetchDeadlines: (weekStart: Date, courses: ScheduleCourse[]) => Promise<ScheduleTask[]>;
 }
 
 interface SchedulePageProps {
@@ -95,6 +97,8 @@ interface SchedulePageProps {
   api: ScheduleApi;
   /** Ouvre le cours d'une séance. */
   onOpenCourse: (programId: number, courseId: number) => void;
+  /** « Voir le devoir » d'une remise : ouvre le devoir dans le canal Devoirs du cours. */
+  onOpenAssignment?: (programId: number, courseId: number, assignmentId: number) => void;
   /** Mobile : une liste par jour plutôt que la grille, et l'ajout dans une fenêtre. */
   compact?: boolean;
   /** Date de référence (injectée par les tests). */
@@ -180,6 +184,7 @@ export default function SchedulePage({
   courses,
   api,
   onOpenCourse,
+  onOpenAssignment,
   compact = false,
   now = new Date(),
 }: SchedulePageProps): React.ReactElement {
@@ -240,9 +245,12 @@ export default function SchedulePage({
       api.fetchSessions(weekStart, courses),
       api.fetchTasks(weekStart),
       api.fetchCourseColors(),
+      api.fetchDeadlines(weekStart, courses),
     ])
-      .then(([sessions, tasks, courseColors]) => {
-        if (!cancelled) setLoad({ status: 'ready', sessions, tasks, courseColors });
+      .then(([sessions, tasks, courseColors, deadlines]) => {
+        // Les remises des devoirs rejoignent les tâches : même barre, même liste.
+        if (!cancelled)
+          setLoad({ status: 'ready', sessions, tasks: [...tasks, ...deadlines], courseColors });
       })
       .catch(() => {
         if (!cancelled) setLoad({ status: 'error' });
@@ -589,8 +597,12 @@ export default function SchedulePage({
   /** Remises du jour `index` : une barre rouge à l'heure de l'échéance, son étiquette au-dessus. */
   function renderDeadlines(index: number): React.ReactNode {
     const top = (iso: string) => `${(minutesFromStart(iso) / 60) * HOUR_REM}rem`;
-    const label = (iso: string, title: string) => (
-      <span className={styles.deadlineLabel}>
+    // Plusieurs remises à la même heure : leurs étiquettes s'empilent au-dessus de la barre.
+    const label = (iso: string, title: string, stack = 0) => (
+      <span
+        className={styles.deadlineLabel}
+        style={stack ? { bottom: `calc(100% + 0.25rem + ${stack * 1.5}rem)` } : undefined}
+      >
         <span className={styles.deadlineTime}>{formatShortTime(iso)}</span>
         <span className={styles.deadlineTitle}>Remise : {title}</span>
       </span>
@@ -619,7 +631,7 @@ export default function SchedulePage({
       <>
         {tasks
           .filter((task) => task.deadline && dayIndex(task.start) === index)
-          .map((task) => (
+          .map((task, i, ofDay) => (
             <button
               key={task.id}
               type="button"
@@ -627,7 +639,11 @@ export default function SchedulePage({
               style={{ top: top(task.start) }}
               onClick={() => setOpenTask(task)}
             >
-              {label(task.start, task.title)}
+              {label(
+                task.start,
+                task.title,
+                ofDay.slice(0, i).filter((other) => other.start === task.start).length
+              )}
               {/* Détails au survol, sous la barre ; la fenêtre de la tâche les donne au clavier. */}
               <span
                 className={`${styles.deadlineTip} ${index >= 5 ? styles.deadlineTipEnd : ''}`}
@@ -1196,12 +1212,17 @@ export default function SchedulePage({
                           className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
                           style={hueStyle(task.color)}
                         >
-                          <input
-                            type="checkbox"
-                            checked={task.done}
-                            aria-label={`${task.title} : terminée`}
-                            onChange={() => toggleDone(task)}
-                          />
+                          {/* Remise d'un devoir : faite quand le devoir est remis, pas cochée ici. */}
+                          {task.courseDeadline ? (
+                            <span className={styles.checkSpacer} aria-hidden="true" />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={task.done}
+                              aria-label={`${task.title} : terminée`}
+                              onChange={() => toggleDone(task)}
+                            />
+                          )}
                           <button
                             type="button"
                             className={styles.taskOpen}
@@ -1213,23 +1234,31 @@ export default function SchedulePage({
                               {task.allDay ? (
                                 'toute la journée'
                               ) : task.deadline ? (
-                                <strong className={styles.deadlineBadge}>
-                                  Remise à {formatShortTime(task.start)}
-                                </strong>
+                                <>
+                                  {/* Le cours d'une remise : deux cours peuvent avoir un devoir du même nom. */}
+                                  {task.courseId != null &&
+                                    byId.get(task.courseId) &&
+                                    `${byId.get(task.courseId)!.code} · `}
+                                  <strong className={styles.deadlineBadge}>
+                                    Remise à {formatShortTime(task.start)}
+                                  </strong>
+                                </>
                               ) : (
                                 formatRange(task.start, task.end)
                               )}
                             </span>
                           </button>
-                          {/* Visible au survol de la ligne, ou au focus du clavier. */}
-                          <button
-                            type="button"
-                            className={styles.taskDelete}
-                            aria-label={`Supprimer « ${task.title} »`}
-                            onClick={() => void removeTask(task.id).catch(() => undefined)}
-                          >
-                            <Trash />
-                          </button>
+                          {/* Visible au survol de la ligne, ou au focus du clavier. Un devoir ne se supprime pas ici. */}
+                          {!task.courseDeadline && (
+                            <button
+                              type="button"
+                              className={styles.taskDelete}
+                              aria-label={`Supprimer « ${task.title} »`}
+                              onClick={() => void removeTask(task.id).catch(() => undefined)}
+                            >
+                              <Trash />
+                            </button>
+                          )}
                         </li>
                       )
                     )}
@@ -1264,6 +1293,16 @@ export default function SchedulePage({
           task={openTask}
           course={openTask.courseId != null ? byId.get(openTask.courseId) : undefined}
           onClose={() => setOpenTask(null)}
+          onOpenAssignment={(() => {
+            const course = openTask.courseId != null ? byId.get(openTask.courseId) : undefined;
+            const assignmentId = openTask.assignmentId;
+            return course && assignmentId != null && onOpenAssignment
+              ? () => {
+                  setOpenTask(null);
+                  onOpenAssignment(course.programId, course.id, assignmentId);
+                }
+              : undefined;
+          })()}
         />
       )}
       {openTask && !openTask.courseDeadline && (

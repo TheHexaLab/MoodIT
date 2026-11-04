@@ -124,6 +124,7 @@ const scheduleApi: ScheduleApi = {
   deleteTask: (id) => api.deleteScheduleTask(id),
   createSessions: (input) => api.createScheduleSessions(input),
   fetchCourseColors: () => api.fetchScheduleCourseColors(),
+  fetchDeadlines: (weekStart, courses) => api.fetchScheduleDeadlines(weekStart, courses),
   setCourseColor: (courseId, color) => api.setScheduleCourseColor(courseId, color),
 };
 
@@ -1184,6 +1185,11 @@ export default function Dashboard() {
           courses={scheduleCourses}
           api={scheduleApi}
           onOpenCourse={openCourse}
+          // « Voir le devoir » d'une remise : le devoir ouvert dans le canal Devoirs du cours.
+          onOpenAssignment={(programId, courseId, assignmentId) => {
+            setCoursePanelCollapsed(false);
+            setView({ programId, courseId, channel: { type: 'assignment', id: assignmentId } });
+          }}
           compact={isMobile}
         />
       ) : portalPage ? (

@@ -563,6 +563,8 @@ export interface ScheduleTask {
   deadline: boolean;
   /** Remise d'un devoir du cours, vue par ses étudiants : en lecture dans l'horaire. */
   courseDeadline?: boolean;
+  /** Remise d'un cours : l'id du devoir, que « Voir le devoir » ouvre (#258). */
+  assignmentId?: number;
 }
 
 export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;

@@ -1556,3 +1556,36 @@ export async function leaveAssignmentTeam(
   syncTeam(assignment);
   return assignment;
 }
+
+// ── Horaire et devoirs (#258) : les dates de remise des devoirs deviennent les remises de l'horaire ──
+
+/** Remises de la semaine : les devoirs publiés des cours donnés, à leur date de remise. */
+export async function fetchScheduleDeadlines(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleTask[]> {
+  if (!assignmentsAvailable()) return [];
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return courses.flatMap((course) =>
+    courseAssignments(course.id)
+      .filter((a) => a.isPublished && a.dueAt && new Date(a.dueAt) >= weekStart && new Date(a.dueAt) < weekEnd)
+      .map((a) => ({
+        // Id négatif : il ne croise jamais celui d'une tâche de l'agenda.
+        id: -(course.id * 1000 + a.id),
+        title: a.title,
+        start: a.dueAt!,
+        end: a.dueAt!,
+        courseId: course.id,
+        reminder: null,
+        notes: a.instructions,
+        color: 'rose' as const,
+        // Remis : la remise est faite ; elle quitte « Mes tâches ».
+        done: a.submission != null,
+        allDay: false,
+        deadline: true,
+        courseDeadline: true,
+        assignmentId: a.id,
+      }))
+  );
+}

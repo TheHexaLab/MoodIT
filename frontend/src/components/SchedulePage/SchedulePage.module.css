@@ -1798,3 +1798,10 @@
   outline: 2px solid var(--brand-teal);
   outline-offset: 1px;
 }
+
+/* Remise d'un devoir dans la liste : pas de case (elle se fait en remettant le devoir). */
+.checkSpacer {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}

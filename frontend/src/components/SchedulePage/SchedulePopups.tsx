@@ -210,10 +210,17 @@ interface DeadlinePopupProps {
   task: ScheduleTask;
   course: ScheduleCourse | undefined;
   onClose: () => void;
+  /** « Voir le devoir » : ouvre le devoir dans le canal Devoirs du cours. */
+  onOpenAssignment?: () => void;
 }
 
-/** Remise d'un cours, en lecture : l'étudiant la voit, l'enseignant du cours la modifie. */
-export function DeadlinePopup({ task, course, onClose }: DeadlinePopupProps): React.ReactElement {
+/** Remise d'un devoir du cours, en lecture ; « Voir le devoir » l'ouvre dans Devoirs. */
+export function DeadlinePopup({
+  task,
+  course,
+  onClose,
+  onOpenAssignment,
+}: DeadlinePopupProps): React.ReactElement {
   const controller = usePopupController();
   const title = `Remise : ${task.title}`;
   return (
@@ -231,6 +238,8 @@ export function DeadlinePopup({ task, course, onClose }: DeadlinePopupProps): Re
           <dd>
             {dayTitle(new Date(task.start))}, {formatTime(task.start)}
           </dd>
+          <dt>État</dt>
+          <dd>{task.done ? 'Remis' : 'À remettre'}</dd>
           {task.notes && (
             <>
               <dt>Description</dt>
@@ -239,15 +248,20 @@ export function DeadlinePopup({ task, course, onClose }: DeadlinePopupProps): Re
           )}
         </dl>
         <div className={styles.actions}>
-          <span className={styles.spacer} />
-          <button
-            type="button"
-            className={styles.button}
-            data-autofocus
-            onClick={() => controller.requestClose()}
-          >
+          <button type="button" className={styles.button} onClick={() => controller.requestClose()}>
             Fermer
           </button>
+          <span className={styles.spacer} />
+          {onOpenAssignment && (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary}`}
+              data-autofocus
+              onClick={() => controller.requestClose(onOpenAssignment)}
+            >
+              Voir le devoir
+            </button>
+          )}
         </div>
       </div>
     </Popup>
