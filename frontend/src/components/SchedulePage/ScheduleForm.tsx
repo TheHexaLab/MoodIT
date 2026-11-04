@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import styles from './SchedulePage.module.css';
 import type { ScheduleColor, ScheduleCourse } from '../../types/domain.ts';
 import {
@@ -6,7 +6,6 @@ import {
   COLOR_KEYS,
   DEADLINE_OPTIONS,
   type Draft,
-  type DraftKind,
   REMINDERS,
   SESSION_KINDS,
   TIME_OPTIONS,
@@ -17,8 +16,9 @@ interface ScheduleFormProps {
   onChange: (draft: Draft) => void;
   /** Cours de l'utilisateur ; ceux qu'il gère (`canManage`) peuvent recevoir une séance. */
   courses: ScheduleCourse[];
-  /** Ajout : onglets « Tâche » et « Séance du cours » si l'utilisateur gère un cours. */
-  allowSessions?: boolean;
+  /** Types de séance ajoutés par l'utilisateur, après ceux de la liste. */
+  extraKinds?: string[];
+  onAddKind?: (kind: string) => void;
   /** Message affiché après une tentative d'enregistrement refusée. */
   error: string | null;
   busy?: boolean;
@@ -66,12 +66,103 @@ export function ColorPicker({
   );
 }
 
+const ADD_KIND = '__ajouter__';
+
+/**
+ * Type d'une séance : une liste, avec « Ajouter un type… » en dernier ; le type ajouté rejoint la
+ * liste et devient celui de la séance.
+ */
+function KindField({
+  value,
+  extraKinds,
+  onChange,
+  onAddKind,
+}: {
+  value: string;
+  extraKinds: string[];
+  onChange: (kind: string) => void;
+  onAddKind?: (kind: string) => void;
+}): React.ReactElement {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const fieldId = useId();
+  const known = [...SESSION_KINDS, ...extraKinds];
+  const kinds = known.includes(value) || !value ? known : [...known, value];
+
+  useEffect(() => {
+    if (adding) inputRef.current?.focus();
+  }, [adding]);
+
+  function add() {
+    const kind = text.trim();
+    if (!kind) return;
+    const existing = kinds.find((known) => known.toLowerCase() === kind.toLowerCase());
+    if (!existing) onAddKind?.(kind);
+    onChange(existing ?? kind);
+    setText('');
+    setAdding(false);
+  }
+
+  // « Ajouter un type… » change la liste en champ, au même endroit ; « Ajouter » le sélectionne.
+  return (
+    <div className={styles.field}>
+      <label htmlFor={fieldId} className={styles.kindLabel}>
+        Type
+      </label>
+      {adding ? (
+        <div className={styles.addKind}>
+          <input
+            ref={inputRef}
+            id={fieldId}
+            type="text"
+            placeholder="Séminaire, Examen…"
+            maxLength={24}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              // Entrée ajoute le type sans envoyer le formulaire ; Échap revient à la liste sans fermer la fenêtre.
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                add();
+              } else if (event.key === 'Escape') {
+                event.stopPropagation();
+                setAdding(false);
+              }
+            }}
+          />
+          <button type="button" className={styles.button} disabled={!text.trim()} onClick={add}>
+            Ajouter
+          </button>
+        </div>
+      ) : (
+        <select
+          id={fieldId}
+          value={value}
+          onChange={(event) => {
+            if (event.target.value === ADD_KIND) setAdding(true);
+            else onChange(event.target.value);
+          }}
+        >
+          {kinds.map((kind) => (
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
+          ))}
+          <option value={ADD_KIND}>＋ Ajouter un type…</option>
+        </select>
+      )}
+    </div>
+  );
+}
+
 /** Formulaire d'une tâche ou d'une séance : panneau d'ajout et fenêtre de modification. */
 export default function ScheduleForm({
   draft,
   onChange,
   courses,
-  allowSessions = false,
+  extraKinds = [],
+  onAddKind,
   error,
   busy = false,
   submitLabel,
@@ -83,11 +174,24 @@ export default function ScheduleForm({
   const managed = courses.filter((course) => course.canManage);
   const set = (changes: Partial<Draft>) => onChange({ ...draft, ...changes });
   const isTask = draft.kind === 'task';
+  /** Remise personnelle de l'étudiant (celles d'un cours viennent de ses devoirs). */
+  const isDeadline = isTask && draft.deadline;
 
-  function switchKind(kind: DraftKind) {
-    if (kind === draft.kind) return;
-    set({ kind, courseId: kind === 'session' ? (managed[0]?.id ?? null) : null });
-  }
+  const managedCourseSelect = (
+    <label className={styles.field}>
+      <span>Cours</span>
+      <select
+        value={draft.courseId ?? ''}
+        onChange={(event) => set({ courseId: Number(event.target.value) })}
+      >
+        {managed.map((course) => (
+          <option key={course.id} value={course.id}>
+            {course.title ? `${course.code} · ${course.title}` : course.code}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 
   const timeSelect = (field: 'start' | 'end', label: string) => (
     <label className={styles.field}>
@@ -111,17 +215,7 @@ export default function ScheduleForm({
         onSubmit();
       }}
     >
-      {allowSessions && managed.length > 0 && (
-        <div className={styles.tabs} role="group" aria-label="Type d'ajout">
-          <button type="button" aria-pressed={isTask} onClick={() => switchKind('task')}>
-            Tâche
-          </button>
-          <button type="button" aria-pressed={!isTask} onClick={() => switchKind('session')}>
-            Séance du cours
-          </button>
-        </div>
-      )}
-
+      {/* Étudiant : une tâche, ou une remise à lui (une seule heure, l'échéance). */}
       {isTask && (
         <div className={styles.field}>
           <span id={`${id}-genre`}>Genre</span>
@@ -136,7 +230,7 @@ export default function ScheduleForm({
             <button
               type="button"
               aria-pressed={draft.deadline}
-              onClick={() => set({ deadline: true })}
+              onClick={() => set({ deadline: true, allDay: false })}
             >
               Remise
             </button>
@@ -156,30 +250,13 @@ export default function ScheduleForm({
         </label>
       ) : (
         <>
-          <label className={styles.field}>
-            <span>Cours</span>
-            <select
-              value={draft.courseId ?? ''}
-              onChange={(event) => set({ courseId: Number(event.target.value) })}
-            >
-              {managed.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.title ? `${course.code} · ${course.title}` : course.code}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span>Type</span>
-            <select
-              value={draft.sessionKind}
-              onChange={(event) => set({ sessionKind: event.target.value })}
-            >
-              {SESSION_KINDS.map((kind) => (
-                <option key={kind}>{kind}</option>
-              ))}
-            </select>
-          </label>
+          {managedCourseSelect}
+          <KindField
+            value={draft.sessionKind}
+            extraKinds={extraKinds}
+            onChange={(sessionKind) => set({ sessionKind })}
+            onAddKind={onAddKind}
+          />
         </>
       )}
 
@@ -201,7 +278,7 @@ export default function ScheduleForm({
           <span>Toute la journée</span>
         </label>
       )}
-      {isTask && onDelete && (
+      {isTask && !isDeadline && onDelete && (
         <label className={styles.checkField}>
           <input
             type="checkbox"
@@ -239,22 +316,24 @@ export default function ScheduleForm({
               onChange={(color) => set({ color })}
             />
           )}
-          <label className={styles.field}>
-            <span>Cours lié (facultatif)</span>
-            <select
-              value={draft.courseId ?? ''}
-              onChange={(event) =>
-                set({ courseId: event.target.value ? Number(event.target.value) : null })
-              }
-            >
-              <option value="">Aucun</option>
-              {courses.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.code}
-                </option>
-              ))}
-            </select>
-          </label>
+          {
+            <label className={styles.field}>
+              <span>Cours lié (facultatif)</span>
+              <select
+                value={draft.courseId ?? ''}
+                onChange={(event) =>
+                  set({ courseId: event.target.value ? Number(event.target.value) : null })
+                }
+              >
+                <option value="">Aucun</option>
+                {courses.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {course.code}
+                  </option>
+                ))}
+              </select>
+            </label>
+          }
           <label className={styles.field}>
             <span>Rappel</span>
             <select

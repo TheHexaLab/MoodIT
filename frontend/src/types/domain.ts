@@ -561,6 +561,8 @@ export interface ScheduleTask {
   allDay: boolean;
   /** Remise : une seule heure, l'échéance (`start` = `end`), affichée comme une barre rouge. */
   deadline: boolean;
+  /** Remise d'un devoir du cours, vue par ses étudiants : en lecture dans l'horaire. */
+  courseDeadline?: boolean;
 }
 
 export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;

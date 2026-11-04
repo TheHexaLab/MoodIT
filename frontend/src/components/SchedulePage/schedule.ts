@@ -356,7 +356,7 @@ export function draftToTask(draft: Draft): ScheduleTaskInput {
 export function draftToSession(draft: Draft): ScheduleSessionInput {
   return {
     courseId: draft.courseId as number,
-    kind: draft.sessionKind,
+    kind: draft.sessionKind.trim(),
     room: draft.room.trim(),
     start: toIso(draft.date, draft.start),
     end: toIso(draft.date, draft.end),

@@ -64,6 +64,8 @@ export function SessionPopup({
   onClose,
 }: SessionPopupProps): React.ReactElement {
   const controller = usePopupController();
+  /** Couleur essayée dans les pastilles ; « Appliquer » l'enregistre. */
+  const [picked, setPicked] = useState(color);
   const title = `${course.code} · ${session.kind}`;
   const when = `${dayTitle(new Date(session.start))}, ${formatTime(session.start)} à ${formatTime(session.end)}`;
   const weekday = new Intl.DateTimeFormat('fr-CA', { weekday: 'long' }).format(
@@ -72,7 +74,33 @@ export function SessionPopup({
   return (
     <Popup variant={PopupVariant.Form} label={title} onClose={onClose} controller={controller}>
       <div className={styles.dialog}>
-        <Header title={title} subtitle={course.title} onClose={() => controller.requestClose()} />
+        {/* Le sigle ouvre le cours. */}
+        <header className={styles.dialogHeader}>
+          <div>
+            <h2>
+              <button
+                type="button"
+                className={styles.courseLink}
+                aria-label={`Voir le cours ${course.code}`}
+                title="Voir le cours"
+                data-autofocus
+                onClick={() => controller.requestClose(onOpenCourse)}
+              >
+                {course.code}
+              </button>{' '}
+              · {session.kind}
+            </h2>
+            {course.title && <p>{course.title}</p>}
+          </div>
+          <button
+            type="button"
+            className={styles.closeButton}
+            aria-label="Fermer"
+            onClick={() => controller.requestClose()}
+          >
+            <CloseIcon />
+          </button>
+        </header>
         <dl className={styles.details}>
           <dt>Quand</dt>
           <dd>{when}</dd>
@@ -89,8 +117,8 @@ export function SessionPopup({
         </dl>
         <ColorPicker
           legend="Ma couleur pour ce cours"
-          value={color}
-          onChange={onColorChange}
+          value={picked}
+          onChange={setPicked}
           tone="bright"
         />
         <div className={styles.actions}>
@@ -98,14 +126,19 @@ export function SessionPopup({
             Fermer
           </button>
           <span className={styles.spacer} />
-          <button
-            type="button"
-            className={`${styles.button} ${styles.primary}`}
-            data-autofocus
-            onClick={() => controller.requestClose(onOpenCourse)}
-          >
-            Voir le cours
-          </button>
+          {/* « Appliquer » n'apparaît qu'après avoir choisi une autre couleur. */}
+          {picked !== color && (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary}`}
+              onClick={() => {
+                onColorChange(picked);
+                controller.requestClose();
+              }}
+            >
+              Appliquer
+            </button>
+          )}
         </div>
       </div>
     </Popup>
@@ -168,6 +201,54 @@ export function TaskPopup({
           onCancel={() => controller.requestClose()}
           onDelete={() => void run(onDelete)}
         />
+      </div>
+    </Popup>
+  );
+}
+
+interface DeadlinePopupProps {
+  task: ScheduleTask;
+  course: ScheduleCourse | undefined;
+  onClose: () => void;
+}
+
+/** Remise d'un cours, en lecture : l'étudiant la voit, l'enseignant du cours la modifie. */
+export function DeadlinePopup({ task, course, onClose }: DeadlinePopupProps): React.ReactElement {
+  const controller = usePopupController();
+  const title = `Remise : ${task.title}`;
+  return (
+    <Popup variant={PopupVariant.Form} label={title} onClose={onClose} controller={controller}>
+      <div className={styles.dialog}>
+        <Header title={title} subtitle={course?.title} onClose={() => controller.requestClose()} />
+        <dl className={styles.details}>
+          {course && (
+            <>
+              <dt>Cours</dt>
+              <dd>{course.code}</dd>
+            </>
+          )}
+          <dt>Échéance</dt>
+          <dd>
+            {dayTitle(new Date(task.start))}, {formatTime(task.start)}
+          </dd>
+          {task.notes && (
+            <>
+              <dt>Description</dt>
+              <dd className={styles.preLine}>{task.notes}</dd>
+            </>
+          )}
+        </dl>
+        <div className={styles.actions}>
+          <span className={styles.spacer} />
+          <button
+            type="button"
+            className={styles.button}
+            data-autofocus
+            onClick={() => controller.requestClose()}
+          >
+            Fermer
+          </button>
+        </div>
       </div>
     </Popup>
   );

@@ -17,9 +17,25 @@
 
 .header {
   display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+/* Au-dessus de la grille : titre à gauche, navigation alignée sur son bord droit. */
+.headerMain {
+  display: flex;
+  min-width: 0;
+  flex: 1;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* Au-dessus de la colonne de droite, de la même largeur : le bouton d'ajout. */
+.headerSide {
+  display: flex;
+  flex: 0 0 18.75rem;
+  justify-content: flex-end;
 }
 
 .headerText {
@@ -1538,4 +1554,109 @@
 /* Le crayon ouvre la tâche : curseur de lien, pas de « saisir pour glisser ». */
 .dayColumn .task .editIcon {
   cursor: pointer;
+}
+
+/* Sigle du cours dans le détail d'une séance : un lien vers le cours. */
+.courseLink {
+  padding: 0;
+  border: none;
+  border-radius: 0.25rem;
+  background: none;
+  color: var(--brand-teal);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.courseLink:hover {
+  text-decoration-thickness: 2px;
+}
+
+.courseLink:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+.preLine {
+  white-space: pre-line;
+}
+
+/* Texte d'une séance : sa teinte, tirée vers la couleur du texte (plus foncée en clair, plus
+   claire en sombre) pour garder 4,5:1 sur le fond coloré. */
+.session {
+  color: color-mix(in srgb, var(--ink) 72%, var(--text));
+}
+
+/* En sombre, un aplat un peu moins fort : le texte clair garde son contraste. */
+.session {
+  background: color-mix(in srgb, var(--tint) var(--session-mix, 48%), var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) calc(var(--session-mix, 48%) + 8%), var(--bg-surface));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .page {
+    --session-mix: 34%;
+  }
+}
+
+:root[data-theme='dark'] .page {
+  --session-mix: 34%;
+}
+
+/* Écran moyen : la colonne de droite passe sous la grille, l'en-tête n'a plus deux colonnes. */
+@media (max-width: 75rem) {
+  .header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .headerSide {
+    flex-basis: auto;
+  }
+}
+
+/* Un type de séance à soi peut être long : la pastille se coupe au lieu de déborder. */
+.kindTag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ajouter un type de séance : un champ et son bouton, sous la liste. */
+.addKind {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.addKind input {
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+
+.addKind input:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+.addKind .button {
+  min-height: 2.25rem;
+}
+
+.kindLabel {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 500;
 }

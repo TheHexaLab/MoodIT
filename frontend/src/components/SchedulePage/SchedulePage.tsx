@@ -5,7 +5,7 @@ import { Popup } from '../Popup/Popup.tsx';
 import { PopupVariant } from '../Popup/popupVariant.ts';
 import { usePopupController } from '../Popup/popupController.ts';
 import ScheduleForm from './ScheduleForm.tsx';
-import { Header, SessionPopup, TaskPopup } from './SchedulePopups.tsx';
+import { DeadlinePopup, Header, SessionPopup, TaskPopup } from './SchedulePopups.tsx';
 import type {
   ScheduleColor,
   ScheduleCourse,
@@ -196,6 +196,8 @@ export default function SchedulePage({
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
   /** Jour dont toutes les tâches sans heure sont affichées (plus de trois). */
   const [openAllDay, setOpenAllDay] = useState<number | null>(null);
+  /** Types de séance ajoutés depuis le formulaire (« Séminaire »…), pour la session. */
+  const [extraKinds, setExtraKinds] = useState<string[]>([]);
   /** Tâches cochées qui sortent de la liste en s'effaçant. */
   const [leaving, setLeaving] = useState<number[]>([]);
   /** Dernière tâche cochée : « Annuler » la décoche, pendant UNDO_MS. */
@@ -270,9 +272,12 @@ export default function SchedulePage({
     scroller.scrollTop = savedScroll.current ?? (firstHour - FIRST_HOUR) * HOUR_REM * rem;
   }, [load.status, firstHour]);
 
-  // Le panneau d'ajout prend le focus à l'ouverture.
+  // Le panneau d'ajout prend le focus à l'ouverture ; à la fermeture, le bouton revenu le reprend.
+  const wasPanelOpen = useRef(false);
   useEffect(() => {
     if (panelOpen) panelRef.current?.querySelector<HTMLElement>('input, select')?.focus();
+    else if (wasPanelOpen.current) addButtonRef.current?.focus();
+    wasPanelOpen.current = panelOpen;
   }, [panelOpen]);
 
   function goTo(nextOffset: number) {
@@ -284,7 +289,13 @@ export default function SchedulePage({
   const days = weekDays(weekStart);
   const byId = new Map(courses.map((course) => [course.id, course]));
   const sessions = load.status === 'ready' ? load.sessions : [];
-  const tasks = load.status === 'ready' ? load.tasks : [];
+  // L'enseignant n'a pas de tâches personnelles : il voit les séances et les remises de ses cours.
+  const tasks =
+    load.status === 'ready'
+      ? managesCourse
+        ? load.tasks.filter((task) => task.courseDeadline)
+        : load.tasks
+      : [];
   const colorOf = (courseId: number) =>
     (load.status === 'ready' ? load.courseColors[courseId] : undefined) ?? courseColor(courseId);
 
@@ -315,13 +326,21 @@ export default function SchedulePage({
       return;
     }
     const today = days.find((day) => isSameDay(day, now));
-    setAdding(emptyDraft('task', today ?? weekStart, now.getHours() + 1, null));
+    // Qui gère un cours ajoute ce que ses étudiants verront (séance ou remise) ; l'étudiant, ses tâches.
+    const managedCourse = courses.find((course) => course.canManage);
+    setAdding(
+      emptyDraft(
+        managedCourse ? 'session' : 'task',
+        today ?? weekStart,
+        now.getHours() + 1,
+        managedCourse?.id ?? null
+      )
+    );
     setAddError(null);
   }
 
   function closeAdd() {
     setAdding(null);
-    if (!compact) addButtonRef.current?.focus();
   }
 
   async function submitAdd() {
@@ -1050,7 +1069,8 @@ export default function SchedulePage({
       draft={adding}
       onChange={setAdding}
       courses={courses}
-      allowSessions
+      extraKinds={extraKinds}
+      onAddKind={(kind) => setExtraKinds((kinds) => [...kinds, kind])}
       error={addError}
       busy={addBusy}
       submitLabel={
@@ -1069,142 +1089,155 @@ export default function SchedulePage({
     .sort((a, b) => a.start.localeCompare(b.start));
   const sessionCourse = openSession ? byId.get(openSession.courseId) : undefined;
 
+  /** Colonne de droite : l'ajout en cours ; « Mes tâches » pour l'étudiant seulement. */
+  const hasSidebar = panelOpen || !managesCourse;
+  // Panneau ouvert : le bouton disparaît ; « Annuler » du panneau le referme.
+  const addButton = !panelOpen && (
+    <button
+      ref={addButtonRef}
+      type="button"
+      className={`${styles.button} ${styles.primary}`}
+      onClick={openAdd}
+    >
+      {addLabel}
+    </button>
+  );
+
   return (
     <section className={styles.page} aria-label="Contenu principal">
+      {/* En-tête aux mêmes colonnes que le corps : la navigation s'aligne sur le bord droit de la
+          grille, le bouton d'ajout sur la colonne de droite (quand elle existe). */}
       <header className={styles.header}>
-        <div className={styles.headerText}>
-          <h1 className={styles.title}>Horaire</h1>
-          <p className={styles.subtitle}>{weekLabel(weekStart)}</p>
+        <div className={styles.headerMain}>
+          <div className={styles.headerText}>
+            <h1 className={styles.title}>Horaire</h1>
+            <p className={styles.subtitle}>{weekLabel(weekStart)}</p>
+          </div>
+          <div className={styles.nav}>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.iconButton}`}
+              aria-label="Semaine précédente"
+              onClick={() => goTo(offset - 1)}
+            >
+              <Chevron direction="left" />
+            </button>
+            <button
+              type="button"
+              className={`${styles.button} ${styles.iconButton}`}
+              aria-label="Semaine suivante"
+              onClick={() => goTo(offset + 1)}
+            >
+              <Chevron direction="right" />
+            </button>
+            <button
+              type="button"
+              className={styles.button}
+              disabled={offset === 0}
+              onClick={() => goTo(0)}
+            >
+              Aujourd'hui
+            </button>
+            {!hasSidebar && addButton}
+          </div>
         </div>
-        <div className={styles.nav}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.iconButton}`}
-            aria-label="Semaine précédente"
-            onClick={() => goTo(offset - 1)}
-          >
-            <Chevron direction="left" />
-          </button>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.iconButton}`}
-            aria-label="Semaine suivante"
-            onClick={() => goTo(offset + 1)}
-          >
-            <Chevron direction="right" />
-          </button>
-          <button
-            type="button"
-            className={styles.button}
-            disabled={offset === 0}
-            onClick={() => goTo(0)}
-          >
-            Aujourd'hui
-          </button>
-          <button
-            ref={addButtonRef}
-            type="button"
-            className={`${styles.button} ${styles.primary}`}
-            aria-expanded={compact ? undefined : panelOpen}
-            aria-controls={panelOpen ? panelId : undefined}
-            onClick={openAdd}
-          >
-            {addLabel}
-          </button>
-        </div>
+        {hasSidebar && <div className={styles.headerSide}>{addButton}</div>}
       </header>
       <div className={styles.body}>
         <div className={styles.main}>{renderBody()}</div>
-        <div className={styles.sidebar}>
-          {/* Pendant l'ajout, le formulaire prend toute la colonne ; la liste revient après. */}
-          {panelOpen && (
-            <aside
-              id={panelId}
-              ref={panelRef}
-              className={`${styles.panel} ${styles.panelFill}`}
-              aria-label={addLabel}
-            >
-              <h2 className={styles.panelTitle}>
-                {managesCourse ? "Ajouter à l'horaire" : 'Nouvelle tâche'}
-              </h2>
-              {form}
-            </aside>
-          )}
-          {!panelOpen && load.status === 'ready' && (
-            <section
-              className={`${styles.panel} ${styles.taskList}`}
-              aria-labelledby={`${panelId}-tasks`}
-            >
-              <h2 id={`${panelId}-tasks`} className={styles.panelTitle}>
-                Mes tâches de la semaine
-              </h2>
-              {tasks.length === 0 ? (
-                <p className={styles.taskListEmpty}>Aucune tâche cette semaine.</p>
-              ) : listed.length === 0 ? (
-                <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
-              ) : (
-                <ul>
-                  {listed.map((task) =>
-                    undoIds.includes(task.id) ? (
-                      <li key={task.id} className={styles.undoRow}>
-                        <span role="status">« {task.title} » terminée</span>
-                        <button
-                          id={`${panelId}-undo-${task.id}`}
-                          type="button"
-                          aria-label={`Annuler : remettre « ${task.title} » à faire`}
-                          onClick={() => undoDone(task)}
+        {/* Colonne de droite : l'ajout en cours ; « Mes tâches » pour l'étudiant seulement. */}
+        {hasSidebar && (
+          <div className={styles.sidebar}>
+            {/* Pendant l'ajout, le formulaire prend toute la colonne ; la liste revient après. */}
+            {panelOpen && (
+              <aside
+                id={panelId}
+                ref={panelRef}
+                className={`${styles.panel} ${styles.panelFill}`}
+                aria-label={addLabel}
+              >
+                <h2 className={styles.panelTitle}>
+                  {managesCourse ? "Ajouter à l'horaire" : 'Nouvelle tâche'}
+                </h2>
+                {form}
+              </aside>
+            )}
+            {!panelOpen && !managesCourse && load.status === 'ready' && (
+              <section
+                className={`${styles.panel} ${styles.taskList}`}
+                aria-labelledby={`${panelId}-tasks`}
+              >
+                <h2 id={`${panelId}-tasks`} className={styles.panelTitle}>
+                  Mes tâches de la semaine
+                </h2>
+                {tasks.length === 0 ? (
+                  <p className={styles.taskListEmpty}>Aucune tâche cette semaine.</p>
+                ) : listed.length === 0 ? (
+                  <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
+                ) : (
+                  <ul>
+                    {listed.map((task) =>
+                      undoIds.includes(task.id) ? (
+                        <li key={task.id} className={styles.undoRow}>
+                          <span role="status">« {task.title} » terminée</span>
+                          <button
+                            id={`${panelId}-undo-${task.id}`}
+                            type="button"
+                            aria-label={`Annuler : remettre « ${task.title} » à faire`}
+                            onClick={() => undoDone(task)}
+                          >
+                            Annuler
+                          </button>
+                        </li>
+                      ) : (
+                        <li
+                          key={task.id}
+                          className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
+                          style={hueStyle(task.color)}
                         >
-                          Annuler
-                        </button>
-                      </li>
-                    ) : (
-                      <li
-                        key={task.id}
-                        className={`${leaving.includes(task.id) ? styles.leaving : ''} ${task.deadline ? styles.deadlineItem : ''}`}
-                        style={hueStyle(task.color)}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={task.done}
-                          aria-label={`${task.title} : terminée`}
-                          onChange={() => toggleDone(task)}
-                        />
-                        <button
-                          type="button"
-                          className={styles.taskOpen}
-                          onClick={() => setOpenTask(task)}
-                        >
-                          <span className={styles.taskTitle}>{task.title}</span>
-                          <span className={styles.taskWhen}>
-                            {shortDate(task.start)} ·{' '}
-                            {task.allDay ? (
-                              'toute la journée'
-                            ) : task.deadline ? (
-                              <strong className={styles.deadlineBadge}>
-                                Remise à {formatShortTime(task.start)}
-                              </strong>
-                            ) : (
-                              formatRange(task.start, task.end)
-                            )}
-                          </span>
-                        </button>
-                        {/* Visible au survol de la ligne, ou au focus du clavier. */}
-                        <button
-                          type="button"
-                          className={styles.taskDelete}
-                          aria-label={`Supprimer « ${task.title} »`}
-                          onClick={() => void removeTask(task.id).catch(() => undefined)}
-                        >
-                          <Trash />
-                        </button>
-                      </li>
-                    )
-                  )}
-                </ul>
-              )}
-            </section>
-          )}
-        </div>
+                          <input
+                            type="checkbox"
+                            checked={task.done}
+                            aria-label={`${task.title} : terminée`}
+                            onChange={() => toggleDone(task)}
+                          />
+                          <button
+                            type="button"
+                            className={styles.taskOpen}
+                            onClick={() => setOpenTask(task)}
+                          >
+                            <span className={styles.taskTitle}>{task.title}</span>
+                            <span className={styles.taskWhen}>
+                              {shortDate(task.start)} ·{' '}
+                              {task.allDay ? (
+                                'toute la journée'
+                              ) : task.deadline ? (
+                                <strong className={styles.deadlineBadge}>
+                                  Remise à {formatShortTime(task.start)}
+                                </strong>
+                              ) : (
+                                formatRange(task.start, task.end)
+                              )}
+                            </span>
+                          </button>
+                          {/* Visible au survol de la ligne, ou au focus du clavier. */}
+                          <button
+                            type="button"
+                            className={styles.taskDelete}
+                            aria-label={`Supprimer « ${task.title} »`}
+                            onClick={() => void removeTask(task.id).catch(() => undefined)}
+                          >
+                            <Trash />
+                          </button>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+        )}
       </div>
       {compact && adding && (
         <AddPopup label={addLabel} onClose={closeAdd}>
@@ -1224,7 +1257,15 @@ export default function SchedulePage({
           }}
         />
       )}
-      {openTask && (
+      {/* Une remise vient d'un devoir du cours : elle se lit ici, elle se modifie dans Devoirs. */}
+      {openTask && openTask.courseDeadline && (
+        <DeadlinePopup
+          task={openTask}
+          course={openTask.courseId != null ? byId.get(openTask.courseId) : undefined}
+          onClose={() => setOpenTask(null)}
+        />
+      )}
+      {openTask && !openTask.courseDeadline && (
         <TaskPopup
           task={openTask}
           courses={courses}
