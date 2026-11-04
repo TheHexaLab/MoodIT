@@ -138,6 +138,11 @@ const grid = () => screen.findByRole('group', { name: /^Semaine du/ });
 const block = async (name: RegExp) => within(await grid()).findByRole('button', { name });
 const list = () => screen.findByRole('region', { name: 'Mes tâches de la semaine' });
 
+/** Le bouton de la liste des types : « Type » suivi du type choisi. */
+const typeButton = (panel: HTMLElement) => within(panel).getByRole('button', { name: /^Type / });
+const typeMenu = (panel: HTMLElement) =>
+  within(panel).getByRole('group', { name: 'Types de séance' });
+
 /** Colonnes de 150 px côte à côte (jsdom n'a pas de mise en page) : mercredi = 450-600. */
 function layoutColumns() {
   document.querySelectorAll<HTMLElement>('[class*="dayColumn"]').forEach((column, index) => {
@@ -728,16 +733,27 @@ describe('SchedulePage — enseignant', () => {
     fireEvent.change(course, { target: { value: '11' } });
 
     // « Ajouter un type… » change la liste en champ ; Entrée l'ajoute et le sélectionne.
-    const type = within(panel).getByRole('combobox', { name: 'Type' }) as HTMLSelectElement;
-    expect(type.value).toBe('Cours');
-    fireEvent.change(type, { target: { value: '__ajouter__' } });
+    expect(typeButton(panel).textContent).toBe('Cours');
+    fireEvent.click(typeButton(panel));
+    expect(typeButton(panel).getAttribute('aria-expanded')).toBe('true');
+    // Le focus va au type choisi.
+    expect(document.activeElement).toBe(
+      within(typeMenu(panel)).getByRole('button', { name: 'Cours' })
+    );
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: '＋ Ajouter un type…' }));
     const newType = within(panel).getByRole('textbox', { name: 'Type' });
     expect(document.activeElement).toBe(newType);
     fireEvent.change(newType, { target: { value: 'Séminaire' } });
     fireEvent.keyDown(newType, { key: 'Enter' });
-    const typeAgain = within(panel).getByRole('combobox', { name: 'Type' }) as HTMLSelectElement;
-    expect(typeAgain.value).toBe('Séminaire');
-    expect([...typeAgain.options].map((o) => o.textContent)).toContain('Séminaire');
+    expect(typeButton(panel).textContent).toBe('Séminaire');
+    fireEvent.click(typeButton(panel));
+    expect(
+      within(typeMenu(panel))
+        .getByRole('button', { name: 'Séminaire' })
+        .getAttribute('aria-pressed')
+    ).toBe('true');
+    fireEvent.keyDown(typeMenu(panel), { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'Types de séance' })).toBeNull();
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la séance' }));
     expect(within(panel).getByRole('alert').textContent).toBe('Indiquez le local.');
@@ -769,28 +785,97 @@ describe('SchedulePage — enseignant', () => {
     await block(/^INF201/);
     fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
     const panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
-    fireEvent.change(within(panel).getByRole('combobox', { name: 'Type' }), {
-      target: { value: '__ajouter__' },
-    });
+    fireEvent.click(typeButton(panel));
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: '＋ Ajouter un type…' }));
     fireEvent.keyDown(within(panel).getByRole('textbox', { name: 'Type' }), { key: 'Escape' });
-    expect(within(panel).getByRole('combobox', { name: 'Type' })).toBeTruthy();
+    expect(typeButton(panel)).toBeTruthy();
 
-    fireEvent.change(within(panel).getByRole('combobox', { name: 'Type' }), {
-      target: { value: '__ajouter__' },
-    });
+    // Un type déjà dans la liste est repris tel quel, sans doublon.
+    fireEvent.click(typeButton(panel));
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: '＋ Ajouter un type…' }));
     fireEvent.change(within(panel).getByRole('textbox', { name: 'Type' }), {
       target: { value: 'atelier' },
     });
     fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter' }));
-    const type = within(panel).getByRole('combobox', { name: 'Type' }) as HTMLSelectElement;
-    expect(type.value).toBe('Atelier');
+    expect(typeButton(panel).textContent).toBe('Atelier');
+    fireEvent.click(typeButton(panel));
     expect(
-      [...type.options].filter((o) => o.textContent?.toLowerCase() === 'atelier')
+      within(typeMenu(panel)).getAllByRole('button', { name: /^Supprimer le type « Atelier »/ })
     ).toHaveLength(1);
+    // Les flèches passent d'un type à l'autre ; choisir referme la liste.
+    fireEvent.keyDown(typeMenu(panel), { key: 'ArrowDown' });
+    expect(document.activeElement?.textContent).toBe('Tutorat');
+    fireEvent.keyDown(typeMenu(panel), { key: 'ArrowUp' });
+    fireEvent.keyDown(typeMenu(panel), { key: 'ArrowUp' });
+    expect(document.activeElement?.textContent).toBe('Laboratoire');
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: 'Laboratoire' }));
+    expect(typeButton(panel).textContent).toBe('Laboratoire');
+    expect(document.activeElement).toBe(typeButton(panel));
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Chaque semaine' }));
     fireEvent.click(within(panel).getByRole('button', { name: 'Une fois' }));
     expect(within(panel).queryByLabelText("Jusqu'au")).toBeNull();
+  });
+});
+
+describe('SchedulePage — types de séance ajoutés', () => {
+  it('chaque type a sa corbeille ; supprimer le type choisi passe au suivant ; un clic ailleurs ferme', async () => {
+    setup({ courses: TEACHER });
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
+    const panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
+    fireEvent.click(typeButton(panel));
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: '＋ Ajouter un type…' }));
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Type' }), {
+      target: { value: 'Examen' },
+    });
+    fireEvent.keyDown(within(panel).getByRole('textbox', { name: 'Type' }), { key: 'Enter' });
+
+    fireEvent.click(typeButton(panel));
+    fireEvent.click(
+      within(typeMenu(panel)).getByRole('button', { name: 'Supprimer le type « Examen »' })
+    );
+    expect(within(typeMenu(panel)).queryByRole('button', { name: 'Examen' })).toBeNull();
+    expect(typeButton(panel).textContent).toBe('Cours');
+    // Les types de base aussi se suppriment : le suivant prend la place du type choisi.
+    fireEvent.click(
+      within(typeMenu(panel)).getByRole('button', { name: 'Supprimer le type « Cours »' })
+    );
+    expect(typeButton(panel).textContent).toBe('Travaux dirigés');
+    // La liste reste ouverte après une suppression ; un clic ailleurs la ferme.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('group', { name: 'Types de séance' })).toBeNull();
+  });
+
+  it('la liste vidée, la séance demande un type ; un nouvel ajout repart du premier type restant', async () => {
+    setup({ courses: TEACHER });
+    await block(/^INF201/);
+    fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
+    let panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
+    fireEvent.click(typeButton(panel));
+    for (const kind of ['Cours', 'Travaux dirigés', 'Laboratoire', 'Atelier', 'Tutorat']) {
+      fireEvent.click(
+        within(typeMenu(panel)).getByRole('button', { name: `Supprimer le type « ${kind} »` })
+      );
+    }
+    expect(typeButton(panel).textContent).toBe('Choisir un type');
+    fireEvent.keyDown(typeMenu(panel), { key: 'Escape' });
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Local' }), {
+      target: { value: 'A1' },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Ajouter la séance' }));
+    expect(within(panel).getByRole('alert').textContent).toBe('Choisissez un type de séance.');
+
+    fireEvent.click(typeButton(panel));
+    fireEvent.click(within(typeMenu(panel)).getByRole('button', { name: '＋ Ajouter un type…' }));
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Type' }), {
+      target: { value: 'Examen' },
+    });
+    fireEvent.keyDown(within(panel).getByRole('textbox', { name: 'Type' }), { key: 'Enter' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Annuler' }));
+    fireEvent.click(screen.getByRole('button', { name: "Ajouter à l'horaire" }));
+    panel = screen.getByRole('complementary', { name: "Ajouter à l'horaire" });
+    expect(typeButton(panel).textContent).toBe('Examen');
   });
 });
 

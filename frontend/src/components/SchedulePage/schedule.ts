@@ -330,6 +330,7 @@ export function draftError(draft: Draft): string | null {
   if (!draft.date) return 'Choisissez une date.';
   const timed = !(draft.kind === 'task' && (draft.allDay || draft.deadline));
   if (timed && draft.end <= draft.start) return 'La fin doit suivre le début.';
+  if (draft.kind === 'session' && !draft.sessionKind.trim()) return 'Choisissez un type de séance.';
   if (draft.kind === 'session' && !draft.room.trim()) return 'Indiquez le local.';
   if (draft.kind === 'session' && draft.weekly && (!draft.until || draft.until < draft.date)) {
     return 'La répétition doit finir après la première séance.';

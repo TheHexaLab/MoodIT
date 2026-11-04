@@ -36,6 +36,7 @@ import {
   longDay,
   minutesFromStart,
   placeItems,
+  SESSION_KINDS,
   shiftTimes,
   shortDate,
   shortDay,
@@ -196,8 +197,8 @@ export default function SchedulePage({
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
   /** Jour dont toutes les tâches sans heure sont affichées (plus de deux). */
   const [openAllDay, setOpenAllDay] = useState<number | null>(null);
-  /** Types de séance ajoutés depuis le formulaire (« Séminaire »…), pour la session. */
-  const [extraKinds, setExtraKinds] = useState<string[]>([]);
+  /** Types de séance de la liste, que l'enseignant ajoute ou supprime (pour la session). */
+  const [sessionKinds, setSessionKinds] = useState<string[]>(SESSION_KINDS);
   /** Tâches cochées qui sortent de la liste en s'effaçant. */
   const [leaving, setLeaving] = useState<number[]>([]);
   /** Tâches cochées dont la ligne propose « Annuler » pendant UNDO_MS, à leur place dans la liste. */
@@ -323,14 +324,16 @@ export default function SchedulePage({
     const today = days.find((day) => isSameDay(day, now));
     // Qui gère un cours ajoute ce que ses étudiants verront (séance ou remise) ; l'étudiant, ses tâches.
     const managedCourse = courses.find((course) => course.canManage);
-    setAdding(
-      emptyDraft(
+    setAdding({
+      ...emptyDraft(
         managedCourse ? 'session' : 'task',
         today ?? weekStart,
         now.getHours() + 1,
         managedCourse?.id ?? null
-      )
-    );
+      ),
+      // Le premier type de la liste, qui a pu changer.
+      sessionKind: sessionKinds[0] ?? '',
+    });
     setAddError(null);
   }
 
@@ -1066,8 +1069,9 @@ export default function SchedulePage({
       draft={adding}
       onChange={setAdding}
       courses={courses}
-      extraKinds={extraKinds}
-      onAddKind={(kind) => setExtraKinds((kinds) => [...kinds, kind])}
+      kinds={sessionKinds}
+      onAddKind={(kind) => setSessionKinds((kinds) => [...kinds, kind])}
+      onDeleteKind={(kind) => setSessionKinds((kinds) => kinds.filter((known) => known !== kind))}
       error={addError}
       busy={addBusy}
       submitLabel={

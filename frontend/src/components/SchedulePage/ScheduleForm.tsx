@@ -16,9 +16,10 @@ interface ScheduleFormProps {
   onChange: (draft: Draft) => void;
   /** Cours de l'utilisateur ; ceux qu'il gère (`canManage`) peuvent recevoir une séance. */
   courses: ScheduleCourse[];
-  /** Types de séance ajoutés par l'utilisateur, après ceux de la liste. */
-  extraKinds?: string[];
+  /** Types de séance de la liste, que l'enseignant ajoute ou supprime. */
+  kinds?: string[];
   onAddKind?: (kind: string) => void;
+  onDeleteKind?: (kind: string) => void;
   /** Message affiché après une tentative d'enregistrement refusée. */
   error: string | null;
   busy?: boolean;
@@ -66,33 +67,85 @@ export function ColorPicker({
   );
 }
 
-const ADD_KIND = '__ajouter__';
+const ChevronDown = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path
+      d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 /**
- * Type d'une séance : une liste, avec « Ajouter un type… » en dernier ; le type ajouté rejoint la
- * liste et devient celui de la séance.
+ * Type d'une séance : une liste déroulante, chaque type avec sa corbeille ;
+ * « Ajouter un type… », en bleu, change la liste en champ au même endroit, et « Ajouter » le
+ * sélectionne.
  */
 function KindField({
   value,
-  extraKinds,
+  kinds: known,
   onChange,
   onAddKind,
+  onDeleteKind,
 }: {
   value: string;
-  extraKinds: string[];
+  kinds: string[];
   onChange: (kind: string) => void;
   onAddKind?: (kind: string) => void;
+  onDeleteKind?: (kind: string) => void;
 }): React.ReactElement {
+  const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const fieldId = useId();
-  const known = [...SESSION_KINDS, ...extraKinds];
   const kinds = known.includes(value) || !value ? known : [...known, value];
+  const options = () => [
+    ...(menuRef.current?.querySelectorAll<HTMLElement>('[data-kind-option]') ?? []),
+  ];
 
   useEffect(() => {
     if (adding) inputRef.current?.focus();
   }, [adding]);
+
+  // Liste ouverte : le focus va au type choisi ; un clic ailleurs la referme.
+  useEffect(() => {
+    if (!open) return;
+    (options().find((el) => el.getAttribute('aria-pressed') === 'true') ?? options()[0])?.focus();
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [open]);
+
+  function close() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function choose(kind: string) {
+    onChange(kind);
+    close();
+  }
+
+  function remove(kind: string) {
+    onDeleteKind?.(kind);
+    // Le type choisi supprimé : le premier qui reste le remplace (aucun si la liste est vide).
+    if (value === kind) onChange(known.find((other) => other !== kind) ?? '');
+    // La liste reste ouverte ; le focus revient au premier type.
+    window.requestAnimationFrame(() => options()[0]?.focus());
+  }
 
   function add() {
     const kind = text.trim();
@@ -104,10 +157,9 @@ function KindField({
     setAdding(false);
   }
 
-  // « Ajouter un type… » change la liste en champ, au même endroit ; « Ajouter » le sélectionne.
   return (
     <div className={styles.field}>
-      <label htmlFor={fieldId} className={styles.kindLabel}>
+      <label id={`${fieldId}-label`} htmlFor={fieldId} className={styles.kindLabel}>
         Type
       </label>
       {adding ? (
@@ -136,21 +188,77 @@ function KindField({
           </button>
         </div>
       ) : (
-        <select
-          id={fieldId}
-          value={value}
-          onChange={(event) => {
-            if (event.target.value === ADD_KIND) setAdding(true);
-            else onChange(event.target.value);
-          }}
-        >
-          {kinds.map((kind) => (
-            <option key={kind} value={kind}>
-              {kind}
-            </option>
-          ))}
-          <option value={ADD_KIND}>＋ Ajouter un type…</option>
-        </select>
+        <div ref={rootRef} className={styles.kindPicker}>
+          <button
+            ref={triggerRef}
+            id={fieldId}
+            type="button"
+            className={styles.kindTrigger}
+            aria-haspopup="true"
+            aria-expanded={open}
+            aria-labelledby={`${fieldId}-label ${fieldId}-value`}
+            onClick={() => setOpen((previous) => !previous)}
+          >
+            <span id={`${fieldId}-value`}>{value || 'Choisir un type'}</span>
+            <ChevronDown />
+          </button>
+          {open && (
+            <div
+              ref={menuRef}
+              className={styles.kindMenu}
+              role="group"
+              aria-label="Types de séance"
+              onKeyDown={(event) => {
+                // Échap referme la liste sans fermer la fenêtre ; les flèches passent d'un type à l'autre.
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  close();
+                } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  const items = options();
+                  const index = items.indexOf(document.activeElement as HTMLElement);
+                  const step = event.key === 'ArrowDown' ? 1 : -1;
+                  items[(index + step + items.length) % items.length]?.focus();
+                }
+              }}
+            >
+              {kinds.map((kind) => (
+                <div key={kind} className={styles.kindRow}>
+                  <button
+                    type="button"
+                    className={styles.kindOption}
+                    data-kind-option
+                    aria-pressed={kind === value}
+                    onClick={() => choose(kind)}
+                  >
+                    {kind}
+                  </button>
+                  {
+                    <button
+                      type="button"
+                      className={styles.kindDelete}
+                      aria-label={`Supprimer le type « ${kind} »`}
+                      onClick={() => remove(kind)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  }
+                </div>
+              ))}
+              <button
+                type="button"
+                className={styles.kindAdd}
+                data-kind-option
+                onClick={() => {
+                  setOpen(false);
+                  setAdding(true);
+                }}
+              >
+                ＋ Ajouter un type…
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -161,8 +269,9 @@ export default function ScheduleForm({
   draft,
   onChange,
   courses,
-  extraKinds = [],
+  kinds = SESSION_KINDS,
   onAddKind,
+  onDeleteKind,
   error,
   busy = false,
   submitLabel,
@@ -253,9 +362,10 @@ export default function ScheduleForm({
           {managedCourseSelect}
           <KindField
             value={draft.sessionKind}
-            extraKinds={extraKinds}
+            kinds={kinds}
             onChange={(sessionKind) => set({ sessionKind })}
             onAddKind={onAddKind}
+            onDeleteKind={onDeleteKind}
           />
         </>
       )}
