@@ -453,7 +453,7 @@ describe('Dashboard', () => {
         expect(new Set(courses.map((c) => c.id)).size).toBe(courses.length);
         expect(api.fetchScheduleTasks).toHaveBeenCalled();
         fireEvent.click(block);
-        fireEvent.click(await screen.findByRole('button', { name: 'Voir le cours' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Voir le cours IFT101' }));
         await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
       } finally {
         vi.mocked(api.scheduleAvailable).mockReset();

@@ -9,8 +9,11 @@ import {
   draftToSession,
   draftToTask,
   emptyDraft,
+  DEADLINE_OPTIONS,
   formatRange,
+  formatShortTime,
   formatTime,
+  kindTag,
   isSameDay,
   minutesFromStart,
   placeItems,
@@ -32,30 +35,32 @@ function item(id: number, start: [number, number], end: [number, number]) {
 }
 
 describe('semaine', () => {
-  it('ramène n’importe quel jour à son lundi, fin de semaine comprise', () => {
-    const monday = new Date(2026, 9, 26);
-    for (const day of [26, 28, 30, 31, 1]) {
-      const date = new Date(2026, day === 1 ? 10 : 9, day, 15, 0);
-      expect(startOfWeek(date).getTime()).toBe(monday.getTime());
+  it('ramène n’importe quel jour au dimanche de sa semaine', () => {
+    const sunday = new Date(2026, 9, 25);
+    for (const day of [25, 26, 28, 30, 31]) {
+      expect(startOfWeek(new Date(2026, 9, day, 15, 0)).getTime()).toBe(sunday.getTime());
     }
+    expect(startOfWeek(new Date(2026, 10, 1, 9)).getTime()).toBe(new Date(2026, 10, 1).getTime());
   });
 
-  it('donne les cinq jours de cours et leurs étiquettes', () => {
-    const days = weekDays(new Date(2026, 9, 26));
+  it('donne les sept jours, du dimanche au samedi, et leurs étiquettes', () => {
+    const days = weekDays(new Date(2026, 9, 25));
     expect(days.map((day, index) => shortDay(day, index))).toEqual([
+      'Dim 25',
       'Lun 26',
       'Mar 27',
       'Mer 28',
       'Jeu 29',
       'Ven 30',
+      'Sam 31',
     ]);
-    expect(dayTitle(days[0])).toBe('Lundi 26 octobre');
+    expect(dayTitle(days[1])).toBe('Lundi 26 octobre');
   });
 
   it('écrit la semaine, dans un mois, d’un mois à l’autre et d’une année à l’autre', () => {
-    expect(weekLabel(new Date(2026, 9, 26))).toBe('Semaine du 26 au 30 octobre 2026');
-    expect(weekLabel(new Date(2026, 10, 30))).toBe('Semaine du 30 novembre au 4 décembre 2026');
-    expect(weekLabel(new Date(2026, 11, 28))).toBe('Semaine du 28 décembre 2026 au 1 janvier 2027');
+    expect(weekLabel(new Date(2026, 9, 25))).toBe('Semaine du 25 au 31 octobre 2026');
+    expect(weekLabel(new Date(2026, 10, 29))).toBe('Semaine du 29 novembre au 5 décembre 2026');
+    expect(weekLabel(new Date(2026, 11, 27))).toBe('Semaine du 27 décembre 2026 au 2 janvier 2027');
   });
 
   it('compare des jours, pas des heures', () => {
@@ -68,10 +73,10 @@ describe('événements', () => {
   it('écrit l’heure, la position dans la grille et le jour', () => {
     expect(formatTime(at(0, 8, 5))).toBe('8 h 05');
     expect(minutesFromStart(at(0, 10, 30))).toBe(630);
-    expect(dayIndex(at(0, 9))).toBe(0);
-    expect(dayIndex(at(4, 9))).toBe(4);
-    expect(dayIndex(at(5, 9))).toBe(-1);
-    expect(dayIndex(at(6, 9))).toBe(-1);
+    // 0 = dimanche : lundi 26 vaut 1, samedi 31 vaut 6, dimanche 1er novembre vaut 0.
+    expect(dayIndex(at(0, 9))).toBe(1);
+    expect(dayIndex(at(5, 9))).toBe(6);
+    expect(dayIndex(at(6, 9))).toBe(0);
   });
 
   it('un événement seul n’est pas décalé et reste entier', () => {
@@ -163,6 +168,7 @@ describe('brouillon', () => {
       color: 'rose' as const,
       done: true,
       allDay: false,
+      deadline: false,
     };
     const draft = taskDraft({ ...task, id: 1 });
     expect(draft).toMatchObject({ kind: 'task', date: '2026-10-28', start: '14:00', end: '15:30' });
@@ -192,7 +198,8 @@ describe('brouillon', () => {
     expect(draftError(task)).toBeNull();
     expect(draftError({ ...task, title: ' ' })).toBe('Donnez un titre à la tâche.');
     expect(draftError({ ...task, date: '' })).toBe('Choisissez une date.');
-    expect(draftError({ ...task, date: '2026-10-31' })).toBe('Choisissez un jour de semaine.');
+    // La fin de semaine est permise.
+    expect(draftError({ ...task, date: '2026-10-31' })).toBeNull();
     expect(draftError({ ...task, end: '09:00' })).toBe('La fin doit suivre le début.');
 
     const session = { ...emptyDraft('session', monday, 9, 10), room: 'C1' };
@@ -234,5 +241,48 @@ describe('heures courtes et tâches sans heure', () => {
       start: '09:00',
       end: '10:00',
     });
+  });
+});
+
+describe('remises et types de séance', () => {
+  const monday = new Date(2026, 9, 26);
+
+  it('une remise n’a qu’une heure : la fin vaut l’échéance, sans vérifier les heures', () => {
+    const draft = {
+      ...emptyDraft('task', monday, 9, null),
+      title: 'TP2',
+      deadline: true,
+      start: '23:59',
+      end: '10:00',
+    };
+    expect(draftError(draft)).toBeNull();
+    expect(draftToTask(draft)).toMatchObject({
+      deadline: true,
+      allDay: false,
+      start: toIso('2026-10-26', '23:59'),
+      end: toIso('2026-10-26', '23:59'),
+    });
+    expect(DEADLINE_OPTIONS.at(-1)).toEqual({ value: '23:59', label: '23 h 59' });
+  });
+
+  it('heure courte : « 17 h » ou « 17 h 30 »', () => {
+    expect(formatShortTime(at(0, 17))).toBe('17 h');
+    expect(formatShortTime(at(0, 17, 30))).toBe('17 h 30');
+  });
+
+  it('étiquette courte du type de séance ; un type à soi reste tel quel', () => {
+    expect(kindTag('Laboratoire')).toBe('Labo');
+    expect(kindTag('Travaux dirigés')).toBe('TD');
+    expect(kindTag('Cours')).toBe('Cours');
+    expect(kindTag('Séminaire')).toBe('Séminaire');
+  });
+
+  it('une séance garde son type sans espaces autour', () => {
+    const draft = {
+      ...emptyDraft('session', monday, 9, 10),
+      room: 'C1',
+      sessionKind: ' Séminaire ',
+    };
+    expect(draftToSession(draft).kind).toBe('Séminaire');
   });
 });

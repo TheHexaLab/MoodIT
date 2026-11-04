@@ -17,12 +17,12 @@ afterEach(() => {
   resetDemoAgenda();
 });
 
-/** Lundi 0 h de la semaine courante, comme les tâches d'exemple. */
-function thisMonday(): Date {
-  const monday = new Date();
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  return monday;
+/** Dimanche 0 h de la semaine courante : la semaine de l'horaire va du dimanche au samedi. */
+function thisWeekStart(): Date {
+  const sunday = new Date();
+  sunday.setHours(0, 0, 0, 0);
+  sunday.setDate(sunday.getDate() - sunday.getDay());
+  return sunday;
 }
 
 describe('horaire : données fictives', () => {
@@ -33,7 +33,8 @@ describe('horaire : données fictives', () => {
   });
 
   it('deux séances par cours, dans la semaine demandée, du lundi au vendredi', async () => {
-    const monday = new Date(2026, 9, 26);
+    // Semaine du dimanche 25 octobre ; les séances tombent du lundi 26 au vendredi 30.
+    const monday = new Date(2026, 9, 25);
     const courses = [
       { id: 10, code: 'INF201', programId: 1 },
       { id: 11, code: 'MAT265', programId: 1 },
@@ -44,7 +45,7 @@ describe('horaire : données fictives', () => {
     expect(new Set(sessions.map((s) => s.id)).size).toBe(4);
     for (const s of sessions) {
       const start = new Date(s.start);
-      expect(start >= monday && start < new Date(2026, 9, 31)).toBe(true);
+      expect(start >= new Date(2026, 9, 26) && start < new Date(2026, 9, 31)).toBe(true);
       expect(s.end > s.start).toBe(true);
       expect(start.getHours()).toBeGreaterThanOrEqual(8);
       expect(new Date(s.end).getHours()).toBeLessThanOrEqual(18);
@@ -54,8 +55,8 @@ describe('horaire : données fictives', () => {
 
   it('les mêmes créneaux d’une semaine à l’autre', async () => {
     const courses = [{ id: 10, code: 'INF201', programId: 1 }];
-    const a = await fetchSchedule(new Date(2026, 9, 26), courses);
-    const b = await fetchSchedule(new Date(2026, 10, 2), courses);
+    const a = await fetchSchedule(new Date(2026, 9, 25), courses);
+    const b = await fetchSchedule(new Date(2026, 10, 1), courses);
     expect(b.map((s) => new Date(s.start).getDay())).toEqual(
       a.map((s) => new Date(s.start).getDay())
     );
@@ -76,15 +77,17 @@ describe('agenda : tâches et séances fictives', () => {
     color: 'teal' as const,
     done: false,
     allDay: false,
+    deadline: false,
   });
 
-  it('quatre tâches d’exemple dans la semaine courante, aucune la suivante', async () => {
-    const monday = thisMonday();
+  it('cinq tâches d’exemple dans la semaine courante, aucune la suivante', async () => {
+    const monday = thisWeekStart();
     expect((await fetchScheduleTasks(monday)).map((t) => t.title)).toEqual([
       'Tutorat',
       "Rencontre d'équipe",
       'Appel de stage',
       'Remise du TP2',
+      'Rapport de labo',
     ]);
     const next = new Date(monday);
     next.setDate(next.getDate() + 7);
@@ -92,7 +95,7 @@ describe('agenda : tâches et séances fictives', () => {
   });
 
   it('ajoute, modifie et supprime une tâche', async () => {
-    const monday = thisMonday();
+    const monday = thisWeekStart();
     const start = new Date(monday);
     start.setHours(9);
     const created = await createScheduleTask(task(start));

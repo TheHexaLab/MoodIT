@@ -194,13 +194,12 @@ export default function SchedulePage({
   const [addBusy, setAddBusy] = useState(false);
   const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
-  /** Jour dont toutes les tâches sans heure sont affichées (plus de trois). */
+  /** Jour dont toutes les tâches sans heure sont affichées (plus de deux). */
   const [openAllDay, setOpenAllDay] = useState<number | null>(null);
   /** Types de séance ajoutés depuis le formulaire (« Séminaire »…), pour la session. */
   const [extraKinds, setExtraKinds] = useState<string[]>([]);
   /** Tâches cochées qui sortent de la liste en s'effaçant. */
   const [leaving, setLeaving] = useState<number[]>([]);
-  /** Dernière tâche cochée : « Annuler » la décoche, pendant UNDO_MS. */
   /** Tâches cochées dont la ligne propose « Annuler » pendant UNDO_MS, à leur place dans la liste. */
   const [undoIds, setUndoIds] = useState<number[]>([]);
   const undoTimers = useRef(new Map<number, number>());
@@ -321,10 +320,6 @@ export default function SchedulePage({
     dayIndex(iso) !== -1 && startOfWeek(new Date(iso)).getTime() === weekStartTime;
 
   function openAdd() {
-    if (adding) {
-      closeAdd();
-      return;
-    }
     const today = days.find((day) => isSameDay(day, now));
     // Qui gère un cours ajoute ce que ses étudiants verront (séance ou remise) ; l'étudiant, ses tâches.
     const managedCourse = courses.find((course) => course.canManage);
@@ -677,8 +672,7 @@ export default function SchedulePage({
     );
   }
 
-  /** Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = dimanche). */
-  /** Tâches sans heure du jour `index`, qui vont dans la rangée « Journée ». */
+  /** Tâches sans heure du jour `index`, qui flottent en haut de sa colonne. */
   const allDayOf = (index: number) =>
     tasks.filter((task) => task.allDay && dayIndex(task.start) === index);
   const allDayDraft =
@@ -687,7 +681,10 @@ export default function SchedulePage({
       : null;
   const hasAllDay = tasks.some((task) => task.allDay) || allDayDraft != null;
 
-  /** `withAllDay` : la liste mobile met aussi les tâches sans heure, en tête de leur jour. */
+  /**
+   * Séances, tâches et aperçu de l'ajout, pour le jour `index` (0 = dimanche). `withAllDay` : la
+   * liste mobile met aussi les tâches sans heure et les remises dans leur jour.
+   */
   function itemsOf(index: number, withAllDay = false): GridItem[] {
     const items: GridItem[] = [];
     for (const session of sessions) {
@@ -988,7 +985,7 @@ export default function SchedulePage({
                         </span>
                       </button>
                     ))}
-                    {/* Au-delà de trois, « +N de plus » déplie la liste du jour. */}
+                    {/* Au-delà de deux, « +N de plus » déplie la liste du jour. */}
                     {allDayOf(index).length > MAX_ALL_DAY && (
                       <button
                         type="button"
