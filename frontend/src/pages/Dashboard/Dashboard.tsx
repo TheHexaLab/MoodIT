@@ -58,6 +58,7 @@ import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
 import SchedulePage, { type ScheduleApi } from '../../components/SchedulePage/SchedulePage.tsx';
 import { type ScheduleCourse } from '../../types/domain.ts';
+import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
 import { getProgramPermissions } from '../../helpers/permissions.ts';
@@ -898,7 +899,10 @@ export default function Dashboard() {
       })
     : [];
   const selectedChannel =
-    selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ?? null;
+    isAssignmentChannel(selectedChannelRef?.type) && selectedChannelRef && api.assignmentsAvailable()
+      ? { id: selectedChannelRef.id, type: selectedChannelRef.type, name: 'Devoirs' }
+      : (selectedCourseChannels.find((channel) => isSameChannel(channel, selectedChannelRef)) ??
+        null);
   // Le quiz actuellement ouvert a-t-il été modifié à distance ? → rechargement de la vue.
   const openQuizId = selectedChannel?.type === 'quiz' ? selectedChannel.id : null;
   // La ref (lue depuis les closures WS, ex. resync) est synchronisée hors rendu :
@@ -909,9 +913,14 @@ export default function Dashboard() {
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
   // Ouvre un cours depuis le portail (barre de gauche, horaire) : son panneau se rouvre.
+  // La tuile du cours déjà ouvert garde le canal affiché ; un autre cours repart de zéro.
   const openCourse = (programId: number, courseId: number) => {
     setCoursePanelCollapsed(false);
-    setView({ programId, courseId });
+    setView((previous) =>
+      previous.programId === programId && previous.courseId === courseId
+        ? previous
+        : { programId, courseId }
+    );
   };
   // Cours de l'horaire : ceux de tous les programmes, une seule fois chacun, ouverts par leur
   // premier programme (comme dans la barre de gauche).
@@ -930,6 +939,36 @@ export default function Dashboard() {
       }
     }
   }
+  // Devoirs (données fictives, jamais en production) : la pastille du panneau suit ce qui reste à
+  // remettre dans le cours ouvert, et une remise la remet à jour.
+  const canManageActiveProgram = permsForProgram(activeProgramId).canManageContent;
+  const [assignmentsToSubmit, setAssignmentsToSubmit] = useState<number | undefined>(undefined);
+  const refreshAssignmentsCount = useCallback((courseId: number | undefined) => {
+    if (courseId == null || !api.assignmentsAvailable()) return;
+    void api.fetchAssignments(courseId).then((assignments) => {
+      setAssignmentsToSubmit(assignments.filter((a) => !a.submission).length);
+    });
+  }, []);
+  useEffect(() => {
+    refreshAssignmentsCount(effectiveSelectedCourseId);
+  }, [effectiveSelectedCourseId, refreshAssignmentsCount]);
+  const assignmentHandlers = api.assignmentsAvailable()
+    ? {
+        onFetchAssignments: api.fetchAssignments,
+        onSubmitAssignment: api.submitAssignment,
+        onCreateAssignment: api.createAssignment,
+        onUpdateAssignment: api.updateAssignment,
+        onFetchSubmissions: api.fetchAssignmentSubmissions,
+        onFetchSubmission: api.fetchSubmission,
+        onGradeSubmission: api.gradeSubmission,
+        onFetchTeams: api.fetchAssignmentTeams,
+        onSaveTeams: api.saveAssignmentTeams,
+        onJoinTeam: api.joinAssignmentTeam,
+        onCreateTeam: api.createAssignmentTeam,
+        onLeaveTeam: api.leaveAssignmentTeam,
+        onAssignmentsChanged: () => refreshAssignmentsCount(effectiveSelectedCourseId),
+      }
+    : undefined;
 
   // Établissement de l'utilisateur : celui dont le domaine courriel correspond au sien. Le bandeau
   // retombe sur « MoodIT » si aucun ne correspond ou si la liste ne se charge pas.
@@ -1107,6 +1146,11 @@ export default function Dashboard() {
             courses={coursesEnabled ? courses : []}
             selectedCourseId={effectiveSelectedCourseId}
             selectedChannel={selectedChannelRef}
+            assignments={
+              api.assignmentsAvailable()
+                ? { count: canManageActiveProgram ? undefined : assignmentsToSubmit }
+                : undefined
+            }
             onSelectChannel={(channel) =>
               setView({
                 programId: activeProgramId,
@@ -1148,6 +1192,21 @@ export default function Dashboard() {
         <AccueilPage firstName={currentUser.firstName} />
       ) : (
       <MainPanel
+        assignmentHandlers={assignmentHandlers}
+        onOpenAssignment={(assignmentId) =>
+          setView({
+            programId: activeProgramId,
+            courseId: effectiveSelectedCourseId,
+            channel: { type: 'assignment', id: assignmentId },
+          })
+        }
+        onOpenSubmission={(submissionId) =>
+          setView({
+            programId: activeProgramId,
+            courseId: effectiveSelectedCourseId,
+            channel: { type: 'submission', id: submissionId },
+          })
+        }
         loading={mainPanelLoading}
         isAdmin={permsForProgram(activeProgramId).canManageContent}
         // Modération (supprimer le contenu d'autrui) : admin GLOBAL ou Administrateur du

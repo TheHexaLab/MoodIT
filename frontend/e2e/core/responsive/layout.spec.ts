@@ -62,7 +62,7 @@ test('disposition selon la largeur : tiroir + barre mobile (≤ 900 px) ou barre
   await expect
     .poll(async () => Math.round((await rail.locator('xpath=ancestor::div[3]').boundingBox())!.width))
     .toBeLessThan(120);
-  for (const section of ['QUIZ', 'CANAUX', 'FORUMS']) {
+  for (const section of ['Quiz', 'Canaux', 'Forums']) {
     await expectReachable(
       page.getByRole('navigation', { name: 'Cours' }).getByRole('button', { name: section, exact: true })
     );

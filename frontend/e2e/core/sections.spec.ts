@@ -140,7 +140,7 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
   await expect(editorRows(page)).toHaveCount(2);
 
   // L'étudiant voit les deux canaux apparaître sans recharger.
-  await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([a, b]);
+  await expect(sidebarItems(student.page, 'Canaux')).toHaveText([a, b]);
 
   // Renommer : « Annuler » ne change rien, puis renommage effectif.
   await rowAction(page, a, 'rename').click();
@@ -154,14 +154,14 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
   await nameField(page).fill(renamed);
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(editorRows(page)).toHaveText([`⠿${renamed}`, `⠿${b}`]);
-  await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([renamed, b]);
+  await expect(sidebarItems(student.page, 'Canaux')).toHaveText([renamed, b]);
 
   // Réordonner en glissant depuis la poignée (Pointer Events, cf. usePointerReorder) : glissé
   // progressif, avec un rendu React entre deux déplacements (comme pour les quiz).
   await pointerDrag(page, editorRow(page, b).getByText('⠿'), editorRow(page, renamed));
   await expect(editorRows(page)).toHaveText([`⠿${b}`, `⠿${renamed}`]);
-  await expect(sidebarItems(page, 'CANAUX')).toHaveText([b, renamed]);
-  await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([b, renamed]);
+  await expect(sidebarItems(page, 'Canaux')).toHaveText([b, renamed]);
+  await expect(sidebarItems(student.page, 'Canaux')).toHaveText([b, renamed]);
 
   // Supprimer : confirmation (« Annuler » puis « Supprimer »).
   await rowAction(page, b, 'delete').click();
@@ -171,14 +171,14 @@ test('canaux : créer, refuser un doublon, renommer, réordonner et supprimer ; 
   await rowAction(page, b, 'delete').click();
   await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
   await expect(editorRows(page)).toHaveText([`⠿${renamed}`]);
-  await expect(sidebarItems(student.page, 'CANAUX')).toHaveText([renamed]);
+  await expect(sidebarItems(student.page, 'Canaux')).toHaveText([renamed]);
 
   // Fermeture par « ✕ » ; l'état est persisté (rechargement).
   await page.getByRole('button', { name: '✕' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toHaveCount(0);
   await page.reload();
   await enterProgram(page, program.name);
-  await expect(sidebarItems(page, 'CANAUX')).toHaveText([renamed]);
+  await expect(sidebarItems(page, 'Canaux')).toHaveText([renamed]);
 
   await close();
 });
@@ -191,8 +191,8 @@ test('forums : créer, renommer et supprimer par le crayon de la section ; vu en
   const page = teacher.page;
   const name = `forum-${uniqueSuffix()}`;
 
-  await sidebarSection(page, 'FORUMS')
-    .getByRole('button', { name: 'Modifier la section FORUMS' })
+  await sidebarSection(page, 'Forums')
+    .getByRole('button', { name: 'Modifier la section Forums' })
     .click();
   await expect(page.getByRole('heading', { name: 'Modifier les forums' })).toBeVisible();
   await expect(page.getByText('Aucun forum pour le moment.')).toBeVisible();
@@ -201,20 +201,20 @@ test('forums : créer, renommer et supprimer par le crayon de la section ; vu en
   await nameField(page).fill(name);
   await nameField(page).press('Enter');
   await expect(editorRow(page, name)).toBeVisible();
-  await expect(sidebarItems(student.page, 'FORUMS')).toHaveText([name]);
+  await expect(sidebarItems(student.page, 'Forums')).toHaveText([name]);
 
   // Renommage puis suppression enchaînés (l'id réel du forum créé doit avoir été réconcilié).
   await rowAction(page, name, 'rename').click();
   await nameField(page).fill(`${name}-v2`);
   await nameField(page).press('Enter');
   await expect(editorRow(page, `${name}-v2`)).toBeVisible();
-  await expect(sidebarItems(student.page, 'FORUMS')).toHaveText([`${name}-v2`]);
+  await expect(sidebarItems(student.page, 'Forums')).toHaveText([`${name}-v2`]);
 
   await rowAction(page, `${name}-v2`, 'delete').click();
   await expect(page.getByRole('heading', { name: 'Supprimer un forum ?' })).toBeVisible();
   await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
   await expect(editorRows(page)).toHaveCount(0);
-  await expect(sidebarSection(student.page, 'FORUMS').getByText('Aucun forum')).toBeVisible();
+  await expect(sidebarSection(student.page, 'Forums').getByText('Aucun forum')).toBeVisible();
 
   // Fermeture par clic sur le fond du popup.
   await page.mouse.click(5, 5);
@@ -230,8 +230,8 @@ test('un étudiant n’a pas les crayons d’édition des sections', async ({ br
   await enterProgram(page, PROGRAM_NAME);
 
   const sidebar = page.getByRole('navigation', { name: 'Cours' });
-  await expect(sidebarSection(page, 'CANAUX')).toBeVisible();
-  for (const section of ['QUIZ', 'CANAUX', 'FORUMS']) {
+  await expect(sidebarSection(page, 'Canaux')).toBeVisible();
+  for (const section of ['Quiz', 'Canaux', 'Forums']) {
     await expect(sidebarSection(page, section)).toBeVisible();
     await expect(
       sidebar.getByRole('button', { name: `Modifier la section ${section}` })

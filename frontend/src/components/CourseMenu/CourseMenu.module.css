@@ -10,6 +10,7 @@
     min-width: var(--cm-width, var(--cm-default-width));
     height: 100%;
     background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
     box-sizing: border-box;
     overflow: hidden;
     transition: width 0.2s ease, min-width 0.2s ease, visibility 0.2s;
@@ -160,13 +161,14 @@
     gap: 0.5rem;
     width: 100%;
     height: 100%;
-    padding: 0 var(--header-pad-x);
+    /* À droite : la place du bouton de réduction, posé par-dessus. */
+    padding: 0 2.75rem 0 var(--header-pad-x);
     border: none;
     background: transparent;
     color: var(--text);
     font-family: Inter, sans-serif;
-    font-size: clamp(0.875rem, 0.8rem + 0.3vw, 1rem);
-    font-weight: 600;
+    font-size: 0.875rem;
+    font-weight: 700;
     line-height: normal;
     outline: none;
     cursor: default;
@@ -188,6 +190,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Le nom du cours se pose sous le code, qui remonte d'autant. */
+.courseSelectWithTitle {
+    padding-bottom: 0.875rem;
+}
+
+.courseSelectTitle {
+    position: absolute;
+    left: var(--header-pad-x);
+    right: 2.75rem;
+    bottom: 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-family: Inter, sans-serif;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    line-height: normal;
+    pointer-events: none;
 }
 
 /* ── Zone principale ────────────────────────────────────────── */

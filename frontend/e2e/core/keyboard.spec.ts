@@ -503,7 +503,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await enterProgram(page, fixture.program.name);
     await page
       .getByRole('navigation', { name: 'Cours' })
-      .getByRole('button', { name: 'Modifier la section QUIZ' })
+      .getByRole('button', { name: 'Modifier la section Quiz' })
       .click();
     await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
     await page.locator('[data-reorder-id]').filter({ hasText: quizTitle }).click();
@@ -565,7 +565,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     await enterProgram(page, fixture.program.name);
     const nav = page.getByRole('navigation', { name: 'Cours' });
 
-    await nav.getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Quiz' }).click();
     const editor = page.getByRole('heading', { name: 'Modifier les quiz' });
     await expect(editor).toBeVisible();
     await page.keyboard.press('Escape');
@@ -573,7 +573,7 @@ test.describe('éditeur de quiz (Administrateur neuf d’un programme neuf)', ()
     if (await editor.isVisible()) await page.getByRole('button', { name: 'Fermer' }).click();
     await expect(editor).toBeHidden();
 
-    await nav.getByRole('button', { name: 'Modifier la section CANAUX' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Canaux' }).click();
     const sections = page.getByRole('heading', { name: 'Modifier les canaux' });
     await expect(sections).toBeVisible();
     await page.keyboard.press('Escape');

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './CourseMenu.module.css';
 import { type Program } from '../ProgramMenu/ProgramMenu';
+import { isAssignmentChannel } from '../CourseChannelList/channelTypeDefinitions.ts';
 import CourseChannelList, {
   type ChannelRef,
   type ChannelTypeDefinition,
@@ -49,6 +50,8 @@ interface CourseMenuProps {
   courses?: Course[];
   /** Cours actuellement ouvert (par défaut, le premier). */
   selectedCourseId?: number;
+  /** Affiche l'entrée « Devoirs » du cours (voir CourseChannelList). */
+  assignments?: { count?: number };
   /** Definition des types de canaux affiches dans la liste. */
   channelTypeDefinitions?: ChannelTypeDefinition[];
   /** Canal actuellement sélectionné (type + id). */
@@ -128,6 +131,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   activeProgram,
   courses = [],
   selectedCourseId,
+  assignments,
   channelTypeDefinitions,
   selectedChannel,
   onSelectChannel,
@@ -173,6 +177,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
   const courseOptions = courses.map((course) => ({
     id: course.id,
     code: formatCourseCode(course),
+    title: course.title,
     channels: normalizeCourseChannelsFromSources({
       quizzes: course.quizzes,
       forums: course.forums,
@@ -272,7 +277,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             {/* Pas d'action au clic : le bouton ne porte que le menu contextuel du cours. */}
             <button
               type="button"
-              className={styles.courseSelect}
+              className={`${styles.courseSelect}${selectedCourse?.title ? ` ${styles.courseSelectWithTitle}` : ''}`}
               onContextMenu={handleCourseContextMenu}
               onKeyDown={handleCourseSelectKeyDown}
               onTouchStart={handleCourseTouchStart}
@@ -287,6 +292,12 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
                 {selectedCourse?.code ?? dropdownLabels.selectFallback}
               </span>
             </button>
+            {/* Repère visuel, hors du bouton : son nom accessible reste le code du cours. */}
+            {selectedCourse?.title && (
+              <span className={styles.courseSelectTitle} aria-hidden="true">
+                {selectedCourse.title}
+              </span>
+            )}
           </div>
         ) : (
           <span className={styles.headerTitle}>{activeProgram?.label ?? 'Accueil'}</span>
@@ -344,6 +355,7 @@ const CourseMenu: React.FC<CourseMenuProps> = ({
             onSelectChannel={onSelectChannel}
             onOpenChannel={onOpenChannel}
             onEditSection={isAdmin && onSectionChange ? setEditingSection : undefined}
+            assignments={assignments}
           />
         )}
       </main>
@@ -437,6 +449,8 @@ function getEffectiveSelectedChannel(
   selectedChannel: ChannelRef | undefined
 ): ChannelRef | undefined {
   if (selectedChannel === undefined) return undefined;
+  // Les devoirs ne sont pas des canaux normalisés : leur entrée suit l'URL directement.
+  if (isAssignmentChannel(selectedChannel.type)) return selectedChannel;
   return channels.some((channel) => isSameChannel(channel, selectedChannel))
     ? selectedChannel
     : undefined;

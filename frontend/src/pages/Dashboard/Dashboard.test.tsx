@@ -331,6 +331,128 @@ afterEach(() => {
 });
 
 describe('Dashboard', () => {
+  describe('devoirs', () => {
+    const TO_SUBMIT = {
+      id: 5,
+      courseId: 10,
+      title: 'Devoir 5',
+      instructions: 'Lire.',
+      expectedFormats: [],
+      files: [],
+      isPublished: true,
+      submittedCount: 0,
+      gradedCount: 0,
+      studentCount: 1,
+    };
+    const courseNav = () => within(screen.getByRole('navigation', { name: 'Cours' }));
+
+    beforeEach(() => {
+      vi.mocked(api.assignmentsAvailable).mockReturnValue(true);
+      vi.mocked(api.fetchAssignments).mockResolvedValue([TO_SUBMIT]);
+    });
+
+    afterEach(() => {
+      // Démonter d'abord : une vue encore montée relirait des accès déjà réinitialisés.
+      cleanup();
+      vi.mocked(api.assignmentsAvailable).mockReset();
+      vi.mocked(api.fetchAssignments).mockReset();
+    });
+
+    it('l’entrée du panneau ouvre la liste, et une ligne ouvre le devoir, dans l’URL', async () => {
+      renderDashboard({ path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      expect(await courseNav().findByLabelText('1 à remettre')).toBeTruthy();
+
+      fireEvent.click(courseNav().getByRole('button', { name: /Devoirs/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/assignment/0'));
+      expect(lastNavigation()).toBe('PUSH');
+
+      fireEvent.click(await screen.findByRole('button', { name: /Devoir 5/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/assignment/5'));
+      expect(await screen.findByRole('heading', { name: 'Devoir 5' })).toBeTruthy();
+    });
+
+    it('une remise met à jour la pastille du panneau', async () => {
+      vi.mocked(api.submitAssignment).mockResolvedValue({
+        ...TO_SUBMIT,
+        submission: { fileNames: ['a.pdf'], submittedAt: new Date().toISOString(), late: false },
+      });
+      renderDashboard({ path: '/home/p/1/c/10/assignment/5' });
+      await screen.findByRole('heading', { name: 'Devoir 5' });
+      await courseNav().findByLabelText('1 à remettre');
+
+      vi.mocked(api.fetchAssignments).mockResolvedValue([]);
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [new File(['x'], 'a.pdf')] },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Remettre le devoir' }));
+
+      await waitFor(() => expect(courseNav().queryByLabelText(/à remettre/)).toBeNull());
+    });
+
+    it('une remise à noter s’ouvre dans l’URL, avec l’entrée Devoirs active', async () => {
+      vi.mocked(api.fetchSubmission).mockResolvedValue({
+        assignment: TO_SUBMIT,
+        rows: [
+          {
+            id: 500,
+            studentName: 'Camille Lavoie',
+            status: 'submitted',
+            files: [{ name: 'a.zip', size: '1 Ko' }],
+          },
+        ],
+      });
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10/submission/500' });
+
+      expect(
+        await screen.findByRole('heading', { name: 'Camille Lavoie' }, { timeout: 5000 })
+      ).toBeTruthy();
+      expect(api.fetchSubmission).toHaveBeenCalledWith(10, 500);
+      expect(
+        courseNav()
+          .getByRole('button', { name: /Devoirs/ })
+          .getAttribute('aria-current')
+      ).toBe('page');
+    });
+
+    it('le personnel ouvre une remise depuis le suivi, dans l’URL', async () => {
+      vi.mocked(api.fetchAssignmentSubmissions).mockResolvedValue([
+        {
+          id: 500,
+          studentName: 'Camille Lavoie',
+          status: 'submitted',
+          files: [{ name: 'a.zip', size: '1 Ko' }],
+        },
+      ]);
+      vi.mocked(api.fetchSubmission).mockResolvedValue({ assignment: TO_SUBMIT, rows: [] });
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10/assignment/5' });
+
+      // Programmes, cours, devoirs puis remises : quatre chargements, plus lents en suite complète.
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Noter Camille Lavoie' }, { timeout: 5000 })
+      );
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10/submission/500'));
+      expect(lastNavigation()).toBe('PUSH');
+    });
+
+    it('le personnel n’a pas de pastille de devoirs à remettre', async () => {
+      renderDashboard({ isAdmin: true, path: '/home/p/1/c/10' });
+      await waitForCourseSelector('IFT101');
+      await courseNav().findByRole('button', { name: /Devoirs/ });
+      expect(courseNav().queryByLabelText(/à remettre/)).toBeNull();
+    });
+
+    it('en production : aucune entrée, et l’URL d’un devoir n’affiche rien de fictif', async () => {
+      vi.mocked(api.assignmentsAvailable).mockReturnValue(false);
+      renderDashboard({ path: '/home/p/1/c/10/assignment/5' });
+      await waitForCourseSelector('IFT101');
+
+      expect(courseNav().queryByRole('button', { name: /Devoirs/ })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Devoir 5' })).toBeNull();
+      expect(api.fetchAssignments).not.toHaveBeenCalled();
+    });
+  });
+
   describe('chargement initial', () => {
     it('ouvre la connexion WS, charge les programmes et affiche le portail', async () => {
       renderDashboard({ path: '/home' });
@@ -497,6 +619,18 @@ describe('Dashboard', () => {
       fireEvent.doubleClick(handle);
       expect(localStorage.getItem('portalSidebar:width')).toBeNull();
       expect(handle.getAttribute('aria-valuenow')).toBe('272');
+    });
+
+    it('la tuile du cours ouvert garde le canal affiché, celle d’un autre cours repart de zéro', async () => {
+      renderDashboard({ path: '/home/p/1/c/10/text/5' });
+      await waitForCourseSelector('IFT101');
+
+      // Nom complet de la tuile : le sélecteur du panneau, lui, s'appelle seulement « IFT101 ».
+      fireEvent.click(screen.getByRole('button', { name: /^IFT101.+/ }));
+      expect(currentPath()).toBe('/home/p/1/c/10/text/5');
+
+      fireEvent.click(screen.getByRole('button', { name: /^IFT102.+/ }));
+      await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/11'));
     });
 
     it('ouvrir un cours rouvre le panneau réduit', async () => {
@@ -906,7 +1040,7 @@ describe('Dashboard', () => {
       renderDashboard({ isAdmin: true });
       await selectProgram('Génie logiciel');
       await waitForCourseSelector('IFT101');
-      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section CANAUX' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Modifier la section Canaux' }));
       // Ligne « general » DANS le popup (celle qui porte les icônes d'action).
       const li = screen
         .getAllByText('general')
@@ -1634,7 +1768,7 @@ describe('Dashboard — compléments', () => {
       fireEvent.click(
         within(openProgramContextMenu('Mathématiques')).getByRole('menuitem', { name: 'Rejoindre des cours' })
       );
-      fireEvent.click(await screen.findByRole('button', { name: /Algèbre/ }));
+      fireEvent.click(await within(screen.getByRole('dialog')).findByRole('button', { name: /Algèbre/ }));
       fireEvent.click(screen.getByRole('button', { name: joinCoursesLabels.join }));
       expect(await screen.findByRole('button', { name: /MAT100/ })).toBeTruthy();
       expect(api.joinCourses).toHaveBeenCalledWith(3, [30]);

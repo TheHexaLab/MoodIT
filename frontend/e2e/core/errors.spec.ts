@@ -432,7 +432,7 @@ test('sections : création en panne (saisie conservée) et suppression annulée'
   const name = `panne-${uniqueSuffix()}`;
   const sectionsUrl = `**/api/courses/${fx.course.id}/sections`;
 
-  await courseNav(page).getByRole('button', { name: 'Modifier la section CANAUX' }).click();
+  await courseNav(page).getByRole('button', { name: 'Modifier la section Canaux' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toBeVisible();
   await page.getByRole('button', { name: '+ Ajouter un canal' }).click();
   await sectionNameField(page).fill(name);
@@ -735,7 +735,7 @@ test('éditeur de quiz : enregistrement en panne (formulaire conservé) puis suc
   const api = await apiFor(baseURL!, teacher.storageState);
 
   try {
-    await courseNav(page).getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+    await courseNav(page).getByRole('button', { name: 'Modifier la section Quiz' }).click();
     await page.getByRole('button', { name: 'Créer un quiz' }).click();
     await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
     await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill('Question de panne');
@@ -778,7 +778,7 @@ test('éditeur de quiz : l’évaluation du code échoue puis « Réessayer » c
   const teacher = await member(baseURL!, fx, 'Enseignant');
   const { page } = await openProgram(browser, teacher.storageState, fx.program);
 
-  await courseNav(page).getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+  await courseNav(page).getByRole('button', { name: 'Modifier la section Quiz' }).click();
   await page.getByRole('button', { name: 'Créer un quiz' }).click();
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await page.getByRole('textbox', { name: 'Éditeur Markdown' }).fill('Écris `solution(a, b)` qui renvoie a + b.');
