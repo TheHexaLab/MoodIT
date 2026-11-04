@@ -361,18 +361,39 @@ export default function ScheduleForm({
     </div>
   );
 
-  const timeSelect = (field: 'start' | 'end', label: string) => (
-    <label className={styles.field}>
-      <span>{label}</span>
-      <select value={draft[field]} onChange={(event) => set({ [field]: event.target.value })}>
-        {TIME_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+  /** Un champ à liste déroulante (la même que Cours et Type) : libellé, choix affiché, éléments. */
+  const pickField = (key: string, label: string, display: string, items: DropdownItem[]) => (
+    <div className={styles.field}>
+      <label id={`${id}-${key}-label`} htmlFor={`${id}-${key}`} className={styles.kindLabel}>
+        {label}
+      </label>
+      <Dropdown
+        id={`${id}-${key}`}
+        labelId={`${id}-${key}-label`}
+        display={display}
+        menuLabel={label}
+        items={items}
+      />
+    </div>
   );
+
+  const timeOptions = (options: { value: string; label: string }[], field: 'start' | 'end') =>
+    options.map((option) => ({
+      key: option.value,
+      label: option.label,
+      selected: draft[field] === option.value,
+      onSelect: () => set({ [field]: option.value }),
+    }));
+  const timeLabel = (options: { value: string; label: string }[], value: string) =>
+    options.find((option) => option.value === value)?.label ?? value;
+
+  const timeSelect = (field: 'start' | 'end', label: string) =>
+    pickField(
+      field,
+      label,
+      timeLabel(TIME_OPTIONS, draft[field]),
+      timeOptions(TIME_OPTIONS, field)
+    );
 
   return (
     <form
@@ -457,18 +478,14 @@ export default function ScheduleForm({
           <span>Tâche terminée</span>
         </label>
       )}
-      {isTask && draft.deadline && (
-        <label className={styles.field}>
-          <span>Heure limite</span>
-          <select value={draft.start} onChange={(event) => set({ start: event.target.value })}>
-            {DEADLINE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      {isTask &&
+        draft.deadline &&
+        pickField(
+          'due',
+          'Heure limite',
+          timeLabel(DEADLINE_OPTIONS, draft.start),
+          timeOptions(DEADLINE_OPTIONS, 'start')
+        )}
       {!(isTask && (draft.allDay || draft.deadline)) && (
         <div className={styles.fieldRow}>
           {timeSelect('start', 'Début')}
@@ -485,39 +502,37 @@ export default function ScheduleForm({
               onChange={(color) => set({ color })}
             />
           )}
-          {
-            <label className={styles.field}>
-              <span>Cours lié (facultatif)</span>
-              <select
-                value={draft.courseId ?? ''}
-                onChange={(event) =>
-                  set({ courseId: event.target.value ? Number(event.target.value) : null })
-                }
-              >
-                <option value="">Aucun</option>
-                {courses.map((course) => (
-                  <option key={course.id} value={course.id}>
-                    {course.code}
-                  </option>
-                ))}
-              </select>
-            </label>
-          }
-          <label className={styles.field}>
-            <span>Rappel</span>
-            <select
-              value={draft.reminder ?? ''}
-              onChange={(event) =>
-                set({ reminder: event.target.value ? Number(event.target.value) : null })
-              }
-            >
-              {REMINDERS.map((reminder) => (
-                <option key={reminder.label} value={reminder.value ?? ''}>
-                  {reminder.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {pickField(
+            'linked',
+            'Cours lié (facultatif)',
+            courses.find((course) => course.id === draft.courseId)?.code ?? 'Aucun',
+            [
+              {
+                key: 'none',
+                label: 'Aucun',
+                selected: draft.courseId == null,
+                onSelect: () => set({ courseId: null }),
+              },
+              ...courses.map((course) => ({
+                key: String(course.id),
+                label: course.code,
+                selected: course.id === draft.courseId,
+                onSelect: () => set({ courseId: course.id }),
+              })),
+            ]
+          )}
+          {pickField(
+            'reminder',
+            'Rappel',
+            REMINDERS.find((reminder) => reminder.value === draft.reminder)?.label ??
+              'Aucun rappel',
+            REMINDERS.map((reminder) => ({
+              key: reminder.label,
+              label: reminder.label,
+              selected: reminder.value === draft.reminder,
+              onSelect: () => set({ reminder: reminder.value }),
+            }))
+          )}
           {/* La description s'agrandit avec son texte : elle se lit toujours en entier. */}
           <label className={`${styles.field} ${styles.fieldGrow}`}>
             <span>Description</span>
