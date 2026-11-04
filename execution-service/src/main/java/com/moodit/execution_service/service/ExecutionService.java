@@ -85,28 +85,19 @@ public class ExecutionService {
     }
 
     /**
-     * Évalue une question « appel de fonction » par CAS STRUCTURÉS (#116). Le code étudiant est lancé
-     * comme SERVEUR RPC pur (aucun harnais, aucun nonce) ; on lui envoie TOUS les cas sur stdin (Piston
-     * est one-shot : une requête JSON par ligne) et on compare ICI chaque sortie à l'attendu — qui ne
-     * touche JAMAIS le sandbox. Le verdict vit donc hors de portée de l'étudiant, pour tout langage.
-     * L'ordre des réponses suit l'ordre des cas (le serveur répond séquentiellement).
+     * Évalue une question par CAS STRUCTURÉS (#116). Le code étudiant est assemblé en SERVEUR qui
+     * ÉVALUE les EXPRESSIONS des cas (sans harnais, sans nonce) et émet, par cas et dans l'ordre, DEUX
+     * lignes : statut (1=ok, 0=exception) puis la valeur en texte. On exécute UNE fois (Piston est
+     * one-shot), puis on compare ICI chaque valeur à l'attendu — qui ne touche JAMAIS le sandbox. Le
+     * verdict et les attendus restent donc hors de portée de l'étudiant, quel que soit le langage.
      */
     public List<TestResult> evaluateStructured(StructuredEvaluateRequest request) {
-        CodeAssembler.Assembled asm = assembler.assembleServer(request.language(), request.code());
-        // Requêtes en NETSTRING (lisibles sans lib JSON, requis pour C/Rust) : pour chaque cas,
-        // l'entrée puis chaque argument (scalaire → texte brut ; tableau → son JSON). Le serveur
-        // connaît le nombre/les types d'arguments par symbole (généré depuis la signature).
-        StringBuilder stdin = new StringBuilder();
-        for (StructuredCase c : request.cases()) {
-            ns(stdin, c.entry());
-            JsonNode args = c.args();
-            if (args != null && args.isArray()) {
-                for (JsonNode arg : args) {
-                    ns(stdin, (arg.isArray() || arg.isObject()) ? arg.toString() : arg.asText());
-                }
-            }
-        }
-        PistonClient.Result result = execute(asm.pistonLanguage(), request.version(), asm.files(), stdin.toString());
+        List<CodeAssembler.ServerCase> serverCases = request.cases().stream()
+                .map(c -> new CodeAssembler.ServerCase(c.expr(), kindOf(c.expected())))
+                .toList();
+        CodeAssembler.Assembled asm =
+                assembler.assembleServer(request.language(), request.code(), serverCases);
+        PistonClient.Result result = execute(asm.pistonLanguage(), request.version(), asm.files());
 
         // Échec de compilation → tous les cas échouent avec le message de compilation.
         PistonClient.Stage compile = result.compile();
@@ -116,33 +107,35 @@ public class ExecutionService {
                     .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, msg)).toList();
         }
 
-        // Réponses en NETSTRING : (status, payload) par cas. payload = valeur JSON (succès) ou message.
         PistonClient.Stage run = result.run();
-        NetstringReader reader = new NetstringReader(run == null ? null : run.stdout());
+        // Deux lignes par cas : statut (1/0) puis valeur. split(-1) conserve les lignes vides.
+        String[] lines = (run == null || run.stdout() == null) ? new String[0] : run.stdout().split("\n", -1);
         List<TestResult> out = new ArrayList<>();
-        for (StructuredCase c : request.cases()) {
+        for (int i = 0; i < request.cases().size(); i++) {
+            StructuredCase c = request.cases().get(i);
             int weight = c.effectiveWeight();
             if (run != null && run.signal() != null) {
                 out.add(new TestResult(c.name(), weight, false,
                         "Interrompu (signal " + run.signal() + ") — dépassement de temps ou de mémoire probable"));
                 continue;
             }
-            String status = reader.next();
-            String payload = reader.next();
-            if (status == null || payload == null) {
+            if (2 * i + 1 >= lines.length) {
                 out.add(new TestResult(c.name(), weight, false,
                         firstNonBlank(run == null ? null : run.stderr(), "Aucune réponse du serveur pour ce cas")));
                 continue;
             }
+            String status = lines[2 * i].trim();
+            String payload = lines[2 * i + 1];
             if (!"1".equals(status)) {
-                out.add(new TestResult(c.name(), weight, false, "L'appel a échoué : " + payload));
+                out.add(new TestResult(c.name(), weight, false,
+                        "L'expression a échoué (exception/panique) pour ce cas"));
                 continue;
             }
             JsonNode value;
             try {
                 value = MAPPER.readTree(payload);
             } catch (RuntimeException e) {
-                // Valeur non-JSON (ex. chaîne brute émise par un serveur sans lib JSON) → traitée en chaîne.
+                // Valeur non-JSON (chaîne brute émise par un serveur sans lib JSON) → traitée en chaîne.
                 value = MAPPER.readTree(MAPPER.writeValueAsString(payload));
             }
             boolean passed = jsonMatches(value, c.expected(), c.compareMode());
@@ -152,31 +145,16 @@ public class ExecutionService {
         return out;
     }
 
-    /** Ajoute {@code s} à {@code b} en netstring ({@code <longueur octets>:<s>,}). */
-    private static void ns(StringBuilder b, String s) {
-        int len = s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        b.append(len).append(':').append(s).append(',');
+    /** Kind de l'attendu (pour l'émission typée des serveurs C/C++) : int/double/bool/string. */
+    private static String kindOf(JsonNode expected) {
+        if (expected == null) return "string";
+        if (expected.isBoolean()) return "bool";
+        if (expected.isIntegralNumber()) return "int";
+        if (expected.isNumber()) return "double";
+        return "string";
     }
 
-    /** Lecture séquentielle de netstrings dans une sortie (ASCII ; {@code next()} = {@code null} si fini). */
-    private static final class NetstringReader {
-        private final String s;
-        private int i;
-        NetstringReader(String stdout) { this.s = stdout == null ? "" : stdout; }
-        String next() {
-            while (i < s.length() && (s.charAt(i) == '\n' || s.charAt(i) == '\r')) i++;
-            int colon = s.indexOf(':', i);
-            if (colon < 0) return null;
-            int len;
-            try { len = Integer.parseInt(s.substring(i, colon).trim()); } catch (NumberFormatException e) { return null; }
-            int start = colon + 1;
-            if (start + len > s.length()) return null;
-            String val = s.substring(start, start + len);
-            i = start + len;
-            if (i < s.length() && s.charAt(i) == ',') i++;
-            return val;
-        }
-    }
+
 
     /** Compare une sortie à l'attendu selon le mode : {@code exact}, {@code float} (tolérance),
      *  {@code unordered} (collection sans ordre). */

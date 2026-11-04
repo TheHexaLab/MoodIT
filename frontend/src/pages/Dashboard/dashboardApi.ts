@@ -262,9 +262,9 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  // #116 : si les cas sont STRUCTURÉS (un `entry` renseigné), on passe par le serveur RPC pur —
-  // les attendus (args/expected, parsés en JSON) sont comparés hors sandbox, jamais exposés au code.
-  const structured = input.testCases.some((t) => t.entry != null && t.entry !== '');
+  // #116 : si les cas sont STRUCTURÉS (une `expr` renseignée), on évalue l'expression dans un serveur
+  // pur et on compare l'attendu (parsé en JSON) hors sandbox — jamais exposé au code étudiant.
+  const structured = input.testCases.some((t) => t.expr != null && t.expr !== '');
   const path = structured ? '/exec/evaluate-structured' : '/exec/evaluate';
   const body = structured
     ? {
@@ -272,8 +272,7 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
         code: input.code,
         cases: input.testCases.map((t) => ({
           name: t.name,
-          entry: t.entry,
-          args: parseJsonOrNull(t.argsJson),
+          expr: t.expr,
           expected: parseJsonOrNull(t.expectedJson),
           compare: t.compareMode,
           weight: t.weight,

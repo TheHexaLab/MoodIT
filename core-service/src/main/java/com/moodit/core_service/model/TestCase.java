@@ -31,13 +31,13 @@ public class TestCase {
     @Column(name = "harness_code", columnDefinition = "TEXT")
     private String harnessCode;
 
-    /** Symbole appelé pour un cas structuré (ex. {@code doubler}, {@code Solution.solution}). */
-    @Column(length = 200)
-    private String entry;
-
-    /** Arguments du cas structuré, en JSON (tableau). */
-    @Column(name = "args_json", columnDefinition = "TEXT")
-    private String argsJson;
+    /**
+     * CAS STRUCTURÉ (#116) : EXPRESSION (dans le langage de la question) qui RENVOIE la valeur testée
+     * — appel de fonction, construction d'objet + méthode, séquence. {@code expr} renseigné ⇒ cas
+     * structuré : évalué dans un serveur, sa sortie est comparée à {@code expectedJson} HORS sandbox.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String expr;
 
     /** Valeur attendue du cas structuré, en JSON. */
     @Column(name = "expected_json", columnDefinition = "TEXT")

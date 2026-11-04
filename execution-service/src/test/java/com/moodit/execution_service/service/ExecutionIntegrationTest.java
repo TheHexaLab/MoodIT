@@ -86,99 +86,104 @@ class ExecutionIntegrationTest {
 
     private static final ObjectMapper M = new ObjectMapper();
 
-    /** Vrai si tous les CAS STRUCTURÉS passent (serveur RPC pur ; attendus comparés hors sandbox). */
+    /** Vrai si tous les CAS STRUCTURÉS passent (serveur qui évalue les expressions ; attendus dehors). */
     private boolean passesStructured(String language, String code, StructuredCase... cases) {
         List<TestResult> res = service.evaluateStructured(
                 new StructuredEvaluateRequest(language, null, code, List.of(cases)));
         return !res.isEmpty() && res.stream().allMatch(TestResult::passed);
     }
 
-    private StructuredCase cas(String entry, String argsJson, String expectedJson) {
-        return new StructuredCase("t", entry, M.readTree(argsJson), M.readTree(expectedJson), "exact", 1);
+    /** Cas structuré : une expression (renvoyant la valeur, convention du langage) + l'attendu (JSON). */
+    private StructuredCase cas(String expr, String expectedJson) {
+        return new StructuredCase("t", expr, M.readTree(expectedJson), "exact", 1);
     }
+
+    // #116 — Cas structurés : l'expression (appel de fonction OU construction d'objet + méthode) tourne
+    // dans le serveur ; l'ATTENDU est comparé par execution-service, jamais dans le sandbox. On prouve
+    // pour chaque compilé : fonction OK, POO OK, mauvais attendu → échec, mauvaise réponse/exception → échec.
 
     @Test
     void go_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("go");
         String code = "package main\nfunc doubler(n int) int { return n * 2 }\n"
-                + "func somme(xs []int) int { t := 0; for _, x := range xs { t += x }; return t }\n"
-                + "func main() {}";
-        // Bonne réponse : les cas passent. Le harnais/attendu ne sont JAMAIS dans le sandbox.
+                + "type Rectangle struct { largeur, hauteur int }\n"
+                + "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\nfunc main() {}";
         assertThat(passesStructured("Go", code,
-                cas("doubler", "[5]", "10"), cas("somme", "[[1,2,3]]", "6"))).isTrue();
-        // Mauvaise valeur attendue → échec : c'est execution-service (hors sandbox) qui tranche.
-        assertThat(passesStructured("Go", code, cas("doubler", "[5]", "11"))).isFalse();
-        // Mauvaise réponse étudiant → échec.
-        assertThat(passesStructured("Go", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
-
-        // SÉCURITÉ : un étudiant qui fouille sa propre source/son binaire pour deviner l'attendu NE PEUT
-        // PAS — l'attendu (10) n'est nulle part dans le sandbox (ni harnais, ni stdin). Il renvoie faux.
+                cas("return doubler(5)", "10"),
+                cas("return Rectangle{largeur: 3, hauteur: 4}.aire()", "12"))).isTrue();
+        assertThat(passesStructured("Go", code, cas("return doubler(5)", "11"))).isFalse();
+        assertThat(passesStructured("Go", code.replace("n * 2", "0"), cas("return doubler(5)", "10"))).isFalse();
+        // SÉCURITÉ : fouiller la source ne révèle pas l'attendu (10 n'est nulle part dans le sandbox).
         String triche = "package main\nimport (\n\t\"os\"\n\t\"regexp\"\n\t\"strconv\"\n)\n"
                 + "func doubler(n int) int {\n"
                 + "\tb, _ := os.ReadFile(\"main.go\")\n"
                 + "\tm := regexp.MustCompile(`[0-9]+`).FindString(string(b))\n"
                 + "\tv, _ := strconv.Atoi(m)\n\treturn v\n}\nfunc main() {}";
-        assertThat(passesStructured("Go", triche, cas("doubler", "[5]", "10"))).isFalse();
+        assertThat(passesStructured("Go", triche, cas("return doubler(5)", "10"))).isFalse();
     }
 
     @Test
     void rust_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("rust");
         String code = "fn doubler(n: i32) -> i32 { n * 2 }\n"
-                + "fn crier(s: String) -> String { format!(\"{}!\", s) }\nfn main() {}";
+                + "struct Rectangle { largeur: i32, hauteur: i32 }\n"
+                + "impl Rectangle { fn aire(&self) -> i32 { self.largeur * self.hauteur } }\nfn main() {}";
         assertThat(passesStructured("Rust", code,
-                cas("doubler", "[5]", "10"), cas("crier", "[\"hi\"]", "\"hi!\""))).isTrue();
-        assertThat(passesStructured("Rust", code, cas("doubler", "[5]", "11"))).isFalse();
-        assertThat(passesStructured("Rust", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
-        // panic étudiant → échec du cas (pas de faux positif).
+                cas("doubler(5)", "10"),
+                cas("Rectangle { largeur: 3, hauteur: 4 }.aire()", "12"))).isTrue();
+        assertThat(passesStructured("Rust", code, cas("doubler(5)", "11"))).isFalse();
         assertThat(passesStructured("Rust", "fn doubler(_n: i32) -> i32 { panic!(\"x\") }\nfn main() {}",
-                cas("doubler", "[5]", "10"))).isFalse();
+                cas("doubler(5)", "10"))).isFalse();
     }
 
     @Test
     void c_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("c");
         String code = "int doubler(int n){ return n * 2; }\nint main(void){ return 0; }";
-        assertThat(passesStructured("C", code, cas("doubler", "[5]", "10"))).isTrue();
-        assertThat(passesStructured("C", code, cas("doubler", "[5]", "11"))).isFalse();
-        assertThat(passesStructured("C", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
+        assertThat(passesStructured("C", code, cas("return doubler(5);", "10"))).isTrue();
+        assertThat(passesStructured("C", code, cas("return doubler(5);", "11"))).isFalse();
+        assertThat(passesStructured("C", code.replace("n * 2", "0"), cas("return doubler(5);", "10"))).isFalse();
     }
 
     @Test
     void cpp_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("c++");
-        String code = "int doubler(int n){ return n * 2; }\nint main(){ return 0; }";
-        assertThat(passesStructured("C++", code, cas("doubler", "[5]", "10"))).isTrue();
-        assertThat(passesStructured("C++", code.replace("n * 2", "0"), cas("doubler", "[5]", "10"))).isFalse();
-        // exception étudiant → échec du cas.
-        assertThat(passesStructured("C++", "int doubler(int n){ throw 1; }\nint main(){ return 0; }",
-                cas("doubler", "[5]", "10"))).isFalse();
+        String code = "struct Rectangle { int l, h; Rectangle(int a, int b): l(a), h(b) {} int aire(){ return l * h; } };\n"
+                + "int doubler(int n){ return n * 2; }\nint boom(){ throw 1; }\nint main(){ return 0; }";
+        assertThat(passesStructured("C++", code,
+                cas("return doubler(5);", "10"),
+                cas("return Rectangle(3, 4).aire();", "12"))).isTrue();
+        assertThat(passesStructured("C++", code, cas("return doubler(5);", "11"))).isFalse();
+        // exception étudiant → échec du cas (pas de faux positif).
+        assertThat(passesStructured("C++", code, cas("return boom();", "10"))).isFalse();
     }
 
     @Test
     void csharp_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("csharp");
-        String code = "class S { public static int solution(int n){ return n * 2; } "
-                + "public static string crier(string s){ return s + \"!\"; } static void Main(){} }";
+        String code = "class Solution { public static int doubler(int n){ return n * 2; } }\n"
+                + "class Rectangle { int l, h; public Rectangle(int a, int b){ l = a; h = b; } public int aire(){ return l * h; } }";
         assertThat(passesStructured("C#", code,
-                cas("S.solution", "[5]", "10"), cas("S.crier", "[\"hi\"]", "\"hi!\""))).isTrue();
-        assertThat(passesStructured("C#", code, cas("S.solution", "[5]", "11"))).isFalse();
-        assertThat(passesStructured("C#", code.replace("n * 2", "0"), cas("S.solution", "[5]", "10"))).isFalse();
+                cas("return Solution.doubler(5);", "10"),
+                cas("return new Rectangle(3, 4).aire();", "12"))).isTrue();
+        assertThat(passesStructured("C#", code, cas("return Solution.doubler(5);", "11"))).isFalse();
     }
 
     @Test
     void java_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("java");
-        String code = "public class Solution { public static int solution(int n){ return n * 2; } "
-                + "public static String crier(String s){ return s + \"!\"; } public static void main(String[] a){} }";
+        String code = "public class Solution { public static int doubler(int n){ return n * 2; } }\n"
+                + "class Rectangle { int l, h; Rectangle(int a, int b){ l = a; h = b; } int aire(){ return l * h; } }";
         assertThat(passesStructured("Java", code,
-                cas("Solution.solution", "[5]", "10"), cas("Solution.crier", "[\"hi\"]", "\"hi!\""))).isTrue();
-        assertThat(passesStructured("Java", code, cas("Solution.solution", "[5]", "11"))).isFalse();
-        assertThat(passesStructured("Java", code.replace("n * 2", "0"), cas("Solution.solution", "[5]", "10"))).isFalse();
+                cas("return Solution.doubler(5);", "10"),
+                cas("return new Rectangle(3, 4).aire();", "12"))).isTrue();
+        assertThat(passesStructured("Java", code, cas("return Solution.doubler(5);", "11"))).isFalse();
         assertThat(passesStructured("Java",
-                "public class Solution { public static int solution(int n){ throw new RuntimeException(); } }",
-                cas("Solution.solution", "[5]", "10"))).isFalse();
+                "public class Solution { public static int doubler(int n){ throw new RuntimeException(); } }",
+                cas("return Solution.doubler(5);", "10"))).isFalse();
     }
+
+
 
     // ─────────────────────── Langages interprétés (RPC isolé) ───────────────────────
     // Pour chacun : (1) bonne réponse réussit, (2) réponse fausse échoue, (3) SÉCURITÉ : une réponse

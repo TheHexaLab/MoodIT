@@ -96,11 +96,11 @@ public class ExecutionClient {
     public record Harness(String name, String harnessCode, int weight) {}
 
     /**
-     * Un CAS STRUCTURÉ (#116) : appeler {@code entry(args)} et comparer la sortie à {@code expected}
-     * selon {@code compare}. {@code args}/{@code expected} sont du JSON (envoyés tels quels, jamais
-     * dans le sandbox). Alternative au harnais-code pour les questions « appel de fonction ».
+     * Un CAS STRUCTURÉ (#116) : une EXPRESSION (dans le langage de la question) renvoyant la valeur
+     * testée, comparée à {@code expected} selon {@code compare}. {@code expected} (JSON) n'est jamais
+     * envoyé dans le sandbox. Remplace le harnais-code pour les questions « appel de fonction »/POO.
      */
-    public record Case(String name, String entry, JsonNode args, JsonNode expected, String compare, int weight) {}
+    public record Case(String name, String expr, JsonNode expected, String compare, int weight) {}
 
     /** Verdict renvoyé par execution-service (on n'exploite que {@code passed} + l'ordre). */
     private record Verdict(String name, int weight, boolean passed, String detail) {}
@@ -142,8 +142,7 @@ public class ExecutionClient {
         List<Map<String, Object>> caseBodies = cases.stream().map(c -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", c.name());
-            m.put("entry", c.entry());
-            m.put("args", c.args());
+            m.put("expr", c.expr());
             m.put("expected", c.expected());
             m.put("compare", c.compare());
             m.put("weight", c.weight());

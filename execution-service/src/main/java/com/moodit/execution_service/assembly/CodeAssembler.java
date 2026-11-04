@@ -689,437 +689,189 @@ public class CodeAssembler {
         };
     }
 
-    // ══ SERVEUR RPC PUR (cas structurés, #116) ═════════════════════════════════════
+    // ══ SERVEUR DE CAS STRUCTURÉS (#116) ═══════════════════════════════════════════
     //
-    // Le code étudiant est assemblé en un SERVEUR sans harnais ni nonce : il lit des requêtes
-    // {@code {"name":…,"args":[…]}} (une par ligne) sur stdin et répond {@code {"ok":…,"value":…}}
-    // (une par ligne) sur stdout. ExecutionService envoie TOUS les cas d'un coup (Piston est one-shot)
-    // et compare LUI-MÊME les sorties aux attendus — qui ne touchent donc jamais le sandbox.
+    // Le code étudiant est assemblé en un SERVEUR qui ÉVALUE des EXPRESSIONS fournies par le prof
+    // (chacune RENVOIE la valeur testée — appel de fonction, construction d'objet + méthode, séquence)
+    // et émet, par cas et dans l'ordre, DEUX lignes : statut (1=ok, 0=exception) puis la valeur en
+    // texte. ExecutionService compare ces valeurs aux ATTENDUS, qu'il garde chez lui : ni le harnais ni
+    // les attendus ne touchent le sandbox. Les expressions (donc les entrées) y sont visibles — mais une
+    // entrée est de toute façon connue du code qui la reçoit ; seul l'attendu est un secret, et il reste
+    // dehors. Aucun parsing de signature, aucun RPC : on compile les expressions et on émet les valeurs.
 
-    /** Assemble le code étudiant en serveur RPC pur (sans harnais ni attendus). Cf. {@link #assemble}. */
-    public Assembled assembleServer(String language, String studentCode) {
+    /** Un cas à baker : l'EXPRESSION (bloc renvoyant la valeur) + le KIND de l'attendu
+     *  ({@code int}/{@code double}/{@code bool}/{@code string}) pour l'émission typée (C/C++). */
+    public record ServerCase(String expr, String kind) {}
+
+    /** Assemble le code étudiant en serveur qui évalue les expressions des cas (cf. section). */
+    public Assembled assembleServer(String language, String studentCode, List<ServerCase> cases) {
         String code = studentCode == null ? "" : studentCode;
         return switch (canon(language)) {
-            case "go" -> assembleServerGo(code);
-            case "rust" -> assembleServerRust(code);
-            case "c" -> assembleServerCLike(code, false);
-            case "c++" -> assembleServerCLike(code, true);
-            case "csharp" -> assembleServerCSharp(code);
-            case "java" -> assembleServerJava(code);
+            case "go" -> serverGo(code, cases);
+            case "rust" -> serverRust(code, cases);
+            case "c" -> serverCLike(code, cases, false);
+            case "c++" -> serverCLike(code, cases, true);
+            case "csharp" -> serverCSharp(code, cases);
+            case "java" -> serverJava(code, cases);
             default -> throw new UnsupportedLanguageException(
-                    language + " (serveur RPC de cas structurés pas encore porté)");
+                    language + " (serveur de cas structurés non disponible)");
         };
     }
 
-    private Assembled assembleServerGo(String student) {
-        List<String[]> funcs = new ArrayList<>();
-        Matcher fm = GO_FUNC.matcher(student);
-        while (fm.find()) {
-            if (!"main".equals(fm.group(1))) {
-                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3).trim()});
-            }
-        }
+    // ── Go : interface{} + json.Marshal (type dynamique, kind inutile) ──
+    private Assembled serverGo(String student, List<ServerCase> cases) {
         String code = student.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
         Matcher pm = Pattern.compile("(?m)^package\\s+\\w+.*$").matcher(code);
         int pkgEnd = pm.find() ? pm.end() : 0;
         String head = code.substring(0, pkgEnd);
         String tail = code.substring(pkgEnd);
-
-        StringBuilder cases = new StringBuilder();
-        Set<String> sliceTypes = new java.util.LinkedHashSet<>();
-        for (String[] f : funcs) {
-            String name = f[0];
-            List<String[]> params = goExpandParams(f[1]);
-            String ret = f[2];
-            for (String[] p : params) {
-                if (p[1].startsWith("[]")) sliceTypes.add(p[1].substring(2));
-            }
-            if (ret.startsWith("[]")) sliceTypes.add(ret.substring(2));
-            boolean supported = (ret.isEmpty() || goConv("x", ret) != null)
-                    && params.stream().allMatch(p -> goConv("x", p[1]) != null);
-            cases.append("\t\tcase \"").append(name).append("\":\n");
-            if (!supported) {
-                cases.append("\t\t\t__moodit_fail(__w, \"type non supporte\")\n");
-                continue;
-            }
-            StringBuilder call = new StringBuilder(name).append("(");
-            for (int i = 0; i < params.size(); i++) {
-                cases.append("\t\t\t__a").append(i).append(", _ := __moodit_nsRead(__r)\n");
-                if (i > 0) call.append(", ");
-                call.append(goConv("__moodit_arg(__a" + i + ")", params.get(i)[1]));
-            }
-            call.append(")");
-            if (ret.isEmpty()) {
-                cases.append("\t\t\t").append(call).append("\n")
-                        .append("\t\t\t__moodit_ok(__w, \"null\")\n");
-            } else {
-                cases.append("\t\t\t__moodit_v := ").append(call).append("\n")
-                        .append("\t\t\t__moodit_b, _ := __moodit_json.Marshal(__moodit_v)\n")
-                        .append("\t\t\t__moodit_ok(__w, string(__moodit_b))\n");
-            }
-        }
-        StringBuilder helpers = new StringBuilder();
-        for (String t : sliceTypes) {
-            String h = goSliceHelper(t);
-            if (h != null) helpers.append(h).append("\n");
+        StringBuilder fns = new StringBuilder();
+        StringBuilder calls = new StringBuilder();
+        for (int i = 0; i < cases.size(); i++) {
+            fns.append("func __moodit_case").append(i).append("() interface{} {\n")
+                    .append(cases.get(i).expr()).append("\n}\n");
+            calls.append("\t__moodit_emit(__moodit_case").append(i).append(")\n");
         }
         String program = head + "\n"
-                + "import __moodit_bufio \"bufio\"\n"
                 + "import __moodit_json \"encoding/json\"\n"
-                + "import __moodit_fmt \"fmt\"\n"
-                + "import __moodit_io \"io\"\n"
                 + "import __moodit_os \"os\"\n"
-                + "import __moodit_strconv \"strconv\"\n"
                 + tail + "\n"
-                + helpers
-                + "func __moodit_arg(s string) interface{} { var v interface{}; __moodit_json.Unmarshal([]byte(s), &v); return v }\n"
-                + "func __moodit_nsRead(r *__moodit_bufio.Reader) (string, bool) {\n"
-                + "\tnum := \"\"\n"
-                + "\tfor {\n"
-                + "\t\tb, err := r.ReadByte()\n"
-                + "\t\tif err != nil { return \"\", false }\n"
-                + "\t\tif b == ':' { break }\n"
-                + "\t\tif b >= '0' && b <= '9' { num += string(b) } else if b == '\\n' || b == '\\r' { continue } else { return \"\", false }\n"
-                + "\t}\n"
-                + "\tn, _ := __moodit_strconv.Atoi(num)\n"
-                + "\tbuf := make([]byte, n)\n"
-                + "\tif _, err := __moodit_io.ReadFull(r, buf); err != nil { return \"\", false }\n"
-                + "\tr.ReadByte()\n"
-                + "\treturn string(buf), true\n"
+                + fns
+                + "func __moodit_emit(f func() interface{}) {\n"
+                + "\t__ok := false\n\tvar __b []byte\n"
+                + "\tfunc() { defer func() { recover() }(); __v := f(); __b, _ = __moodit_json.Marshal(__v); __ok = true }()\n"
+                + "\tif __ok { __moodit_os.Stdout.WriteString(\"1\\n\"); __moodit_os.Stdout.Write(__b); __moodit_os.Stdout.WriteString(\"\\n\") } else { __moodit_os.Stdout.WriteString(\"0\\n\\n\") }\n"
                 + "}\n"
-                + "func __moodit_nsWrite(w *__moodit_bufio.Writer, s string) { w.WriteString(__moodit_strconv.Itoa(len(s))); w.WriteByte(':'); w.WriteString(s); w.WriteByte(',') }\n"
-                + "func __moodit_ok(w *__moodit_bufio.Writer, v string) { __moodit_nsWrite(w, \"1\"); __moodit_nsWrite(w, v) }\n"
-                + "func __moodit_fail(w *__moodit_bufio.Writer, m string) { __moodit_nsWrite(w, \"0\"); __moodit_nsWrite(w, m) }\n"
-                + "func __moodit_serve() {\n"
-                + "\t__r := __moodit_bufio.NewReader(__moodit_os.Stdin)\n"
-                + "\t__w := __moodit_bufio.NewWriter(__moodit_os.Stdout)\n"
-                + "\tdefer __w.Flush()\n"
-                + "\tfor {\n"
-                + "\t\t__entry, __eok := __moodit_nsRead(__r)\n"
-                + "\t\tif !__eok { break }\n"
-                + "\t\tfunc() {\n"
-                + "\t\t\tdefer func() { if rec := recover(); rec != nil { __moodit_fail(__w, __moodit_fmt.Sprint(rec)) } }()\n"
-                + "\t\t\tswitch __entry {\n"
-                + cases
-                + "\t\t\tdefault:\n"
-                + "\t\t\t\t__moodit_fail(__w, \"symbole inconnu\")\n"
-                + "\t\t\t}\n"
-                + "\t\t}()\n"
-                + "\t\t__w.Flush()\n"
-                + "\t}\n"
-                + "}\n"
-                + "func main() { __moodit_serve() }\n";
+                + "func main() {\n" + calls + "}\n";
         return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
     }
 
-    private Assembled assembleServerRust(String student) {
-        List<String[]> funcs = new ArrayList<>();
-        Matcher fm = RUST_FUNC.matcher(student);
-        while (fm.find()) {
-            if (!"main".equals(fm.group(1))) {
-                funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3) == null ? "" : fm.group(3).trim()});
-            }
-        }
-        // Serveur pur : aucun harnais → pas de stub, les fonctions gardent leur nom ; on neutralise main.
+    // ── Rust : catch_unwind + Display (type inféré, kind inutile) ──
+    private Assembled serverRust(String student, List<ServerCase> cases) {
         String code = student.replaceAll("\\bfn\\s+main\\s*\\(", "fn __moodit_student_main(");
-        StringBuilder cases = new StringBuilder();
-        for (String[] f : funcs) {
-            String name = f[0];
-            List<String[]> params = rustParseParams(f[1]);
-            String ret = f[2];
-            boolean supported = (ret.isEmpty() || RUST_SCALARS.contains(ret))
-                    && params.stream().allMatch(p -> RUST_SCALARS.contains(p[1]));
-            cases.append("        \"").append(name).append("\" => {\n");
-            if (!supported) {
-                cases.append("          __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"type non supporte\");\n        }\n");
-                continue;
-            }
-            StringBuilder reads = new StringBuilder();
-            StringBuilder decls = new StringBuilder();
-            StringBuilder callArgs = new StringBuilder();
-            for (int i = 0; i < params.size(); i++) {
-                reads.append("          let __s").append(i).append(" = __moodit_ns_read(&mut __r).unwrap_or_default();\n");
-                decls.append("let __a").append(i).append(": ").append(params.get(i)[1]).append(" = ")
-                        .append(rustDec("__s" + i, params.get(i)[1])).append("; ");
-                if (i > 0) callArgs.append(", ");
-                callArgs.append("__a").append(i);
-            }
-            String realCall = name + "(" + callArgs + ")";
-            cases.append(reads)
-                    .append("          let __res = std::panic::catch_unwind(move || { ").append(decls);
-            if (ret.isEmpty()) {
-                cases.append(realCall).append("; });\n")
-                        .append("          match __res { Ok(_) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, \"null\"); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"erreur\"); } }\n        }\n");
-            } else {
-                String enc = "String".equals(ret) ? "format!(\"{:?}\", __v)" : "format!(\"{}\", __v)";
-                cases.append(realCall).append(" });\n")
-                        .append("          match __res { Ok(__v) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, &").append(enc).append("); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"erreur\"); } }\n        }\n");
-            }
+        StringBuilder body = new StringBuilder();
+        for (ServerCase c : cases) {
+            body.append("    __moodit_emit(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { ")
+                    .append(c.expr()).append(" })));\n");
         }
-        String program = "use std::io::{Read, Write};\n\n"
-                + code + "\n\n"
-                + "fn __moodit_ns_write<W: Write>(w: &mut W, s: &str) {\n"
-                + "    let b = s.as_bytes();\n"
-                + "    write!(w, \"{}:\", b.len()).unwrap();\n"
-                + "    w.write_all(b).unwrap(); w.write_all(b\",\").unwrap(); w.flush().unwrap();\n"
+        String program = code + "\n\n"
+                + "fn __moodit_emit<T: std::fmt::Display>(r: std::thread::Result<T>) {\n"
+                + "    match r { Ok(v) => { println!(\"1\"); println!(\"{}\", v); }, Err(_) => { println!(\"0\"); println!(); } }\n"
                 + "}\n"
-                + "fn __moodit_ns_read<R: Read>(r: &mut R) -> Option<String> {\n"
-                + "    let mut n: usize = 0; let mut any = false;\n"
-                + "    loop {\n"
-                + "        let mut one = [0u8; 1];\n"
-                + "        if r.read(&mut one).ok()? == 0 { return None; }\n"
-                + "        if one[0] == b':' { break; }\n"
-                + "        if one[0] == b'\\n' || one[0] == b'\\r' { continue; }\n"
-                + "        n = n * 10 + (one[0] - b'0') as usize; any = true;\n"
-                + "    }\n"
-                + "    if !any { return None; }\n"
-                + "    let mut buf = vec![0u8; n]; let mut off = 0;\n"
-                + "    while off < n { let k = r.read(&mut buf[off..]).ok()?; if k == 0 { return None; } off += k; }\n"
-                + "    let mut comma = [0u8; 1]; let _ = r.read(&mut comma);\n"
-                + "    Some(String::from_utf8_lossy(&buf).into_owned())\n"
-                + "}\n"
-                + "fn __moodit_serve() {\n"
+                + "fn main() {\n"
                 + "    std::panic::set_hook(Box::new(|_| {}));\n"
-                + "    let __stdin = std::io::stdin(); let mut __r = __stdin.lock();\n"
-                + "    let __stdout = std::io::stdout(); let mut __w = __stdout.lock();\n"
-                + "    loop {\n"
-                + "        let __key = match __moodit_ns_read(&mut __r) { Some(k) => k, None => break };\n"
-                + "        match __key.as_str() {\n"
-                + cases
-                + "        _ => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"symbole inconnu\"); }\n"
-                + "        }\n"
-                + "    }\n"
-                + "}\n"
-                + "fn main() { __moodit_serve(); }\n";
+                + body
+                + "}\n";
         return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
     }
 
-    private Assembled assembleServerCLike(String student, boolean cpp) {
+    // ── C / C++ : type de retour et émission d'après le KIND de l'attendu ──
+    private Assembled serverCLike(String student, List<ServerCase> cases, boolean cpp) {
         String s = student == null ? "" : student;
-        List<String[]> funcs = new ArrayList<>();
-        Matcher fm = C_FUNC.matcher(s);
-        while (fm.find()) {
-            if (!"main".equals(fm.group(2))) {
-                funcs.add(new String[] {fm.group(1).trim(), fm.group(2), fm.group(3)});
-            }
-        }
-        StringBuilder cases = new StringBuilder();
-        for (String[] f : funcs) {
-            String ret = f[0];
-            String name = f[1];
-            List<String[]> params = cParseParams(f[2]);
-            boolean supported = ("void".equals(ret) || C_SCALARS.contains(ret))
-                    && params.stream().allMatch(p -> C_SCALARS.contains(p[1]));
-            int n = name.length();
-            cases.append("    if (__keylen == ").append(n).append(" && __eq(__key, \"").append(name)
-                    .append("\", ").append(n).append(")) {\n");
-            if (!supported) {
-                cases.append("      __ns_write_s(1, \"0\"); __ns_write_s(1, \"type non supporte\"); continue;\n    }\n");
-                continue;
-            }
-            StringBuilder callArgs = new StringBuilder();
-            for (int i = 0; i < params.size(); i++) {
-                cases.append("      char __s").append(i).append("[128]; long __l").append(i)
-                        .append(" = __ns_read(0, __s").append(i).append(", sizeof(__s").append(i)
-                        .append(")); if (__l").append(i).append(" < 0) return 0; __s").append(i)
-                        .append("[__l").append(i).append(" < 128 ? __l").append(i).append(" : 127] = 0;\n");
-                if (i > 0) callArgs.append(", ");
-                callArgs.append(cDec("__s" + i, params.get(i)[1]));
-            }
-            String realCall = name + "(" + callArgs + ")";
-            if (cpp) cases.append("      try {\n");
-            if ("void".equals(ret)) {
-                cases.append("      ").append(realCall).append(";\n")
-                        .append("      __ns_write_s(1, \"1\"); __ns_write_s(1, \"null\");\n");
+        StringBuilder fns = new StringBuilder();
+        StringBuilder calls = new StringBuilder();
+        for (int i = 0; i < cases.size(); i++) {
+            String kind = cases.get(i).kind();
+            fns.append("static ").append(cServerType(kind, cpp)).append(" __moodit_case").append(i)
+                    .append("(void) {\n").append(cases.get(i).expr()).append("\n}\n");
+            String emitVal = cServerEmit(kind, "__moodit_case" + i + "()", cpp);
+            if (cpp) {
+                calls.append("  try { ").append(emitVal)
+                        .append(" } catch (...) { fputs(\"0\\n\\n\", stdout); }\n");
             } else {
-                cases.append("      ").append(ret).append(" __r = ").append(realCall).append(";\n")
-                        .append("      char __ob[64]; int __ol = snprintf(__ob, sizeof(__ob), \"").append(cFmt(ret))
-                        .append("\", __r); __ns_write_s(1, \"1\"); __ns_write(1, __ob, __ol);\n");
+                calls.append("  ").append(emitVal).append("\n");
             }
-            if (cpp) cases.append("      } catch (...) { __ns_write_s(1, \"0\"); __ns_write_s(1, \"erreur\"); }\n");
-            cases.append("      continue;\n    }\n");
         }
         String includes = cpp
-                ? "#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\n"
-                : "#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n";
+                ? "#include <cstdio>\n#include <cstdlib>\n#include <string>\n"
+                : "#include <stdio.h>\n#include <stdlib.h>\n";
         String program = includes
                 + "#define main __moodit_student_main\n"
                 + s + "\n"
                 + "#undef main\n"
-                + "static void __w_all(int fd, const char* b, long n) { long o = 0; while (o < n) { long k = write(fd, b + o, n - o); if (k <= 0) _exit(1); o += k; } }\n"
-                + "static int __rd1(int fd) { unsigned char c; long k = read(fd, &c, 1); if (k <= 0) return -1; return c; }\n"
-                + "static void __ns_write(int fd, const char* s, long len) {\n"
-                + "  char num[24]; int i = 0; long t = len; char tmp[24]; int j = 0;\n"
-                + "  if (t == 0) tmp[j++] = '0'; while (t > 0) { tmp[j++] = '0' + (t % 10); t /= 10; }\n"
-                + "  while (j > 0) num[i++] = tmp[--j]; num[i++] = ':';\n"
-                + "  __w_all(fd, num, i); __w_all(fd, s, len); __w_all(fd, \",\", 1);\n"
-                + "}\n"
-                + "static void __ns_write_s(int fd, const char* s) { long n = 0; while (s[n]) n++; __ns_write(fd, s, n); }\n"
-                + "static long __ns_read(int fd, char* buf, long cap) {\n"
-                + "  long n = 0; int any = 0, c;\n"
-                + "  while ((c = __rd1(fd)) != ':') { if (c < 0) return -1; n = n * 10 + (c - '0'); any = 1; }\n"
-                + "  if (!any) return -1;\n"
-                + "  long o = 0; while (o < n) { int d = __rd1(fd); if (d < 0) return -1; if (o < cap) buf[o] = (char)d; o++; }\n"
-                + "  __rd1(fd);\n"
-                + "  return n;\n"
-                + "}\n"
-                + "static int __eq(const char* a, const char* b, long n) { for (long i = 0; i < n; i++) if (a[i] != b[i]) return 0; return 1; }\n"
-                + "int main(void) {\n"
-                + "  for (;;) {\n"
-                + "    char __key[64]; long __keylen = __ns_read(0, __key, sizeof(__key));\n"
-                + "    if (__keylen < 0) return 0;\n"
-                + cases
-                + "    __ns_write_s(1, \"0\"); __ns_write_s(1, \"symbole inconnu\");\n"
-                + "  }\n"
-                + "}\n";
+                + fns
+                + "int main(void) {\n" + calls + "  return 0;\n}\n";
         return new Assembled(cpp ? "c++" : "c", List.of(new PistonClient.File(cpp ? "main.cpp" : "main.c", program)));
     }
 
-    private Assembled assembleServerCSharp(String studentCode) {
-        String student = studentCode == null ? "" : studentCode;
-        student = student.replaceAll("(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
-        StringBuilder usings = new StringBuilder("using System;\nusing System.IO;\n");
+    private static String cServerType(String kind, boolean cpp) {
+        return switch (kind) {
+            case "double" -> "double";
+            case "bool" -> "int";
+            case "string" -> cpp ? "std::string" : "const char*";
+            default -> "long"; // int
+        };
+    }
+
+    /** Instruction C/C++ émettant statut « 1 » + la valeur de {@code call}, selon le kind. */
+    private static String cServerEmit(String kind, String call, boolean cpp) {
+        return switch (kind) {
+            case "double" -> "{ double __v = " + call + "; printf(\"1\\n%.17g\\n\", __v); }";
+            case "bool" -> "{ int __v = " + call + "; printf(\"1\\n%s\\n\", __v ? \"true\" : \"false\"); }";
+            case "string" -> cpp
+                    ? "{ std::string __v = " + call + "; printf(\"1\\n%s\\n\", __v.c_str()); }"
+                    : "{ const char* __v = " + call + "; printf(\"1\\n%s\\n\", __v); }";
+            default -> "{ long __v = " + call + "; printf(\"1\\n%ld\\n\", __v); }";
+        };
+    }
+
+    // ── C# : object + formateur (type dynamique, kind inutile) ──
+    private Assembled serverCSharp(String studentCode, List<ServerCase> cases) {
+        String student = (studentCode == null ? "" : studentCode)
+                .replaceAll("(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
+        StringBuilder usings = new StringBuilder("using System;\n");
         Matcher um = CS_USING.matcher(student);
         while (um.find()) {
             String u = um.group().strip();
-            if (!"using System;".equals(u) && !"using System.IO;".equals(u)) usings.append(u).append("\n");
+            if (!"using System;".equals(u)) usings.append(u).append("\n");
         }
         student = CS_USING.matcher(student).replaceAll("");
-
-        StringBuilder cases = new StringBuilder();
-        Matcher cm = CS_CLASS_DECL.matcher(student);
-        while (cm.find()) {
-            String className = cm.group(1);
-            int open = student.indexOf('{', cm.start());
-            int close = javaMatchBrace(student, open);
-            String body = student.substring(open + 1, close);
-            Matcher mm = CS_STATIC_METHOD.matcher(body);
-            while (mm.find()) {
-                String vis = mm.group(1);
-                String ret = mm.group(2);
-                String method = mm.group(3);
-                if ("Main".equals(method) || "__moodit_student_main".equals(method)) continue;
-                if (!("public".equals(vis) || "internal".equals(vis))) continue;
-                List<String[]> params = javaParseParams(mm.group(4));
-                String key = className + "." + method;
-                boolean supported = ("void".equals(ret) || CS_SCALARS.contains(ret))
-                        && params.stream().allMatch(p -> CS_SCALARS.contains(p[1]));
-                cases.append("          case \"").append(key).append("\": {\n");
-                if (!supported) {
-                    cases.append("            __s = \"0\"; __p = \"type non supporte\"; break;\n          }\n");
-                    continue;
-                }
-                StringBuilder callArgs = new StringBuilder();
-                for (int i = 0; i < params.size(); i++) {
-                    cases.append("            string __a").append(i).append(" = __NsRead(__in);\n");
-                    if (i > 0) callArgs.append(", ");
-                    callArgs.append(csDec("__a" + i, params.get(i)[1]));
-                }
-                String call = className + "." + method + "(" + callArgs + ")";
-                if ("void".equals(ret)) {
-                    cases.append("            ").append(call).append("; __s = \"1\"; __p = \"null\"; break;\n          }\n");
-                } else {
-                    String payload = "bool".equals(ret) ? "(__r ? \"true\" : \"false\")"
-                            : "string".equals(ret) ? "__r" : csEnc("__r", ret);
-                    cases.append("            var __r = ").append(call).append("; __s = \"1\"; __p = ")
-                            .append(payload).append("; break;\n          }\n");
-                }
-            }
+        StringBuilder fns = new StringBuilder();
+        StringBuilder calls = new StringBuilder();
+        for (int i = 0; i < cases.size(); i++) {
+            fns.append("  static object __moodit_case").append(i).append("() {\n")
+                    .append(cases.get(i).expr()).append("\n  }\n");
+            calls.append("    __moodit_emit(() => __moodit_case").append(i).append("());\n");
         }
         String program = usings + "\n" + student + "\n"
-                + "static class __MooditServer {\n"
-                + "  static void __NsWrite(Stream o, string s) { var b = System.Text.Encoding.UTF8.GetBytes(s); var h = System.Text.Encoding.UTF8.GetBytes(b.Length + \":\"); o.Write(h, 0, h.Length); o.Write(b, 0, b.Length); o.WriteByte((byte)','); o.Flush(); }\n"
-                + "  static string __NsRead(Stream r) { int n = 0; bool any = false; int c; while ((c = r.ReadByte()) != ':') { if (c < 0) return null; if (c == '\\n' || c == '\\r') continue; n = n * 10 + (c - '0'); any = true; } if (!any) return null; var buf = new byte[n]; int off = 0; while (off < n) { int k = r.Read(buf, off, n - off); if (k <= 0) return null; off += k; } r.ReadByte(); return System.Text.Encoding.UTF8.GetString(buf); }\n"
-                + "  static void Main() {\n"
-                + "    var __in = Console.OpenStandardInput(); var __out = Console.OpenStandardOutput();\n"
-                + "    while (true) {\n"
-                + "      string __entry = __NsRead(__in); if (__entry == null) break;\n"
-                + "      string __s = \"0\"; string __p = \"symbole inconnu\";\n"
-                + "      try {\n"
-                + "        switch (__entry) {\n"
-                + cases
-                + "          default: __s = \"0\"; __p = \"symbole inconnu\"; break;\n"
-                + "        }\n"
-                + "      } catch (Exception) { __s = \"0\"; __p = \"erreur\"; }\n"
-                + "      __NsWrite(__out, __s); __NsWrite(__out, __p);\n"
-                + "    }\n"
-                + "  }\n"
+                + "static class __MooditMain {\n"
+                + fns
+                + "  static string __moodit_fmt(object o) { if (o is bool __b) return __b ? \"true\" : \"false\"; if (o is double __d) return __d.ToString(System.Globalization.CultureInfo.InvariantCulture); if (o is float __f) return __f.ToString(System.Globalization.CultureInfo.InvariantCulture); return o == null ? \"\" : o.ToString(); }\n"
+                + "  static void __moodit_emit(Func<object> c) { try { object __v = c(); Console.WriteLine(\"1\"); Console.WriteLine(__moodit_fmt(__v)); } catch { Console.WriteLine(\"0\"); Console.WriteLine(); } }\n"
+                + "  static void Main() {\n" + calls + "  }\n"
                 + "}\n";
         return new Assembled("csharp", List.of(new PistonClient.File("main.cs", program)));
     }
 
-    private Assembled assembleServerJava(String studentCode) {
-        String student = studentCode == null ? "" : studentCode;
-        student = student.replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
+    // ── Java : Object + String.valueOf (type dynamique, kind inutile) ──
+    private Assembled serverJava(String studentCode, List<ServerCase> cases) {
+        String student = (studentCode == null ? "" : studentCode)
+                .replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
         StringBuilder imports = new StringBuilder("import java.io.*;\n");
         Matcher im = JAVA_IMPORT.matcher(student);
         while (im.find()) {
-            String s = im.group().strip();
-            if (!"import java.io.*;".equals(s)) imports.append(s).append("\n");
+            String u = im.group().strip();
+            if (!"import java.io.*;".equals(u)) imports.append(u).append("\n");
         }
         student = JAVA_IMPORT.matcher(student).replaceAll("");
-
-        StringBuilder cases = new StringBuilder();
-        Matcher cm = JAVA_CLASS_DECL.matcher(student);
-        while (cm.find()) {
-            String className = cm.group(1);
-            int open = student.indexOf('{', cm.start());
-            int close = javaMatchBrace(student, open);
-            String body = student.substring(open + 1, close);
-            Matcher mm = JAVA_STATIC_METHOD.matcher(body);
-            while (mm.find()) {
-                String vis = mm.group(1);
-                String ret = mm.group(2);
-                String method = mm.group(3);
-                if ("main".equals(method) || "__moodit_student_main".equals(method)) continue;
-                if ("private".equals(vis) || "protected".equals(vis)) continue;
-                List<String[]> params = javaParseParams(mm.group(4));
-                String key = className + "." + method;
-                boolean supported = ("void".equals(ret) || JAVA_SCALARS.contains(ret))
-                        && params.stream().allMatch(p -> JAVA_SCALARS.contains(p[1]));
-                cases.append("        case \"").append(key).append("\": {\n");
-                if (!supported) {
-                    cases.append("          __st = \"0\"; __p = \"type non supporte\"; break;\n        }\n");
-                    continue;
-                }
-                StringBuilder callArgs = new StringBuilder();
-                for (int i = 0; i < params.size(); i++) {
-                    cases.append("          String __a").append(i).append(" = __nsRead(__in);\n");
-                    if (i > 0) callArgs.append(", ");
-                    callArgs.append(javaDec("__a" + i, params.get(i)[1]));
-                }
-                String call = className + "." + method + "(" + callArgs + ")";
-                if ("void".equals(ret)) {
-                    cases.append("          ").append(call).append("; __st = \"1\"; __p = \"null\"; break;\n        }\n");
-                } else {
-                    cases.append("          ").append(ret).append(" __r = ").append(call)
-                            .append("; __st = \"1\"; __p = String.valueOf(__r); break;\n        }\n");
-                }
-            }
+        StringBuilder fns = new StringBuilder();
+        StringBuilder calls = new StringBuilder();
+        for (int i = 0; i < cases.size(); i++) {
+            fns.append("  static Object __moodit_case").append(i).append("() throws Throwable {\n")
+                    .append(cases.get(i).expr()).append("\n  }\n");
+            calls.append("    __moodit_emit(() -> __moodit_case").append(i).append("());\n");
         }
         String program = imports + "\n"
                 + "public class __MooditMain {\n"
-                + "  static void __nsWrite(OutputStream o, String s) { try { byte[] b = s.getBytes(\"UTF-8\"); o.write((b.length + \":\").getBytes(\"UTF-8\")); o.write(b); o.write(','); o.flush(); } catch (IOException e) { throw new RuntimeException(e); } }\n"
-                + "  static String __nsRead(InputStream in) { try { int n = 0, c; boolean any = false; while ((c = in.read()) != ':') { if (c < 0) throw new EOFException(); if (c == '\\n' || c == '\\r') continue; n = n * 10 + (c - '0'); any = true; } if (!any) throw new IOException(\"ns\"); byte[] b = new byte[n]; int off = 0; while (off < n) { int k = in.read(b, off, n - off); if (k < 0) throw new EOFException(); off += k; } in.read(); return new String(b, \"UTF-8\"); } catch (IOException e) { throw new RuntimeException(e); } }\n"
-                + "  public static void main(String[] __args) throws Exception {\n"
-                + "    InputStream __in = new FileInputStream(FileDescriptor.in);\n"
-                + "    OutputStream __out = new FileOutputStream(FileDescriptor.out);\n"
-                + "    while (true) {\n"
-                + "      String __entry; try { __entry = __nsRead(__in); } catch (RuntimeException e) { break; }\n"
-                + "      String __st = \"0\"; String __p = \"symbole inconnu\";\n"
-                + "      try {\n"
-                + "        switch (__entry) {\n"
-                + cases
-                + "        default: __st = \"0\"; __p = \"symbole inconnu\"; break;\n"
-                + "        }\n"
-                + "      } catch (Throwable __t) { __st = \"0\"; __p = \"erreur\"; }\n"
-                + "      __nsWrite(__out, __st); __nsWrite(__out, __p);\n"
-                + "    }\n"
-                + "  }\n"
+                + "  interface __Case { Object run() throws Throwable; }\n"
+                + fns
+                + "  static void __moodit_emit(__Case c) { try { Object __v = c.run(); System.out.println(\"1\"); System.out.println(String.valueOf(__v)); } catch (Throwable __t) { System.out.println(\"0\"); System.out.println(); } }\n"
+                + "  public static void main(String[] __a) {\n" + calls + "  }\n"
                 + "}\n\n"
                 + student + "\n";
         return new Assembled("java", List.of(new PistonClient.File("Main.java", program)));
     }
+
 
     // ── Rust ─────────────────────────────────────────────────────────────────────
 

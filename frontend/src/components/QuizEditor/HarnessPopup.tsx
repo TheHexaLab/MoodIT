@@ -138,10 +138,10 @@ export function HarnessBody({
   }
   function add() {
     if (structured) {
-      // Cas structuré : symbole + arguments + attendu + mode de comparaison (pas de harnais-code).
+      // Cas structuré : expression renvoyant la valeur + attendu + comparaison (pas de harnais-code).
       setCases((prev) => [
         ...prev,
-        { name: '', harnessCode: '', entry: '', argsJson: '[]', expectedJson: '', compareMode: 'exact', weight: 1 },
+        { name: '', harnessCode: '', expr: '', expectedJson: '', compareMode: 'exact', weight: 1 },
       ]);
       return;
     }
@@ -150,11 +150,11 @@ export function HarnessBody({
   }
 
   // Enregistrement bloqué s'il n'y a aucun cas, ou si l'un n'a pas de nom / poids ≤ 0 ; en mode
-  // structuré, l'entrée (fonction appelée) est aussi requise.
+  // structuré, l'expression est aussi requise.
   const isValid =
     cases.length > 0 &&
     cases.every(
-      (c) => c.name.trim() !== '' && c.weight > 0 && (!structured || (c.entry ?? '').trim() !== '')
+      (c) => c.name.trim() !== '' && c.weight > 0 && (!structured || (c.expr ?? '').trim() !== '')
     );
 
   return (
@@ -195,22 +195,13 @@ export function HarnessBody({
             </div>
             {structured ? (
               <div className={styles.harnessFields}>
-                <input
-                  className={styles.input}
-                  aria-invalid={(c.entry ?? '').trim() === ''}
-                  value={c.entry ?? ''}
-                  placeholder={t.entryPlaceholder}
-                  maxLength={200}
-                  onChange={(e) => update(i, { entry: e.target.value })}
-                />
                 <label className={styles.weightField}>
-                  <span className={styles.weightLabel}>{t.argsLabel}</span>
-                  <textarea
-                    className={styles.input}
-                    value={c.argsJson ?? ''}
-                    placeholder={t.argsPlaceholder}
-                    rows={2}
-                    onChange={(e) => update(i, { argsJson: e.target.value })}
+                  <span className={styles.weightLabel}>{t.exprLabel}</span>
+                  <CodeEditor
+                    value={c.expr ?? ''}
+                    onChange={(expr) => update(i, { expr })}
+                    language={harnessLanguage?.name}
+                    ariaLabel={t.exprAria(i + 1)}
                   />
                 </label>
                 <label className={styles.weightField}>

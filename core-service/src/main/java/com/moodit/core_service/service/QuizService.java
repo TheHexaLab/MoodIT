@@ -522,12 +522,11 @@ public class QuizService {
             // historique, toujours supporté). Les quiz existants restent donc valides : adoption
             // progressive sans conversion forcée.
             boolean structured = harnesses.stream()
-                    .anyMatch(tc -> tc.getEntry() != null && !tc.getEntry().isBlank());
+                    .anyMatch(tc -> tc.getExpr() != null && !tc.getExpr().isBlank());
             if (structured) {
                 List<ExecutionClient.Case> cases = harnesses.stream()
-                        .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getEntry(),
-                                parseJson(tc.getArgsJson()), parseJson(tc.getExpectedJson()),
-                                tc.getCompareMode(), weightOf(tc)))
+                        .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getExpr(),
+                                parseJson(tc.getExpectedJson()), tc.getCompareMode(), weightOf(tc)))
                         .toList();
                 tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, null, cases));
             } else {
@@ -1226,8 +1225,7 @@ public class QuizService {
 
     /** Copie les champs d'un cas STRUCTURÉ (#116) du DTO vers l'entité (null pour un harnais-code). */
     private static void applyStructuredFields(TestCase tc, TestCaseDTO td) {
-        tc.setEntry(td.getEntry());
-        tc.setArgsJson(td.getArgsJson());
+        tc.setExpr(td.getExpr());
         tc.setExpectedJson(td.getExpectedJson());
         tc.setCompareMode(td.getCompareMode());
     }
@@ -1303,8 +1301,7 @@ public class QuizService {
                 .id(testCase.getId())
                 .name(testCase.getName())
                 .harnessCode(testCase.getHarnessCode())
-                .entry(testCase.getEntry())
-                .argsJson(testCase.getArgsJson())
+                .expr(testCase.getExpr())
                 .expectedJson(testCase.getExpectedJson())
                 .compareMode(testCase.getCompareMode())
                 .weight(testCase.getWeight())

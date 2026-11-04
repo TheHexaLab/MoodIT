@@ -22,12 +22,10 @@ export interface HarnessLabels {
   // ── Cas STRUCTURÉS (#116) — questions « appel de fonction » (langages compilés) ──
   /** Bandeau d'info pour les cas structurés. */
   structuredInfoBanner: string;
-  /** Placeholder du symbole appelé (entry). */
-  entryPlaceholder: string;
-  /** Label du champ arguments (JSON). */
-  argsLabel: string;
-  /** Placeholder des arguments (JSON). */
-  argsPlaceholder: string;
+  /** Label du champ expression (code renvoyant la valeur testée). */
+  exprLabel: string;
+  /** aria-label de l'éditeur d'expression d'un cas (numéro 1-based). */
+  exprAria: (index: number) => string;
   /** Label du champ valeur attendue (JSON). */
   expectedLabel: string;
   /** Placeholder de la valeur attendue (JSON). */
@@ -48,10 +46,9 @@ export const defaultHarnessLabels: HarnessLabels = {
   cancel: 'Annuler',
   save: 'Enregistrer',
   structuredInfoBanner:
-    "Cachés à l'étudiant · on appelle la fonction avec les arguments et on compare la sortie à l'attendu · note = part des poids réussis",
-  entryPlaceholder: 'Fonction appelée (ex. solution, Solution.solution)',
-  argsLabel: 'Arguments (JSON)',
-  argsPlaceholder: '[5]',
+    "Attendus cachés à l'étudiant · l'expression renvoie la valeur testée (ex. solution(5), new Rectangle(3,4).aire()) · on la compare à l'attendu hors sandbox · note = part des poids réussis",
+  exprLabel: 'Expression (renvoie la valeur testée)',
+  exprAria: (index) => `Expression du cas ${index}`,
   expectedLabel: 'Résultat attendu (JSON)',
   expectedPlaceholder: '10',
   compareLabel: 'Comparaison',

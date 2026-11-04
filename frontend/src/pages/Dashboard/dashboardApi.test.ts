@@ -402,7 +402,7 @@ describe('evaluateCode', () => {
     expect(out).toEqual([{ name: 't', passed: true, weight: 1 }]);
   });
 
-  it('cas structurés (entry) → POST /exec/evaluate-structured avec args/attendu parsés en JSON', async () => {
+  it('cas structurés (expr) → POST /exec/evaluate-structured avec attendu parsé en JSON', async () => {
     mockedApiFetch.mockResolvedValueOnce(res([{ name: 'c1', passed: true, weight: 1 }]));
     const out = await evaluateCode({
       language: 'Java',
@@ -411,9 +411,8 @@ describe('evaluateCode', () => {
         {
           name: 'c1',
           harnessCode: '',
-          entry: 'Solution.solution',
-          argsJson: '[5]',
-          expectedJson: '10',
+          expr: 'return new Rectangle(3, 4).aire();',
+          expectedJson: '12',
           compareMode: 'exact',
           weight: 2,
         } as never,
@@ -425,7 +424,7 @@ describe('evaluateCode', () => {
       language: 'Java',
       code: 'class Solution{}',
       cases: [
-        { name: 'c1', entry: 'Solution.solution', args: [5], expected: 10, compare: 'exact', weight: 2 },
+        { name: 'c1', expr: 'return new Rectangle(3, 4).aire();', expected: 12, compare: 'exact', weight: 2 },
       ],
     });
     expect(out).toEqual([{ name: 'c1', passed: true, weight: 1 }]);
