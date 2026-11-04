@@ -194,8 +194,8 @@ export function HarnessBody({
               </button>
             </div>
             {structured ? (
-              <div className={styles.harnessFields}>
-                <label className={styles.weightField}>
+              <div className={styles.structuredFields}>
+                <label className={styles.structuredField}>
                   <span className={styles.weightLabel}>{t.exprLabel}</span>
                   <CodeEditor
                     value={c.expr ?? ''}
@@ -204,17 +204,17 @@ export function HarnessBody({
                     ariaLabel={t.exprAria(i + 1)}
                   />
                 </label>
-                <label className={styles.weightField}>
+                <label className={styles.structuredField}>
                   <span className={styles.weightLabel}>{t.expectedLabel}</span>
                   <textarea
-                    className={styles.input}
+                    className={styles.textarea}
                     value={c.expectedJson ?? ''}
                     placeholder={t.expectedPlaceholder}
                     rows={2}
                     onChange={(e) => update(i, { expectedJson: e.target.value })}
                   />
                 </label>
-                <label className={styles.weightField}>
+                <label className={styles.structuredField}>
                   <span className={styles.weightLabel}>{t.compareLabel}</span>
                   <select
                     className={styles.input}

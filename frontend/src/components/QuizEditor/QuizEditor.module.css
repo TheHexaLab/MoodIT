@@ -760,6 +760,14 @@
 .weightLabel { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; flex: 0 0 auto; }
 .weightInput { flex: 0 0 3.25rem; text-align: center; }
 
+/* Cas structuré (#116) : expression + attendu + comparaison, EMPILÉS pleine largeur
+   (sinon ils partagent une ligne flex et débordent en scroll horizontal). */
+.structuredFields { display: flex; flex-direction: column; gap: 0.625rem; min-width: 0; }
+.structuredField { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.structuredField > .input,
+.structuredField > .textarea,
+.structuredField > select { width: 100%; box-sizing: border-box; }
+
 /* Mobile : nom et poids empilés sur une colonne. La poubelle est placée sur la
    LIGNE DU NOM (centrée verticalement par rapport à l'input de nom), le poids
    passant en dessous sur toute la largeur. On déplie `.harnessFields` (display:
