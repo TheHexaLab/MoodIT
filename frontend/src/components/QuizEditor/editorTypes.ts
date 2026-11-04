@@ -325,6 +325,10 @@ export function draftToQuestion(
       id: t.id ?? -(i + 1),
       name: t.name,
       harnessCode: t.harnessCode,
+      entry: t.entry,
+      argsJson: t.argsJson,
+      expectedJson: t.expectedJson,
+      compareMode: t.compareMode,
       weight: t.weight,
     })),
   };

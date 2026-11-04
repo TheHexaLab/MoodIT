@@ -247,8 +247,20 @@ export interface DragItem {
 export interface TestCase {
   id: number;
   name: string;
-  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). */
+  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). Vide pour un cas structuré. */
   harnessCode: string;
+  /**
+   * CAS STRUCTURÉ (#116) — alternative au harnais-code pour les questions « appel de fonction »
+   * (langages compilés) : appeler `entry(args)` et comparer la sortie à `expectedJson`, HORS sandbox.
+   * `entry` renseigné ⇒ le cas est structuré.
+   */
+  entry?: string;
+  /** Arguments (JSON, tableau) du cas structuré. */
+  argsJson?: string;
+  /** Valeur attendue (JSON) du cas structuré. */
+  expectedJson?: string;
+  /** Mode de comparaison : `exact` (défaut), `float`, `unordered`. */
+  compareMode?: string;
   weight: number;
 }
 
