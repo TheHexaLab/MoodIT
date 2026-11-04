@@ -28,6 +28,8 @@ interface ScheduleFormProps {
   onCancel: () => void;
   /** Modification : bouton « Supprimer ». */
   onDelete?: () => void;
+  /** Séance modifiée : remplace le champ « Répétition » (null = rien à sa place). */
+  repeatField?: React.ReactNode;
 }
 
 /** Pastilles de couleur : des boutons radio natifs, redessinés. */
@@ -329,6 +331,7 @@ export default function ScheduleForm({
   onSubmit,
   onCancel,
   onDelete,
+  repeatField,
 }: ScheduleFormProps): React.ReactElement {
   const id = useId();
   const managed = courses.filter((course) => course.canManage);
@@ -543,34 +546,40 @@ export default function ScheduleForm({
               onChange={(event) => set({ room: event.target.value })}
             />
           </label>
-          <div className={styles.field}>
-            <span id={`${id}-repeat`}>Répétition</span>
-            <div className={styles.chips} role="group" aria-labelledby={`${id}-repeat`}>
-              <button
-                type="button"
-                aria-pressed={!draft.weekly}
-                onClick={() => set({ weekly: false })}
-              >
-                Une fois
-              </button>
-              <button
-                type="button"
-                aria-pressed={draft.weekly}
-                onClick={() => set({ weekly: true, until: draft.until || draft.date })}
-              >
-                Chaque semaine
-              </button>
-            </div>
-          </div>
-          {draft.weekly && (
-            <label className={styles.field}>
-              <span>Jusqu'au</span>
-              <input
-                type="date"
-                value={draft.until}
-                onChange={(event) => set({ until: event.target.value })}
-              />
-            </label>
+          {repeatField !== undefined ? (
+            repeatField
+          ) : (
+            <>
+              <div className={styles.field}>
+                <span id={`${id}-repeat`}>Répétition</span>
+                <div className={styles.chips} role="group" aria-labelledby={`${id}-repeat`}>
+                  <button
+                    type="button"
+                    aria-pressed={!draft.weekly}
+                    onClick={() => set({ weekly: false })}
+                  >
+                    Une fois
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={draft.weekly}
+                    onClick={() => set({ weekly: true, until: draft.until || draft.date })}
+                  >
+                    Chaque semaine
+                  </button>
+                </div>
+              </div>
+              {draft.weekly && (
+                <label className={styles.field}>
+                  <span>Jusqu'au</span>
+                  <input
+                    type="date"
+                    value={draft.until}
+                    onChange={(event) => set({ until: event.target.value })}
+                  />
+                </label>
+              )}
+            </>
           )}
           <p className={styles.hint}>
             Les étudiants du cours la verront, sans pouvoir la déplacer.

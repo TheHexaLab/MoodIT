@@ -14,12 +14,14 @@ import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import {
   addDemoSessions,
   addDemoTask,
+  deleteDemoSessions,
   deleteDemoTask,
   demoSchedule,
   demoCourseColors,
   demoTasks,
   setDemoCourseColor,
   updateDemoTask,
+  updateDemoSessions,
 } from '../../mocks/scheduleData.ts';
 import {
   DEMO_STUDENT,
@@ -34,6 +36,7 @@ import type {
   ScheduleCourse,
   ScheduleSession,
   ScheduleSessionInput,
+  ScheduleSessionScope,
   ScheduleTask,
   ScheduleTaskInput,
   Assignment,
@@ -1312,6 +1315,22 @@ export async function setScheduleCourseColor(courseId: number, color: ScheduleCo
 /** Séance ajoutée par l'enseignant : toutes ses occurrences, si elle se répète. */
 export async function createScheduleSessions(input: ScheduleSessionInput): Promise<ScheduleSession[]> {
   return addDemoSessions(input);
+}
+
+/** Séance modifiée par l'enseignant : celle-ci, ou toute sa série. */
+export async function updateScheduleSessions(
+  session: ScheduleSession,
+  input: ScheduleSessionInput,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  updateDemoSessions(session, input, scope);
+}
+
+export async function deleteScheduleSessions(
+  session: ScheduleSession,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  deleteDemoSessions(session, scope);
 }
 
 // ── Devoirs (#252) : données FICTIVES, en mémoire, en attendant une API ───────────────────────────

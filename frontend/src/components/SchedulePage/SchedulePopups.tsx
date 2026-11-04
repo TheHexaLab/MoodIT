@@ -8,6 +8,8 @@ import type {
   ScheduleColor,
   ScheduleCourse,
   ScheduleSession,
+  ScheduleSessionInput,
+  ScheduleSessionScope,
   ScheduleTask,
   ScheduleTaskInput,
 } from '../../types/domain.ts';
@@ -16,10 +18,12 @@ import {
   REMINDERS,
   dayTitle,
   draftError,
+  draftToSession,
   draftToTask,
   formatRange,
   formatShortTime,
   formatTime,
+  sessionDraft,
   taskDraft,
 } from './schedule.ts';
 
@@ -62,6 +66,8 @@ interface SessionPopupProps {
   onColorChange: (color: ScheduleColor) => void;
   onOpenCourse: () => void;
   onClose: () => void;
+  /** Qui gère le cours : « Modifier » ouvre la fenêtre de modification de la séance. */
+  onEdit?: () => void;
 }
 
 /** Détail d'une séance : quand, où, répétition ; « Voir le cours » ouvre le cours. */
@@ -72,6 +78,7 @@ export function SessionPopup({
   onColorChange,
   onOpenCourse,
   onClose,
+  onEdit,
 }: SessionPopupProps): React.ReactElement {
   const controller = usePopupController();
   /** Couleur essayée dans les pastilles ; « Appliquer » l'enregistre. */
@@ -149,6 +156,15 @@ export function SessionPopup({
               Appliquer
             </button>
           )}
+          {onEdit && picked === color && (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary}`}
+              onClick={() => controller.requestClose(onEdit)}
+            >
+              Modifier
+            </button>
+          )}
         </div>
       </div>
     </Popup>
@@ -210,6 +226,96 @@ export function TaskPopup({
           }}
           onCancel={() => controller.requestClose()}
           onDelete={() => void run(onDelete)}
+        />
+      </div>
+    </Popup>
+  );
+}
+
+interface SessionEditPopupProps {
+  session: ScheduleSession;
+  courses: ScheduleCourse[];
+  kinds: string[];
+  onAddKind: (kind: string) => void;
+  onDeleteKind: (kind: string) => void;
+  onSave: (input: ScheduleSessionInput, scope: ScheduleSessionScope) => Promise<void>;
+  onDelete: (scope: ScheduleSessionScope) => Promise<void>;
+  onClose: () => void;
+}
+
+/**
+ * Modification d'une séance par qui gère le cours : cours, type, jour, heures, local. Une séance
+ * répétée se modifie seule ou avec toute sa série.
+ */
+export function SessionEditPopup({
+  session,
+  courses,
+  kinds,
+  onAddKind,
+  onDeleteKind,
+  onSave,
+  onDelete,
+  onClose,
+}: SessionEditPopupProps): React.ReactElement {
+  const controller = usePopupController();
+  const [draft, setDraft] = useState(() => sessionDraft(session));
+  const [scope, setScope] = useState<ScheduleSessionScope>('one');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inSeries = session.seriesId != null;
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await action();
+      controller.requestClose();
+    } catch {
+      setError("L'enregistrement a échoué. Réessayez.");
+      setBusy(false);
+    }
+  }
+
+  const scopeField = inSeries ? (
+    <div className={styles.field}>
+      <span id={`session-scope-${session.id}`}>Appliquer à</span>
+      <div className={styles.chips} role="group" aria-labelledby={`session-scope-${session.id}`}>
+        <button type="button" aria-pressed={scope === 'one'} onClick={() => setScope('one')}>
+          Cette séance
+        </button>
+        <button type="button" aria-pressed={scope === 'series'} onClick={() => setScope('series')}>
+          Toutes les semaines
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <Popup
+      variant={PopupVariant.Form}
+      label="Modifier la séance"
+      onClose={onClose}
+      controller={controller}
+    >
+      <div className={styles.dialog}>
+        <Header title="Modifier la séance" onClose={() => controller.requestClose()} />
+        <ScheduleForm
+          draft={draft}
+          onChange={setDraft}
+          courses={courses}
+          kinds={kinds}
+          onAddKind={onAddKind}
+          onDeleteKind={onDeleteKind}
+          error={error}
+          busy={busy}
+          submitLabel="Enregistrer"
+          repeatField={scopeField}
+          onSubmit={() => {
+            const problem = draftError(draft);
+            if (problem) setError(problem);
+            else void run(() => onSave(draftToSession(draft), scope));
+          }}
+          onCancel={() => controller.requestClose()}
+          onDelete={() => void run(() => onDelete(scope))}
         />
       </div>
     </Popup>

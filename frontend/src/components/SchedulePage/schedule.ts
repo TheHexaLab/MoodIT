@@ -1,5 +1,6 @@
 import type {
   ScheduleColor,
+  ScheduleSession,
   ScheduleSessionInput,
   ScheduleTask,
   ScheduleTaskInput,
@@ -320,6 +321,17 @@ export function taskDraft(task: ScheduleTask): Draft {
     done: task.done,
     allDay: task.allDay,
     deadline: task.deadline,
+  };
+}
+
+/** Brouillon d'une séance à modifier ; sa répétition ne change pas ici. */
+export function sessionDraft(session: ScheduleSession): Draft {
+  return {
+    ...emptyDraft('session', new Date(session.start), 9, session.courseId),
+    start: toTimeInput(session.start),
+    end: toTimeInput(session.end),
+    sessionKind: session.kind,
+    room: session.room,
   };
 }
 

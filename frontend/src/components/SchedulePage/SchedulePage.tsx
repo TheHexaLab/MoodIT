@@ -8,6 +8,7 @@ import ScheduleForm from './ScheduleForm.tsx';
 import {
   DeadlinePopup,
   Header,
+  SessionEditPopup,
   SessionPopup,
   TaskPopup,
   TaskPreviewPopup,
@@ -17,6 +18,7 @@ import type {
   ScheduleCourse,
   ScheduleSession,
   ScheduleSessionInput,
+  ScheduleSessionScope,
   ScheduleTask,
   ScheduleTaskInput,
 } from '../../types/domain.ts';
@@ -90,6 +92,13 @@ export interface ScheduleApi {
   deleteTask: (id: number) => Promise<void>;
   /** Toutes les occurrences de la séance ajoutée. */
   createSessions: (input: ScheduleSessionInput) => Promise<ScheduleSession[]>;
+  /** Modifie ou supprime une séance, ou toute sa série. */
+  updateSessions: (
+    session: ScheduleSession,
+    input: ScheduleSessionInput,
+    scope: ScheduleSessionScope
+  ) => Promise<void>;
+  deleteSessions: (session: ScheduleSession, scope: ScheduleSessionScope) => Promise<void>;
   /** Couleurs choisies par l'utilisateur pour ses cours (les autres gardent la leur). */
   fetchCourseColors: () => Promise<Record<number, ScheduleColor>>;
   setCourseColor: (courseId: number, color: ScheduleColor) => Promise<void>;
@@ -212,6 +221,8 @@ export default function SchedulePage({
   const [addError, setAddError] = useState<string | null>(null);
   const [addBusy, setAddBusy] = useState(false);
   const [openSession, setOpenSession] = useState<ScheduleSession | null>(null);
+  /** Séance en cours de modification (qui gère son cours). */
+  const [editSession, setEditSession] = useState<ScheduleSession | null>(null);
   const [openTask, setOpenTask] = useState<ScheduleTask | null>(null);
   /** Tâche vue en aperçu (titre, quand, description) ; « Modifier » ouvre sa fenêtre de modification. */
   const [previewTask, setPreviewTask] = useState<ScheduleTask | null>(null);
@@ -367,6 +378,12 @@ export default function SchedulePage({
 
   function closeAdd() {
     setAdding(null);
+  }
+
+  /** Après une modification de séance : les séances de la semaine, relues (une série a pu bouger). */
+  async function reloadSessions() {
+    const sessions = await api.fetchSessions(new Date(weekStartTime), courses);
+    setLoad((previous) => (previous.status === 'ready' ? { ...previous, sessions } : previous));
   }
 
   async function submitAdd() {
@@ -1330,6 +1347,34 @@ export default function SchedulePage({
             setOpenSession(null);
             onOpenCourse(sessionCourse.programId, sessionCourse.id);
           }}
+          onEdit={
+            sessionCourse.canManage
+              ? () => {
+                  setEditSession(openSession);
+                  setOpenSession(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {editSession && (
+        <SessionEditPopup
+          session={editSession}
+          courses={courses}
+          kinds={sessionKinds}
+          onAddKind={(kind) => setSessionKinds((kinds) => [...kinds, kind])}
+          onDeleteKind={(kind) =>
+            setSessionKinds((kinds) => kinds.filter((known) => known !== kind))
+          }
+          onSave={async (input, scope) => {
+            await api.updateSessions(editSession, input, scope);
+            await reloadSessions();
+          }}
+          onDelete={async (scope) => {
+            await api.deleteSessions(editSession, scope);
+            await reloadSessions();
+          }}
+          onClose={() => setEditSession(null)}
         />
       )}
       {/* Une remise vient d'un devoir du cours : elle se lit ici, elle se modifie dans Devoirs. */}

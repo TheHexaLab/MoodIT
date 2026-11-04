@@ -534,10 +534,15 @@ export interface ScheduleSession {
   end: string;
   /** Séance hebdomadaire : date ISO de la dernière occurrence ; null ou absent = une seule fois. */
   until?: string | null;
+  /** Série des séances répétées chaque semaine ; absent = une séance seule. */
+  seriesId?: number;
 }
 
 /** Séance à ajouter par l'enseignant ; `until` répète chaque semaine jusqu'à cette date ISO. */
-export type ScheduleSessionInput = Omit<ScheduleSession, 'id'>;
+export type ScheduleSessionInput = Omit<ScheduleSession, 'id' | 'seriesId'>;
+
+/** Modification d'une séance répétée : celle-ci seulement, ou toute sa série. */
+export type ScheduleSessionScope = 'one' | 'series';
 
 /** Couleur d'une tâche, choisie par l'étudiant. */
 export type ScheduleColor = 'teal' | 'blue' | 'purple' | 'rose' | 'orange' | 'green' | 'gray';
