@@ -1292,6 +1292,11 @@ public class CodeAssembler {
     /** Méthode statique C# : {@code [vis] static RET nom(params) {} } (vis capturée). */
     private static final Pattern CS_STATIC_METHOD = Pattern.compile(
             "(public|private|protected|internal)?\\s*static\\s+([\\w\\[\\]<>]+)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{");
+    /** N'importe quelle méthode C# : modifieurs + type de retour + nom + params (le `static` est filtré
+     *  à l'exécution pour ne garder que les méthodes d'INSTANCE — POO). */
+    private static final Pattern CS_METHOD_ANY = Pattern.compile(
+            "((?:(?:public|private|protected|internal|static|sealed|virtual|override)\\s+)*)"
+                    + "([\\w\\[\\]<>]+)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{");
     /** Directive {@code using …;}, à hisser en tête (un using après une classe ne compile pas). */
     private static final Pattern CS_USING = Pattern.compile("(?m)^[ \\t]*using\\s+[^;]+;[ \\t]*\\n?");
 
@@ -1301,8 +1306,10 @@ public class CodeAssembler {
      * __moodit_student} (pas de recompilation → rapide) comme serveur étudiant. Le PARENT (noteur) lit
      * le nonce sur SON stdin, exécute le harnais INCHANGÉ et réémet le nonce en cas de succès ; le
      * CHILD héberge le vrai code étudiant et répond par RPC (netstring). Classes étudiant renommées
-     * {@code __MooditStudent_*} + classes STUB de même nom. Périmètre : méthodes STATIQUES
-     * {@code public}/{@code internal} à paramètres/retour scalaires ({@code int, long, double, bool, string}).
+     * {@code __MooditStudent_*} + classes STUB de même nom. POO : les stubs ont aussi des CONSTRUCTEURS
+     * et méthodes d'INSTANCE qui délèguent par handle ({@code @new}/{@code @call}), le child
+     * instanciant/appelant par réflexion. Périmètre : paramètres/retours scalaires ({@code int, long,
+     * double, bool, string}), méthodes {@code public}/{@code internal}.
      */
     private Assembled assembleCSharp(String studentCode, String harnessCode, String nonce) {
         String student = studentCode == null ? "" : studentCode;
@@ -1328,6 +1335,7 @@ public class CodeAssembler {
             int bodyClose = javaMatchBrace(student, bodyOpen);
             String body = student.substring(bodyOpen + 1, bodyClose);
             stubs.append("class ").append(className).append(" {\n");
+            stubs.append("  int __moodit_h = -1;\n"); // handle de l'objet réel côté child (POO)
             Matcher mm = CS_STATIC_METHOD.matcher(body);
             while (mm.find()) {
                 String vis = mm.group(1);
@@ -1376,6 +1384,48 @@ public class CodeAssembler {
                 }
                 cases.append("      break;\n    }\n");
             }
+            // POO — constructeurs : délèguent "@new <Classe>" et mémorisent le handle du vrai objet.
+            Pattern ctorP = Pattern.compile(
+                    "(?:(?:public|private|protected|internal)\\s+)*" + Pattern.quote(className)
+                            + "\\s*\\(([^)]*)\\)\\s*\\{");
+            Matcher ctm = ctorP.matcher(body);
+            while (ctm.find()) {
+                List<String[]> params = javaParseParams(ctm.group(1));
+                if (!params.stream().allMatch(p -> CS_SCALARS.contains(p[1]))) continue;
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                String encArgs = params.stream().map(p -> csEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                stubs.append("  public ").append(className).append("(").append(sig)
+                        .append(") { __moodit_h = int.Parse(__MooditMain.__rpcNew(\"").append(className)
+                        .append("\", new string[]{").append(encArgs).append("})); }\n");
+            }
+            // POO — méthodes d'INSTANCE : délèguent "@call <handle> <methode>".
+            Matcher instM = CS_METHOD_ANY.matcher(body);
+            while (instM.find()) {
+                String mods = instM.group(1);
+                if (mods.contains("static")) continue;
+                if (!(mods.contains("public") || mods.contains("internal"))) continue;
+                String ret = instM.group(2);
+                String method = instM.group(3);
+                if (method.equals(className)) continue; // garde-fou (ctor géré à part)
+                List<String[]> params = javaParseParams(instM.group(4));
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                boolean supported = ("void".equals(ret) || CS_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> CS_SCALARS.contains(p[1]));
+                if (!supported) {
+                    stubs.append("  public ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { throw new System.Exception(\"type non supporte\"); }\n");
+                    continue;
+                }
+                String encArgs = params.stream().map(p -> csEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                String rpc = "__MooditMain.__rpcCall(__moodit_h, \"" + method + "\", new string[]{" + encArgs + "})";
+                if ("void".equals(ret)) {
+                    stubs.append("  public ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { ").append(rpc).append("; }\n");
+                } else {
+                    stubs.append("  public ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { return ").append(csDec(rpc, ret)).append("; }\n");
+                }
+            }
             stubs.append("}\n");
         }
 
@@ -1407,6 +1457,45 @@ public class CodeAssembler {
                 + "    if (st != \"1\") throw new System.Exception(\"appel etudiant en echec\");\n"
                 + "    return rv;\n"
                 + "  }\n"
+                // POO (grader → child) : construction et appel de méthode par handle.
+                + "  public static string __rpcNew(string cls, string[] args) {\n"
+                + "    __nsWrite(__rpcOut, \"@new\"); __nsWrite(__rpcOut, cls); __nsWrite(__rpcOut, args.Length.ToString());\n"
+                + "    foreach (var a in args) __nsWrite(__rpcOut, a);\n"
+                + "    string st = __nsRead(__rpcIn); string rv = __nsRead(__rpcIn);\n"
+                + "    if (st != \"1\") throw new System.Exception(\"construction etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                + "  public static string __rpcCall(int h, string name, string[] args) {\n"
+                + "    __nsWrite(__rpcOut, \"@call\"); __nsWrite(__rpcOut, h.ToString()); __nsWrite(__rpcOut, name); __nsWrite(__rpcOut, args.Length.ToString());\n"
+                + "    foreach (var a in args) __nsWrite(__rpcOut, a);\n"
+                + "    string st = __nsRead(__rpcIn); string rv = __nsRead(__rpcIn);\n"
+                + "    if (st != \"1\") throw new System.Exception(\"appel methode etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                // POO (child) : table d'objets + instanciation/appel par réflexion (args coercés par type).
+                + "  static System.Collections.Generic.List<object> __moodit_objs = new System.Collections.Generic.List<object>();\n"
+                + "  static object __moodit_coerce(System.Type t, string s) { return System.Convert.ChangeType(s, t, System.Globalization.CultureInfo.InvariantCulture); }\n"
+                + "  static string __moodit_fmt(object o) { if (o == null) return \"\"; if (o is double) return ((double)o).ToString(System.Globalization.CultureInfo.InvariantCulture); if (o is float) return ((float)o).ToString(System.Globalization.CultureInfo.InvariantCulture); return o.ToString(); }\n"
+                + "  static int __moodit_newObj(string cls, string[] a) {\n"
+                + "    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;\n"
+                + "    System.Type k = System.Type.GetType(\"__MooditStudent_\" + cls);\n"
+                + "    foreach (var c in k.GetConstructors(flags)) if (c.GetParameters().Length == a.Length) {\n"
+                + "      var pt = c.GetParameters(); object[] o = new object[a.Length];\n"
+                + "      for (int i=0;i<a.Length;i++) o[i]=__moodit_coerce(pt[i].ParameterType, a[i]);\n"
+                + "      __moodit_objs.Add(c.Invoke(o)); return __moodit_objs.Count-1;\n"
+                + "    }\n"
+                + "    throw new System.Exception(\"ctor\");\n"
+                + "  }\n"
+                + "  static object __moodit_callObj(int h, string name, string[] a) {\n"
+                + "    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;\n"
+                + "    object obj = __moodit_objs[h];\n"
+                + "    foreach (var m in obj.GetType().GetMethods(flags)) if (m.Name == name && m.GetParameters().Length == a.Length) {\n"
+                + "      var pt = m.GetParameters(); object[] o = new object[a.Length];\n"
+                + "      for (int i=0;i<a.Length;i++) o[i]=__moodit_coerce(pt[i].ParameterType, a[i]);\n"
+                + "      return m.Invoke(obj, o);\n"
+                + "    }\n"
+                + "    throw new System.Exception(\"method\");\n"
+                + "  }\n"
                 + "  static bool __moodit_harness() {\n"
                 + harness
                 + "\n  }\n"
@@ -1418,6 +1507,18 @@ public class CodeAssembler {
                 + "      try { __key = __nsRead(__in); } catch (System.Exception) { break; }\n"
                 + "      switch (__key) {\n"
                 + cases
+                + "      case \"@new\": {\n"
+                + "        string __cls = __nsRead(__in); int __ac = int.Parse(__nsRead(__in));\n"
+                + "        string[] __a = new string[__ac]; for (int __i=0;__i<__ac;__i++) __a[__i]=__nsRead(__in);\n"
+                + "        try { int __h = __moodit_newObj(__cls, __a); __nsWrite(__out, \"1\"); __nsWrite(__out, __h.ToString()); }\n"
+                + "        catch (System.Exception) { __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); }\n"
+                + "        break;\n      }\n"
+                + "      case \"@call\": {\n"
+                + "        int __h = int.Parse(__nsRead(__in)); string __m = __nsRead(__in); int __ac = int.Parse(__nsRead(__in));\n"
+                + "        string[] __a = new string[__ac]; for (int __i=0;__i<__ac;__i++) __a[__i]=__nsRead(__in);\n"
+                + "        try { object __r = __moodit_callObj(__h, __m, __a); __nsWrite(__out, \"1\"); __nsWrite(__out, __moodit_fmt(__r)); }\n"
+                + "        catch (System.Exception) { __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); }\n"
+                + "        break;\n      }\n"
                 + "      default: __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); break;\n"
                 + "      }\n"
                 + "    }\n"
@@ -1475,6 +1576,10 @@ public class CodeAssembler {
     private static final Pattern JAVA_IMPORT = Pattern.compile("(?m)^[ \\t]*import\\s+[^;]+;[ \\t]*\\n?");
     /** Types scalaires marshalables (périmètre pilote Java/C#). */
     private static final Set<String> JAVA_SCALARS = Set.of("int", "long", "double", "boolean", "String");
+    /** N'importe quelle méthode : modifieurs + type de retour + nom + params (le `static` est filtré
+     *  à l'exécution pour ne garder que les méthodes d'INSTANCE — POO). */
+    private static final Pattern JAVA_METHOD_ANY = Pattern.compile(
+            "((?:(?:public|private|protected|static|final|abstract)\\s+)*)([\\w\\[\\]<>]+)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws[^{]*)?\\{");
 
     /**
      * Java : exécution ISOLÉE en DEUX processus (cf. #116). Piston lance {@code java <src>} en mode
@@ -1484,8 +1589,10 @@ public class CodeAssembler {
      * répond par RPC (protocole netstring sur stdin/stdout). Le child ne voit jamais le nonce (mémoire
      * du parent). Les classes étudiant sont renommées {@code __MooditStudent_*} et remplacées par des
      * classes STUB de même nom dont les méthodes statiques délèguent au child — le harnais
-     * {@code Classe.methode(...)} compile donc sans le vrai code. Périmètre : méthodes STATIQUES à
-     * paramètres/retour scalaires ({@code int, long, double, boolean, String}).
+     * {@code Classe.methode(...)} compile donc sans le vrai code. POO : les stubs ont aussi des
+     * CONSTRUCTEURS et méthodes d'INSTANCE qui délèguent par handle ({@code @new}/{@code @call}),
+     * le child instanciant/appelant par réflexion dans une table d'objets. Périmètre : paramètres et
+     * retours scalaires ({@code int, long, double, boolean, String}).
      */
     private Assembled assembleJava(String studentCode, String harnessCode, String nonce) {
         String student = studentCode == null ? "" : studentCode;
@@ -1512,6 +1619,7 @@ public class CodeAssembler {
             int bodyClose = javaMatchBrace(student, bodyOpen);
             String body = student.substring(bodyOpen + 1, bodyClose);
             stubs.append("class ").append(className).append(" {\n");
+            stubs.append("  int __moodit_h = -1;\n"); // handle de l'objet réel côté child (POO)
             Matcher mm = JAVA_STATIC_METHOD.matcher(body);
             while (mm.find()) {
                 String vis = mm.group(1);
@@ -1561,6 +1669,47 @@ public class CodeAssembler {
                 }
                 cases.append("      break;\n    }\n");
             }
+            // POO — constructeurs : délèguent "@new <Classe>" et mémorisent le handle du vrai objet.
+            Pattern ctorP = Pattern.compile(
+                    "(?:(?:public|private|protected)\\s+)*" + Pattern.quote(className)
+                            + "\\s*\\(([^)]*)\\)\\s*(?:throws[^{]*)?\\{");
+            Matcher ctm = ctorP.matcher(body);
+            while (ctm.find()) {
+                List<String[]> params = javaParseParams(ctm.group(1));
+                if (!params.stream().allMatch(p -> JAVA_SCALARS.contains(p[1]))) continue;
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                String encArgs = params.stream().map(p -> javaEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                stubs.append("  ").append(className).append("(").append(sig)
+                        .append(") { __moodit_h = Integer.parseInt(__MooditMain.__rpcNew(\"").append(className)
+                        .append("\", new String[]{").append(encArgs).append("})); }\n");
+            }
+            // POO — méthodes d'INSTANCE : délèguent "@call <handle> <methode>".
+            Matcher instM = JAVA_METHOD_ANY.matcher(body);
+            while (instM.find()) {
+                String mods = instM.group(1);
+                if (mods.contains("static") || mods.contains("private") || mods.contains("protected")) continue;
+                String ret = instM.group(2);
+                String method = instM.group(3);
+                if (method.equals(className)) continue; // garde-fou (un ctor ne matche pas : pas de type de retour)
+                List<String[]> params = javaParseParams(instM.group(4));
+                String sig = params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+                boolean supported = ("void".equals(ret) || JAVA_SCALARS.contains(ret))
+                        && params.stream().allMatch(p -> JAVA_SCALARS.contains(p[1]));
+                if (!supported) {
+                    stubs.append("  ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { throw new RuntimeException(\"type non supporte par l'isolation RPC\"); }\n");
+                    continue;
+                }
+                String encArgs = params.stream().map(p -> javaEnc(p[0], p[1])).collect(Collectors.joining(", "));
+                String rpc = "__MooditMain.__rpcCall(__moodit_h, \"" + method + "\", new String[]{" + encArgs + "})";
+                if ("void".equals(ret)) {
+                    stubs.append("  ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { ").append(rpc).append("; }\n");
+                } else {
+                    stubs.append("  ").append(ret).append(" ").append(method).append("(").append(sig)
+                            .append(") { return ").append(javaDec(rpc, ret)).append("; }\n");
+                }
+            }
             stubs.append("}\n");
         }
 
@@ -1592,6 +1741,48 @@ public class CodeAssembler {
                 + "    if (!st.equals(\"1\")) throw new RuntimeException(\"appel etudiant en echec\");\n"
                 + "    return rv;\n"
                 + "  }\n"
+                // POO (grader → child) : construction et appel de méthode par handle.
+                + "  static String __rpcNew(String cls, String[] args) {\n"
+                + "    __nsWrite(__rpcOut, \"@new\"); __nsWrite(__rpcOut, cls); __nsWrite(__rpcOut, String.valueOf(args.length));\n"
+                + "    for (String a : args) __nsWrite(__rpcOut, a);\n"
+                + "    String st = __nsRead(__rpcIn); String rv = __nsRead(__rpcIn);\n"
+                + "    if (!st.equals(\"1\")) throw new RuntimeException(\"construction etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                + "  static String __rpcCall(int h, String name, String[] args) {\n"
+                + "    __nsWrite(__rpcOut, \"@call\"); __nsWrite(__rpcOut, String.valueOf(h)); __nsWrite(__rpcOut, name); __nsWrite(__rpcOut, String.valueOf(args.length));\n"
+                + "    for (String a : args) __nsWrite(__rpcOut, a);\n"
+                + "    String st = __nsRead(__rpcIn); String rv = __nsRead(__rpcIn);\n"
+                + "    if (!st.equals(\"1\")) throw new RuntimeException(\"appel methode etudiant en echec\");\n"
+                + "    return rv;\n"
+                + "  }\n"
+                // POO (child) : table d'objets + instanciation/appel par réflexion (args coercés par type).
+                + "  static java.util.List<Object> __moodit_objs = new java.util.ArrayList<Object>();\n"
+                + "  static Object __moodit_coerce(Class<?> t, String s) {\n"
+                + "    if (t==int.class||t==Integer.class) return Integer.valueOf(Integer.parseInt(s));\n"
+                + "    if (t==long.class||t==Long.class) return Long.valueOf(Long.parseLong(s));\n"
+                + "    if (t==double.class||t==Double.class) return Double.valueOf(Double.parseDouble(s));\n"
+                + "    if (t==boolean.class||t==Boolean.class) return Boolean.valueOf(Boolean.parseBoolean(s));\n"
+                + "    return s;\n"
+                + "  }\n"
+                + "  static int __moodit_newObj(String cls, String[] a) throws Exception {\n"
+                + "    Class<?> k = Class.forName(\"__MooditStudent_\" + cls);\n"
+                + "    for (java.lang.reflect.Constructor<?> c : k.getDeclaredConstructors()) if (c.getParameterCount()==a.length) {\n"
+                + "      c.setAccessible(true); Class<?>[] pt = c.getParameterTypes(); Object[] o = new Object[a.length];\n"
+                + "      for (int i=0;i<a.length;i++) o[i]=__moodit_coerce(pt[i], a[i]);\n"
+                + "      __moodit_objs.add(c.newInstance(o)); return __moodit_objs.size()-1;\n"
+                + "    }\n"
+                + "    throw new NoSuchMethodException(cls);\n"
+                + "  }\n"
+                + "  static Object __moodit_callObj(int h, String name, String[] a) throws Exception {\n"
+                + "    Object obj = __moodit_objs.get(h);\n"
+                + "    for (java.lang.reflect.Method m : obj.getClass().getDeclaredMethods()) if (m.getName().equals(name) && m.getParameterCount()==a.length) {\n"
+                + "      m.setAccessible(true); Class<?>[] pt = m.getParameterTypes(); Object[] o = new Object[a.length];\n"
+                + "      for (int i=0;i<a.length;i++) o[i]=__moodit_coerce(pt[i], a[i]);\n"
+                + "      return m.invoke(obj, o);\n"
+                + "    }\n"
+                + "    throw new NoSuchMethodException(name);\n"
+                + "  }\n"
                 + "  static boolean __moodit_harness() {\n"
                 + harness
                 + "\n  }\n"
@@ -1604,6 +1795,18 @@ public class CodeAssembler {
                 + "      try { __key = __nsRead(__in); } catch (RuntimeException e) { break; }\n"
                 + "      switch (__key) {\n"
                 + cases
+                + "      case \"@new\": {\n"
+                + "        String __cls = __nsRead(__in); int __ac = Integer.parseInt(__nsRead(__in));\n"
+                + "        String[] __a = new String[__ac]; for (int __i=0;__i<__ac;__i++) __a[__i]=__nsRead(__in);\n"
+                + "        try { int __h = __moodit_newObj(__cls, __a); __nsWrite(__out, \"1\"); __nsWrite(__out, String.valueOf(__h)); }\n"
+                + "        catch (Throwable __t) { __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); }\n"
+                + "        break;\n      }\n"
+                + "      case \"@call\": {\n"
+                + "        int __h = Integer.parseInt(__nsRead(__in)); String __m = __nsRead(__in); int __ac = Integer.parseInt(__nsRead(__in));\n"
+                + "        String[] __a = new String[__ac]; for (int __i=0;__i<__ac;__i++) __a[__i]=__nsRead(__in);\n"
+                + "        try { Object __r = __moodit_callObj(__h, __m, __a); __nsWrite(__out, \"1\"); __nsWrite(__out, __r==null?\"\":String.valueOf(__r)); }\n"
+                + "        catch (Throwable __t) { __nsWrite(__out, \"0\"); __nsWrite(__out, \"\"); }\n"
+                + "        break;\n      }\n"
                 + "      default: __nsWrite(__out, \"0\"); __nsWrite(__out, \"\");\n"
                 + "      }\n"
                 + "    }\n"

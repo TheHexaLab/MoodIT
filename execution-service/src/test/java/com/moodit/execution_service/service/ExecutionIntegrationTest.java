@@ -414,6 +414,23 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void java_poo_construction_et_methode_dinstance_par_handle() {
+        requireRuntime("java");
+        // POO : le harnais construit un objet étudiant et appelle une méthode d'instance, à travers
+        // l'isolation 2-process (new → @new, aire() → @call ; le child instancie/appelle par réflexion).
+        String rect = "public class Rectangle {\n"
+                + "  private int l, h;\n"
+                + "  public Rectangle(int l, int h){ this.l = l; this.h = h; }\n"
+                + "  public int aire(){ return l * h; }\n"
+                + "  public static void main(String[] a){} }";
+        assertThat(passes("Java", rect, "return new Rectangle(3, 4).aire() == 12;")).isTrue();
+        assertThat(passes("Java", rect, "return new Rectangle(5, 5).aire() == 25;")).isTrue();
+        // Mauvaise implémentation → la vraie méthode (dans le child) renvoie faux.
+        assertThat(passes("Java", rect.replace("l * h", "0"),
+                "return new Rectangle(3, 4).aire() == 12;")).isFalse();
+    }
+
+    @Test
     void go_isolation_rpc_deux_processus() {
         requireRuntime("go");
         // Commentaire en 1ère ligne (comme le gabarit livré) : nos imports vont APRÈS `package`, pas
@@ -514,6 +531,22 @@ class ExecutionIntegrationTest {
                 + "  } catch {}\n"
                 + "  return 0; } }",
                 "return S.Doubler(5) == 10;")).isFalse();
+    }
+
+    @Test
+    void csharp_poo_construction_et_methode_dinstance_par_handle() {
+        requireRuntime("csharp");
+        // POO : le harnais construit un objet étudiant et appelle une méthode d'instance, à travers
+        // l'isolation 2-process (new → @new, Aire() → @call ; le child instancie/appelle par réflexion).
+        String rect = "class Rectangle {\n"
+                + "  int l, h;\n"
+                + "  public Rectangle(int l, int h){ this.l = l; this.h = h; }\n"
+                + "  public int Aire(){ return l * h; }\n"
+                + "  static void Main(string[] a){} }";
+        assertThat(passes("C#", rect, "return new Rectangle(3, 4).Aire() == 12;")).isTrue();
+        assertThat(passes("C#", rect, "return new Rectangle(5, 5).Aire() == 25;")).isTrue();
+        assertThat(passes("C#", rect.replace("l * h", "0"),
+                "return new Rectangle(3, 4).Aire() == 12;")).isFalse();
     }
 
 

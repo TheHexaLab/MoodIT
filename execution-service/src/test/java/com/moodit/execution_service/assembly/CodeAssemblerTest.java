@@ -179,6 +179,62 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void java_poo_genere_constructeur_et_methode_dinstance_par_handle() {
+        // Classe POO : ctor + méthode d'instance → le stub doit déléguer par handle (@new/@call),
+        // le child doit instancier/appeler par réflexion (le harnais fait new Rectangle(3,4).aire()).
+        var a = assembler.assemble("Java",
+                "public class Rectangle { int l, h; public Rectangle(int l, int h){ this.l=l; this.h=h; } "
+                        + "public int aire(){ return l*h; } }",
+                "return new Rectangle(3,4).aire() == 12;", "MOODIT_OK_poo");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("class Rectangle {").contains("int __moodit_h");   // stub + handle
+        assertThat(c).contains("__MooditMain.__rpcNew(\"Rectangle\"");            // ctor → @new
+        assertThat(c).contains("__MooditMain.__rpcCall(__moodit_h, \"aire\"");    // méthode → @call
+        assertThat(c).contains("case \"@new\"").contains("case \"@call\"");       // dispatch child
+        assertThat(c).contains("getDeclaredConstructors").contains("getDeclaredMethods"); // réflexion
+        assertThat(c).contains("__MooditStudent_Rectangle");                      // vrai code renommé
+        assertThat(c).doesNotContain("MOODIT_OK_poo");                            // nonce jamais gravé
+    }
+
+    @Test
+    void java_poo_genere_un_programme_qui_compile(@TempDir Path dir) throws Exception {
+        // Garde-fou : le programme POO assemblé doit COMPILER (stubs ctor/méthode, dispatch @new/@call,
+        // helpers de réflexion). Classe étudiant package-private pour que javac strict accepte le nom de
+        // fichier (en vrai, Piston lance `java Main.java` en mode fichier-source, qui ignore cette règle).
+        var a = assembler.assemble("Java",
+                "class Rectangle { int l, h; Rectangle(int l, int h){ this.l=l; this.h=h; } "
+                        + "int aire(){ return l*h; } static void main(String[] x){} }",
+                "return new Rectangle(3,4).aire() == 12;", "MOODIT_OK_poo");
+        Path javac = Path.of(System.getProperty("java.home"), "bin", "javac");
+        if (!Files.exists(javac)) return; // pas de JDK (JRE seul) → on saute ce garde-fou
+        Path src = dir.resolve("__MooditMain.java");
+        Files.writeString(src, onlyFileContent(a));
+        Process p = new ProcessBuilder(javac.toString(), src.toString())
+                .redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes());
+        int code = p.waitFor();
+        assertThat(code).withFailMessage("javac a échoué :\n%s", out).isZero();
+    }
+
+    @Test
+    void csharp_poo_genere_constructeur_et_methode_dinstance_par_handle() {
+        // POO C# : ctor + méthode d'instance → le stub délègue par handle (@new/@call), le child
+        // instancie/appelle par réflexion (le harnais fait new Rectangle(3,4).Aire()).
+        var a = assembler.assemble("C#",
+                "class Rectangle { int l, h; public Rectangle(int l, int h){ this.l=l; this.h=h; } "
+                        + "public int Aire(){ return l*h; } static void Main(string[] x){} }",
+                "return new Rectangle(3,4).Aire() == 12;", "MOODIT_OK_poo");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("class Rectangle {").contains("int __moodit_h");
+        assertThat(c).contains("__MooditMain.__rpcNew(\"Rectangle\"");
+        assertThat(c).contains("__MooditMain.__rpcCall(__moodit_h, \"Aire\"");
+        assertThat(c).contains("case \"@new\"").contains("case \"@call\"");
+        assertThat(c).contains("GetConstructors").contains("GetMethods");           // réflexion
+        assertThat(c).contains("__MooditStudent_Rectangle");
+        assertThat(c).doesNotContain("MOODIT_OK_poo");
+    }
+
+    @Test
     void c_forks_isolated_process_and_reads_secret_from_stdin() {
         var a = assembler.assemble("C", "int solution(void){ return 5; }",
                 "return solution() == 5;", "MOODIT_OK_c");
