@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, dueBadge, formatDueDate, formatMoney, invoiceTotal } from './invoice';
+import {
+  daysUntil,
+  dueBadge,
+  formatDay,
+  formatDueDate,
+  formatMoney,
+  invoiceTotal,
+} from './invoice';
 
 /** Intl sépare les milliers et le « $ » par des espaces insécables : on les compare en espaces. */
 const plain = (text: string) => text.replace(/\s/g, ' ');
@@ -25,6 +32,10 @@ describe('factures : calculs et formats', () => {
 
   it('échéance en toutes lettres, lue comme une date locale', () => {
     expect(formatDueDate('2026-11-15')).toBe('15 novembre 2026');
+  });
+
+  it('jour d’une date, en toutes lettres', () => {
+    expect(formatDay(new Date(2026, 9, 30, 23, 30))).toBe('30 octobre 2026');
   });
 
   it('jours de calendrier avant l’échéance, quelle que soit l’heure', () => {

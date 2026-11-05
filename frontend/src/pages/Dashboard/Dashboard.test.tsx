@@ -558,7 +558,6 @@ describe('Dashboard', () => {
     it.each([
       ['horaire', 'Horaire'],
       ['bulletin', 'Bulletin'],
-      ['factures', 'Factures'],
       ['aide', "Centre d'aide"],
     ])('la page /home/%s affiche son écran d’attente, active dans la barre', async (slug, label) => {
       renderDashboard({ path: `/home/${slug}` });
@@ -2045,9 +2044,12 @@ describe('Dashboard — factures (#207)', () => {
     lines: [{ label: 'Droits de scolarité', amountCents: 112_000 }],
   };
   const portal = () => within(screen.getByRole('navigation', { name: 'Portail' }));
+  /** Étudiant : aucun rôle dans ses programmes. */
+  const studentPrograms = () => makePrograms().map((program) => ({ ...program, roleName: undefined }));
 
   beforeEach(() => {
     vi.mocked(api.invoicesAvailable).mockReturnValue(true);
+    vi.mocked(api.fetchPrograms).mockImplementation(async () => studentPrograms());
   });
 
   it('la page affiche le solde, et la barre la pastille « À payer »', async () => {
@@ -2101,6 +2103,28 @@ describe('Dashboard — factures (#207)', () => {
     unmount();
     await act(async () => reject(new Error('panne')));
     expect(screen.queryByText('Impossible de charger vos factures.')).toBeNull();
+  });
+
+  it('enseignant : ni lien Factures, ni facture ; /home/factures ramène à l’Accueil', async () => {
+    vi.mocked(api.fetchPrograms).mockImplementation(async () => makePrograms());
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByRole('heading', { name: /Bonjour/ })).toBeTruthy();
+    const router = screen.getByTestId('router');
+    expect(router.getAttribute('data-path')).toBe('/home');
+    expect(router.getAttribute('data-navigation')).toBe('REPLACE');
+    expect(portal().queryByRole('link', { name: /Factures/ })).toBeNull();
+    expect(portal().getByRole('link', { name: 'Bulletin' })).toBeTruthy();
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['administrateur', { isAdmin: true }],
+    ['gardien', { isGuardian: true }],
+  ])('%s global : pas de lien Factures', async (_role, roles) => {
+    renderDashboard({ path: '/home', ...roles });
+    expect(await portal().findByRole('link', { name: 'Bulletin' })).toBeTruthy();
+    expect(portal().queryByRole('link', { name: /Factures/ })).toBeNull();
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
   });
 
   it('en production : l’écran d’attente, sans données fictives ni pastille', async () => {

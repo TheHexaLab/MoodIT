@@ -1,22 +1,67 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import styles from './InvoicesPage.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
+import InvoiceStatement from './InvoiceStatement.tsx';
 import type { InvoiceSummary } from '../../types/domain.ts';
-import { daysUntil, dueBadge, formatDueDate, formatMoney, invoiceTotal } from './invoice.ts';
+import {
+  daysUntil,
+  dueBadge,
+  formatDueDate,
+  formatMoney,
+  INVOICE_LINKS,
+  invoiceTotal,
+  type InvoiceLink,
+} from './invoice.ts';
 
 /** Factures de la session, chargées par le Dashboard (qui en tire aussi la pastille « À payer »). */
 export type InvoiceState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; invoice: InvoiceSummary };
+  { status: 'loading' } | { status: 'error' } | { status: 'ready'; invoice: InvoiceSummary };
+
+const EXTERNAL_ICON = 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5';
 
 interface InvoicesPageProps {
   state: InvoiceState;
   onRetry: () => void;
   /** Page de l'établissement qui explique comment payer. Absente : bouton grisé, à venir. */
   paymentInfoUrl?: string;
+  /** Liens complémentaires, sous la facture. */
+  links?: InvoiceLink[];
+  /** Nom complet de l'étudiant, sur le relevé PDF. */
+  studentName?: string;
+  /** Établissement émetteur, en tête du relevé PDF. */
+  establishmentName?: string;
   /** Aujourd'hui, pour le compte à rebours de l'échéance. */
   now?: Date;
+}
+
+function LinkRow({ link }: { link: InvoiceLink }): React.ReactElement {
+  const icon = (
+    <svg className={styles.linkIcon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d={EXTERNAL_ICON}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+  return link.url ? (
+    <a className={styles.link} href={link.url} target="_blank" rel="noopener noreferrer">
+      <span>{link.label}</span>
+      {icon}
+    </a>
+  ) : (
+    <span
+      className={`${styles.link} ${styles.soon}`}
+      aria-disabled="true"
+      title="Bientôt disponible"
+    >
+      <span>{link.label}</span>
+      {icon}
+    </span>
+  );
 }
 
 interface BalanceProps {
@@ -64,7 +109,7 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
         {/* Le paiement se fait chez l'établissement : on renvoie à sa page d'explications. */}
         {paymentInfoUrl ? (
           <a
-            className={`${styles.button} ${styles.primary}`}
+            className={`${styles.button} ${styles.primary} ${styles.noPrint}`}
             href={paymentInfoUrl}
             target="_blank"
             rel="noopener noreferrer"
@@ -74,7 +119,7 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
         ) : (
           <button
             type="button"
-            className={`${styles.button} ${styles.primary} ${styles.soon}`}
+            className={`${styles.button} ${styles.primary} ${styles.soon} ${styles.noPrint}`}
             aria-disabled="true"
             title="Bientôt disponible"
           >
@@ -115,18 +160,61 @@ export default function InvoicesPage({
   state,
   onRetry,
   paymentInfoUrl,
+  links = INVOICE_LINKS,
+  studentName,
+  establishmentName,
   now = new Date(),
 }: InvoicesPageProps): React.ReactElement {
+  // Le relevé n'existe que le temps d'imprimer (bouton ou Ctrl+P) : à l'écran et pour les lecteurs
+  // d'écran, la page seule, sans doublon. flushSync : le relevé est rendu avant la mise en page.
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    const before = () => flushSync(() => setPrinting(true));
+    const after = () => setPrinting(false);
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => {
+      window.removeEventListener('beforeprint', before);
+      window.removeEventListener('afterprint', after);
+    };
+  }, []);
+  const statementShown = printing && state.status === 'ready';
+
   return (
-    <section className={styles.page} aria-label="Contenu principal">
+    <section
+      className={`${styles.page} ${statementShown ? styles.printing : ''}`}
+      aria-label="Contenu principal"
+    >
       <div className={styles.main}>
-        <div>
-          <h1 className={styles.title}>Factures</h1>
-          <p className={styles.subtitle}>
-            {state.status === 'ready'
-              ? `Ce que vous devez pour la session d'${state.invoice.session}`
-              : 'Ce que vous devez pour la session'}
-          </p>
+        <div className={styles.header}>
+          <div>
+            <h1 className={styles.title}>Factures</h1>
+            <p className={styles.subtitle}>
+              {state.status === 'ready'
+                ? `Ce que vous devez pour la session d'${state.invoice.session}`
+                : 'Ce que vous devez pour la session'}
+            </p>
+          </div>
+          {state.status === 'ready' && (
+            // La fenêtre d'impression du navigateur propose « Enregistrer au format PDF » ; elle
+            // n'imprime que le relevé ci-dessous (InvoiceStatement), pas la page.
+            <button
+              type="button"
+              className={`${styles.button} ${styles.noPrint}`}
+              onClick={() => window.print()}
+            >
+              <svg className={styles.buttonIcon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M12 4v11M7 10l5 5 5-5M5 20h14"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Enregistrer en PDF
+            </button>
+          )}
         </div>
 
         <div className={styles.card}>
@@ -146,7 +234,34 @@ export default function InvoicesPage({
             <Balance invoice={state.invoice} now={now} paymentInfoUrl={paymentInfoUrl} />
           )}
         </div>
+
+        {links.length > 0 && (
+          <nav
+            className={`${styles.card} ${styles.linksCard} ${styles.noPrint}`}
+            aria-labelledby="invoice-links-title"
+          >
+            <h2 className={styles.linksTitle} id="invoice-links-title">
+              Liens complémentaires
+            </h2>
+            <ul className={styles.links}>
+              {links.map((link) => (
+                <li key={link.label}>
+                  <LinkRow link={link} />
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
       </div>
+
+      {statementShown && (
+        <InvoiceStatement
+          invoice={state.invoice}
+          studentName={studentName}
+          establishmentName={establishmentName}
+          now={now}
+        />
+      )}
     </section>
   );
 }

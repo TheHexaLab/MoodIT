@@ -22,9 +22,16 @@ function parseDay(day: string): Date {
 
 /** « 15 novembre 2026 ». */
 export function formatDueDate(day: string): string {
-  return new Intl.DateTimeFormat('fr-CA', { day: 'numeric', month: 'long', year: 'numeric' }).format(
-    parseDay(day)
-  );
+  return formatDay(parseDay(day));
+}
+
+/** « 30 octobre 2026 » : le jour d'une date. */
+export function formatDay(date: Date): string {
+  return new Intl.DateTimeFormat('fr-CA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
 /** Jours de calendrier entre aujourd'hui et l'échéance : 0 le jour même, négatif une fois passée. */
@@ -46,3 +53,16 @@ export function dueBadge(days: number): DueBadge {
   if (days === 1) return { text: 'Demain', tone: 'soon' };
   return { text: `Dans ${days} jours`, tone: 'soon' };
 }
+
+/** Lien vers une page de l'établissement. Sans `url` : affiché grisé, en attendant la source. */
+export interface InvoiceLink {
+  label: string;
+  url?: string;
+}
+
+/** Liens sous la facture ; leurs adresses restent à fournir par l'établissement. */
+export const INVOICE_LINKS: InvoiceLink[] = [
+  { label: 'Comment payer mes frais de scolarité?' },
+  { label: 'Quels frais sont inclus dans ma facture?' },
+  { label: 'Remboursement ou désistement de frais' },
+];

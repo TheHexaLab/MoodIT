@@ -46,3 +46,16 @@ export function getProgramPermissions(
     canDeleteProgram: isGlobalAdmin,
   };
 }
+
+/**
+ * Compte étudiant : aucun rôle dans ses programmes (ni Enseignant ni Administrateur) et aucun rôle
+ * global (Administrateur, Gardien). Sert à n'afficher qu'aux étudiants ce qui les concerne seuls,
+ * comme les Factures (#207). Sans programme, c'est un étudiant qui n'a pas encore de cours.
+ */
+export function isStudentAccount(
+  programs: readonly Pick<Program, 'roleName'>[],
+  isGlobalAdmin: boolean,
+  isGuardian: boolean
+): boolean {
+  return !isGlobalAdmin && !isGuardian && programs.every((program) => !program.roleName);
+}

@@ -61,7 +61,7 @@ import { invoiceTotal } from '../../components/InvoicesPage/invoice.ts';
 import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
-import { getProgramPermissions } from '../../helpers/permissions.ts';
+import { getProgramPermissions, isStudentAccount } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
 import { avatarInitials } from '../../helpers/text.ts';
 import * as api from './dashboardApi.ts';
@@ -149,30 +149,6 @@ export default function Dashboard() {
   const isPortal = activeProgramId < 0;
   const { pathname } = useLocation();
   const portalPage = isPortal ? portalPageFromPath(pathname) : undefined;
-  // Factures (#207, données fictives, jamais en production) : chargées une fois pour la page et
-  // pour la pastille « À payer » de la barre de gauche.
-  const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
-  const [invoiceAttempt, setInvoiceAttempt] = useState(0);
-  useEffect(() => {
-    if (!api.invoicesAvailable()) return;
-    let cancelled = false;
-    api.fetchInvoice().then(
-      (invoice) => {
-        if (!cancelled) setInvoiceState({ status: 'ready', invoice });
-      },
-      () => {
-        if (!cancelled) setInvoiceState({ status: 'error' });
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [invoiceAttempt]);
-  const retryInvoice = () => {
-    setInvoiceState({ status: 'loading' });
-    setInvoiceAttempt((attempt) => attempt + 1);
-  };
-  const invoiceDue = invoiceState.status === 'ready' && invoiceTotal(invoiceState.invoice) > 0;
   const isMobile = useSyncExternalStore(subscribeToMobile, () => window.matchMedia(MOBILE_QUERY).matches);
   // Barre de gauche : le choix mémorisé sur l'Accueil, toujours réduite dans un cours, à côté du
   // panneau du cours. Sur mobile, complète sur l'Accueil, sans bouton pour la changer.
@@ -338,6 +314,43 @@ export default function Dashboard() {
     loadError: programsError,
     reload: reloadPrograms,
   } = useProgramsLoader(handleFetchPrograms);
+
+  // Factures (#207, données fictives, jamais en production) : pour les étudiants seulement, une fois
+  // leurs rôles connus (la liste des programmes chargée). Chargées une fois pour la page et pour la
+  // pastille « À payer » de la barre de gauche.
+  const isStudent =
+    !programsLoading && !programsError && isStudentAccount(dashboardPrograms, isAdmin, isGuardian);
+  const invoicesShown = isStudent && api.invoicesAvailable();
+  const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
+  const [invoiceAttempt, setInvoiceAttempt] = useState(0);
+  useEffect(() => {
+    if (!invoicesShown) return;
+    let cancelled = false;
+    api.fetchInvoice().then(
+      (invoice) => {
+        if (!cancelled) setInvoiceState({ status: 'ready', invoice });
+      },
+      () => {
+        if (!cancelled) setInvoiceState({ status: 'error' });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [invoicesShown, invoiceAttempt]);
+  const retryInvoice = () => {
+    setInvoiceState({ status: 'loading' });
+    setInvoiceAttempt((attempt) => attempt + 1);
+  };
+  const invoiceDue =
+    invoicesShown && invoiceState.status === 'ready' && invoiceTotal(invoiceState.invoice) > 0;
+  // Pas étudiant (enseignant, administrateur) : /home/factures ramène à l'Accueil, repli automatique.
+  const notStudentOnInvoices =
+    portalPage?.slug === 'factures' && !programsLoading && !programsError && !isStudent;
+  useEffect(() => {
+    if (notStudentOnInvoices) setView({ programId: -1 }, { replace: true });
+  }, [notStudentOnInvoices, setView]);
+
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,
   // adhésion / désabonnement. Applique à la liste, et bascule le programme actif s'il
@@ -1114,6 +1127,8 @@ export default function Dashboard() {
             onWidthChange={isMobile ? undefined : changeSidebarWidth}
             activePage={portalPage}
             pageBadges={invoiceDue ? { factures: 'À payer' } : undefined}
+            // Factures : étudiants seulement, une fois leurs rôles connus.
+            hiddenPages={isStudent ? undefined : ['factures']}
             activeProgramId={activeProgramId}
             selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
             userMenu={
@@ -1173,8 +1188,13 @@ export default function Dashboard() {
         }
       />
 
-      {portalPage?.slug === 'factures' && api.invoicesAvailable() ? (
-        <InvoicesPage state={invoiceState} onRetry={retryInvoice} />
+      {portalPage?.slug === 'factures' && api.invoicesAvailable() && (isStudent || programsLoading) ? (
+        <InvoicesPage
+          state={invoiceState}
+          onRetry={retryInvoice}
+          studentName={[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ')}
+          establishmentName={establishment?.name}
+        />
       ) : portalPage ? (
         <PortalPlaceholder title={portalPage.label} />
       ) : isPortal ? (

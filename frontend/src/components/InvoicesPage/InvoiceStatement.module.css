@@ -1,0 +1,170 @@
+/* Relevé imprimable : caché à l'écran, seul sur le PDF (voir le @media print d'InvoicesPage). */
+.statement {
+    display: none;
+}
+
+@page {
+    size: letter;
+    margin: 18mm 16mm;
+}
+
+@media print {
+    .statement {
+        display: block;
+        color: #161623;
+        font-family: Inter, sans-serif;
+        font-size: 10pt;
+        line-height: 1.45;
+    }
+
+    .statement p {
+        margin: 0;
+    }
+
+    /* En-tête : l'établissement à gauche, le titre du document à droite, sur un filet. */
+    .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 2rem;
+        padding-bottom: 10pt;
+        border-bottom: 2pt solid #161623;
+    }
+
+    .issuer {
+        font-size: 15pt;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+    }
+
+    .titleBlock {
+        text-align: right;
+    }
+
+    .title {
+        margin: 0;
+        font-size: 13pt;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .muted {
+        color: #5c5c70;
+        font-size: 9pt;
+    }
+
+    /* Informations : quatre colonnes, libellé au-dessus de la valeur. */
+    .facts {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12pt;
+        margin: 16pt 0 20pt;
+    }
+
+    .facts dt {
+        margin-bottom: 2pt;
+        color: #5c5c70;
+        font-size: 8pt;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .facts dd {
+        margin: 0;
+        font-weight: 500;
+    }
+
+    /* Détail : en-têtes sur fond gris clair, montants alignés à droite. */
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .table th,
+    .table td {
+        padding: 7pt 8pt;
+        border-bottom: 0.75pt solid #d4d4dc;
+        text-align: left;
+        vertical-align: top;
+        font-weight: 400;
+    }
+
+    .table th:last-child,
+    .table td:last-child {
+        width: 30%;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .table thead th {
+        border-bottom: 1pt solid #161623;
+        background: #f2f2f5;
+        color: #333347;
+        font-size: 8pt;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+    }
+
+    .detail {
+        display: block;
+        color: #5c5c70;
+        font-size: 8.5pt;
+    }
+
+    .empty {
+        color: #5c5c70;
+        font-style: italic;
+    }
+
+    .table tfoot th,
+    .table tfoot td {
+        border-top: 1pt solid #161623;
+        border-bottom: none;
+        font-weight: 700;
+    }
+
+    /* Solde : un encadré à droite, le montant en évidence. */
+    .balance {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 2rem;
+        width: 55%;
+        margin: 18pt 0 0 auto;
+        padding: 10pt 12pt;
+        border: 1.25pt solid #161623;
+        break-inside: avoid;
+    }
+
+    .balanceLabel {
+        font-size: 10pt;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .balanceAmount {
+        font-size: 16pt;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .footer {
+        margin-top: 28pt;
+        padding-top: 8pt;
+        border-top: 0.75pt solid #d4d4dc;
+        color: #5c5c70;
+        font-size: 8pt;
+    }
+
+    .footer p + p {
+        margin-top: 2pt;
+    }
+}

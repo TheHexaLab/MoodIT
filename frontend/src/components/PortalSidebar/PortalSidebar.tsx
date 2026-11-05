@@ -52,6 +52,8 @@ interface PortalSidebarProps {
   onWidthChange?: (width: number | null) => void;
   /** Page du portail ouverte (Horaire, Factures…). */
   activePage?: PortalPage;
+  /** Pages masquées : les Factures, pour qui n'est pas étudiant. */
+  hiddenPages?: readonly PortalPage['slug'][];
   /** Pastille à côté d'une page : « À payer » pour les Factures. */
   pageBadges?: Partial<Record<PortalPage['slug'], string>>;
   /** Programme ouvert (-1 : aucun, on est sur l'Accueil). */
@@ -113,6 +115,7 @@ export default function PortalSidebar({
   width = null,
   onWidthChange,
   activePage,
+  hiddenPages = [],
   pageBadges = {},
   activeProgramId = -1,
   selectedCourseId,
@@ -173,7 +176,7 @@ export default function PortalSidebar({
         <NavIcon path={HOME_ICON} />
         <span className={styles.label}>Accueil</span>
       </Link>
-      {PORTAL_PAGES.map((page) => {
+      {PORTAL_PAGES.filter((page) => !hiddenPages.includes(page.slug)).map((page) => {
         const isActive = !inCourse && page.slug === activePage?.slug;
         const badge = pageBadges[page.slug];
         // Barre réduite : la pastille devient un point, son texte passe dans le nom de la page.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import InvoicesPage, { type InvoiceState } from './InvoicesPage';
 import { formatMoney } from './invoice';
 import type { InvoiceSummary } from '../../types/domain';
@@ -13,7 +13,11 @@ const INVOICE: InvoiceSummary = {
   dueDate: '2026-11-15',
   lines: [
     { label: 'Droits de scolarité', detail: 'Automne 2026, 15 crédits', amountCents: 112_000 },
-    { label: 'Frais afférents', detail: 'Services aux étudiants et technologies', amountCents: 13_450 },
+    {
+      label: 'Frais afférents',
+      detail: 'Services aux étudiants et technologies',
+      amountCents: 13_450,
+    },
     { label: 'Assurance collective', amountCents: 3_000 },
   ],
 };
@@ -52,6 +56,63 @@ describe('InvoicesPage', () => {
     expect(within(rows[2]).getByRole('rowheader').textContent).toBe('Assurance collective');
     expect(within(rows[3]).getByRole('rowheader').textContent).toBe('Total à payer');
     expect(within(rows[3]).getByRole('cell').textContent).toBe(formatMoney(128_450));
+  });
+
+  it('« Enregistrer en PDF » ouvre la fenêtre d’impression du navigateur', () => {
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+    try {
+      renderPage({ status: 'ready', invoice: INVOICE });
+      fireEvent.click(screen.getByRole('button', { name: 'Enregistrer en PDF' }));
+      expect(print).toHaveBeenCalledOnce();
+      // Le relevé n'existe que pendant l'impression.
+      expect(screen.queryByText('Relevé de compte')).toBeNull();
+    } finally {
+      print.mockRestore();
+    }
+  });
+
+  it('pendant l’impression : le relevé de compte remplace la page, puis disparaît', () => {
+    render(
+      <InvoicesPage
+        state={{ status: 'ready', invoice: INVOICE }}
+        onRetry={vi.fn()}
+        studentName="Camille Lavoie"
+        establishmentName="Université Exemple"
+        now={NOW}
+      />
+    );
+    const page = screen.getByRole('region', { name: 'Contenu principal' });
+    act(() => {
+      window.dispatchEvent(new Event('beforeprint'));
+    });
+    expect(page.className).toMatch(/printing/);
+    const statement = screen.getByRole('article');
+    expect(within(statement).getByRole('heading', { name: 'Relevé de compte' })).toBeTruthy();
+    expect(within(statement).getByText('Université Exemple')).toBeTruthy();
+    expect(within(statement).getByText('Camille Lavoie')).toBeTruthy();
+    expect(within(statement).getByText('Avant le 15 novembre 2026')).toBeTruthy();
+    expect(within(statement).getAllByRole('row')).toHaveLength(5);
+    act(() => {
+      window.dispatchEvent(new Event('afterprint'));
+    });
+    expect(screen.queryByRole('article')).toBeNull();
+    expect(page.className).not.toMatch(/printing/);
+  });
+
+  it('impression pendant le chargement : la page telle quelle, sans relevé', () => {
+    renderPage({ status: 'loading' });
+    act(() => {
+      window.dispatchEvent(new Event('beforeprint'));
+    });
+    expect(screen.queryByRole('article')).toBeNull();
+  });
+
+  it('rien à enregistrer pendant le chargement ou après une erreur', () => {
+    renderPage({ status: 'loading' });
+    expect(screen.queryByRole('button', { name: 'Enregistrer en PDF' })).toBeNull();
+    cleanup();
+    renderPage({ status: 'error' });
+    expect(screen.queryByRole('button', { name: 'Enregistrer en PDF' })).toBeNull();
   });
 
   it('« Comment payer » : grisé tant que la page de l’établissement n’est pas fournie', () => {
@@ -93,7 +154,9 @@ describe('InvoicesPage', () => {
     renderPage({ status: 'ready', invoice: { session: 'automne 2026', lines: [] } });
     expect(screen.getByText(shown(0))).toBeTruthy();
     expect(screen.getByText('Rien à payer').className).toMatch(/badgePaid/);
-    expect(screen.getByText("Aucun montant dû pour la session d'automne 2026.", { exact: false })).toBeTruthy();
+    expect(
+      screen.getByText("Aucun montant dû pour la session d'automne 2026.", { exact: false })
+    ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
   });
@@ -119,12 +182,7 @@ describe('InvoicesPage', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 14, 12, 0));
     try {
-      render(
-        <InvoicesPage
-          state={{ status: 'ready', invoice: INVOICE }}
-          onRetry={vi.fn()}
-        />
-      );
+      render(<InvoicesPage state={{ status: 'ready', invoice: INVOICE }} onRetry={vi.fn()} />);
       expect(screen.getByText('Demain')).toBeTruthy();
     } finally {
       vi.useRealTimers();

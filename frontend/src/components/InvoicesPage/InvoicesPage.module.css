@@ -18,11 +18,26 @@
 .main {
     flex: 1;
     min-width: 0;
-    max-width: 50rem;
+    max-width: 68rem;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 1rem;
+}
+
+/* Titre à gauche, « Enregistrer en PDF » à droite. */
+.header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.buttonIcon {
+    width: 1.125rem;
+    height: 1.125rem;
+    margin-right: 0.5rem;
+    flex: none;
 }
 
 .title {
@@ -150,6 +165,60 @@
     font-weight: 700;
 }
 
+/* Liens complémentaires : une ligne par lien, l'icône de lien externe à droite. */
+.linksCard {
+    padding: 1.25rem 1.5rem 0.5rem;
+}
+
+.linksTitle {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.links {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.links li + li {
+    border-top: 1px solid var(--border);
+}
+
+.link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0 -0.75rem;
+    padding: 0.875rem 0.75rem;
+    border-radius: 0.5rem;
+    color: var(--text);
+    text-decoration: none;
+}
+
+a.link:hover {
+    background: var(--bg-active-channel);
+    color: var(--brand-teal);
+}
+
+.link:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: -2px;
+}
+
+.linkIcon {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex: none;
+    color: var(--text-muted);
+}
+
+a.link:hover .linkIcon {
+    color: currentColor;
+}
+
 /* Chargement et erreur, au centre de la carte. */
 .state {
     display: flex;
@@ -239,5 +308,40 @@
     .lines {
         width: calc(100% - 2rem);
         margin: 0 1rem;
+    }
+}
+
+/*
+ * Enregistrer en PDF (window.print) : seul le relevé (InvoiceStatement) s'imprime, sans la barre,
+ * le bandeau ni la page à l'écran.
+ */
+@media print {
+    :global(html),
+    :global(body) {
+        background: #fff !important;
+    }
+
+    :global(body *) {
+        visibility: hidden;
+    }
+
+    .page,
+    .page * {
+        visibility: visible;
+    }
+
+    .page {
+        /* Fixe : sort de la mise en page du portail, dont les conteneurs coupent ce qui dépasse. */
+        position: fixed;
+        inset: 0;
+        height: auto;
+        padding: 0;
+        overflow: visible;
+        background: #fff;
+    }
+
+    /* Relevé rendu : il remplace la page. Sinon (chargement, erreur), la page telle quelle. */
+    .printing .main {
+        display: none;
     }
 }
