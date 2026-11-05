@@ -57,7 +57,7 @@ import {
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
 import InvoicesPage, { type InvoiceState } from '../../components/InvoicesPage/InvoicesPage.tsx';
-import { invoiceBalance, sessionName } from '../../components/InvoicesPage/invoice.ts';
+import { invoiceBalance } from '../../components/InvoicesPage/invoice.ts';
 import InvoicesAdminPage, {
   type InvoicesAdminApi,
 } from '../../components/InvoicesAdminPage/InvoicesAdminPage.tsx';
@@ -120,9 +120,10 @@ type PopupState =
 
 // Factures émises, vue de l'administration (#207) : données fictives de dashboardApi, lues à l'appel.
 const invoicesAdminApi: InvoicesAdminApi = {
-  fetchIssued: () => api.fetchIssuedInvoices(),
-  create: (draft) => api.createInvoice(draft),
-  recordPayment: (id, payment) => api.recordInvoicePayment(id, payment),
+  fetchSchedule: () => api.fetchFeeSchedule(),
+  saveSchedule: (schedule) => api.saveFeeSchedule(schedule),
+  fetchStudents: () => api.fetchEnrolledStudents(),
+  recordPayment: (studentId, payment) => api.recordStudentPayment(studentId, payment),
 };
 
 const MOBILE_QUERY = '(max-width: 900px)';
@@ -1203,7 +1204,7 @@ export default function Dashboard() {
       />
 
       {portalPage?.slug === 'factures' && api.invoicesAvailable() && isBillingAdmin ? (
-        <InvoicesAdminPage api={invoicesAdminApi} session={sessionName(new Date())} />
+        <InvoicesAdminPage api={invoicesAdminApi} />
       ) : portalPage?.slug === 'factures' && api.invoicesAvailable() && (isStudent || programsLoading) ? (
         <InvoicesPage
           state={invoiceState}

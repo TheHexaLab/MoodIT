@@ -2043,6 +2043,17 @@ describe('Dashboard — factures (#207)', () => {
     dueDate: '2026-11-15',
     lines: [{ label: 'Droits de scolarité', amountCents: 112_000 }],
   };
+  const STUDENT = { id: 1, name: 'Camille Lavoie', credits: 15, payments: [] };
+  /** Facturation de l'administration : 75 $ le crédit, 30 $ de frais communs, une étudiante. */
+  const mockBilling = () => {
+    vi.mocked(api.fetchFeeSchedule).mockResolvedValue({
+      session: 'automne 2026',
+      creditPriceCents: 7_500,
+      dueDate: '2026-11-15',
+      fees: [{ label: 'Assurance collective', amountCents: 3_000 }],
+    });
+    vi.mocked(api.fetchEnrolledStudents).mockResolvedValue([STUDENT]);
+  };
   const portal = () => within(screen.getByRole('navigation', { name: 'Portail' }));
   /** Étudiant : aucun rôle dans ses programmes. */
   const studentPrograms = () => makePrograms().map((program) => ({ ...program, roleName: undefined }));
@@ -2122,43 +2133,37 @@ describe('Dashboard — factures (#207)', () => {
     ['administrateur', { isAdmin: true }],
     ['gardien', { isGuardian: true }],
   ])('%s global : la vue de l’administration, sans facture personnelle', async (_role, roles) => {
-    vi.mocked(api.fetchIssuedInvoices).mockResolvedValue([
-      { ...INVOICE, id: 1, studentName: 'Camille Lavoie' },
-    ]);
+    mockBilling();
     renderDashboard({ path: '/home/factures', ...roles });
     expect(await screen.findByText('Camille Lavoie')).toBeTruthy();
-    expect(screen.getByText("Factures émises pour la session d'automne 2026", { exact: false })).toBeTruthy();
+    expect(screen.getByText("Tarification de la session d'automne 2026")).toBeTruthy();
     expect(portal().getByRole('link', { name: 'Factures' }).getAttribute('aria-current')).toBe('page');
     expect(api.fetchInvoice).not.toHaveBeenCalled();
   });
 
-  it('administration : « Nouvelle facture », puis « Marquer payée », passent par l’API', async () => {
-    const issued = { ...INVOICE, id: 1, studentName: 'Camille Lavoie', payments: [] };
-    vi.mocked(api.fetchIssuedInvoices).mockResolvedValue([issued]);
-    vi.mocked(api.createInvoice).mockImplementation(async (draft) => ({
-      ...draft,
-      id: 2,
-      session: 'automne 2026',
-      payments: [],
-    }));
-    vi.mocked(api.recordInvoicePayment).mockImplementation(async (_id, payment) => ({
-      ...issued,
+  it('administration : enregistrer la tarification et « Marquer payée » passent par l’API', async () => {
+    mockBilling();
+    vi.mocked(api.saveFeeSchedule).mockImplementation(async (schedule) => schedule);
+    vi.mocked(api.recordStudentPayment).mockImplementation(async (_id, payment) => ({
+      ...STUDENT,
       payments: [payment],
     }));
     renderDashboard({ path: '/home/factures', isAdmin: true });
     fireEvent.click(await screen.findByRole('button', { name: 'Marquer payée : Camille Lavoie' }));
     expect(await screen.findByText('Paiement enregistré pour Camille Lavoie.')).toBeTruthy();
-    expect(api.recordInvoicePayment).toHaveBeenCalledWith(1, expect.objectContaining({ amountCents: 112_000 }));
+    // 15 crédits × 75 $ + 30 $ de frais communs.
+    expect(api.recordStudentPayment).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ amountCents: 115_500 })
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Nouvelle facture' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Nouvelle facture' });
-    fireEvent.change(within(dialog).getByLabelText('Étudiant'), { target: { value: 'Zoé Martin' } });
-    fireEvent.change(within(dialog).getByLabelText('Libellé'), { target: { value: 'Frais' } });
-    fireEvent.change(within(dialog).getByLabelText('Montant ($)'), { target: { value: '25' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Émettre la facture' }));
-    expect(await screen.findByText('Facture émise à Zoé Martin.')).toBeTruthy();
-    expect(api.createInvoice).toHaveBeenCalledWith(
-      expect.objectContaining({ studentName: 'Zoé Martin', lines: [{ label: 'Frais', amountCents: 2_500 }] })
+    fireEvent.change(screen.getByLabelText('Prix du crédit'), { target: { value: '80' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(
+      await screen.findByText('Tarification enregistrée. Les factures des étudiants sont à jour.')
+    ).toBeTruthy();
+    expect(api.saveFeeSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ creditPriceCents: 8_000 })
     );
   });
 

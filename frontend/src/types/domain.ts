@@ -643,17 +643,33 @@ export interface InvoiceSummary {
   payments?: InvoicePayment[];
 }
 
-/** Facture émise par l'administration, à un étudiant. */
-export interface IssuedInvoice extends InvoiceSummary {
-  id: number;
-  studentName: string;
-  studentEmail?: string;
+/** Frais payé par tous les étudiants de la session, quel que soit leur nombre de crédits. */
+export interface SessionFee {
+  label: string;
+  /** Précision sous le libellé. */
+  detail?: string;
+  amountCents: number;
 }
 
-/** Nouvelle facture, telle que saisie par l'administration. */
-export interface InvoiceDraft {
-  studentName: string;
-  studentEmail?: string;
+/**
+ * Tarification de la session, fixée par l'administration. La facture d'un étudiant en découle :
+ * ses crédits × le prix du crédit, plus les frais communs.
+ */
+export interface FeeSchedule {
+  /** « automne 2026 ». */
+  session: string;
+  creditPriceCents: number;
+  /** Échéance commune (AAAA-MM-JJ). */
   dueDate: string;
-  lines: InvoiceLine[];
+  fees: SessionFee[];
+}
+
+/** Étudiant inscrit à la session, vu par l'administration. */
+export interface EnrolledStudent {
+  id: number;
+  name: string;
+  email?: string;
+  /** Crédits auxquels il est inscrit. */
+  credits: number;
+  payments: InvoicePayment[];
 }

@@ -19,17 +19,18 @@ import {
   demoTeams,
 } from '../../mocks/assignmentsData.ts';
 import {
-  addDemoInvoice,
+  demoEnrolledStudents,
+  demoFeeSchedule,
   demoInvoice,
-  demoIssuedInvoices,
-  recordDemoPayment,
+  recordDemoStudentPayment,
+  saveDemoFeeSchedule,
 } from '../../mocks/invoicesData.ts';
 import type {
   AnswerResponse,
-  InvoiceDraft,
+  EnrolledStudent,
+  FeeSchedule,
   InvoicePayment,
   InvoiceSummary,
-  IssuedInvoice,
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
@@ -1518,26 +1519,29 @@ export async function fetchInvoice(now: Date = new Date()): Promise<InvoiceSumma
   return demoInvoice(now);
 }
 
-/** Administration : factures émises pour la session en cours. */
-export async function fetchIssuedInvoices(now: Date = new Date()): Promise<IssuedInvoice[]> {
+/** Administration : tarification de la session en cours (prix du crédit, frais communs). */
+export async function fetchFeeSchedule(now: Date = new Date()): Promise<FeeSchedule> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
-  return demoIssuedInvoices(now);
+  return demoFeeSchedule(now);
 }
 
-/** Administration : émet une facture à un étudiant. */
-export async function createInvoice(
-  draft: InvoiceDraft,
-  now: Date = new Date()
-): Promise<IssuedInvoice> {
+/** Administration : enregistre la tarification ; les factures des étudiants en découlent. */
+export async function saveFeeSchedule(schedule: FeeSchedule): Promise<FeeSchedule> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
-  return addDemoInvoice(draft, now);
+  return saveDemoFeeSchedule(schedule);
 }
 
-/** Administration : enregistre un paiement reçu sur une facture émise. */
-export async function recordInvoicePayment(
-  id: number,
+/** Administration : étudiants inscrits à la session, avec leurs crédits et leurs paiements. */
+export async function fetchEnrolledStudents(now: Date = new Date()): Promise<EnrolledStudent[]> {
+  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
+  return demoEnrolledStudents(now);
+}
+
+/** Administration : enregistre un paiement reçu d'un étudiant. */
+export async function recordStudentPayment(
+  studentId: number,
   payment: InvoicePayment
-): Promise<IssuedInvoice> {
+): Promise<EnrolledStudent> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
-  return recordDemoPayment(id, payment);
+  return recordDemoStudentPayment(studentId, payment);
 }

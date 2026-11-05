@@ -1,11 +1,10 @@
 import type {
-  InvoiceDraft,
+  EnrolledStudent,
+  FeeSchedule,
   InvoicePayment,
   InvoiceSummary,
-  IssuedInvoice,
 } from '../types/domain.ts';
-
-import { sessionName } from '../components/InvoicesPage/invoice.ts';
+import { invoiceFromSchedule, sessionName } from '../components/InvoicesPage/invoice.ts';
 
 export { sessionName };
 
@@ -15,6 +14,41 @@ function dayAfter(now: Date, days: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
+
+// ── Tarification de la session (administration) : en mémoire, le temps de la session du navigateur ─
+
+let schedule: FeeSchedule | null = null;
+
+/** Tarification de départ : 75 $ le crédit, frais afférents et assurance, échéance dans 16 jours. */
+function seedSchedule(now: Date): FeeSchedule {
+  return {
+    session: sessionName(now),
+    creditPriceCents: 7_500,
+    dueDate: dayAfter(now, 16),
+    fees: [
+      {
+        label: 'Frais afférents',
+        detail: 'Services aux étudiants et technologies',
+        amountCents: 13_450,
+      },
+      { label: 'Assurance collective', amountCents: 3_000 },
+    ],
+  };
+}
+
+/** Tarification de la session (une copie : l'appelant ne modifie pas le magasin par mégarde). */
+export function demoFeeSchedule(now: Date): FeeSchedule {
+  schedule ??= seedSchedule(now);
+  return structuredClone(schedule);
+}
+
+/** Nouvelle tarification, enregistrée par l'administration. */
+export function saveDemoFeeSchedule(next: FeeSchedule): FeeSchedule {
+  schedule = structuredClone(next);
+  return structuredClone(schedule);
+}
+
+// ── Facture de l'étudiant connecté ─────────────────────────────────────────────────────────────────
 
 /**
  * État de la facture fictive vue par l'étudiant, pour essayer chaque version de la page :
@@ -28,35 +62,21 @@ export type DemoInvoiceStatus = 'due' | 'partial' | 'paid' | 'none';
 /** Point de bascule de la démo : changer la valeur ici pour voir un autre état de la page. */
 export const demoInvoiceStatus: DemoInvoiceStatus = 'due';
 
-/** Lignes de la maquette : droits de scolarité, frais afférents, assurance (1 284,50 $). */
-function demoLines(session: string): InvoiceSummary['lines'] {
-  const label = session.charAt(0).toUpperCase() + session.slice(1);
-  return [
-    { label: 'Droits de scolarité', detail: `${label}, 15 crédits`, amountCents: 112_000 },
-    {
-      label: 'Frais afférents',
-      detail: 'Services aux étudiants et technologies',
-      amountCents: 13_450,
-    },
-    { label: 'Assurance collective', detail: label, amountCents: 3_000 },
-  ];
-}
+/** Crédits de l'étudiant de la démo. */
+const DEMO_CREDITS = 15;
 
 /**
- * Facture fictive de la session (#207), comme dans les maquettes. Contenu d'exemple, jamais
- * affiché en production. Les dates suivent `now` (échéance dans 16 jours) : la démo reste à jour.
+ * Facture fictive de la session (#207) : 15 crédits au prix de la tarification, plus les frais
+ * communs. Contenu d'exemple, jamais affiché en production. Les dates suivent `now`.
  */
 export function demoInvoice(
   now: Date,
   status: DemoInvoiceStatus = demoInvoiceStatus
 ): InvoiceSummary {
-  const session = sessionName(now);
-  if (status === 'none') return { session, lines: [] };
-  const invoice: InvoiceSummary = {
-    session,
-    dueDate: dayAfter(now, 16),
-    lines: demoLines(session),
-  };
+  const current = demoFeeSchedule(now);
+  if (status === 'none') return { session: current.session, lines: [] };
+  const invoice = invoiceFromSchedule(current, DEMO_CREDITS);
+  const total = invoice.lines.reduce((sum, line) => sum + line.amountCents, 0);
   if (status === 'partial') {
     invoice.payments = [
       { date: dayAfter(now, -5), amountCents: 50_000, method: 'Virement bancaire' },
@@ -64,83 +84,71 @@ export function demoInvoice(
   } else if (status === 'paid') {
     invoice.payments = [
       { date: dayAfter(now, -12), amountCents: 50_000, method: 'Virement bancaire' },
-      { date: dayAfter(now, -2), amountCents: 78_450, method: 'Carte de crédit' },
+      { date: dayAfter(now, -2), amountCents: total - 50_000, method: 'Carte de crédit' },
     ];
+  } else {
+    invoice.payments = undefined;
   }
   return invoice;
 }
 
-// ── Factures émises (vue administration) : en mémoire, le temps de la session du navigateur ──────
+// ── Étudiants inscrits (administration) ────────────────────────────────────────────────────────────
 
-let issued: IssuedInvoice[] | null = null;
-let nextId = 1;
+let students: EnrolledStudent[] | null = null;
 
-/** Factures émises fictives : quelques étudiants, dans chaque état. */
-function seedIssued(now: Date): IssuedInvoice[] {
-  const session = sessionName(now);
-  const students: Array<[string, string, number, InvoicePayment[]]> = [
-    ['Camille Lavoie', 'camille.lavoie@exemple.ca', 16, []],
-    [
-      'Jérémie Tremblay',
-      'jeremie.tremblay@exemple.ca',
-      16,
-      [{ date: dayAfter(now, -2), amountCents: 128_450, method: 'Carte de crédit' }],
-    ],
-    [
-      'Amira Benali',
-      'amira.benali@exemple.ca',
-      16,
-      [{ date: dayAfter(now, -5), amountCents: 50_000, method: 'Virement bancaire' }],
-    ],
-    ['Noah Gagnon', 'noah.gagnon@exemple.ca', -3, []],
-    ['Léa Côté', 'lea.cote@exemple.ca', 30, []],
-  ];
-  return students.map(([studentName, studentEmail, dueIn, payments]) => ({
-    id: nextId++,
-    session,
-    studentName,
-    studentEmail,
-    dueDate: dayAfter(now, dueIn),
-    lines: demoLines(session),
-    payments,
-  }));
-}
-
-/** Copie profonde : l'appelant ne modifie jamais le magasin par mégarde. */
-const copy = (invoice: IssuedInvoice): IssuedInvoice => structuredClone(invoice);
-
-/** Factures émises pour la session, les plus récentes d'abord. */
-export function demoIssuedInvoices(now: Date): IssuedInvoice[] {
-  issued ??= seedIssued(now);
-  return issued.map(copy);
-}
-
-/** Nouvelle facture émise : elle s'ajoute en tête de la liste. */
-export function addDemoInvoice(draft: InvoiceDraft, now: Date): IssuedInvoice {
-  issued ??= seedIssued(now);
-  const invoice: IssuedInvoice = {
-    id: nextId++,
-    session: sessionName(now),
-    studentName: draft.studentName,
-    studentEmail: draft.studentEmail || undefined,
-    dueDate: draft.dueDate,
-    lines: draft.lines,
-    payments: [],
+/** Étudiants fictifs : temps plein et partiel, payés, en partie, ou pas encore. */
+function seedStudents(now: Date): EnrolledStudent[] {
+  const fullyPaid = (credits: number): InvoicePayment[] => {
+    const current = demoFeeSchedule(now);
+    const total = invoiceFromSchedule(current, credits).lines.reduce(
+      (sum, line) => sum + line.amountCents,
+      0
+    );
+    return [{ date: dayAfter(now, -2), amountCents: total, method: 'Carte de crédit' }];
   };
-  issued.unshift(invoice);
-  return copy(invoice);
+  return [
+    {
+      id: 1,
+      name: 'Camille Lavoie',
+      email: 'camille.lavoie@exemple.ca',
+      credits: 15,
+      payments: [],
+    },
+    {
+      id: 2,
+      name: 'Jérémie Tremblay',
+      email: 'jeremie.tremblay@exemple.ca',
+      credits: 12,
+      payments: fullyPaid(12),
+    },
+    {
+      id: 3,
+      name: 'Amira Benali',
+      email: 'amira.benali@exemple.ca',
+      credits: 15,
+      payments: [{ date: dayAfter(now, -5), amountCents: 50_000, method: 'Virement bancaire' }],
+    },
+    { id: 4, name: 'Noah Gagnon', email: 'noah.gagnon@exemple.ca', credits: 9, payments: [] },
+    { id: 5, name: 'Léa Côté', email: 'lea.cote@exemple.ca', credits: 6, payments: [] },
+  ];
 }
 
-/** Paiement enregistré par l'administration sur une facture émise. */
-export function recordDemoPayment(id: number, payment: InvoicePayment): IssuedInvoice {
-  const invoice = issued?.find((candidate) => candidate.id === id);
-  if (!invoice) throw new Error('Facture introuvable');
-  invoice.payments = [...(invoice.payments ?? []), payment];
-  return copy(invoice);
+/** Étudiants inscrits à la session. */
+export function demoEnrolledStudents(now: Date): EnrolledStudent[] {
+  students ??= seedStudents(now);
+  return structuredClone(students);
 }
 
-/** Tests : repart des factures de départ. */
-export function resetDemoIssuedInvoices(): void {
-  issued = null;
-  nextId = 1;
+/** Paiement reçu d'un étudiant, enregistré par l'administration. */
+export function recordDemoStudentPayment(id: number, payment: InvoicePayment): EnrolledStudent {
+  const student = students?.find((candidate) => candidate.id === id);
+  if (!student) throw new Error('Étudiant introuvable');
+  student.payments = [...student.payments, payment];
+  return structuredClone(student);
+}
+
+/** Tests : repart de la tarification et des étudiants de départ. */
+export function resetDemoBilling(): void {
+  schedule = null;
+  students = null;
 }

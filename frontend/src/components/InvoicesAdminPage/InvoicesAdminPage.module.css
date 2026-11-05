@@ -1,289 +1,598 @@
 /* Factures, vue de l'administration (#207) : même colonne centrée que la vue étudiante. */
 .page {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  height: 100%;
-  padding: 1.5rem;
-  overflow-y: auto;
-  background: var(--bg-main);
-  color: var(--text);
-  font-family: Inter, sans-serif;
-  font-size: 0.875rem;
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 100%;
+    padding: 1.5rem;
+    overflow-y: auto;
+    background: var(--bg-main);
+    color: var(--text);
+    font-family: Inter, sans-serif;
+    font-size: 0.875rem;
 }
 
 .main {
-  max-width: 68rem;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+    max-width: 68rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
 }
 
 .header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.headerActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
 }
 
 .subtitle {
-  margin: 0.25rem 0 0;
-  color: var(--text-body);
+    margin: 0.25rem 0 0;
+    color: var(--text-body);
+}
+
+.sectionTitle {
+    margin: 0.75rem 0 0;
+    font-size: 1.125rem;
+    font-weight: 700;
 }
 
 /* Annonce discrète sous l'en-tête ; vide, elle ne prend pas de place. */
 .notice {
-  margin: 0;
-  color: var(--badge-success-fg);
-  font-weight: 500;
+    margin: 0;
+    color: var(--badge-success-fg);
+    font-weight: 500;
 }
 
 .notice:empty {
-  display: none;
+    display: none;
+}
+
+.error {
+    margin: 0;
+    color: var(--badge-danger-fg);
+    font-weight: 500;
 }
 
 .card {
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 0.625rem;
-  background: var(--bg-surface);
+    box-sizing: border-box;
+    min-width: 0;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 0.625rem;
+    background: var(--bg-surface);
 }
 
-/* Totaux : trois tuiles de même largeur. */
+.cardTitle {
+    margin: 0;
+    padding: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.cardHint {
+    margin: 0.25rem 0 0;
+    color: var(--text-muted);
+}
+
+/* ── L'équation : quatre termes séparés par ×, + et = ─────────────────────────────────────────── */
+.formulaCard {
+    padding: 1.25rem 1.5rem;
+}
+
+.formula {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.term {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-width: 0;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-sidebar);
+}
+
+.termLabel {
+    color: var(--text-heading-alt);
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.termValue {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 2.5rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.termNote {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.termInput {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 2.5rem;
+    padding: 0 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    color: var(--text);
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color-scheme: inherit;
+}
+
+.termInput:focus {
+    border-color: var(--brand-teal);
+    outline: none;
+}
+
+.money {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+/* Le résultat : la facture, en couleur de la marque. */
+.result {
+    border-color: var(--brand-teal);
+    background: var(--badge-success-bg);
+}
+
+.result .termValue {
+    color: var(--brand-teal);
+}
+
+.operator {
+    align-self: center;
+    color: var(--text-muted);
+    font-size: 1.75rem;
+    font-weight: 300;
+}
+
+.dueField {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-body);
+    font-weight: 500;
+}
+
+.dueField input,
+.field input {
+    box-sizing: border-box;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-input);
+    color: var(--text);
+    font: inherit;
+    color-scheme: inherit;
+}
+
+.dueField input:focus,
+.field input:focus {
+    border-color: var(--brand-teal);
+    outline: none;
+}
+
+/* ── Frais communs : une ligne par frais, modifiable ──────────────────────────────────────────── */
+.feesCard {
+    padding: 1.25rem 1.5rem;
+}
+
+/* La légende d'un fieldset se place sur la bordure par défaut : on la remet dans la carte. */
+.feesCard > legend {
+    float: left;
+    width: 100%;
+}
+
+.feesCard > legend + * {
+    clear: both;
+}
+
+.fees {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fee {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 0.7fr) 2rem;
+    align-items: end;
+    gap: 0.75rem;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.field > span {
+    color: var(--text-body);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.field input {
+    width: 100%;
+}
+
+/* Les libellés des champs, visibles sur la première ligne seulement (comme des en-têtes de colonne) ;
+   les lignes suivantes les gardent pour les lecteurs d'écran. */
+.fee + .fee .field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.field input::placeholder {
+    color: var(--text-muted);
+}
+
+.amountField input {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.remove {
+    width: 2rem;
+    height: 2rem;
+    margin-bottom: 0.25rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.remove:hover {
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
+}
+
+.emptyFees {
+    margin: 1rem 0 0;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.chip {
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.chip:hover {
+    border-style: solid;
+    border-color: var(--brand-teal);
+    color: var(--brand-teal);
+}
+
+.feesTotal {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin: 1rem 0 0;
+    padding-top: 0.875rem;
+    border-top: 1px solid var(--border);
+}
+
+.feesTotal strong {
+    font-size: 1.125rem;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Étudiants inscrits : totaux, puis un tableau ─────────────────────────────────────────────── */
 .stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  margin: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 0;
 }
 
 .stats .card {
-  padding: 1rem 1.25rem;
+    padding: 1rem 1.25rem;
 }
 
 .stats dt {
-  color: var(--text-heading-alt);
-  font-weight: 600;
+    color: var(--text-heading-alt);
+    font-weight: 600;
 }
 
 .stats dd {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  margin: 0.375rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    margin: 0.375rem 0 0;
 }
 
 .statValue {
-  font-size: 1.5rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
 
 .statNote {
-  color: var(--text-muted);
-  font-size: 0.8125rem;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
 }
 
 .statLate {
-  color: var(--badge-danger-fg);
-  font-weight: 600;
+    color: var(--badge-danger-fg);
+    font-weight: 600;
 }
 
-/* Tableau des factures émises ; il défile à l'horizontale sur un petit écran. */
 .tableCard {
-  overflow: hidden;
+    overflow: hidden;
 }
 
 .scroll {
-  overflow-x: auto;
+    overflow-x: auto;
 }
 
 .table {
-  width: 100%;
-  min-width: 44rem;
-  border-collapse: collapse;
+    width: 100%;
+    min-width: 50rem;
+    border-collapse: collapse;
 }
 
 .table th,
 .table td {
-  padding: 0.875rem 1rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: middle;
-  font-weight: 400;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: middle;
+    font-weight: 400;
 }
 
-/* Dates et montants sur une ligne : sur un petit écran, le tableau défile plutôt. */
+/* Chiffres sur une ligne : sur un petit écran, le tableau défile plutôt. */
 .table td {
-  white-space: nowrap;
+    white-space: nowrap;
 }
 
 .table thead th {
-  background: var(--bg-sidebar);
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+    background: var(--bg-sidebar);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.table thead th:nth-child(n + 2):nth-child(-n + 6) {
+    text-align: right;
 }
 
 .table tbody tr:last-child th,
 .table tbody tr:last-child td {
-  border-bottom: none;
+    border-bottom: none;
 }
 
 .student,
 .email {
-  display: block;
+    display: block;
 }
 
 .student {
-  font-weight: 500;
+    font-weight: 500;
 }
 
 .email {
-  margin-top: 0.125rem;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+    margin-top: 0.125rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
 }
 
-.money {
-  text-align: right !important;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.table thead th:nth-child(3),
-.table thead th:nth-child(4) {
-  text-align: right;
+.number {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
 }
 
 .actions {
-  width: 1%;
-  text-align: right !important;
-  white-space: nowrap;
+    width: 1%;
+    text-align: right !important;
 }
 
 .badge {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  white-space: nowrap;
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .badgePaid {
-  background: var(--badge-success-bg);
-  color: var(--badge-success-fg);
+    background: var(--badge-success-bg);
+    color: var(--badge-success-fg);
 }
 
 .badgeDue {
-  background: var(--badge-warn-bg);
-  color: var(--badge-warn-fg);
+    background: var(--badge-warn-bg);
+    color: var(--badge-warn-fg);
 }
 
 .badgeLate {
-  background: var(--badge-danger-bg);
-  color: var(--badge-danger-fg);
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
 }
 
 .badgePartial {
-  background: var(--badge-info-bg);
-  color: var(--badge-info-fg);
+    background: var(--badge-info-bg);
+    color: var(--badge-info-fg);
 }
 
 .empty,
 .state {
-  margin: 0;
-  padding: 3rem 1rem;
-  color: var(--text-muted);
-  text-align: center;
+    margin: 0;
+    padding: 3rem 1rem;
+    color: var(--text-muted);
+    text-align: center;
 }
 
 .state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
 }
 
 .button {
-  box-sizing: border-box;
-  min-height: 2.75rem;
-  padding: 0 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--bg-surface);
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
+    box-sizing: border-box;
+    min-height: 2.75rem;
+    padding: 0 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-surface);
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
 }
 
 .button:hover:not(:disabled) {
-  background: var(--bg-active-channel);
-}
-
-.button:focus-visible {
-  outline: 2px solid var(--brand-teal);
-  outline-offset: 2px;
+    background: var(--bg-active-channel);
 }
 
 .button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .primary {
-  border-color: var(--brand-teal-strong);
-  background: var(--brand-teal-strong);
-  color: var(--text-on-brand);
+    border-color: var(--brand-teal-strong);
+    background: var(--brand-teal-strong);
+    color: var(--text-on-brand);
 }
 
 .primary:hover:not(:disabled) {
-  background: var(--brand-teal-strong);
-  filter: brightness(1.12);
+    background: var(--brand-teal-strong);
+    filter: brightness(1.12);
 }
 
 .small {
-  min-height: 2rem;
-  padding: 0 0.75rem;
-  font-size: 0.8125rem;
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+}
+
+.button:focus-visible,
+.chip:focus-visible,
+.remove:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
 }
 
 .srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
-/* Mobile : sous la barre fixe de LeftMenuGroup ; les tuiles l'une sous l'autre. */
+/* Mobile : tout en une colonne, sous la barre fixe de LeftMenuGroup. */
 @media (max-width: 56.25rem) {
-  .page {
-    padding: 4.25rem 1rem 1rem;
-  }
+    .page {
+        padding: 4.25rem 1rem 1rem;
+    }
 
-  .header {
-    flex-direction: column;
-    align-items: stretch;
-  }
+    .header {
+        flex-direction: column;
+        align-items: stretch;
+    }
 
-  .stats {
-    grid-template-columns: minmax(0, 1fr);
-  }
+    .formulaCard,
+    .feesCard {
+        padding: 1rem;
+    }
+
+    .formula {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.375rem;
+    }
+
+    .formula > .operator {
+        justify-self: center;
+        font-size: 1.25rem;
+        line-height: 1;
+    }
+
+    .stats {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fee {
+        grid-template-columns: minmax(0, 1fr) 2rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .fee .field:not(.amountField) {
+        grid-column: 1 / -1;
+    }
 }

@@ -6,6 +6,7 @@ import {
   formatDueDate,
   formatMoney,
   invoiceBalance,
+  invoiceFromSchedule,
   invoicePaid,
   invoiceStatus,
   invoiceTotal,
@@ -13,6 +14,8 @@ import {
   lastPaymentDate,
   parseAmount,
   sessionName,
+  sharedFeesCents,
+  tuitionCents,
 } from './invoice';
 
 /** Intl sépare les milliers et le « $ » par des espaces insécables : on les compare en espaces. */
@@ -118,5 +121,42 @@ describe('factures : paiements et état', () => {
 
   it('la session suit le mois', () => {
     expect(sessionName(new Date(2026, 9, 30))).toBe('automne 2026');
+  });
+});
+
+describe('factures : calcul à partir de la tarification', () => {
+  const SCHEDULE = {
+    session: 'automne 2026',
+    creditPriceCents: 7_500,
+    dueDate: '2026-11-15',
+    fees: [
+      { label: 'Frais afférents', detail: 'Services', amountCents: 13_450 },
+      { label: 'Assurance collective', amountCents: 3_000 },
+    ],
+  };
+
+  it('droits : crédits × prix du crédit ; frais communs : leur somme', () => {
+    expect(tuitionCents(15, 7_500)).toBe(112_500);
+    expect(tuitionCents(0, 7_500)).toBe(0);
+    expect(sharedFeesCents(SCHEDULE)).toBe(16_450);
+    expect(sharedFeesCents({ fees: [] })).toBe(0);
+  });
+
+  it('facture d’un étudiant : une ligne de droits, puis chaque frais commun', () => {
+    const invoice = invoiceFromSchedule(SCHEDULE, 15, [{ date: '2026-10-30', amountCents: 100 }]);
+    expect(invoice.session).toBe('automne 2026');
+    expect(invoice.dueDate).toBe('2026-11-15');
+    expect(invoice.lines[0].label).toBe('Droits de scolarité');
+    expect(plain(invoice.lines[0].detail ?? '')).toBe('15 crédits × 75,00 $');
+    expect(invoice.lines[0].amountCents).toBe(112_500);
+    expect(invoice.lines.slice(1)).toEqual(SCHEDULE.fees);
+    expect(invoiceTotal(invoice)).toBe(128_950);
+    expect(invoice.payments).toEqual([{ date: '2026-10-30', amountCents: 100 }]);
+  });
+
+  it('un seul crédit : « 1 crédit » ; sans paiement : liste vide', () => {
+    const invoice = invoiceFromSchedule(SCHEDULE, 1);
+    expect(plain(invoice.lines[0].detail ?? '')).toBe('1 crédit × 75,00 $');
+    expect(invoice.payments).toEqual([]);
   });
 });

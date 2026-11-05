@@ -1,4 +1,4 @@
-import type { InvoiceSummary } from '../../types/domain.ts';
+import type { FeeSchedule, InvoicePayment, InvoiceSummary } from '../../types/domain.ts';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -113,4 +113,38 @@ export function sessionName(now: Date): string {
   const month = now.getMonth();
   const season = month < 4 ? 'hiver' : month < 8 ? 'été' : 'automne';
   return `${season} ${now.getFullYear()}`;
+}
+
+/** Droits de scolarité : les crédits × le prix du crédit, en cents. */
+export function tuitionCents(credits: number, creditPriceCents: number): number {
+  return credits * creditPriceCents;
+}
+
+/** Frais communs de la session, en cents. */
+export function sharedFeesCents(schedule: Pick<FeeSchedule, 'fees'>): number {
+  return schedule.fees.reduce((sum, fee) => sum + fee.amountCents, 0);
+}
+
+/**
+ * Facture d'un étudiant, calculée à partir de la tarification : une ligne « Droits de scolarité »
+ * (crédits × prix du crédit), puis chaque frais commun.
+ */
+export function invoiceFromSchedule(
+  schedule: FeeSchedule,
+  credits: number,
+  payments: InvoicePayment[] = []
+): InvoiceSummary {
+  return {
+    session: schedule.session,
+    dueDate: schedule.dueDate,
+    lines: [
+      {
+        label: 'Droits de scolarité',
+        detail: `${credits} ${credits > 1 ? 'crédits' : 'crédit'} × ${formatMoney(schedule.creditPriceCents)}`,
+        amountCents: tuitionCents(credits, schedule.creditPriceCents),
+      },
+      ...schedule.fees,
+    ],
+    payments,
+  };
 }
