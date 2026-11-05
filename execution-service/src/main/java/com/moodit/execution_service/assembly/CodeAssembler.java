@@ -732,17 +732,21 @@ public class CodeAssembler {
                     .append(cases.get(i).expr()).append("\n}\n");
             calls.append("\t__moodit_emit(__moodit_case").append(i).append(")\n");
         }
+        // Le verdict sort sur le VRAI stdout (capturé à l'init, avant toute exécution étudiante) ;
+        // le stdout de l'étudiant est détourné vers stderr dans main → ce qu'il imprime ne peut pas
+        // se faire passer pour une paire « statut+valeur » (cf. evaluateStructured, fail-closed).
         String program = head + "\n"
                 + "import __moodit_json \"encoding/json\"\n"
                 + "import __moodit_os \"os\"\n"
                 + tail + "\n"
+                + "var __moodit_real = __moodit_os.Stdout\n"
                 + fns
                 + "func __moodit_emit(f func() interface{}) {\n"
                 + "\t__ok := false\n\tvar __b []byte\n"
                 + "\tfunc() { defer func() { recover() }(); __v := f(); __b, _ = __moodit_json.Marshal(__v); __ok = true }()\n"
-                + "\tif __ok { __moodit_os.Stdout.WriteString(\"1\\n\"); __moodit_os.Stdout.Write(__b); __moodit_os.Stdout.WriteString(\"\\n\") } else { __moodit_os.Stdout.WriteString(\"0\\n\\n\") }\n"
+                + "\tif __ok { __moodit_real.WriteString(\"1\\n\"); __moodit_real.Write(__b); __moodit_real.WriteString(\"\\n\") } else { __moodit_real.WriteString(\"0\\n\\n\") }\n"
                 + "}\n"
-                + "func main() {\n" + calls + "}\n";
+                + "func main() {\n\t__moodit_os.Stdout = __moodit_os.Stderr\n" + calls + "}\n";
         return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
     }
 
@@ -754,11 +758,22 @@ public class CodeAssembler {
             body.append("    __moodit_emit(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { ")
                     .append(c.expr()).append(" })));\n");
         }
+        // Verdict émis sur un DUP du vrai stdout ; le fd 1 de l'étudiant est redirigé vers stderr
+        // (dup2) avant toute évaluation → ses `println!` ne peuvent pas forger une paire de verdict.
         String program = code + "\n\n"
+                + "extern \"C\" { fn dup(oldfd: i32) -> i32; fn dup2(oldfd: i32, newfd: i32) -> i32;"
+                + " fn write(fd: i32, buf: *const u8, count: usize) -> isize; }\n"
+                + "static __MOODIT_OUT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);\n"
+                + "fn __moodit_write(s: &str) {\n"
+                + "    let __fd = __MOODIT_OUT.load(std::sync::atomic::Ordering::SeqCst);\n"
+                + "    let __b = s.as_bytes();\n"
+                + "    unsafe { let _ = write(__fd, __b.as_ptr(), __b.len()); }\n"
+                + "}\n"
                 + "fn __moodit_emit<T: std::fmt::Display>(r: std::thread::Result<T>) {\n"
-                + "    match r { Ok(v) => { println!(\"1\"); println!(\"{}\", v); }, Err(_) => { println!(\"0\"); println!(); } }\n"
+                + "    match r { Ok(v) => { __moodit_write(\"1\\n\"); __moodit_write(&format!(\"{}\\n\", v)); }, Err(_) => { __moodit_write(\"0\\n\\n\"); } }\n"
                 + "}\n"
                 + "fn main() {\n"
+                + "    unsafe { __MOODIT_OUT.store(dup(1), std::sync::atomic::Ordering::SeqCst); dup2(2, 1); }\n"
                 + "    std::panic::set_hook(Box::new(|_| {}));\n"
                 + body
                 + "}\n";
@@ -777,20 +792,26 @@ public class CodeAssembler {
             String emitVal = cServerEmit(kind, "__moodit_case" + i + "()", cpp);
             if (cpp) {
                 calls.append("  try { ").append(emitVal)
-                        .append(" } catch (...) { fputs(\"0\\n\\n\", stdout); }\n");
+                        .append(" } catch (...) { fputs(\"0\\n\\n\", __moodit_out); }\n");
             } else {
                 calls.append("  ").append(emitVal).append("\n");
             }
         }
         String includes = cpp
-                ? "#include <cstdio>\n#include <cstdlib>\n#include <string>\n"
-                : "#include <stdio.h>\n#include <stdlib.h>\n";
+                ? "#include <cstdio>\n#include <cstdlib>\n#include <string>\n#include <unistd.h>\n"
+                : "#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n";
+        // Verdict émis sur un FILE* ouvert sur un DUP du vrai stdout ; le fd 1 de l'étudiant est
+        // redirigé vers stderr (dup2) avant tout appel → ses printf ne polluent pas le canal de verdict.
         String program = includes
                 + "#define main __moodit_student_main\n"
                 + s + "\n"
                 + "#undef main\n"
                 + fns
-                + "int main(void) {\n" + calls + "  return 0;\n}\n";
+                + "int main(void) {\n"
+                + "  int __moodit_out_fd = dup(1); dup2(2, 1);\n"
+                + "  FILE* __moodit_out = fdopen(__moodit_out_fd, \"w\");\n"
+                + calls
+                + "  fflush(__moodit_out);\n  return 0;\n}\n";
         return new Assembled(cpp ? "c++" : "c", List.of(new PistonClient.File(cpp ? "main.cpp" : "main.c", program)));
     }
 
@@ -803,15 +824,16 @@ public class CodeAssembler {
         };
     }
 
-    /** Instruction C/C++ émettant statut « 1 » + la valeur de {@code call}, selon le kind. */
+    /** Instruction C/C++ émettant statut « 1 » + la valeur de {@code call} sur {@code __moodit_out}
+     *  (le vrai stdout dupé), selon le kind. */
     private static String cServerEmit(String kind, String call, boolean cpp) {
         return switch (kind) {
-            case "double" -> "{ double __v = " + call + "; printf(\"1\\n%.17g\\n\", __v); }";
-            case "bool" -> "{ int __v = " + call + "; printf(\"1\\n%s\\n\", __v ? \"true\" : \"false\"); }";
+            case "double" -> "{ double __v = " + call + "; fprintf(__moodit_out, \"1\\n%.17g\\n\", __v); }";
+            case "bool" -> "{ int __v = " + call + "; fprintf(__moodit_out, \"1\\n%s\\n\", __v ? \"true\" : \"false\"); }";
             case "string" -> cpp
-                    ? "{ std::string __v = " + call + "; printf(\"1\\n%s\\n\", __v.c_str()); }"
-                    : "{ const char* __v = " + call + "; printf(\"1\\n%s\\n\", __v); }";
-            default -> "{ long __v = " + call + "; printf(\"1\\n%ld\\n\", __v); }";
+                    ? "{ std::string __v = " + call + "; fprintf(__moodit_out, \"1\\n%s\\n\", __v.c_str()); }"
+                    : "{ const char* __v = " + call + "; fprintf(__moodit_out, \"1\\n%s\\n\", __v); }";
+            default -> "{ long __v = " + call + "; fprintf(__moodit_out, \"1\\n%ld\\n\", __v); }";
         };
     }
 
@@ -833,12 +855,15 @@ public class CodeAssembler {
                     .append(cases.get(i).expr()).append("\n  }\n");
             calls.append("    __moodit_emit(() => __moodit_case").append(i).append("());\n");
         }
+        // Verdict écrit sur le vrai stdout capturé au démarrage ; le Console.Out de l'étudiant est
+        // redirigé vers stderr → ses Console.WriteLine ne peuvent pas forger une paire de verdict.
         String program = usings + "\n" + student + "\n"
                 + "static class __MooditMain {\n"
+                + "  static System.IO.TextWriter __moodit_real;\n"
                 + fns
                 + "  static string __moodit_fmt(object o) { if (o is bool __b) return __b ? \"true\" : \"false\"; if (o is double __d) return __d.ToString(System.Globalization.CultureInfo.InvariantCulture); if (o is float __f) return __f.ToString(System.Globalization.CultureInfo.InvariantCulture); return o == null ? \"\" : o.ToString(); }\n"
-                + "  static void __moodit_emit(Func<object> c) { try { object __v = c(); Console.WriteLine(\"1\"); Console.WriteLine(__moodit_fmt(__v)); } catch { Console.WriteLine(\"0\"); Console.WriteLine(); } }\n"
-                + "  static void Main() {\n" + calls + "  }\n"
+                + "  static void __moodit_emit(Func<object> c) { try { object __v = c(); __moodit_real.WriteLine(\"1\"); __moodit_real.WriteLine(__moodit_fmt(__v)); } catch { __moodit_real.WriteLine(\"0\"); __moodit_real.WriteLine(); } }\n"
+                + "  static void Main() {\n    __moodit_real = Console.Out; Console.SetOut(Console.Error);\n" + calls + "  }\n"
                 + "}\n";
         return new Assembled("csharp", List.of(new PistonClient.File("main.cs", program)));
     }
@@ -864,9 +889,10 @@ public class CodeAssembler {
         String program = imports + "\n"
                 + "public class __MooditMain {\n"
                 + "  interface __Case { Object run() throws Throwable; }\n"
+                + "  static java.io.PrintStream __moodit_real;\n"
                 + fns
-                + "  static void __moodit_emit(__Case c) { try { Object __v = c.run(); System.out.println(\"1\"); System.out.println(String.valueOf(__v)); } catch (Throwable __t) { System.out.println(\"0\"); System.out.println(); } }\n"
-                + "  public static void main(String[] __a) {\n" + calls + "  }\n"
+                + "  static void __moodit_emit(__Case c) { try { Object __v = c.run(); __moodit_real.println(\"1\"); __moodit_real.println(String.valueOf(__v)); } catch (Throwable __t) { __moodit_real.println(\"0\"); __moodit_real.println(); } }\n"
+                + "  public static void main(String[] __a) {\n    __moodit_real = System.out; System.setOut(System.err);\n" + calls + "  }\n"
                 + "}\n\n"
                 + student + "\n";
         return new Assembled("java", List.of(new PistonClient.File("Main.java", program)));

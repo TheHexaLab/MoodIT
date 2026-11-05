@@ -123,6 +123,21 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void go_structured_stdout_is_isolated_from_the_verdict() {
+        requireRuntime("go");
+        // (a) Fonction CORRECTE qui imprime AUSSI sur stdout : l'impression est détournée vers stderr,
+        // le vrai verdict (émis sur le stdout préservé) reste propre → notée juste.
+        String noisy = "package main\nimport \"fmt\"\n"
+                + "func doubler(n int) int { fmt.Println(\"1\"); fmt.Println(\"999\"); return n * 2 }\nfunc main() {}";
+        assertThat(passesStructured("Go", noisy, cas("return doubler(5)", "10"))).isTrue();
+        // (b) Fonction FAUSSE qui tente de forger une paire « 1\n10 » sur stdout : l'impression est
+        // détournée et la vraie valeur (0) ne correspond pas → échec (pas de verdict falsifiable).
+        String cheat = "package main\nimport \"fmt\"\n"
+                + "func doubler(n int) int { fmt.Println(\"1\"); fmt.Println(\"10\"); return 0 }\nfunc main() {}";
+        assertThat(passesStructured("Go", cheat, cas("return doubler(5)", "10"))).isFalse();
+    }
+
+    @Test
     void rust_structured_cases_keep_expected_out_of_sandbox() {
         requireRuntime("rust");
         String code = "fn doubler(n: i32) -> i32 { n * 2 }\n"

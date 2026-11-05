@@ -324,6 +324,17 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void structured_fails_closed_when_stdout_has_extra_lines() {
+        // Triche : le code étudiant a écrit une paire « statut+valeur » forgée AVANT le vrai émetteur,
+        // donc la sortie a 2 lignes de trop (≠ 2·N+1). On refuse plutôt que de lire un verdict falsifié.
+        pistonRun(files -> new PistonClient.Stage("1\n10\n1\n5\n", "", 0, null, null));
+        StructuredEvaluateRequest req = new StructuredEvaluateRequest("go", null, "x",
+                List.of(new StructuredCase("t", "return doubler(5)", M.readTree("10"), "exact", 1)));
+        assertThat(service.evaluateStructured(req)).singleElement()
+                .satisfies(r -> assertThat(r.passed()).isFalse());
+    }
+
+    @Test
     void chaque_appel_piston_occupe_une_place_du_sandbox() {
         // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel Piston (run, harnais,
         // SQL en deux phases) doit passer par cette place, donc être refusé sans appeler Piston.

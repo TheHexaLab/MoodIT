@@ -110,18 +110,26 @@ public class ExecutionService {
         PistonClient.Stage run = result.run();
         // Deux lignes par cas : statut (1/0) puis valeur. split(-1) conserve les lignes vides.
         String[] lines = (run == null || run.stdout() == null) ? new String[0] : run.stdout().split("\n", -1);
+        int n = request.cases().size();
+        boolean signaled = run != null && run.signal() != null;
+        // FAIL-CLOSED (sécurité) : l'émetteur écrit EXACTEMENT 2 lignes par cas (+ une vide finale).
+        // Toute autre longueur = le code étudiant a écrit sur stdout (triche en forgeant une paire
+        // « statut+valeur », ou simple débogage) → on ne lit pas un verdict dans une sortie qu'il a pu
+        // polluer : tous les cas échouent. Le stdout étudiant est normalement redirigé vers stderr par
+        // le serveur (cf. CodeAssembler), donc une sortie propre a bien 2·N+1 lignes.
+        boolean malformed = !signaled && lines.length != 2 * n + 1;
         List<TestResult> out = new ArrayList<>();
-        for (int i = 0; i < request.cases().size(); i++) {
+        for (int i = 0; i < n; i++) {
             StructuredCase c = request.cases().get(i);
             int weight = c.effectiveWeight();
-            if (run != null && run.signal() != null) {
+            if (signaled) {
                 out.add(new TestResult(c.name(), weight, false,
                         "Interrompu (signal " + run.signal() + ") — dépassement de temps ou de mémoire probable"));
                 continue;
             }
-            if (2 * i + 1 >= lines.length) {
+            if (malformed) {
                 out.add(new TestResult(c.name(), weight, false,
-                        firstNonBlank(run == null ? null : run.stderr(), "Aucune réponse du serveur pour ce cas")));
+                        "Sortie du serveur inattendue — le code a-t-il écrit sur la sortie standard ?"));
                 continue;
             }
             String status = lines[2 * i].trim();
