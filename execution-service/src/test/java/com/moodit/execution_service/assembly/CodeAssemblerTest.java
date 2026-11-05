@@ -235,6 +235,83 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void java_poo_couvre_void_prive_et_types_non_supportes() {
+        // Exerce les branches POO : méthode d'instance void, membre privé (ignoré), retour/param non
+        // scalaire (stub qui lève), ctor à paramètre non scalaire (ignoré).
+        var a = assembler.assemble("Java",
+                "class Widget { int x;\n"
+                        + "  Widget(int x){ this.x=x; }\n"
+                        + "  Widget(int[] xs){ this.x=xs.length; }\n"   // ctor non scalaire → ignoré
+                        + "  public void reset(){ x=0; }\n"              // void d'instance
+                        + "  private int secret(){ return x; }\n"       // privé → non exposé
+                        + "  public int[] dump(){ return new int[]{x}; }\n" // retour non scalaire → lève
+                        + "  public int get(){ return x; } }",
+                "return new Widget(1).get() == 1;", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("void reset(");                                  // branche void
+        assertThat(c).contains("int[] dump() { throw new RuntimeException");    // non supporté → lève
+        assertThat(c).doesNotContain("\"secret\"");                            // privé non proxifié
+        assertThat(c).containsOnlyOnce("__rpcNew(\"Widget\"");                  // seul le ctor scalaire
+    }
+
+    @Test
+    void go_poo_genere_stub_struct_et_methode_par_passage_de_champs() {
+        // POO Go : struct + méthode → stub type (mêmes champs) + méthode qui envoie les champs ; le
+        // child reconstruit le vrai struct et appelle la méthode (le harnais fait Rectangle{...}.aire()).
+        var a = assembler.assemble("Go",
+                "package main\n"
+                        + "type Rectangle struct { largeur, hauteur int }\n"
+                        + "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\n"
+                        + "func main() {}",
+                "return Rectangle{largeur: 3, hauteur: 4}.aire() == 12", "MOODIT_OK_go");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("type Rectangle struct { largeur int; hauteur int }");  // stub (mêmes champs)
+        assertThat(c).contains("func (__self Rectangle) aire() int");                  // méthode stub
+        assertThat(c).contains("__moodit_rpc(\"Rectangle.aire\", __self.largeur, __self.hauteur)");
+        assertThat(c).contains("case \"Rectangle.aire\":");                            // dispatch child
+        assertThat(c).contains("__MooditStudent_Rectangle{");                          // reconstruction
+        assertThat(c).doesNotContain("MOODIT_OK_go");                                  // nonce jamais gravé
+    }
+
+    @Test
+    void go_poo_ignore_struct_non_scalaire_et_methode_non_supportee() {
+        // Exerce : struct à champ non scalaire → ignoré (pas de stub) ; méthode à retour non scalaire
+        // sur un struct scalaire → stub qui panique.
+        var a = assembler.assemble("Go",
+                "package main\n"
+                        + "type Bag struct { items []map[string]int }\n"          // champ non scalaire → struct ignoré
+                        + "type Box struct { n int }\n"
+                        + "func (b Box) items() []map[string]int { return nil }\n" // retour non scalaire → panique
+                        + "func (b Box) get() int { return b.n }\n"
+                        + "func main() {}",
+                "return Box{n: 7}.get() == 7", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).doesNotContain("type Bag struct");                          // struct non scalaire ignoré
+        assertThat(c).contains("type Box struct { n int }");
+        assertThat(c).contains("func (__self Box) items() []map[string]int { panic(");  // méthode non supportée
+        assertThat(c).contains("case \"Box.get\":");
+    }
+
+    @Test
+    void csharp_poo_couvre_void_prive_et_types_non_supportes() {
+        var a = assembler.assemble("C#",
+                "class Widget { int x;\n"
+                        + "  public Widget(int x){ this.x=x; }\n"
+                        + "  public Widget(int[] xs){ this.x=xs.Length; }\n"  // ctor non scalaire → ignoré
+                        + "  public void Reset(){ x=0; }\n"                    // void d'instance
+                        + "  private int Secret(){ return x; }\n"             // privé → non exposé
+                        + "  public int[] Dump(){ return new int[]{x}; }\n"   // retour non scalaire → lève
+                        + "  public int Get(){ return x; }\n"
+                        + "  static void Main(string[] a){} }",
+                "return new Widget(1).Get() == 1;", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("void Reset(");
+        assertThat(c).contains("int[] Dump() { throw new System.Exception");
+        assertThat(c).doesNotContain("\"Secret\"");
+        assertThat(c).containsOnlyOnce("__rpcNew(\"Widget\"");
+    }
+
+    @Test
     void c_forks_isolated_process_and_reads_secret_from_stdin() {
         var a = assembler.assemble("C", "int solution(void){ return 5; }",
                 "return solution() == 5;", "MOODIT_OK_c");

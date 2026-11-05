@@ -473,6 +473,21 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void go_poo_struct_et_methode_par_passage_de_champs() {
+        requireRuntime("go");
+        // POO Go : le harnais construit un struct par littéral et appelle une méthode d'instance ;
+        // le child reconstruit le vrai struct (champs non exportés, même package) et appelle la méthode.
+        String rect = "package main\n"
+                + "type Rectangle struct { largeur, hauteur int }\n"
+                + "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\n"
+                + "func main() {}";
+        assertThat(passes("Go", rect, "return Rectangle{largeur: 3, hauteur: 4}.aire() == 12")).isTrue();
+        assertThat(passes("Go", rect, "return Rectangle{largeur: 5, hauteur: 5}.aire() == 25")).isTrue();
+        assertThat(passes("Go", rect.replace("r.largeur * r.hauteur", "0"),
+                "return Rectangle{largeur: 3, hauteur: 4}.aire() == 12")).isFalse();
+    }
+
+    @Test
     void rust_isolation_rpc_deux_processus() {
         requireRuntime("rust");
         String good = "fn doubler(n: i32) -> i32 { n * 2 }\nfn main() {}";

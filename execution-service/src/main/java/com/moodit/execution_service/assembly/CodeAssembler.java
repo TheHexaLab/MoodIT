@@ -464,6 +464,12 @@ public class CodeAssembler {
     /** Fonctions Go de premier niveau : {@code func nom(params) ret {} }. */
     private static final Pattern GO_FUNC =
             Pattern.compile("(?m)^func\\s+([A-Za-z_]\\w*)\\s*\\(([^)]*)\\)\\s*([^{]*)\\{");
+    /** Déclaration de struct Go top-level : {@code type Nom struct { … } } (capture le nom). */
+    private static final Pattern GO_STRUCT =
+            Pattern.compile("(?m)^type\\s+(\\w+)\\s+struct\\s*\\{");
+    /** Méthode Go (récepteur) : {@code func (r [*]Type) Nom(params) ret {} } — groupes recv/type/nom/params/ret. */
+    private static final Pattern GO_METHOD =
+            Pattern.compile("(?m)^func\\s*\\(\\s*(\\w+)\\s+(\\*?)(\\w+)\\s*\\)\\s*(\\w+)\\s*\\(([^)]*)\\)\\s*([^{]*)\\{");
 
     /**
      * Go : exécution ISOLÉE en DEUX processus (comme les interprétés, mais obtenue autrement — cf. #116).
@@ -478,9 +484,12 @@ public class CodeAssembler {
      *       signatures) qui délèguent au child ; les définitions/appels étudiant sont renommés
      *       {@code __moodit_s_*} pour laisser les noms d'origine aux stubs.</li>
      * </ul>
-     * Périmètre : fonctions top-level à paramètres/retour parmi {@code int}, {@code int64},
-     * {@code float64}, {@code bool}, {@code string} et slices {@code []T} de ceux-ci ; un type hors
-     * périmètre rend la fonction inappelable (stub qui panique), sans casser les autres (pilote #116).
+     * POO : pour un struct à champs scalaires, un type STUB (mêmes champs) dont les méthodes envoient
+     * les VALEURS des champs + les args ; le child reconstruit le vrai struct (même {@code package main}
+     * → champs non exportés accessibles) et appelle la méthode. Sémantique VALEUR (une méthode qui mute
+     * le récepteur ne persiste pas entre appels). Périmètre : paramètres/retour/champs parmi {@code int},
+     * {@code int64}, {@code float64}, {@code bool}, {@code string} et slices {@code []T} ; un type hors
+     * périmètre rend la fonction/méthode inappelable (stub qui panique), sans casser les autres.
      */
     private Assembled assembleGo(String studentCode, String harnessCode, String nonce) {
         String student = studentCode == null ? "" : studentCode;
@@ -495,11 +504,33 @@ public class CodeAssembler {
             }
         }
 
+        // 1b) Collecter les structs (nom → champs) et les méthodes (récepteur) pour la POO. Tout étant
+        //     dans `package main`, le code généré pourra lire/écrire même les champs NON exportés.
+        java.util.LinkedHashMap<String, List<String[]>> structs = new java.util.LinkedHashMap<>();
+        Matcher sm = GO_STRUCT.matcher(student);
+        while (sm.find()) {
+            int open = student.indexOf('{', sm.start());
+            int close = javaMatchBrace(student, open);
+            if (close < 0) continue;
+            String fbody = student.substring(open + 1, close).replaceAll("[;\\n]", ",");
+            structs.put(sm.group(1), goExpandParams(fbody));
+        }
+        List<String[]> methods = new ArrayList<>();
+        Matcher mem = GO_METHOD.matcher(student);
+        while (mem.find()) {
+            methods.add(new String[] {mem.group(3), mem.group(4), mem.group(5), mem.group(6).trim()});
+        }
+
         // 2) Neutraliser le main étudiant, puis renommer définitions ET appels des fonctions étudiant
         //    en __moodit_s_* (nom entier, jamais précédé d'un point → on épargne les appels de méthode).
         String code = student.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
         for (String[] f : funcs) {
             code = code.replaceAll("(?<![\\w.])" + Pattern.quote(f[0]) + "(?=\\s*\\()", "__moodit_s_" + f[0]);
+        }
+        // Renommer les TYPES struct étudiant → __MooditStudent_* (défs, littéraux, récepteurs, retours) ;
+        // les stubs gardent les noms d'origine pour le harnais.
+        for (String s : structs.keySet()) {
+            code = code.replaceAll("\\b" + Pattern.quote(s) + "\\b", "__MooditStudent_" + s);
         }
 
         // 3) Insérer notre infrastructure APRÈS la déclaration `package` (PAS la 1ère ligne : elle peut
@@ -559,6 +590,69 @@ public class CodeAssembler {
             } else {
                 cases.append("\t\t\t__resp = map[string]interface{}{\"ok\": true, \"value\": ")
                         .append(realCall).append("}\n");
+            }
+        }
+
+        // POO : pour chaque struct à champs scalaires, un type STUB (mêmes champs) ; ses méthodes
+        // envoient les VALEURS DES CHAMPS + les args, et le child reconstruit le vrai struct (possible
+        // car même `package main`, champs non exportés compris) puis appelle la méthode. Sémantique
+        // VALEUR : une méthode qui mute le récepteur ne persiste pas entre appels (périmètre pilote).
+        for (var se : structs.entrySet()) {
+            String sname = se.getKey();
+            List<String[]> fields = se.getValue();
+            if (fields.isEmpty() || !fields.stream().allMatch(f -> goConv("x", f[1]) != null)) continue;
+            for (String[] f : fields) if (f[1].startsWith("[]")) sliceTypes.add(f[1].substring(2));
+            stubs.append("type ").append(sname).append(" struct { ")
+                    .append(fields.stream().map(f -> f[0] + " " + f[1]).collect(Collectors.joining("; ")))
+                    .append(" }\n");
+            for (String[] m : methods) {
+                if (!m[0].equals(sname)) continue;
+                String mname = m[1];
+                List<String[]> mp = goExpandParams(m[2]);
+                String mret = m[3];
+                String msig = mp.stream().map(p -> p[0] + " " + p[1]).collect(Collectors.joining(", "));
+                boolean ok = (mret.isEmpty() || goConv("x", mret) != null)
+                        && mp.stream().allMatch(p -> goConv("x", p[1]) != null);
+                if (!ok) {
+                    stubs.append("func (__self ").append(sname).append(") ").append(mname).append("(").append(msig)
+                            .append(")").append(mret.isEmpty() ? "" : " " + mret)
+                            .append(" { panic(\"type non supporte par l'isolation RPC\") }\n");
+                    continue;
+                }
+                for (String[] p : mp) if (p[1].startsWith("[]")) sliceTypes.add(p[1].substring(2));
+                if (mret.startsWith("[]")) sliceTypes.add(mret.substring(2));
+                String key = sname + "." + mname;
+                String fieldVals = fields.stream().map(f -> "__self." + f[0]).collect(Collectors.joining(", "));
+                String argVals = mp.stream().map(p -> p[0]).collect(Collectors.joining(", "));
+                String allVals = fieldVals + (argVals.isEmpty() ? "" : ", " + argVals);
+                String rpc = "__moodit_rpc(\"" + key + "\", " + allVals + ")";
+                if (mret.isEmpty()) {
+                    stubs.append("func (__self ").append(sname).append(") ").append(mname).append("(").append(msig)
+                            .append(") { ").append(rpc).append(" }\n");
+                } else {
+                    stubs.append("func (__self ").append(sname).append(") ").append(mname).append("(").append(msig)
+                            .append(") ").append(mret).append(" { return ").append(goConv(rpc, mret)).append(" }\n");
+                }
+                StringBuilder recon = new StringBuilder("__MooditStudent_").append(sname).append("{");
+                for (int i = 0; i < fields.size(); i++) {
+                    if (i > 0) recon.append(", ");
+                    recon.append(fields.get(i)[0]).append(": ").append(goConv("__a[" + i + "]", fields.get(i)[1]));
+                }
+                recon.append("}");
+                StringBuilder mcall = new StringBuilder();
+                for (int i = 0; i < mp.size(); i++) {
+                    if (i > 0) mcall.append(", ");
+                    mcall.append(goConv("__a[" + (fields.size() + i) + "]", mp.get(i)[1]));
+                }
+                cases.append("\t\tcase \"").append(key).append("\":\n");
+                cases.append("\t\t\t__moodit_recv := ").append(recon).append("\n");
+                if (mret.isEmpty()) {
+                    cases.append("\t\t\t__moodit_recv.").append(mname).append("(").append(mcall).append(")\n")
+                            .append("\t\t\t__resp = map[string]interface{}{\"ok\": true, \"value\": nil}\n");
+                } else {
+                    cases.append("\t\t\t__resp = map[string]interface{}{\"ok\": true, \"value\": __moodit_recv.")
+                            .append(mname).append("(").append(mcall).append(")}\n");
+                }
             }
         }
 
