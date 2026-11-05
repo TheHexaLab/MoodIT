@@ -52,6 +52,8 @@ interface PortalSidebarProps {
   onWidthChange?: (width: number | null) => void;
   /** Page du portail ouverte (Horaire, Factures…). */
   activePage?: PortalPage;
+  /** Pastille à côté d'une page : « À payer » pour les Factures. */
+  pageBadges?: Partial<Record<PortalPage['slug'], string>>;
   /** Programme ouvert (-1 : aucun, on est sur l'Accueil). */
   activeProgramId?: number;
   /** Cours ouvert : mis en évidence dans la liste. */
@@ -111,6 +113,7 @@ export default function PortalSidebar({
   width = null,
   onWidthChange,
   activePage,
+  pageBadges = {},
   activeProgramId = -1,
   selectedCourseId,
 }: PortalSidebarProps): React.ReactElement {
@@ -172,17 +175,23 @@ export default function PortalSidebar({
       </Link>
       {PORTAL_PAGES.map((page) => {
         const isActive = !inCourse && page.slug === activePage?.slug;
+        const badge = pageBadges[page.slug];
+        // Barre réduite : la pastille devient un point, son texte passe dans le nom de la page.
+        const collapsedName = badge ? `${page.label} (${badge.toLowerCase()})` : page.label;
         return (
           <Link
             key={page.slug}
             to={`/home/${page.slug}`}
             className={`${styles.navItem} ${isActive ? styles.navItemActive : ''}`}
             aria-current={isActive ? 'page' : undefined}
-            aria-label={collapsed ? page.label : undefined}
-            title={collapsed ? page.label : undefined}
+            aria-label={collapsed ? collapsedName : undefined}
+            title={collapsed ? collapsedName : undefined}
           >
             <NavIcon path={page.path} />
             <span className={styles.label}>{page.label}</span>
+            {/* L'espace sépare la pastille du libellé dans le nom lu par un lecteur d'écran. */}
+            {badge && ' '}
+            {badge && <span className={styles.pageBadge}>{badge}</span>}
           </Link>
         );
       })}

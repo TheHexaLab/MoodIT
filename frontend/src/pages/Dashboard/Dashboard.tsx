@@ -56,6 +56,8 @@ import {
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
+import InvoicesPage, { type InvoiceState } from '../../components/InvoicesPage/InvoicesPage.tsx';
+import { invoiceTotal } from '../../components/InvoicesPage/invoice.ts';
 import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
@@ -147,6 +149,30 @@ export default function Dashboard() {
   const isPortal = activeProgramId < 0;
   const { pathname } = useLocation();
   const portalPage = isPortal ? portalPageFromPath(pathname) : undefined;
+  // Factures (#207, données fictives, jamais en production) : chargées une fois pour la page et
+  // pour la pastille « À payer » de la barre de gauche.
+  const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
+  const [invoiceAttempt, setInvoiceAttempt] = useState(0);
+  useEffect(() => {
+    if (!api.invoicesAvailable()) return;
+    let cancelled = false;
+    api.fetchInvoice().then(
+      (invoice) => {
+        if (!cancelled) setInvoiceState({ status: 'ready', invoice });
+      },
+      () => {
+        if (!cancelled) setInvoiceState({ status: 'error' });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceAttempt]);
+  const retryInvoice = () => {
+    setInvoiceState({ status: 'loading' });
+    setInvoiceAttempt((attempt) => attempt + 1);
+  };
+  const invoiceDue = invoiceState.status === 'ready' && invoiceTotal(invoiceState.invoice) > 0;
   const isMobile = useSyncExternalStore(subscribeToMobile, () => window.matchMedia(MOBILE_QUERY).matches);
   // Barre de gauche : le choix mémorisé sur l'Accueil, toujours réduite dans un cours, à côté du
   // panneau du cours. Sur mobile, complète sur l'Accueil, sans bouton pour la changer.
@@ -1087,6 +1113,7 @@ export default function Dashboard() {
             width={sidebarWidth}
             onWidthChange={isMobile ? undefined : changeSidebarWidth}
             activePage={portalPage}
+            pageBadges={invoiceDue ? { factures: 'À payer' } : undefined}
             activeProgramId={activeProgramId}
             selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
             userMenu={
@@ -1146,7 +1173,9 @@ export default function Dashboard() {
         }
       />
 
-      {portalPage ? (
+      {portalPage?.slug === 'factures' && api.invoicesAvailable() ? (
+        <InvoicesPage state={invoiceState} onRetry={retryInvoice} onOpenProfile={handleEditProfile} />
+      ) : portalPage ? (
         <PortalPlaceholder title={portalPage.label} />
       ) : isPortal ? (
         <AccueilPage firstName={currentUser.firstName} />

@@ -611,3 +611,23 @@ export interface Assignment {
   /** Nombre d'étudiants ou, pour un devoir en équipe, d'équipes. */
   studentCount: number;
 }
+
+// ── Factures (#207) ──────────────────────────────────────────────────────────────────────────────
+
+/** Un montant dû pour la session : droits de scolarité, frais afférents… */
+export interface InvoiceLine {
+  label: string;
+  /** Précision sous le libellé (session, nombre de crédits…). */
+  detail?: string;
+  /** En cents, pour éviter les erreurs d'arrondi. */
+  amountCents: number;
+}
+
+/** Ce que l'étudiant doit pour la session en cours. Sans ligne : rien à payer. */
+export interface InvoiceSummary {
+  /** Nom de la session, en minuscules : « automne 2026 ». */
+  session: string;
+  /** Échéance (AAAA-MM-JJ). Absente s'il n'y a rien à payer. */
+  dueDate?: string;
+  lines: InvoiceLine[];
+}

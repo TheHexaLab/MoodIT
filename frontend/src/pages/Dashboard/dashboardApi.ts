@@ -18,8 +18,10 @@ import {
   demoStudentRows,
   demoTeams,
 } from '../../mocks/assignmentsData.ts';
+import { demoInvoice } from '../../mocks/invoicesData.ts';
 import type {
   AnswerResponse,
+  InvoiceSummary,
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
@@ -1493,4 +1495,17 @@ export async function leaveAssignmentTeam(
   demoTeamsByAssignment.set(assignmentId, remaining);
   syncTeam(assignment);
   return assignment;
+}
+
+// ── Factures (#207) : données FICTIVES, en attendant une API de facturation ───────────────────────
+
+/** Pas d'API de facturation : la page n'existe qu'en développement ; en production, l'écran d'attente. */
+export function invoicesAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+/** Ce que l'étudiant doit pour la session en cours. Jamais de faux montant en production. */
+export async function fetchInvoice(now: Date = new Date()): Promise<InvoiceSummary> {
+  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
+  return demoInvoice(now);
 }

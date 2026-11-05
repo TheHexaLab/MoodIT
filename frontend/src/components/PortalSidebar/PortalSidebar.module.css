@@ -53,6 +53,34 @@
         visibility var(--sidebar-speed), color 0.15s ease;
 }
 
+/* Pastille d'une page (« À payer » des Factures), à droite du libellé. */
+.pageBadge {
+    margin: 0 0.75rem 0 auto;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    background: var(--badge-warn-bg);
+    color: var(--badge-warn-fg);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+/* Barre réduite : un point sur le coin de l'icône ; le texte passe dans le nom de la page. */
+.sidebarCollapsed .pageBadge {
+    position: absolute;
+    top: 0.5rem;
+    left: 1.875rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--badge-warn-fg);
+    color: transparent;
+    font-size: 0;
+}
+
 /* Le libellé s'efface en place : il ne pousse rien pendant le glissement. */
 .label {
     white-space: nowrap;

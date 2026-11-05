@@ -2037,3 +2037,78 @@ describe('Dashboard — compléments', () => {
     });
   });
 });
+
+describe('Dashboard — factures (#207)', () => {
+  const INVOICE = {
+    session: 'automne 2026',
+    dueDate: '2026-11-15',
+    lines: [{ label: 'Droits de scolarité', amountCents: 112_000 }],
+  };
+  const portal = () => within(screen.getByRole('navigation', { name: 'Portail' }));
+
+  beforeEach(() => {
+    vi.mocked(api.invoicesAvailable).mockReturnValue(true);
+  });
+
+  it('la page affiche le solde, la barre la pastille « À payer », et le profil s’ouvre', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText('Solde à payer')).toBeTruthy();
+    const link = portal().getByRole('link', { name: 'Factures À payer' });
+    expect(link.getAttribute('aria-current')).toBe('page');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir mon profil' }));
+    expect(await screen.findByText(profileLabels.subtitle)).toBeTruthy();
+  });
+
+  it('la pastille s’affiche aussi depuis l’Accueil', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home' });
+    expect(await screen.findByRole('link', { name: 'Factures À payer' })).toBeTruthy();
+    expect(api.fetchInvoice).toHaveBeenCalledOnce();
+  });
+
+  it('rien à payer : pas de pastille', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue({ session: 'automne 2026', lines: [] });
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText('Rien à payer')).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+  });
+
+  it('erreur de chargement, puis « Réessayer » recharge', async () => {
+    vi.mocked(api.fetchInvoice).mockRejectedValueOnce(new Error('panne')).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home/factures' });
+    const alert = (await screen.findByText('Impossible de charger vos factures.')).closest('[role="alert"]')!;
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+    fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Réessayer' }));
+    expect(screen.getByText('Chargement de vos factures…')).toBeTruthy();
+    expect(await screen.findByText('Solde à payer')).toBeTruthy();
+    expect(api.fetchInvoice).toHaveBeenCalledTimes(2);
+  });
+
+  it('une réponse arrivée après le démontage est ignorée', async () => {
+    let resolve: (invoice: typeof INVOICE) => void = () => {};
+    vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((done) => (resolve = done)));
+    const { unmount } = renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText('Chargement de vos factures…')).toBeTruthy();
+    unmount();
+    await act(async () => resolve(INVOICE));
+    expect(screen.queryByText('Solde à payer')).toBeNull();
+  });
+
+  it('une erreur arrivée après le démontage est ignorée', async () => {
+    let reject: (error: Error) => void = () => {};
+    vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((_, fail) => (reject = fail)));
+    const { unmount } = renderDashboard({ path: '/home/factures' });
+    unmount();
+    await act(async () => reject(new Error('panne')));
+    expect(screen.queryByText('Impossible de charger vos factures.')).toBeNull();
+  });
+
+  it('en production : l’écran d’attente, sans données fictives ni pastille', async () => {
+    vi.mocked(api.invoicesAvailable).mockReturnValue(false);
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText("Cette page n'est pas encore disponible.")).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
+  });
+});
