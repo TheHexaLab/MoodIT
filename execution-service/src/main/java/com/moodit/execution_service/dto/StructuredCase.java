@@ -16,7 +16,11 @@ import jakarta.validation.constraints.Size;
  * donc les entrées, y est visible — mais une entrée est de toute façon connue du code qui la reçoit).
  *
  * <p>{@code expected} est du JSON (scalaire : nombre, booléen, chaîne). {@code compare} :
- * {@code exact} (défaut), {@code float} (tolérance), {@code unordered} (collection sans ordre).
+ * {@code exact} (défaut), {@code unordered} (collection sans ordre), les relationnels
+ * {@code gt}/{@code ge}/{@code lt}/{@code le} (l'attendu est la borne, comparée hors sandbox),
+ * {@code ne} (différent), {@code contains}/{@code regex} (sur chaîne) et {@code compound}
+ * (combinaison ET/OU). Une marge de tolérance s'exprime en composant une plage ({@code ge a} ET
+ * {@code le b}). Un mode inconnu retombe sur {@code exact}.
  */
 public record StructuredCase(
         @NotBlank @Size(max = 500) String name,

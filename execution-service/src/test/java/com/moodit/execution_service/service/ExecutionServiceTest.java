@@ -3,11 +3,14 @@ package com.moodit.execution_service.service;
 import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
+import com.moodit.execution_service.dto.StructuredCase;
+import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.function.Function;
@@ -35,6 +38,7 @@ class ExecutionServiceTest {
     private final ExecutionService service = new ExecutionService(assembler, piston);
 
     private static final Pattern NONCE = Pattern.compile("MOODIT_OK_[0-9a-f]+");
+    private static final ObjectMapper M = new ObjectMapper();
 
     /** Retrouve le nonce injecté dans les fichiers assemblés (pour simuler un harnais qui réussit). */
     private static String nonceIn(List<PistonClient.File> files) {
@@ -197,6 +201,126 @@ class ExecutionServiceTest {
                 List.of(new TestCaseInput("a", "return True", 3)));
         assertThat(service.evaluate(req)).singleElement()
                 .satisfies(t -> assertThat(t.weight()).isEqualTo(3));
+    }
+
+    // ───────────────── Cas STRUCTURÉS : modes de comparaison (verdict HORS sandbox) ─────────────────
+    // Le serveur (mocké) émet « 1\n<valeur>\n » ; seul le mode de comparaison varie. Le code et
+    // l'expression sont indifférents (Piston mocké) : on teste uniquement la décision de `jsonMatches`.
+
+    private boolean structured(String emitted, String expectedJson, String compare) {
+        pistonRun(files -> new PistonClient.Stage("1\n" + emitted + "\n", "", 0, null, null));
+        StructuredEvaluateRequest req = new StructuredEvaluateRequest("go", null,
+                "package main\nfunc doubler(n int) int { return n * 2 }",
+                List.of(new StructuredCase("t", "return doubler(5)", M.readTree(expectedJson), compare, 1)));
+        return service.evaluateStructured(req).get(0).passed();
+    }
+
+    @Test
+    void structured_exact_treats_int_and_double_as_equal() {
+        assertThat(structured("10", "10.0", "exact")).isTrue();
+        assertThat(structured("10.0", "10", "exact")).isTrue();
+        assertThat(structured("10", "11", "exact")).isFalse();
+        assertThat(structured("\"abc\"", "\"abc\"", "exact")).isTrue();
+    }
+
+    @Test
+    void structured_relational_modes_compare_against_a_hidden_bound() {
+        assertThat(structured("70", "60", "gt")).isTrue();
+        assertThat(structured("60", "60", "gt")).isFalse();
+        assertThat(structured("60", "60", "ge")).isTrue();
+        assertThat(structured("2", "3", "lt")).isTrue();
+        assertThat(structured("3", "3", "lt")).isFalse();
+        assertThat(structured("3", "3", "le")).isTrue();
+        assertThat(structured("4", "3", "le")).isFalse();
+    }
+
+    @Test
+    void structured_relational_on_non_number_fails() {
+        assertThat(structured("\"abc\"", "60", "gt")).isFalse();
+    }
+
+    @Test
+    void structured_ne_mode() {
+        assertThat(structured("5", "6", "ne")).isTrue();
+        assertThat(structured("6", "6", "ne")).isFalse();
+        assertThat(structured("\"a\"", "\"b\"", "ne")).isTrue();
+        assertThat(structured("\"a\"", "\"a\"", "ne")).isFalse();
+    }
+
+    @Test
+    void structured_contains_mode() {
+        assertThat(structured("\"hello world\"", "\"world\"", "contains")).isTrue();
+        assertThat(structured("\"hello\"", "\"world\"", "contains")).isFalse();
+    }
+
+    @Test
+    void structured_contains_coerces_non_string_operands() {
+        assertThat(structured("123", "\"2\"", "contains")).isTrue();     // valeur nombre → « 123 »
+        assertThat(structured("\"abc\"", "null", "contains")).isTrue();  // borne vide (« ») → toujours contenue
+    }
+
+    @Test
+    void structured_regex_mode_searches_a_pattern() {
+        assertThat(structured("\"abc123\"", "\"\\\\d+\"", "regex")).isTrue();  // motif \d+
+        assertThat(structured("\"abc\"", "\"\\\\d+\"", "regex")).isFalse();
+        assertThat(structured("\"x\"", "\"[\"", "regex")).isFalse();           // motif invalide → échec
+    }
+
+    @Test
+    void structured_unordered_mode_ignores_order() {
+        assertThat(structured("[3,1,2]", "[1,2,3]", "unordered")).isTrue();
+        assertThat(structured("[1,2]", "[1,2,3]", "unordered")).isFalse();
+    }
+
+    @Test
+    void structured_unknown_mode_falls_back_to_exact() {
+        assertThat(structured("10", "10", "bogus")).isTrue();
+        assertThat(structured("10", "11", "bogus")).isFalse();
+    }
+
+    // ── Comparaison COMPOSÉE (plusieurs conditions ET/OU, priorité ET > OU) ──
+
+    private static String cond(String compare, String value) {
+        return "{\"compare\":\"" + compare + "\",\"value\":\"" + value + "\"}";
+    }
+
+    private static String compound(String conds, String conns) {
+        return "{\"conditions\":[" + conds + "],\"connectors\":[" + conns + "]}";
+    }
+
+    @Test
+    void structured_compound_range_with_and() {
+        // 60 ≤ valeur < 100
+        String c = compound(cond("ge", "60") + "," + cond("lt", "100"), "\"and\"");
+        assertThat(structured("70", c, "compound")).isTrue();
+        assertThat(structured("60", c, "compound")).isTrue();
+        assertThat(structured("100", c, "compound")).isFalse();
+        assertThat(structured("50", c, "compound")).isFalse();
+    }
+
+    @Test
+    void structured_compound_alternatives_with_or() {
+        // valeur == 10 OU valeur == 20
+        String c = compound(cond("exact", "10") + "," + cond("exact", "20"), "\"or\"");
+        assertThat(structured("20", c, "compound")).isTrue();
+        assertThat(structured("10", c, "compound")).isTrue();
+        assertThat(structured("15", c, "compound")).isFalse();
+    }
+
+    @Test
+    void structured_compound_and_binds_tighter_than_or() {
+        // (≥ 60 ET < 100) OU == 0
+        String c = compound(
+                cond("ge", "60") + "," + cond("lt", "100") + "," + cond("exact", "0"),
+                "\"and\",\"or\"");
+        assertThat(structured("70", c, "compound")).isTrue();  // groupe ET vrai
+        assertThat(structured("0", c, "compound")).isTrue();   // dernier OU vrai
+        assertThat(structured("150", c, "compound")).isFalse();// aucun
+    }
+
+    @Test
+    void structured_compound_empty_conditions_fail() {
+        assertThat(structured("5", "{\"conditions\":[],\"connectors\":[]}", "compound")).isFalse();
     }
 
     @Test
