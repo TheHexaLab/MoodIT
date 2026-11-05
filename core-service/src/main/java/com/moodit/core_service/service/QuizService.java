@@ -105,6 +105,7 @@ public class QuizService {
                         .name(l.getName())
                         .harnessTemplate(l.getHarnessTemplate())
                         .startCodeTemplate(l.getStartCodeTemplate())
+                        .exprTemplate(l.getExprTemplate())
                         .harnessLanguageId(l.getHarnessLanguageId())
                         .build())
                 .toList();
