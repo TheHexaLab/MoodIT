@@ -156,6 +156,13 @@
         white-space: nowrap;
     }
 
+    /* Paiements reçus, sous le total, sans gras. */
+    .table tfoot tr.payment th,
+    .table tfoot tr.payment td {
+        border-top: none;
+        font-weight: 400;
+    }
+
     .footer {
         margin-top: 28pt;
         padding-top: 8pt;

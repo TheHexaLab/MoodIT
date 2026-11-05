@@ -2121,11 +2121,45 @@ describe('Dashboard — factures (#207)', () => {
   it.each([
     ['administrateur', { isAdmin: true }],
     ['gardien', { isGuardian: true }],
-  ])('%s global : pas de lien Factures', async (_role, roles) => {
-    renderDashboard({ path: '/home', ...roles });
-    expect(await portal().findByRole('link', { name: 'Bulletin' })).toBeTruthy();
-    expect(portal().queryByRole('link', { name: /Factures/ })).toBeNull();
+  ])('%s global : la vue de l’administration, sans facture personnelle', async (_role, roles) => {
+    vi.mocked(api.fetchIssuedInvoices).mockResolvedValue([
+      { ...INVOICE, id: 1, studentName: 'Camille Lavoie' },
+    ]);
+    renderDashboard({ path: '/home/factures', ...roles });
+    expect(await screen.findByText('Camille Lavoie')).toBeTruthy();
+    expect(screen.getByText("Factures émises pour la session d'automne 2026", { exact: false })).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' }).getAttribute('aria-current')).toBe('page');
     expect(api.fetchInvoice).not.toHaveBeenCalled();
+  });
+
+  it('administration : « Nouvelle facture », puis « Marquer payée », passent par l’API', async () => {
+    const issued = { ...INVOICE, id: 1, studentName: 'Camille Lavoie', payments: [] };
+    vi.mocked(api.fetchIssuedInvoices).mockResolvedValue([issued]);
+    vi.mocked(api.createInvoice).mockImplementation(async (draft) => ({
+      ...draft,
+      id: 2,
+      session: 'automne 2026',
+      payments: [],
+    }));
+    vi.mocked(api.recordInvoicePayment).mockImplementation(async (_id, payment) => ({
+      ...issued,
+      payments: [payment],
+    }));
+    renderDashboard({ path: '/home/factures', isAdmin: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Marquer payée : Camille Lavoie' }));
+    expect(await screen.findByText('Paiement enregistré pour Camille Lavoie.')).toBeTruthy();
+    expect(api.recordInvoicePayment).toHaveBeenCalledWith(1, expect.objectContaining({ amountCents: 112_000 }));
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Nouvelle facture' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Nouvelle facture' });
+    fireEvent.change(within(dialog).getByLabelText('Étudiant'), { target: { value: 'Zoé Martin' } });
+    fireEvent.change(within(dialog).getByLabelText('Libellé'), { target: { value: 'Frais' } });
+    fireEvent.change(within(dialog).getByLabelText('Montant ($)'), { target: { value: '25' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Émettre la facture' }));
+    expect(await screen.findByText('Facture émise à Zoé Martin.')).toBeTruthy();
+    expect(api.createInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({ studentName: 'Zoé Martin', lines: [{ label: 'Frais', amountCents: 2_500 }] })
+    );
   });
 
   it('en production : l’écran d’attente, sans données fictives ni pastille', async () => {

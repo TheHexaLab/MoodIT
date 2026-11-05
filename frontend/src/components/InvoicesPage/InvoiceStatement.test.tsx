@@ -56,3 +56,44 @@ describe('InvoiceStatement', () => {
     expect(screen.queryByText(/^Avant le/)).toBeNull();
   });
 });
+
+describe('InvoiceStatement : paiements', () => {
+  it('chaque paiement sous le total, puis un solde nul « payée en entier »', () => {
+    render(
+      <InvoiceStatement
+        invoice={{
+          session: 'automne 2026',
+          dueDate: '2026-11-15',
+          lines: [{ label: 'Droits de scolarité', amountCents: 100_000 }],
+          payments: [
+            { date: '2026-10-20', amountCents: 40_000, method: 'Virement bancaire' },
+            { date: '2026-10-28', amountCents: 60_000 },
+          ],
+        }}
+        now={NOW}
+      />
+    );
+    expect(screen.getByText('Paiement reçu le 20 octobre 2026', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Virement bancaire')).toBeTruthy();
+    expect(screen.getByText(`−${shown(60_000)}`)).toBeTruthy();
+    expect(screen.getByText('Payée en entier le 28 octobre 2026')).toBeTruthy();
+    expect(screen.queryByText(/^Avant le/)).toBeNull();
+    expect(screen.getByText(shown(0))).toBeTruthy();
+  });
+
+  it('paiement partiel : le solde restant, avant l’échéance', () => {
+    render(
+      <InvoiceStatement
+        invoice={{
+          session: 'automne 2026',
+          dueDate: '2026-11-15',
+          lines: [{ label: 'Droits de scolarité', amountCents: 100_000 }],
+          payments: [{ date: '2026-10-20', amountCents: 40_000 }],
+        }}
+        now={NOW}
+      />
+    );
+    expect(screen.getByText(shown(60_000))).toBeTruthy();
+    expect(screen.getByText('Avant le 15 novembre 2026')).toBeTruthy();
+  });
+});

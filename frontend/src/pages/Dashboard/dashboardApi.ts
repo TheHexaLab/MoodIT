@@ -18,10 +18,18 @@ import {
   demoStudentRows,
   demoTeams,
 } from '../../mocks/assignmentsData.ts';
-import { demoInvoice } from '../../mocks/invoicesData.ts';
+import {
+  addDemoInvoice,
+  demoInvoice,
+  demoIssuedInvoices,
+  recordDemoPayment,
+} from '../../mocks/invoicesData.ts';
 import type {
   AnswerResponse,
+  InvoiceDraft,
+  InvoicePayment,
   InvoiceSummary,
+  IssuedInvoice,
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
@@ -1508,4 +1516,28 @@ export function invoicesAvailable(): boolean {
 export async function fetchInvoice(now: Date = new Date()): Promise<InvoiceSummary> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
   return demoInvoice(now);
+}
+
+/** Administration : factures émises pour la session en cours. */
+export async function fetchIssuedInvoices(now: Date = new Date()): Promise<IssuedInvoice[]> {
+  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
+  return demoIssuedInvoices(now);
+}
+
+/** Administration : émet une facture à un étudiant. */
+export async function createInvoice(
+  draft: InvoiceDraft,
+  now: Date = new Date()
+): Promise<IssuedInvoice> {
+  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
+  return addDemoInvoice(draft, now);
+}
+
+/** Administration : enregistre un paiement reçu sur une facture émise. */
+export async function recordInvoicePayment(
+  id: number,
+  payment: InvoicePayment
+): Promise<IssuedInvoice> {
+  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
+  return recordDemoPayment(id, payment);
 }

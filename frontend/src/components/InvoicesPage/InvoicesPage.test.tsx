@@ -182,6 +182,53 @@ describe('InvoicesPage', () => {
     expect(screen.getAllByText(shown(128_450))).toHaveLength(2);
   });
 
+  it('paiement partiel : le solde restant, ce qui est déjà reçu et chaque paiement', () => {
+    renderPage({
+      status: 'ready',
+      invoice: {
+        ...INVOICE,
+        payments: [{ date: '2026-10-25', amountCents: 50_000, method: 'Virement bancaire' }],
+      },
+    });
+    // Le solde en haut, puis en bas du détail.
+    expect(screen.getAllByText(shown(78_450))).toHaveLength(2);
+    expect(screen.getByText(`${shown(50_000)} déjà reçu sur ${shown(128_450)}`)).toBeTruthy();
+    expect(screen.getByText('Dans 16 jours')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Comment payer' })).toBeTruthy();
+    const rows = within(
+      screen.getByRole('table', { name: 'Détail des montants dus' })
+    ).getAllByRole('row');
+    expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
+      'Droits de scolaritéAutomne 2026, 15 crédits',
+      'Frais afférentsServices aux étudiants et technologies',
+      'Assurance collective',
+      'Total',
+      'Paiement reçu25 octobre 2026 · Virement bancaire',
+      'Solde à payer',
+    ]);
+    expect(within(rows[4]).getByRole('cell').textContent).toBe(`−${formatMoney(50_000)}`);
+  });
+
+  it('payée : solde nul, pastille « Payée » et date du dernier paiement, sans « Comment payer »', () => {
+    renderPage({
+      status: 'ready',
+      invoice: {
+        ...INVOICE,
+        payments: [
+          { date: '2026-10-18', amountCents: 50_000 },
+          { date: '2026-10-28', amountCents: 78_450, method: 'Carte de crédit' },
+        ],
+      },
+    });
+    expect(screen.getByText('Payée').className).toMatch(/badgePaid/);
+    expect(screen.getByText('Payée en entier le 28 octobre 2026. Merci!')).toBeTruthy();
+    expect(screen.queryByText('Échéance le', { exact: false })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
+    expect(screen.queryByText('déjà reçu', { exact: false })).toBeNull();
+    // Un paiement sans mode : sa date seule.
+    expect(screen.getByText('18 octobre 2026')).toBeTruthy();
+  });
+
   it('rien à payer : un solde nul, sans « Comment payer » ni détail', () => {
     renderPage({ status: 'ready', invoice: { session: 'automne 2026', lines: [] } });
     expect(screen.getByText(shown(0))).toBeTruthy();

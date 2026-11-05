@@ -3,14 +3,17 @@ import { flushSync } from 'react-dom';
 import styles from './InvoicesPage.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
 import InvoiceStatement from './InvoiceStatement.tsx';
-import type { InvoiceSummary } from '../../types/domain.ts';
+import type { InvoicePayment, InvoiceSummary } from '../../types/domain.ts';
 import {
   daysUntil,
   dueBadge,
   formatDueDate,
   formatMoney,
   INVOICE_LINKS,
+  invoiceBalance,
+  invoicePaid,
   invoiceTotal,
+  lastPaymentDate,
   type InvoiceLink,
 } from './invoice.ts';
 
@@ -70,8 +73,16 @@ interface BalanceProps {
   paymentInfoUrl?: string;
 }
 
+/** « 3 novembre 2026 · Carte de crédit » : quand et comment un paiement a été reçu. */
+function paymentDetail(payment: InvoicePayment): string {
+  return [formatDueDate(payment.date), payment.method].filter(Boolean).join(' · ');
+}
+
 function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactElement {
   const total = invoiceTotal(invoice);
+  const paid = invoicePaid(invoice);
+  const balance = invoiceBalance(invoice);
+  const payments = invoice.payments ?? [];
 
   if (total <= 0) {
     return (
@@ -88,44 +99,63 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
     );
   }
 
+  const paidOff = balance <= 0;
+  const lastPayment = lastPaymentDate(invoice);
   const badge = invoice.dueDate ? dueBadge(daysUntil(invoice.dueDate, now)) : null;
   return (
     <>
       <div className={styles.summary}>
         <div className={styles.balance}>
           <p className={styles.balanceLabel}>Solde à payer</p>
-          <p className={styles.amount}>{formatMoney(total)}</p>
-          {invoice.dueDate && badge && (
+          <p className={styles.amount}>{formatMoney(balance)}</p>
+          {paidOff ? (
+            // Payée : la date du dernier paiement remplace l'échéance.
             <p className={styles.due}>
-              Échéance le {formatDueDate(invoice.dueDate)}
-              <span
-                className={`${styles.badge} ${badge.tone === 'late' ? styles.badgeLate : styles.badgeSoon}`}
-              >
-                {badge.text}
-              </span>
+              <span className={`${styles.badge} ${styles.badgePaid}`}>Payée</span>
+              {lastPayment
+                ? `Payée en entier le ${formatDueDate(lastPayment)}. Merci!`
+                : 'Payée en entier. Merci!'}
+            </p>
+          ) : (
+            invoice.dueDate &&
+            badge && (
+              <p className={styles.due}>
+                Échéance le {formatDueDate(invoice.dueDate)}
+                <span
+                  className={`${styles.badge} ${badge.tone === 'late' ? styles.badgeLate : styles.badgeSoon}`}
+                >
+                  {badge.text}
+                </span>
+              </p>
+            )
+          )}
+          {!paidOff && paid > 0 && (
+            <p className={styles.paidNote}>
+              {formatMoney(paid)} déjà reçu sur {formatMoney(total)}
             </p>
           )}
         </div>
         {/* Le paiement se fait chez l'établissement : on renvoie à sa page d'explications. */}
-        {paymentInfoUrl ? (
-          <a
-            className={`${styles.button} ${styles.primary} ${styles.noPrint}`}
-            href={paymentInfoUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Comment payer
-          </a>
-        ) : (
-          <button
-            type="button"
-            className={`${styles.button} ${styles.primary} ${styles.soon} ${styles.noPrint}`}
-            aria-disabled="true"
-            title="Bientôt disponible"
-          >
-            Comment payer
-          </button>
-        )}
+        {!paidOff &&
+          (paymentInfoUrl ? (
+            <a
+              className={`${styles.button} ${styles.primary} ${styles.noPrint}`}
+              href={paymentInfoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Comment payer
+            </a>
+          ) : (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary} ${styles.soon} ${styles.noPrint}`}
+              aria-disabled="true"
+              title="Bientôt disponible"
+            >
+              Comment payer
+            </button>
+          ))}
       </div>
 
       <table className={styles.lines}>
@@ -141,10 +171,28 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
             </tr>
           ))}
         </tbody>
+        {payments.length > 0 && (
+          // Paiements reçus : le total, puis chaque paiement en déduction.
+          <tbody className={styles.payments}>
+            <tr className={styles.subtotal}>
+              <th scope="row">Total</th>
+              <td>{formatMoney(total)}</td>
+            </tr>
+            {payments.map((payment, index) => (
+              <tr key={`${payment.date}-${index}`}>
+                <th scope="row">
+                  <span className={styles.lineLabel}>Paiement reçu</span>
+                  <span className={styles.lineDetail}>{paymentDetail(payment)}</span>
+                </th>
+                <td className={styles.credit}>−{formatMoney(payment.amountCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        )}
         <tfoot>
           <tr>
-            <th scope="row">Total à payer</th>
-            <td>{formatMoney(total)}</td>
+            <th scope="row">{payments.length > 0 ? 'Solde à payer' : 'Total à payer'}</th>
+            <td>{formatMoney(balance)}</td>
           </tr>
         </tfoot>
       </table>

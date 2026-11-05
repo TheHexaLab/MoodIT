@@ -57,7 +57,10 @@ import {
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
 import InvoicesPage, { type InvoiceState } from '../../components/InvoicesPage/InvoicesPage.tsx';
-import { invoiceTotal } from '../../components/InvoicesPage/invoice.ts';
+import { invoiceBalance, sessionName } from '../../components/InvoicesPage/invoice.ts';
+import InvoicesAdminPage, {
+  type InvoicesAdminApi,
+} from '../../components/InvoicesAdminPage/InvoicesAdminPage.tsx';
 import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
@@ -114,6 +117,13 @@ type PopupState =
   | { kind: 'deleteCourse'; courseId: number }
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
+
+// Factures émises, vue de l'administration (#207) : données fictives de dashboardApi, lues à l'appel.
+const invoicesAdminApi: InvoicesAdminApi = {
+  fetchIssued: () => api.fetchIssuedInvoices(),
+  create: (draft) => api.createInvoice(draft),
+  recordPayment: (id, payment) => api.recordInvoicePayment(id, payment),
+};
 
 const MOBILE_QUERY = '(max-width: 900px)';
 
@@ -315,11 +325,13 @@ export default function Dashboard() {
     reload: reloadPrograms,
   } = useProgramsLoader(handleFetchPrograms);
 
-  // Factures (#207, données fictives, jamais en production) : pour les étudiants seulement, une fois
-  // leurs rôles connus (la liste des programmes chargée). Chargées une fois pour la page et pour la
-  // pastille « À payer » de la barre de gauche.
-  const isStudent =
-    !programsLoading && !programsError && isStudentAccount(dashboardPrograms, isAdmin, isGuardian);
+  // Factures (#207, données fictives, jamais en production), une fois les rôles connus (la liste des
+  // programmes chargée) : l'étudiant voit sa facture, l'administration globale (Administrateur,
+  // Gardien) les factures émises ; les autres (enseignants) n'ont pas la page. La facture de
+  // l'étudiant est chargée une fois pour la page et pour la pastille « À payer » de la barre.
+  const rolesKnown = !programsLoading && !programsError;
+  const isStudent = rolesKnown && isStudentAccount(dashboardPrograms, isAdmin, isGuardian);
+  const isBillingAdmin = rolesKnown && (isAdmin || isGuardian);
   const invoicesShown = isStudent && api.invoicesAvailable();
   const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
   const [invoiceAttempt, setInvoiceAttempt] = useState(0);
@@ -343,15 +355,15 @@ export default function Dashboard() {
     setInvoiceAttempt((attempt) => attempt + 1);
   };
   const invoiceDue =
-    invoicesShown && invoiceState.status === 'ready' && invoiceTotal(invoiceState.invoice) > 0;
-  // Pas étudiant (enseignant, administrateur) : /home/factures ramène à l'Accueil, repli automatique.
-  const notStudentOnInvoices =
-    portalPage?.slug === 'factures' && !programsLoading && !programsError && !isStudent;
+    invoicesShown && invoiceState.status === 'ready' && invoiceBalance(invoiceState.invoice) > 0;
+  // Ni étudiant ni administration (enseignant) : /home/factures ramène à l'Accueil, repli automatique.
+  const noInvoicesPage =
+    portalPage?.slug === 'factures' && rolesKnown && !isStudent && !isBillingAdmin;
   // La vue est déjà « aucun programme » : setView n'y changerait rien, on remplace l'adresse.
   const navigate = useNavigate();
   useEffect(() => {
-    if (notStudentOnInvoices) navigate('/home', { replace: true });
-  }, [notStudentOnInvoices, navigate]);
+    if (noInvoicesPage) navigate('/home', { replace: true });
+  }, [noInvoicesPage, navigate]);
 
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,
@@ -1129,8 +1141,8 @@ export default function Dashboard() {
             onWidthChange={isMobile ? undefined : changeSidebarWidth}
             activePage={portalPage}
             pageBadges={invoiceDue ? { factures: 'À payer' } : undefined}
-            // Factures : étudiants seulement, une fois leurs rôles connus.
-            hiddenPages={isStudent ? undefined : ['factures']}
+            // Factures : étudiants et administration seulement, une fois les rôles connus.
+            hiddenPages={isStudent || isBillingAdmin ? undefined : ['factures']}
             activeProgramId={activeProgramId}
             selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
             userMenu={
@@ -1190,7 +1202,9 @@ export default function Dashboard() {
         }
       />
 
-      {portalPage?.slug === 'factures' && api.invoicesAvailable() && (isStudent || programsLoading) ? (
+      {portalPage?.slug === 'factures' && api.invoicesAvailable() && isBillingAdmin ? (
+        <InvoicesAdminPage api={invoicesAdminApi} session={sessionName(new Date())} />
+      ) : portalPage?.slug === 'factures' && api.invoicesAvailable() && (isStudent || programsLoading) ? (
         <InvoicesPage
           state={invoiceState}
           onRetry={retryInvoice}

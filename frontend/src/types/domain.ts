@@ -623,11 +623,37 @@ export interface InvoiceLine {
   amountCents: number;
 }
 
+/** Un paiement reçu, déduit du total de la facture. */
+export interface InvoicePayment {
+  /** Date de réception (AAAA-MM-JJ). */
+  date: string;
+  amountCents: number;
+  /** Mode de paiement : « Carte de crédit », « Virement bancaire »… */
+  method?: string;
+}
+
 /** Ce que l'étudiant doit pour la session en cours. Sans ligne : rien à payer. */
 export interface InvoiceSummary {
   /** Nom de la session, en minuscules : « automne 2026 ». */
   session: string;
   /** Échéance (AAAA-MM-JJ). Absente s'il n'y a rien à payer. */
   dueDate?: string;
+  lines: InvoiceLine[];
+  /** Paiements déjà reçus. Le solde est le total moins ces paiements. */
+  payments?: InvoicePayment[];
+}
+
+/** Facture émise par l'administration, à un étudiant. */
+export interface IssuedInvoice extends InvoiceSummary {
+  id: number;
+  studentName: string;
+  studentEmail?: string;
+}
+
+/** Nouvelle facture, telle que saisie par l'administration. */
+export interface InvoiceDraft {
+  studentName: string;
+  studentEmail?: string;
+  dueDate: string;
   lines: InvoiceLine[];
 }

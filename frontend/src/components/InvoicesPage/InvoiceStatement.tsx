@@ -1,7 +1,14 @@
 import React from 'react';
 import styles from './InvoiceStatement.module.css';
 import type { InvoiceSummary } from '../../types/domain.ts';
-import { formatDay, formatDueDate, formatMoney, invoiceTotal } from './invoice.ts';
+import {
+  formatDay,
+  formatDueDate,
+  formatMoney,
+  invoiceBalance,
+  invoiceTotal,
+  lastPaymentDate,
+} from './invoice.ts';
 
 interface InvoiceStatementProps {
   invoice: InvoiceSummary;
@@ -28,6 +35,9 @@ export default function InvoiceStatement({
   now,
 }: InvoiceStatementProps): React.ReactElement {
   const total = invoiceTotal(invoice);
+  const balance = invoiceBalance(invoice);
+  const payments = invoice.payments ?? [];
+  const lastPayment = lastPaymentDate(invoice);
   const session = capitalize(invoice.session);
 
   return (
@@ -93,17 +103,31 @@ export default function InvoiceStatement({
             <th scope="row">Total</th>
             <td>{formatMoney(total)}</td>
           </tr>
+          {payments.map((payment, index) => (
+            <tr key={`${payment.date}-${index}`} className={styles.payment}>
+              <th scope="row">
+                Paiement reçu le {formatDueDate(payment.date)}
+                {payment.method && <span className={styles.detail}>{payment.method}</span>}
+              </th>
+              <td>−{formatMoney(payment.amountCents)}</td>
+            </tr>
+          ))}
         </tfoot>
       </table>
 
       <section className={styles.balance}>
         <div>
           <p className={styles.balanceLabel}>Solde à payer</p>
-          {invoice.dueDate && total > 0 && (
-            <p className={styles.muted}>Avant le {formatDueDate(invoice.dueDate)}</p>
+          {total > 0 && balance <= 0 ? (
+            <p className={styles.muted}>
+              {lastPayment ? `Payée en entier le ${formatDueDate(lastPayment)}` : 'Payée en entier'}
+            </p>
+          ) : (
+            invoice.dueDate &&
+            total > 0 && <p className={styles.muted}>Avant le {formatDueDate(invoice.dueDate)}</p>
           )}
         </div>
-        <p className={styles.balanceAmount}>{formatMoney(Math.max(total, 0))}</p>
+        <p className={styles.balanceAmount}>{formatMoney(balance)}</p>
       </section>
 
       <footer className={styles.footer}>

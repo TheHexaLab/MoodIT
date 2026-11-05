@@ -219,6 +219,22 @@ a.link:hover .linkIcon {
     color: currentColor;
 }
 
+/* Paiements reçus : le total en demi-gras, puis chaque paiement en déduction, en vert. */
+.payments .subtotal th,
+.payments .subtotal td {
+    font-weight: 600;
+}
+
+.credit {
+    color: var(--badge-success-fg);
+}
+
+.paidNote {
+    margin: 0.5rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+}
+
 /* Chargement et erreur, au centre de la carte. */
 .state {
     display: flex;

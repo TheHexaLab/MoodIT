@@ -14,6 +14,40 @@ export function invoiceTotal(invoice: InvoiceSummary): number {
   return invoice.lines.reduce((sum, line) => sum + line.amountCents, 0);
 }
 
+/** Déjà payé, en cents. */
+export function invoicePaid(invoice: InvoiceSummary): number {
+  return (invoice.payments ?? []).reduce((sum, payment) => sum + payment.amountCents, 0);
+}
+
+/** Ce qui reste à payer, en cents (jamais négatif). */
+export function invoiceBalance(invoice: InvoiceSummary): number {
+  return Math.max(invoiceTotal(invoice) - invoicePaid(invoice), 0);
+}
+
+/** Date du dernier paiement reçu (AAAA-MM-JJ), s'il y en a un. */
+export function lastPaymentDate(invoice: InvoiceSummary): string | undefined {
+  return (invoice.payments ?? [])
+    .map((payment) => payment.date)
+    .sort()
+    .at(-1);
+}
+
+export type InvoiceStatus = 'none' | 'paid' | 'late' | 'due';
+
+/** État d'une facture : rien à payer, payée, en retard (échéance passée), ou à payer. */
+export function invoiceStatus(invoice: InvoiceSummary, now: Date): InvoiceStatus {
+  if (invoiceTotal(invoice) <= 0) return 'none';
+  if (invoiceBalance(invoice) <= 0) return 'paid';
+  if (invoice.dueDate && daysUntil(invoice.dueDate, now) < 0) return 'late';
+  return 'due';
+}
+
+/** Date locale au format AAAA-MM-JJ. */
+export function isoDay(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 /** Date AAAA-MM-JJ lue comme une date locale (et non à minuit UTC, la veille au Québec). */
 function parseDay(day: string): Date {
   const [year, month, date] = day.split('-').map(Number);
@@ -66,3 +100,17 @@ export const INVOICE_LINKS: InvoiceLink[] = [
   { label: 'Quels frais sont inclus dans ma facture?' },
   { label: 'Remboursement ou désistement de frais' },
 ];
+
+/** « 1 120,50 » ou « 1120.5 » → 112050 cents ; NaN si le montant n'est pas un nombre. */
+export function parseAmount(text: string): number {
+  const normalized = text.replace(/[\s$]/g, '').replace(',', '.');
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return Number.NaN;
+  return Math.round(Number(normalized) * 100);
+}
+
+/** Session d'une date : hiver (janvier à avril), été (mai à août), automne (septembre à décembre). */
+export function sessionName(now: Date): string {
+  const month = now.getMonth();
+  const season = month < 4 ? 'hiver' : month < 8 ? 'été' : 'automne';
+  return `${season} ${now.getFullYear()}`;
+}
