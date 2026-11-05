@@ -86,16 +86,19 @@ describe('InvoicesPage', () => {
       window.dispatchEvent(new Event('beforeprint'));
     });
     expect(page.className).toMatch(/printing/);
-    const statement = screen.getByRole('article');
-    expect(within(statement).getByRole('heading', { name: 'Relevé de compte' })).toBeTruthy();
+    // Le relevé n'est visible qu'à l'impression (display: none à l'écran) : hidden pour l'atteindre.
+    const statement = screen.getByRole('article', { hidden: true });
+    expect(
+      within(statement).getByRole('heading', { name: 'Relevé de compte', hidden: true })
+    ).toBeTruthy();
     expect(within(statement).getByText('Université Exemple')).toBeTruthy();
     expect(within(statement).getByText('Camille Lavoie')).toBeTruthy();
     expect(within(statement).getByText('Avant le 15 novembre 2026')).toBeTruthy();
-    expect(within(statement).getAllByRole('row')).toHaveLength(5);
+    expect(within(statement).getAllByRole('row', { hidden: true })).toHaveLength(5);
     act(() => {
       window.dispatchEvent(new Event('afterprint'));
     });
-    expect(screen.queryByRole('article')).toBeNull();
+    expect(screen.queryByRole('article', { hidden: true })).toBeNull();
     expect(page.className).not.toMatch(/printing/);
   });
 
@@ -104,7 +107,7 @@ describe('InvoicesPage', () => {
     act(() => {
       window.dispatchEvent(new Event('beforeprint'));
     });
-    expect(screen.queryByRole('article')).toBeNull();
+    expect(screen.queryByRole('article', { hidden: true })).toBeNull();
   });
 
   it('rien à enregistrer pendant le chargement ou après une erreur', () => {

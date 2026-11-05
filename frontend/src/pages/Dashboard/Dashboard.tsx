@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
@@ -347,9 +347,11 @@ export default function Dashboard() {
   // Pas étudiant (enseignant, administrateur) : /home/factures ramène à l'Accueil, repli automatique.
   const notStudentOnInvoices =
     portalPage?.slug === 'factures' && !programsLoading && !programsError && !isStudent;
+  // La vue est déjà « aucun programme » : setView n'y changerait rien, on remplace l'adresse.
+  const navigate = useNavigate();
   useEffect(() => {
-    if (notStudentOnInvoices) setView({ programId: -1 }, { replace: true });
-  }, [notStudentOnInvoices, setView]);
+    if (notStudentOnInvoices) navigate('/home', { replace: true });
+  }, [notStudentOnInvoices, navigate]);
 
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,

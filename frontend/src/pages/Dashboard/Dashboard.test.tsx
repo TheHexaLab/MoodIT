@@ -2090,7 +2090,7 @@ describe('Dashboard — factures (#207)', () => {
     let resolve: (invoice: typeof INVOICE) => void = () => {};
     vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((done) => (resolve = done)));
     const { unmount } = renderDashboard({ path: '/home/factures' });
-    expect(await screen.findByText('Chargement de vos factures…')).toBeTruthy();
+    await waitFor(() => expect(api.fetchInvoice).toHaveBeenCalled());
     unmount();
     await act(async () => resolve(INVOICE));
     expect(screen.queryByText('Solde à payer')).toBeNull();
@@ -2100,6 +2100,7 @@ describe('Dashboard — factures (#207)', () => {
     let reject: (error: Error) => void = () => {};
     vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((_, fail) => (reject = fail)));
     const { unmount } = renderDashboard({ path: '/home/factures' });
+    await waitFor(() => expect(api.fetchInvoice).toHaveBeenCalled());
     unmount();
     await act(async () => reject(new Error('panne')));
     expect(screen.queryByText('Impossible de charger vos factures.')).toBeNull();

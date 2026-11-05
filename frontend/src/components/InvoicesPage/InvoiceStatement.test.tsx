@@ -30,12 +30,15 @@ describe('InvoiceStatement', () => {
       />
     );
     expect(screen.getByText('Université Exemple')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Relevé de compte' })).toBeTruthy();
+    // Caché à l'écran (display: none hors impression) : hidden pour l'atteindre par son rôle.
+    expect(screen.getByRole('heading', { name: 'Relevé de compte', hidden: true })).toBeTruthy();
     expect(screen.getByText('Camille Lavoie')).toBeTruthy();
     expect(screen.getByText('Automne 2026')).toBeTruthy();
     expect(screen.getAllByText('30 octobre 2026')).toHaveLength(1);
     expect(screen.getByText('15 novembre 2026')).toBeTruthy();
-    const rows = within(screen.getByRole('table')).getAllByRole('row');
+    const rows = within(screen.getByRole('table', { hidden: true })).getAllByRole('row', {
+      hidden: true,
+    });
     expect(rows).toHaveLength(4);
     expect(rows[1].textContent).toContain('Automne 2026, 15 crédits');
     // Le total du tableau, puis le solde encadré.
