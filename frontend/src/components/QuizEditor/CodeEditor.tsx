@@ -38,6 +38,12 @@ interface CodeEditorProps {
   ariaLabel?: string;
   /** Hauteur minimale, en lignes (défaut 4). */
   minRows?: number;
+  /**
+   * Rendu compact « inline » : ni gouttière (numéros) ni barre d'outils, hauteur d'un champ input —
+   * mais la coloration syntaxique est conservée. Pour une petite valeur sur une ligne (ex. borne JSON
+   * d'une condition). Combiner avec `minRows={1}`.
+   */
+  inline?: boolean;
   /** Lecture seule : pas d'édition (utilisé pour la révision d'une réponse). */
   readOnly?: boolean;
   /**
@@ -64,6 +70,7 @@ export function CodeEditor({
   ariaLabel,
   minRows = 4,
   readOnly = false,
+  inline = false,
   onRun,
   runLabel = 'Exécuter',
 }: CodeEditorProps): React.ReactElement {
@@ -84,6 +91,8 @@ export function CodeEditor({
     const ta = taRef.current;
     const hs = hscrollRef.current;
     const inner = hscrollInnerRef.current;
+    // En inline, la barre proxy n'est pas rendue (hs == null) → on sort : pas de barre, le défilement
+    // horizontal reste assuré par le suivi du curseur à la frappe.
     if (!ta || !hs || !inner) return;
     const maxScroll = ta.scrollWidth - ta.clientWidth;
     if (maxScroll > 1) {
@@ -239,6 +248,12 @@ export function CodeEditor({
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
 
+    // Inline (champ d'une ligne) : Entrée n'insère pas de saut de ligne — comportement d'un input.
+    if (inline && e.key === 'Enter') {
+      e.preventDefault();
+      return;
+    }
+
     // Tab = indentation (4 espaces) plutôt que changement de champ.
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
@@ -364,12 +379,12 @@ export function CodeEditor({
   const showConsole = running || runResult != null || runError != null;
 
   return (
-    <div className={styles.editor}>
+    <div className={[styles.editor, inline ? styles.inline : ''].filter(Boolean).join(' ')}>
       {/* Barre d'outils : affichée dès qu'il y a un langage À MONTRER ou un bouton « play ».
           L'étiquette de langage reste visible en lecture seule (révision d'un quiz) et pour
           les langages sans exécution autonome (SQL/HTML/JSX/TSX : pas de `onRun`). Le bouton
-          « play », lui, n'apparaît qu'en saisie (hors lecture seule). */}
-      {(language || (onRun && !readOnly)) && (
+          « play », lui, n'apparaît qu'en saisie (hors lecture seule). Masquée en `inline`. */}
+      {!inline && (language || (onRun && !readOnly)) && (
         <div className={styles.toolbar}>
           {language && <span className={styles.langLabel}>{language}</span>}
           {onRun && !readOnly && (
@@ -393,9 +408,11 @@ export function CodeEditor({
         </div>
       )}
       <div className={styles.body}>
-        <div className={styles.gutter} aria-hidden>
-          {gutter}
-        </div>
+        {!inline && (
+          <div className={styles.gutter} aria-hidden>
+            {gutter}
+          </div>
+        )}
         <div className={styles.codeWrap}>
           {/* Couche colorée (sous le textarea). `code` reçoit un espace si vide pour
               garder une ligne et éviter un saut de hauteur. */}
@@ -437,10 +454,13 @@ export function CodeEditor({
           />
         </div>
       </div>
-      {/* Barre de défilement horizontale pleine largeur (proxy synchronisé). */}
-      <div className={styles.hscroll} ref={hscrollRef} aria-hidden onScroll={onProxyScroll}>
-        <div className={styles.hscrollInner} ref={hscrollInnerRef} />
-      </div>
+      {/* Barre de défilement horizontale pleine largeur (proxy synchronisé). Pas en inline :
+          l'épaisseur minimale imposée par les moteurs est peu esthétique sur un champ d'une ligne. */}
+      {!inline && (
+        <div className={styles.hscroll} ref={hscrollRef} aria-hidden onScroll={onProxyScroll}>
+          <div className={styles.hscrollInner} ref={hscrollInnerRef} />
+        </div>
+      )}
 
       {showConsole && (
         <RunConsole
