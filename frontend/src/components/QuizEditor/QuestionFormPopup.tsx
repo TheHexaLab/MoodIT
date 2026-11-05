@@ -298,6 +298,19 @@ export function QuestionFormBody({
 
 
       <EditorFooter>
+        {/* Gestion des harnais (question Code) : dans le pied FIXE → toujours visible, hors du
+            corps défilant (l'éditeur de code de départ peut être long). */}
+        {draft.qType === 'coding' && (
+          <div className={[styles.harnessSummary, styles.footerAddRow].join(' ')}>
+            <div className={styles.harnessSummaryText}>
+              <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
+              <span className={styles.harnessSummarySub}>{t.harnessCount((draft.testCases ?? []).length)}</span>
+            </div>
+            <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
+              {t.manageHarness} <ArrowRight width={14} height={14} />
+            </button>
+          </div>
+        )}
         {/* Bouton d'ajout HORS de la zone défilante (juste au-dessus des actions). */}
         {addEntryLabel && (
           <div className={styles.footerAddRow}>
@@ -564,9 +577,10 @@ export function QuestionFormBody({
   }
 
   function renderCoding(): React.ReactElement {
-    const tests = draft.testCases ?? [];
     const languageName = languages.find((l) => l.id === draft.languageId)?.name;
 
+    // La section « Harnais de test » (gestion) est rendue dans le PIED fixe, pas ici — voir le
+    // bloc `.harnessSummary` du footer : elle reste visible sans défiler jusqu'au bas du code.
     return (
       <>
         <div className={styles.field}>
@@ -588,18 +602,6 @@ export function QuestionFormBody({
             placeholder={t.startCodePlaceholder}
             ariaLabel={t.startCodeAria}
           />
-        </div>
-
-        <div className={styles.harnessSummary}>
-          <div className={styles.harnessSummaryText}>
-            <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
-            <span className={styles.harnessSummarySub}>
-              {t.harnessCount(tests.length)}
-            </span>
-          </div>
-          <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
-            {t.manageHarness} <ArrowRight width={14} height={14} />
-          </button>
         </div>
       </>
     );
