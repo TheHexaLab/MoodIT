@@ -90,6 +90,17 @@ describe('PortalSidebar', () => {
     expect(props.onReload).toHaveBeenCalled();
   });
 
+  it('une page masquée n’a pas de lien ; les autres gardent leur ordre', () => {
+    renderSidebar({ hiddenPages: ['factures'] });
+    const links = within(screen.getByRole('navigation', { name: 'Portail' })).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual([
+      'Accueil',
+      'Horaire',
+      'Bulletin',
+      "Centre d'aide",
+    ]);
+  });
+
   it('pastille d’une page : à côté du libellé, et dans le nom lu', () => {
     renderSidebar({ pageBadges: { factures: 'À payer' } });
     const factures = screen.getByRole('link', { name: 'Factures À payer' });

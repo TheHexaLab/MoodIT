@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getProgramPermissions } from './permissions';
+import { getProgramPermissions, isStudentAccount } from './permissions';
 import { ROLE } from './roles';
 import type { Program } from '../types/domain';
 
@@ -154,5 +154,22 @@ describe('getProgramPermissions', () => {
     for (const v of Object.values(perms)) {
       expect(typeof v).toBe('boolean');
     }
+  });
+});
+
+describe('isStudentAccount', () => {
+  it('aucun rôle de programme ni rôle global : étudiant, même sans programme', () => {
+    expect(isStudentAccount([{ roleName: null }, {}], false, false)).toBe(true);
+    expect(isStudentAccount([], false, false)).toBe(true);
+  });
+
+  it('enseignant ou administrateur d’un programme : pas étudiant', () => {
+    expect(isStudentAccount([{}, { roleName: ROLE.TEACHER }], false, false)).toBe(false);
+    expect(isStudentAccount([{ roleName: ROLE.ADMIN }], false, false)).toBe(false);
+  });
+
+  it('administrateur ou gardien global : pas étudiant', () => {
+    expect(isStudentAccount([], true, false)).toBe(false);
+    expect(isStudentAccount([], false, true)).toBe(false);
   });
 });

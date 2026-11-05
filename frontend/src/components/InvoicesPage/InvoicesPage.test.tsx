@@ -133,6 +133,35 @@ describe('InvoicesPage', () => {
     expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
   });
 
+  it('liens complémentaires : grisés tant que leur adresse n’est pas fournie', () => {
+    renderPage({ status: 'error' });
+    const nav = screen.getByRole('navigation', { name: 'Liens complémentaires' });
+    expect(within(nav).queryAllByRole('link')).toHaveLength(0);
+    const first = within(nav).getByText('Comment payer mes frais de scolarité?').parentElement!;
+    expect(first.getAttribute('aria-disabled')).toBe('true');
+    expect(first.getAttribute('title')).toBe('Bientôt disponible');
+    expect(within(nav).getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  it('liens complémentaires : avec une adresse, un lien vers un nouvel onglet', () => {
+    render(
+      <InvoicesPage
+        state={{ status: 'loading' }}
+        onRetry={vi.fn()}
+        links={[{ label: 'Remboursement', url: 'https://exemple.ca/remboursement' }]}
+      />
+    );
+    const link = screen.getByRole('link', { name: 'Remboursement' });
+    expect(link.getAttribute('href')).toBe('https://exemple.ca/remboursement');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('sans lien complémentaire : pas de carte', () => {
+    render(<InvoicesPage state={{ status: 'loading' }} onRetry={vi.fn()} links={[]} />);
+    expect(screen.queryByRole('navigation', { name: 'Liens complémentaires' })).toBeNull();
+  });
+
   it('pas de carte d’historique ni de reçus', () => {
     renderPage({ status: 'ready', invoice: INVOICE });
     expect(screen.queryByText('Factures payées et reçus')).toBeNull();
