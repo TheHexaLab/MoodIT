@@ -21,8 +21,8 @@ const INVOICE: InvoiceSummary = {
 /** Montant tel que Testing Library le lit : ses espaces insécables deviennent des espaces. */
 const shown = (cents: number) => formatMoney(cents).replace(/\s/g, ' ');
 
-function renderPage(state: InvoiceState) {
-  const props = { state, onRetry: vi.fn(), onOpenProfile: vi.fn(), now: NOW };
+function renderPage(state: InvoiceState, paymentInfoUrl?: string) {
+  const props = { state, onRetry: vi.fn(), paymentInfoUrl, now: NOW };
   render(<InvoicesPage {...props} />);
   return props;
 }
@@ -54,12 +54,28 @@ describe('InvoicesPage', () => {
     expect(within(rows[3]).getByRole('cell').textContent).toBe(formatMoney(128_450));
   });
 
-  it('« Payer maintenant » est visible mais pas encore branché', () => {
+  it('« Comment payer » : grisé tant que la page de l’établissement n’est pas fournie', () => {
     renderPage({ status: 'ready', invoice: INVOICE });
-    const pay = screen.getByRole('button', { name: 'Payer maintenant' });
-    expect(pay.getAttribute('aria-disabled')).toBe('true');
-    expect(pay.getAttribute('title')).toBe('Bientôt disponible');
-    fireEvent.click(pay);
+    const how = screen.getByRole('button', { name: 'Comment payer' });
+    expect(how.getAttribute('aria-disabled')).toBe('true');
+    expect(how.getAttribute('title')).toBe('Bientôt disponible');
+    fireEvent.click(how);
+    expect(screen.queryByRole('link', { name: 'Comment payer' })).toBeNull();
+  });
+
+  it('« Comment payer » ouvre la page de l’établissement dans un nouvel onglet', () => {
+    renderPage({ status: 'ready', invoice: INVOICE }, 'https://exemple.ca/payer');
+    const how = screen.getByRole('link', { name: 'Comment payer' });
+    expect(how.getAttribute('href')).toBe('https://exemple.ca/payer');
+    expect(how.getAttribute('target')).toBe('_blank');
+    expect(how.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
+  });
+
+  it('pas de carte d’historique ni de reçus', () => {
+    renderPage({ status: 'ready', invoice: INVOICE });
+    expect(screen.queryByText('Factures payées et reçus')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ouvrir mon profil' })).toBeNull();
   });
 
   it('échéance passée : pastille rouge « En retard »', () => {
@@ -73,12 +89,12 @@ describe('InvoicesPage', () => {
     expect(screen.getAllByText(shown(128_450))).toHaveLength(2);
   });
 
-  it('rien à payer : un solde nul, sans bouton de paiement ni détail', () => {
+  it('rien à payer : un solde nul, sans « Comment payer » ni détail', () => {
     renderPage({ status: 'ready', invoice: { session: 'automne 2026', lines: [] } });
     expect(screen.getByText(shown(0))).toBeTruthy();
     expect(screen.getByText('Rien à payer').className).toMatch(/badgePaid/);
     expect(screen.getByText("Aucun montant dû pour la session d'automne 2026.", { exact: false })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Payer maintenant' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
   });
 
@@ -99,13 +115,6 @@ describe('InvoicesPage', () => {
     expect(props.onRetry).toHaveBeenCalledOnce();
   });
 
-  it('« Ouvrir mon profil » mène à l’historique et aux reçus, quel que soit l’état', () => {
-    const props = renderPage({ status: 'error' });
-    expect(screen.getByRole('heading', { name: 'Factures payées et reçus' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir mon profil' }));
-    expect(props.onOpenProfile).toHaveBeenCalledOnce();
-  });
-
   it('sans date fournie : le compte à rebours part d’aujourd’hui', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 14, 12, 0));
@@ -114,7 +123,6 @@ describe('InvoicesPage', () => {
         <InvoicesPage
           state={{ status: 'ready', invoice: INVOICE }}
           onRetry={vi.fn()}
-          onOpenProfile={vi.fn()}
         />
       );
       expect(screen.getByText('Demain')).toBeTruthy();

@@ -72,7 +72,7 @@ test('Factures (#207) : en production, l’écran d’attente, sans montant fict
   await expect(mainContent(page).getByRole('heading', { level: 1, name: 'Factures' })).toBeVisible();
   await expect(mainContent(page).getByText("Cette page n'est pas encore disponible.")).toBeVisible();
   await expect(page.getByText('Solde à payer')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Payer maintenant' })).toHaveCount(0);
+  await expect(page.getByText('Comment payer')).toHaveCount(0);
   await context.close();
 });
 

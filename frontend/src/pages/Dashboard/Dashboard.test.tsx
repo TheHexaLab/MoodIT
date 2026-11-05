@@ -2050,14 +2050,13 @@ describe('Dashboard — factures (#207)', () => {
     vi.mocked(api.invoicesAvailable).mockReturnValue(true);
   });
 
-  it('la page affiche le solde, la barre la pastille « À payer », et le profil s’ouvre', async () => {
+  it('la page affiche le solde, et la barre la pastille « À payer »', async () => {
     vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
     renderDashboard({ path: '/home/factures' });
     expect(await screen.findByText('Solde à payer')).toBeTruthy();
     const link = portal().getByRole('link', { name: 'Factures À payer' });
     expect(link.getAttribute('aria-current')).toBe('page');
-    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir mon profil' }));
-    expect(await screen.findByText(profileLabels.subtitle)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Comment payer' })).toBeTruthy();
   });
 
   it('la pastille s’affiche aussi depuis l’Accueil', async () => {

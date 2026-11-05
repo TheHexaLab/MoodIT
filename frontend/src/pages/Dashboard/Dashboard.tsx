@@ -1174,7 +1174,7 @@ export default function Dashboard() {
       />
 
       {portalPage?.slug === 'factures' && api.invoicesAvailable() ? (
-        <InvoicesPage state={invoiceState} onRetry={retryInvoice} onOpenProfile={handleEditProfile} />
+        <InvoicesPage state={invoiceState} onRetry={retryInvoice} />
       ) : portalPage ? (
         <PortalPlaceholder title={portalPage.label} />
       ) : isPortal ? (

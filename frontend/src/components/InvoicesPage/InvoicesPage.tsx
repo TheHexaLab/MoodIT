@@ -13,13 +13,19 @@ export type InvoiceState =
 interface InvoicesPageProps {
   state: InvoiceState;
   onRetry: () => void;
-  /** L'historique et les reçus sont dans le profil. */
-  onOpenProfile: () => void;
+  /** Page de l'établissement qui explique comment payer. Absente : bouton grisé, à venir. */
+  paymentInfoUrl?: string;
   /** Aujourd'hui, pour le compte à rebours de l'échéance. */
   now?: Date;
 }
 
-function Balance({ invoice, now }: { invoice: InvoiceSummary; now: Date }): React.ReactElement {
+interface BalanceProps {
+  invoice: InvoiceSummary;
+  now: Date;
+  paymentInfoUrl?: string;
+}
+
+function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactElement {
   const total = invoiceTotal(invoice);
 
   if (total <= 0) {
@@ -55,15 +61,26 @@ function Balance({ invoice, now }: { invoice: InvoiceSummary; now: Date }): Reac
             </p>
           )}
         </div>
-        {/* Le paiement attend le choix d'un fournisseur (hors de portée de #207). */}
-        <button
-          type="button"
-          className={`${styles.button} ${styles.primary} ${styles.soon}`}
-          aria-disabled="true"
-          title="Bientôt disponible"
-        >
-          Payer maintenant
-        </button>
+        {/* Le paiement se fait chez l'établissement : on renvoie à sa page d'explications. */}
+        {paymentInfoUrl ? (
+          <a
+            className={`${styles.button} ${styles.primary}`}
+            href={paymentInfoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Comment payer
+          </a>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.button} ${styles.primary} ${styles.soon}`}
+            aria-disabled="true"
+            title="Bientôt disponible"
+          >
+            Comment payer
+          </button>
+        )}
       </div>
 
       <table className={styles.lines}>
@@ -92,12 +109,12 @@ function Balance({ invoice, now }: { invoice: InvoiceSummary; now: Date }): Reac
 
 /**
  * Page Factures du portail (#207) : ce que l'étudiant doit pour la session, sans plus.
- * L'historique et les reçus sont dans le profil ; le paiement lui-même reste à brancher.
+ * Le paiement se fait chez l'établissement : « Comment payer » renvoie à ses explications.
  */
 export default function InvoicesPage({
   state,
   onRetry,
-  onOpenProfile,
+  paymentInfoUrl,
   now = new Date(),
 }: InvoicesPageProps): React.ReactElement {
   return (
@@ -126,23 +143,10 @@ export default function InvoicesPage({
               </button>
             </div>
           ) : (
-            <Balance invoice={state.invoice} now={now} />
+            <Balance invoice={state.invoice} now={now} paymentInfoUrl={paymentInfoUrl} />
           )}
         </div>
       </div>
-
-      <aside className={styles.side} aria-label="Historique">
-        <div className={`${styles.card} ${styles.sideCard}`}>
-          <h2 className={styles.cardTitle}>Factures payées et reçus</h2>
-          <p className={styles.cardText}>
-            Seuls les montants dus s'affichent ici. Votre historique et vos reçus se trouvent dans
-            votre profil.
-          </p>
-          <button type="button" className={`${styles.button} ${styles.wide}`} onClick={onOpenProfile}>
-            Ouvrir mon profil
-          </button>
-        </div>
-      </aside>
     </section>
   );
 }
