@@ -9,9 +9,9 @@ import lombok.Data;
  *   <li><b>Harnais-code</b> ({@code harnessCode}) : code exécuté contre la soumission (interprétés,
  *       HTML/JSX/SQL). Écrit dans le langage {@code Language.harness_language_id} ou celui de la
  *       question.</li>
- *   <li><b>Cas structuré</b> ({@code entry} + {@code argsJson} + {@code expectedJson} +
- *       {@code compareMode}) : appeler {@code entry(args)} et comparer la sortie à l'attendu, HORS
- *       sandbox — les attendus ne sont jamais exposés au code étudiant (requis pour les compilés).</li>
+ *   <li><b>Cas structuré</b> ({@code expr} + {@code expectedJson} + {@code compareMode}) : évaluer
+ *       l'EXPRESSION {@code expr} (qui renvoie la valeur testée) et comparer la sortie à l'attendu,
+ *       HORS sandbox — les attendus ne sont jamais exposés au code étudiant (requis pour les compilés).</li>
  * </ul>
  * {@code weight} = crédit partiel. DONNÉES CACHÉES : jamais exposées au répondant.
  */
@@ -43,7 +43,9 @@ public class TestCase {
     @Column(name = "expected_json", columnDefinition = "TEXT")
     private String expectedJson;
 
-    /** Mode de comparaison d'un cas structuré : {@code exact} (défaut), {@code float}, {@code unordered}. */
+    /** Mode de comparaison d'un cas structuré : {@code exact} (défaut), relationnels
+     *  {@code gt}/{@code ge}/{@code lt}/{@code le}, {@code ne}, {@code contains}/{@code regex},
+     *  {@code unordered}, {@code compound} (combinaison ET/OU). Interprété par execution-service. */
     @Column(name = "compare_mode", length = 20)
     private String compareMode;
 

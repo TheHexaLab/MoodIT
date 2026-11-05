@@ -258,7 +258,8 @@ export interface TestCase {
   expr?: string;
   /** Valeur attendue (JSON) du cas structuré. */
   expectedJson?: string;
-  /** Mode de comparaison : `exact` (défaut), `float`, `unordered`. */
+  /** Mode de comparaison : `exact` (défaut), `gt`/`ge`/`lt`/`le`, `ne`, `contains`/`regex`,
+   *  `unordered`, ou `compound` (combinaison ET/OU encodée dans `expectedJson`). */
   compareMode?: string;
   weight: number;
 }
