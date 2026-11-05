@@ -28,13 +28,17 @@ interface BalanceProps {
 function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactElement {
   const total = invoiceTotal(invoice);
 
-  // Rien à payer : une seule carte, sur toute la largeur.
   if (total <= 0) {
     return (
-      <div className={`${styles.card} ${styles.full} ${styles.paid}`}>
-        <span className={`${styles.badge} ${styles.badgePaid}`}>Rien à payer</span>
-        <p className={styles.amount}>{formatMoney(0)}</p>
-        <p className={styles.paidText}>Aucun montant dû pour la session d'{invoice.session}.</p>
+      <div className={styles.summary}>
+        <div className={styles.balance}>
+          <p className={styles.balanceLabel}>Solde à payer</p>
+          <p className={styles.amount}>{formatMoney(0)}</p>
+          <p className={styles.due}>
+            <span className={`${styles.badge} ${styles.badgePaid}`}>Rien à payer</span>
+            Aucun montant dû pour la session d'{invoice.session}.
+          </p>
+        </div>
       </div>
     );
   }
@@ -42,20 +46,21 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
   const badge = invoice.dueDate ? dueBadge(daysUntil(invoice.dueDate, now)) : null;
   return (
     <>
-      {/* Gauche : le solde et comment le payer. */}
-      <div className={`${styles.card} ${styles.balance}`}>
-        <h2 className={styles.cardTitle}>Solde à payer</h2>
-        <p className={styles.amount}>{formatMoney(total)}</p>
-        {invoice.dueDate && badge && (
-          <p className={styles.due}>
-            Échéance le {formatDueDate(invoice.dueDate)}
-            <span
-              className={`${styles.badge} ${badge.tone === 'late' ? styles.badgeLate : styles.badgeSoon}`}
-            >
-              {badge.text}
-            </span>
-          </p>
-        )}
+      <div className={styles.summary}>
+        <div className={styles.balance}>
+          <p className={styles.balanceLabel}>Solde à payer</p>
+          <p className={styles.amount}>{formatMoney(total)}</p>
+          {invoice.dueDate && badge && (
+            <p className={styles.due}>
+              Échéance le {formatDueDate(invoice.dueDate)}
+              <span
+                className={`${styles.badge} ${badge.tone === 'late' ? styles.badgeLate : styles.badgeSoon}`}
+              >
+                {badge.text}
+              </span>
+            </p>
+          )}
+        </div>
         {/* Le paiement se fait chez l'établissement : on renvoie à sa page d'explications. */}
         {paymentInfoUrl ? (
           <a
@@ -78,31 +83,26 @@ function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactEle
         )}
       </div>
 
-      {/* Droite : le détail des montants, puis le total. */}
-      <div className={styles.card}>
-        <h2 className={styles.cardTitle} id="invoice-lines-title">
-          Détail des montants dus
-        </h2>
-        <table className={styles.lines} aria-labelledby="invoice-lines-title">
-          <tbody>
-            {invoice.lines.map((line) => (
-              <tr key={line.label}>
-                <th scope="row">
-                  <span className={styles.lineLabel}>{line.label}</span>
-                  {line.detail && <span className={styles.lineDetail}>{line.detail}</span>}
-                </th>
-                <td>{formatMoney(line.amountCents)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th scope="row">Total à payer</th>
-              <td>{formatMoney(total)}</td>
+      <table className={styles.lines}>
+        <caption className={styles.srOnly}>Détail des montants dus</caption>
+        <tbody>
+          {invoice.lines.map((line) => (
+            <tr key={line.label}>
+              <th scope="row">
+                <span className={styles.lineLabel}>{line.label}</span>
+                {line.detail && <span className={styles.lineDetail}>{line.detail}</span>}
+              </th>
+              <td>{formatMoney(line.amountCents)}</td>
             </tr>
-          </tfoot>
-        </table>
-      </div>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total à payer</th>
+            <td>{formatMoney(total)}</td>
+          </tr>
+        </tfoot>
+      </table>
     </>
   );
 }
@@ -129,14 +129,14 @@ export default function InvoicesPage({
           </p>
         </div>
 
-        <div className={styles.grid}>
+        <div className={styles.card}>
           {state.status === 'loading' ? (
-            <div className={`${styles.card} ${styles.full} ${styles.state}`} role="status" aria-busy="true">
+            <div className={styles.state} role="status" aria-busy="true">
               <Spinner size={24} />
               <span>Chargement de vos factures…</span>
             </div>
           ) : state.status === 'error' ? (
-            <div className={`${styles.card} ${styles.full} ${styles.state}`} role="alert">
+            <div className={styles.state} role="alert">
               <span>Impossible de charger vos factures.</span>
               <button type="button" className={styles.button} onClick={onRetry}>
                 Réessayer
