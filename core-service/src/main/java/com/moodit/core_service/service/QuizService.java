@@ -518,14 +518,18 @@ public class QuizService {
             SubmittedAnswerDTO answer = byQuestion.get(question.getId());
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
-            // Aiguillage PAR LA DONNÉE (#116), pas par le langage : un cas qui porte un `entry` est
-            // structuré (serveur RPC pur, attendus hors sandbox) ; sinon harnais-code (chemin
-            // historique, toujours supporté). Les quiz existants restent donc valides : adoption
-            // progressive sans conversion forcée.
+            // Aiguillage PAR LA DONNÉE (#116), pas par le langage : un cas qui porte une `expr` est
+            // structuré (attendus comparés hors sandbox) ; sinon harnais-code (chemin historique,
+            // toujours supporté). Les quiz existants restent donc valides : adoption progressive sans
+            // conversion forcée.
             boolean structured = harnesses.stream()
                     .anyMatch(tc -> tc.getExpr() != null && !tc.getExpr().isBlank());
             if (structured) {
+                // On ne garde QUE les cas porteurs d'une expr : un cas sans expr (question mixte,
+                // possible via l'API/BD) injecterait une expression vide dans le source → échec de
+                // compilation de TOUTE la question. Dégradation propre plutôt que question ininotable.
                 List<ExecutionClient.Case> cases = harnesses.stream()
+                        .filter(tc -> tc.getExpr() != null && !tc.getExpr().isBlank())
                         .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getExpr(),
                                 parseJson(tc.getExpectedJson()), tc.getCompareMode(), weightOf(tc)))
                         .toList();
