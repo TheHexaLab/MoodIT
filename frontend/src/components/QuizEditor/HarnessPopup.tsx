@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
+import { Dropdown } from './Dropdown';
 import { TrashCan } from '../../assets/TrashCan';
-import { type TestCaseDraft } from './editorTypes';
+import { defaultStructuredExpr, type TestCaseDraft } from './editorTypes';
 import { type Language } from '../../types/domain';
-import { defaultHarnessLabels, type HarnessLabels } from './harnessLabels';
+import { defaultHarnessLabels, type CompareMode, type HarnessLabels } from './harnessLabels';
 
 /**
  * Vrai si le langage (du harnais = de la question pour les compilés) est COMPILÉ → la question
@@ -28,8 +29,112 @@ function isCompiledHarnessLang(name?: string): boolean {
   }
 }
 
-/** Modes de comparaison d'un cas structuré (valeur envoyée au backend). */
-const COMPARE_MODES = ['exact', 'float', 'unordered'] as const;
+/**
+ * Modes de comparaison d'un cas structuré (valeur envoyée au backend). Ordre d'affichage du menu.
+ * Les relationnels (`gt`/`ge`/`lt`/`le`) et `ne` sont évalués HORS sandbox : l'attendu reste la
+ * borne cachée. Miroir de `ExecutionService.jsonMatches`.
+ */
+const COMPARE_MODES = ['exact', 'gt', 'ge', 'lt', 'le', 'ne', 'contains', 'regex', 'unordered'] as const;
+
+/** Une sous-condition en édition : mode de comparaison + borne en TEXTE JSON (comme un attendu simple). */
+interface Condition {
+  compare: string;
+  value: string;
+}
+
+/**
+ * Modes « texte » : la borne est une CHAÎNE BRUTE (sous-chaîne ou motif regex), pas du JSON — donc
+ * saisie sans guillemets ni antislashs doublés. On l'encode quand même en chaîne JSON pour le
+ * transport (core/execution), et on la ré-affiche brute. Les autres modes gardent la saisie JSON.
+ */
+function isStringPatternMode(mode: string): boolean {
+  return mode === 'contains' || mode === 'regex';
+}
+
+/** Déballe une chaîne JSON (`"abc"` → `abc`) ; si ce n'est pas une chaîne JSON, rend le texte tel quel. */
+function unwrapJsonString(raw: string): string {
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (typeof v === 'string') return v;
+  } catch {
+    /* pas du JSON valide → tel quel */
+  }
+  return raw;
+}
+
+/**
+ * Conditions d'un cas, dérivées de ses champs transportés. Un cas « simple » (une condition) garde
+ * `compareMode`/`expectedJson` tels quels ; un cas « composé » (plusieurs, reliées par ET/OU) les
+ * encode dans `expectedJson` (objet `{conditions, connectors}`) avec `compareMode = "compound"` —
+ * ainsi core/BD n'ont rien à savoir. Miroir de `ExecutionService` (mode `compound`).
+ */
+function readConditions(c: TestCaseDraft): { conds: Condition[]; connectors: string[] } {
+  if ((c.compareMode ?? '') === 'compound') {
+    const parsed = parseCompound(c.expectedJson ?? '');
+    if (parsed && parsed.conds.length > 0) return parsed;
+  }
+  const mode = c.compareMode ?? 'exact';
+  const raw = c.expectedJson ?? '';
+  return {
+    conds: [{ compare: mode, value: isStringPatternMode(mode) ? unwrapJsonString(raw) : raw }],
+    connectors: [],
+  };
+}
+
+/** Réécrit les conditions dans les champs transportés : forme simple si une seule, `compound` au-delà. */
+function writeConditions(conds: Condition[], connectors: string[]): Partial<TestCaseDraft> {
+  if (conds.length <= 1) {
+    const only = conds[0] ?? { compare: 'exact', value: '' };
+    // Modes texte : on encode la borne brute en chaîne JSON (guillemets/échappement automatiques).
+    const expectedJson = isStringPatternMode(only.compare) ? JSON.stringify(only.value) : only.value;
+    return { compareMode: only.compare, expectedJson };
+  }
+  return {
+    compareMode: 'compound',
+    expectedJson: JSON.stringify({
+      conditions: conds.map((c) => ({ compare: c.compare, value: c.value })),
+      connectors: connectors.slice(0, conds.length - 1),
+    }),
+  };
+}
+
+/** Parse prudemment l'objet composé (sans `any`) ; null si invalide. */
+function parseCompound(json: string): { conds: Condition[]; connectors: string[] } | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof obj !== 'object' || obj === null) return null;
+  const rec = obj as Record<string, unknown>;
+  const conds = (Array.isArray(rec.conditions) ? rec.conditions : []).map((x) => {
+    const r = (typeof x === 'object' && x !== null ? x : {}) as Record<string, unknown>;
+    return {
+      compare: typeof r.compare === 'string' ? r.compare : 'exact',
+      value: typeof r.value === 'string' ? r.value : '',
+    };
+  });
+  const connectors = (Array.isArray(rec.connectors) ? rec.connectors : []).map((x) => (x === 'or' ? 'or' : 'and'));
+  return { conds, connectors };
+}
+
+/** Résumé lisible de la combinaison. ET lie plus fort que OU : groupes ET (entre parenthèses) reliés par OU. */
+function buildSummary(conds: Condition[], connectors: string[], t: HarnessLabels): string {
+  const term = (c: Condition) =>
+    `${t.compareSymbols[c.compare as CompareMode] ?? c.compare} ${(c.value ?? '').trim() || '…'}`;
+  const groups: string[][] = [[term(conds[0])]];
+  for (let k = 1; k < conds.length; k++) {
+    if ((connectors[k - 1] === 'or' ? 'or' : 'and') === 'or') groups.push([term(conds[k])]);
+    else groups[groups.length - 1].push(term(conds[k]));
+  }
+  return groups
+    .map((g) => {
+      const joined = g.join(` ${t.connectorOptions.and} `);
+      return groups.length > 1 && g.length > 1 ? `(${joined})` : joined;
+    })
+    .join(` ${t.connectorOptions.or} `);
+}
 
 interface HarnessBodyProps {
   /** Harnais courants (édités en place ; renvoyés par `onSave`). */
@@ -119,29 +224,99 @@ export function HarnessBody({
   onSave,
 }: HarnessBodyProps): React.ReactElement {
   const t = { ...defaultHarnessLabels, ...labels };
-  // Langage compilé → cas STRUCTURÉS (entry/args/attendu) ; sinon harnais-code (#116).
-  const structured = isCompiledHarnessLang(harnessLanguage?.name);
+  // Mode STRUCTURÉ (#116) décidé comme au backend — PAR LA DONNÉE d'abord : un cas déjà porteur d'une
+  // `expr` (ex. question convertie, chargée pour édition) force le mode structuré même si les langages
+  // ne sont pas encore résolus. Sinon, on se base sur le langage compilé (nouvelle question).
+  const structured =
+    testCases.some((c) => (c.expr ?? '').trim() !== '') || isCompiledHarnessLang(harnessLanguage?.name);
   // On reflète les harnais existants tels quels (liste vide si aucun) : pas d'ajout
   // automatique — l'utilisateur ajoute via « + Ajouter un harnais ».
   const [cases, setCases] = useState<TestCaseDraft[]>(() => testCases.map((tc) => ({ ...tc })));
+
+  // Défilement vers le cas qu'on vient d'ajouter : le bouton « + » est dans le pied FIXE, donc
+  // le nouveau cas (en bas de la liste défilante) peut être hors écran. `pendingScroll` est armé
+  // par `add()` et consommé après le rendu.
+  const listRef = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef(false);
 
   // Page harnais = contexte Code → on s'assure que les langages sont chargés.
   useEffect(() => {
     onRequestLanguages?.();
   }, [onRequestLanguages]);
 
+  // Après l'ajout d'un cas, amène le nouveau (dernière carte) à l'écran. rAF : laisse les éditeurs
+  // de code finir leur auto-dimensionnement avant de calculer la position.
+  useEffect(() => {
+    if (!pendingScroll.current) return;
+    pendingScroll.current = false;
+    const id = requestAnimationFrame(() => {
+      const last = listRef.current?.lastElementChild;
+      last?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [cases.length]);
+
   function update(index: number, patch: Partial<TestCaseDraft>) {
     setCases((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  }
+  /** Modifie les conditions du cas `index` (lecture → transformation → réécriture dans les champs). */
+  function mutateConds(
+    index: number,
+    fn: (conds: Condition[], connectors: string[]) => { conds: Condition[]; connectors: string[] }
+  ) {
+    setCases((prev) =>
+      prev.map((c, i) => {
+        if (i !== index) return c;
+        const { conds, connectors } = readConditions(c);
+        const next = fn(conds.map((x) => ({ ...x })), [...connectors]);
+        return { ...c, ...writeConditions(next.conds, next.connectors) };
+      })
+    );
+  }
+  function setCond(i: number, j: number, patch: Partial<Condition>) {
+    mutateConds(i, (conds, connectors) => {
+      conds[j] = { ...conds[j], ...patch };
+      return { conds, connectors };
+    });
+  }
+  function setConnector(i: number, j: number, value: string) {
+    mutateConds(i, (conds, connectors) => {
+      connectors[j] = value === 'or' ? 'or' : 'and';
+      return { conds, connectors };
+    });
+  }
+  function addCond(i: number) {
+    mutateConds(i, (conds, connectors) => {
+      conds.push({ compare: 'exact', value: '' });
+      connectors.push('and');
+      return { conds, connectors };
+    });
+  }
+  function removeCond(i: number, j: number) {
+    mutateConds(i, (conds, connectors) => {
+      conds.splice(j, 1);
+      connectors.splice(j === 0 ? 0 : j - 1, 1);
+      return { conds, connectors };
+    });
   }
   function remove(index: number) {
     setCases((prev) => prev.filter((_, i) => i !== index));
   }
   function add() {
+    pendingScroll.current = true;
     if (structured) {
       // Cas structuré : expression renvoyant la valeur + attendu + comparaison (pas de harnais-code).
+      // Pré-remplie d'un squelette commenté du langage (comme l'ancien gabarit de harnais).
       setCases((prev) => [
         ...prev,
-        { name: '', harnessCode: '', expr: '', expectedJson: '', compareMode: 'exact', weight: 1 },
+        {
+          name: '',
+          harnessCode: '',
+          expr: defaultStructuredExpr(harnessLanguage),
+          expectedJson: '',
+          compareMode: 'exact',
+          weight: 1,
+        },
       ]);
       return;
     }
@@ -157,11 +332,86 @@ export function HarnessBody({
       (c) => c.name.trim() !== '' && c.weight > 0 && (!structured || (c.expr ?? '').trim() !== '')
     );
 
+  /**
+   * Bloc « Conditions » d'un cas structuré : une ou plusieurs conditions (mode + borne), reliées par
+   * ET/OU. Une seule → se stocke en forme simple ; au-delà → `compound`. Résumé lisible dès qu'il y a
+   * plusieurs conditions (ET prioritaire sur OU).
+   */
+  function renderConditions(c: TestCaseDraft, i: number): React.ReactElement {
+    const { conds, connectors } = readConditions(c);
+    return (
+      <div className={styles.structuredAside}>
+        <span className={styles.weightLabel}>{t.conditionsLabel}</span>
+        <div className={styles.conditions}>
+          {conds.map((cond, j) => (
+            <React.Fragment key={j}>
+              <div className={styles.conditionRow}>
+                <div className={styles.conditionCompare}>
+                  <Dropdown
+                    ariaLabel={t.compareLabel}
+                    value={cond.compare}
+                    options={COMPARE_MODES.map((m) => ({ value: m, label: t.compareOptions[m] }))}
+                    onChange={(compare) => setCond(i, j, { compare })}
+                  />
+                </div>
+                <div className={styles.conditionValue}>
+                  <CodeEditor
+                    value={cond.value}
+                    onChange={(value) => setCond(i, j, { value })}
+                    language={isStringPatternMode(cond.compare) ? undefined : 'json'}
+                    placeholder={
+                      isStringPatternMode(cond.compare) ? t.patternPlaceholder : t.expectedPlaceholder
+                    }
+                    minRows={1}
+                    inline
+                    ariaLabel={t.expectedAria(i + 1)}
+                  />
+                </div>
+                {conds.length > 1 && (
+                  <button
+                    type="button"
+                    className={[styles.iconButton, styles.iconButtonDanger].join(' ')}
+                    aria-label={t.deleteConditionAria(j + 1)}
+                    onClick={() => removeCond(i, j)}
+                  >
+                    <TrashCan width={15} height={15} />
+                  </button>
+                )}
+              </div>
+              {j < conds.length - 1 && (
+                <div className={styles.connectorRow}>
+                  <Dropdown
+                    ariaLabel={t.connectorAria(j + 1)}
+                    value={connectors[j] === 'or' ? 'or' : 'and'}
+                    options={[
+                      { value: 'and', label: t.connectorOptions.and },
+                      { value: 'or', label: t.connectorOptions.or },
+                    ]}
+                    onChange={(v) => setConnector(i, j, v)}
+                  />
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+          <button type="button" className={styles.addConditionButton} onClick={() => addCond(i)}>
+            + {t.addCondition}
+          </button>
+          {conds.length > 1 && (
+            <div className={styles.conditionSummary}>
+              <span className={styles.conditionSummaryLabel}>{t.summaryPrefix}</span>{' '}
+              {buildSummary(conds, connectors, t)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className={styles.infoBanner}>{structured ? t.structuredInfoBanner : t.infoBanner}</div>
 
-      <div className={[styles.list, styles.harnessList].join(' ')}>
+      <div className={[styles.list, styles.harnessList].join(' ')} ref={listRef}>
         {cases.map((c, i) => (
           <div key={i} className={styles.harnessCard}>
             <div className={styles.harnessCardHead}>
@@ -195,7 +445,7 @@ export function HarnessBody({
             </div>
             {structured ? (
               <div className={styles.structuredFields}>
-                <label className={styles.structuredField}>
+                <label className={[styles.structuredField, styles.structuredExpr].join(' ')}>
                   <span className={styles.weightLabel}>{t.exprLabel}</span>
                   <CodeEditor
                     value={c.expr ?? ''}
@@ -204,30 +454,7 @@ export function HarnessBody({
                     ariaLabel={t.exprAria(i + 1)}
                   />
                 </label>
-                <label className={styles.structuredField}>
-                  <span className={styles.weightLabel}>{t.expectedLabel}</span>
-                  <textarea
-                    className={styles.textarea}
-                    value={c.expectedJson ?? ''}
-                    placeholder={t.expectedPlaceholder}
-                    rows={2}
-                    onChange={(e) => update(i, { expectedJson: e.target.value })}
-                  />
-                </label>
-                <label className={styles.structuredField}>
-                  <span className={styles.weightLabel}>{t.compareLabel}</span>
-                  <select
-                    className={styles.input}
-                    value={c.compareMode ?? 'exact'}
-                    onChange={(e) => update(i, { compareMode: e.target.value })}
-                  >
-                    {COMPARE_MODES.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {renderConditions(c, i)}
               </div>
             ) : (
               <CodeEditor
@@ -241,24 +468,26 @@ export function HarnessBody({
         ))}
       </div>
 
-      <button type="button" className={styles.addButton} onClick={add}>
-        + {t.add}
-      </button>
-
       <EditorFooter>
-        <div className={styles.footer}>
-          <span className={styles.footerSpacer} />
-          <button type="button" className={styles.ghostButton} onClick={onCancel}>
-            {t.cancel}
+        {/* Bouton d'ajout dans le pied FIXE (hors du corps défilant) pour rester toujours visible. */}
+        <div className={styles.footerStack}>
+          <button type="button" className={styles.addButton} onClick={add}>
+            + {t.add}
           </button>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            disabled={!isValid}
-            onClick={() => onSave(cases)}
-          >
-            {t.save}
-          </button>
+          <div className={styles.footer}>
+            <span className={styles.footerSpacer} />
+            <button type="button" className={styles.ghostButton} onClick={onCancel}>
+              {t.cancel}
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={!isValid}
+              onClick={() => onSave(cases)}
+            >
+              {t.save}
+            </button>
+          </div>
         </div>
       </EditorFooter>
     </>

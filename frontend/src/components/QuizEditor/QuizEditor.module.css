@@ -760,13 +760,39 @@
 .weightLabel { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; flex: 0 0 auto; }
 .weightInput { flex: 0 0 3.25rem; text-align: center; }
 
-/* Cas structuré (#116) : expression + attendu + comparaison, EMPILÉS pleine largeur
-   (sinon ils partagent une ligne flex et débordent en scroll horizontal). */
+/* Cas structuré (#116) : expression, attendu puis comparaison EMPILÉS pleine largeur.
+   `min-width: 0` partout pour que l'éditeur de code rétrécisse au lieu de pousser une
+   scrollbar horizontale. */
 .structuredFields { display: flex; flex-direction: column; gap: 0.625rem; min-width: 0; }
+.structuredExpr { min-width: 0; }
+.structuredAside { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .structuredField { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .structuredField > .input,
-.structuredField > .textarea,
-.structuredField > select { width: 100%; box-sizing: border-box; }
+.structuredField > .textarea { width: 100%; box-sizing: border-box; }
+
+/* Conditions (cas composé ET/OU) : liste de rangées « mode + borne », un connecteur entre deux. */
+.conditions { display: flex; flex-direction: column; gap: 0.375rem; min-width: 0; }
+.conditionRow { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.conditionCompare { flex: 0 0 10rem; min-width: 0; }
+.conditionValue { flex: 1 1 auto; min-width: 0; }
+/* Connecteur : étroit, CENTRÉ horizontalement entre les deux conditions qu'il relie. */
+.connectorRow { display: flex; justify-content: center; }
+.connectorRow > * { flex: 0 0 5rem; }
+/* Bouton d'ajout d'une condition : plus discret que « + Ajouter un harnais ». */
+.addConditionButton {
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    padding: 0.25rem 0;
+    color: var(--brand-teal);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.addConditionButton:hover { text-decoration: underline; }
+.conditionSummary { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.125rem; overflow-wrap: anywhere; }
+.conditionSummaryLabel { color: var(--text); font-weight: 600; }
 
 /* Mobile : nom et poids empilés sur une colonne. La poubelle est placée sur la
    LIGNE DU NOM (centrée verticalement par rapport à l'input de nom), le poids
@@ -831,6 +857,13 @@
 }
 
 /* ── Barre d'actions (dans le pied fixe `.panelFooter`) ── */
+/* Empile un éventuel bouton d'ajout (harnais) AU-DESSUS de la barre d'actions, le tout
+   dans le pied fixe → le bouton reste visible hors du corps défilant. */
+.footerStack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
 .footer {
     display: flex;
     align-items: center;

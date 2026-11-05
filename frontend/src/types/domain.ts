@@ -272,6 +272,12 @@ export interface Language {
   /** Code de départ par défaut proposé pour ce langage (table Language.start_code_template). */
   startCodeTemplate?: string;
   /**
+   * #116 — Gabarit d'EXPRESSION d'un cas structuré (langages compilés), table
+   * Language.expr_template. Squelette commenté pré-rempli par l'éditeur. Absent pour les
+   * langages notés par harnais-code.
+   */
+  exprTemplate?: string;
+  /**
    * Langage dans lequel s'écrivent les harnais des questions utilisant CE langage
    * (table Language.harness_language_id, auto-référence). Absent → harnais dans le
    * même langage que la question.
