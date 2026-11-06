@@ -555,6 +555,36 @@ describe('Dashboard', () => {
       expect(panel.className).not.toMatch(/sidebarCollapsed/);
     });
 
+    it('en développement, /home/horaire affiche l’horaire de tous les cours, qui ouvre un cours', async () => {
+      vi.mocked(api.scheduleAvailable).mockReturnValue(true);
+      vi.mocked(api.fetchSchedule).mockImplementation(async (weekStart, courses) =>
+        courses.slice(0, 1).map((course) => {
+          const start = new Date(weekStart);
+          start.setHours(9, 0, 0, 0);
+          const end = new Date(start);
+          end.setHours(10);
+          return { id: 1, courseId: course.id, kind: 'Cours', room: 'A', start: start.toISOString(), end: end.toISOString() };
+        })
+      );
+      vi.mocked(api.fetchScheduleTasks).mockResolvedValue([]);
+      vi.mocked(api.fetchScheduleCourseColors).mockResolvedValue({});
+      vi.mocked(api.fetchScheduleDeadlines).mockResolvedValue([]);
+      try {
+        renderDashboard({ path: '/home/horaire' });
+        const block = await screen.findByRole('button', { name: /^IFT101 ?Cours/ }, { timeout: 5000 });
+        const courses = vi.mocked(api.fetchSchedule).mock.calls.at(-1)![1];
+        expect(new Set(courses.map((c) => c.id)).size).toBe(courses.length);
+        expect(api.fetchScheduleTasks).toHaveBeenCalled();
+        fireEvent.click(block);
+        fireEvent.click(await screen.findByRole('button', { name: 'Voir le cours IFT101' }));
+        await waitFor(() => expect(currentPath()).toBe('/home/p/1/c/10'));
+      } finally {
+        vi.mocked(api.scheduleAvailable).mockReset();
+        vi.mocked(api.fetchSchedule).mockReset();
+        vi.mocked(api.fetchScheduleTasks).mockReset();
+      }
+    });
+
     it.each([
       ['horaire', 'Horaire'],
       ['bulletin', 'Bulletin'],

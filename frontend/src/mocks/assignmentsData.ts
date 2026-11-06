@@ -10,6 +10,25 @@ function dueIn(now: Date, days: number): string {
   return due.toISOString();
 }
 
+/**
+ * Date limite dans la semaine en cours (du dimanche au samedi) : `ahead` jours après `now`, sans
+ * dépasser samedi, à l'heure donnée. L'horaire montre ainsi des remises dès son ouverture (#258).
+ */
+function dueThisWeek(now: Date, ahead: number, hour: number, minute = 0): string {
+  const due = new Date(now);
+  due.setDate(due.getDate() + Math.min(ahead, 6 - due.getDay()));
+  due.setHours(hour, minute, 0, 0);
+  return due.toISOString();
+}
+
+/** Date limite la semaine prochaine, au jour (0 = dimanche) et à l'heure donnés. */
+function dueNextWeek(now: Date, weekday: number, hour: number, minute = 0): string {
+  const due = new Date(now);
+  due.setDate(due.getDate() - due.getDay() + 7 + weekday);
+  due.setHours(hour, minute, 0, 0);
+  return due.toISOString();
+}
+
 /** Devoirs fictifs d'un cours (#252). Contenu d'exemple, jamais affiché en production. */
 export function demoAssignments(courseId: number, now: Date): Assignment[] {
   const base = {
@@ -22,6 +41,16 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
   };
   // Ids dérivés du cours : un devoir ouvert dans un cours n'existe pas dans un autre.
   const id = (n: number) => courseId * 100 + n;
+  // Les remises varient d'un cours à l'autre : un cours sur deux remet la semaine prochaine, et
+  // jour et heure se décalent.
+  const nextWeek = courseId % 2 === 0;
+  const dayShift = Math.floor(courseId / 2) % 2;
+  const hourShift = courseId % 4;
+  /** `ahead` jours après aujourd'hui cette semaine, ou le jour `weekday` la semaine prochaine. */
+  const due = (ahead: number, weekday: number, hour: number, minute = 0) =>
+    nextWeek
+      ? dueNextWeek(now, weekday + dayShift, hour, minute)
+      : dueThisWeek(now, ahead + dayShift, hour, minute);
   return [
     {
       ...base,
@@ -29,7 +58,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       title: 'Laboratoire 2 : Tables de hachage',
       instructions:
         'En équipe de trois, comparez deux stratégies de résolution de collisions et présentez vos mesures.',
-      dueAt: dueIn(now, 14),
+      dueAt: due(2, 1, 12 + hourShift),
       weight: 10,
       expectedFormats: ['.pdf'],
       files: [],
@@ -52,7 +81,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       title: 'Projet : Réseau social en graphe',
       instructions:
         "En équipe, modélisez un réseau social avec un graphe et implémentez la recherche d'amis communs.\n\nRemettez votre code et un rapport de cinq pages.",
-      dueAt: dueIn(now, 10),
+      dueAt: due(1, 3, 17 + hourShift, 30),
       weight: 30,
       expectedFormats: ['.zip', '.pdf'],
       files: [{ name: 'enonce-projet.pdf', size: '410 Ko' }],
@@ -85,7 +114,7 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       title: 'Devoir 5 : Listes chaînées',
       instructions:
         "Implémentez une liste doublement chaînée en Java, avec les opérations d'insertion, de suppression et de recherche.\n\nPensez aux cas limites : liste vide, un seul nœud, insertion en tête et en queue.\n\nRemettez une archive .zip contenant votre code et un court rapport de deux pages.",
-      dueAt: dueIn(now, 4),
+      dueAt: due(1, 4, 20 + hourShift),
       weight: 20,
       expectedFormats: ['.pdf', '.zip'],
       files: [

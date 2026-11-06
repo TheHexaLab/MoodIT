@@ -61,6 +61,8 @@ import { invoiceBalance } from '../../components/InvoicesPage/invoice.ts';
 import InvoicesAdminPage, {
   type InvoicesAdminApi,
 } from '../../components/InvoicesAdminPage/InvoicesAdminPage.tsx';
+import SchedulePage, { type ScheduleApi } from '../../components/SchedulePage/SchedulePage.tsx';
+import { type ScheduleCourse } from '../../types/domain.ts';
 import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
@@ -123,6 +125,21 @@ const invoicesAdminApi: InvoicesAdminApi = {
   fetchSchedule: () => api.fetchFeeSchedule(),
   saveSchedule: (schedule) => api.saveFeeSchedule(schedule),
   fetchStudents: () => api.fetchEnrolledStudents(),
+};
+
+// Agenda de la page Horaire (#206) : données fictives de dashboardApi, lues à l'appel (vi.mock).
+const scheduleApi: ScheduleApi = {
+  fetchSessions: (weekStart, courses) => api.fetchSchedule(weekStart, courses),
+  fetchTasks: (weekStart) => api.fetchScheduleTasks(weekStart),
+  createTask: (input) => api.createScheduleTask(input),
+  updateTask: (id, input) => api.updateScheduleTask(id, input),
+  deleteTask: (id) => api.deleteScheduleTask(id),
+  createSessions: (input) => api.createScheduleSessions(input),
+  updateSessions: (session, input, scope) => api.updateScheduleSessions(session, input, scope),
+  deleteSessions: (session, scope) => api.deleteScheduleSessions(session, scope),
+  fetchCourseColors: () => api.fetchScheduleCourseColors(),
+  fetchDeadlines: (weekStart, courses) => api.fetchScheduleDeadlines(weekStart, courses),
+  setCourseColor: (courseId, color) => api.setScheduleCourseColor(courseId, color),
 };
 
 const MOBILE_QUERY = '(max-width: 900px)';
@@ -951,6 +968,33 @@ export default function Dashboard() {
   }, [openQuizId]);
   const quizStale = staleQuizId != null && staleQuizId === openQuizId;
 
+  // Ouvre un cours depuis le portail (barre de gauche, horaire) : son panneau se rouvre.
+  // La tuile du cours déjà ouvert garde le canal affiché ; un autre cours repart de zéro.
+  const openCourse = (programId: number, courseId: number) => {
+    setCoursePanelCollapsed(false);
+    setView((previous) =>
+      previous.programId === programId && previous.courseId === courseId
+        ? previous
+        : { programId, courseId }
+    );
+  };
+  // Cours de l'horaire : ceux de tous les programmes, une seule fois chacun, ouverts par leur
+  // premier programme (comme dans la barre de gauche).
+  const scheduleCourses: ScheduleCourse[] = [];
+  for (const program of dashboardPrograms) {
+    for (const course of program.courses ?? []) {
+      if (!scheduleCourses.some((known) => known.id === course.id)) {
+        scheduleCourses.push({
+          id: course.id,
+          code: course.code?.trim() || course.title?.trim() || 'Cours',
+          title: course.title?.trim() || undefined,
+          programId: program.id,
+          // Enseignant ou responsable du programme : peut ajouter des séances au cours.
+          canManage: permsForProgram(program.id).canManageContent,
+        });
+      }
+    }
+  }
   // Devoirs (données fictives, jamais en production) : la pastille du panneau suit ce qui reste à
   // remettre dans le cours ouvert, et une remise la remet à jour.
   const canManageActiveProgram = permsForProgram(activeProgramId).canManageContent;
@@ -1123,15 +1167,7 @@ export default function Dashboard() {
               onJoinCourses: handleJoinCourses,
               onLeaveProgram: handleLeaveProgram,
             }}
-            onOpenCourse={(programId, courseId) => {
-              setCoursePanelCollapsed(false);
-              // La tuile du cours déjà ouvert garde le canal affiché ; un autre cours repart de zéro.
-              setView((previous) =>
-                previous.programId === programId && previous.courseId === courseId
-                  ? previous
-                  : { programId, courseId }
-              );
-            }}
+            onOpenCourse={openCourse}
             onJoinProgram={handleJoinFromPortal}
             onAddProgram={isMobile ? handleAddProgram : undefined}
             collapsed={sidebarCollapsed}
@@ -1210,6 +1246,18 @@ export default function Dashboard() {
           onRetry={retryInvoice}
           studentName={[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ')}
           establishmentName={establishment?.name}
+        />
+      ) : portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
+        <SchedulePage
+          courses={scheduleCourses}
+          api={scheduleApi}
+          onOpenCourse={openCourse}
+          // « Voir le devoir » d'une remise : le devoir ouvert dans le canal Devoirs du cours.
+          onOpenAssignment={(programId, courseId, assignmentId) => {
+            setCoursePanelCollapsed(false);
+            setView({ programId, courseId, channel: { type: 'assignment', id: assignmentId } });
+          }}
+          compact={isMobile}
         />
       ) : portalPage ? (
         <PortalPlaceholder title={portalPage.label} />

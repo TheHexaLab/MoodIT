@@ -12,6 +12,18 @@ import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
 import {
+  addDemoSessions,
+  addDemoTask,
+  deleteDemoSessions,
+  deleteDemoTask,
+  demoSchedule,
+  demoCourseColors,
+  demoTasks,
+  setDemoCourseColor,
+  updateDemoTask,
+  updateDemoSessions,
+} from '../../mocks/scheduleData.ts';
+import {
   DEMO_STUDENT,
   demoAssignments,
   demoCourseStudents,
@@ -29,6 +41,13 @@ import type {
   EnrolledStudent,
   FeeSchedule,
   InvoiceSummary,
+  ScheduleColor,
+  ScheduleCourse,
+  ScheduleSession,
+  ScheduleSessionInput,
+  ScheduleSessionScope,
+  ScheduleTask,
+  ScheduleTaskInput,
   Assignment,
   AssignmentDraft,
   AssignmentStudentRow,
@@ -1263,6 +1282,68 @@ export async function votePost(forumId: number, postId: number, value: 1 | -1): 
   if (!res.ok) throw new Error('Échec du vote');
 }
 
+// ── Horaire (#206) : données FICTIVES, en attendant une API ────────────────────────────────────────
+
+/** Pas d'API d'horaire : la page n'existe qu'en développement ; en production, l'écran d'attente. */
+export function scheduleAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+/** Séances de la semaine qui commence au dimanche `weekStart`, pour les cours donnés. */
+export async function fetchSchedule(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleSession[]> {
+  return demoSchedule(weekStart, courses);
+}
+
+/** Tâches et remises de la semaine qui commence au dimanche `weekStart`. */
+export async function fetchScheduleTasks(weekStart: Date): Promise<ScheduleTask[]> {
+  return demoTasks(weekStart);
+}
+
+export async function createScheduleTask(input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return addDemoTask(input);
+}
+
+export async function updateScheduleTask(id: number, input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return updateDemoTask(id, input);
+}
+
+export async function deleteScheduleTask(id: number): Promise<void> {
+  deleteDemoTask(id);
+}
+
+/** Couleurs que l'utilisateur a choisies pour ses cours dans l'horaire. */
+export async function fetchScheduleCourseColors(): Promise<Record<number, ScheduleColor>> {
+  return demoCourseColors();
+}
+
+export async function setScheduleCourseColor(courseId: number, color: ScheduleColor): Promise<void> {
+  setDemoCourseColor(courseId, color);
+}
+
+/** Séance ajoutée par l'enseignant : toutes ses occurrences, si elle se répète. */
+export async function createScheduleSessions(input: ScheduleSessionInput): Promise<ScheduleSession[]> {
+  return addDemoSessions(input);
+}
+
+/** Séance modifiée par l'enseignant : celle-ci, ou toute sa série. */
+export async function updateScheduleSessions(
+  session: ScheduleSession,
+  input: ScheduleSessionInput,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  updateDemoSessions(session, input, scope);
+}
+
+export async function deleteScheduleSessions(
+  session: ScheduleSession,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  deleteDemoSessions(session, scope);
+}
+
 // ── Devoirs (#252) : données FICTIVES, en mémoire, en attendant une API ───────────────────────────
 
 /** Pas d'API de devoirs : l'interface n'existe qu'en développement, jamais en production. */
@@ -1535,4 +1616,37 @@ export async function saveFeeSchedule(schedule: FeeSchedule): Promise<FeeSchedul
 export async function fetchEnrolledStudents(now: Date = new Date()): Promise<EnrolledStudent[]> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
   return demoEnrolledStudents(now);
+}
+
+// ── Horaire et devoirs (#258) : les dates de remise des devoirs deviennent les remises de l'horaire ──
+
+/** Remises de la semaine : les devoirs publiés des cours donnés, à leur date de remise. */
+export async function fetchScheduleDeadlines(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleTask[]> {
+  if (!assignmentsAvailable()) return [];
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return courses.flatMap((course) =>
+    courseAssignments(course.id)
+      .filter((a) => a.isPublished && a.dueAt && new Date(a.dueAt) >= weekStart && new Date(a.dueAt) < weekEnd)
+      .map((a) => ({
+        // Id négatif : il ne croise jamais celui d'une tâche de l'agenda.
+        id: -(course.id * 1000 + a.id),
+        title: a.title,
+        start: a.dueAt!,
+        end: a.dueAt!,
+        courseId: course.id,
+        reminder: null,
+        notes: a.instructions,
+        color: 'rose' as const,
+        // Remis : la remise est faite ; elle quitte « Mes tâches ».
+        done: a.submission != null,
+        allDay: false,
+        deadline: true,
+        courseDeadline: true,
+        assignmentId: a.id,
+      }))
+  );
 }

@@ -511,6 +511,69 @@ export interface PostVoteUserDTO {
   children?: PostVoteUserDTO[];
 }
 
+/** Cours de l'étudiant, tel que l'horaire en a besoin : son programme sert à l'ouvrir (#206). */
+export interface ScheduleCourse {
+  id: number;
+  code: string;
+  /** Nom complet du cours (« Structures de données »), affiché dans le détail d'une séance. */
+  title?: string;
+  programId: number;
+  /** Enseignant ou responsable : peut ajouter des séances à ce cours. */
+  canManage?: boolean;
+}
+
+/** Séance de cours dans l'horaire de la semaine. */
+export interface ScheduleSession {
+  id: number;
+  courseId: number;
+  /** Cours, Travaux dirigés, Laboratoire… */
+  kind: string;
+  room: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+  /** Séance hebdomadaire : date ISO de la dernière occurrence ; null ou absent = une seule fois. */
+  until?: string | null;
+  /** Série des séances répétées chaque semaine ; absent = une séance seule. */
+  seriesId?: number;
+}
+
+/** Séance à ajouter par l'enseignant ; `until` répète chaque semaine jusqu'à cette date ISO. */
+export type ScheduleSessionInput = Omit<ScheduleSession, 'id' | 'seriesId'>;
+
+/** Modification d'une séance répétée : celle-ci seulement, ou toute sa série. */
+export type ScheduleSessionScope = 'one' | 'series';
+
+/** Couleur d'une tâche, choisie par l'étudiant. */
+export type ScheduleColor = 'teal' | 'blue' | 'purple' | 'rose' | 'orange' | 'green' | 'gray';
+
+/** Tâche personnelle dans l'agenda : visible seulement de son auteur. */
+export interface ScheduleTask {
+  id: number;
+  title: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+  /** Cours lié, facultatif. */
+  courseId: number | null;
+  /** Rappel, en minutes avant le début ; null = aucun. */
+  reminder: number | null;
+  notes: string;
+  color: ScheduleColor;
+  /** Cochée dans la liste des tâches. */
+  done: boolean;
+  /** Toute la journée : pas d'heure, seulement un jour (`start` à minuit). */
+  allDay: boolean;
+  /** Remise : une seule heure, l'échéance (`start` = `end`), affichée comme une barre rouge. */
+  deadline: boolean;
+  /** Remise d'un devoir du cours, vue par ses étudiants : en lecture dans l'horaire. */
+  courseDeadline?: boolean;
+  /** Remise d'un cours : l'id du devoir, que « Voir le devoir » ouvre (#258). */
+  assignmentId?: number;
+}
+
+export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;
+
 /** Remise d'un étudiant : toujours un fichier (#252). */
 export interface AssignmentSubmission {
   /** Une remise peut compter plusieurs fichiers. */
