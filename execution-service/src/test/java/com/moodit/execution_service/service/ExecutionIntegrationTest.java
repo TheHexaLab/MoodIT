@@ -378,6 +378,20 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void cpp_poo_construction_et_methode_dinstance_par_handle() {
+        requireRuntime("c++");
+        // POO C++ : le harnais construit un objet étudiant et appelle une méthode ; le child crée le
+        // vrai objet (table de handles) et appelle la méthode par cast. Champs privés jamais transmis.
+        String rect = "class Rectangle {\n  int l, h;\npublic:\n"
+                + "  Rectangle(int l, int h) : l(l), h(h) {}\n"
+                + "  int aire() { return l * h; }\n};\nint main(){ return 0; }";
+        assertThat(passes("C++", rect, "return Rectangle(3, 4).aire() == 12;")).isTrue();
+        assertThat(passes("C++", rect, "return Rectangle(5, 5).aire() == 25;")).isTrue();
+        assertThat(passes("C++", rect.replace("l * h", "0"),
+                "return Rectangle(3, 4).aire() == 12;")).isFalse();
+    }
+
+    @Test
     void java_isolation_rpc_deux_processus() {
         requireRuntime("java");
         String good = "public class Main { static int doubler(int n){ return n * 2; } "

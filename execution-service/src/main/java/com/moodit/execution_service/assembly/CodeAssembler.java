@@ -1280,6 +1280,11 @@ public class CodeAssembler {
             Pattern.compile("(?m)^([A-Za-z_][\\w \\*]*?[ \\*]+)(\\w+)\\s*\\(([^)]*)\\)\\s*\\{");
     /** Types scalaires marshalables C/C++ (numériques — pas de {@code char*} au pilote). */
     private static final Set<String> C_SCALARS = Set.of("int", "long", "double");
+    /** Déclaration de classe C++ top-level : {@code class Nom { … } } (capture le nom). */
+    private static final Pattern CPP_CLASS = Pattern.compile("(?m)^class\\s+(\\w+)\\s*\\{");
+    /** Méthode C++ membre : {@code ret nom(params) } (dans la section publique). */
+    private static final Pattern CPP_METHOD =
+            Pattern.compile("([A-Za-z_][\\w]*)\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:const\\s*)?\\{");
 
     /**
      * C : exécution ISOLÉE en DEUX processus (cf. #116). Le programme se {@code fork()} : le PARENT
@@ -1377,14 +1382,45 @@ public class CodeAssembler {
             cases.append("      continue;\n    }\n");
         }
 
+        // POO C++ : les champs privés sont inaccessibles hors de la classe → modèle HANDLE (comme
+        // Java/C#) en codegen. Chaque classe à section publique donne un type STUB (handle) dont le
+        // ctor et les méthodes délèguent par RPC ; le child garde les vrais objets dans une table et
+        // les instancie/appelle (cast). Périmètre : ctor + méthodes publiques à scalaires (int/long/double).
+        if (cpp) {
+            List<String> cppClasses = new ArrayList<>();
+            Matcher cpm = CPP_CLASS.matcher(student);
+            while (cpm.find()) {
+                String cn = cpm.group(1);
+                int open = student.indexOf('{', cpm.start());
+                int close = javaMatchBrace(student, open);
+                if (close < 0) continue;
+                String body = student.substring(open + 1, close);
+                int pub = body.indexOf("public:");
+                if (pub < 0) continue;
+                int after = pub + "public:".length();
+                int end = body.length();
+                for (String spec : new String[] {"private:", "protected:"}) {
+                    int idx = body.indexOf(spec, after);
+                    if (idx >= 0 && idx < end) end = idx;
+                }
+                cppClasses.add(cn);
+                appendCppClassStub(cn, body.substring(after, end), stubs, cases);
+            }
+            // Renommer les classes étudiant → __MooditStudent_* (déf, ctor, littéraux) ; le stub garde le nom.
+            for (String cn : cppClasses) {
+                student = student.replaceAll("\\b" + Pattern.quote(cn) + "\\b", "__MooditStudent_" + cn);
+            }
+        }
+
         String includes = cpp
-                ? "#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\n#include <sys/types.h>\n"
+                ? "#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\n#include <sys/types.h>\n#include <vector>\n"
                 : "#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n#include <sys/types.h>\n";
         String harnessType = cpp ? "bool" : "int";
         String program = includes + "\n"
                 + defines
                 + student + "\n"
                 + undefs + "\n"
+                + (cpp ? "static std::vector<void*> __moodit_objs;\n" : "")
                 + "static int __moodit_rfd, __moodit_wfd;\n"
                 + "static void __w_all(int fd, const char* b, long n) { long o = 0; while (o < n) { long k = write(fd, b + o, n - o); if (k <= 0) _exit(1); o += k; } }\n"
                 + "static int __rd1(int fd) { unsigned char c; long k = read(fd, &c, 1); if (k <= 0) return -1; return c; }\n"
@@ -1437,6 +1473,105 @@ public class CodeAssembler {
                 + "}\n";
         return new Assembled(cpp ? "c++" : "c",
                 List.of(new PistonClient.File(cpp ? "main.cpp" : "main.c", program)));
+    }
+
+    /**
+     * POO C++ (section publique d'une classe) : ajoute le type STUB (handle + ctor + méthodes qui
+     * délèguent par RPC {@code @new}/{@code @call}) et les cas de dispatch du child (instanciation via
+     * {@code new}, appel via cast du handle). Pilote : 1 constructeur, méthodes à scalaires.
+     */
+    private void appendCppClassStub(String cn, String pubBody, StringBuilder stubs, StringBuilder cases) {
+        stubs.append("class ").append(cn).append(" {\npublic:\n  long __moodit_h;\n");
+        // Un seul constructeur (le premier à paramètres scalaires).
+        Matcher ctm = Pattern.compile("(?<![\\w:])" + Pattern.quote(cn) + "\\s*\\(([^)]*)\\)").matcher(pubBody);
+        boolean ctorDone = false;
+        while (!ctorDone && ctm.find()) {
+            List<String[]> params = cParseParams(ctm.group(1));
+            if (!params.stream().allMatch(p -> C_SCALARS.contains(p[1]))) continue;
+            ctorDone = true;
+            String sig = params.isEmpty() ? ""
+                    : params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+            stubs.append("  ").append(cn).append("(").append(sig).append(") {\n")
+                    .append("    __ns_write_s(__moodit_wfd, \"@new:").append(cn).append("\");\n");
+            for (String[] p : params) {
+                stubs.append("    { char __b[64]; int __l = snprintf(__b, sizeof(__b), \"").append(cFmt(p[1]))
+                        .append("\", ").append(p[0]).append("); __ns_write(__moodit_wfd, __b, __l); }\n");
+            }
+            stubs.append("    char __st[4]; long __sl = __ns_read(__moodit_rfd, __st, sizeof(__st));\n")
+                    .append("    char __rv[128]; long __rl = __ns_read(__moodit_rfd, __rv, sizeof(__rv)); if (__rl < 0) _exit(1); __rv[__rl < 128 ? __rl : 127] = 0;\n")
+                    .append("    if (!(__sl == 1 && __st[0] == '1')) _exit(1);\n")
+                    .append("    __moodit_h = strtol(__rv, 0, 10);\n  }\n");
+            String key = "@new:" + cn;
+            cases.append("    if (__keylen == ").append(key.length()).append(" && __eq(__key, \"").append(key)
+                    .append("\", ").append(key.length()).append(")) {\n");
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                cases.append("      char __s").append(i).append("[128]; long __l").append(i)
+                        .append(" = __ns_read(__moodit_rfd, __s").append(i).append(", sizeof(__s").append(i)
+                        .append(")); __s").append(i).append("[__l").append(i).append(" < 128 ? __l").append(i).append(" : 127] = 0;\n");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append(cDec("__s" + i, params.get(i)[1]));
+            }
+            cases.append("      try {\n")
+                    .append("        long __h = (long)__moodit_objs.size();\n")
+                    .append("        __moodit_objs.push_back((void*) new __MooditStudent_").append(cn).append("(").append(callArgs).append("));\n")
+                    .append("        char __ob[64]; int __ol = snprintf(__ob, sizeof(__ob), \"%ld\", __h); __ns_write_s(__moodit_wfd, \"1\"); __ns_write(__moodit_wfd, __ob, __ol);\n")
+                    .append("      } catch (...) { __ns_write_s(__moodit_wfd, \"0\"); __ns_write_s(__moodit_wfd, \"\"); }\n")
+                    .append("      continue;\n    }\n");
+        }
+        // Méthodes publiques (type de retour présent → ne matche pas un ctor).
+        Matcher mm = CPP_METHOD.matcher(pubBody);
+        while (mm.find()) {
+            String ret = mm.group(1);
+            String method = mm.group(2);
+            if (method.equals(cn)) continue;
+            List<String[]> params = cParseParams(mm.group(3));
+            String sig = params.isEmpty() ? ""
+                    : params.stream().map(p -> p[1] + " " + p[0]).collect(Collectors.joining(", "));
+            boolean ok = ("void".equals(ret) || C_SCALARS.contains(ret))
+                    && params.stream().allMatch(p -> C_SCALARS.contains(p[1]));
+            if (!ok) {
+                stubs.append("  ").append(ret).append(" ").append(method).append("(").append(sig).append(") { _exit(1); }\n");
+                continue;
+            }
+            stubs.append("  ").append(ret).append(" ").append(method).append("(").append(sig).append(") {\n")
+                    .append("    __ns_write_s(__moodit_wfd, \"@call:").append(cn).append(":").append(method).append("\");\n")
+                    .append("    { char __b[64]; int __l = snprintf(__b, sizeof(__b), \"%ld\", __moodit_h); __ns_write(__moodit_wfd, __b, __l); }\n");
+            for (String[] p : params) {
+                stubs.append("    { char __b[64]; int __l = snprintf(__b, sizeof(__b), \"").append(cFmt(p[1]))
+                        .append("\", ").append(p[0]).append("); __ns_write(__moodit_wfd, __b, __l); }\n");
+            }
+            stubs.append("    char __st[4]; long __sl = __ns_read(__moodit_rfd, __st, sizeof(__st));\n")
+                    .append("    char __rv[128]; long __rl = __ns_read(__moodit_rfd, __rv, sizeof(__rv)); if (__rl < 0) _exit(1); __rv[__rl < 128 ? __rl : 127] = 0;\n")
+                    .append("    if (!(__sl == 1 && __st[0] == '1')) _exit(1);\n");
+            if (!"void".equals(ret)) stubs.append("    return ").append(cDec("__rv", ret)).append(";\n");
+            stubs.append("  }\n");
+            String key = "@call:" + cn + ":" + method;
+            cases.append("    if (__keylen == ").append(key.length()).append(" && __eq(__key, \"").append(key)
+                    .append("\", ").append(key.length()).append(")) {\n")
+                    .append("      char __sh[128]; long __lh = __ns_read(__moodit_rfd, __sh, sizeof(__sh)); __sh[__lh < 128 ? __lh : 127] = 0; long __h = strtol(__sh, 0, 10);\n");
+            StringBuilder callArgs = new StringBuilder();
+            for (int i = 0; i < params.size(); i++) {
+                cases.append("      char __s").append(i).append("[128]; long __l").append(i)
+                        .append(" = __ns_read(__moodit_rfd, __s").append(i).append(", sizeof(__s").append(i)
+                        .append(")); __s").append(i).append("[__l").append(i).append(" < 128 ? __l").append(i).append(" : 127] = 0;\n");
+                if (i > 0) callArgs.append(", ");
+                callArgs.append(cDec("__s" + i, params.get(i)[1]));
+            }
+            String recv = "((__MooditStudent_" + cn + "*)__moodit_objs[__h])->" + method + "(" + callArgs + ")";
+            cases.append("      try {\n");
+            if ("void".equals(ret)) {
+                cases.append("        ").append(recv).append(";\n")
+                        .append("        __ns_write_s(__moodit_wfd, \"1\"); __ns_write_s(__moodit_wfd, \"\");\n");
+            } else {
+                cases.append("        ").append(ret).append(" __r = ").append(recv).append(";\n")
+                        .append("        char __ob[64]; int __ol = snprintf(__ob, sizeof(__ob), \"").append(cFmt(ret))
+                        .append("\", __r); __ns_write_s(__moodit_wfd, \"1\"); __ns_write(__moodit_wfd, __ob, __ol);\n");
+            }
+            cases.append("      } catch (...) { __ns_write_s(__moodit_wfd, \"0\"); __ns_write_s(__moodit_wfd, \"\"); }\n")
+                    .append("      continue;\n    }\n");
+        }
+        stubs.append("};\n");
     }
 
     /** Paramètres C/C++ ({@code "int a, long b"} ; {@code void} = aucun) → couples {@code {nom, type}}. */

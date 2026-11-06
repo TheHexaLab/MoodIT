@@ -372,6 +372,41 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void cpp_poo_genere_stub_classe_et_handle() {
+        // POO C++ : classe (ctor + méthode publics) → type stub avec handle, délégués par @new/@call ;
+        // le child garde les vrais objets dans une table et les instancie/appelle (le harnais fait
+        // Rectangle(3,4).aire()).
+        var a = assembler.assemble("C++",
+                "class Rectangle {\n  int l, h;\npublic:\n  Rectangle(int l, int h) : l(l), h(h) {}\n"
+                        + "  int aire() { return l * h; }\n};",
+                "return Rectangle(3, 4).aire() == 12;", "MOODIT_OK_cpp");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("class Rectangle {").contains("long __moodit_h");  // stub + handle
+        assertThat(c).contains("@new:Rectangle").contains("@call:Rectangle:aire"); // RPC
+        assertThat(c).contains("static std::vector<void*> __moodit_objs");         // table d'objets (child)
+        assertThat(c).contains("new __MooditStudent_Rectangle(");                   // instanciation réelle
+        assertThat(c).contains("#include <vector>");
+        assertThat(c).doesNotContain("MOODIT_OK_cpp");                             // nonce jamais gravé
+    }
+
+    @Test
+    void cpp_poo_ignore_classe_sans_public_et_methode_non_supportee() {
+        var a = assembler.assemble("C++",
+                "class Interne { int x; };\n"                       // pas de public: → ignorée
+                        + "class Box {\n  int n;\npublic:\n"
+                        + "  Box(int n) : n(n) {}\n"
+                        + "  void bump() { n++; }\n"                 // void (branche void)
+                        + "  bool valid() { return true; }\n"       // retour non scalaire → _exit stub
+                        + "  int get() { return n; }\n};",
+                "return Box(7).get() == 7;", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).doesNotContain("@new:Interne");               // classe sans public ignorée
+        assertThat(c).contains("void bump()");                      // méthode void
+        assertThat(c).contains("bool valid() { _exit(1); }");       // non supportée
+        assertThat(c).contains("@call:Box:get");
+    }
+
+    @Test
     void csharp_harness_structurel_delegue_par_rpc_en_deux_processus() {
         var a = assembler.assemble("C#",
                 "class S { public static int Doubler(int n){ return n*2; } static void Main(string[] x){} }",
