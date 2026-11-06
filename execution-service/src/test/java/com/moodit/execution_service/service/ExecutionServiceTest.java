@@ -6,6 +6,8 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.SandboxException;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 
@@ -18,8 +20,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -86,9 +90,11 @@ class ExecutionServiceTest {
 
     @Test
     void fails_on_compile_error() {
+        // TypeScript : seul langage encore assemblé pour Piston avec une étape de compilation.
         when(piston.execute(anyString(), any(), any(), any(), any())).thenReturn(new PistonClient.Result(
                 new PistonClient.Stage("", "erreur de compilation", 1, null, null), null, null));
-        List<TestResult> r = service.evaluate(oneTest("C", "int solution(){return 5;}", "return 1;"));
+        List<TestResult> r = service.evaluate(
+                oneTest("TypeScript", "function solution(): number { return 5; }", "return true;"));
         assertThat(r).singleElement().satisfies(t -> {
             assertThat(t.passed()).isFalse();
             assertThat(t.detail()).contains("erreur de compilation");
@@ -204,7 +210,7 @@ class ExecutionServiceTest {
         // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel Piston (run, harnais,
         // SQL en deux phases) doit passer par cette place, donc être refusé sans appeler Piston.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
-        ExecutionService limited = new ExecutionService(assembler, piston, limiter);
+        ExecutionService limited = new ExecutionService(assembler, piston, limiter, null);
         pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
 
         limiter.withSandboxSlot(() -> {
@@ -221,5 +227,52 @@ class ExecutionServiceTest {
         // Place rendue : la même exécution passe.
         assertThat(limited.evaluate(oneTest("Python", "def f(): pass", "return True")))
                 .singleElement().satisfies(t -> assertThat(t.passed()).isTrue());
+    }
+
+    // ── Routage des langages COMPILÉS vers le runner Docker (#116) ────────────────
+
+    @Test
+    void compiled_languages_route_to_docker_evaluator_not_piston() {
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, piston, docker);
+        List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
+        when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(expected);
+
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            assertThat(routed.evaluate(oneTest(language, "code", "harnais"))).isEqualTo(expected);
+        }
+        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any());
+        verify(piston, never()).execute(anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void compiled_evaluation_fails_cleanly_without_docker_runner() {
+        // Service construit sans runner (ex. mauvaise config) : erreur 502 propre, pas de NPE.
+        assertThatThrownBy(() -> service.evaluate(oneTest("Java", "class A {}", "harnais")))
+                .isInstanceOf(SandboxException.class);
+    }
+
+    @Test
+    void compiled_evaluation_takes_a_sandbox_slot() {
+        // Un conteneur runner consomme une place de la limite globale, comme un appel Piston.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService limited = new ExecutionService(assembler, piston, limiter, docker);
+        limiter.withSandboxSlot(() -> {
+            assertThatThrownBy(() -> limited.evaluate(oneTest("Go", "code", "harnais")))
+                    .isInstanceOf(ExecutionBusyException.class);
+            return null;
+        });
+        verify(docker, never()).evaluate(anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void timeout_is_forwarded_to_docker_evaluator() {
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, piston, docker);
+        when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(List.of());
+        routed.evaluate(new EvaluateRequest("Rust", null, "code",
+                List.of(new TestCaseInput("t", "harnais", 1)), 42_000));
+        verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000));
     }
 }

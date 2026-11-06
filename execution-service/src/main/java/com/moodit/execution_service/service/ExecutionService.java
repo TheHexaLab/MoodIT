@@ -7,6 +7,8 @@ import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.SandboxException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,15 +19,18 @@ import java.util.HexFormat;
 import java.util.List;
 
 /**
- * Évalue une soumission contre chaque harnais : assemble code+harnais, exécute dans Piston, en
- * déduit le verdict. ANTI-TRICHE : le verdict ne dépend PAS de l'exit code (falsifiable par un
- * {@code exit(0)} anticipé ou une neutralisation d'exit), mais de la présence d'un NONCE ALÉATOIRE
- * secret que SEUL le harnais émet en cas de succès. Chaque test tourne dans une exécution Piston
- * ISOLÉE. Interprétés comme compilés sont notés en DEUX processus : le code étudiant vit dans un
- * processus SÉPARÉ et ne voit jamais le nonce (détenu par le noteur ; cf. {@link CodeAssembler}).
- * Pour les compilés, le binaire unique se dédouble (fork / re-exec) et le nonce est injecté au RUNTIME
- * via l'entrée standard, lue par le seul PARENT. Un étudiant ne peut donc l'extraire : il n'est ni
- * dans sa mémoire (processus distinct), ni dans la source, ni dans le binaire.
+ * Évalue une soumission contre chaque harnais. Deux chemins (#116) :
+ * <ul>
+ *   <li><b>Langages COMPILÉS</b> → {@link DockerEvaluator} : conteneur runner jetable par
+ *       soumission (réseau coupé), SUPERVISEUR de confiance (root) qui compile, verrouille les
+ *       sources en 700, exécute chaque cas sous un UID étudiant dédié tracé par strace, et rend
+ *       un verdict FAIL-CLOSED multi-canaux gardé par des CANARIS randomisés. Le harnais du prof
+ *       est un VRAI test du langage (JUnit, NUnit, go test, cargo test, moodit_check.h).</li>
+ *   <li><b>Interprétés / SQL / vues</b> → Piston, verdict par NONCE ALÉATOIRE : il ne dépend PAS
+ *       de l'exit code (falsifiable par un {@code exit(0)} anticipé), mais de la présence d'un
+ *       nonce secret que SEUL le harnais émet en cas de succès ; le code étudiant vit dans un
+ *       processus séparé qui ne voit jamais le nonce (cf. {@link CodeAssembler}).</li>
+ * </ul>
  */
 @Service
 public class ExecutionService {
@@ -35,21 +40,30 @@ public class ExecutionService {
     private final CodeAssembler assembler;
     private final PistonClient piston;
     private final ExecutionLimiter limiter;
+    private final DockerEvaluator dockerEvaluator;
 
     /** Taille max du dump d'état transféré phase 1 → phase 2 (borne anti-DoS). Configurable. */
     @Value("${app.sql.max-dump-chars:524288}")
     private int maxSqlDumpChars = 524288;
 
-    /** Sans borne de charge effective (tests unitaires de la logique de verdict). */
+    /** Sans borne de charge ni runner Docker (tests unitaires de la logique de verdict Piston). */
     public ExecutionService(CodeAssembler assembler, PistonClient piston) {
-        this(assembler, piston, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE));
+        this(assembler, piston, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE), null);
+    }
+
+    /** Pour les tests : runner Docker injectable, sans borne de charge. */
+    public ExecutionService(CodeAssembler assembler, PistonClient piston, DockerEvaluator dockerEvaluator) {
+        this(assembler, piston, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE),
+                dockerEvaluator);
     }
 
     @Autowired
-    public ExecutionService(CodeAssembler assembler, PistonClient piston, ExecutionLimiter limiter) {
+    public ExecutionService(CodeAssembler assembler, PistonClient piston, ExecutionLimiter limiter,
+            DockerEvaluator dockerEvaluator) {
         this.assembler = assembler;
         this.piston = piston;
         this.limiter = limiter;
+        this.dockerEvaluator = dockerEvaluator;
     }
 
     /** Un appel au sandbox, dans une place de la limite globale (#24) : file bornée, sinon 429. */
@@ -77,6 +91,16 @@ public class ExecutionService {
     }
 
     public List<TestResult> evaluate(EvaluateRequest request) {
+        // Langages COMPILÉS (#116) : notés dans un CONTENEUR RUNNER jetable (superviseur root,
+        // code étudiant sous un UID dédié, harnais = vrai framework de test, canaris anti-
+        // falsification). Un conteneur = une place de la limite globale, comme un appel Piston.
+        if (CodeAssembler.isCompiled(request.language())) {
+            if (dockerEvaluator == null) {
+                throw new SandboxException("Runner Docker non configuré pour les langages compilés");
+            }
+            return limiter.withSandboxSlot(() -> dockerEvaluator.evaluate(
+                    request.language(), request.code(), request.testCases(), request.timeoutMs()));
+        }
         List<TestResult> results = new ArrayList<>();
         for (TestCaseInput testCase : request.testCases()) {
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.

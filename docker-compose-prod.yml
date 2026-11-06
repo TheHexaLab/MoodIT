@@ -283,6 +283,13 @@ services:
       - .env.docker
     environment:
       PISTON_URL: http://piston:2000 # sandbox, sur le réseau dédié
+    volumes:
+      # Runner des langages COMPILÉS (#116) : execution-service lance des conteneurs jetables
+      # moodit-runner-* (réseau coupé, limites mémoire/PID/CPU) via le démon Docker de l'HÔTE
+      # (docker-outside-of-docker — un montage hôte ne marcherait pas, les fichiers passent par
+      # l'API). Accès root-équivalent au démon : assumé, service interne sans route d'admin ;
+      # cf. deploy/DEPLOY.md. Les images runner sont construites par docker/runners/build.sh.
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - internal # appelé par le gateway et core-service
       - sandbox # seul service applicatif qui joint Piston

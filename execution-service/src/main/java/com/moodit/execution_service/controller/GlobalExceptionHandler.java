@@ -2,6 +2,7 @@ package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.assembly.UnsupportedLanguageException;
 import com.moodit.execution_service.piston.PistonException;
+import com.moodit.execution_service.sandbox.SandboxException;
 import com.moodit.execution_service.service.ExecutionBusyException;
 
 import org.springframework.http.HttpHeaders;
@@ -24,6 +25,13 @@ public class GlobalExceptionHandler {
     /** Sandbox injoignable / en erreur → 502 (dépendance amont indisponible). */
     @ExceptionHandler(PistonException.class)
     public ProblemDetail handlePiston(PistonException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+                "Sandbox d'exécution indisponible");
+    }
+
+    /** Runner Docker des compilés injoignable / en erreur (#116) → même sémantique : 502. */
+    @ExceptionHandler(SandboxException.class)
+    public ProblemDetail handleSandbox(SandboxException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
                 "Sandbox d'exécution indisponible");
     }

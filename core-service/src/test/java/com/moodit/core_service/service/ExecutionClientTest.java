@@ -146,6 +146,10 @@ class ExecutionClientTest {
         assertThat(ExecutionClient.pistonCalls("sqlite", 2)).isEqualTo(4);
         assertThat(ExecutionClient.pistonCalls("sqlite3", 2)).isEqualTo(4);
         assertThat(ExecutionClient.pistonCalls("sqlserver", 2)).isEqualTo(2);
+        // Compilés (#116) : compilation + exécution par cas, plus deux canaris du runner.
+        assertThat(ExecutionClient.pistonCalls("Java", 3)).isEqualTo(8);
+        assertThat(ExecutionClient.pistonCalls("C++", 1)).isEqualTo(4);
+        assertThat(ExecutionClient.pistonCalls("go", 2)).isEqualTo(6);
     }
 
     @Test

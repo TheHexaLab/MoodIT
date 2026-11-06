@@ -10,7 +10,7 @@ les **dépendances fragiles** à connaître avant une mise à jour, et le **rés
 | Appel de fonction / classe (interprétés) | Python, JavaScript, TypeScript, PHP, Bash | **RPC 2 processus** | nonce émis par le noteur |
 | Vues / composants | JSX, TSX | **RPC + proxy DOM** | nonce émis par le noteur |
 | Données inertes | JSON, HTML | contenu non exécuté | nonce (harnais JS sur `data`/`doc`) |
-| Compilés | Go, Rust, C, C++, C#, Java | source **absente au runtime** | nonce |
+| Compilés | Go, Rust, C, C++, C#, Java | **runner Docker isolé** (#116, `docker/runners/`) | fail-closed multi-canaux + **canaris** |
 | Requête / état | SQL | **isolation 2 phases** (dump) | sortie encadrée par sentinelles au nonce |
 
 ### Isolation RPC (interprétés + JSX/TSX)
@@ -40,7 +40,20 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
   plus atteindre le nonce). À re-tester si le runtime React/Node change.
 - **Compilation TS** : fichiers nommés sans extension → Piston écrit `.ts` et compile `.js`.
 - **Bash** : `grader.sh` supprimé mais lisible via son fd déjà ouvert (sémantique unlink Unix).
-- **Compilés** : la source n'est pas présente dans le dossier d'exécution (vérifié : `fopen(main.c)=NULL`).
+- **Compilés** : notés HORS Piston, dans le runner Docker (voir plus bas) ; seule l'exécution
+  simple (bouton « Exécuter ») passe encore par Piston pour ces langages.
+
+### Runner Docker des compilés (#116)
+
+Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-runner-*`
+(réseau coupé, mémoire/PID/CPU bornés) : le harnais du prof est un **vrai test du langage**
+(JUnit, NUnit, go test, cargo test, `moodit_check.h`) et la POO du simple code de test. Dans le
+conteneur, un **superviseur** (root) compile, verrouille les sources en 700, exécute chaque cas
+sous l'**UID `student`** tracé par strace, et rend un verdict **fail-closed** gardé par des
+**canaris randomisés** (forger la sortie du framework est détecté). Les tentatives (lecture du
+harnais, rapport forgé) remontent en **événements** dans le détail des verdicts. Modèle de menace
+complet, limites assumées et protocole : `docker/runners/README.md`. Filet d'intégration (matrice
+anti-triche) : `DockerRunnerIntegrationTest`.
 
 ## Limites du bac à sable (#24)
 
@@ -74,3 +87,5 @@ calculer la bonne sortie) — c'est le problème classique des **cas de test con
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
   Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une boucle d'allocation
   tuée par la limite mémoire.
+- **Runner des compilés** : `DockerRunnerIntegrationTest` (même job CI ; construit d'abord les
+  images `docker/runners/build.sh`). En local : démon Docker + images, sinon les tests s'ignorent.

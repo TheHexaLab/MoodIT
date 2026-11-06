@@ -273,36 +273,14 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_echec_de_compilation_sans_stderr() {
+        // TypeScript : seul langage encore assemblé pour Piston avec une étape de compilation (#116).
         piston(f -> new PistonClient.Result(stage("", "", 1, null, "compile killed"), null, null));
-        assertThat(single("C", "", "return 1;").detail()).isEqualTo("compile killed");
+        assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("compile killed");
 
         piston(f -> new PistonClient.Result(stage("", "", 1, null, null), null, null));
-        TestResult t = single("C", "", "return 1;");
+        TestResult t = single("TypeScript", "", "return true;");
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Échec de compilation");
-    }
-
-    @Test
-    void evaluate_compile_lit_le_secret_depuis_stdin_et_le_reemet() {
-        // Langage COMPILÉ : le nonce N'EST PAS gravé dans les fichiers — il est passé via stdin, et
-        // le programme le réémet sur stderr s'il réussit. On simule ce comportement : stderr = stdin.
-        reset(piston);
-        when(piston.execute(anyString(), any(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
-            String stdin = inv.getArgument(3);
-            String secret = stdin == null ? "" : stdin.trim();
-            return new PistonClient.Result(stage("", "", 0, null, null), stage("", secret, 0, null, null), null);
-        });
-
-        // Le secret n'apparaît dans AUCUN fichier soumis (il vient de stdin) et le verdict passe.
-        assertThat(single("C", "int s(){return 1;}", "return s();").passed()).isTrue();
-
-        ArgumentCaptor<String> stdinCap = ArgumentCaptor.forClass(String.class);
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<PistonClient.File>> filesCap = ArgumentCaptor.forClass(List.class);
-        verify(piston).execute(eq("c"), any(), filesCap.capture(), stdinCap.capture(), any());
-        assertThat(stdinCap.getValue()).isNotBlank();
-        String secret = stdinCap.getValue().trim();
-        assertThat(filesCap.getValue()).allSatisfy(f -> assertThat(f.content()).doesNotContain(secret));
     }
 
     // ── SQL lecture seule : verdict dégradé ─────────────────────────────────────

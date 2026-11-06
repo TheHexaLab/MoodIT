@@ -34,102 +34,6 @@ class CodeAssemblerLanguagesTest {
         return a.files().get(0).content();
     }
 
-    // ── Langages compilés : propriétés du programme assemblé (modèle deux-processus, #116) ──────
-    //
-    // On ne compare plus le programme caractère par caractère (fragile, et ça ne prouve pas qu'il
-    // s'exécute : c'est le rôle d'ExecutionIntegrationTest contre un vrai Piston). On vérifie les
-    // INVARIANTS du modèle RPC : (a) le binaire se dédouble (fork/re-exec) pour isoler le code
-    // étudiant ; (b) les symboles étudiant appelés par le harnais sont RENOMMÉS (le réel) et exposés
-    // via un STUB de même nom ; (c) le harnais est présent ; (d) le nonce n'est JAMAIS gravé et est lu
-    // sur stdin (par le parent). Un harnais = un programme : le nonce est le marqueur propre à chaque test.
-
-    /**
-     * Cas d'un langage compilé. {@code secondProcess} prouve le dédoublement (fork/re-exec) ;
-     * {@code renamedMarker} prouve le renommage du vrai symbole étudiant ; {@code stubMarker} prouve
-     * le stub de même nom (le harnais compile sans le vrai code) ; {@code stdinMarker} prouve la
-     * lecture du nonce sur l'entrée standard.
-     */
-    private record Compiled(String language, String pistonLanguage, String fileName, String studentCode,
-            String harness, String secondProcess, String renamedMarker, String stubMarker, String stdinMarker) {
-        @Override
-        public String toString() {
-            return language;
-        }
-    }
-
-    private static final String NONCE = "MOODIT_OK_n0nce";
-
-    static Stream<Compiled> compiledLanguages() {
-        return Stream.of(
-                new Compiled("Go", "go", "main.go",
-                        "package main\n\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                        "return solution() == 5",
-                        "/proc/self/exe", "func __moodit_s_solution", "func solution(", "Stdin"),
-                new Compiled("Rust", "rust", "main.rs",
-                        "fn solution() -> i32 { 5 }\nfn main() {}",
-                        "solution() == 5",
-                        "current_exe", "fn __moodit_s_solution", "fn solution(", "stdin"),
-                new Compiled("C", "c", "main.c",
-                        "int solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "return solution() == 5;",
-                        "fork(", "#define solution __moodit_s_solution", "int solution(void) {", "__rd1(0)"),
-                new Compiled("C++", "c++", "main.cpp",
-                        "int solution(){ return 5; }\nint main(){ return 0; }",
-                        "return solution() == 5;",
-                        "fork(", "#define solution __moodit_s_solution", "int solution(void) {", "__rd1(0)"),
-                new Compiled("C#", "csharp", "main.cs",
-                        "class S { public static int solution(){ return 5; } static void Main(string[] a){} }",
-                        "return S.solution() == 5;",
-                        "Process.Start", "__MooditStudent_S", "class S {", "Console.In"),
-                new Compiled("Java", "java", "Main.java",
-                        "public class Solution { public static int solution(){ return 5; } "
-                                + "public static void main(String[] a){} }",
-                        "return Solution.solution() == 5;",
-                        "ProcessBuilder", "__MooditStudent_Solution", "class Solution {", "System.in"));
-    }
-
-    private String assembleCompiled(Compiled c) {
-        var a = assembler.assemble(c.language(), c.studentCode(), c.harness(), NONCE);
-        assertThat(a.pistonLanguage()).isEqualTo(c.pistonLanguage());
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly(c.fileName());
-        return onlyFileContent(a);
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_deux_processus_avec_stub_et_symbole_renomme(Compiled c) {
-        String program = assembleCompiled(c);
-
-        // (a) Le binaire se dédouble (fork ou re-exec) : le code étudiant vit dans un autre processus.
-        assertThat(program).as("marqueur de second processus").contains(c.secondProcess());
-        // (b) Le vrai symbole étudiant est renommé, et un STUB de même nom l'expose au harnais.
-        assertThat(program).as("symbole étudiant renommé (le réel)").contains(c.renamedMarker());
-        assertThat(program).as("stub de même nom pour le harnais").contains(c.stubMarker());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_harnais_present_nonce_jamais_grave_lu_sur_stdin(Compiled c) {
-        String program = assembleCompiled(c);
-
-        // Le harnais (corps exact fourni par le prof) est présent dans le noteur.
-        assertThat(program).contains(c.harness());
-        // ANTI-TRICHE : le nonce n'est JAMAIS gravé — il est lu au RUNTIME sur stdin (par le parent).
-        assertThat(program).doesNotContain(NONCE);
-        assertThat(program).as("le parent doit lire le secret depuis stdin").contains(c.stdinMarker());
-    }
-
-    @Test
-    void java_notre_classe_d_entree_vient_en_premier() {
-        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté. Les imports
-        // (hissés en tête) la précèdent ; aucune classe étudiant ne vient avant __MooditMain.
-        String program = onlyFileContent(assembler.assemble("Java",
-                "public class Main { public static void main(String[] a){} }", "return true;", "N"));
-
-        assertThat(program).contains("public class __MooditMain {");
-        assertThat(program.indexOf("__MooditMain")).isLessThan(program.indexOf("__MooditStudent_Main"));
-    }
-
     // ── HTML (bundle vendor) ────────────────────────────────────────────────────
 
     @Test
@@ -254,17 +158,21 @@ class CodeAssemblerLanguagesTest {
             "node, javascript",
             "' Python ', python",
             "ts, typescript",
-            "cplusplus, c++",
-            "cs, csharp",
-            "c-sharp, csharp",
             "shell, bash",
             "sh, bash",
-            "golang, go",
             "sqlite, sqlite3",
             "SQLITE3, sqlite3",
     })
     void alias_de_langage_resolus_a_l_assemblage(String language, String pistonLanguage) {
         assertThat(assembler.assemble(language, "", "", "N").pistonLanguage()).isEqualTo(pistonLanguage);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"cplusplus", "cs", "c-sharp", "golang", "Java", "Rust", "C"})
+    void alias_compiles_refuses_a_l_assemblage_le_runner_docker_les_note(String language) {
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
+        assertThatThrownBy(() -> assembler.assemble(language, "", "", "N"))
+                .isInstanceOf(UnsupportedLanguageException.class);
     }
 
     @Test

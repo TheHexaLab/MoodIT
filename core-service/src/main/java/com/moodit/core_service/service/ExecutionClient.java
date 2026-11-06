@@ -69,16 +69,31 @@ public class ExecutionClient {
     }
 
     /**
-     * Nombre d'appels au sandbox pour corriger {@code harnessCount} harnais en {@code language} :
-     * un par harnais, sauf en SQL où un harnais de modification ({@code -- @student}) s'exécute en
-     * DEUX phases isolées, chacune avec son attente et son appel Piston. Le mode n'est pas déduit
-     * ici (execution-service l'analyse dans le harnais) : tout harnais SQL compte pour deux, ce qui
-     * ne fait qu'allonger le délai d'une question SQL en lecture seule.
+     * Nombre d'unités de travail du sandbox pour corriger {@code harnessCount} harnais en
+     * {@code language} — dimensionne le délai d'attente de la réponse :
+     * <ul>
+     *   <li>un par harnais (interprétés) ;</li>
+     *   <li>DEUX par harnais en SQL : un harnais de modification ({@code -- @student}) s'exécute en
+     *       deux phases isolées, chacune avec son attente et son appel Piston. Le mode n'est pas
+     *       déduit ici (execution-service l'analyse dans le harnais) : tout harnais SQL compte pour
+     *       deux, ce qui ne fait qu'allonger le délai d'une question SQL en lecture seule ;</li>
+     *   <li>DEUX par harnais + 2 pour un langage COMPILÉ (#116) : le runner Docker COMPILE puis
+     *       exécute chaque cas, et ajoute deux canaris anti-falsification — la compilation (jusqu'à
+     *       90 s de budget côté runner) peut dominer le temps d'exécution.</li>
+     * </ul>
      */
     static int pistonCalls(String language, int harnessCount) {
         String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
         boolean sql = lang.equals("sql") || lang.equals("sqlite") || lang.equals("sqlite3");
-        return sql ? 2 * harnessCount : harnessCount;
+        if (sql) {
+            return 2 * harnessCount;
+        }
+        boolean compiled = switch (lang) {
+            case "c", "c++", "cpp", "cplusplus", "go", "golang", "rust",
+                 "csharp", "c#", "cs", "c-sharp", "java" -> true;
+            default -> false;
+        };
+        return compiled ? 2 * harnessCount + 2 : harnessCount;
     }
 
     // Client par appel : le délai de lecture dépend du nombre d'appels au sandbox. Un sandbox

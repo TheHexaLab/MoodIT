@@ -29,6 +29,12 @@ dependencies {
 	// Validation des payloads d'évaluation
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 
+	// Runner Docker des langages compilés (#116) : client API Docker (transport zerodep :
+	// socket Unix en prod/conteneur, named pipe en dev Windows) + tar en mémoire des jobs.
+	implementation("com.github.docker-java:docker-java-core:3.4.1")
+	implementation("com.github.docker-java:docker-java-transport-zerodep:3.4.1")
+	implementation("org.apache.commons:commons-compress:1.27.1")
+
 	// Lombok
 	compileOnly("org.projectlombok:lombok")
 	annotationProcessor("org.projectlombok:lombok")
@@ -66,8 +72,11 @@ tasks.test {
 pitest {
 	pitestVersion = "1.30.1"
 	junit5PluginVersion = "1.2.3"
-	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.piston.*")
-	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest")
+	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.piston.*", "com.moodit.execution_service.sandbox.*")
+	// DockerSandbox = enveloppe d'infra (client Docker) : couverte par DockerRunnerIntegrationTest
+	// (exclu de PIT comme toute intégration), pas par les tests unitaires → on ne la mute pas.
+	excludedClasses = setOf("com.moodit.execution_service.sandbox.DockerSandbox")
+	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest", "*DockerRunnerIntegrationTest")
 	threads = 4
 	outputFormats = setOf("XML", "HTML")
 	timestampedReports = false

@@ -501,18 +501,26 @@ jobs:
           docker cp "$cid:/out/." vendor-ci/
           docker rm "$cid"
 
+      # Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
+      # Exigées par DockerRunnerIntegrationTest (notation compilée + matrice anti-triche).
+      - name: Construire les images runner (langages compilés)
+        run: bash docker/runners/build.sh
+
       - name: Tests d'intégration
         working-directory: execution-service
         env:
           PISTON_URL: http://localhost:2000
           APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
-          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent) doit FAIRE
-          # ÉCHOUER le job, pas l'ignorer : sinon un Piston qui ne démarre pas laisserait ce gate de
-          # sécurité passer au vert sans avoir rien exécuté. (En local, drapeau absent → tests ignorés.)
+          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent, démon
+          # Docker/images runner absents) doit FAIRE ÉCHOUER le job, pas l'ignorer : sinon un Piston
+          # ou un runner qui ne démarre pas laisserait ce gate de sécurité passer au vert sans avoir
+          # rien exécuté. (En local, drapeaux absents → tests ignorés.)
           PISTON_REQUIRED: "true"
+          SANDBOX_REQUIRED: "true"
         run: |
           chmod +x ./gradlew
-          ./gradlew test --tests "*ExecutionIntegrationTest" --no-daemon --console=plain
+          ./gradlew test --tests "*ExecutionIntegrationTest" --tests "*DockerRunnerIntegrationTest" \
+            --no-daemon --console=plain
 
       - name: Publier le rapport
         if: always()

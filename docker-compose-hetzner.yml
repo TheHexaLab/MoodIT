@@ -289,9 +289,16 @@ services:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
       PISTON_URL: http://piston:2000
       # 2 exécutions simultanées × 512 Mo de compilation au pire : tient dans le mem_limit de Piston
-      # (1,5 Go, marge comprise). Augmenter l'un impose de revoir l'autre.
+      # (1,5 Go, marge comprise). Augmenter l'un impose de revoir l'autre. La même limite borne le
+      # nombre de CONTENEURS RUNNER simultanés (#116) : 2 × 1,5 Go de runner — surveiller la RAM du VPS.
       EXEC_MAX_CONCURRENT: "2"
     mem_limit: 512m
+    volumes:
+      # Runner des langages COMPILÉS (#116) : conteneurs jetables moodit-runner-* via le démon
+      # Docker de l'HÔTE (docker-outside-of-docker). Accès root-équivalent au démon : assumé,
+      # service interne sans route d'admin ; cf. deploy/DEPLOY.md. Images construites au déploiement
+      # par docker/runners/build.sh.
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - internal
       - sandbox

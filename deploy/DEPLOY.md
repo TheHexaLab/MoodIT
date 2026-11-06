@@ -86,6 +86,11 @@ sed -i 's/moodit.example.com/TON_DOMAINE/' deploy/Caddyfile
 Depuis la **racine** du repo :
 
 ```bash
+# Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
+# Conteneurs jetables lancés par execution-service pour noter Go/Rust/C/C++/C#/Java
+# (~6 Go d'images au total ; à relancer quand docker/runners/ change).
+./docker/runners/build.sh
+
 docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
@@ -247,3 +252,14 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
   `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
   puis vérifier le job CI `integration` (vrai Piston) avant de déployer.
+- **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
+  des conteneurs jetables `moodit-runner-*` (réseau coupé, 1,5 Go de mémoire, 512 PID, 2 CPU,
+  `no-new-privileges` ; seule capacité ajoutée : `SYS_PTRACE`, pour que le superviseur trace le
+  processus étudiant et détecte les lectures du harnais). Dans le conteneur, le code étudiant
+  tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
+  fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
+  Pour lancer ces conteneurs, `execution-service` monte `/var/run/docker.sock` : c'est un accès
+  root-équivalent au démon de l'hôte, assumé pour ce service interne (aucune route d'admin, appels
+  authentifiés par le gateway/`X-Internal-Token`). Les images sont construites par
+  `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
+  fait automatiquement).

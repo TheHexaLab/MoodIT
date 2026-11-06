@@ -4,11 +4,13 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 /**
- * Harnais de test d'une question Code (table test_case) : {@code harnessCode} est exécuté contre la
- * soumission (renvoie vrai/faux). Les langages compilés sont notés en DEUX processus isolés par
- * execution-service (code étudiant isolé, nonce/verdict dans le parent — POO comprise). Le harnais
- * est écrit dans le langage {@code Language.harness_language_id} ou celui de la question.
- * {@code weight} = crédit partiel. DONNÉES CACHÉES : jamais exposées au répondant.
+ * Harnais de test d'une question Code (table test_case) : {@code harnessCode} est un TEST
+ * exécutable contre la soumission. Interprétés/SQL/vues : code qui renvoie vrai/faux, dans le
+ * langage {@code Language.harness_language_id} ou celui de la question. Langages COMPILÉS (#116) :
+ * un VRAI test du langage (JUnit, NUnit, go test, cargo test, moodit_check.h), noté par le runner
+ * Docker isolé d'execution-service (code étudiant sous UID dédié, harnais verrouillé, canaris
+ * anti-falsification). {@code weight} = crédit partiel. DONNÉES CACHÉES : jamais exposées au
+ * répondant.
  */
 @Entity
 @Data

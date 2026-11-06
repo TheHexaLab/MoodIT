@@ -268,6 +268,8 @@ rollback() {
 step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
+# Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
+if ! stream "Build des images runner (langages compilés)" bash docker/runners/build.sh; then rollback; fi
 ok "Images construites."
 
 step "5/5 · Redémarrage des services"
