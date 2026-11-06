@@ -60,6 +60,25 @@ describe('HarnessBody', () => {
     expect(names.map((n) => n.value)).toEqual(['Cas A', 'Cas B']);
   });
 
+  it('« Ajouter » fait défiler la liste jusqu’au nouveau harnais', () => {
+    // jsdom n'implémente pas scrollIntoView, et rAF est rendu synchrone pour observer l'effet.
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const raf = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+    try {
+      renderHarness();
+      fireEvent.click(screen.getByText(`+ ${t.add}`));
+      expect(scrolled).toHaveBeenCalled();
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it('« Ajouter » insère une carte avec le squelette par défaut et poids 1', () => {
     renderHarness({ defaultHarnessCode: '// SKELETON\n' });
     fireEvent.click(screen.getByText(`+ ${t.add}`));

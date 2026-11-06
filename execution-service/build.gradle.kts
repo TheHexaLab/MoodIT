@@ -31,9 +31,20 @@ dependencies {
 
 	// Runner Docker des langages compilés (#116) : client API Docker (transport zerodep :
 	// socket Unix en prod/conteneur, named pipe en dev Windows) + tar en mémoire des jobs.
-	implementation("com.github.docker-java:docker-java-core:3.4.1")
+	// BouncyCastle exclu (CVE critique en 1.76, bloquante pour Trivy) : il ne sert qu'à
+	// l'authentification TLS d'un démon distant (DOCKER_CERT_PATH), jamais utilisée ici —
+	// on parle au démon local par socket/named pipe. Guava forcé : la 19.0 transitive a une
+	// CVE DoS (fixée en 33.x).
+	implementation("com.github.docker-java:docker-java-core:3.4.1") {
+		exclude(group = "org.bouncycastle")
+	}
 	implementation("com.github.docker-java:docker-java-transport-zerodep:3.4.1")
 	implementation("org.apache.commons:commons-compress:1.27.1")
+	constraints {
+		implementation("com.google.guava:guava:33.7.2-jre") {
+			because("CVE-2026-102554 : DoS via la 19.0 transitive de docker-java-core")
+		}
+	}
 
 	// Lombok
 	compileOnly("org.projectlombok:lombok")

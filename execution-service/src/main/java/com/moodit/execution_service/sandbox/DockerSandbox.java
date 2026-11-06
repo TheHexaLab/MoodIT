@@ -56,6 +56,12 @@ public class DockerSandbox {
         this.nanoCpus = (long) (cpus * 1_000_000_000L);
     }
 
+    /** Pour les tests : client Docker injecté (aucune résolution d'hôte). */
+    DockerSandbox(DockerClient client, long memoryMb, long pidsLimit, double cpus) {
+        this("tcp://injecte-pour-les-tests", memoryMb, pidsLimit, cpus);
+        this.client = client;
+    }
+
     /** Démon local par défaut selon l'OS (dev Windows : npipe ; Linux/conteneur : socket Unix). */
     static String defaultDockerHost() {
         String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);

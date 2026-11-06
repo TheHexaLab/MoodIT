@@ -62,9 +62,26 @@ class DockerEvaluatorTest {
 
     @Test
     void json_illisible_leve_sandbox_exception() {
-        supervisorReturns("pas du json");
+        // stderr volumineux : tronqué dans le journal, jamais dans l'exception.
+        when(sandbox.run(any(), anyMap(), anyLong()))
+                .thenReturn(new DockerSandbox.ContainerRun("pas du json", "x".repeat(5000), 1));
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(SandboxException.class);
+        // stderr absent : le journal reste robuste (aucune NPE).
+        when(sandbox.run(any(), anyMap(), anyLong()))
+                .thenReturn(new DockerSandbox.ContainerRun("toujours pas du json", null, 1));
+        assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                .isInstanceOf(SandboxException.class);
+    }
+
+    @Test
+    void evenement_non_suspect_avec_cas_ne_marque_pas_le_verdict() {
+        supervisorReturns("""
+                {"v":1,"results":[{"index":0,"passed":true,"ms":1},{"index":1,"passed":true,"ms":1}],
+                 "events":[{"type":"trace_indisponible","case":0}],"canaries":"ok"}
+                """);
+        List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
+        assertThat(results.get(0).detail()).isNull();
     }
 
     @Test

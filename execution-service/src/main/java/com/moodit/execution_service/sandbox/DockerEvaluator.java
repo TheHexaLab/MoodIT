@@ -40,6 +40,7 @@ public class DockerEvaluator {
     private final String imagePrefix;
     private final String imageTag;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public DockerEvaluator(
             @Value("${app.sandbox.docker-host:}") String dockerHost,
             @Value("${app.sandbox.image-prefix:moodit-runner-}") String imagePrefix,
@@ -105,7 +106,7 @@ public class DockerEvaluator {
             String detail = event.path("detail").asString("");
             int caseIndex = event.path("case").asInt(-1);
             log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
-            if (caseIndex >= 0 && caseIndex < cases.size() && isSuspicious(type)) {
+            if (isSuspicious(type) && caseIndex >= 0 && caseIndex < cases.size()) {
                 eventByCase.merge(caseIndex, type, (a, b) -> a + ", " + b);
             }
         }

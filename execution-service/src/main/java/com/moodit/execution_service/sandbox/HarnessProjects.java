@@ -121,7 +121,9 @@ public final class HarnessProjects {
                 // privés du code étudiant, comme un vrai test unitaire.
                 files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n");
             }
-            case "c", "cpp" -> {
+            // default = C et C++ : lang vient de runnerLanguage(), qui ne renvoie que les six
+            // valeurs canoniques — il ne reste que "c" et "cpp" ici.
+            default -> {
                 String ext = lang.equals("c") ? "c" : "cpp";
                 files.put(base + "solution." + ext, studentCode);
                 // Prélude généré : inclut le code étudiant (main neutralisé) + moodit_check.h ;
@@ -134,7 +136,6 @@ public final class HarnessProjects {
                         + "#include <moodit_check.h>\n\n"
                         + harnessCode);
             }
-            default -> throw new UnsupportedLanguageException("Langage runner inconnu : " + lang);
         }
     }
 
@@ -185,12 +186,12 @@ public final class HarnessProjects {
                         }
                     }
                     """;
-            case "c", "cpp" -> """
+            // default = C et C++ (seules valeurs restantes de runnerLanguage()).
+            default -> """
                     MOODIT_TEST(moodit_canari) {
                         MOODIT_CHECK(__MOODIT_A__ == __MOODIT_B__);
                     }
                     """;
-            default -> throw new UnsupportedLanguageException("Langage runner inconnu : " + lang);
         };
     }
 

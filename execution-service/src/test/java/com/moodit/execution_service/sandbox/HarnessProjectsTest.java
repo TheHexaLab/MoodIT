@@ -103,9 +103,11 @@ class HarnessProjectsTest {
     @Test
     void job_json_echappe_les_noms_de_cas() {
         HarnessProjects.Project project = HarnessProjects.build("Java", "class A {}",
-                List.of(new TestCaseInput("nom \"piégé\"\navec\tsaut", "h", 1)), null);
+                List.of(new TestCaseInput("nom \"piégé\"\navec\tsaut", "h", 1),
+                        new TestCaseInput("anti\\slash\rretour\u0001contrôle", "h", 1)), null);
         assertThat(project.files().get("job.json"))
-                .contains("\"name\":\"nom \\\"piégé\\\"\\navec\\tsaut\"");
+                .contains("\"name\":\"nom \\\"piégé\\\"\\navec\\tsaut\"")
+                .contains("\"name\":\"anti\\\\slash\\rretour\\u0001contrôle\"");
     }
 
     @Test

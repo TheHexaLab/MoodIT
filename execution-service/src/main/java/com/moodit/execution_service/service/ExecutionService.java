@@ -71,12 +71,6 @@ public class ExecutionService {
         return execute(language, version, files, null, null);
     }
 
-    /** Variante avec {@code stdin} (secret injecté au runtime pour les langages compilés), défaut serveur. */
-    private PistonClient.Result execute(String language, String version, List<PistonClient.File> files,
-            String stdin) {
-        return execute(language, version, files, stdin, null);
-    }
-
     /** Variante complète : {@code timeoutMs} = temps limite demandé par le prof ({@code null} → défaut). */
     private PistonClient.Result execute(String language, String version, List<PistonClient.File> files,
             String stdin, Integer timeoutMs) {

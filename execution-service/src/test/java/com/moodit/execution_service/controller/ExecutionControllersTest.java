@@ -115,6 +115,16 @@ class ExecutionControllersTest {
     }
 
     @Test
+    void runner_docker_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
+        when(service.evaluate(any())).thenThrow(
+                new com.moodit.execution_service.sandbox.SandboxException("Démon Docker injoignable (npipe)"));
+
+        mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"));
+    }
+
+    @Test
     void interne_avec_le_bon_jeton_evalue() throws Exception {
         when(service.evaluate(any())).thenReturn(List.of(new TestResult("t1", 2, true, null)));
 
