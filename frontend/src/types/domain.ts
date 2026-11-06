@@ -250,20 +250,8 @@ export interface DragItem {
 export interface TestCase {
   id: number;
   name: string;
-  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). Vide pour un cas structuré. */
+  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code) ; renvoie vrai/faux. */
   harnessCode: string;
-  /**
-   * CAS STRUCTURÉ (#116) — alternative au harnais-code pour les langages compilés : `expr` est une
-   * EXPRESSION (dans le langage de la question) qui RENVOIE la valeur testée (appel de fonction,
-   * construction d'objet + méthode, séquence) ; sa sortie est comparée à `expectedJson` HORS sandbox.
-   * `expr` renseigné ⇒ le cas est structuré.
-   */
-  expr?: string;
-  /** Valeur attendue (JSON) du cas structuré. */
-  expectedJson?: string;
-  /** Mode de comparaison : `exact` (défaut), `gt`/`ge`/`lt`/`le`, `ne`, `contains`/`regex`,
-   *  `unordered`, ou `compound` (combinaison ET/OU encodée dans `expectedJson`). */
-  compareMode?: string;
   weight: number;
 }
 
@@ -275,12 +263,6 @@ export interface Language {
   harnessTemplate?: string;
   /** Code de départ par défaut proposé pour ce langage (table Language.start_code_template). */
   startCodeTemplate?: string;
-  /**
-   * #116 — Gabarit d'EXPRESSION d'un cas structuré (langages compilés), table
-   * Language.expr_template. Squelette commenté pré-rempli par l'éditeur. Absent pour les
-   * langages notés par harnais-code.
-   */
-  exprTemplate?: string;
   /**
    * Langage dans lequel s'écrivent les harnais des questions utilisant CE langage
    * (table Language.harness_language_id, auto-référence). Absent → harnais dans le

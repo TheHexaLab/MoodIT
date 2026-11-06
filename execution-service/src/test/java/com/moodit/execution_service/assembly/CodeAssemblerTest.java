@@ -419,17 +419,6 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void serveurs_de_cas_structures_generes_pour_tous_les_compiles() {
-        // Couvre les serveurs structurés (émission de valeur, attendus hors sandbox) de chaque compilé.
-        for (String lang : new String[] {"rust", "c", "c++", "csharp", "java"}) {
-            var a = assembler.assembleServer(lang, "// code etudiant",
-                    java.util.List.of(new CodeAssembler.ServerCase("doubler(5)", "int")));
-            assertThat(a.files()).isNotEmpty();
-            assertThat(onlyFileContent(a)).contains("doubler(5)");
-        }
-    }
-
-    @Test
     void csharp_poo_couvre_void_prive_et_types_non_supportes() {
         var a = assembler.assemble("C#",
                 "class Widget { int x;\n"

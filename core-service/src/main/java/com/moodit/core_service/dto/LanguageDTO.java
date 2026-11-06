@@ -21,7 +21,5 @@ public class LanguageDTO {
     private String name;
     private String harnessTemplate;
     private String startCodeTemplate;
-    /** #116 — gabarit d'expression d'un cas structuré (langages compilés). Prof uniquement. */
-    private String exprTemplate;
     private Integer harnessLanguageId;
 }

@@ -3,7 +3,6 @@ package com.moodit.execution_service.controller;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
-import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.security.GatewayAuthFilter;
 import com.moodit.execution_service.service.ExecutionLimiter;
@@ -44,17 +43,6 @@ public class ExecutionController {
             @RequestHeader(value = GatewayAuthFilter.USER_EMAIL_HEADER, required = false) String user,
             @Valid @RequestBody EvaluateRequest request) {
         return ResponseEntity.ok(limiter.forUser(user, () -> executionService.evaluate(request)));
-    }
-
-    /**
-     * Évalue le code par CAS STRUCTURÉS (questions « appel de fonction », #116) : le code tourne en
-     * serveur RPC pur, les attendus sont comparés côté service — jamais dans le sandbox.
-     */
-    @PostMapping("/evaluate-structured")
-    public ResponseEntity<List<TestResult>> evaluateStructured(
-            @RequestHeader(value = GatewayAuthFilter.USER_EMAIL_HEADER, required = false) String user,
-            @Valid @RequestBody StructuredEvaluateRequest request) {
-        return ResponseEntity.ok(limiter.forUser(user, () -> executionService.evaluateStructured(request)));
     }
 
     /** Exécute le code TEL QUEL (sans harnais) et renvoie sa sortie brute (bouton « play »). */

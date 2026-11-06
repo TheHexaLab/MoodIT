@@ -182,61 +182,27 @@ describe('HarnessBody', () => {
     });
   });
 
-  // ── Cas STRUCTURÉS (#116) : langage compilé → expression + attendu, pas de harnais-code ──
-  describe('cas structurés (langage compilé)', () => {
+  // Harnais-code PARTOUT, y compris les langages compilés (notés en deux processus isolés) :
+  // l'éditeur montre toujours l'éditeur de harnais-code.
+  describe('harnais-code pour un langage compilé', () => {
     const JAVA: Language = { id: 5, name: 'Java' };
-    const sample = {
-      id: 1,
-      name: 'Cas A',
-      harnessCode: '',
-      expr: 'return new Rectangle(3, 4).aire();',
-      expectedJson: '12',
-      compareMode: 'exact',
-      weight: 1,
-    };
 
-    it("affiche le bandeau structuré et l'éditeur d'expression (pas d'éditeur de harnais)", () => {
-      renderHarness({ harnessLanguage: JAVA, testCases: [{ ...sample }] });
-      expect(screen.getByText(t.structuredInfoBanner)).toBeTruthy();
-      expect(screen.getByLabelText(t.exprAria(1))).toBeTruthy();
-      // Pas d'éditeur de code harnais en mode structuré.
-      expect(screen.queryByLabelText(t.codeAria(1))).toBeNull();
-    });
-
-    it("remonte l'expression et l'attendu à la sauvegarde", () => {
-      const { onSave } = renderHarness({ harnessLanguage: JAVA, testCases: [{ ...sample }] });
-      fireEvent.click(screen.getByText(t.save));
-      const saved = onSave.mock.calls[0][0] as TestCaseDraft[];
-      expect(saved[0].expr).toBe('return new Rectangle(3, 4).aire();');
-      expect(saved[0].expectedJson).toBe('12');
-      expect(saved[0].compareMode).toBe('exact');
-    });
-
-    it("enregistrement bloqué tant qu'une expression est vide", () => {
-      // Mode structuré déclenché par un cas DÉJÀ porteur d'expr ; un second cas à expr vide bloque.
+    it("affiche l'éditeur de harnais-code pour un compilé", () => {
       renderHarness({
         harnessLanguage: JAVA,
-        testCases: [
-          { id: 1, name: 'A', harnessCode: '', expr: 'return 1;', expectedJson: '1', compareMode: 'exact', weight: 1 },
-          { id: 2, name: 'B', harnessCode: '', expr: '', expectedJson: '2', compareMode: 'exact', weight: 1 },
-        ],
+        testCases: [{ id: 1, name: 'A', harnessCode: 'return Main.doubler(5) == 10;', weight: 1 }],
       });
-      const save = screen.getByText(t.save).closest('button') as HTMLButtonElement;
-      expect(save.disabled).toBe(true);
+      expect(screen.getByLabelText(t.codeAria(1))).toBeTruthy();
     });
-  });
 
-  // ── Bascule (#116) : un compilé SANS expr part en HARNAIS-CODE (isolation 2-process), pas structuré.
-  describe('compilé sans expr → harnais-code', () => {
-    const GO: Language = { id: 6, name: 'Go' };
-
-    it("affiche l'éditeur de harnais (pas le mode structuré) pour un nouveau compilé", () => {
-      renderHarness({
-        harnessLanguage: GO,
-        testCases: [{ id: 1, name: 'A', harnessCode: 'return doubler(5) == 10', weight: 1 }],
+    it('remonte le harnais-code à la sauvegarde', () => {
+      const { onSave } = renderHarness({
+        harnessLanguage: JAVA,
+        testCases: [{ id: 1, name: 'A', harnessCode: 'return Main.doubler(5) == 10;', weight: 1 }],
       });
-      expect(screen.getByLabelText(t.codeAria(1))).toBeTruthy();       // éditeur de harnais-code
-      expect(screen.queryByText(t.structuredInfoBanner)).toBeNull();   // pas de bandeau structuré
+      fireEvent.click(screen.getByText(t.save));
+      const saved = onSave.mock.calls[0][0] as TestCaseDraft[];
+      expect(saved[0].harnessCode).toBe('return Main.doubler(5) == 10;');
     });
   });
 });

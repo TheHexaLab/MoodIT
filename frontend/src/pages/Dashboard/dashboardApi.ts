@@ -263,34 +263,19 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  // #116 : si les cas sont STRUCTURÉS (une `expr` renseignée), on évalue l'expression dans un serveur
-  // pur et on compare l'attendu (parsé en JSON) hors sandbox — jamais exposé au code étudiant.
-  const structured = input.testCases.some((t) => t.expr != null && t.expr !== '');
-  const path = structured ? '/exec/evaluate-structured' : '/exec/evaluate';
-  const body = structured
-    ? {
-        language: input.language,
-        code: input.code,
-        timeoutMs: input.execTimeoutMs,
-        cases: input.testCases.map((t) => ({
-          name: t.name,
-          expr: t.expr,
-          expected: parseJsonOrNull(t.expectedJson),
-          compare: t.compareMode,
-          weight: t.weight,
-        })),
-      }
-    : {
-        language: input.language,
-        code: input.code,
-        timeoutMs: input.execTimeoutMs,
-        testCases: input.testCases.map((t) => ({
-          name: t.name,
-          harnessCode: t.harnessCode,
-          weight: t.weight,
-        })),
-      };
-  const res = await apiFetch(path, {
+  // Le service d'exécution assemble code + harnais (compilés : en deux processus isolés) et renvoie
+  // le verdict par harnais. timeoutMs : temps limite choisi par le prof (absent → défaut sandbox).
+  const body = {
+    language: input.language,
+    code: input.code,
+    timeoutMs: input.execTimeoutMs,
+    testCases: input.testCases.map((t) => ({
+      name: t.name,
+      harnessCode: t.harnessCode,
+      weight: t.weight,
+    })),
+  };
+  const res = await apiFetch('/exec/evaluate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -298,16 +283,6 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
   if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'évaluation du code");
   return await res.json();
-}
-
-/** Parse un JSON (args/attendu d'un cas structuré) ; `null` si vide ou invalide. */
-function parseJsonOrNull(json?: string): unknown {
-  if (json == null || json.trim() === '') return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
 }
 
 /**

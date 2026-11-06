@@ -1,13 +1,9 @@
 package com.moodit.execution_service.service;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
-import com.moodit.execution_service.dto.StructuredCase;
-import com.moodit.execution_service.dto.StructuredEvaluateRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.piston.PistonClient;
@@ -35,7 +31,6 @@ import java.util.List;
 public class ExecutionService {
 
     private static final SecureRandom RNG = new SecureRandom();
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final CodeAssembler assembler;
     private final PistonClient piston;
@@ -89,206 +84,6 @@ public class ExecutionService {
                     request.timeoutMs()));
         }
         return results;
-    }
-
-    /**
-     * Évalue une question par CAS STRUCTURÉS (#116). Le code étudiant est assemblé en SERVEUR qui
-     * ÉVALUE les EXPRESSIONS des cas (sans harnais, sans nonce) et émet, par cas et dans l'ordre, DEUX
-     * lignes : statut (1=ok, 0=exception) puis la valeur en texte. On exécute UNE fois (Piston est
-     * one-shot), puis on compare ICI chaque valeur à l'attendu — qui ne touche JAMAIS le sandbox. Le
-     * verdict et les attendus restent donc hors de portée de l'étudiant, quel que soit le langage.
-     */
-    public List<TestResult> evaluateStructured(StructuredEvaluateRequest request) {
-        List<CodeAssembler.ServerCase> serverCases = request.cases().stream()
-                .map(c -> new CodeAssembler.ServerCase(c.expr(), kindOf(c.expected())))
-                .toList();
-        CodeAssembler.Assembled asm =
-                assembler.assembleServer(request.language(), request.code(), serverCases);
-        PistonClient.Result result =
-                execute(asm.pistonLanguage(), request.version(), asm.files(), null, request.timeoutMs());
-
-        // Échec de compilation → tous les cas échouent avec le message de compilation.
-        PistonClient.Stage compile = result.compile();
-        if (compile != null && compile.code() != null && compile.code() != 0) {
-            String msg = firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation");
-            return request.cases().stream()
-                    .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, msg)).toList();
-        }
-
-        PistonClient.Stage run = result.run();
-        // Deux lignes par cas : statut (1/0) puis valeur. split(-1) conserve les lignes vides.
-        String[] lines = (run == null || run.stdout() == null) ? new String[0] : run.stdout().split("\n", -1);
-        int n = request.cases().size();
-        boolean signaled = run != null && run.signal() != null;
-        // FAIL-CLOSED (sécurité) : l'émetteur écrit EXACTEMENT 2 lignes par cas (+ une vide finale).
-        // Toute autre longueur = le code étudiant a écrit sur stdout (triche en forgeant une paire
-        // « statut+valeur », ou simple débogage) → on ne lit pas un verdict dans une sortie qu'il a pu
-        // polluer : tous les cas échouent. Le stdout étudiant est normalement redirigé vers stderr par
-        // le serveur (cf. CodeAssembler), donc une sortie propre a bien 2·N+1 lignes.
-        boolean malformed = !signaled && lines.length != 2 * n + 1;
-        List<TestResult> out = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            StructuredCase c = request.cases().get(i);
-            int weight = c.effectiveWeight();
-            if (signaled) {
-                out.add(new TestResult(c.name(), weight, false,
-                        "Interrompu (signal " + run.signal() + ") — dépassement de temps ou de mémoire probable"));
-                continue;
-            }
-            if (malformed) {
-                out.add(new TestResult(c.name(), weight, false,
-                        "Sortie du serveur inattendue — le code a-t-il écrit sur la sortie standard ?"));
-                continue;
-            }
-            String status = lines[2 * i].trim();
-            String payload = lines[2 * i + 1];
-            if (!"1".equals(status)) {
-                out.add(new TestResult(c.name(), weight, false,
-                        "L'expression a échoué (exception/panique) pour ce cas"));
-                continue;
-            }
-            JsonNode value;
-            try {
-                value = MAPPER.readTree(payload);
-            } catch (RuntimeException e) {
-                // Valeur non-JSON (chaîne brute émise par un serveur sans lib JSON) → traitée en chaîne.
-                value = MAPPER.readTree(MAPPER.writeValueAsString(payload));
-            }
-            boolean passed = jsonMatches(value, c.expected(), c.compareMode());
-            out.add(new TestResult(c.name(), weight, passed, passed ? null
-                    : "Attendu " + c.expected() + ", obtenu " + value));
-        }
-        return out;
-    }
-
-    /** Kind de l'attendu (pour l'émission typée des serveurs C/C++) : int/double/bool/string. */
-    private static String kindOf(JsonNode expected) {
-        if (expected == null) return "string";
-        // Composé : le kind vient de la borne de la 1re condition (bornes supposées de même nature).
-        if (expected.isObject() && expected.has("conditions")) {
-            JsonNode conds = expected.path("conditions");
-            return (conds.isArray() && !conds.isEmpty())
-                    ? kindOf(parseConditionValue(conds.get(0).path("value")))
-                    : "string";
-        }
-        if (expected.isBoolean()) return "bool";
-        if (expected.isIntegralNumber()) return "int";
-        if (expected.isNumber()) return "double";
-        return "string";
-    }
-
-
-
-    /** Compare une sortie à l'attendu selon le mode : {@code exact}, {@code unordered} (collection sans
-     *  ordre), les relationnels {@code gt}/{@code ge}/{@code lt}/{@code le} (la borne — l'attendu —
-     *  reste hors sandbox), {@code ne} (différent), {@code contains}/{@code regex} (sur chaîne) et
-     *  {@code compound} (combinaison ET/OU). Les comparaisons numériques sont faites sur la valeur
-     *  ({@code 10} vaut {@code 10.0}) ; une marge de tolérance s'exprime en composant une plage
-     *  ({@code ge a} ET {@code le b}). */
-    private static boolean jsonMatches(JsonNode actual, JsonNode expected, String mode) {
-        if (actual == null) actual = MAPPER.nullNode();
-        if (expected == null) expected = MAPPER.nullNode();
-        switch (mode) {
-            case "unordered":
-                if (!actual.isArray() || !expected.isArray() || actual.size() != expected.size()) {
-                    return actual.equals(expected);
-                }
-                List<String> a = new ArrayList<>();
-                List<String> b = new ArrayList<>();
-                actual.forEach(n -> a.add(n.toString()));
-                expected.forEach(n -> b.add(n.toString()));
-                a.sort(null);
-                b.sort(null);
-                return a.equals(b);
-            case "gt":
-            case "ge":
-            case "lt":
-            case "le": {
-                // Relationnels : n'ont de sens qu'entre nombres ; sinon, inconcluant → échec.
-                if (!actual.isNumber() || !expected.isNumber()) return false;
-                double d = actual.asDouble();
-                double e = expected.asDouble();
-                return switch (mode) {
-                    case "gt" -> d > e;
-                    case "ge" -> d >= e;
-                    case "lt" -> d < e;
-                    default -> d <= e; // le
-                };
-            }
-            case "ne":
-                if (actual.isNumber() && expected.isNumber()) return actual.asDouble() != expected.asDouble();
-                return !actual.equals(expected);
-            case "contains":
-                // Sous-chaîne : la valeur (texte) contient l'attendu (texte, la borne cachée).
-                return asPlainString(actual).contains(asPlainString(expected));
-            case "regex":
-                // Recherche d'un motif (java.util.regex) dans la valeur ; ancrer avec ^…$ pour un
-                // match complet. Motif invalide → échec (jamais d'exception qui casserait la notation).
-                try {
-                    return java.util.regex.Pattern.compile(asPlainString(expected))
-                            .matcher(asPlainString(actual)).find();
-                } catch (java.util.regex.PatternSyntaxException e) {
-                    return false;
-                }
-            case "compound":
-                return matchesCompound(actual, expected);
-            default: // exact
-                if (actual.isNumber() && expected.isNumber()) return actual.asDouble() == expected.asDouble();
-                return actual.equals(expected);
-        }
-    }
-
-    /**
-     * Comparaison COMPOSÉE : {@code expected} = {@code {"conditions":[{"compare","value"}…],
-     * "connectors":["and"|"or"…]}}. Chaque sous-condition est évaluée contre {@code actual} (via
-     * {@link #jsonMatches}), puis combinée avec priorité ET &gt; OU, sans parenthèses : des groupes
-     * ET reliés par des OU. Liste vide / forme invalide → échec. L'attendu (les bornes) reste hors
-     * sandbox comme pour un cas simple.
-     */
-    private static boolean matchesCompound(JsonNode actual, JsonNode expected) {
-        JsonNode conds = expected == null ? null : expected.path("conditions");
-        if (conds == null || !conds.isArray() || conds.isEmpty()) return false;
-        JsonNode conns = expected.path("connectors");
-        boolean orAcc = false;
-        boolean andAcc = evalCondition(actual, conds.get(0));
-        for (int k = 1; k < conds.size(); k++) {
-            String conn = (k - 1 < conns.size()) ? conns.get(k - 1).asString() : "and";
-            if ("or".equalsIgnoreCase(conn)) {
-                orAcc = orAcc || andAcc;   // ferme le groupe ET courant, en ouvre un nouveau
-                andAcc = evalCondition(actual, conds.get(k));
-            } else {
-                andAcc = andAcc && evalCondition(actual, conds.get(k));
-            }
-        }
-        return orAcc || andAcc;
-    }
-
-    /** Évalue UNE sous-condition {@code {compare, value}} ({@code value} = texte JSON, comme un attendu simple). */
-    private static boolean evalCondition(JsonNode actual, JsonNode cond) {
-        if (cond == null) return false;
-        String cmp = cond.path("compare").asString();
-        if (cmp == null || cmp.isBlank()) cmp = "exact";
-        return jsonMatches(actual, parseConditionValue(cond.path("value")), cmp.toLowerCase(java.util.Locale.ROOT));
-    }
-
-    /** La borne d'une sous-condition est stockée en TEXTE JSON : on la parse (repli : chaîne brute). */
-    private static JsonNode parseConditionValue(JsonNode valueNode) {
-        if (valueNode == null || valueNode.isMissingNode() || valueNode.isNull()) return MAPPER.nullNode();
-        if (valueNode.isString()) {
-            try {
-                return MAPPER.readTree(valueNode.asString());
-            } catch (RuntimeException e) {
-                return valueNode; // valeur non-JSON → comparée comme chaîne
-            }
-        }
-        return valueNode;
-    }
-
-    /** Texte « nu » d'un nœud pour les comparaisons de chaîne : contenu si c'est une chaîne JSON,
-     *  sinon sa forme JSON (ex. {@code 123}). Null/absent → chaîne vide. */
-    private static String asPlainString(JsonNode n) {
-        if (n == null || n.isNull() || n.isMissingNode()) return "";
-        return n.isString() ? n.asString() : n.toString();
     }
 
     /**

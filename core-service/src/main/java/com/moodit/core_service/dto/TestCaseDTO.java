@@ -17,9 +17,5 @@ public class TestCaseDTO {
     private Integer id;
     private String name;
     private String harnessCode;
-    // Cas structuré (#116) — expression renvoyant la valeur testée + attendu (hors sandbox).
-    private String expr;
-    private String expectedJson;
-    private String compareMode;
     private Integer weight;
 }

@@ -1,7 +1,6 @@
 package com.moodit.core_service.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
@@ -105,7 +104,6 @@ public class QuizService {
                         .name(l.getName())
                         .harnessTemplate(l.getHarnessTemplate())
                         .startCodeTemplate(l.getStartCodeTemplate())
-                        .exprTemplate(l.getExprTemplate())
                         .harnessLanguageId(l.getHarnessLanguageId())
                         .build())
                 .toList();
@@ -355,8 +353,7 @@ public class QuizService {
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
-            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses,
-            List<ExecutionClient.Case> cases, Integer timeoutMs) {}
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses, Integer timeoutMs) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -518,30 +515,13 @@ public class QuizService {
             SubmittedAnswerDTO answer = byQuestion.get(question.getId());
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
-            // Aiguillage PAR LA DONNÉE (#116), pas par le langage : un cas qui porte une `expr` est
-            // structuré (attendus comparés hors sandbox) ; sinon harnais-code (chemin historique,
-            // toujours supporté). Les quiz existants restent donc valides : adoption progressive sans
-            // conversion forcée.
-            boolean structured = harnesses.stream()
-                    .anyMatch(tc -> tc.getExpr() != null && !tc.getExpr().isBlank());
-            if (structured) {
-                // On ne garde QUE les cas porteurs d'une expr : un cas sans expr (question mixte,
-                // possible via l'API/BD) injecterait une expression vide dans le source → échec de
-                // compilation de TOUTE la question. Dégradation propre plutôt que question ininotable.
-                List<ExecutionClient.Case> cases = harnesses.stream()
-                        .filter(tc -> tc.getExpr() != null && !tc.getExpr().isBlank())
-                        .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getExpr(),
-                                parseJson(tc.getExpectedJson()), tc.getCompareMode(), weightOf(tc)))
-                        .toList();
-                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, null, cases,
-                        question.getExecTimeoutMs()));
-            } else {
-                List<ExecutionClient.Harness> inputs = harnesses.stream()
-                        .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
-                        .toList();
-                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs, null,
-                        question.getExecTimeoutMs()));
-            }
+            // Harnais-code pour TOUS les langages : les compilés sont notés en deux processus isolés
+            // (code étudiant isolé, nonce/verdict dans le parent — POO comprise), côté execution-service.
+            List<ExecutionClient.Harness> inputs = harnesses.stream()
+                    .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
+                    .toList();
+            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs,
+                    question.getExecTimeoutMs()));
         }
         return tasks;
     }
@@ -555,9 +535,8 @@ public class QuizService {
     private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
-            List<Boolean> verdicts = task.cases() != null
-                    ? executionClient.evaluateStructured(task.language(), task.code(), task.cases(), task.timeoutMs())
-                    : executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs());
+            List<Boolean> verdicts =
+                    executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -600,17 +579,6 @@ public class QuizService {
         return testCase.getWeight() != null && testCase.getWeight() > 0 ? testCase.getWeight() : 1;
     }
 
-    /** Parse un JSON stocké (args/attendu d'un cas structuré) ; {@code null} si vide ou invalide. */
-    private JsonNode parseJson(String json) {
-        if (json == null || json.isBlank()) {
-            return null;
-        }
-        try {
-            return objectMapper.readTree(json);
-        } catch (JsonProcessingException e) {
-            return null;
-        }
-    }
 
     /**
      * Historique des tentatives (résumés). earned/max sont calculés DYNAMIQUEMENT à partir
@@ -1195,7 +1163,6 @@ public class QuizService {
             TestCase tc = new TestCase();
             tc.setName(td.getName());
             tc.setHarnessCode(td.getHarnessCode());
-            applyStructuredFields(tc, td);
             tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
             tc.setQuestion(question);
             testCases.add(tc);
@@ -1227,16 +1194,8 @@ public class QuizService {
             }
             tc.setName(td.getName());
             tc.setHarnessCode(td.getHarnessCode());
-            applyStructuredFields(tc, td);
             tc.setWeight(td.getWeight() != null ? td.getWeight() : 1);
         }
-    }
-
-    /** Copie les champs d'un cas STRUCTURÉ (#116) du DTO vers l'entité (null pour un harnais-code). */
-    private static void applyStructuredFields(TestCase tc, TestCaseDTO td) {
-        tc.setExpr(td.getExpr());
-        tc.setExpectedJson(td.getExpectedJson());
-        tc.setCompareMode(td.getCompareMode());
     }
 
     // ── Mapping entité → DTO ─────────────────────────────────────────────────────
@@ -1311,9 +1270,6 @@ public class QuizService {
                 .id(testCase.getId())
                 .name(testCase.getName())
                 .harnessCode(testCase.getHarnessCode())
-                .expr(testCase.getExpr())
-                .expectedJson(testCase.getExpectedJson())
-                .compareMode(testCase.getCompareMode())
                 .weight(testCase.getWeight())
                 .build();
     }

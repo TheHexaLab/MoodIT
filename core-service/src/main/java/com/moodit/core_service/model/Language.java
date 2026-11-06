@@ -27,14 +27,6 @@ public class Language {
     @Column(name = "start_code_template", columnDefinition = "TEXT")
     private String startCodeTemplate;
 
-    /**
-     * #116 — Gabarit d'EXPRESSION d'un cas structuré (langages compilés) : une expression commentée
-     * qui RENVOIE la valeur testée, selon la convention de retour du langage. Null pour les langages
-     * notés par harnais-code (interprétés, vues/données).
-     */
-    @Column(name = "expr_template", columnDefinition = "TEXT")
-    private String exprTemplate;
-
     @Column(name = "harness_language_id")
     private Integer harnessLanguageId;
 }

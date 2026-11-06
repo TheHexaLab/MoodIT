@@ -210,40 +210,6 @@ export function defaultHarness(questionLanguage?: Language, harnessLanguage?: La
 }
 
 /**
- * Squelette d'EXPRESSION d'un cas structuré (#116), par langage compilé. Comme l'ancien gabarit de
- * harnais-code, c'est du code commenté qui montre quoi écrire — mais ici une seule expression qui
- * RENVOIE la valeur testée, selon la convention de retour propre au langage (Go sans `;`, Rust en
- * valeur de bloc, C/C++/C#/Java avec `return …;`). L'enseignant remplace l'exemple par son appel.
- */
-const STRUCTURED_EXPR_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
-  go: '// Appelez la fonction de l\'étudiant et renvoyez la valeur à vérifier.\nreturn doubler(5)',
-  rust:
-    '// Renvoyez la valeur à vérifier (dernière valeur du bloc, sans `return` ni `;`).\ndoubler(5)',
-  c: '// Appelez la fonction de l\'étudiant et renvoyez la valeur à vérifier.\nreturn doubler(5);',
-  'c++': '// Appelez la fonction de l\'étudiant et renvoyez la valeur à vérifier.\nreturn doubler(5);',
-  cpp: '// Appelez la fonction de l\'étudiant et renvoyez la valeur à vérifier.\nreturn doubler(5);',
-  'c#': '// Appelez la méthode de l\'étudiant et renvoyez la valeur à vérifier.\nreturn Solution.doubler(5);',
-  csharp:
-    '// Appelez la méthode de l\'étudiant et renvoyez la valeur à vérifier.\nreturn Solution.doubler(5);',
-  java: '// Appelez la méthode de l\'étudiant et renvoyez la valeur à vérifier.\nreturn Solution.doubler(5);',
-};
-
-/**
- * Expression par défaut d'un NOUVEAU cas structuré — squelette commenté du langage (compilé).
- * Source de vérité : `Language.exprTemplate` (table expr_template, cf. V4), comme `harnessTemplate`.
- * Replie sur le map codé en dur par nom de langage si la base ne fournit rien. Chaîne vide si rien
- * de connu. Rétablit le « feeling » des anciens gabarits : du code pré-rempli avec un exemple.
- */
-export function defaultStructuredExpr(harnessLanguage?: Language): string {
-  const key = harnessLanguage?.name.trim().toLowerCase();
-  return (
-    harnessLanguage?.exprTemplate ??
-    (key ? STRUCTURED_EXPR_TEMPLATE_BY_LANGUAGE[key] : undefined) ??
-    ''
-  );
-}
-
-/**
  * Nombre minimal d'éléments d'une Remise en ordre (même règle côté serveur) : avec deux
  * éléments, le seul ordre de départ différent de la solution la révélerait (#211).
  */
@@ -363,9 +329,6 @@ export function draftToQuestion(
       id: t.id ?? -(i + 1),
       name: t.name,
       harnessCode: t.harnessCode,
-      expr: t.expr,
-      expectedJson: t.expectedJson,
-      compareMode: t.compareMode,
       weight: t.weight,
     })),
   };
