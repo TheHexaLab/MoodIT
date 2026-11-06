@@ -517,6 +517,20 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void rust_poo_struct_et_methode_par_passage_de_champs() {
+        requireRuntime("rust");
+        // POO Rust : le harnais construit un struct par littéral et appelle une méthode d'instance ;
+        // le child reconstruit le vrai struct (champs privés, même module) et appelle la méthode.
+        String rect = "struct Rectangle { largeur: i32, hauteur: i32 }\n"
+                + "impl Rectangle { fn aire(&self) -> i32 { self.largeur * self.hauteur } }\n"
+                + "fn main() {}";
+        assertThat(passes("Rust", rect, "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12")).isTrue();
+        assertThat(passes("Rust", rect, "Rectangle { largeur: 5, hauteur: 5 }.aire() == 25")).isTrue();
+        assertThat(passes("Rust", rect.replace("self.largeur * self.hauteur", "0"),
+                "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12")).isFalse();
+    }
+
+    @Test
     void csharp_isolation_rpc_deux_processus() {
         requireRuntime("csharp");
         String good = "class S { public static int Doubler(int n) { return n * 2; } static void Main(string[] a) {} }";

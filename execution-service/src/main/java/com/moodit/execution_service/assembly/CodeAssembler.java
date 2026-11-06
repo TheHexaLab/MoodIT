@@ -1000,6 +1000,13 @@ public class CodeAssembler {
             Pattern.compile("(?m)^fn\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:->\\s*([^{]+?))?\\s*\\{");
     /** Types scalaires marshalables Rust. */
     private static final Set<String> RUST_SCALARS = Set.of("i32", "i64", "f64", "bool", "String");
+    /** Déclaration de struct Rust top-level : {@code struct Nom { … } } (capture le nom). */
+    private static final Pattern RUST_STRUCT = Pattern.compile("(?m)^struct\\s+(\\w+)\\s*\\{");
+    /** Bloc {@code impl Nom { … }} inhérent (pas {@code impl Trait for …}). */
+    private static final Pattern RUST_IMPL = Pattern.compile("(?m)^impl\\s+(\\w+)\\s*\\{");
+    /** Méthode dans un {@code impl} : {@code fn nom(params) -> ret {} } (params inclut le récepteur). */
+    private static final Pattern RUST_METHOD =
+            Pattern.compile("fn\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:->\\s*([^{]+?))?\\s*\\{");
 
     /**
      * Rust : exécution ISOLÉE en DEUX processus (cf. #116, même modèle que {@link #assembleGo}). Le
@@ -1007,7 +1014,10 @@ public class CodeAssembler {
      * PARENT (noteur) lit le nonce sur SON stdin, exécute le harnais INCHANGÉ et réémet le nonce en cas
      * de succès ; le CHILD héberge le vrai code étudiant et répond par RPC (netstring). Les fonctions
      * étudiant (défs + appels) sont renommées {@code __moodit_s_*} ; des STUBS de même nom délèguent au
-     * child. Périmètre : fonctions à paramètres/retour scalaires ({@code i32, i64, f64, bool, String}).
+     * child. POO : type STUB (mêmes champs) + {@code impl} dont les méthodes envoient les valeurs des
+     * champs + les args ; le child reconstruit {@code __MooditStudent_Type { … }} (même module → champs
+     * privés accessibles) et appelle la méthode. Sémantique VALEUR (mutation non persistée). Périmètre :
+     * paramètres/retour/champs scalaires ({@code i32, i64, f64, bool, String}).
      */
     private Assembled assembleRust(String studentCode, String harnessCode, String nonce) {
         String student = studentCode == null ? "" : studentCode;
@@ -1020,9 +1030,39 @@ public class CodeAssembler {
                 funcs.add(new String[] {fm.group(1), fm.group(2), fm.group(3) == null ? "" : fm.group(3).trim()});
             }
         }
+        // POO : structs (nom → champs) + méthodes (par impl). Tout est dans le même module (un seul
+        // fichier) → le code généré peut lire/écrire les champs, même privés.
+        java.util.LinkedHashMap<String, List<String[]>> rstructs = new java.util.LinkedHashMap<>();
+        Matcher rsm = RUST_STRUCT.matcher(student);
+        while (rsm.find()) {
+            int open = student.indexOf('{', rsm.start());
+            int close = javaMatchBrace(student, open);
+            if (close < 0) continue;
+            String fbody = student.substring(open + 1, close).replaceAll("[;\\n]", ",");
+            rstructs.put(rsm.group(1), rustParseParams(fbody));
+        }
+        List<String[]> rmethods = new ArrayList<>(); // [type, nom, paramsAvecSelf, ret]
+        Matcher rim = RUST_IMPL.matcher(student);
+        while (rim.find()) {
+            String implType = rim.group(1);
+            int open = student.indexOf('{', rim.start());
+            int close = javaMatchBrace(student, open);
+            if (close < 0) continue;
+            Matcher rmm = RUST_METHOD.matcher(student.substring(open + 1, close));
+            while (rmm.find()) {
+                rmethods.add(new String[] {implType, rmm.group(1), rmm.group(2),
+                        rmm.group(3) == null ? "" : rmm.group(3).trim()});
+            }
+        }
+
         String code = student.replaceAll("\\bfn\\s+main\\s*\\(", "fn __moodit_student_main(");
         for (String[] f : funcs) {
             code = code.replaceAll("(?<![\\w.])" + Pattern.quote(f[0]) + "(?=\\s*\\()", "__moodit_s_" + f[0]);
+        }
+        // Renommer les types struct étudiant → __MooditStudent_* (défs, impls, littéraux, retours) ;
+        // les stubs gardent les noms d'origine pour le harnais.
+        for (String s : rstructs.keySet()) {
+            code = code.replaceAll("\\b" + Pattern.quote(s) + "\\b", "__MooditStudent_" + s);
         }
 
         StringBuilder stubs = new StringBuilder();
@@ -1068,6 +1108,72 @@ public class CodeAssembler {
                 cases.append(realCall).append(" });\n")
                         .append("          match __res { Ok(__v) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, &format!(\"{}\", __v)); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); } }\n        }\n");
             }
+        }
+
+        // POO : type STUB (mêmes champs) + impl dont les méthodes envoient les valeurs des champs +
+        // les args ; le child reconstruit __MooditStudent_Type { … } (même module → champs privés OK)
+        // et appelle la méthode. Sémantique VALEUR (une méthode qui mute le récepteur ne persiste pas).
+        for (var se : rstructs.entrySet()) {
+            String sname = se.getKey();
+            List<String[]> fields = se.getValue();
+            if (fields.isEmpty() || !fields.stream().allMatch(f -> RUST_SCALARS.contains(f[1]))) continue;
+            stubs.append("struct ").append(sname).append(" { ")
+                    .append(fields.stream().map(f -> f[0] + ": " + f[1]).collect(Collectors.joining(", ")))
+                    .append(" }\n");
+            StringBuilder impl = new StringBuilder("impl ").append(sname).append(" {\n");
+            boolean any = false;
+            for (String[] m : rmethods) {
+                if (!m[0].equals(sname)) continue;
+                any = true;
+                String mname = m[1];
+                String rawParams = m[2];                 // inclut le récepteur (&self / &mut self / self)
+                String ret = m[3];
+                List<String[]> margs = rustParseParams(rawParams); // laisse tomber le récepteur
+                boolean ok = (ret.isEmpty() || RUST_SCALARS.contains(ret))
+                        && margs.stream().allMatch(p -> RUST_SCALARS.contains(p[1]));
+                if (!ok) {
+                    impl.append("    fn ").append(mname).append("(").append(rawParams).append(")")
+                            .append(ret.isEmpty() ? "" : " -> " + ret).append(" { panic!(\"type non supporte\"); }\n");
+                    continue;
+                }
+                String fieldFmts = fields.stream().map(f -> "format!(\"{}\", self." + f[0] + ")")
+                        .collect(Collectors.joining(", "));
+                String argFmts = margs.stream().map(p -> "format!(\"{}\", " + p[0] + ")")
+                        .collect(Collectors.joining(", "));
+                String allFmts = fieldFmts + (argFmts.isEmpty() ? "" : ", " + argFmts);
+                String rpc = "__moodit_rpc(\"" + sname + "." + mname + "\", &[" + allFmts + "])";
+                impl.append("    fn ").append(mname).append("(").append(rawParams).append(")")
+                        .append(ret.isEmpty() ? "" : " -> " + ret).append(" { ")
+                        .append(ret.isEmpty() ? rpc + ";" : rustDec(rpc, ret)).append(" }\n");
+                int nf = fields.size();
+                StringBuilder reads = new StringBuilder();
+                for (int i = 0; i < nf + margs.size(); i++) {
+                    reads.append("          let __s").append(i).append(" = __moodit_ns_read(&mut __r).unwrap_or_default();\n");
+                }
+                StringBuilder lit = new StringBuilder("__MooditStudent_").append(sname).append(" { ");
+                for (int i = 0; i < nf; i++) {
+                    if (i > 0) lit.append(", ");
+                    lit.append(fields.get(i)[0]).append(": ").append(rustDec("__s" + i, fields.get(i)[1]));
+                }
+                lit.append(" }");
+                StringBuilder mcall = new StringBuilder();
+                for (int i = 0; i < margs.size(); i++) {
+                    if (i > 0) mcall.append(", ");
+                    mcall.append(rustDec("__s" + (nf + i), margs.get(i)[1]));
+                }
+                String recvDecl = rawParams.contains("&mut self") ? "let mut __moodit_recv = " : "let __moodit_recv = ";
+                cases.append("        \"").append(sname).append(".").append(mname).append("\" => {\n").append(reads)
+                        .append("          let __res = std::panic::catch_unwind(move || { ").append(recvDecl).append(lit).append("; ");
+                if (ret.isEmpty()) {
+                    cases.append("__moodit_recv.").append(mname).append("(").append(mcall).append("); });\n")
+                            .append("          match __res { Ok(_) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, \"\"); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); } }\n        }\n");
+                } else {
+                    cases.append("__moodit_recv.").append(mname).append("(").append(mcall).append(") });\n")
+                            .append("          match __res { Ok(__v) => { __moodit_ns_write(&mut __w, \"1\"); __moodit_ns_write(&mut __w, &format!(\"{}\", __v)); }, Err(_) => { __moodit_ns_write(&mut __w, \"0\"); __moodit_ns_write(&mut __w, \"\"); } }\n        }\n");
+                }
+            }
+            impl.append("}\n");
+            if (any) stubs.append(impl);
         }
 
         String program = "use std::io::{Read, Write, BufRead};\n\n"

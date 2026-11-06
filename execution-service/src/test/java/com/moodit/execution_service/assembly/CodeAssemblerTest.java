@@ -275,21 +275,123 @@ class CodeAssemblerTest {
 
     @Test
     void go_poo_ignore_struct_non_scalaire_et_methode_non_supportee() {
-        // Exerce : struct à champ non scalaire → ignoré (pas de stub) ; méthode à retour non scalaire
-        // sur un struct scalaire → stub qui panique.
+        // Exerce : struct à champ non scalaire → ignoré (pas de stub) ; struct vide → ignoré ; méthode
+        // void ; méthode à retour non scalaire → stub qui panique ; champ/param slice (supporté).
         var a = assembler.assemble("Go",
                 "package main\n"
-                        + "type Bag struct { items []map[string]int }\n"          // champ non scalaire → struct ignoré
+                        + "type Bag struct { items []map[string]int }\n"          // champ non scalaire → ignoré
+                        + "type Empty struct {}\n"                                 // struct vide → ignoré
                         + "type Box struct { n int }\n"
                         + "func (b Box) items() []map[string]int { return nil }\n" // retour non scalaire → panique
+                        + "func (b Box) bump() {}\n"                               // méthode void
                         + "func (b Box) get() int { return b.n }\n"
+                        + "type Vec struct { xs []int }\n"                         // champ slice (supporté)
+                        + "func (v Vec) size() int { return len(v.xs) }\n"
                         + "func main() {}",
                 "return Box{n: 7}.get() == 7", "N");
         String c = onlyFileContent(a);
-        assertThat(c).doesNotContain("type Bag struct");                          // struct non scalaire ignoré
+        assertThat(c).doesNotContain("type Bag struct");                          // non scalaire ignoré
+        assertThat(c).doesNotContain("type Empty struct");                        // vide ignoré
         assertThat(c).contains("type Box struct { n int }");
-        assertThat(c).contains("func (__self Box) items() []map[string]int { panic(");  // méthode non supportée
+        assertThat(c).contains("func (__self Box) items() []map[string]int { panic(");  // non supportée
+        assertThat(c).contains("func (__self Box) bump() {");                     // méthode void
         assertThat(c).contains("case \"Box.get\":");
+        assertThat(c).contains("type Vec struct { xs []int }").contains("__moodit_slice_int"); // slice
+    }
+
+    @Test
+    void go_harness_fonctions_couvre_scalaire_void_slice_et_non_supporte() {
+        // Chemin harnais à FONCTIONS (jamais couvert structurellement jusqu'ici) : scalaire, void,
+        // slice (+ helper), et type non supporté → stub qui panique.
+        var a = assembler.assemble("Go",
+                "package main\n"
+                        + "func doubler(n int) int { return n * 2 }\n"           // scalaire
+                        + "func salut(nom string) {}\n"                          // void
+                        + "func somme(xs []int) int { return len(xs) }\n"        // slice param
+                        + "func bidon(m map[string]int) int { return 0 }\n"      // param non supporté → panique
+                        + "func main() {}",
+                "return doubler(5) == 10", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("func doubler(n int) int").contains("__moodit_rpc(\"doubler\"");
+        assertThat(c).contains("func salut(nom string) {").contains("__moodit_rpc(\"salut\"");
+        assertThat(c).contains("__moodit_slice_int");                            // helper slice
+        assertThat(c).contains("panic(\"type non supporte par l'isolation RPC\")"); // bidon
+        assertThat(c).contains("__moodit_s_doubler");                            // vrai code renommé
+    }
+
+    @Test
+    void rust_harness_fonctions_couvre_scalaire_void_et_non_supporte() {
+        var a = assembler.assemble("Rust",
+                "fn doubler(n: i32) -> i32 { n * 2 }\n"       // scalaire
+                        + "fn salut(nom: String) {}\n"       // void
+                        + "fn bidon(v: Vec<i32>) -> i32 { 0 }\n" // param non supporté → panic
+                        + "fn main() {}",
+                "doubler(5) == 10", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("fn doubler(n: i32) -> i32").contains("__moodit_rpc(\"doubler\"");
+        assertThat(c).contains("fn salut(nom: String) {").contains("__moodit_rpc(\"salut\"");
+        assertThat(c).contains("panic!(\"type non supporte\")");  // bidon
+        assertThat(c).contains("__moodit_s_doubler");
+    }
+
+    @Test
+    void rust_poo_genere_stub_struct_et_methode_par_passage_de_champs() {
+        var a = assembler.assemble("Rust",
+                "struct Rectangle { largeur: i32, hauteur: i32 }\n"
+                        + "impl Rectangle { fn aire(&self) -> i32 { self.largeur * self.hauteur } }\n"
+                        + "fn main() {}",
+                "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12", "MOODIT_OK_rust");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("struct Rectangle { largeur: i32, hauteur: i32 }");  // stub
+        assertThat(c).contains("impl Rectangle {").contains("fn aire(&self) -> i32");
+        assertThat(c).contains("__moodit_rpc(\"Rectangle.aire\", &[format!(\"{}\", self.largeur), format!(\"{}\", self.hauteur)])");
+        assertThat(c).contains("\"Rectangle.aire\" =>");                            // dispatch child
+        assertThat(c).contains("__MooditStudent_Rectangle {");                      // reconstruction
+        assertThat(c).doesNotContain("MOODIT_OK_rust");
+    }
+
+    @Test
+    void rust_poo_ignore_struct_non_scalaire_et_methode_non_supportee() {
+        var a = assembler.assemble("Rust",
+                "struct Bag { items: Vec<i32> }\n"                  // champ non scalaire → ignoré
+                        + "struct Box { n: i32 }\n"
+                        + "impl Box {\n"
+                        + "  fn items(&self) -> Vec<i32> { vec![] }\n"  // retour non scalaire → panic
+                        + "  fn bump(&mut self) { self.n += 1; }\n"      // void + &mut self
+                        + "  fn get(&self) -> i32 { self.n }\n"
+                        + "}\n"
+                        + "fn main() {}",
+                "Box { n: 7 }.get() == 7", "N");
+        String c = onlyFileContent(a);
+        assertThat(c).doesNotContain("struct Bag {");                   // non scalaire ignoré
+        assertThat(c).contains("struct Box { n: i32 }");
+        assertThat(c).contains("fn items(&self) -> Vec<i32> { panic!");  // non supportée
+        assertThat(c).contains("fn bump(&mut self) {");
+        assertThat(c).contains("let mut __moodit_recv");                // &mut self → binding mutable
+        assertThat(c).contains("\"Box.get\" =>");
+    }
+
+    @Test
+    void csharp_harness_structurel_delegue_par_rpc_en_deux_processus() {
+        var a = assembler.assemble("C#",
+                "class S { public static int Doubler(int n){ return n*2; } static void Main(string[] x){} }",
+                "return S.Doubler(5) == 10;", "MOODIT_OK_cs");
+        String c = onlyFileContent(a);
+        assertThat(c).contains("class __MooditMain").contains("__MooditStudent_S");  // entrée + réel renommé
+        assertThat(c).contains("class S {").contains("__rpc(\"S.Doubler\"");          // stub → RPC
+        assertThat(c).contains("ProcessStartInfo").contains("mono");                 // 2e processus
+        assertThat(c).doesNotContain("MOODIT_OK_cs");                                // nonce lu sur stdin
+    }
+
+    @Test
+    void serveurs_de_cas_structures_generes_pour_tous_les_compiles() {
+        // Couvre les serveurs structurés (émission de valeur, attendus hors sandbox) de chaque compilé.
+        for (String lang : new String[] {"rust", "c", "c++", "csharp", "java"}) {
+            var a = assembler.assembleServer(lang, "// code etudiant",
+                    java.util.List.of(new CodeAssembler.ServerCase("doubler(5)", "int")));
+            assertThat(a.files()).isNotEmpty();
+            assertThat(onlyFileContent(a)).contains("doubler(5)");
+        }
     }
 
     @Test
