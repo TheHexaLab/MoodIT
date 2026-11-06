@@ -9,27 +9,6 @@ import { type Language } from '../../types/domain';
 import { defaultHarnessLabels, type CompareMode, type HarnessLabels } from './harnessLabels';
 
 /**
- * Vrai si le langage (du harnais = de la question pour les compilés) est COMPILÉ → la question
- * se note par CAS STRUCTURÉS (#116 : appeler une fonction, comparer la sortie hors sandbox), et non
- * par harnais-code. Miroir de la décision backend (CodeAssembler.isCompiled / QuizService).
- */
-function isCompiledHarnessLang(name?: string): boolean {
-  switch ((name ?? '').trim().toLowerCase()) {
-    case 'c':
-    case 'c++':
-    case 'cpp':
-    case 'go':
-    case 'rust':
-    case 'c#':
-    case 'csharp':
-    case 'java':
-      return true;
-    default:
-      return false;
-  }
-}
-
-/**
  * Modes de comparaison d'un cas structuré (valeur envoyée au backend). Ordre d'affichage du menu.
  * Les relationnels (`gt`/`ge`/`lt`/`le`) et `ne` sont évalués HORS sandbox : l'attendu reste la
  * borne cachée. Miroir de `ExecutionService.jsonMatches`.
@@ -227,8 +206,11 @@ export function HarnessBody({
   // Mode STRUCTURÉ (#116) décidé comme au backend — PAR LA DONNÉE d'abord : un cas déjà porteur d'une
   // `expr` (ex. question convertie, chargée pour édition) force le mode structuré même si les langages
   // ne sont pas encore résolus. Sinon, on se base sur le langage compilé (nouvelle question).
-  const structured =
-    testCases.some((c) => (c.expr ?? '').trim() !== '') || isCompiledHarnessLang(harnessLanguage?.name);
+  // Harnais-code PARTOUT, y compris les compilés : ceux-ci sont notés en DEUX processus (le code
+  // étudiant dans un enfant isolé, le nonce/verdict dans le parent, hors de sa portée — cf. #116,
+  // POO comprise). On ne reste en mode « cas structuré » que pour une question DÉJÀ convertie (un cas
+  // porte une `expr`) ; une nouvelle question compilée part donc en harnais-code, comme les interprétés.
+  const structured = testCases.some((c) => (c.expr ?? '').trim() !== '');
   // On reflète les harnais existants tels quels (liste vide si aucun) : pas d'ajout
   // automatique — l'utilisateur ajoute via « + Ajouter un harnais ».
   const [cases, setCases] = useState<TestCaseDraft[]>(() => testCases.map((tc) => ({ ...tc })));

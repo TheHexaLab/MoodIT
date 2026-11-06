@@ -212,13 +212,31 @@ describe('HarnessBody', () => {
       expect(saved[0].compareMode).toBe('exact');
     });
 
-    it("enregistrement bloqué tant que l'expression est vide", () => {
+    it("enregistrement bloqué tant qu'une expression est vide", () => {
+      // Mode structuré déclenché par un cas DÉJÀ porteur d'expr ; un second cas à expr vide bloque.
       renderHarness({
         harnessLanguage: JAVA,
-        testCases: [{ id: 1, name: 'A', harnessCode: '', expr: '', expectedJson: '1', compareMode: 'exact', weight: 1 }],
+        testCases: [
+          { id: 1, name: 'A', harnessCode: '', expr: 'return 1;', expectedJson: '1', compareMode: 'exact', weight: 1 },
+          { id: 2, name: 'B', harnessCode: '', expr: '', expectedJson: '2', compareMode: 'exact', weight: 1 },
+        ],
       });
       const save = screen.getByText(t.save).closest('button') as HTMLButtonElement;
       expect(save.disabled).toBe(true);
+    });
+  });
+
+  // ── Bascule (#116) : un compilé SANS expr part en HARNAIS-CODE (isolation 2-process), pas structuré.
+  describe('compilé sans expr → harnais-code', () => {
+    const GO: Language = { id: 6, name: 'Go' };
+
+    it("affiche l'éditeur de harnais (pas le mode structuré) pour un nouveau compilé", () => {
+      renderHarness({
+        harnessLanguage: GO,
+        testCases: [{ id: 1, name: 'A', harnessCode: 'return doubler(5) == 10', weight: 1 }],
+      });
+      expect(screen.getByLabelText(t.codeAria(1))).toBeTruthy();       // éditeur de harnais-code
+      expect(screen.queryByText(t.structuredInfoBanner)).toBeNull();   // pas de bandeau structuré
     });
   });
 });
