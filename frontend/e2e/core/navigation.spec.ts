@@ -54,6 +54,28 @@ test('Accueil : ouvrir un cours depuis la barre, puis y revenir', async ({ brows
   await context.close();
 });
 
+test('Factures (#207) : en production, l’écran d’attente, sans montant fictif ni pastille', async ({
+  browser,
+  baseURL,
+}) => {
+  // La pile e2e sert le build de production : les données fictives des factures n'y sont jamais.
+  const { storageState } = await createEnrolledUser(baseURL!);
+  const context = await browser.newContext({ storageState });
+  const page = await context.newPage();
+  await page.goto('/home');
+
+  const factures = page.getByRole('navigation', { name: 'Portail' }).getByRole('link', { name: 'Factures' });
+  await expect(factures).toHaveAccessibleName('Factures');
+  await factures.click();
+  await expect(page).toHaveURL(/\/home\/factures$/);
+  await expect(factures).toHaveAttribute('aria-current', 'page');
+  await expect(mainContent(page).getByRole('heading', { level: 1, name: 'Factures' })).toBeVisible();
+  await expect(mainContent(page).getByText("Cette page n'est pas encore disponible.")).toBeVisible();
+  await expect(page.getByText('Solde à payer')).toHaveCount(0);
+  await expect(page.getByText('Comment payer')).toHaveCount(0);
+  await context.close();
+});
+
 test('la barre de l’Accueil se réduit et se déplie sans déplacer ses icônes, et le choix est gardé', async ({
   browser,
   baseURL,

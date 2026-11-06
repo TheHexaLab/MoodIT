@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import styles from './SchedulePage.module.css';
+import scrollbar from '../../styles/scrollbar.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
 import { Popup } from '../Popup/Popup.tsx';
 import { PopupVariant } from '../Popup/popupVariant.ts';
@@ -1259,7 +1260,7 @@ export default function SchedulePage({
                 ) : listed.length === 0 ? (
                   <p className={styles.taskListEmpty}>Tout est fait pour cette semaine.</p>
                 ) : (
-                  <ul>
+                  <ul className={scrollbar.thin}>
                     {listed.map((task) =>
                       deletingIds.includes(task.id) ? (
                         // Supprimée : « Annuler » la remet, tant que la suppression n'est pas partie.

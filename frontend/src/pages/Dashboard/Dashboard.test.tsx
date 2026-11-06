@@ -588,7 +588,6 @@ describe('Dashboard', () => {
     it.each([
       ['horaire', 'Horaire'],
       ['bulletin', 'Bulletin'],
-      ['factures', 'Factures'],
       ['aide', "Centre d'aide"],
     ])('la page /home/%s affiche son écran d’attente, active dans la barre', async (slug, label) => {
       renderDashboard({ path: `/home/${slug}` });
@@ -2065,5 +2064,156 @@ describe('Dashboard — compléments', () => {
       type(['8', '3', '3', '9', '!']);
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
     });
+  });
+});
+
+describe('Dashboard — factures (#207)', () => {
+  const INVOICE = {
+    session: 'automne 2026',
+    dueDate: '2026-11-15',
+    lines: [{ label: 'Droits de scolarité', amountCents: 112_000 }],
+  };
+  const STUDENT = {
+    id: 1,
+    name: 'Camille Lavoie',
+    residency: 'quebec' as const,
+    credits: 15,
+    payments: [],
+  };
+  /** Facturation de l'administration : 75 $ le crédit au Québec, 30 $ de frais, une étudiante. */
+  const mockBilling = () => {
+    vi.mocked(api.fetchFeeSchedule).mockResolvedValue({
+      session: 'automne 2026',
+      statuses: [
+        { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 7_500 },
+        { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 20_000 },
+        { id: 'international', label: 'International', creditPriceCents: 50_000 },
+      ],
+      dueDate: '2026-11-15',
+      fees: [{ label: 'Assurance collective', amountCents: 3_000 }],
+    });
+    vi.mocked(api.fetchEnrolledStudents).mockResolvedValue([STUDENT]);
+  };
+  const portal = () => within(screen.getByRole('navigation', { name: 'Portail' }));
+  /** Étudiant : aucun rôle dans ses programmes. */
+  const studentPrograms = () => makePrograms().map((program) => ({ ...program, roleName: undefined }));
+
+  beforeEach(() => {
+    vi.mocked(api.invoicesAvailable).mockReturnValue(true);
+    vi.mocked(api.fetchPrograms).mockImplementation(async () => studentPrograms());
+  });
+
+  it('la page affiche le solde, et la barre la pastille « À payer »', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText('Solde restant')).toBeTruthy();
+    const link = portal().getByRole('link', { name: 'Factures À payer' });
+    expect(link.getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: 'Comment payer' })).toBeTruthy();
+  });
+
+  it('la pastille s’affiche aussi depuis l’Accueil', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home' });
+    expect(await screen.findByRole('link', { name: 'Factures À payer' })).toBeTruthy();
+    expect(api.fetchInvoice).toHaveBeenCalledOnce();
+  });
+
+  it('rien à payer : pas de pastille', async () => {
+    vi.mocked(api.fetchInvoice).mockResolvedValue({ session: 'automne 2026', lines: [] });
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText('Rien à payer')).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+  });
+
+  it('erreur de chargement, puis « Réessayer » recharge', async () => {
+    vi.mocked(api.fetchInvoice).mockRejectedValueOnce(new Error('panne')).mockResolvedValue(INVOICE);
+    renderDashboard({ path: '/home/factures' });
+    const alert = (await screen.findByText('Impossible de charger vos factures.')).closest('[role="alert"]')!;
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+    fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Réessayer' }));
+    expect(screen.getByText('Chargement de vos factures…')).toBeTruthy();
+    expect(await screen.findByText('Solde restant')).toBeTruthy();
+    expect(api.fetchInvoice).toHaveBeenCalledTimes(2);
+  });
+
+  it('une réponse arrivée après le démontage est ignorée', async () => {
+    let resolve: (invoice: typeof INVOICE) => void = () => {};
+    vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((done) => (resolve = done)));
+    const { unmount } = renderDashboard({ path: '/home/factures' });
+    await waitFor(() => expect(api.fetchInvoice).toHaveBeenCalled());
+    unmount();
+    await act(async () => resolve(INVOICE));
+    expect(screen.queryByText('Solde restant')).toBeNull();
+  });
+
+  it('une erreur arrivée après le démontage est ignorée', async () => {
+    let reject: (error: Error) => void = () => {};
+    vi.mocked(api.fetchInvoice).mockReturnValue(new Promise((_, fail) => (reject = fail)));
+    const { unmount } = renderDashboard({ path: '/home/factures' });
+    await waitFor(() => expect(api.fetchInvoice).toHaveBeenCalled());
+    unmount();
+    await act(async () => reject(new Error('panne')));
+    expect(screen.queryByText('Impossible de charger vos factures.')).toBeNull();
+  });
+
+  it('enseignant : ni lien Factures, ni facture ; /home/factures ramène à l’Accueil', async () => {
+    vi.mocked(api.fetchPrograms).mockImplementation(async () => makePrograms());
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByRole('heading', { name: /Bonjour/ })).toBeTruthy();
+    const router = screen.getByTestId('router');
+    expect(router.getAttribute('data-path')).toBe('/home');
+    expect(router.getAttribute('data-navigation')).toBe('REPLACE');
+    expect(portal().queryByRole('link', { name: /Factures/ })).toBeNull();
+    expect(portal().getByRole('link', { name: 'Bulletin' })).toBeTruthy();
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['administrateur', { isAdmin: true }],
+    ['gardien', { isGuardian: true }],
+  ])('%s global : la vue de l’administration, sans facture personnelle', async (_role, roles) => {
+    mockBilling();
+    renderDashboard({ path: '/home/factures', ...roles });
+    expect(await screen.findByText('Camille Lavoie')).toBeTruthy();
+    expect(screen.getByText("Facturation de la session d'automne 2026")).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' }).getAttribute('aria-current')).toBe('page');
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
+  });
+
+  it('administration : le détail d’un étudiant, puis la tarification passe par l’API', async () => {
+    mockBilling();
+    vi.mocked(api.saveFeeSchedule).mockImplementation(async (schedule) => schedule);
+    renderDashboard({ path: '/home/factures', isAdmin: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Camille Lavoie' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Facture de Camille Lavoie' });
+    expect(within(dialog).getByText('Droits de scolarité')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fermer' }));
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Tarification' }));
+    fireEvent.change(screen.getByLabelText('Prix du crédit : Résident du Québec'), {
+      target: { value: '80' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la tarification' }));
+    expect(
+      await screen.findByText('Tarification enregistrée. Les factures des étudiants sont à jour.')
+    ).toBeTruthy();
+    expect(api.saveFeeSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statuses: [
+          { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 8000 },
+          { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 20_000 },
+          { id: 'international', label: 'International', creditPriceCents: 50_000 },
+        ],
+      })
+    );
+  });
+
+  it('en production : l’écran d’attente, sans données fictives ni pastille', async () => {
+    vi.mocked(api.invoicesAvailable).mockReturnValue(false);
+    renderDashboard({ path: '/home/factures' });
+    expect(await screen.findByText("Cette page n'est pas encore disponible.")).toBeTruthy();
+    expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
+    expect(api.fetchInvoice).not.toHaveBeenCalled();
   });
 });

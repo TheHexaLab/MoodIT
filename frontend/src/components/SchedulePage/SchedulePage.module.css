@@ -208,6 +208,7 @@
 
 /* Panneau d'ajout : il prend toute la hauteur de la colonne, la description le reste. */
 .panelFill {
+  composes: thin from '../../styles/scrollbar.module.css';
   flex: 1;
   box-sizing: border-box;
   min-height: 0;
@@ -424,18 +425,13 @@
 }
 
 /* La journée entière (24 h) défile dans un cadre à la hauteur de l'écran ; les jours restent en haut. */
+/* Barres de défilement discrètes (styles/scrollbar.module.css) : la grille, la liste des tâches,
+   le panneau d'ajout. */
 .gridScroll {
+  composes: thin from '../../styles/scrollbar.module.css';
   max-height: var(--grid-height);
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-/* Barres de défilement discrètes : la grille, la liste des tâches, le panneau d'ajout. */
-.gridScroll,
-.taskList ul,
-.panelFill {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
 }
 
 /* Rangée « Journée » : les tâches sans heure, sous les jours, fixée en haut avec eux. */
@@ -1663,143 +1659,7 @@
   font-weight: 500;
 }
 
-/* ── Type de séance : liste déroulante maison (corbeille sur les types ajoutés) ── */
-.kindPicker {
-  --accent-blue: #1d4ed8;
-  position: relative;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .kindPicker {
-    --accent-blue: #60a5fa;
-  }
-}
-
-:root[data-theme='dark'] .kindPicker {
-  --accent-blue: #60a5fa;
-}
-
-.kindTrigger {
-  display: flex;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 2.25rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.625rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--bg-input);
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.kindTrigger svg {
-  flex: none;
-  width: 1rem;
-  height: 1rem;
-  color: var(--text-body);
-}
-
-.kindTrigger[aria-expanded='true'] svg {
-  transform: rotate(180deg);
-}
-
-.kindMenu {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 0.25rem);
-  right: 0;
-  left: 0;
-  display: flex;
-  max-height: 16rem;
-  flex-direction: column;
-  gap: 0.125rem;
-  padding: 0.25rem;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--bg-surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-}
-
-.kindRow {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.kindOption,
-.kindAdd {
-  flex: 1;
-  min-height: 2rem;
-  padding: 0.375rem 0.625rem;
-  border: none;
-  border-radius: 0.375rem;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.kindOption:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.kindOption[aria-pressed='true'] {
-  background: var(--badge-success-bg);
-  color: var(--badge-success-fg);
-  font-weight: 600;
-}
-
-.kindDelete {
-  display: inline-flex;
-  flex: none;
-  width: 2rem;
-  height: 2rem;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 0.375rem;
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.kindDelete svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-.kindDelete:hover {
-  background: var(--badge-danger-bg);
-  color: var(--badge-danger-fg);
-}
-
-/* « Ajouter un type… » : en bleu, bien visible en bas de la liste. */
-.kindAdd {
-  margin-top: 0.125rem;
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
-  color: var(--accent-blue);
-  font-weight: 700;
-}
-
-.kindAdd:hover {
-  background: color-mix(in srgb, var(--accent-blue) 20%, transparent);
-}
-
-.kindTrigger:focus-visible,
-.kindOption:focus-visible,
-.kindDelete:focus-visible,
-.kindAdd:focus-visible {
-  outline: 2px solid var(--brand-teal);
-  outline-offset: 1px;
-}
+/* Type de séance : la liste déroulante maison est le composant partagé Dropdown. */
 
 /* Remise d'un devoir dans la liste : pas de case (elle se fait en remettant le devoir). */
 .checkSpacer {

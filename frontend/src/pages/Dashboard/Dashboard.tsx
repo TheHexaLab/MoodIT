@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { type Program } from '../../components/ProgramMenu/ProgramMenu.tsx';
 import { useProgramsLoader } from '../../components/ProgramMenu/useProgramsLoader.ts';
 import CourseMenu, { type Course } from '../../components/CourseMenu/CourseMenu.tsx';
@@ -56,12 +56,17 @@ import {
 } from '../../components/PortalSidebar/sidebarPreference.ts';
 import AccueilPage from '../../components/AccueilPage/AccueilPage.tsx';
 import PortalPlaceholder from '../../components/PortalPlaceholder/PortalPlaceholder.tsx';
+import InvoicesPage, { type InvoiceState } from '../../components/InvoicesPage/InvoicesPage.tsx';
+import { invoiceBalance } from '../../components/InvoicesPage/invoice.ts';
+import InvoicesAdminPage, {
+  type InvoicesAdminApi,
+} from '../../components/InvoicesAdminPage/InvoicesAdminPage.tsx';
 import SchedulePage, { type ScheduleApi } from '../../components/SchedulePage/SchedulePage.tsx';
 import { type ScheduleCourse } from '../../types/domain.ts';
 import { isAssignmentChannel } from '../../components/CourseChannelList/channelTypeDefinitions.ts';
 import { portalPageFromPath } from '../../components/PortalSidebar/portalPages.ts';
 import { useViewLocation } from './viewLocation.ts';
-import { getProgramPermissions } from '../../helpers/permissions.ts';
+import { getProgramPermissions, isStudentAccount } from '../../helpers/permissions.ts';
 import { ROLE } from '../../helpers/roles.ts';
 import { avatarInitials } from '../../helpers/text.ts';
 import * as api from './dashboardApi.ts';
@@ -114,6 +119,13 @@ type PopupState =
   | { kind: 'deleteCourse'; courseId: number }
   | { kind: 'joinCourses'; programId: number }
   | { kind: 'mcp'; courseId: number };
+
+// Factures émises, vue de l'administration (#207) : données fictives de dashboardApi, lues à l'appel.
+const invoicesAdminApi: InvoicesAdminApi = {
+  fetchSchedule: () => api.fetchFeeSchedule(),
+  saveSchedule: (schedule) => api.saveFeeSchedule(schedule),
+  fetchStudents: () => api.fetchEnrolledStudents(),
+};
 
 // Agenda de la page Horaire (#206) : données fictives de dashboardApi, lues à l'appel (vi.mock).
 const scheduleApi: ScheduleApi = {
@@ -329,6 +341,49 @@ export default function Dashboard() {
     loadError: programsError,
     reload: reloadPrograms,
   } = useProgramsLoader(handleFetchPrograms);
+
+  // Factures (#207, données fictives, jamais en production), une fois les rôles connus (la liste des
+  // programmes chargée) : l'étudiant voit sa facture, l'administration globale (Administrateur,
+  // Gardien) les factures émises ; les autres (enseignants) n'ont pas la page. La facture de
+  // l'étudiant est chargée une fois pour la page et pour la pastille « À payer » de la barre.
+  const rolesKnown = !programsLoading && !programsError;
+  const isStudent = rolesKnown && isStudentAccount(dashboardPrograms, isAdmin, isGuardian);
+  const isBillingAdmin = rolesKnown && (isAdmin || isGuardian);
+  const invoicesShown = isStudent && api.invoicesAvailable();
+  const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
+  const [invoiceAttempt, setInvoiceAttempt] = useState(0);
+  // TEMPORAIRE (développement) : l'état de la facture fictive choisi dans la page.
+  const [demoInvoiceState, setDemoInvoiceState] = useState(api.DEMO_INVOICE_DEFAULT);
+  useEffect(() => {
+    if (!invoicesShown) return;
+    let cancelled = false;
+    api.fetchInvoice(undefined, demoInvoiceState).then(
+      (invoice) => {
+        if (!cancelled) setInvoiceState({ status: 'ready', invoice });
+      },
+      () => {
+        if (!cancelled) setInvoiceState({ status: 'error' });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [invoicesShown, invoiceAttempt, demoInvoiceState]);
+  const retryInvoice = () => {
+    setInvoiceState({ status: 'loading' });
+    setInvoiceAttempt((attempt) => attempt + 1);
+  };
+  const invoiceDue =
+    invoicesShown && invoiceState.status === 'ready' && invoiceBalance(invoiceState.invoice) > 0;
+  // Ni étudiant ni administration (enseignant) : /home/factures ramène à l'Accueil, repli automatique.
+  const noInvoicesPage =
+    portalPage?.slug === 'factures' && rolesKnown && !isStudent && !isBillingAdmin;
+  // La vue est déjà « aucun programme » : setView n'y changerait rien, on remplace l'adresse.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (noInvoicesPage) navigate('/home', { replace: true });
+  }, [noInvoicesPage, navigate]);
+
 
   // Abonnement temps réel (scope utilisateur) : programme créé / renommé / supprimé,
   // adhésion / désabonnement. Applique à la liste, et bascule le programme actif s'il
@@ -1123,6 +1178,9 @@ export default function Dashboard() {
             width={sidebarWidth}
             onWidthChange={isMobile ? undefined : changeSidebarWidth}
             activePage={portalPage}
+            pageBadges={invoiceDue ? { factures: 'À payer' } : undefined}
+            // Factures : étudiants et administration seulement, une fois les rôles connus.
+            hiddenPages={isStudent || isBillingAdmin ? undefined : ['factures']}
             activeProgramId={activeProgramId}
             selectedCourseId={isPortal ? undefined : effectiveSelectedCourseId}
             userMenu={
@@ -1182,7 +1240,23 @@ export default function Dashboard() {
         }
       />
 
-      {portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
+      {portalPage?.slug === 'factures' && api.invoicesAvailable() && isBillingAdmin ? (
+        <InvoicesAdminPage api={invoicesAdminApi} />
+      ) : portalPage?.slug === 'factures' && api.invoicesAvailable() && (isStudent || programsLoading) ? (
+        <InvoicesPage
+          state={invoiceState}
+          onRetry={retryInvoice}
+          studentName={[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ')}
+          establishmentName={establishment?.name}
+          // TEMPORAIRE : voir chaque état de la facture fictive.
+          demoStates={{
+            value: demoInvoiceState,
+            options: api.DEMO_INVOICE_STATES,
+            onChange: (value) =>
+              setDemoInvoiceState(value as (typeof api.DEMO_INVOICE_STATES)[number]['value']),
+          }}
+        />
+      ) : portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
         <SchedulePage
           courses={scheduleCourses}
           api={scheduleApi}

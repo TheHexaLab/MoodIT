@@ -674,3 +674,99 @@ export interface Assignment {
   /** Nombre d'étudiants ou, pour un devoir en équipe, d'équipes. */
   studentCount: number;
 }
+
+// ── Factures (#207) ──────────────────────────────────────────────────────────────────────────────
+
+/** Un montant dû pour la session : droits de scolarité, frais afférents… */
+export interface InvoiceLine {
+  label: string;
+  /** Précision sous le libellé (session, nombre de crédits…). */
+  detail?: string;
+  /** En cents, pour éviter les erreurs d'arrondi. */
+  amountCents: number;
+}
+
+/** Un paiement reçu, déduit du total de la facture. */
+export interface InvoicePayment {
+  /** Date de réception (AAAA-MM-JJ). */
+  date: string;
+  amountCents: number;
+  /** Mode de paiement : « Carte de crédit », « Virement bancaire »… */
+  method?: string;
+}
+
+/** Ce que l'étudiant doit pour la session en cours. Sans ligne : rien à payer. */
+export interface InvoiceSummary {
+  /** Nom de la session, en minuscules : « automne 2026 ». */
+  session: string;
+  /** Échéance (AAAA-MM-JJ). Absente s'il n'y a rien à payer. */
+  dueDate?: string;
+  lines: InvoiceLine[];
+  /** Paiements déjà reçus. Le solde est le total moins ces paiements. */
+  payments?: InvoicePayment[];
+}
+
+/**
+ * Statut de l'étudiant aux fins des droits de scolarité (résident du Québec, international, entente
+ * France-Québec…) : il fixe le prix du crédit. L'administration peut en ajouter.
+ */
+export interface TuitionStatus {
+  /** Identifiant stable : « quebec », « france », « statut-7 »… */
+  id: string;
+  label: string;
+  creditPriceCents: number;
+}
+
+/** Base de calcul d'un frais : un montant par crédit, ou un montant fixe pour la session. */
+export type FeeBasis = 'perCredit' | 'perSession';
+
+/** Frais de la session, en plus des droits de scolarité. */
+export interface SessionFee {
+  label: string;
+  /** Précision sous le libellé. */
+  detail?: string;
+  /** Montant par crédit, ou pour la session, selon `basis`. */
+  amountCents: number;
+  /** Par défaut : pour la session. */
+  basis?: FeeBasis;
+  /** L'étudiant peut s'en retirer (assurance déjà couverte, association…). */
+  optional?: boolean;
+}
+
+/**
+ * Tarification de la session, fixée par l'administration. La facture d'un étudiant en découle :
+ * ses crédits × le prix du crédit de son statut, plus les frais (par crédit ou pour la session).
+ */
+export interface FeeSchedule {
+  /** « automne 2026 ». */
+  session: string;
+  /** Statuts et prix du crédit de chacun, dans l'ordre d'affichage. */
+  statuses: TuitionStatus[];
+  /** Échéance commune (AAAA-MM-JJ). */
+  dueDate: string;
+  fees: SessionFee[];
+  /**
+   * Intérêts de retard, en % par mois : chaque mois de retard commencé après l'échéance ajoute ce
+   * pourcentage du solde impayé.
+   * Absent ou 0 : pas d'intérêts.
+   */
+  lateInterestPercent?: number;
+}
+
+/** Étudiant inscrit à la session, vu par l'administration. */
+export interface EnrolledStudent {
+  id: number;
+  name: string;
+  email?: string;
+  /** Matricule de l'établissement. */
+  studentNumber?: string;
+  /** Programme d'études. */
+  program?: string;
+  /** Identifiant de son statut (`TuitionStatus.id`). */
+  residency: string;
+  /** Crédits auxquels il est inscrit. */
+  credits: number;
+  /** Libellés des frais facultatifs dont il s'est retiré. */
+  optedOut?: string[];
+  payments: InvoicePayment[];
+}

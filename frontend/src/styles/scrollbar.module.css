@@ -1,0 +1,13 @@
+/*
+ * Barre de défilement discrète, celle de l'Horaire : fine, le curseur en gris, sans fond.
+ *
+ * À réutiliser plutôt que de la redéfinir :
+ * - dans une feuille de module, en premier dans la règle :
+ *     .liste { composes: thin from '../../styles/scrollbar.module.css'; overflow-y: auto; }
+ * - ou dans un composant : `import scrollbar from '../../styles/scrollbar.module.css'`, puis
+ *   `className={scrollbar.thin}`.
+ */
+.thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}

@@ -90,7 +90,33 @@ describe('PortalSidebar', () => {
     expect(props.onReload).toHaveBeenCalled();
   });
 
+  it('une page masquée n’a pas de lien ; les autres gardent leur ordre', () => {
+    renderSidebar({ hiddenPages: ['factures'] });
+    const links = within(screen.getByRole('navigation', { name: 'Portail' })).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual([
+      'Accueil',
+      'Horaire',
+      'Bulletin',
+      "Centre d'aide",
+    ]);
+  });
+
+  it('pastille d’une page : à côté du libellé, et dans le nom lu', () => {
+    renderSidebar({ pageBadges: { factures: 'À payer' } });
+    const factures = screen.getByRole('link', { name: 'Factures À payer' });
+    expect(factures.querySelector('[class*="pageBadge"]')?.textContent).toBe('À payer');
+    // Les autres pages n'en ont pas.
+    expect(screen.getByRole('link', { name: 'Horaire' }).querySelector('[class*="pageBadge"]')).toBeNull();
+  });
+
   describe('version réduite', () => {
+    it('la pastille devient un point ; son texte passe dans le nom et l’infobulle', () => {
+      renderSidebar({ collapsed: true, pageBadges: { factures: 'À payer' } });
+      const factures = screen.getByRole('link', { name: 'Factures (à payer)' });
+      expect(factures.getAttribute('title')).toBe('Factures (à payer)');
+      expect(screen.getByRole('link', { name: 'Bulletin' }).getAttribute('title')).toBe('Bulletin');
+    });
+
     it('les pages et les cours gardent un nom accessible et une infobulle', () => {
       renderSidebar({ collapsed: true });
       expect(screen.getByRole('link', { name: 'Accueil' }).getAttribute('title')).toBe('Accueil');

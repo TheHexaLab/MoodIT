@@ -1,0 +1,1308 @@
+/*
+ * Factures, vue de l'administration (#207) : suivi des étudiants et tarification. Feuille commune à
+ * InvoicesAdminPage, BillingOverview, StudentBillingPopup et FeeScheduleEditor.
+ */
+.page {
+  composes: thin from '../../styles/scrollbar.module.css';
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: var(--bg-main);
+  color: var(--text);
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+}
+
+.main {
+  max-width: 76rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--text-body);
+}
+
+.card {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--bg-surface);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* Annonce discrète ; vide, elle ne prend pas de place. */
+.notice {
+  margin: 0;
+  color: var(--badge-success-fg);
+  font-weight: 500;
+}
+
+.notice:empty {
+  display: none;
+}
+
+.error {
+  margin: 0;
+  color: var(--badge-danger-fg);
+  font-weight: 500;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ── Onglets ─────────────────────────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  position: relative;
+  padding: 0.75rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tabOn {
+  color: var(--brand-teal);
+}
+
+.tabOn::after {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--brand-teal);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: -2px;
+  border-radius: 0.375rem;
+}
+
+.panel {
+  min-width: 0;
+}
+
+/* ── Suivi : indicateurs ─────────────────────────────────────────────────────────────────────── */
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.kpi {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--bg-surface);
+}
+
+.kpi dt {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.kpi dd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0.5rem 0 0;
+}
+
+.kpiValue {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiNote {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.kpiAlert {
+  border-color: var(--badge-danger-fg);
+}
+
+.kpiAlert .kpiNote {
+  color: var(--badge-danger-fg);
+  font-weight: 600;
+}
+
+/* Part encaissée : une jauge. */
+.meter {
+  display: block;
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-teal);
+}
+
+/* ── Suivi : répartition par état (barre empilée + légende-filtre) ───────────────────────────── */
+.listHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.stack {
+  display: flex;
+  gap: 3px;
+  height: 0.625rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.stackPart {
+  flex-basis: 0;
+  min-width: 0.375rem;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  min-height: 2.125rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-body);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.filter:hover {
+  background: var(--bg-active-channel);
+}
+
+.filterOn,
+.filterOn:hover {
+  border-color: var(--brand-teal);
+  background: var(--badge-success-bg);
+  color: var(--brand-teal);
+}
+
+.count {
+  min-width: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+/* ── Suivi : barre d'outils ──────────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.search {
+  flex: 1 1 18rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  height: 2.75rem;
+  padding: 0 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.search:focus-within {
+  border-color: var(--brand-teal);
+}
+
+.search svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.select select,
+.field select {
+  height: 2.75rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  color-scheme: inherit;
+}
+
+.select select:focus,
+.field select:focus {
+  border-color: var(--brand-teal);
+  outline: none;
+}
+
+/* ── Suivi : tableau ─────────────────────────────────────────────────────────────────────────── */
+.tableCard {
+  overflow: hidden;
+}
+
+.scroll {
+  composes: thin from '../../styles/scrollbar.module.css';
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 54rem;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 400;
+}
+
+.table td {
+  white-space: nowrap;
+}
+
+.table thead th {
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.table .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.strong {
+  font-weight: 600 !important;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background: var(--brand-teal-surface);
+}
+
+.studentButton {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.studentButton:hover {
+  color: var(--brand-teal);
+  text-decoration: underline;
+}
+
+.studentButton:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.studentMeta {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.residency {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  color: var(--text-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chevron {
+  width: 1%;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+
+.tableFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+}
+
+.tableFooter strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty p {
+  margin: 0;
+}
+
+/* ── Pastilles d'état ────────────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badgePaid {
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+}
+
+.badgeDue {
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
+}
+
+.badgeLate {
+  background: var(--badge-danger-bg);
+  color: var(--badge-danger-fg);
+}
+
+.badgePartial {
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
+}
+
+.badgeNeutral {
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+}
+
+/* Barre et points de légende : la couleur pleine de chaque état. */
+.stackPart.badgePaid,
+.dot.badgePaid {
+  background: var(--badge-success-fg);
+}
+
+.stackPart.badgeDue,
+.dot.badgeDue {
+  background: var(--warning);
+}
+
+.stackPart.badgeLate,
+.dot.badgeLate {
+  background: var(--badge-danger-fg);
+}
+
+.stackPart.badgePartial,
+.dot.badgePartial {
+  background: var(--badge-info-fg);
+}
+
+/* ── Détail d'un étudiant (popup) ────────────────────────────────────────────────────────────── */
+.popup {
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+}
+
+.popupHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1.125rem 1.5rem 0.75rem;
+}
+
+.popupHeaderText {
+  flex: 1;
+  min-width: 0;
+}
+
+.popupHeaderText h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.popupHeaderText p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.popupFacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.factsDue {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.popupBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.popupColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.popupColumn + .popupColumn {
+  border-left: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.popupTitle {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.paidMessage {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--text-body);
+}
+
+.paymentForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.close,
+.remove {
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--bg-active-channel);
+}
+
+.remove:hover {
+  background: var(--badge-danger-bg);
+  color: var(--badge-danger-fg);
+}
+
+/* Détail d'une facture (popup et simulateur) : libellés à gauche, montants à droite. */
+.lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines th,
+.lines td {
+  padding: 0.5625rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  font-weight: 400;
+}
+
+.lines td {
+  padding-left: 1rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.lineDetail {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.linesTotal th,
+.linesTotal td {
+  font-weight: 600;
+}
+
+.paymentLine td {
+  color: var(--badge-success-fg);
+}
+
+.linesBalance th,
+.linesBalance td {
+  border-bottom: none;
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+/* ── Tarification ────────────────────────────────────────────────────────────────────────────── */
+.editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  align-items: start;
+  gap: 1rem;
+  padding-bottom: 4.5rem;
+}
+
+.editorMain {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.section {
+  padding: 1.25rem 1.5rem;
+}
+
+.prices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.priceHead {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Nom du statut : modifiable, mais lu comme un titre de carte. */
+.priceName {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.375rem;
+  margin-left: -0.375rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-heading-alt);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.priceName:hover {
+  border-color: var(--border);
+}
+
+.priceName:focus {
+  border-color: var(--brand-teal);
+  background: var(--bg-input);
+  outline: none;
+}
+
+.priceName::placeholder {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.priceNote {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.prices > li {
+  display: flex;
+}
+
+.prices > li > .price,
+.prices > .price {
+  flex: 1;
+}
+
+.addStatus {
+  flex: 1;
+  min-height: 8rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-body);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addStatus:hover {
+  border-style: solid;
+  border-color: var(--brand-teal);
+  color: var(--brand-teal);
+}
+
+.addStatus:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+.price {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-sidebar);
+}
+
+.priceLabel {
+  color: var(--text-heading-alt);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.priceInput {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.priceInput input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 2.5rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.priceInput input:focus {
+  border-color: var(--brand-teal);
+  outline: none;
+}
+
+.dueRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.dueField {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-body);
+  font-weight: 500;
+}
+
+.rateInput {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.rateInput input {
+  box-sizing: border-box;
+  width: 5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rateInput input:focus {
+  border-color: var(--brand-teal);
+  outline: none;
+}
+
+.dueField input,
+.field input {
+  box-sizing: border-box;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  color-scheme: inherit;
+}
+
+.dueField input:focus,
+.field input:focus {
+  border-color: var(--brand-teal);
+  outline: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.field > span {
+  color: var(--text-body);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.field input,
+.field select {
+  width: 100%;
+}
+
+/* Frais : libellé, montant, base, facultatif et retrait sur une ligne ; la précision dessous. */
+.fees {
+  display: flex;
+  flex-direction: column;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fee {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5rem auto auto 2rem;
+  grid-template-areas:
+    'label amount basis optional remove'
+    'detail detail detail detail .';
+  align-items: end;
+  gap: 0.5rem 0.75rem;
+  padding: 0.875rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.fee:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.feeLabel {
+  grid-area: label;
+}
+
+/* Libellés des champs visibles sur le premier frais seulement, comme des en-têtes de colonne ;
+   les frais suivants les gardent pour les lecteurs d'écran. */
+.fee + .fee .field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.feeAmount {
+  grid-area: amount;
+}
+
+.feeAmount input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.feeDetail {
+  grid-area: detail;
+}
+
+.feeDetail > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.feeDetail input {
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.feeDetail input::placeholder {
+  color: var(--text-muted);
+}
+
+.fee .remove {
+  grid-area: remove;
+  margin-bottom: 0.25rem;
+}
+
+.segmented {
+  grid-area: basis;
+  display: inline-flex;
+  padding: 0.1875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-sidebar);
+}
+
+.segmented button {
+  min-height: 2rem;
+  padding: 0 0.625rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented .segmentOn {
+  background: var(--bg-surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.optional {
+  grid-area: optional;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.5rem;
+  color: var(--text-body);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.optional input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--brand-teal);
+}
+
+.emptyFees {
+  margin: 1rem 0 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.chip {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-body);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-style: solid;
+  border-color: var(--brand-teal);
+  color: var(--brand-teal);
+}
+
+/* Simulateur : à droite, il reste visible pendant qu'on fait défiler les frais. */
+.simulator {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border-color: var(--brand-teal);
+}
+
+.simulatorInputs {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.simulator .linesBalance td {
+  color: var(--brand-teal);
+  font-size: 1.125rem;
+}
+
+/* Barre d'enregistrement, collée au bas de la page. */
+.saveBar {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  left: calc(var(--portal-sidebar-width, 17rem) + 1.5rem);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px var(--shadow-modal);
+}
+
+.saveBar p {
+  margin: 0;
+  color: var(--text-body);
+  font-weight: 500;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ── Boutons ─────────────────────────────────────────────────────────────────────────────────── */
+.button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0 1.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--bg-active-channel);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.buttonIcon {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-right: 0.5rem;
+}
+
+.primary {
+  border-color: var(--brand-teal-strong);
+  background: var(--brand-teal-strong);
+  color: var(--text-on-brand);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--brand-teal-strong);
+  filter: brightness(1.12);
+}
+
+.button:focus-visible,
+.filter:focus-visible,
+.chip:focus-visible,
+.close:focus-visible,
+.remove:focus-visible,
+.segmented button:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Écrans plus étroits ─────────────────────────────────────────────────────────────────────── */
+@media (max-width: 80rem) {
+  .editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .simulator {
+    position: static;
+  }
+}
+
+@media (max-width: 70rem) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Mobile : une colonne, sous la barre fixe de LeftMenuGroup. */
+@media (max-width: 56.25rem) {
+  .page {
+    padding: 4.25rem 1rem 1rem;
+  }
+
+  .prices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Indicateurs deux par ligne, plus compacts : la liste reste proche du haut. */
+  .kpis {
+    gap: 0.5rem;
+  }
+
+  .kpi {
+    padding: 0.75rem;
+  }
+
+  .kpiValue {
+    font-size: 1.0625rem;
+    white-space: normal;
+  }
+
+  .toolbar > .select,
+  .toolbar > .button {
+    flex: 1 1 auto;
+  }
+
+  .popupBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .popupColumn + .popupColumn {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .fee {
+    grid-template-columns: minmax(0, 1fr) 2rem;
+    grid-template-areas:
+      'label remove'
+      'amount amount'
+      'basis basis'
+      'optional optional'
+      'detail detail';
+    align-items: center;
+  }
+
+  .saveBar {
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+  }
+}
+
+/* Listes déroulantes (Dropdown) de la barre d'outils : une largeur fixe, à la hauteur des champs. */
+.selectStatus {
+  width: 13rem;
+}
+
+.selectSort {
+  width: 12rem;
+}
+
+.select [aria-haspopup] {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 56.25rem) {
+  .selectStatus,
+  .selectSort {
+    flex: 1;
+    width: auto;
+  }
+}
+
+/* Liste déroulante du simulateur : à la hauteur du champ « Crédits ». */
+.field [aria-haspopup] {
+  min-height: 2.5rem;
+}
