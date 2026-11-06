@@ -2043,12 +2043,22 @@ describe('Dashboard — factures (#207)', () => {
     dueDate: '2026-11-15',
     lines: [{ label: 'Droits de scolarité', amountCents: 112_000 }],
   };
-  const STUDENT = { id: 1, name: 'Camille Lavoie', credits: 15, payments: [] };
-  /** Facturation de l'administration : 75 $ le crédit, 30 $ de frais communs, une étudiante. */
+  const STUDENT = {
+    id: 1,
+    name: 'Camille Lavoie',
+    residency: 'quebec' as const,
+    credits: 15,
+    payments: [],
+  };
+  /** Facturation de l'administration : 75 $ le crédit au Québec, 30 $ de frais, une étudiante. */
   const mockBilling = () => {
     vi.mocked(api.fetchFeeSchedule).mockResolvedValue({
       session: 'automne 2026',
-      creditPriceCents: 7_500,
+      statuses: [
+        { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 7_500 },
+        { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 20_000 },
+        { id: 'international', label: 'International', creditPriceCents: 50_000 },
+      ],
       dueDate: '2026-11-15',
       fees: [{ label: 'Assurance collective', amountCents: 3_000 }],
     });
@@ -2136,34 +2146,36 @@ describe('Dashboard — factures (#207)', () => {
     mockBilling();
     renderDashboard({ path: '/home/factures', ...roles });
     expect(await screen.findByText('Camille Lavoie')).toBeTruthy();
-    expect(screen.getByText("Tarification de la session d'automne 2026")).toBeTruthy();
+    expect(screen.getByText("Facturation de la session d'automne 2026")).toBeTruthy();
     expect(portal().getByRole('link', { name: 'Factures' }).getAttribute('aria-current')).toBe('page');
     expect(api.fetchInvoice).not.toHaveBeenCalled();
   });
 
-  it('administration : enregistrer la tarification et « Marquer payée » passent par l’API', async () => {
+  it('administration : le détail d’un étudiant, puis la tarification passe par l’API', async () => {
     mockBilling();
     vi.mocked(api.saveFeeSchedule).mockImplementation(async (schedule) => schedule);
-    vi.mocked(api.recordStudentPayment).mockImplementation(async (_id, payment) => ({
-      ...STUDENT,
-      payments: [payment],
-    }));
     renderDashboard({ path: '/home/factures', isAdmin: true });
-    fireEvent.click(await screen.findByRole('button', { name: 'Marquer payée : Camille Lavoie' }));
-    expect(await screen.findByText('Paiement enregistré pour Camille Lavoie.')).toBeTruthy();
-    // 15 crédits × 75 $ + 30 $ de frais communs.
-    expect(api.recordStudentPayment).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({ amountCents: 115_500 })
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Camille Lavoie' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Facture de Camille Lavoie' });
+    expect(within(dialog).getByText('Droits de scolarité')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fermer' }));
 
-    fireEvent.change(screen.getByLabelText('Prix du crédit'), { target: { value: '80' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Tarification' }));
+    fireEvent.change(screen.getByLabelText('Prix du crédit : Résident du Québec'), {
+      target: { value: '80' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la tarification' }));
     expect(
       await screen.findByText('Tarification enregistrée. Les factures des étudiants sont à jour.')
     ).toBeTruthy();
     expect(api.saveFeeSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({ creditPriceCents: 8_000 })
+      expect.objectContaining({
+        statuses: [
+          { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 8000 },
+          { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 20_000 },
+          { id: 'international', label: 'International', creditPriceCents: 50_000 },
+        ],
+      })
     );
   });
 

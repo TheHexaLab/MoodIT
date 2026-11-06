@@ -4,10 +4,10 @@ import {
   fetchFeeSchedule,
   fetchInvoice,
   invoicesAvailable,
-  recordStudentPayment,
   saveFeeSchedule,
 } from './dashboardApi.ts';
 import { demoInvoice, resetDemoBilling, sessionName } from '../../mocks/invoicesData.ts';
+import { invoiceFromSchedule, invoiceTotal } from '../../components/InvoicesPage/invoice.ts';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -24,31 +24,31 @@ describe('factures : données fictives (#207)', () => {
     await expect(fetchInvoice()).rejects.toThrow('Factures indisponibles');
   });
 
-  it('la facture de l’étudiant découle de la tarification : 15 crédits × 75 $ + frais communs', async () => {
+  it('la facture de l’étudiant découle de la tarification : 15 crédits au tarif du Québec + frais', async () => {
     const invoice = await fetchInvoice(NOW);
     expect(invoice.session).toBe('automne 2026');
     expect(invoice.dueDate).toBe('2026-11-15');
-    expect(invoice.lines).toEqual([
-      {
-        label: 'Droits de scolarité',
-        detail: expect.stringContaining('15 crédits ×'),
-        amountCents: 112_500,
-      },
-      {
-        label: 'Frais afférents',
-        detail: 'Services aux étudiants et technologies',
-        amountCents: 13_450,
-      },
-      { label: 'Assurance collective', amountCents: 3_000 },
+    expect(invoice.lines.map((line) => [line.label, line.amountCents])).toEqual([
+      ['Droits de scolarité', 157_500],
+      ['Frais afférents', 13_500],
+      ['Frais technologiques', 4_500],
+      ['Association étudiante', 2_500],
+      ['Assurance collective', 15_000],
     ]);
   });
 
   it('une tarification enregistrée change la facture de l’étudiant', async () => {
     const schedule = await fetchFeeSchedule(NOW);
-    await saveFeeSchedule({ ...schedule, creditPriceCents: 10_000, fees: [] });
+    await saveFeeSchedule({
+      ...schedule,
+      statuses: schedule.statuses.map((status) =>
+        status.id === 'quebec' ? { ...status, creditPriceCents: 10_000 } : status
+      ),
+      fees: [],
+    });
     const invoice = await fetchInvoice(NOW);
-    expect(invoice.lines).toEqual([
-      expect.objectContaining({ label: 'Droits de scolarité', amountCents: 150_000 }),
+    expect(invoice.lines.map((line) => [line.label, line.amountCents])).toEqual([
+      ['Droits de scolarité', 150_000],
     ]);
   });
 
@@ -79,7 +79,18 @@ describe('factures : états de démonstration', () => {
 
   it('payée : deux paiements qui couvrent le total', () => {
     const payments = demoInvoice(NOW, 'paid').payments ?? [];
-    expect(payments.reduce((sum, payment) => sum + payment.amountCents, 0)).toBe(128_950);
+    expect(payments.reduce((sum, payment) => sum + payment.amountCents, 0)).toBe(193_000);
+  });
+
+  it('en retard : l’échéance passée depuis 12 jours, et des intérêts à 7 % par an', () => {
+    const invoice = demoInvoice(NOW, 'late');
+    expect(invoice.dueDate).toBe('2026-10-18');
+    const interest = invoice.lines.at(-1)!;
+    expect(interest.label).toBe('Intérêts de retard');
+    expect(interest.detail).toBe('7 % par an · 12 jours de retard');
+    // 7 % par an sur 1 930 $, 12 jours : 4,44 $.
+    expect(interest.amountCents).toBe(444);
+    expect(invoice.payments).toBeUndefined();
   });
 
   it('rien à payer : aucune ligne', () => {
@@ -88,25 +99,37 @@ describe('factures : états de démonstration', () => {
 });
 
 describe('tarification et étudiants (administration)', () => {
-  it('tarification de départ ; une copie à chaque appel', async () => {
+  it('tarification de départ : un prix du crédit par statut ; une copie à chaque appel', async () => {
     const schedule = await fetchFeeSchedule(NOW);
     expect(schedule).toMatchObject({
       session: 'automne 2026',
-      creditPriceCents: 7_500,
+      statuses: [
+        { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 10_500 },
+        { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 31500 },
+        { id: 'france', label: 'Français (entente)', creditPriceCents: 31500 },
+        { id: 'international', label: 'International', creditPriceCents: 85000 },
+      ],
       dueDate: '2026-11-15',
+      lateInterestPercent: 7,
     });
-    expect(schedule.fees.map((fee) => fee.label)).toEqual([
-      'Frais afférents',
-      'Assurance collective',
+    expect(schedule.fees.map((fee) => [fee.label, fee.basis, fee.optional ?? false])).toEqual([
+      ['Frais afférents', 'perCredit', false],
+      ['Frais technologiques', 'perSession', false],
+      ['Association étudiante', 'perSession', true],
+      ['Assurance collective', 'perSession', true],
     ]);
     schedule.fees.length = 0;
-    expect((await fetchFeeSchedule(NOW)).fees).toHaveLength(2);
+    expect((await fetchFeeSchedule(NOW)).fees).toHaveLength(4);
   });
 
   it('une tarification enregistrée est relue telle quelle', async () => {
     const next = {
       session: 'automne 2026',
-      creditPriceCents: 8_000,
+      statuses: [
+        { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 11_000 },
+        { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 33_000 },
+        { id: 'international', label: 'International', creditPriceCents: 90_000 },
+      ],
       dueDate: '2026-12-01',
       fees: [{ label: 'Frais technologiques', amountCents: 4_500 }],
     };
@@ -114,45 +137,48 @@ describe('tarification et étudiants (administration)', () => {
     expect(await fetchFeeSchedule(NOW)).toEqual(next);
   });
 
-  it('cinq étudiants, avec leurs crédits ; Jérémie a tout payé', async () => {
+  it('seize étudiants : matricule, programme, statut et crédits ; payés selon leur facture', async () => {
     const students = await fetchEnrolledStudents(NOW);
-    expect(students.map((student) => [student.name, student.credits])).toEqual([
-      ['Camille Lavoie', 15],
-      ['Jérémie Tremblay', 12],
-      ['Amira Benali', 15],
-      ['Noah Gagnon', 9],
-      ['Léa Côté', 6],
-    ]);
-    // 12 crédits × 75 $ + 164,50 $ de frais communs.
-    expect(students[1].payments[0].amountCents).toBe(106_450);
-  });
-
-  it('un paiement enregistré s’ajoute à l’étudiant', async () => {
-    await fetchEnrolledStudents(NOW);
-    const updated = await recordStudentPayment(1, { date: '2026-10-30', amountCents: 10_000 });
-    expect(updated.payments).toEqual([{ date: '2026-10-30', amountCents: 10_000 }]);
-    expect((await fetchEnrolledStudents(NOW))[0].payments).toHaveLength(1);
-  });
-
-  it('paiement pour un étudiant inconnu, ou avant tout chargement : erreur', async () => {
-    await expect(recordStudentPayment(1, { date: '2026-10-30', amountCents: 1 })).rejects.toThrow(
-      'Étudiant introuvable'
+    expect(students).toHaveLength(16);
+    // Deux étudiants français, à l'entente France-Québec.
+    expect(students.filter((student) => student.residency === 'france')).toHaveLength(2);
+    expect(students[0]).toMatchObject({
+      id: 1,
+      name: 'Camille Lavoie',
+      email: 'camille.lavoie@exemple.ca',
+      program: 'Génie informatique',
+      residency: 'quebec',
+      credits: 15,
+      payments: [],
+    });
+    expect(students[0].studentNumber).toMatch(/^\d{8}$/);
+    // Les accents tombent dans le courriel.
+    expect(students[10].email).toBe('emile.fortin@exemple.ca');
+    // Payé en entier : exactement le total de sa facture.
+    const schedule = await fetchFeeSchedule(NOW);
+    const jeremie = students[1];
+    expect(jeremie.payments[0].amountCents).toBe(
+      invoiceTotal(invoiceFromSchedule(schedule, jeremie))
     );
-    await fetchEnrolledStudents(NOW);
-    await expect(recordStudentPayment(999, { date: '2026-10-30', amountCents: 1 })).rejects.toThrow(
-      'Étudiant introuvable'
-    );
+    // Retiré de l'assurance.
+    expect(students[3].optedOut).toEqual(['Assurance collective']);
   });
 
   it('jamais en production', async () => {
     vi.stubEnv('DEV', false);
     await expect(fetchFeeSchedule(NOW)).rejects.toThrow('Factures indisponibles');
     await expect(
-      saveFeeSchedule({ session: 's', creditPriceCents: 1, dueDate: '2026-12-01', fees: [] })
+      saveFeeSchedule({
+        session: 's',
+        statuses: [
+          { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 1 },
+          { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 1 },
+          { id: 'international', label: 'International', creditPriceCents: 1 },
+        ],
+        dueDate: '2026-12-01',
+        fees: [],
+      })
     ).rejects.toThrow('Factures indisponibles');
     await expect(fetchEnrolledStudents(NOW)).rejects.toThrow('Factures indisponibles');
-    await expect(recordStudentPayment(1, { date: '2026-10-30', amountCents: 1 })).rejects.toThrow(
-      'Factures indisponibles'
-    );
   });
 });

@@ -1,4 +1,9 @@
-import type { FeeSchedule, InvoicePayment, InvoiceSummary } from '../../types/domain.ts';
+import type {
+  FeeSchedule,
+  InvoicePayment,
+  InvoiceSummary,
+  SessionFee,
+} from '../../types/domain.ts';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -115,36 +120,122 @@ export function sessionName(now: Date): string {
   return `${season} ${now.getFullYear()}`;
 }
 
+/** Nom du statut d'un étudiant ; « Statut inconnu » s'il a été retiré de la tarification. */
+export function statusLabel(schedule: Pick<FeeSchedule, 'statuses'>, id: string): string {
+  return schedule.statuses.find((status) => status.id === id)?.label ?? 'Statut inconnu';
+}
+
+/** Prix du crédit d'un statut, en cents ; 0 pour un statut inconnu. */
+export function statusPrice(schedule: Pick<FeeSchedule, 'statuses'>, id: string): number {
+  return schedule.statuses.find((status) => status.id === id)?.creditPriceCents ?? 0;
+}
+
 /** Droits de scolarité : les crédits × le prix du crédit, en cents. */
 export function tuitionCents(credits: number, creditPriceCents: number): number {
   return credits * creditPriceCents;
 }
 
-/** Frais communs de la session, en cents. */
-export function sharedFeesCents(schedule: Pick<FeeSchedule, 'fees'>): number {
-  return schedule.fees.reduce((sum, fee) => sum + fee.amountCents, 0);
+/** « 15 crédits » / « 1 crédit ». */
+export function creditsLabel(credits: number): string {
+  return `${credits} ${credits > 1 ? 'crédits' : 'crédit'}`;
+}
+
+/** Montant d'un frais pour un étudiant : par crédit (× ses crédits) ou fixe pour la session. */
+export function feeCents(fee: SessionFee, credits: number): number {
+  return fee.basis === 'perCredit' ? fee.amountCents * credits : fee.amountCents;
+}
+
+/** Frais qui s'appliquent à un étudiant : tous, sauf les facultatifs dont il s'est retiré. */
+export function appliedFees(fees: SessionFee[], optedOut: string[] = []): SessionFee[] {
+  return fees.filter((fee) => !(fee.optional && optedOut.includes(fee.label)));
+}
+
+/** Total des frais d'un étudiant (hors droits de scolarité), en cents. */
+export function feesCents(fees: SessionFee[], credits: number, optedOut: string[] = []): number {
+  return appliedFees(fees, optedOut).reduce((sum, fee) => sum + feeCents(fee, credits), 0);
+}
+
+/** Ce qu'il faut savoir d'un étudiant pour calculer sa facture. */
+export interface BillableStudent {
+  credits: number;
+  /** Identifiant de son statut. */
+  residency: string;
+  optedOut?: string[];
 }
 
 /**
  * Facture d'un étudiant, calculée à partir de la tarification : une ligne « Droits de scolarité »
- * (crédits × prix du crédit), puis chaque frais commun.
+ * (crédits × prix du crédit de son statut), puis chaque frais qui s'applique à lui.
  */
 export function invoiceFromSchedule(
   schedule: FeeSchedule,
-  credits: number,
-  payments: InvoicePayment[] = []
+  student: BillableStudent,
+  payments: InvoicePayment[] = [],
+  /** Aujourd'hui : après l'échéance, des intérêts s'ajoutent sur le solde impayé. */
+  now?: Date
 ): InvoiceSummary {
-  return {
+  const price = statusPrice(schedule, student.residency);
+  const invoice: InvoiceSummary = {
     session: schedule.session,
     dueDate: schedule.dueDate,
     lines: [
       {
         label: 'Droits de scolarité',
-        detail: `${credits} ${credits > 1 ? 'crédits' : 'crédit'} × ${formatMoney(schedule.creditPriceCents)}`,
-        amountCents: tuitionCents(credits, schedule.creditPriceCents),
+        detail: `${creditsLabel(student.credits)} × ${formatMoney(price)}`,
+        amountCents: tuitionCents(student.credits, price),
       },
-      ...schedule.fees,
+      ...appliedFees(schedule.fees, student.optedOut).map((fee) => ({
+        label: fee.label,
+        detail:
+          fee.basis === 'perCredit'
+            ? `${creditsLabel(student.credits)} × ${formatMoney(fee.amountCents)}`
+            : fee.detail,
+        amountCents: feeCents(fee, student.credits),
+      })),
     ],
     payments,
   };
+  // Intérêts de retard : sur ce qui reste à payer, pour chaque jour depuis l'échéance.
+  const rate = schedule.lateInterestPercent ?? 0;
+  const daysLate = now ? -daysUntil(schedule.dueDate, now) : 0;
+  const unpaid = invoiceTotal(invoice) - invoicePaid(invoice);
+  const interest = lateInterestCents(unpaid, rate, daysLate);
+  if (interest > 0) {
+    invoice.lines.push({
+      label: INTEREST_LABEL,
+      detail: `${formatPercent(rate)} par an · ${daysLate} ${daysLate > 1 ? 'jours' : 'jour'} de retard`,
+      amountCents: interest,
+    });
+  }
+  return invoice;
+}
+
+const percent = new Intl.NumberFormat('fr-CA', { maximumFractionDigits: 2 });
+
+/** « 7,5 % ». */
+export function formatPercent(rate: number): string {
+  return `${percent.format(rate)} %`;
+}
+
+/**
+ * Intérêts simples sur un solde impayé, en cents : solde × taux annuel × jours / 365, arrondi au
+ * cent. Rien avant l'échéance, ni sur un solde nul.
+ */
+export function lateInterestCents(
+  unpaidCents: number,
+  ratePercent: number,
+  daysLate: number
+): number {
+  if (unpaidCents <= 0 || ratePercent <= 0 || daysLate <= 0) return 0;
+  return Math.round((unpaidCents * (ratePercent / 100) * daysLate) / 365);
+}
+
+/** Libellé de la ligne d'intérêts, pour la reconnaître dans une facture. */
+export const INTEREST_LABEL = 'Intérêts de retard';
+
+/** Intérêts de retard d'une facture, en cents (0 s'il n'y en a pas). */
+export function invoiceInterest(invoice: InvoiceSummary): number {
+  return invoice.lines
+    .filter((line) => line.label === INTEREST_LABEL)
+    .reduce((sum, line) => sum + line.amountCents, 0);
 }

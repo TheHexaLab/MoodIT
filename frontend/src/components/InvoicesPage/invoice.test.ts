@@ -14,7 +14,15 @@ import {
   lastPaymentDate,
   parseAmount,
   sessionName,
-  sharedFeesCents,
+  appliedFees,
+  formatPercent,
+  invoiceInterest,
+  lateInterestCents,
+  statusLabel,
+  statusPrice,
+  creditsLabel,
+  feeCents,
+  feesCents,
   tuitionCents,
 } from './invoice';
 
@@ -127,36 +135,138 @@ describe('factures : paiements et état', () => {
 describe('factures : calcul à partir de la tarification', () => {
   const SCHEDULE = {
     session: 'automne 2026',
-    creditPriceCents: 7_500,
+    statuses: [
+      { id: 'quebec', label: 'Résident du Québec', creditPriceCents: 10_500 },
+      { id: 'canada', label: 'Canadien hors Québec', creditPriceCents: 31_500 },
+      { id: 'international', label: 'International', creditPriceCents: 85_000 },
+    ],
     dueDate: '2026-11-15',
     fees: [
-      { label: 'Frais afférents', detail: 'Services', amountCents: 13_450 },
-      { label: 'Assurance collective', amountCents: 3_000 },
+      { label: 'Frais afférents', amountCents: 900, basis: 'perCredit' as const },
+      { label: 'Frais technologiques', detail: 'Session', amountCents: 4_500 },
+      { label: 'Assurance collective', amountCents: 15_000, optional: true },
     ],
   };
 
-  it('droits : crédits × prix du crédit ; frais communs : leur somme', () => {
-    expect(tuitionCents(15, 7_500)).toBe(112_500);
-    expect(tuitionCents(0, 7_500)).toBe(0);
-    expect(sharedFeesCents(SCHEDULE)).toBe(16_450);
-    expect(sharedFeesCents({ fees: [] })).toBe(0);
+  it('nom et prix d’un statut ; un statut inconnu : « Statut inconnu », 0 $', () => {
+    expect(statusLabel(SCHEDULE, 'canada')).toBe('Canadien hors Québec');
+    expect(statusPrice(SCHEDULE, 'canada')).toBe(31_500);
+    expect(statusLabel(SCHEDULE, 'retiré')).toBe('Statut inconnu');
+    expect(statusPrice(SCHEDULE, 'retiré')).toBe(0);
   });
 
-  it('facture d’un étudiant : une ligne de droits, puis chaque frais commun', () => {
-    const invoice = invoiceFromSchedule(SCHEDULE, 15, [{ date: '2026-10-30', amountCents: 100 }]);
+  it('droits : crédits × prix du crédit ; « 1 crédit » au singulier', () => {
+    expect(tuitionCents(15, 10_500)).toBe(157_500);
+    expect(tuitionCents(0, 10_500)).toBe(0);
+    expect(creditsLabel(1)).toBe('1 crédit');
+    expect(creditsLabel(15)).toBe('15 crédits');
+  });
+
+  it('un frais par crédit se multiplie ; un frais de session reste fixe', () => {
+    expect(feeCents(SCHEDULE.fees[0], 15)).toBe(13_500);
+    expect(feeCents(SCHEDULE.fees[1], 15)).toBe(4_500);
+  });
+
+  it('un frais facultatif refusé ne s’applique pas ; un frais obligatoire, toujours', () => {
+    expect(appliedFees(SCHEDULE.fees)).toHaveLength(3);
+    expect(
+      appliedFees(SCHEDULE.fees, ['Assurance collective', 'Frais technologiques']).map(
+        (fee) => fee.label
+      )
+    ).toEqual(['Frais afférents', 'Frais technologiques']);
+    expect(feesCents(SCHEDULE.fees, 15)).toBe(33_000);
+    expect(feesCents(SCHEDULE.fees, 15, ['Assurance collective'])).toBe(18_000);
+  });
+
+  it('facture d’un résident : les droits à son tarif, puis chaque frais', () => {
+    const invoice = invoiceFromSchedule(SCHEDULE, { credits: 15, residency: 'quebec' }, [
+      { date: '2026-10-30', amountCents: 100 },
+    ]);
     expect(invoice.session).toBe('automne 2026');
     expect(invoice.dueDate).toBe('2026-11-15');
-    expect(invoice.lines[0].label).toBe('Droits de scolarité');
-    expect(plain(invoice.lines[0].detail ?? '')).toBe('15 crédits × 75,00 $');
-    expect(invoice.lines[0].amountCents).toBe(112_500);
-    expect(invoice.lines.slice(1)).toEqual(SCHEDULE.fees);
-    expect(invoiceTotal(invoice)).toBe(128_950);
+    expect(invoice.lines.map((line) => [line.label, line.amountCents])).toEqual([
+      ['Droits de scolarité', 157_500],
+      ['Frais afférents', 13_500],
+      ['Frais technologiques', 4_500],
+      ['Assurance collective', 15_000],
+    ]);
+    expect(plain(invoice.lines[0].detail ?? '')).toBe('15 crédits × 105,00 $');
+    expect(plain(invoice.lines[1].detail ?? '')).toBe('15 crédits × 9,00 $');
+    expect(invoice.lines[2].detail).toBe('Session');
+    expect(invoiceTotal(invoice)).toBe(190_500);
     expect(invoice.payments).toEqual([{ date: '2026-10-30', amountCents: 100 }]);
   });
 
-  it('un seul crédit : « 1 crédit » ; sans paiement : liste vide', () => {
-    const invoice = invoiceFromSchedule(SCHEDULE, 1);
-    expect(plain(invoice.lines[0].detail ?? '')).toBe('1 crédit × 75,00 $');
+  it('étudiant international, retiré de l’assurance, sans paiement', () => {
+    const invoice = invoiceFromSchedule(SCHEDULE, {
+      credits: 1,
+      residency: 'international',
+      optedOut: ['Assurance collective'],
+    });
+    expect(plain(invoice.lines[0].detail ?? '')).toBe('1 crédit × 850,00 $');
+    expect(invoiceTotal(invoice)).toBe(85_000 + 900 + 4_500);
     expect(invoice.payments).toEqual([]);
+  });
+});
+
+describe('factures : intérêts de retard', () => {
+  const SCHEDULE = {
+    session: 'automne 2026',
+    statuses: [{ id: 'quebec', label: 'Résident du Québec', creditPriceCents: 10_000 }],
+    dueDate: '2026-11-15',
+    fees: [],
+    lateInterestPercent: 7.3,
+  };
+  const STUDENT = { credits: 10, residency: 'quebec' };
+
+  it('intérêts simples : solde × taux × jours / 365, arrondis au cent', () => {
+    expect(lateInterestCents(100_000, 7.3, 10)).toBe(200);
+    expect(lateInterestCents(100_000, 7.3, 0)).toBe(0);
+    expect(lateInterestCents(0, 7.3, 10)).toBe(0);
+    expect(lateInterestCents(100_000, 0, 10)).toBe(0);
+    expect(formatPercent(7.5)).toBe('7,5 %');
+    expect(formatPercent(7)).toBe('7 %');
+  });
+
+  it('avant ou le jour de l’échéance, ou sans date : pas d’intérêts', () => {
+    expect(invoiceFromSchedule(SCHEDULE, STUDENT).lines).toHaveLength(1);
+    expect(invoiceFromSchedule(SCHEDULE, STUDENT, [], new Date(2026, 10, 15)).lines).toHaveLength(
+      1
+    );
+  });
+
+  it('après l’échéance : une ligne d’intérêts sur le solde impayé', () => {
+    const invoice = invoiceFromSchedule(
+      SCHEDULE,
+      STUDENT,
+      [{ date: '2026-11-01', amountCents: 50_000 }],
+      new Date(2026, 10, 25)
+    );
+    const interest = invoice.lines.at(-1)!;
+    expect(interest.label).toBe('Intérêts de retard');
+    expect(interest.detail).toBe('7,3 % par an · 10 jours de retard');
+    // Sur 500 $ restants : 1,00 $.
+    expect(interest.amountCents).toBe(100);
+    expect(invoiceInterest(invoice)).toBe(100);
+    expect(invoiceBalance(invoice)).toBe(50_100);
+  });
+
+  it('un jour de retard : « 1 jour » ; payée en entier ou sans taux : rien', () => {
+    const oneDay = invoiceFromSchedule(SCHEDULE, STUDENT, [], new Date(2026, 10, 16));
+    expect(oneDay.lines.at(-1)!.detail).toBe('7,3 % par an · 1 jour de retard');
+    const paid = invoiceFromSchedule(
+      SCHEDULE,
+      STUDENT,
+      [{ date: '2026-11-01', amountCents: 100_000 }],
+      new Date(2026, 10, 25)
+    );
+    expect(invoiceInterest(paid)).toBe(0);
+    const noRate = invoiceFromSchedule(
+      { ...SCHEDULE, lateInterestPercent: undefined },
+      STUDENT,
+      [],
+      new Date(2026, 10, 25)
+    );
+    expect(invoiceInterest(noRate)).toBe(0);
   });
 });

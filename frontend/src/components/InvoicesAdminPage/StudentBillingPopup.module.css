@@ -1,0 +1,266 @@
+/* Détail de la facture d'un étudiant (administration) : en-tête, trois chiffres, puis les groupes. */
+.popup {
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+}
+
+/* ── En-tête : initiales, nom, coordonnées et étiquettes ─────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1.25rem 1.5rem 1rem;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--badge-success-bg);
+  color: var(--brand-teal);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.identity h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.identity p {
+  margin: 0.125rem 0 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.625rem;
+}
+
+.tag {
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ── Trois chiffres : total, payé, solde ─────────────────────────────────────────────────────── */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0 1.5rem 1.25rem;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--bg-sidebar);
+}
+
+.figure dt {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.figure dd {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.figureNote {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Le solde : la tuile ressort, dans la couleur de son état. */
+.balance {
+  border-width: 1.5px;
+}
+
+.balance dd {
+  font-size: 1.375rem;
+}
+
+.balance.toneDue {
+  border-color: var(--warning);
+  background: var(--badge-warn-bg);
+}
+
+.balance.toneLate {
+  border-color: var(--badge-danger-fg);
+  background: var(--badge-danger-bg);
+}
+
+.balance.tonePaid {
+  border-color: var(--badge-success-fg);
+  background: var(--badge-success-bg);
+}
+
+.balance.toneDue dd,
+.balance.toneDue .figureNote {
+  color: var(--badge-warn-fg);
+}
+
+.balance.toneLate dd,
+.balance.toneLate .figureNote {
+  color: var(--badge-danger-fg);
+}
+
+.balance.tonePaid dd,
+.balance.tonePaid .figureNote {
+  color: var(--badge-success-fg);
+}
+
+.tonePaid {
+  color: var(--badge-success-fg);
+}
+
+.toneLate {
+  color: var(--badge-danger-fg);
+}
+
+/* ── Le détail, par groupe ───────────────────────────────────────────────────────────────────── */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.groupTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.groupTotal {
+  color: var(--text);
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.group {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  list-style: none;
+}
+
+.groupLate {
+  border-color: var(--badge-danger-fg);
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6875rem 0.875rem;
+}
+
+.line + .line {
+  border-top: 1px solid var(--border);
+}
+
+.lineText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.lineLabel {
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.lineDetail {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.amount {
+  flex: none;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.empty {
+  margin: 0;
+  padding: 0.875rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.625rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Mobile : les trois chiffres l'un sous l'autre, le solde en premier. */
+@media (max-width: 40rem) {
+  .header,
+  .summary,
+  .body {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .balance {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}

@@ -123,7 +123,6 @@ const invoicesAdminApi: InvoicesAdminApi = {
   fetchSchedule: () => api.fetchFeeSchedule(),
   saveSchedule: (schedule) => api.saveFeeSchedule(schedule),
   fetchStudents: () => api.fetchEnrolledStudents(),
-  recordPayment: (studentId, payment) => api.recordStudentPayment(studentId, payment),
 };
 
 const MOBILE_QUERY = '(max-width: 900px)';

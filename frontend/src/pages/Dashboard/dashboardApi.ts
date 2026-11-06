@@ -22,14 +22,12 @@ import {
   demoEnrolledStudents,
   demoFeeSchedule,
   demoInvoice,
-  recordDemoStudentPayment,
   saveDemoFeeSchedule,
 } from '../../mocks/invoicesData.ts';
 import type {
   AnswerResponse,
   EnrolledStudent,
   FeeSchedule,
-  InvoicePayment,
   InvoiceSummary,
   Assignment,
   AssignmentDraft,
@@ -504,9 +502,7 @@ export async function fetchProgramRoleCandidates(
     page: String(page),
     size: String(size),
   });
-  const res = await apiFetch(
-    `/api/programs/${programId}/role-candidates?${params.toString()}`
-  );
+  const res = await apiFetch(`/api/programs/${programId}/role-candidates?${params.toString()}`);
   if (!res.ok) throw new Error('Échec chargement des candidats');
   return (await res.json()).map((u: User) => ({ ...u, role_ids: u.roles ?? [] }));
 }
@@ -745,7 +741,12 @@ async function fetchCourseForums(courseId: number): Promise<Forum[]> {
   const res = await apiFetch(`/api/courses/${courseId}/forums`);
   if (!res.ok) throw new Error('Échec chargement des forums du cours');
   const forums: ForumResponse[] = await res.json();
-  return forums.map((f) => ({ id: f.id, title: f.title, position: f.position, fType: f.fTypeName }));
+  return forums.map((f) => ({
+    id: f.id,
+    title: f.title,
+    position: f.position,
+    fType: f.fTypeName,
+  }));
 }
 
 /**
@@ -771,7 +772,10 @@ export async function createProgram(program: NewProgram): Promise<DemoProgram> {
  * courant (contexte), et non `localStorage`, où il peut manquer : on enverrait alors `id: 0`,
  * refusé en 403 par la règle « soi-même seulement ».
  */
-export async function joinPrograms(selection: JoinSelection, userId: number): Promise<DemoProgram[]> {
+export async function joinPrograms(
+  selection: JoinSelection,
+  userId: number
+): Promise<DemoProgram[]> {
   const res = await apiFetch(`/api/programs/users`, {
     method: 'POST',
     headers: {
@@ -1250,11 +1254,7 @@ export async function deletePost(forumId: number, postId: number): Promise<void>
  * direction brute. `forumId` est requis (le DTO cible le post PAR son forum).
  * L'utilisateur vient du JWT (X-User-Email injecté par le gateway).
  */
-export async function votePost(
-  forumId: number,
-  postId: number,
-  value: 1 | -1
-): Promise<void> {
+export async function votePost(forumId: number, postId: number, value: 1 | -1): Promise<void> {
   const res = await apiFetch('/api/forums/posts/votes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1535,13 +1535,4 @@ export async function saveFeeSchedule(schedule: FeeSchedule): Promise<FeeSchedul
 export async function fetchEnrolledStudents(now: Date = new Date()): Promise<EnrolledStudent[]> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
   return demoEnrolledStudents(now);
-}
-
-/** Administration : enregistre un paiement reçu d'un étudiant. */
-export async function recordStudentPayment(
-  studentId: number,
-  payment: InvoicePayment
-): Promise<EnrolledStudent> {
-  if (!invoicesAvailable()) throw new Error('Factures indisponibles');
-  return recordDemoStudentPayment(studentId, payment);
 }
