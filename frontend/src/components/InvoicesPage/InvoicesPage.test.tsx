@@ -205,7 +205,9 @@ describe('InvoicesPage', () => {
   it('sans échéance connue : le solde seul, sans compte à rebours', () => {
     renderPage({ status: 'ready', invoice: { ...INVOICE, dueDate: undefined } });
     expect(screen.getByText('Aucune échéance fixée')).toBeTruthy();
-    expect(screen.queryByText('Dans', { exact: false })).toBeNull();
+    // Pas de pastille de compte à rebours.
+    expect(screen.queryByText(/^Dans \d+ jours?$/)).toBeNull();
+    expect(screen.queryByText('Demain')).toBeNull();
     expect(screen.getByText(shown(128_450))).toBeTruthy();
   });
 
@@ -290,7 +292,7 @@ describe('InvoicesPage', () => {
     expect(status.textContent).toBe('Chargement de vos factures…');
     expect(status.getAttribute('aria-busy')).toBe('true');
     expect(screen.getByText('Ce que vous devez pour la session')).toBeTruthy();
-    expect(screen.queryByText('Solde à payer')).toBeNull();
+    expect(screen.queryByText('Solde restant')).toBeNull();
   });
 
   it('erreur : un message, et « Réessayer » recharge', () => {

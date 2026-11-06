@@ -2106,7 +2106,7 @@ describe('Dashboard — factures (#207)', () => {
   it('la page affiche le solde, et la barre la pastille « À payer »', async () => {
     vi.mocked(api.fetchInvoice).mockResolvedValue(INVOICE);
     renderDashboard({ path: '/home/factures' });
-    expect(await screen.findByText('Solde à payer')).toBeTruthy();
+    expect(await screen.findByText('Solde restant')).toBeTruthy();
     const link = portal().getByRole('link', { name: 'Factures À payer' });
     expect(link.getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('button', { name: 'Comment payer' })).toBeTruthy();
@@ -2133,7 +2133,7 @@ describe('Dashboard — factures (#207)', () => {
     expect(portal().getByRole('link', { name: 'Factures' })).toBeTruthy();
     fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Réessayer' }));
     expect(screen.getByText('Chargement de vos factures…')).toBeTruthy();
-    expect(await screen.findByText('Solde à payer')).toBeTruthy();
+    expect(await screen.findByText('Solde restant')).toBeTruthy();
     expect(api.fetchInvoice).toHaveBeenCalledTimes(2);
   });
 
@@ -2144,7 +2144,7 @@ describe('Dashboard — factures (#207)', () => {
     await waitFor(() => expect(api.fetchInvoice).toHaveBeenCalled());
     unmount();
     await act(async () => resolve(INVOICE));
-    expect(screen.queryByText('Solde à payer')).toBeNull();
+    expect(screen.queryByText('Solde restant')).toBeNull();
   });
 
   it('une erreur arrivée après le démontage est ignorée', async () => {
