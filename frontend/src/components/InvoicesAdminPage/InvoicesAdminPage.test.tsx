@@ -85,6 +85,15 @@ const ready = () => screen.findByRole('tab', { name: 'Suivi des étudiants' });
 /** Noms des étudiants affichés, dans l'ordre du tableau. */
 const names = () =>
   screen.getAllByRole('rowheader').map((header) => within(header).getByRole('button').textContent);
+/**
+ * Ouvre la liste déroulante `label` (Dropdown : son nom lu est le libellé puis le choix affiché) et
+ * y choisit `option`.
+ */
+const choose = (label: string, option: string) => {
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.startsWith(`${label} `) }));
+  fireEvent.click(screen.getByRole('button', { name: option }));
+};
+
 /** Ligne d'un étudiant (comparée sans expression régulière, comme ailleurs pour CodeQL). */
 const row = (name: string) =>
   screen
@@ -177,20 +186,21 @@ describe('InvoicesAdminPage : suivi des étudiants', () => {
     fireEvent.change(search, { target: { value: '23000001' } });
     expect(names()).toEqual(['Camille Lavoie']);
     fireEvent.change(search, { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Statut'), { target: { value: 'international' } });
+    choose('Statut', 'International');
     expect(names()).toEqual(['Émile Benali']);
   });
 
   it('tri : solde, nom, crédits', async () => {
     renderPage();
     await ready();
-    const sort = screen.getByLabelText('Trier par');
-    fireEvent.change(sort, { target: { value: 'balance' } });
+    choose('Trier par', 'Solde le plus élevé');
     expect(names()).toEqual(['Émile Benali', 'Camille Lavoie', 'Jérémie Tremblay']);
-    fireEvent.change(sort, { target: { value: 'name' } });
+    choose('Trier par', 'Nom (A à Z)');
     expect(names()).toEqual(['Camille Lavoie', 'Émile Benali', 'Jérémie Tremblay']);
-    fireEvent.change(sort, { target: { value: 'credits' } });
+    choose('Trier par', 'Crédits');
     expect(names()[2]).toBe('Émile Benali');
+    // Le choix est affiché dans le bouton de la liste.
+    expect(screen.getByRole('button', { name: 'Trier par Crédits' })).toBeTruthy();
   });
 
   it('« Exporter (CSV) » télécharge les lignes affichées', async () => {
@@ -270,17 +280,19 @@ describe('InvoicesAdminPage : détail d’un étudiant', () => {
     expect(within(dialog).queryByText("Aucun paiement reçu pour l'instant.")).toBeNull();
   });
 
-  it('après l’échéance : des intérêts de retard sur le solde impayé', async () => {
-    api.fetchSchedule.mockResolvedValue({ ...structuredClone(SCHEDULE), lateInterestPercent: 7.3 });
-    // 7,3 % par an sur 1 150 $, 10 jours après l'échéance du 15 novembre : 2,30 $.
+  it('après l’échéance : 2 % par mois du solde impayé', async () => {
+    api.fetchSchedule.mockResolvedValue({ ...structuredClone(SCHEDULE), lateInterestPercent: 2 });
+    // 10 jours après l'échéance du 15 novembre : un mois commencé. Camille : 2 % de 1 150 $ ;
+    // Émile : 2 % de 3 100 $. Soit 23,00 $ + 62,00 $.
     renderPage(new Date(2026, 10, 25));
     await ready();
-    expect(screen.getByText(`2 soldes ouverts, dont ${shown(850)} d'intérêts`)).toBeTruthy();
+    expect(screen.getByText(`2 soldes ouverts, dont ${shown(8_500)} d'intérêts`)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Camille Lavoie' }));
     const dialog = screen.getByRole('dialog', { name: 'Facture de Camille Lavoie' });
     expect(within(dialog).getByText('Intérêts de retard')).toBeTruthy();
-    expect(within(dialog).getByText('7,3 % par an · 10 jours de retard')).toBeTruthy();
-    expect(within(dialog).getByText(shown(230))).toBeTruthy();
+    expect(within(dialog).getByText('2 % par mois · 1 mois de retard')).toBeTruthy();
+    expect(within(dialog).getByText(shown(2_300))).toBeTruthy();
+    expect(within(dialog).getByText('En retard de 10 jours')).toBeTruthy();
   });
 
   it('un clic sur la ligne ouvre aussi le détail ; ✕ le ferme', async () => {
@@ -310,7 +322,7 @@ describe('InvoicesAdminPage : tarification', () => {
     ).toBe('100,00');
     // 15 crédits au Québec : 1 500 + 150 + 50 = 1 700 $.
     expect(screen.getByText(shown(170_000))).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Statut'), { target: { value: 'canada' } });
+    choose('Statut', 'Canadien hors Québec');
     expect(screen.getByText(shown(470_000))).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Avec les frais facultatifs'));
     expect(screen.getByText(shown(465_000))).toBeTruthy();
@@ -342,7 +354,7 @@ describe('InvoicesAdminPage : tarification', () => {
     fireEvent.change(screen.getByLabelText('Prix du crédit : Français (entente)'), {
       target: { value: '315' },
     });
-    fireEvent.change(screen.getByLabelText('Statut'), { target: { value: 'statut-100' } });
+    choose('Statut', 'Français (entente)');
     // 15 × 315 + 150 + 50 = 4 925 $.
     expect(screen.getByText(shown(492_500))).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la tarification' }));
@@ -494,7 +506,7 @@ describe('InvoicesAdminPage : tarification', () => {
     fireEvent.change(rate, { target: { value: 'beaucoup' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la tarification' }));
     expect(screen.getByRole('alert').textContent).toBe(
-      'Indiquez un taux d’intérêt entre 0 et 100 % par an.'
+      'Indiquez un taux d’intérêt entre 0 et 100 % par mois.'
     );
     fireEvent.change(rate, { target: { value: '7,5 %' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la tarification' }));

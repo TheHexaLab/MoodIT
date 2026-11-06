@@ -1,0 +1,165 @@
+/*
+ * Une facture en un coup d'œil (le solde restant) et son détail : page étudiante et admin.
+ * En haut, une tuile franche ; au centre, une zone ouverte, sans encadré ni filet entre les lignes.
+ */
+
+/* ── Le solde restant ─────────────────────────────────────────────────────── */
+.figures {
+  margin: 0;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--bg-sidebar);
+}
+
+.figure dt {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.figure dd {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.figureNote {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Le solde ressort, dans la couleur de son état. */
+.balance {
+  border-width: 1.5px;
+}
+
+.balance dd {
+  font-size: 1.5rem;
+}
+
+.balance.toneDue {
+  border-color: var(--warning);
+  background: var(--badge-warn-bg);
+}
+
+.balance.toneLate {
+  border-color: var(--badge-danger-fg);
+  background: var(--badge-danger-bg);
+}
+
+.balance.tonePaid {
+  border-color: var(--badge-success-fg);
+  background: var(--badge-success-bg);
+}
+
+.balance.toneDue dd,
+.balance.toneDue .figureNote {
+  color: var(--badge-warn-fg);
+}
+
+.balance.toneLate dd,
+.balance.toneLate .figureNote {
+  color: var(--badge-danger-fg);
+}
+
+.balance.tonePaid dd,
+.balance.tonePaid .figureNote {
+  color: var(--badge-success-fg);
+}
+
+.paidText {
+  color: var(--badge-success-fg);
+}
+
+.lateText {
+  color: var(--badge-danger-fg);
+}
+
+/* ── Le détail : une zone ouverte, les groupes séparés par de l'espace ───────────────────────── */
+.details {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Droits de scolarité et frais vont ensemble ; un seul filet avant les intérêts et les paiements. */
+.details > section + section {
+  margin-top: 1.125rem;
+}
+
+.details > .separated {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.groupTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4375rem 0;
+}
+
+.lineText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 0;
+}
+
+.lineLabel {
+  font-size: 0.9375rem;
+}
+
+.lineDetail {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.amount {
+  flex: none;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.empty {
+  margin: 0;
+  padding: 0.25rem 0;
+  color: var(--text-muted);
+}

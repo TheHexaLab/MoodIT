@@ -352,10 +352,12 @@ export default function Dashboard() {
   const invoicesShown = isStudent && api.invoicesAvailable();
   const [invoiceState, setInvoiceState] = useState<InvoiceState>({ status: 'loading' });
   const [invoiceAttempt, setInvoiceAttempt] = useState(0);
+  // TEMPORAIRE (développement) : l'état de la facture fictive choisi dans la page.
+  const [demoInvoiceState, setDemoInvoiceState] = useState(api.DEMO_INVOICE_DEFAULT);
   useEffect(() => {
     if (!invoicesShown) return;
     let cancelled = false;
-    api.fetchInvoice().then(
+    api.fetchInvoice(undefined, demoInvoiceState).then(
       (invoice) => {
         if (!cancelled) setInvoiceState({ status: 'ready', invoice });
       },
@@ -366,7 +368,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [invoicesShown, invoiceAttempt]);
+  }, [invoicesShown, invoiceAttempt, demoInvoiceState]);
   const retryInvoice = () => {
     setInvoiceState({ status: 'loading' });
     setInvoiceAttempt((attempt) => attempt + 1);
@@ -1246,6 +1248,13 @@ export default function Dashboard() {
           onRetry={retryInvoice}
           studentName={[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ')}
           establishmentName={establishment?.name}
+          // TEMPORAIRE : voir chaque état de la facture fictive.
+          demoStates={{
+            value: demoInvoiceState,
+            options: api.DEMO_INVOICE_STATES,
+            onChange: (value) =>
+              setDemoInvoiceState(value as (typeof api.DEMO_INVOICE_STATES)[number]['value']),
+          }}
         />
       ) : portalPage?.slug === 'horaire' && api.scheduleAvailable() ? (
         <SchedulePage

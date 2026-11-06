@@ -1,4 +1,4 @@
-/* Page Factures (#207) : mise en page de l'Accueil (AccueilPage.module.css), une colonne centrée. */
+/* Page Factures (#207) : une colonne centrée, la facture en un coup d'œil puis son détail. */
 .page {
     flex: 1;
     min-width: 0;
@@ -18,7 +18,7 @@
 .main {
     flex: 1;
     min-width: 0;
-    max-width: 68rem;
+    max-width: 50rem;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -53,39 +53,24 @@
 
 .card {
     border: 1px solid var(--border);
-    border-radius: 0.625rem;
+    border-radius: 0.875rem;
     background: var(--bg-surface);
 }
 
-/* Solde, échéance et bouton de paiement. */
-.summary {
+/* En haut : les trois chiffres, puis l'échéance et « Comment payer » (ou le merci). */
+.hero {
     display: flex;
-    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.875rem;
+    padding: 1.25rem;
+}
+
+.heroFooter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 1.5rem;
-}
-
-.summary + .lines {
-    border-top: 1px solid var(--border);
-}
-
-.balance {
-    min-width: 0;
-}
-
-.balanceLabel {
-    margin: 0;
-    color: var(--text-heading-alt);
-    font-weight: 600;
-}
-
-.amount {
-    margin: 0.25rem 0 0.5rem;
-    font-size: 2.25rem;
-    font-weight: 700;
-    line-height: 1.2;
-    font-variant-numeric: tabular-nums;
+    gap: 0.75rem;
 }
 
 .due {
@@ -95,6 +80,11 @@
     align-items: center;
     gap: 0.5rem;
     color: var(--text-body);
+}
+
+/* Le détail, par groupe (InvoiceBreakdown). */
+.detailsCard {
+    padding: 1.25rem;
 }
 
 .badge {
@@ -120,49 +110,76 @@
     color: var(--badge-success-fg);
 }
 
-/* Détail des montants : une ligne par montant, le total en gras. */
-.lines {
-    width: calc(100% - 3rem);
-    margin: 0 1.5rem;
-    border-collapse: collapse;
-    box-sizing: border-box;
+/* Rien à payer : une carte centrée. */
+.nothing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
 }
 
-.lines th,
-.lines td {
-    padding: 1rem 0;
-    border-bottom: 1px solid var(--border);
-    vertical-align: top;
-    font-weight: 400;
-}
-
-.lines th {
-    text-align: left;
-}
-
-.lines td {
-    padding-left: 1rem;
-    text-align: right;
-    white-space: nowrap;
+.amount {
+    margin: 0.5rem 0 0;
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.2;
     font-variant-numeric: tabular-nums;
 }
 
-.lineLabel,
-.lineDetail {
-    display: block;
+.nothingText {
+    margin: 0;
+    color: var(--text-body);
 }
 
-.lineDetail {
-    margin-top: 0.125rem;
+/* TEMPORAIRE (développement seulement) : choisir l'état de la facture fictive. */
+.demo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: 0.75rem;
+}
+
+.demoLabel {
+    margin-right: 0.25rem;
     color: var(--text-muted);
     font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
-.lines tfoot th,
-.lines tfoot td {
-    border-bottom: none;
-    font-size: 0.9375rem;
-    font-weight: 700;
+.demoChip {
+    min-height: 1.875rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-body);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.demoChip:hover {
+    background: var(--bg-active-channel);
+}
+
+.demoChipOn,
+.demoChipOn:hover {
+    border-color: var(--brand-teal);
+    background: var(--badge-success-bg);
+    color: var(--brand-teal);
+}
+
+.demoChip:focus-visible {
+    outline: 2px solid var(--brand-teal);
+    outline-offset: 2px;
 }
 
 /* Liens complémentaires : une ligne par lien, l'icône de lien externe à droite. */
@@ -217,22 +234,6 @@ a.link:hover {
 
 a.link:hover .linkIcon {
     color: currentColor;
-}
-
-/* Paiements reçus : le total en demi-gras, puis chaque paiement en déduction, en vert. */
-.payments .subtotal th,
-.payments .subtotal td {
-    font-weight: 600;
-}
-
-.credit {
-    color: var(--badge-success-fg);
-}
-
-.paidNote {
-    margin: 0.5rem 0 0;
-    color: var(--text-muted);
-    font-size: 0.8125rem;
 }
 
 /* Chargement et erreur, au centre de la carte. */
@@ -311,19 +312,18 @@ a.link:hover .linkIcon {
         flex: none;
     }
 
-    .summary {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 1.25rem 1rem;
+    .hero,
+    .detailsCard {
+        padding: 1rem;
+    }
+
+    /* « Comment payer » sous l'échéance, sur toute la largeur. */
+    .heroFooter > .button {
+        width: 100%;
     }
 
     .amount {
         font-size: 2rem;
-    }
-
-    .lines {
-        width: calc(100% - 2rem);
-        margin: 0 1rem;
     }
 }
 

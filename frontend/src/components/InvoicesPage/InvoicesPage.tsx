@@ -3,7 +3,8 @@ import { flushSync } from 'react-dom';
 import styles from './InvoicesPage.module.css';
 import { Spinner } from '../Spinner/Spinner.tsx';
 import InvoiceStatement from './InvoiceStatement.tsx';
-import type { InvoicePayment, InvoiceSummary } from '../../types/domain.ts';
+import { InvoiceDetails, InvoiceFigures, type BalanceTone } from './InvoiceBreakdown.tsx';
+import type { InvoiceSummary } from '../../types/domain.ts';
 import {
   daysUntil,
   dueBadge,
@@ -11,7 +12,7 @@ import {
   formatMoney,
   INVOICE_LINKS,
   invoiceBalance,
-  invoicePaid,
+  invoiceStatus,
   invoiceTotal,
   lastPaymentDate,
   type InvoiceLink,
@@ -36,6 +37,18 @@ interface InvoicesPageProps {
   establishmentName?: string;
   /** Aujourd'hui, pour le compte à rebours de l'échéance. */
   now?: Date;
+  /**
+   * TEMPORAIRE, développement seulement : boutons pour voir chaque état de la facture fictive.
+   * Absent en production (les factures fictives n'y existent pas).
+   */
+  demoStates?: DemoStates;
+}
+
+/** Sélecteur d'état de la démo : l'état affiché, la liste, et le changement. */
+export interface DemoStates {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
 }
 
 function LinkRow({ link }: { link: InvoiceLink }): React.ReactElement {
@@ -73,129 +86,95 @@ interface BalanceProps {
   paymentInfoUrl?: string;
 }
 
-/** « 3 novembre 2026 · Carte de crédit » : quand et comment un paiement a été reçu. */
-function paymentDetail(payment: InvoicePayment): string {
-  return [formatDueDate(payment.date), payment.method].filter(Boolean).join(' · ');
+/** Le bouton « Comment payer » : la page de l'établissement, ou grisé tant qu'elle manque. */
+function HowToPay({ url }: { url?: string }): React.ReactElement {
+  return url ? (
+    <a
+      className={`${styles.button} ${styles.primary} ${styles.noPrint}`}
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Comment payer
+    </a>
+  ) : (
+    <button
+      type="button"
+      className={`${styles.button} ${styles.primary} ${styles.soon} ${styles.noPrint}`}
+      aria-disabled="true"
+      title="Bientôt disponible"
+    >
+      Comment payer
+    </button>
+  );
 }
 
+/**
+ * La facture de l'étudiant : en haut, le total, ce qui est payé et le solde (en couleur selon
+ * l'état), avec l'échéance et « Comment payer » ; dessous, le détail par groupe.
+ */
 function Balance({ invoice, now, paymentInfoUrl }: BalanceProps): React.ReactElement {
   const total = invoiceTotal(invoice);
-  const paid = invoicePaid(invoice);
   const balance = invoiceBalance(invoice);
-  const payments = invoice.payments ?? [];
 
   if (total <= 0) {
     return (
-      <div className={styles.summary}>
-        <div className={styles.balance}>
-          <p className={styles.balanceLabel}>Solde à payer</p>
-          <p className={styles.amount}>{formatMoney(0)}</p>
-          <p className={styles.due}>
-            <span className={`${styles.badge} ${styles.badgePaid}`}>Rien à payer</span>
-            Aucun montant dû pour la session d'{invoice.session}.
-          </p>
-        </div>
+      <div className={`${styles.card} ${styles.nothing}`}>
+        <span className={`${styles.badge} ${styles.badgePaid}`}>Rien à payer</span>
+        <p className={styles.amount}>{formatMoney(0)}</p>
+        <p className={styles.nothingText}>Aucun montant dû pour la session d'{invoice.session}.</p>
       </div>
     );
   }
 
-  const paidOff = balance <= 0;
+  const status = invoiceStatus(invoice, now);
   const lastPayment = lastPaymentDate(invoice);
-  const badge = invoice.dueDate ? dueBadge(daysUntil(invoice.dueDate, now)) : null;
+  const days = invoice.dueDate ? daysUntil(invoice.dueDate, now) : null;
+  const badge = days !== null ? dueBadge(days) : null;
+  const tone: BalanceTone = status === 'paid' ? 'paid' : status === 'late' ? 'late' : 'due';
+  // Payée : la date du dernier paiement sous le solde. Sinon, le compte à rebours est une
+  // pastille à côté de l'échéance (« Dans 16 jours », « En retard de 12 jours »).
+  const note =
+    status === 'paid'
+      ? lastPayment
+        ? `Payée en entier le ${formatDueDate(lastPayment)}`
+        : 'Payée en entier'
+      : undefined;
+  const pill =
+    status === 'late' && days !== null
+      ? { text: `En retard de ${-days} ${-days > 1 ? 'jours' : 'jour'}`, late: true }
+      : badge && { text: badge.text, late: badge.tone === 'late' };
+
   return (
     <>
-      <div className={styles.summary}>
-        <div className={styles.balance}>
-          <p className={styles.balanceLabel}>Solde à payer</p>
-          <p className={styles.amount}>{formatMoney(balance)}</p>
-          {paidOff ? (
-            // Payée : la date du dernier paiement remplace l'échéance.
-            <p className={styles.due}>
-              <span className={`${styles.badge} ${styles.badgePaid}`}>Payée</span>
-              {lastPayment
-                ? `Payée en entier le ${formatDueDate(lastPayment)}. Merci!`
-                : 'Payée en entier. Merci!'}
-            </p>
+      <div className={`${styles.card} ${styles.hero}`}>
+        <InvoiceFigures balance={balance} tone={tone} note={note} />
+        <div className={styles.heroFooter}>
+          {status === 'paid' ? (
+            <p className={styles.due}>Merci! Votre facture de la session est réglée.</p>
           ) : (
-            invoice.dueDate &&
-            badge && (
+            <>
               <p className={styles.due}>
-                Échéance le {formatDueDate(invoice.dueDate)}
-                <span
-                  className={`${styles.badge} ${badge.tone === 'late' ? styles.badgeLate : styles.badgeSoon}`}
-                >
-                  {badge.text}
-                </span>
+                {invoice.dueDate
+                  ? `Échéance le ${formatDueDate(invoice.dueDate)}`
+                  : 'Aucune échéance fixée'}
+                {pill && (
+                  <span
+                    className={`${styles.badge} ${pill.late ? styles.badgeLate : styles.badgeSoon}`}
+                  >
+                    {pill.text}
+                  </span>
+                )}
               </p>
-            )
-          )}
-          {!paidOff && paid > 0 && (
-            <p className={styles.paidNote}>
-              {formatMoney(paid)} déjà reçu sur {formatMoney(total)}
-            </p>
+              <HowToPay url={paymentInfoUrl} />
+            </>
           )}
         </div>
-        {/* Le paiement se fait chez l'établissement : on renvoie à sa page d'explications. */}
-        {!paidOff &&
-          (paymentInfoUrl ? (
-            <a
-              className={`${styles.button} ${styles.primary} ${styles.noPrint}`}
-              href={paymentInfoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Comment payer
-            </a>
-          ) : (
-            <button
-              type="button"
-              className={`${styles.button} ${styles.primary} ${styles.soon} ${styles.noPrint}`}
-              aria-disabled="true"
-              title="Bientôt disponible"
-            >
-              Comment payer
-            </button>
-          ))}
       </div>
 
-      <table className={styles.lines}>
-        <caption className={styles.srOnly}>Détail des montants dus</caption>
-        <tbody>
-          {invoice.lines.map((line) => (
-            <tr key={line.label}>
-              <th scope="row">
-                <span className={styles.lineLabel}>{line.label}</span>
-                {line.detail && <span className={styles.lineDetail}>{line.detail}</span>}
-              </th>
-              <td>{formatMoney(line.amountCents)}</td>
-            </tr>
-          ))}
-        </tbody>
-        {payments.length > 0 && (
-          // Paiements reçus : le total, puis chaque paiement en déduction.
-          <tbody className={styles.payments}>
-            <tr className={styles.subtotal}>
-              <th scope="row">Total</th>
-              <td>{formatMoney(total)}</td>
-            </tr>
-            {payments.map((payment, index) => (
-              <tr key={`${payment.date}-${index}`}>
-                <th scope="row">
-                  <span className={styles.lineLabel}>Paiement reçu</span>
-                  <span className={styles.lineDetail}>{paymentDetail(payment)}</span>
-                </th>
-                <td className={styles.credit}>−{formatMoney(payment.amountCents)}</td>
-              </tr>
-            ))}
-          </tbody>
-        )}
-        <tfoot>
-          <tr>
-            <th scope="row">{payments.length > 0 ? 'Solde à payer' : 'Total à payer'}</th>
-            <td>{formatMoney(balance)}</td>
-          </tr>
-        </tfoot>
-      </table>
+      <div className={`${styles.card} ${styles.detailsCard}`}>
+        <InvoiceDetails lines={invoice.lines} payments={invoice.payments ?? []} />
+      </div>
     </>
   );
 }
@@ -212,6 +191,7 @@ export default function InvoicesPage({
   studentName,
   establishmentName,
   now = new Date(),
+  demoStates,
 }: InvoicesPageProps): React.ReactElement {
   // Le relevé n'existe que le temps d'imprimer (bouton ou Ctrl+P) : à l'écran et pour les lecteurs
   // d'écran, la page seule, sans doublon. flushSync : le relevé est rendu avant la mise en page.
@@ -265,23 +245,43 @@ export default function InvoicesPage({
           )}
         </div>
 
-        <div className={styles.card}>
-          {state.status === 'loading' ? (
-            <div className={styles.state} role="status" aria-busy="true">
-              <Spinner size={24} />
-              <span>Chargement de vos factures…</span>
-            </div>
-          ) : state.status === 'error' ? (
-            <div className={styles.state} role="alert">
-              <span>Impossible de charger vos factures.</span>
-              <button type="button" className={styles.button} onClick={onRetry}>
-                Réessayer
+        {/* TEMPORAIRE : voir chaque état de la facture fictive (développement seulement). */}
+        {demoStates && (
+          <div
+            className={`${styles.demo} ${styles.noPrint}`}
+            role="group"
+            aria-label="État de la démo"
+          >
+            <span className={styles.demoLabel}>Démo, temporaire</span>
+            {demoStates.options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`${styles.demoChip} ${option.value === demoStates.value ? styles.demoChipOn : ''}`}
+                aria-pressed={option.value === demoStates.value}
+                onClick={() => demoStates.onChange(option.value)}
+              >
+                {option.label}
               </button>
-            </div>
-          ) : (
-            <Balance invoice={state.invoice} now={now} paymentInfoUrl={paymentInfoUrl} />
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {state.status === 'loading' ? (
+          <div className={`${styles.card} ${styles.state}`} role="status" aria-busy="true">
+            <Spinner size={24} />
+            <span>Chargement de vos factures…</span>
+          </div>
+        ) : state.status === 'error' ? (
+          <div className={`${styles.card} ${styles.state}`} role="alert">
+            <span>Impossible de charger vos factures.</span>
+            <button type="button" className={styles.button} onClick={onRetry}>
+              Réessayer
+            </button>
+          </div>
+        ) : (
+          <Balance invoice={state.invoice} now={now} paymentInfoUrl={paymentInfoUrl} />
+        )}
 
         {links.length > 0 && (
           <nav

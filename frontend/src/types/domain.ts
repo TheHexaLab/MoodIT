@@ -746,7 +746,8 @@ export interface FeeSchedule {
   dueDate: string;
   fees: SessionFee[];
   /**
-   * Intérêts de retard, en % par an : après l'échéance, ils courent chaque jour sur le solde impayé.
+   * Intérêts de retard, en % par mois : chaque mois de retard commencé après l'échéance ajoute ce
+   * pourcentage du solde impayé.
    * Absent ou 0 : pas d'intérêts.
    */
   lateInterestPercent?: number;

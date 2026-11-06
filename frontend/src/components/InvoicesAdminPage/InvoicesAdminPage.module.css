@@ -3,6 +3,7 @@
  * InvoicesAdminPage, BillingOverview, StudentBillingPopup et FeeScheduleEditor.
  */
 .page {
+  composes: thin from '../../styles/scrollbar.module.css';
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
@@ -361,6 +362,7 @@
 }
 
 .scroll {
+  composes: thin from '../../styles/scrollbar.module.css';
   overflow-x: auto;
 }
 
@@ -1277,4 +1279,30 @@
     right: 1rem;
     bottom: 1rem;
   }
+}
+
+/* Listes déroulantes (Dropdown) de la barre d'outils : une largeur fixe, à la hauteur des champs. */
+.selectStatus {
+  width: 13rem;
+}
+
+.selectSort {
+  width: 12rem;
+}
+
+.select [aria-haspopup] {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 56.25rem) {
+  .selectStatus,
+  .selectSort {
+    flex: 1;
+    width: auto;
+  }
+}
+
+/* Liste déroulante du simulateur : à la hauteur du champ « Crédits ». */
+.field [aria-haspopup] {
+  min-height: 2.5rem;
 }

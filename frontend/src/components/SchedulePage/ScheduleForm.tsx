@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import styles from './SchedulePage.module.css';
+import { Dropdown, DropdownAddButton, type DropdownItem } from '../Dropdown/Dropdown.tsx';
 import type { ScheduleColor, ScheduleCourse } from '../../types/domain.ts';
 import {
   COLORS,
@@ -66,148 +67,6 @@ export function ColorPicker({
         ))}
       </div>
     </fieldset>
-  );
-}
-
-const ChevronDown = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-    <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const TrashIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-    <path
-      d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-interface DropdownItem {
-  key: string;
-  label: string;
-  selected: boolean;
-  onSelect: () => void;
-  /** Corbeille à côté de l'élément (types de séance). */
-  onDelete?: () => void;
-  deleteLabel?: string;
-}
-
-/**
- * Liste déroulante maison : un bouton qui montre le choix, et une liste de boutons dessous. Choisir
- * referme la liste et rend le focus au bouton ; une corbeille la garde ouverte. Flèches pour passer
- * d'un élément à l'autre, Échap pour refermer (sans fermer la fenêtre), clic ailleurs aussi.
- * `footer` ajoute une ligne en bas (« Ajouter un type… ») ; elle reçoit de quoi refermer la liste.
- */
-function Dropdown({
-  id,
-  labelId,
-  display,
-  menuLabel,
-  items,
-  footer,
-}: {
-  id: string;
-  labelId: string;
-  display: string;
-  menuLabel: string;
-  items: DropdownItem[];
-  footer?: (close: () => void) => React.ReactNode;
-}): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const options = () => [
-    ...(menuRef.current?.querySelectorAll<HTMLElement>('[data-kind-option]') ?? []),
-  ];
-
-  // Liste ouverte : le focus va à l'élément choisi ; un clic ailleurs la referme.
-  useEffect(() => {
-    if (!open) return;
-    (options().find((el) => el.getAttribute('aria-pressed') === 'true') ?? options()[0])?.focus();
-    const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [open]);
-
-  function close() {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }
-
-  return (
-    <div ref={rootRef} className={styles.kindPicker}>
-      <button
-        ref={triggerRef}
-        id={id}
-        type="button"
-        className={styles.kindTrigger}
-        aria-haspopup="true"
-        aria-expanded={open}
-        aria-labelledby={`${labelId} ${id}-value`}
-        onClick={() => setOpen((previous) => !previous)}
-      >
-        <span id={`${id}-value`}>{display}</span>
-        <ChevronDown />
-      </button>
-      {open && (
-        <div
-          ref={menuRef}
-          className={styles.kindMenu}
-          role="group"
-          aria-label={menuLabel}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.stopPropagation();
-              close();
-            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-              event.preventDefault();
-              const all = options();
-              const index = all.indexOf(document.activeElement as HTMLElement);
-              const step = event.key === 'ArrowDown' ? 1 : -1;
-              all[(index + step + all.length) % all.length]?.focus();
-            }
-          }}
-        >
-          {items.map((item) => (
-            <div key={item.key} className={styles.kindRow}>
-              <button
-                type="button"
-                className={styles.kindOption}
-                data-kind-option
-                aria-pressed={item.selected}
-                onClick={() => {
-                  item.onSelect();
-                  close();
-                }}
-              >
-                {item.label}
-              </button>
-              {item.onDelete && (
-                <button
-                  type="button"
-                  className={styles.kindDelete}
-                  aria-label={item.deleteLabel}
-                  onClick={() => {
-                    item.onDelete?.();
-                    // La liste reste ouverte ; le focus revient au premier élément.
-                    window.requestAnimationFrame(() => options()[0]?.focus());
-                  }}
-                >
-                  <TrashIcon />
-                </button>
-              )}
-            </div>
-          ))}
-          {footer?.(() => setOpen(false))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -299,17 +158,14 @@ function KindField({
             deleteLabel: `Supprimer le type « ${kind} »`,
           }))}
           footer={(closeMenu) => (
-            <button
-              type="button"
-              className={styles.kindAdd}
-              data-kind-option
+            <DropdownAddButton
               onClick={() => {
                 closeMenu();
                 setAdding(true);
               }}
             >
               ＋ Ajouter un type…
-            </button>
+            </DropdownAddButton>
           )}
         />
       )}

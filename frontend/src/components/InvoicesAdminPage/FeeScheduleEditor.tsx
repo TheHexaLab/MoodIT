@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import styles from './InvoicesAdminPage.module.css';
+import { Dropdown } from '../Dropdown/Dropdown.tsx';
 import type { FeeBasis, FeeSchedule } from '../../types/domain.ts';
 import {
   creditsLabel,
@@ -111,6 +112,7 @@ export default function FeeScheduleEditor({
   const [credits, setCredits] = useState('15');
   const [residency, setResidency] = useState(schedule.statuses[0]?.id ?? '');
   const [optIn, setOptIn] = useState(true);
+  const simulatorId = useId();
 
   const change = (next: Draft) => {
     setDraft(next);
@@ -211,7 +213,7 @@ export default function FeeScheduleEditor({
     if (!draft.dueDate) return setError("Indiquez l'échéance.");
     const interest = parseRate(draft.interest);
     if (Number.isNaN(interest) || interest > 100) {
-      return setError('Indiquez un taux d’intérêt entre 0 et 100 % par an.');
+      return setError('Indiquez un taux d’intérêt entre 0 et 100 % par mois.');
     }
     const fees = draft.fees.map((fee) => ({
       label: fee.label.trim(),
@@ -337,19 +339,19 @@ export default function FeeScheduleEditor({
                 <input
                   type="text"
                   inputMode="decimal"
-                  // Nom explicite : sans lui, « % par an » s'ajouterait au nom lu.
+                  // Nom explicite : sans lui, « % par mois » s'ajouterait au nom lu.
                   aria-label="Intérêts de retard"
                   value={draft.interest}
                   placeholder="0"
                   onChange={(event) => change({ ...draft, interest: event.target.value })}
                 />
-                <span aria-hidden="true">% par an</span>
+                <span aria-hidden="true">% par mois</span>
               </span>
             </label>
           </div>
           <p className={styles.hint}>
-            Après l'échéance, les intérêts courent chaque jour sur le solde impayé. Laissez vide
-            pour ne pas en facturer.
+            Chaque mois de retard commencé ajoute ce pourcentage du solde impayé (2 % par mois, par
+            exemple). Laissez vide pour ne pas en facturer.
           </p>
         </section>
 
@@ -486,16 +488,24 @@ export default function FeeScheduleEditor({
               onChange={(event) => setCredits(event.target.value)}
             />
           </label>
-          <label className={styles.field}>
-            <span>Statut</span>
-            <select value={simulatedStatus} onChange={(event) => setResidency(event.target.value)}>
-              {namedStatuses.map((status) => (
-                <option key={status.key} value={status.id}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className={styles.field}>
+            <span id={`${simulatorId}-status-label`}>Statut</span>
+            <Dropdown
+              id={`${simulatorId}-status`}
+              labelId={`${simulatorId}-status-label`}
+              display={
+                namedStatuses.find((status) => status.id === simulatedStatus)?.label ??
+                'Aucun statut'
+              }
+              menuLabel="Statuts"
+              items={namedStatuses.map((status) => ({
+                key: String(status.key),
+                label: status.label,
+                selected: status.id === simulatedStatus,
+                onSelect: () => setResidency(status.id),
+              }))}
+            />
+          </div>
         </div>
         <label className={styles.optional}>
           <input

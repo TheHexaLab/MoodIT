@@ -37,7 +37,7 @@ function seedSchedule(now: Date): FeeSchedule {
       { id: 'international', label: 'International', creditPriceCents: 85_000 },
     ],
     dueDate: dayAfter(now, 16),
-    lateInterestPercent: 7,
+    lateInterestPercent: 2,
     fees: [
       {
         label: 'Frais afférents',

@@ -32,30 +32,33 @@ function renderPage(state: InvoiceState, paymentInfoUrl?: string) {
 }
 
 describe('InvoicesPage', () => {
-  it('solde, échéance et compte à rebours, comme dans la maquette', () => {
+  it('en un coup d’œil : total, payé et solde, avec le compte à rebours et l’échéance', () => {
     renderPage({ status: 'ready', invoice: INVOICE });
     expect(screen.getByRole('heading', { level: 1, name: 'Factures' })).toBeTruthy();
     expect(screen.getByText("Ce que vous devez pour la session d'automne 2026")).toBeTruthy();
-    expect(screen.getByText('Solde à payer')).toBeTruthy();
-    // Le solde, puis le total du détail.
-    expect(screen.getAllByText(shown(128_450))).toHaveLength(2);
-    expect(screen.getByText('Échéance le 15 novembre 2026', { exact: false })).toBeTruthy();
+    // Seul le solde restant, en haut ; le total et les paiements sont dans le détail.
+    expect(screen.getByText('Solde restant')).toBeTruthy();
+    expect(screen.queryByText('Total de la session')).toBeNull();
+    expect(screen.getByText(shown(128_450))).toBeTruthy();
+    // Le compte à rebours : une pastille à côté de l'échéance.
     expect(screen.getByText('Dans 16 jours').className).toMatch(/badgeSoon/);
+    expect(screen.getByText('Échéance le 15 novembre 2026')).toBeTruthy();
   });
 
-  it('le détail des montants est un tableau : une ligne par montant, puis le total', () => {
+  it('le détail par groupe : droits de scolarité, frais (avec leur total), paiements', () => {
     renderPage({ status: 'ready', invoice: INVOICE });
-    const table = screen.getByRole('table', { name: 'Détail des montants dus' });
-    const rows = within(table).getAllByRole('row');
-    expect(rows).toHaveLength(4);
-    expect(within(rows[0]).getByRole('rowheader').textContent).toBe(
-      'Droits de scolaritéAutomne 2026, 15 crédits'
-    );
-    expect(within(rows[0]).getByRole('cell').textContent).toBe(formatMoney(112_000));
-    // Une ligne sans précision n'a que son libellé.
-    expect(within(rows[2]).getByRole('rowheader').textContent).toBe('Assurance collective');
-    expect(within(rows[3]).getByRole('rowheader').textContent).toBe('Total à payer');
-    expect(within(rows[3]).getByRole('cell').textContent).toBe(formatMoney(128_450));
+    expect(screen.getByRole('heading', { level: 2, name: 'Droits de scolarité' })).toBeTruthy();
+    // Les crédits et leur prix sont mis en avant.
+    expect(screen.getByText('Automne 2026, 15 crédits')).toBeTruthy();
+    // Pas de sous-total à côté des titres.
+    expect(screen.getByRole('heading', { level: 2, name: 'Frais de la session' })).toBeTruthy();
+    expect(screen.queryByText(shown(16_450))).toBeNull();
+    expect(screen.getByText('Frais afférents')).toBeTruthy();
+    expect(screen.getByText('Services aux étudiants et technologies')).toBeTruthy();
+    expect(screen.getByText('Assurance collective')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Paiements reçus' })).toBeTruthy();
+    expect(screen.getByText("Aucun paiement reçu pour l'instant.")).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Intérêts' })).toBeNull();
   });
 
   it('« Enregistrer en PDF » ouvre la fenêtre d’impression du navigateur', () => {
@@ -171,18 +174,42 @@ describe('InvoicesPage', () => {
     expect(screen.queryByRole('button', { name: 'Ouvrir mon profil' })).toBeNull();
   });
 
-  it('échéance passée : pastille rouge « En retard »', () => {
+  it('échéance passée : le retard sous le solde', () => {
     renderPage({ status: 'ready', invoice: { ...INVOICE, dueDate: '2026-10-20' } });
-    expect(screen.getByText('En retard').className).toMatch(/badgeLate/);
+    expect(screen.getByText('En retard de 10 jours').className).toMatch(/badgeLate/);
+    expect(screen.getByText('Échéance le 20 octobre 2026')).toBeTruthy();
   });
 
-  it('sans échéance connue : le solde seul', () => {
+  it('intérêts de retard : un groupe à part', () => {
+    renderPage({
+      status: 'ready',
+      invoice: {
+        ...INVOICE,
+        dueDate: '2026-10-20',
+        lines: [
+          ...INVOICE.lines,
+          {
+            label: 'Intérêts de retard',
+            detail: '2 % par mois · 1 mois de retard',
+            amountCents: 2_569,
+          },
+        ],
+      },
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'Intérêts' })).toBeTruthy();
+    expect(screen.getByText('Intérêts de retard')).toBeTruthy();
+    expect(screen.getByText('2 % par mois · 1 mois de retard')).toBeTruthy();
+    expect(screen.getByText(shown(2_569))).toBeTruthy();
+  });
+
+  it('sans échéance connue : le solde seul, sans compte à rebours', () => {
     renderPage({ status: 'ready', invoice: { ...INVOICE, dueDate: undefined } });
-    expect(screen.queryByText('Échéance', { exact: false })).toBeNull();
-    expect(screen.getAllByText(shown(128_450))).toHaveLength(2);
+    expect(screen.getByText('Aucune échéance fixée')).toBeTruthy();
+    expect(screen.queryByText('Dans', { exact: false })).toBeNull();
+    expect(screen.getByText(shown(128_450))).toBeTruthy();
   });
 
-  it('paiement partiel : le solde restant, ce qui est déjà reçu et chaque paiement', () => {
+  it('paiement partiel : le solde restant, ce qui est payé et chaque paiement', () => {
     renderPage({
       status: 'ready',
       invoice: {
@@ -190,26 +217,16 @@ describe('InvoicesPage', () => {
         payments: [{ date: '2026-10-25', amountCents: 50_000, method: 'Virement bancaire' }],
       },
     });
-    // Le solde en haut, puis en bas du détail.
-    expect(screen.getAllByText(shown(78_450))).toHaveLength(2);
-    expect(screen.getByText(`${shown(50_000)} déjà reçu sur ${shown(128_450)}`)).toBeTruthy();
+    expect(screen.getByText(shown(78_450))).toBeTruthy();
+    // Le paiement, dans le détail.
+    expect(screen.getByText(shown(50_000))).toBeTruthy();
+    expect(screen.getByText('25 octobre 2026')).toBeTruthy();
+    expect(screen.getByText('Virement bancaire')).toBeTruthy();
     expect(screen.getByText('Dans 16 jours')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Comment payer' })).toBeTruthy();
-    const rows = within(
-      screen.getByRole('table', { name: 'Détail des montants dus' })
-    ).getAllByRole('row');
-    expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
-      'Droits de scolaritéAutomne 2026, 15 crédits',
-      'Frais afférentsServices aux étudiants et technologies',
-      'Assurance collective',
-      'Total',
-      'Paiement reçu25 octobre 2026 · Virement bancaire',
-      'Solde à payer',
-    ]);
-    expect(within(rows[4]).getByRole('cell').textContent).toBe(`−${formatMoney(50_000)}`);
   });
 
-  it('payée : solde nul, pastille « Payée » et date du dernier paiement, sans « Comment payer »', () => {
+  it('payée : solde nul, date du dernier paiement et merci, sans « Comment payer »', () => {
     renderPage({
       status: 'ready',
       invoice: {
@@ -220,11 +237,10 @@ describe('InvoicesPage', () => {
         ],
       },
     });
-    expect(screen.getByText('Payée').className).toMatch(/badgePaid/);
-    expect(screen.getByText('Payée en entier le 28 octobre 2026. Merci!')).toBeTruthy();
+    expect(screen.getByText('Payée en entier le 28 octobre 2026')).toBeTruthy();
+    expect(screen.getByText('Merci! Votre facture de la session est réglée.')).toBeTruthy();
     expect(screen.queryByText('Échéance le', { exact: false })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
-    expect(screen.queryByText('déjà reçu', { exact: false })).toBeNull();
     // Un paiement sans mode : sa date seule.
     expect(screen.getByText('18 octobre 2026')).toBeTruthy();
   });
@@ -233,11 +249,39 @@ describe('InvoicesPage', () => {
     renderPage({ status: 'ready', invoice: { session: 'automne 2026', lines: [] } });
     expect(screen.getByText(shown(0))).toBeTruthy();
     expect(screen.getByText('Rien à payer').className).toMatch(/badgePaid/);
-    expect(
-      screen.getByText("Aucun montant dû pour la session d'automne 2026.", { exact: false })
-    ).toBeTruthy();
+    expect(screen.getByText("Aucun montant dû pour la session d'automne 2026.")).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Comment payer' })).toBeNull();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText('Droits de scolarité')).toBeNull();
+  });
+
+  it('TEMPORAIRE : le sélecteur de démo montre l’état choisi et en change', () => {
+    const onChange = vi.fn();
+    render(
+      <InvoicesPage
+        state={{ status: 'ready', invoice: INVOICE }}
+        onRetry={vi.fn()}
+        now={NOW}
+        demoStates={{
+          value: 'due',
+          options: [
+            { value: 'due', label: 'À payer' },
+            { value: 'paid', label: 'Payée' },
+          ],
+          onChange,
+        }}
+      />
+    );
+    const demo = screen.getByRole('group', { name: 'État de la démo' });
+    expect(within(demo).getByRole('button', { name: 'À payer' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    fireEvent.click(within(demo).getByRole('button', { name: 'Payée' }));
+    expect(onChange).toHaveBeenCalledWith('paid');
+  });
+
+  it('sans sélecteur de démo (production) : pas de boutons d’état', () => {
+    renderPage({ status: 'ready', invoice: INVOICE });
+    expect(screen.queryByRole('group', { name: 'État de la démo' })).toBeNull();
   });
 
   it('chargement : un état annoncé, sans montant', () => {

@@ -18,6 +18,7 @@ import {
   formatPercent,
   invoiceInterest,
   lateInterestCents,
+  monthsLate,
   statusLabel,
   statusPrice,
   creditsLabel,
@@ -215,17 +216,26 @@ describe('factures : intérêts de retard', () => {
     statuses: [{ id: 'quebec', label: 'Résident du Québec', creditPriceCents: 10_000 }],
     dueDate: '2026-11-15',
     fees: [],
-    lateInterestPercent: 7.3,
+    lateInterestPercent: 2,
   };
   const STUDENT = { credits: 10, residency: 'quebec' };
 
-  it('intérêts simples : solde × taux × jours / 365, arrondis au cent', () => {
-    expect(lateInterestCents(100_000, 7.3, 10)).toBe(200);
-    expect(lateInterestCents(100_000, 7.3, 0)).toBe(0);
-    expect(lateInterestCents(0, 7.3, 10)).toBe(0);
-    expect(lateInterestCents(100_000, 0, 10)).toBe(0);
-    expect(formatPercent(7.5)).toBe('7,5 %');
-    expect(formatPercent(7)).toBe('7 %');
+  it('mois de retard commencés : 1 du 1er au 30e jour, 2 ensuite', () => {
+    expect(monthsLate(0)).toBe(0);
+    expect(monthsLate(-5)).toBe(0);
+    expect(monthsLate(1)).toBe(1);
+    expect(monthsLate(30)).toBe(1);
+    expect(monthsLate(31)).toBe(2);
+  });
+
+  it('intérêts : solde × taux mensuel × mois, arrondis au cent', () => {
+    expect(lateInterestCents(100_000, 2, 1)).toBe(2_000);
+    expect(lateInterestCents(100_000, 2, 3)).toBe(6_000);
+    expect(lateInterestCents(100_000, 2, 0)).toBe(0);
+    expect(lateInterestCents(0, 2, 1)).toBe(0);
+    expect(lateInterestCents(100_000, 0, 1)).toBe(0);
+    expect(formatPercent(2.5)).toBe('2,5 %');
+    expect(formatPercent(2)).toBe('2 %');
   });
 
   it('avant ou le jour de l’échéance, ou sans date : pas d’intérêts', () => {
@@ -235,7 +245,7 @@ describe('factures : intérêts de retard', () => {
     );
   });
 
-  it('après l’échéance : une ligne d’intérêts sur le solde impayé', () => {
+  it('après l’échéance : 2 % du solde impayé pour le premier mois', () => {
     const invoice = invoiceFromSchedule(
       SCHEDULE,
       STUDENT,
@@ -244,16 +254,17 @@ describe('factures : intérêts de retard', () => {
     );
     const interest = invoice.lines.at(-1)!;
     expect(interest.label).toBe('Intérêts de retard');
-    expect(interest.detail).toBe('7,3 % par an · 10 jours de retard');
-    // Sur 500 $ restants : 1,00 $.
-    expect(interest.amountCents).toBe(100);
-    expect(invoiceInterest(invoice)).toBe(100);
-    expect(invoiceBalance(invoice)).toBe(50_100);
+    expect(interest.detail).toBe('2 % par mois · 1 mois de retard');
+    // Sur 500 $ restants : 10,00 $.
+    expect(interest.amountCents).toBe(1_000);
+    expect(invoiceInterest(invoice)).toBe(1_000);
+    expect(invoiceBalance(invoice)).toBe(51_000);
   });
 
-  it('un jour de retard : « 1 jour » ; payée en entier ou sans taux : rien', () => {
-    const oneDay = invoiceFromSchedule(SCHEDULE, STUDENT, [], new Date(2026, 10, 16));
-    expect(oneDay.lines.at(-1)!.detail).toBe('7,3 % par an · 1 jour de retard');
+  it('un deuxième mois commencé double les intérêts ; payée ou sans taux : rien', () => {
+    const twoMonths = invoiceFromSchedule(SCHEDULE, STUDENT, [], new Date(2026, 11, 16));
+    expect(twoMonths.lines.at(-1)!.detail).toBe('2 % par mois · 2 mois de retard');
+    expect(invoiceInterest(twoMonths)).toBe(4_000);
     const paid = invoiceFromSchedule(
       SCHEDULE,
       STUDENT,

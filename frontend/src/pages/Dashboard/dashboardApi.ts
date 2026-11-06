@@ -34,6 +34,8 @@ import {
   demoEnrolledStudents,
   demoFeeSchedule,
   demoInvoice,
+  demoInvoiceStatus,
+  type DemoInvoiceStatus,
   saveDemoFeeSchedule,
 } from '../../mocks/invoicesData.ts';
 import type {
@@ -1595,10 +1597,26 @@ export function invoicesAvailable(): boolean {
 }
 
 /** Ce que l'étudiant doit pour la session en cours. Jamais de faux montant en production. */
-export async function fetchInvoice(now: Date = new Date()): Promise<InvoiceSummary> {
+export async function fetchInvoice(
+  now: Date = new Date(),
+  /** TEMPORAIRE : l'état de la facture fictive à montrer (sélecteur de démo de la page). */
+  status: DemoInvoiceStatus = demoInvoiceStatus
+): Promise<InvoiceSummary> {
   if (!invoicesAvailable()) throw new Error('Factures indisponibles');
-  return demoInvoice(now);
+  return demoInvoice(now, status);
 }
+
+/** TEMPORAIRE : les états de la facture fictive, pour le sélecteur de démo de la page Factures. */
+export const DEMO_INVOICE_STATES: { value: DemoInvoiceStatus; label: string }[] = [
+  { value: 'due', label: 'À payer' },
+  { value: 'partial', label: 'Paiement partiel' },
+  { value: 'paid', label: 'Payée' },
+  { value: 'late', label: 'En retard' },
+  { value: 'none', label: 'Rien à payer' },
+];
+
+/** TEMPORAIRE : l'état montré au départ. */
+export const DEMO_INVOICE_DEFAULT: DemoInvoiceStatus = demoInvoiceStatus;
 
 /** Administration : tarification de la session en cours (prix du crédit, frais communs). */
 export async function fetchFeeSchedule(now: Date = new Date()): Promise<FeeSchedule> {

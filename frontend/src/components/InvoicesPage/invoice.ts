@@ -195,15 +195,15 @@ export function invoiceFromSchedule(
     ],
     payments,
   };
-  // Intérêts de retard : sur ce qui reste à payer, pour chaque jour depuis l'échéance.
+  // Intérêts de retard : un pourcentage du solde impayé par mois de retard commencé.
   const rate = schedule.lateInterestPercent ?? 0;
-  const daysLate = now ? -daysUntil(schedule.dueDate, now) : 0;
+  const months = monthsLate(now ? -daysUntil(schedule.dueDate, now) : 0);
   const unpaid = invoiceTotal(invoice) - invoicePaid(invoice);
-  const interest = lateInterestCents(unpaid, rate, daysLate);
+  const interest = lateInterestCents(unpaid, rate, months);
   if (interest > 0) {
     invoice.lines.push({
       label: INTEREST_LABEL,
-      detail: `${formatPercent(rate)} par an · ${daysLate} ${daysLate > 1 ? 'jours' : 'jour'} de retard`,
+      detail: `${formatPercent(rate)} par mois · ${months} mois de retard`,
       amountCents: interest,
     });
   }
@@ -217,17 +217,22 @@ export function formatPercent(rate: number): string {
   return `${percent.format(rate)} %`;
 }
 
+/** Mois de retard commencés : 1 du 1er au 30e jour après l'échéance, 2 du 31e au 60e… */
+export function monthsLate(daysLate: number): number {
+  return daysLate > 0 ? Math.ceil(daysLate / 30) : 0;
+}
+
 /**
- * Intérêts simples sur un solde impayé, en cents : solde × taux annuel × jours / 365, arrondi au
- * cent. Rien avant l'échéance, ni sur un solde nul.
+ * Intérêts sur un solde impayé, en cents : solde × taux mensuel × mois de retard commencés, arrondi
+ * au cent. Rien avant l'échéance, ni sur un solde nul.
  */
 export function lateInterestCents(
   unpaidCents: number,
-  ratePercent: number,
-  daysLate: number
+  monthlyRatePercent: number,
+  months: number
 ): number {
-  if (unpaidCents <= 0 || ratePercent <= 0 || daysLate <= 0) return 0;
-  return Math.round((unpaidCents * (ratePercent / 100) * daysLate) / 365);
+  if (unpaidCents <= 0 || monthlyRatePercent <= 0 || months <= 0) return 0;
+  return Math.round(unpaidCents * (monthlyRatePercent / 100) * months);
 }
 
 /** Libellé de la ligne d'intérêts, pour la reconnaître dans une facture. */

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import styles from './InvoicesAdminPage.module.css';
 import type { EnrolledStudent, FeeSchedule } from '../../types/domain.ts';
 import {
@@ -19,6 +19,7 @@ import {
   type PaymentState,
 } from './billing.ts';
 import { STATE_BADGE } from './stateBadge.ts';
+import { Dropdown } from '../Dropdown/Dropdown.tsx';
 
 type SortKey = 'name' | 'balance' | 'state' | 'credits';
 
@@ -69,6 +70,7 @@ export default function BillingOverview({
   const [stateFilter, setStateFilter] = useState<PaymentState | 'all'>('all');
   const [residency, setResidency] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('state');
+  const fieldId = useId();
 
   const rows = students.map((student) => billingRow(schedule, student, now));
   const billed = rows.reduce((sum, row) => sum + row.total, 0);
@@ -180,27 +182,51 @@ export default function BillingOverview({
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <label className={styles.select}>
-              <span>Statut</span>
-              <select value={residency} onChange={(event) => setResidency(event.target.value)}>
-                <option value="all">Tous</option>
-                {schedule.statuses.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={styles.select}>
-              <span>Trier par</span>
-              <select value={sort} onChange={(event) => setSort(event.target.value as SortKey)}>
-                {SORTS.map(({ key, label }) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {/* Listes déroulantes maison (Dropdown), comme dans l'Horaire. */}
+            <div className={styles.select}>
+              <span id={`${fieldId}-status-label`}>Statut</span>
+              <Dropdown
+                id={`${fieldId}-status`}
+                labelId={`${fieldId}-status-label`}
+                className={styles.selectStatus}
+                display={
+                  residency === 'all'
+                    ? 'Tous'
+                    : (schedule.statuses.find((status) => status.id === residency)?.label ?? 'Tous')
+                }
+                menuLabel="Statuts"
+                items={[
+                  {
+                    key: 'all',
+                    label: 'Tous',
+                    selected: residency === 'all',
+                    onSelect: () => setResidency('all'),
+                  },
+                  ...schedule.statuses.map((status) => ({
+                    key: status.id,
+                    label: status.label,
+                    selected: residency === status.id,
+                    onSelect: () => setResidency(status.id),
+                  })),
+                ]}
+              />
+            </div>
+            <div className={styles.select}>
+              <span id={`${fieldId}-sort-label`}>Trier par</span>
+              <Dropdown
+                id={`${fieldId}-sort`}
+                labelId={`${fieldId}-sort-label`}
+                className={styles.selectSort}
+                display={SORTS.find(({ key }) => key === sort)!.label}
+                menuLabel="Ordre"
+                items={SORTS.map(({ key, label }) => ({
+                  key,
+                  label,
+                  selected: sort === key,
+                  onSelect: () => setSort(key),
+                }))}
+              />
+            </div>
             <button
               type="button"
               className={styles.button}

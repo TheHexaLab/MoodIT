@@ -82,14 +82,14 @@ describe('factures : états de démonstration', () => {
     expect(payments.reduce((sum, payment) => sum + payment.amountCents, 0)).toBe(193_000);
   });
 
-  it('en retard : l’échéance passée depuis 12 jours, et des intérêts à 7 % par an', () => {
+  it('en retard : l’échéance passée depuis 12 jours, et des intérêts à 2 % par mois', () => {
     const invoice = demoInvoice(NOW, 'late');
     expect(invoice.dueDate).toBe('2026-10-18');
     const interest = invoice.lines.at(-1)!;
     expect(interest.label).toBe('Intérêts de retard');
-    expect(interest.detail).toBe('7 % par an · 12 jours de retard');
-    // 7 % par an sur 1 930 $, 12 jours : 4,44 $.
-    expect(interest.amountCents).toBe(444);
+    expect(interest.detail).toBe('2 % par mois · 1 mois de retard');
+    // 2 % de 1 930 $ pour le premier mois : 38,60 $.
+    expect(interest.amountCents).toBe(3_860);
     expect(invoice.payments).toBeUndefined();
   });
 
@@ -110,7 +110,7 @@ describe('tarification et étudiants (administration)', () => {
         { id: 'international', label: 'International', creditPriceCents: 85000 },
       ],
       dueDate: '2026-11-15',
-      lateInterestPercent: 7,
+      lateInterestPercent: 2,
     });
     expect(schedule.fees.map((fee) => [fee.label, fee.basis, fee.optional ?? false])).toEqual([
       ['Frais afférents', 'perCredit', false],
