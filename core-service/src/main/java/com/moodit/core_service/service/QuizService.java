@@ -356,7 +356,7 @@ public class QuizService {
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
             List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses,
-            List<ExecutionClient.Case> cases) {}
+            List<ExecutionClient.Case> cases, Integer timeoutMs) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -533,12 +533,14 @@ public class QuizService {
                         .map(tc -> new ExecutionClient.Case(tc.getName(), tc.getExpr(),
                                 parseJson(tc.getExpectedJson()), tc.getCompareMode(), weightOf(tc)))
                         .toList();
-                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, null, cases));
+                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, null, cases,
+                        question.getExecTimeoutMs()));
             } else {
                 List<ExecutionClient.Harness> inputs = harnesses.stream()
                         .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
                         .toList();
-                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs, null));
+                tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs, null,
+                        question.getExecTimeoutMs()));
             }
         }
         return tasks;
@@ -554,8 +556,8 @@ public class QuizService {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
             List<Boolean> verdicts = task.cases() != null
-                    ? executionClient.evaluateStructured(task.language(), task.code(), task.cases())
-                    : executionClient.evaluate(task.language(), task.code(), task.harnesses());
+                    ? executionClient.evaluateStructured(task.language(), task.code(), task.cases(), task.timeoutMs())
+                    : executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -1007,6 +1009,7 @@ public class QuizService {
             q.setQuiz(quiz);
             q.setPrompt(qd.getPrompt());
             q.setStartCode(qd.getStartCode());
+            q.setExecTimeoutMs(qd.getExecTimeoutMs());
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
             q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
@@ -1037,6 +1040,7 @@ public class QuizService {
         q.setQuiz(quiz);
         q.setPrompt(qd.getPrompt());
         q.setStartCode(qd.getStartCode());
+        q.setExecTimeoutMs(qd.getExecTimeoutMs());
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
         q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));
@@ -1287,6 +1291,7 @@ public class QuizService {
                         .name(question.getLanguage().getName())
                         .build())
                 .startCode(question.getStartCode())
+                .execTimeoutMs(question.getExecTimeoutMs())
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
                         .map(a -> toAnswerDTO(a, includeCorrection)).toList())

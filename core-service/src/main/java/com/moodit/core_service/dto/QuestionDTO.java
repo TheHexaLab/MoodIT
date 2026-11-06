@@ -18,7 +18,7 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "prompt", "qType", "qTypeId", "totalScore", "orderIndex", "language", "startCode", "answers", "dragItems", "groups", "testCases"})
+@JsonPropertyOrder({"id", "prompt", "qType", "qTypeId", "totalScore", "orderIndex", "language", "startCode", "execTimeoutMs", "answers", "dragItems", "groups", "testCases"})
 public class QuestionDTO {
     private Integer id;
     private String prompt;
@@ -29,6 +29,8 @@ public class QuestionDTO {
     /** Langage d'exécution (questions Code) : light (id+name) en lecture, id lu à l'écriture. */
     private LanguageDTO language;
     private String startCode;
+    /** Temps limite d'exécution d'un harnais (ms), choisi par le prof ; null → défaut sandbox. */
+    private Integer execTimeoutMs;
     private List<AnswerDTO> answers;
     private List<DragItemDTO> dragItems;
     /**

@@ -288,13 +288,13 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void succes_persisteVerdictsEtPousse() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             // Harnais triés par id (31 puis 32) → verdicts alignés sur cet ordre.
-            when(executionClient.evaluate(eq("python"), eq("print(1)"), any())).thenReturn(List.of(true, false));
+            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), any())).thenReturn(List.of(true, false));
 
             service.gradeAttempt(ATTEMPT_ID);
 
             ArgumentCaptor<List<ExecutionClient.Harness>> harnesses = ArgumentCaptor.forClass(List.class);
             // Une seule question exécutée : celle sans harnais et la question à choix sont ignorées.
-            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture());
+            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), any());
             assertThat(harnesses.getValue()).containsExactly(
                     new ExecutionClient.Harness("cas A", "assert cas A", 2),
                     new ExecutionClient.Harness("cas B", "assert cas B", 1));
@@ -318,11 +318,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void sansLangage_langageNull() {
             codeQ.setLanguage(null);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(executionClient).evaluate(eq(null), eq("print(1)"), any());
+            verify(executionClient).evaluate(eq(null), eq("print(1)"), any(), any());
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
         }
 
@@ -330,7 +330,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Sandbox indisponible (null) → pending SUPPRIMÉ et push quiz:attempt-failed")
         void sandboxIndisponible_supprimeEtNotifie() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -345,7 +345,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Nombre de verdicts incohérent → traité comme une indisponibilité (suppression)")
         void verdictsIncoherents_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -357,7 +357,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Erreur inattendue pendant l'exécution → pending supprimé quand même")
         void erreurInattendue_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -371,7 +371,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))
                     .thenThrow(new IllegalStateException("BD indisponible"));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -385,7 +385,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))   // contexte
                     .thenReturn(Optional.empty());      // finalisation, puis lookup de l'échec
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -398,7 +398,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Push WS en échec après correction → la tentative corrigée n'est PAS supprimée")
         void pushEchoue_tentativeConservee() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
             doThrow(new IllegalStateException("WS fermé"))
                     .when(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
 

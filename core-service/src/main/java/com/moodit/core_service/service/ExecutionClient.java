@@ -110,13 +110,19 @@ public class ExecutionClient {
      * verdicts (true = réussi) dans le MÊME ordre que {@code harnesses}, ou {@code null} en cas
      * d'échec d'appel.
      */
+    /** Surcharge sans timeout (défaut du sandbox). */
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses) {
-        Map<String, Object> body = Map.of(
-                "language", language == null ? "" : language,
-                "code", code == null ? "" : code,
-                "testCases", harnesses.stream()
-                        .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
-                        .toList());
+        return evaluate(language, code, harnesses, null);
+    }
+
+    public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("language", language == null ? "" : language);
+        body.put("code", code == null ? "" : code);
+        body.put("testCases", harnesses.stream()
+                .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
+                .toList());
+        if (timeoutMs != null) body.put("timeoutMs", timeoutMs);
         try {
             Verdict[] verdicts = restClient(pistonCalls(language, harnesses.size())).post()
                     .uri(baseUrl + "/internal/exec/evaluate")
@@ -138,7 +144,12 @@ public class ExecutionClient {
      * traite tous les cas), les attendus comparés hors sandbox. Verdicts dans l'ordre des {@code cases},
      * ou {@code null} si le service est injoignable.
      */
+    /** Surcharge sans timeout (défaut du sandbox). */
     public List<Boolean> evaluateStructured(String language, String code, List<Case> cases) {
+        return evaluateStructured(language, code, cases, null);
+    }
+
+    public List<Boolean> evaluateStructured(String language, String code, List<Case> cases, Integer timeoutMs) {
         List<Map<String, Object>> caseBodies = cases.stream().map(c -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", c.name());
@@ -148,10 +159,11 @@ public class ExecutionClient {
             m.put("weight", c.weight());
             return m;
         }).toList();
-        Map<String, Object> body = Map.of(
-                "language", language == null ? "" : language,
-                "code", code == null ? "" : code,
-                "cases", caseBodies);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("language", language == null ? "" : language);
+        body.put("code", code == null ? "" : code);
+        body.put("cases", caseBodies);
+        if (timeoutMs != null) body.put("timeoutMs", timeoutMs);
         try {
             // Une seule exécution Piston (lot de cas) → budget d'un appel.
             Verdict[] verdicts = restClient(1).post()
