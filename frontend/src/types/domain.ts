@@ -210,6 +210,9 @@ export interface Question {
   language?: Language;
   /** Squelette de code montré à l'étudiant (table Question.start_code). */
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais en ms (table Question.exec_timeout_ms) ; absent → défaut
+   *  du sandbox. Borné côté execution-service (60 s max). */
+  execTimeoutMs?: number;
   /**
    * Harnais de tests CACHÉS (table Test_Case). Présent seulement dans les vues
    * enseignant/éditeur ; jamais renvoyé au répondant.
@@ -491,6 +494,8 @@ export interface QuestionResponse {
   /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
   language?: Language;
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais (ms) ; absent → défaut du sandbox. */
+  execTimeoutMs?: number;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
   /** Catégories (zones) d'une association : groupes distincts, exposés même en passation. */

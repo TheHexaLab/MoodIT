@@ -56,6 +56,8 @@ export interface QuestionDraft {
   dragItems?: DragItemDraft[];
   languageId?: number;
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais en ms (question Code) ; absent → défaut du sandbox. */
+  execTimeoutMs?: number;
   testCases?: TestCaseDraft[];
 }
 
@@ -307,6 +309,7 @@ export function questionToDraft(q: Question): QuestionDraft {
     dragItems: q.dragItems?.map((d) => ({ ...d })),
     languageId: q.language?.id,
     startCode: q.startCode,
+    execTimeoutMs: q.execTimeoutMs,
     testCases: q.testCases?.map((t) => ({ ...t })),
   };
 }
@@ -355,6 +358,7 @@ export function draftToQuestion(
     })),
     language,
     startCode: draft.startCode,
+    execTimeoutMs: draft.execTimeoutMs,
     testCases: draft.testCases?.map((t, i) => ({
       id: t.id ?? -(i + 1),
       name: t.name,

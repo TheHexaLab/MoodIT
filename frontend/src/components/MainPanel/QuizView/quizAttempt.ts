@@ -207,6 +207,8 @@ export interface CodeEvaluationInput {
   languageId?: number;
   code: string;
   testCases: TestCase[];
+  /** Temps limite d'exécution d'un harnais (ms) choisi par le prof ; absent → défaut sandbox. */
+  execTimeoutMs?: number;
 }
 
 /**

@@ -603,6 +603,24 @@ export function QuestionFormBody({
             ariaLabel={t.startCodeAria}
           />
         </div>
+
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t.execTimeoutLabel}</span>
+          {/* Saisie en SECONDES, stockée en ms (draft.execTimeoutMs) ; vide → défaut du sandbox. */}
+          <input
+            className={styles.input}
+            type="number"
+            min={1}
+            max={60}
+            step={1}
+            value={draft.execTimeoutMs != null ? String(Math.round(draft.execTimeoutMs / 1000)) : ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              patch({ execTimeoutMs: raw === '' ? undefined : Math.round(Number(raw) * 1000) });
+            }}
+          />
+          <span className={styles.fieldHint}>{t.execTimeoutHint}</span>
+        </label>
       </>
     );
   }

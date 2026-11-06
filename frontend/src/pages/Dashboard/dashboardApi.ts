@@ -125,6 +125,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       orderIndex: q.orderIndex,
       language: q.language,
       startCode: q.startCode,
+      execTimeoutMs: q.execTimeoutMs,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
         content: a.content,
@@ -270,6 +271,7 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     ? {
         language: input.language,
         code: input.code,
+        timeoutMs: input.execTimeoutMs,
         cases: input.testCases.map((t) => ({
           name: t.name,
           expr: t.expr,
@@ -281,6 +283,7 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     : {
         language: input.language,
         code: input.code,
+        timeoutMs: input.execTimeoutMs,
         testCases: input.testCases.map((t) => ({
           name: t.name,
           harnessCode: t.harnessCode,
