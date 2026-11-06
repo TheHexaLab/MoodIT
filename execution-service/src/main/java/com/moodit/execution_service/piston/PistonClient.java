@@ -24,6 +24,9 @@ public class PistonClient {
 
     /** Limite mémoire par défaut de l'étape run (octets, convention de Piston) : 256 Mo. */
     public static final long DEFAULT_RUN_MEMORY_LIMIT = 256_000_000L;
+    /** Plafond DUR du temps d'exécution (ms) qu'un prof peut demander par question : 60 s. Le prof
+     *  peut allonger le défaut (harnais coûteux) sans pouvoir bloquer le sandbox indéfiniment. */
+    public static final int MAX_RUN_TIMEOUT_MS = 60_000;
     /** Limite mémoire par défaut de l'étape compile (octets) : 512 Mo (rustc, javac, mono…). */
     public static final long DEFAULT_COMPILE_MEMORY_LIMIT = 512_000_000L;
 
@@ -78,16 +81,27 @@ public class PistonClient {
      * @throws PistonException si Piston est injoignable ou renvoie une erreur de requête.
      */
     public Result execute(String language, String version, List<File> files) {
-        return execute(language, version, files, null);
+        return execute(language, version, files, null, null);
+    }
+
+    /** Variante avec {@code stdin} (cf. surcharge complète), temps d'exécution par défaut. */
+    public Result execute(String language, String version, List<File> files, String stdin) {
+        return execute(language, version, files, stdin, null);
     }
 
     /**
      * Variante avec {@code stdin} : la chaîne est fournie à l'ENTRÉE STANDARD de l'étape run.
      * Sert à injecter un secret au RUNTIME (langages compilés) plutôt qu'à le graver dans le source
      * — un {@code strings} du binaire ne le révèle pas. {@code null}/vide → aucun stdin envoyé.
+     *
+     * <p>{@code runTimeoutMsOverride} : temps d'exécution demandé par le prof pour CETTE question
+     * ({@code null} → défaut serveur) ; borné à {@link #MAX_RUN_TIMEOUT_MS} (et ≥ 1 ms).
      * @throws PistonException si Piston est injoignable ou renvoie une erreur de requête.
      */
-    public Result execute(String language, String version, List<File> files, String stdin) {
+    public Result execute(String language, String version, List<File> files, String stdin,
+                          Integer runTimeoutMsOverride) {
+        int effectiveRunTimeout = runTimeoutMsOverride == null ? runTimeoutMs
+                : Math.max(1, Math.min(runTimeoutMsOverride, MAX_RUN_TIMEOUT_MS));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("language", language);
         body.put("version", version == null || version.isBlank() ? "*" : version);
@@ -95,7 +109,7 @@ public class PistonClient {
         if (stdin != null && !stdin.isEmpty()) {
             body.put("stdin", stdin);
         }
-        body.put("run_timeout", runTimeoutMs);
+        body.put("run_timeout", effectiveRunTimeout);
         body.put("compile_timeout", compileTimeoutMs);
         if (runMemoryLimit > 0) {
             body.put("run_memory_limit", runMemoryLimit);

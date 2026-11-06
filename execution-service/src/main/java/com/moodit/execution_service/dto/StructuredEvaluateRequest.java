@@ -18,4 +18,12 @@ public record StructuredEvaluateRequest(
         @NotBlank String language,
         String version,
         @NotNull @Size(max = 100_000) String code,
-        @NotEmpty @Size(max = 100) List<@Valid StructuredCase> cases) {}
+        @NotEmpty @Size(max = 100) List<@Valid StructuredCase> cases,
+        /** Temps limite d'exécution demandé par le prof (ms) ; {@code null} → défaut serveur. */
+        Integer timeoutMs) {
+
+    /** Constructeur de compatibilité (sans timeout → défaut serveur). */
+    public StructuredEvaluateRequest(String language, String version, String code, List<StructuredCase> cases) {
+        this(language, version, code, cases, null);
+    }
+}

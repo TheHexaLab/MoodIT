@@ -55,7 +55,7 @@ class ExecutionServiceTest {
 
     /** Fait renvoyer à Piston une étape run(stdout, stderr) calculée à partir des fichiers soumis. */
     private void pistonRun(Function<List<PistonClient.File>, PistonClient.Stage> runFn) {
-        when(piston.execute(anyString(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
+        when(piston.execute(anyString(), any(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
             List<PistonClient.File> files = inv.getArgument(2);
             return new PistonClient.Result(null, runFn.apply(files), null);
         });
@@ -90,7 +90,7 @@ class ExecutionServiceTest {
 
     @Test
     void fails_on_compile_error() {
-        when(piston.execute(anyString(), any(), any(), any())).thenReturn(new PistonClient.Result(
+        when(piston.execute(anyString(), any(), any(), any(), any())).thenReturn(new PistonClient.Result(
                 new PistonClient.Stage("", "erreur de compilation", 1, null, null), null, null));
         List<TestResult> r = service.evaluate(oneTest("C", "int solution(){return 5;}", "return 1;"));
         assertThat(r).singleElement().satisfies(t -> {
@@ -351,7 +351,7 @@ class ExecutionServiceTest {
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
-        verify(piston, never()).execute(anyString(), any(), any(), any());
+        verify(piston, never()).execute(anyString(), any(), any(), any(), any());
 
         // Place rendue : la même exécution passe.
         assertThat(limited.evaluate(oneTest("Python", "def f(): pass", "return True")))

@@ -59,13 +59,19 @@ public class ExecutionService {
 
     /** Un appel au sandbox, dans une place de la limite globale (#24) : file bornée, sinon 429. */
     private PistonClient.Result execute(String language, String version, List<PistonClient.File> files) {
-        return execute(language, version, files, null);
+        return execute(language, version, files, null, null);
     }
 
-    /** Variante avec {@code stdin} (secret injecté au runtime pour les langages compilés). */
+    /** Variante avec {@code stdin} (secret injecté au runtime pour les langages compilés), défaut serveur. */
     private PistonClient.Result execute(String language, String version, List<PistonClient.File> files,
             String stdin) {
-        return limiter.withSandboxSlot(() -> piston.execute(language, version, files, stdin));
+        return execute(language, version, files, stdin, null);
+    }
+
+    /** Variante complète : {@code timeoutMs} = temps limite demandé par le prof ({@code null} → défaut). */
+    private PistonClient.Result execute(String language, String version, List<PistonClient.File> files,
+            String stdin, Integer timeoutMs) {
+        return limiter.withSandboxSlot(() -> piston.execute(language, version, files, stdin, timeoutMs));
     }
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
@@ -79,7 +85,8 @@ public class ExecutionService {
         List<TestResult> results = new ArrayList<>();
         for (TestCaseInput testCase : request.testCases()) {
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
-            results.add(runOne(request.language(), request.version(), request.code(), testCase, newNonce()));
+            results.add(runOne(request.language(), request.version(), request.code(), testCase, newNonce(),
+                    request.timeoutMs()));
         }
         return results;
     }
@@ -97,7 +104,8 @@ public class ExecutionService {
                 .toList();
         CodeAssembler.Assembled asm =
                 assembler.assembleServer(request.language(), request.code(), serverCases);
-        PistonClient.Result result = execute(asm.pistonLanguage(), request.version(), asm.files());
+        PistonClient.Result result =
+                execute(asm.pistonLanguage(), request.version(), asm.files(), null, request.timeoutMs());
 
         // Échec de compilation → tous les cas échouent avec le message de compilation.
         PistonClient.Stage compile = result.compile();
@@ -312,20 +320,20 @@ public class ExecutionService {
     }
 
     private TestResult runOne(String language, String version, String code, TestCaseInput testCase,
-            String nonce) {
+            String nonce, Integer timeoutMs) {
         int weight = testCase.effectiveWeight();
 
         // SQL en mode MODIFICATION (harnais avec « -- @student ») : exécution ISOLÉE en deux phases
         // (bac à sable jetable pour l'étudiant, puis noteur séparé). Cf. runSqlIsolated.
         if (CodeAssembler.isSql(language) && CodeAssembler.sqlHasStudentMarker(testCase.harnessCode())) {
-            return runSqlIsolated(version, code, testCase, nonce, weight);
+            return runSqlIsolated(version, code, testCase, nonce, weight, timeoutMs);
         }
 
         CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
         // Langages compilés : le nonce est injecté au runtime via stdin — lu par le seul PROCESSUS
         // NOTEUR (parent), jamais par le processus qui exécute le code étudiant (cf. CodeAssembler).
         String stdin = CodeAssembler.isCompiled(language) ? nonce + "\n" : null;
-        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files(), stdin);
+        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files(), stdin, timeoutMs);
 
         // Échec de compilation (langages compilés) → test échoué, message = stderr de compilation.
         PistonClient.Stage compile = result.compile();
@@ -364,10 +372,10 @@ public class ExecutionService {
      * structurelle (processus/base), pas un filtrage lexical.
      */
     private TestResult runSqlIsolated(String version, String code, TestCaseInput testCase,
-            String nonce, int weight) {
+            String nonce, int weight, Integer timeoutMs) {
         // Phase 1 — bac à sable.
         CodeAssembler.Assembled p1 = assembler.assembleSqlPhase1(code, testCase.harnessCode(), nonce);
-        PistonClient.Stage run1 = execute("sqlite3", version, p1.files()).run();
+        PistonClient.Stage run1 = execute("sqlite3", version, p1.files(), null, timeoutMs).run();
         if (run1 == null || run1.signal() != null) {
             return new TestResult(testCase.name(), weight, false,
                     "Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
@@ -391,7 +399,7 @@ public class ExecutionService {
         // Phase 2 — noteur isolé. Une erreur ici vient du HARNAIS (prof) : message générique, on ne
         // fuit pas son stderr (structure des tables de référence) à l'étudiant.
         CodeAssembler.Assembled p2 = assembler.assembleSqlPhase2(data, testCase.harnessCode(), nonce);
-        PistonClient.Stage run2 = execute("sqlite3", version, p2.files()).run();
+        PistonClient.Stage run2 = execute("sqlite3", version, p2.files(), null, timeoutMs).run();
         if (run2 == null || run2.signal() != null || (run2.code() != null && run2.code() != 0)) {
             return new TestResult(testCase.name(), weight, false, "Le harnais n'a pas pu évaluer ton résultat");
         }

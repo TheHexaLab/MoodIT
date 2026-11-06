@@ -142,6 +142,20 @@ class PistonClientTest {
     }
 
     @Test
+    void run_timeout_par_requete_remplace_le_defaut_et_est_borne() throws Exception {
+        PistonClient c = new PistonClient(baseUrl, 3000, 10000, 20000);
+        // Override dans la plage → envoyé tel quel (remplace le défaut 3000).
+        respond(200, OK_RESPONSE);
+        c.execute("python", "*", oneFile(), null, 15_000);
+        assertThat(JSON.readTree(lastBody.get()).get("run_timeout").asInt()).isEqualTo(15_000);
+        // Au-delà du plafond serveur → borné à MAX_RUN_TIMEOUT_MS.
+        respond(200, OK_RESPONSE);
+        c.execute("python", "*", oneFile(), null, 999_999);
+        assertThat(JSON.readTree(lastBody.get()).get("run_timeout").asInt())
+                .isEqualTo(PistonClient.MAX_RUN_TIMEOUT_MS);
+    }
+
+    @Test
     void envoie_les_limites_memoire_configurees() throws Exception {
         respond(200, OK_RESPONSE);
         PistonClient c = new PistonClient(baseUrl, 3000, 10000, 20000, 128_000_000L, 300_000_000L);
