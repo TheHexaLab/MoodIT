@@ -602,6 +602,17 @@ describe('AddSubscriptionPopup', () => {
       expect(heading()).toBe(t.title);
     });
 
+    it('initialEstablishmentId ouvre directement les programmes de l’établissement', async () => {
+      const { loadEstablishmentPrograms } = renderPopup({ initialView: 'join', initialEstablishmentId: 1 });
+      expect(await screen.findByText('Génie logiciel')).toBeTruthy();
+      expect(heading()).toBe('Université de Sherbrooke');
+      expect(loadEstablishmentPrograms).toHaveBeenCalledWith(1);
+      // Le retour mène à la liste des établissements.
+      fireEvent.click(backButton());
+      expect(heading()).toBe(t.joinTitle);
+      expect(screen.getByText('Université de Sherbrooke')).toBeTruthy();
+    });
+
     it('temps réel (catalog) : le décompte et la liste ouverte des programmes se mettent à jour', async () => {
       const { push } = await goPrograms();
       push({ kind: 'catalog', establishmentId: 1, programs: [PROGRAMS[0]] });

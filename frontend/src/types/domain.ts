@@ -517,3 +517,167 @@ export interface PostVoteUserDTO {
   childrenCount?: number;
   children?: PostVoteUserDTO[];
 }
+
+/** Cours de l'étudiant, tel que l'horaire en a besoin : son programme sert à l'ouvrir (#206). */
+export interface ScheduleCourse {
+  id: number;
+  code: string;
+  /** Nom complet du cours (« Structures de données »), affiché dans le détail d'une séance. */
+  title?: string;
+  programId: number;
+  /** Enseignant ou responsable : peut ajouter des séances à ce cours. */
+  canManage?: boolean;
+}
+
+/** Séance de cours dans l'horaire de la semaine. */
+export interface ScheduleSession {
+  id: number;
+  courseId: number;
+  /** Cours, Travaux dirigés, Laboratoire… */
+  kind: string;
+  room: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+  /** Séance hebdomadaire : date ISO de la dernière occurrence ; null ou absent = une seule fois. */
+  until?: string | null;
+  /** Série des séances répétées chaque semaine ; absent = une séance seule. */
+  seriesId?: number;
+}
+
+/** Séance à ajouter par l'enseignant ; `until` répète chaque semaine jusqu'à cette date ISO. */
+export type ScheduleSessionInput = Omit<ScheduleSession, 'id' | 'seriesId'>;
+
+/** Modification d'une séance répétée : celle-ci seulement, ou toute sa série. */
+export type ScheduleSessionScope = 'one' | 'series';
+
+/** Couleur d'une tâche, choisie par l'étudiant. */
+export type ScheduleColor = 'teal' | 'blue' | 'purple' | 'rose' | 'orange' | 'green' | 'gray';
+
+/** Tâche personnelle dans l'agenda : visible seulement de son auteur. */
+export interface ScheduleTask {
+  id: number;
+  title: string;
+  /** Dates ISO. */
+  start: string;
+  end: string;
+  /** Cours lié, facultatif. */
+  courseId: number | null;
+  /** Rappel, en minutes avant le début ; null = aucun. */
+  reminder: number | null;
+  notes: string;
+  color: ScheduleColor;
+  /** Cochée dans la liste des tâches. */
+  done: boolean;
+  /** Toute la journée : pas d'heure, seulement un jour (`start` à minuit). */
+  allDay: boolean;
+  /** Remise : une seule heure, l'échéance (`start` = `end`), affichée comme une barre rouge. */
+  deadline: boolean;
+  /** Remise d'un devoir du cours, vue par ses étudiants : en lecture dans l'horaire. */
+  courseDeadline?: boolean;
+  /** Remise d'un cours : l'id du devoir, que « Voir le devoir » ouvre (#258). */
+  assignmentId?: number;
+}
+
+export type ScheduleTaskInput = Omit<ScheduleTask, 'id'>;
+
+/** Remise d'un étudiant : toujours un fichier (#252). */
+export interface AssignmentSubmission {
+  /** Une remise peut compter plusieurs fichiers. */
+  fileNames: string[];
+  /** Date ISO de la remise. */
+  submittedAt: string;
+  /** Remis après la date limite. */
+  late: boolean;
+  /** Note publiée, ex. « 17 / 20 » ; absente tant que le devoir n'est pas corrigé. */
+  grade?: string;
+  /** Commentaire du prof. */
+  comment?: string;
+  /** Devoir en équipe : le membre qui a déposé la remise, commune à toute l'équipe. */
+  submittedBy?: string;
+}
+
+/** Équipe d'un étudiant pour un devoir : une seule remise, visible par tous ses membres. */
+export interface AssignmentTeam {
+  id: number;
+  name: string;
+  members: string[];
+}
+
+/** Les équipes d'un devoir, et les étudiants qui n'en ont pas encore. */
+export interface AssignmentTeams {
+  teams: AssignmentTeam[];
+  unassigned: string[];
+}
+
+/** Qui forme les équipes d'un devoir. */
+export type TeamFormation = 'students' | 'teacher';
+
+/** Fichier joint par le prof à un devoir. */
+export interface AssignmentFile {
+  name: string;
+  /** Taille lisible, ex. « 240 Ko ». */
+  size: string;
+}
+
+/** Ce que le prof saisit dans la fenêtre « Nouveau devoir ». */
+export interface AssignmentDraft {
+  title: string;
+  instructions: string;
+  dueAt?: string;
+  weight?: number;
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
+  teamFormation?: TeamFormation;
+}
+
+/** Une ligne du suivi des remises, côté prof. */
+export interface AssignmentStudentRow {
+  /** Id de la remise : porté par l'URL de la page de notation. */
+  id: number;
+  /** Nom de l'étudiant ou, pour un devoir en équipe, de l'équipe. */
+  studentName: string;
+  /** Devoir en équipe : ses membres. */
+  members?: string[];
+  status: 'graded' | 'submitted' | 'late' | 'missing';
+  submittedAt?: string;
+  files: AssignmentFile[];
+  grade?: string;
+  comment?: string;
+}
+
+/** Ce que le prof saisit sur la page de notation. */
+export interface SubmissionGrade {
+  score: number;
+  comment: string;
+}
+
+/** Devoir d'un cours, vu par l'étudiant (sa remise) ou le prof (les compteurs). */
+export interface Assignment {
+  id: number;
+  courseId: number;
+  title: string;
+  instructions: string;
+  /** Date ISO ; absente tant qu'un brouillon n'a pas de date limite. */
+  dueAt?: string;
+  /** Pondération en pourcentage. */
+  weight?: number;
+  /** Formats attendus (facultatifs) ; vide : tous les formats sont acceptés. */
+  expectedFormats: string[];
+  files: AssignmentFile[];
+  isPublished: boolean;
+  publishedBy?: string;
+  /** Devoir en équipe : nombre maximal de membres. Absent : devoir individuel. */
+  teamSize?: number;
+  teamFormation?: TeamFormation;
+  /** Devoir en équipe : l'équipe de l'étudiant, s'il en a une. */
+  team?: AssignmentTeam;
+  submission?: AssignmentSubmission;
+  submittedCount: number;
+  gradedCount: number;
+  /** Nombre d'étudiants ou, pour un devoir en équipe, d'équipes. */
+  studentCount: number;
+}

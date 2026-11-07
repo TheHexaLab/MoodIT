@@ -2,7 +2,7 @@
     position: sticky;
     top: 0;
     z-index: 30;
-    height: 100vh;
+    height: calc(100vh - var(--portal-band-height, 0px));
     flex-shrink: 0;
     align-self: flex-start;
 }

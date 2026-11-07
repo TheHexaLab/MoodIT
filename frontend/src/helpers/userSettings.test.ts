@@ -88,21 +88,12 @@ describe('serializeUserSettings', () => {
     expect(serializeUserSettings({ theme: 'dark' })).toBe('{"theme":"dark"}');
   });
 
-  it('sérialise thème + location', () => {
-    const s: UserSettings = {
-      theme: 'light',
-      location: { programId: 3, courseId: 4 },
-    };
-    expect(serializeUserSettings(s)).toBe(
-      '{"theme":"light","location":{"programId":3,"courseId":4}}'
-    );
+  it('un ancien blob avec location reste lisible : le champ est simplement ignoré', () => {
+    expect(parseUserSettings('{"theme":"dark","location":{"programId":3}}').theme).toBe('dark');
   });
 
   it('round-trip : parse(serialize(x)) === x', () => {
-    const s: UserSettings = {
-      theme: 'dark',
-      location: { programId: 7, courseId: 8, channel: { type: 'forum', id: 5 } },
-    };
+    const s: UserSettings = { theme: 'dark' };
     expect(parseUserSettings(serializeUserSettings(s))).toEqual(s);
   });
 });

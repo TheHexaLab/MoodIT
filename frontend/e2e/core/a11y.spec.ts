@@ -18,7 +18,7 @@ import {
   freshAccount,
   openHome,
   openUserMenu,
-  programButton,
+  enterProgram,
 } from './admin.helpers';
 import {
   SIX_TYPES,
@@ -114,9 +114,9 @@ for (const theme of THEMES) {
     await setThemeInDb(baseURL!, student.storageState, theme);
     const { context, page } = await openHome(browser, student.storageState);
     const main = mainContent(page);
-    await expect(main.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
+    await expect(main.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
     await expectTheme(page, theme);
-    await auditScreen(page, 'accueil vide (Bienvenue)', theme);
+    await auditScreen(page, 'accueil sans programme', theme);
 
     // « Ajouter un programme » : choix, puis les deux étapes de « Rejoindre un programme ».
     await page.getByRole('button', { name: 'Ajouter un programme', exact: true }).click();
@@ -137,16 +137,18 @@ for (const theme of THEMES) {
     await enrollApi(student.api, TEST_PROGRAM_ID, [TEST_COURSE_ID]);
     await student.api.dispose();
     await page.reload();
-    await programButton(page, PROGRAM_NAME).click();
+    await enterProgram(page, PROGRAM_NAME);
     await expect(main.getByRole('heading', { name: 'Aucun canal sélectionné' })).toBeVisible();
-    await auditScreen(page, 'accueil avec programme', theme);
+    await auditScreen(page, 'cours ouvert', theme);
 
     await clickProgramMenu(page, PROGRAM_NAME, 'Rejoindre des cours');
     await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toBeVisible();
     await auditScreen(page, 'popup Rejoindre des cours', theme);
     await page.getByRole('button', { name: 'Annuler' }).click();
     await expect(page.getByRole('heading', { name: 'Rejoindre des cours' })).toHaveCount(0);
+    await auditScreen(page, 'accueil avec programme', theme);
 
+    await enterProgram(page, PROGRAM_NAME);
     await page.getByRole('button', { name: CHANNEL_NAME }).click();
     await expect(
       main.getByRole('textbox', { name: `Envoyer un message dans ${CHANNEL_NAME}` })
@@ -197,7 +199,7 @@ for (const theme of THEMES) {
     await student.api.dispose();
     const { context, page } = await openHome(browser, student.storageState);
     const main = mainContent(page);
-    await programButton(page, fixture.program.name).click();
+    await enterProgram(page, fixture.program.name);
     await page.getByRole('button', { name: quizTitle }).click();
     await expect(main).toContainText('Question 1 sur 6');
     await expectTheme(page, theme);
@@ -229,12 +231,12 @@ for (const theme of THEMES) {
     await setThemeInDb(baseURL!, fixture.admin.storageState, theme);
     const { context, page } = await openHome(browser, fixture.admin.storageState);
     const nav = page.getByRole('navigation', { name: 'Cours' });
-    await programButton(page, fixture.program.name).click();
+    await enterProgram(page, fixture.program.name);
     await expect(nav.getByRole('button', { name: fixture.course.code, exact: true })).toBeVisible();
     await expectTheme(page, theme);
 
     // Sections (canaux) : liste puis formulaire d'ajout ; fermeture par « ✕ » (sans nom accessible).
-    await nav.getByRole('button', { name: 'Modifier la section CANAUX' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Canaux' }).click();
     await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toBeVisible();
     await auditScreen(page, 'popup Modifier les canaux', theme);
     await page.getByRole('button', { name: '+ Ajouter un canal' }).click();
@@ -245,7 +247,7 @@ for (const theme of THEMES) {
     await expect(page.getByRole('heading', { name: 'Modifier les canaux' })).toHaveCount(0);
 
     // Éditeur de quiz : liste, formulaire, une question de chaque type, harnais, test, confirmation.
-    await nav.getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+    await nav.getByRole('button', { name: 'Modifier la section Quiz' }).click();
     await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
     await auditScreen(page, 'éditeur de quiz : liste', theme);
     await page.locator('[data-reorder-id]').filter({ hasText: quizTitle }).click();
@@ -294,6 +296,7 @@ for (const theme of THEMES) {
     await page.getByRole('button', { name: 'Annuler' }).click();
     await expect(page.getByRole('heading', { name: 'Ajouter un cours' })).toHaveCount(0);
 
+    await enterProgram(page, fixture.program.name);
     await clickCourseMenu(page, fixture.course.code, 'Modifier le cours');
     await expect(page.getByRole('heading', { name: 'Modifier le cours' })).toBeVisible();
     await auditScreen(page, 'popup Modifier le cours', theme);
@@ -317,6 +320,7 @@ for (const theme of THEMES) {
     await expect(page.getByRole('heading', { name: 'Gestion des rôles' })).toHaveCount(0);
 
     // MCP : gestion, puis bilan d'une analyse (repli déterministe, poussé par WebSocket).
+    await enterProgram(page, fixture.program.name);
     await clickCourseMenu(page, fixture.course.code, 'Feedback du cours');
     await expect(page.getByRole('heading', { name: 'Gestion MCP' })).toBeVisible();
     await expect(page.getByText('Chargement des analyses…')).toBeHidden();

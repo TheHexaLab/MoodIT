@@ -1,0 +1,1892 @@
+/* Page Horaire : mêmes repères que l'Accueil du portail. */
+.page {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: var(--bg-main);
+  color: var(--text);
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+/* Au-dessus de la grille : titre à gauche, navigation alignée sur son bord droit. */
+.headerMain {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Au-dessus de la colonne de droite, de la même largeur : le bouton d'ajout. */
+.headerSide {
+  display: flex;
+  flex: 0 0 18.75rem;
+  justify-content: flex-end;
+}
+
+.headerText {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--bg-active-channel);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.primary {
+  border-color: var(--brand-teal-strong);
+  background: var(--brand-teal-strong);
+  color: #ffffff;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--brand-teal-strong);
+  filter: brightness(0.9);
+}
+
+.danger {
+  color: var(--badge-danger-fg);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.iconButton {
+  width: 2.5rem;
+  padding: 0;
+}
+
+.iconButton svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.button:focus-visible,
+.block:focus-visible,
+.form :is(input, select, textarea, button):focus-visible,
+.closeButton:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+/* ── Corps : la grille, et le panneau d'ajout à droite quand il est ouvert ── */
+.body {
+  --grid-height: max(24rem, calc(100dvh - 11rem));
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+}
+
+/* Colonne de droite : l'ajout en cours, puis la liste des tâches, à la hauteur de la grille. */
+.sidebar {
+  flex: 0 0 18.75rem;
+  min-width: 0;
+  /* À la hauteur de la grille : la liste défile si les tâches dépassent. */
+  max-height: calc(var(--grid-height) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--bg-surface);
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* ── Formulaire d'une tâche ou d'une séance ── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.field > span,
+.colors > legend {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.field :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+
+/* La description grandit avec son texte : rien n'est caché pendant l'édition. */
+.field textarea {
+  min-height: 5rem;
+  field-sizing: content;
+  resize: vertical;
+}
+
+/* Panneau d'ajout : il prend toute la hauteur de la colonne, la description le reste. */
+.panelFill {
+  flex: 1;
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.panelFill .form {
+  flex: 1;
+}
+
+.panelFill .fieldGrow {
+  flex: 1;
+}
+
+.panelFill .fieldGrow textarea {
+  flex: 1;
+  min-height: 8rem;
+  resize: none;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--bg-active-channel);
+}
+
+.tabs button,
+.chips button {
+  min-height: 2rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-body);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tabs button {
+  padding: 0 0.25rem;
+  white-space: nowrap;
+}
+
+.tabs button[aria-pressed='true'] {
+  border-color: var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chips button {
+  padding: 0 0.75rem;
+  border-color: var(--border);
+  border-radius: 999px;
+}
+
+.chips button[aria-pressed='true'] {
+  border-color: var(--brand-teal);
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+}
+
+.colors {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.colors > legend {
+  padding: 0;
+  margin-bottom: 0.375rem;
+}
+
+.colors > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Pastille de couleur : un bouton radio natif, redessiné. */
+.colors input {
+  appearance: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  border-radius: 50%;
+  background: hsl(var(--hue) var(--sat) 42%);
+  cursor: pointer;
+}
+
+/* Cours : pastilles vives ; tâches : pastilles pastel, bordées pour rester visibles sur le blanc. */
+.colors[data-tone='bright'] input {
+  background: hsl(var(--hue) calc(var(--sat) + 20%) 45%);
+}
+
+.colors[data-tone='pastel'] input {
+  background: hsl(var(--hue) var(--sat) 74%);
+  box-shadow: inset 0 0 0 1px hsl(var(--hue) var(--sat) 45% / 45%);
+}
+
+.colors input:checked {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  background: var(--bg-active-channel);
+  color: var(--text-body);
+  font-size: 0.75rem;
+}
+
+.formError {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.8125rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── Fenêtres : détail d'une séance, modification d'une tâche ── */
+.dialog {
+  /* Portées dans document.body : elles ne prennent pas la police de la page. */
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.dialogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dialogHeader h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.dialogHeader p {
+  margin: 0.25rem 0 0;
+  color: var(--text-body);
+}
+
+.closeButton {
+  display: inline-flex;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-body);
+  cursor: pointer;
+}
+
+.closeButton svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1.25rem;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--text-muted);
+}
+
+.details dd {
+  margin: 0;
+}
+
+/* ── Grille de la semaine ── */
+.gridWrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+/* La journée entière (24 h) défile dans un cadre à la hauteur de l'écran ; les jours restent en haut. */
+.gridScroll {
+  max-height: var(--grid-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Barres de défilement discrètes : la grille, la liste des tâches, le panneau d'ajout. */
+.gridScroll,
+.taskList ul,
+.panelFill {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Rangée « Journée » : les tâches sans heure, sous les jours, fixée en haut avec eux. */
+/* Rangée de hauteur nulle : ses pastilles flottent par-dessus le haut de la grille, fixées sous
+   les jours, sans décaler les heures d'une semaine à l'autre. */
+.allDayLabel,
+.allDayCell {
+  position: sticky;
+  top: 2.875rem;
+  z-index: 39;
+  height: 0;
+  overflow: visible;
+}
+
+.allDayLabel {
+  /* Aucun rembourrage vertical : il donnerait de la hauteur à la rangée. */
+  padding: 0 0.5rem 0 0;
+  transform: translateY(0.375rem);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  text-align: right;
+}
+
+.allDayCell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.25rem;
+  transform: translateY(0.25rem);
+}
+
+.allDayCell .allDayChip {
+  /* La rangée n'a pas de hauteur : sans ceci, la pastille rétrécirait à rien. */
+  flex: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+}
+
+.allDayChip {
+  --ink: hsl(var(--hue) var(--sat) var(--badge-hue-lightness));
+  --tint: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.1875rem 0.5rem;
+  overflow: hidden;
+  border: 1px dashed var(--ink);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--tint) 18%, var(--bg-surface));
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.allDayChip:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 3.5rem repeat(7, minmax(0, 1fr));
+}
+
+.corner,
+.dayHead {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 2.875rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.dayHead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--border);
+  color: var(--text-body);
+  font-weight: 500;
+}
+
+.dayHead.today {
+  /* Opaque : les événements défilent dessous. */
+  background: linear-gradient(var(--badge-success-bg), var(--badge-success-bg)), var(--bg-surface);
+  color: var(--brand-teal);
+  font-weight: 700;
+}
+
+.hours {
+  display: flex;
+  flex-direction: column;
+}
+
+.hours span {
+  box-sizing: border-box;
+  padding: 0.375rem 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.dayColumn {
+  position: relative;
+  border-left: 1px solid var(--border);
+  /* Une ligne par heure, sous les événements. */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(4.375rem - 1px),
+    var(--border) calc(4.375rem - 1px),
+    var(--border) 4.375rem
+  );
+}
+
+.dayColumn.today {
+  background-color: color-mix(in srgb, var(--brand-teal) 4%, transparent);
+}
+
+/* ── Événement : teinte du cours ou de la tâche (--hue, --sat), luminosité du thème ── */
+.block {
+  /* Foncée en clair, claire en sombre, comme les pastilles du journal d'audit. */
+  --ink: hsl(var(--hue) var(--sat) var(--badge-hue-lightness));
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.5rem;
+  overflow: hidden;
+  border: none;
+  border-radius: 0.5rem;
+  /* Pastel en clair, teinte sourde en sombre : une couleur vive fondue dans la surface. */
+  --tint: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+  background: color-mix(in srgb, var(--tint) 18%, var(--bg-surface));
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+/* Un événement posé par-dessus un autre s'en détache par une ombre. */
+.stacked {
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+}
+
+/* Recouvert tôt par un autre : le titre seul reste lisible ; les détails restent dans le nom accessible. */
+/* Retirés de la vue, mais gardés dans le nom accessible ; ils ne prennent pas de place. */
+.titleOnly .blockDetail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.block:hover {
+  background: color-mix(in srgb, var(--tint) 28%, var(--bg-surface));
+}
+
+/* Séance : teinte franche ; tâche : pastel, plus pâle, pour qu'on les distingue d'un coup d'œil. */
+.session {
+  background: color-mix(in srgb, var(--tint) 30%, var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) 38%, var(--bg-surface));
+}
+
+.task {
+  background: color-mix(in srgb, var(--tint) 11%, var(--bg-surface));
+}
+
+.task:hover {
+  background: color-mix(in srgb, var(--tint) 17%, var(--bg-surface));
+}
+
+/* Séance : barre de couleur à gauche. */
+.session {
+  padding-left: 0.875rem;
+}
+
+.session::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--tint);
+}
+
+/* Tâche : contour pointillé ; le crayon apparaît au survol. */
+.task {
+  border: 1px dashed var(--ink);
+}
+
+.task:hover,
+.task:focus-visible {
+  border-style: solid;
+}
+
+/* Le texte prend toute la largeur ; au survol, le crayon passe par-dessus le coin, sur le fond
+   du bloc. */
+.editIcon {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  box-sizing: content-box;
+  width: 0.875rem;
+  height: 0.875rem;
+  padding: 0.1875rem;
+  border-radius: 0.25rem;
+  background: inherit;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.task:hover .editIcon,
+.task:focus-visible .editIcon,
+.session:hover .editIcon,
+.session:focus-visible .editIcon {
+  opacity: 1;
+}
+
+/* Tâche terminée : pâlie et barrée, dans la grille comme dans la liste. */
+.done {
+  opacity: 0.6;
+}
+
+.done .blockTitle {
+  text-decoration: line-through;
+}
+
+/* Un bloc garde toujours la hauteur de son titre ; les lignes qui n'y tiennent pas sont retirées. */
+.block {
+  /* Titre et heure : la plus petite taille d'un bloc, avec la même marge en haut et en bas. */
+  min-height: 2.875rem;
+}
+
+.tiny,
+.dragging {
+  justify-content: flex-start;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.tiny .blockDetail ~ .blockDetail,
+.short .blockDetail ~ .blockDetail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Glisser : la tâche se déplace par le corps, s'allonge par sa poignée du bas. */
+.dayColumn .task {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.dragging {
+  z-index: 25 !important;
+  cursor: grabbing;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 25%);
+  pointer-events: none;
+  transition: none;
+}
+
+/* Où tombera la tâche glissée : un emplacement de sa couleur, au quart d'heure. */
+.dropSpot {
+  --ink: hsl(var(--hue) var(--sat) var(--badge-hue-lightness));
+  position: absolute;
+  z-index: 24;
+  left: 0.25rem;
+  width: calc(100% - 0.5rem);
+  box-sizing: border-box;
+  padding: 0.25rem 0.5rem;
+  /* Une ombre pâle de la couleur de la tâche, sans contour. */
+  --tint: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--tint) 20%, transparent);
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition:
+    top 0.08s ease,
+    height 0.08s ease;
+}
+
+.resizeHandle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 0.5rem;
+  cursor: ns-resize;
+}
+
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  bottom: 0.1875rem;
+  left: 50%;
+  width: 1.5rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  opacity: 0;
+  transform: translateX(-50%);
+}
+
+.task:hover .resizeHandle::after {
+  opacity: 0.6;
+}
+
+/* ── Liste des tâches de la semaine ── */
+.taskList {
+  flex: 1;
+  min-height: 0;
+}
+
+.taskList ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.taskList li {
+  --ink: hsl(var(--hue) var(--sat) var(--badge-hue-lightness));
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.375rem 0.25rem;
+  border-radius: 0.375rem;
+}
+
+.taskList li:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* Case à cocher dessinée : bordure fine, cochée de la couleur de la tâche, en clair comme en sombre. */
+.taskList input,
+.checkField input {
+  flex: none;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  margin: 0.125rem 0 0;
+  appearance: none;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 0.25rem;
+  /* Un peu plus sombre que la surface : la case se voit sur le blanc du mode clair. */
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-surface)) center / 0.75rem no-repeat;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.taskList input:hover,
+.checkField input:hover {
+  border-color: var(--text-muted);
+}
+
+.taskList input:checked,
+.checkField input:checked {
+  border-color: transparent;
+  background-color: hsl(var(--hue, 174) calc(var(--sat, 62%) + 15%) 40%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5'/%3E%3C/svg%3E");
+}
+
+/* Tâche cochée : barrée, puis elle glisse et se replie hors de la liste. */
+.leaving {
+  overflow: hidden;
+  animation: task-leave 0.45s ease forwards;
+}
+
+.leaving .taskTitle {
+  text-decoration: line-through;
+}
+
+@keyframes task-leave {
+  0%,
+  35% {
+    max-height: 4rem;
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+}
+
+.taskList .taskOpen {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Titre précédé d'une pastille de la couleur de la tâche. */
+.taskTitle {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.taskTitle::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.375rem;
+  border-radius: 50%;
+  background: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+  vertical-align: 0.0625rem;
+}
+
+.done .taskTitle {
+  text-decoration: line-through;
+}
+
+/* Corbeille d'une tâche : apparaît au survol de sa ligne. */
+.taskDelete {
+  display: inline-flex;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.taskDelete svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.taskList li:hover .taskDelete,
+.taskDelete:focus-visible {
+  opacity: 1;
+}
+
+.taskDelete:hover {
+  background: var(--badge-danger-bg);
+  color: var(--badge-danger-fg);
+}
+
+.taskWhen {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Case « Toute la journée ». */
+.checkField {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.checkField input {
+  margin: 0;
+}
+
+.taskListEmpty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.taskList :is(input, button):focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+/* Aperçu de l'ajout en cours : contour plein, par-dessus tout. */
+.preview {
+  border: 1px solid color-mix(in srgb, var(--ink) 35%, transparent);
+  background: color-mix(in srgb, var(--tint) 12%, var(--bg-surface));
+  cursor: default;
+  z-index: 20 !important;
+}
+
+.blockTitle {
+  flex: none;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* La description prend la place qui reste, sans jamais agrandir le bloc. */
+.blockDescription {
+  display: -webkit-box;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  opacity: 0.85;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+}
+
+.blockDetail {
+  font-size: 0.75rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Mobile : une liste par jour ── */
+.dayList {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.daySection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dayTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.todayTag {
+  padding: 0.0625rem 0.5rem;
+  border-radius: 999px;
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.dayItems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dayItems .block {
+  position: relative;
+}
+
+/* ── États ── */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+}
+
+.state p {
+  margin: 0;
+}
+
+.empty {
+  margin: 0;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.emptyOverlay {
+  position: absolute;
+  z-index: 30;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Écran moyen : l'ajout et la liste passent sous la grille. */
+@media (max-width: 75rem) {
+  .body {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    flex-basis: auto;
+  }
+}
+
+/* Mobile : sous la barre fixe de LeftMenuGroup, comme l'Accueil. */
+@media (max-width: 56.25rem) {
+  .page {
+    padding: 4.25rem 1rem 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .block,
+  .editIcon {
+    transition: none;
+  }
+}
+
+/* L'aperçu de l'ajout se glisse aussi : il change le jour et les heures du formulaire. */
+.dayColumn .preview {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.preview.dragging {
+  z-index: 25 !important;
+  cursor: grabbing;
+}
+
+/* Pendant un glisser (déplacer ou allonger) : le titre reste fixé en haut, la description et le
+   crayon disparaissent, et rien ne bouge dans le bloc. */
+.dragging,
+.dragging.tiny {
+  justify-content: flex-start;
+}
+
+.dragging .editIcon,
+.dragging .resizeHandle::after {
+  display: none;
+}
+
+.dragging .blockTitle {
+  flex: none;
+}
+
+/* Samedi et dimanche : une teinte discrète, pour distinguer les jours de cours. */
+.dayColumn.weekend,
+.allDayCell.weekend {
+  background-color: color-mix(in srgb, var(--text) 3%, var(--bg-surface));
+}
+
+.dayHead.weekend {
+  color: var(--text-muted);
+}
+
+/* Chiffres de même largeur : les heures s'alignent dans les listes et la grille. */
+.page,
+.dialog,
+.field select,
+.field option {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bloc trop étroit pour lire une description (sept colonnes, cascade) : on la retire. */
+.dayColumn .block {
+  container-type: inline-size;
+}
+
+@container (max-width: 6.5rem) {
+  .blockDescription {
+    display: none !important;
+  }
+}
+
+/* « +N de plus » : déplie toutes les tâches sans heure du jour. */
+.allDayMore {
+  flex: none;
+  align-self: flex-start;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.allDayMore:hover {
+  color: var(--text);
+}
+
+.allDayMore:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+/* Remise : une barre rouge franche à l'heure de l'échéance, par-dessus les événements, avec un
+   halo, une pastille au départ et une étiquette « heure · titre ». */
+.deadline {
+  --deadline: #b42318;
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  left: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--deadline);
+  box-shadow:
+    0 0 0 3px rgb(180 35 24 / 14%),
+    0 2px 8px rgb(180 35 24 / 35%);
+  cursor: pointer;
+}
+
+.deadline::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -0.375rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  box-sizing: border-box;
+  border: 2px solid var(--bg-surface);
+  border-radius: 50%;
+  background: var(--deadline);
+  transform: translateY(-50%);
+}
+
+.deadlineLabel {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 0.5rem;
+  display: inline-flex;
+  max-width: calc(100% - 0.75rem);
+  box-sizing: border-box;
+  align-items: baseline;
+  gap: 0.3125rem;
+  padding: 0.125rem 0.5rem 0.125rem 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--deadline);
+  color: #ffffff;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: left;
+  box-shadow: 0 2px 6px rgb(180 35 24 / 35%);
+}
+
+/* L'heure en évidence, dans une pastille plus foncée. */
+.deadlineTime {
+  flex: none;
+  padding: 0 0.3125rem;
+  border-radius: 0.375rem;
+  background: rgb(0 0 0 / 22%);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.deadlineTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.deadline:hover .deadlineLabel {
+  filter: brightness(1.1);
+}
+
+.deadline:focus-visible {
+  outline: none;
+}
+
+.deadline:focus-visible .deadlineLabel {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+/* Remise faite : la barre devient d'un rouge grisé, encore reconnaissable. */
+.deadline.done {
+  --deadline: #8a6260;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.deadline.done .deadlineTitle {
+  text-decoration: line-through;
+}
+
+/* Aperçu d'une remise en cours d'ajout : la même barre, en pointillé et un peu pâle. */
+.deadlinePreview {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--deadline) 0 0.5rem,
+    transparent 0.5rem 0.75rem
+  );
+  box-shadow: none;
+  opacity: 0.85;
+  cursor: default;
+}
+
+/* Remise dans la liste : ligne teintée de rouge, échéance en gras. */
+.taskList li.deadlineItem {
+  background: color-mix(in srgb, #b42318 9%, transparent);
+}
+
+.taskList li.deadlineItem:hover {
+  background: color-mix(in srgb, #b42318 14%, transparent);
+}
+
+.deadlineBadge {
+  color: var(--badge-danger-fg);
+  font-weight: 700;
+}
+
+.deadlineItem .taskTitle::before {
+  border-radius: 0.125rem;
+  background: #b42318;
+}
+
+/* L'aperçu d'une remise se glisse (jour, heure) ; une zone plus haute facilite la prise. */
+.dayColumn .deadlinePreview {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.deadlinePreview::after {
+  content: '';
+  position: absolute;
+  top: -0.5rem;
+  right: 0;
+  bottom: -0.5rem;
+  left: 0;
+}
+
+.deadlinePreview.dragging {
+  z-index: 31 !important;
+  cursor: grabbing;
+  box-shadow: none;
+}
+
+/* Heure courante : une ligne bleue en travers du jour, une pastille au départ. */
+.nowLine {
+  --now: #2563eb;
+  position: absolute;
+  z-index: 29;
+  right: 0;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--now);
+  pointer-events: none;
+}
+
+.nowLine::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -0.3125rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background: var(--now);
+  transform: translateY(-50%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .nowLine {
+    --now: #60a5fa;
+  }
+}
+
+:root[data-theme='dark'] .nowLine {
+  --now: #60a5fa;
+}
+
+/* ── Cours et tâches, au premier coup d'œil ──
+   Séance : bloc teinté, texte coloré, barre à gauche (inchangé).
+   Tâche : carte claire presque de la couleur du fond, contour pointillé de sa couleur, pastille
+   devant le titre et texte neutre : elle se lit comme une note posée sur l'horaire. */
+.task {
+  border: 1.5px dashed color-mix(in srgb, var(--tint) 70%, transparent);
+  background: color-mix(in srgb, var(--tint) 6%, var(--bg-surface));
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 7%);
+}
+
+.task:hover {
+  background: color-mix(in srgb, var(--tint) 11%, var(--bg-surface));
+}
+
+.task .blockTitle::before,
+.allDayChip .blockTitle::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.3125rem;
+  border-radius: 50%;
+  background: var(--tint);
+  vertical-align: 0.0625rem;
+}
+
+.task .blockDetail,
+.task .blockDescription {
+  color: var(--text-body);
+}
+
+.allDayChip {
+  border: 1.5px dashed color-mix(in srgb, var(--tint) 70%, transparent);
+  background: color-mix(in srgb, var(--tint) 6%, var(--bg-surface));
+  color: var(--text);
+}
+
+/* Séance : couleur pleine et lumineuse, nettement plus soutenue que les tâches. */
+.session {
+  background: color-mix(in srgb, var(--tint) 48%, var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) 56%, var(--bg-surface));
+}
+
+/* Détails d'une remise : une bulle sous la barre, au survol ou au focus. */
+.deadlineTip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0.5rem;
+  z-index: 1;
+  display: flex;
+  width: max-content;
+  max-width: 15rem;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid #b42318;
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-0.25rem);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0.15s;
+  pointer-events: none;
+}
+
+.deadlineTip strong {
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+.deadlineTipNotes {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 0.125rem;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+/* Vendredi et samedi : la bulle s'ouvre vers la gauche pour rester dans la grille. */
+.deadlineTipEnd {
+  right: 0.5rem;
+  left: auto;
+}
+
+.deadline:hover .deadlineTip,
+.deadline:focus-visible .deadlineTip {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deadlineTip {
+    transition: none;
+  }
+}
+
+/* Ligne « terminée · Annuler » : à la place de la tâche cochée, pendant quelques secondes. */
+.taskList li.undoRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.375rem 0.5rem 0.625rem;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-body);
+  font-size: 0.8125rem;
+  animation: undo-in 0.2s ease;
+}
+
+.undoRow span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.taskList .undoRow button {
+  flex: none;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.taskList .undoRow button:hover {
+  border-color: var(--text-muted);
+}
+
+@keyframes undo-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .taskList li.undoRow {
+    animation: none;
+  }
+}
+
+/* Séance : le sigle, puis le type en petite pastille pleine qui ressort. */
+.titleRow {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem 0.375rem;
+}
+
+/* Colonne étroite : la pastille passe sous le sigle plutôt que d'être coupée. */
+.titleRow .blockTitle {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.kindTag {
+  flex: none;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg-surface);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Le crayon ouvre la tâche : curseur de lien, pas de « saisir pour glisser ». */
+.dayColumn .task .editIcon {
+  cursor: pointer;
+}
+
+/* Sigle du cours dans le détail d'une séance : un lien vers le cours. */
+.courseLink {
+  padding: 0;
+  border: none;
+  border-radius: 0.25rem;
+  background: none;
+  color: var(--brand-teal);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.courseLink:hover {
+  text-decoration-thickness: 2px;
+}
+
+.courseLink:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+.preLine {
+  white-space: pre-line;
+}
+
+/* Texte d'une séance : sa teinte, tirée vers la couleur du texte (plus foncée en clair, plus
+   claire en sombre) pour garder 4,5:1 sur le fond coloré. */
+.session {
+  color: color-mix(in srgb, var(--ink) 72%, var(--text));
+}
+
+/* En sombre, un aplat un peu moins fort : le texte clair garde son contraste. */
+.session {
+  background: color-mix(in srgb, var(--tint) var(--session-mix, 48%), var(--bg-surface));
+}
+
+.session:hover {
+  background: color-mix(in srgb, var(--tint) calc(var(--session-mix, 48%) + 8%), var(--bg-surface));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .page {
+    --session-mix: 34%;
+  }
+}
+
+:root[data-theme='dark'] .page {
+  --session-mix: 34%;
+}
+
+/* Écran moyen : la colonne de droite passe sous la grille, l'en-tête n'a plus deux colonnes. */
+@media (max-width: 75rem) {
+  .header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .headerSide {
+    flex-basis: auto;
+  }
+}
+
+/* Un type de séance à soi peut être long : la pastille se coupe au lieu de déborder. */
+.kindTag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ajouter un type de séance : un champ et son bouton, sous la liste. */
+.addKind {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.addKind input {
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+
+.addKind input:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+.addKind .button {
+  min-height: 2.25rem;
+}
+
+.kindLabel {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+/* ── Type de séance : liste déroulante maison (corbeille sur les types ajoutés) ── */
+.kindPicker {
+  --accent-blue: #1d4ed8;
+  position: relative;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .kindPicker {
+    --accent-blue: #60a5fa;
+  }
+}
+
+:root[data-theme='dark'] .kindPicker {
+  --accent-blue: #60a5fa;
+}
+
+.kindTrigger {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kindTrigger svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--text-body);
+}
+
+.kindTrigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.kindMenu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: 0;
+  display: flex;
+  max-height: 16rem;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.kindRow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.kindOption,
+.kindAdd {
+  flex: 1;
+  min-height: 2rem;
+  padding: 0.375rem 0.625rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kindOption:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.kindOption[aria-pressed='true'] {
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+  font-weight: 600;
+}
+
+.kindDelete {
+  display: inline-flex;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.kindDelete svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.kindDelete:hover {
+  background: var(--badge-danger-bg);
+  color: var(--badge-danger-fg);
+}
+
+/* « Ajouter un type… » : en bleu, bien visible en bas de la liste. */
+.kindAdd {
+  margin-top: 0.125rem;
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--accent-blue);
+  font-weight: 700;
+}
+
+.kindAdd:hover {
+  background: color-mix(in srgb, var(--accent-blue) 20%, transparent);
+}
+
+.kindTrigger:focus-visible,
+.kindOption:focus-visible,
+.kindDelete:focus-visible,
+.kindAdd:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 1px;
+}
+
+/* Remise d'un devoir dans la liste : pas de case (elle se fait en remettant le devoir). */
+.checkSpacer {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
+/* « Mes tâches de la semaine » : le titre, et « ＋ Ajouter » en haut à droite. */
+.taskListHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.addInline {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0 0.625rem 0 0.5rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--brand-teal-strong);
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.addInline svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.addInline:hover {
+  filter: brightness(0.9);
+}
+
+.addInline:focus-visible {
+  outline: 2px solid var(--brand-teal);
+  outline-offset: 2px;
+}
+
+/* Aperçu d'une tâche : le titre précédé d'une pastille de sa couleur. */
+.previewTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.previewDot {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: hsl(var(--hue) calc(var(--sat) + 15%) 50%);
+}
+
+.previewDotDeadline {
+  border-radius: 0.1875rem;
+  background: #b42318;
+}
+
+/* Aperçu : bouton bascule « Marquer terminée » ; vert et plein une fois la tâche terminée. */
+.doneToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 999px;
+}
+
+.doneToggle svg {
+  width: 1rem;
+  height: 1rem;
+  opacity: 0.45;
+}
+
+.doneToggle[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+}
+
+.doneToggle[aria-pressed='true'] svg {
+  opacity: 1;
+}

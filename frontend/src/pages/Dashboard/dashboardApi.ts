@@ -1,7 +1,10 @@
 // Couche « API » du Dashboard, regroupée ici pour un seul point d'accès au backend
-// (apiFetch) ; le Dashboard se contente d'orchestrer l'état autour. Toutes les
-// fonctions appellent le vrai backend — y compris fetchLanguages (table Language)
-// et evaluateCode (service d'exécution, conteneurs runner).
+// (apiFetch) ; le Dashboard se contente d'orchestrer l'état autour. fetchLanguages
+// (table Language) et evaluateCode (service d'exécution, conteneurs runner — #116)
+// appellent le VRAI backend.
+//
+// Restent en MOCK (à brancher) : l'horaire (scheduleData, #206) et les devoirs
+// (assignmentsData, #252 — fin du fichier).
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -9,8 +12,40 @@ import type { CourseUpdate } from '../../components/UpdateCoursePopup/types.ts';
 import type { ProgramUpdate } from '../../components/UpdateProgramPopup/types.ts';
 import type { RoleChange, User } from '../../components/RoleEditorPopup/types.ts';
 import type { ItemChange } from '../../components/SectionEditorPopup/types.ts';
+import {
+  addDemoSessions,
+  addDemoTask,
+  deleteDemoSessions,
+  deleteDemoTask,
+  demoSchedule,
+  demoCourseColors,
+  demoTasks,
+  setDemoCourseColor,
+  updateDemoTask,
+  updateDemoSessions,
+} from '../../mocks/scheduleData.ts';
+import {
+  DEMO_STUDENT,
+  demoAssignments,
+  demoCourseStudents,
+  demoStudentRows,
+  demoTeams,
+} from '../../mocks/assignmentsData.ts';
 import type {
   AnswerResponse,
+  ScheduleColor,
+  ScheduleCourse,
+  ScheduleSession,
+  ScheduleSessionInput,
+  ScheduleSessionScope,
+  ScheduleTask,
+  ScheduleTaskInput,
+  Assignment,
+  AssignmentDraft,
+  AssignmentStudentRow,
+  AssignmentTeam,
+  AssignmentTeams,
+  SubmissionGrade,
   ChannelMessage,
   DragItemResponse,
   Forum,
@@ -1240,4 +1275,342 @@ export async function votePost(
     body: JSON.stringify({ forumId, postId, voteValue: value }),
   });
   if (!res.ok) throw new Error('Échec du vote');
+}
+
+// ── Horaire (#206) : données FICTIVES, en attendant une API ────────────────────────────────────────
+
+/** Pas d'API d'horaire : la page n'existe qu'en développement ; en production, l'écran d'attente. */
+export function scheduleAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+/** Séances de la semaine qui commence au dimanche `weekStart`, pour les cours donnés. */
+export async function fetchSchedule(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleSession[]> {
+  return demoSchedule(weekStart, courses);
+}
+
+/** Tâches et remises de la semaine qui commence au dimanche `weekStart`. */
+export async function fetchScheduleTasks(weekStart: Date): Promise<ScheduleTask[]> {
+  return demoTasks(weekStart);
+}
+
+export async function createScheduleTask(input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return addDemoTask(input);
+}
+
+export async function updateScheduleTask(id: number, input: ScheduleTaskInput): Promise<ScheduleTask> {
+  return updateDemoTask(id, input);
+}
+
+export async function deleteScheduleTask(id: number): Promise<void> {
+  deleteDemoTask(id);
+}
+
+/** Couleurs que l'utilisateur a choisies pour ses cours dans l'horaire. */
+export async function fetchScheduleCourseColors(): Promise<Record<number, ScheduleColor>> {
+  return demoCourseColors();
+}
+
+export async function setScheduleCourseColor(courseId: number, color: ScheduleColor): Promise<void> {
+  setDemoCourseColor(courseId, color);
+}
+
+/** Séance ajoutée par l'enseignant : toutes ses occurrences, si elle se répète. */
+export async function createScheduleSessions(input: ScheduleSessionInput): Promise<ScheduleSession[]> {
+  return addDemoSessions(input);
+}
+
+/** Séance modifiée par l'enseignant : celle-ci, ou toute sa série. */
+export async function updateScheduleSessions(
+  session: ScheduleSession,
+  input: ScheduleSessionInput,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  updateDemoSessions(session, input, scope);
+}
+
+export async function deleteScheduleSessions(
+  session: ScheduleSession,
+  scope: ScheduleSessionScope
+): Promise<void> {
+  deleteDemoSessions(session, scope);
+}
+
+// ── Devoirs (#252) : données FICTIVES, en mémoire, en attendant une API ───────────────────────────
+
+/** Pas d'API de devoirs : l'interface n'existe qu'en développement, jamais en production. */
+export function assignmentsAvailable(): boolean {
+  return import.meta.env.DEV;
+}
+
+const demoAssignmentsByCourse = new Map<number, Assignment[]>();
+
+function courseAssignments(courseId: number): Assignment[] {
+  let assignments = demoAssignmentsByCourse.get(courseId);
+  if (!assignments) {
+    assignments = demoAssignments(courseId, new Date());
+    demoAssignmentsByCourse.set(courseId, assignments);
+    assignments.filter((a) => a.teamSize).forEach(syncTeam);
+  }
+  return assignments;
+}
+
+/** Devoirs d'un cours ; les brouillons pour le prof seulement. */
+export async function fetchAssignments(
+  courseId: number,
+  includeDrafts = false
+): Promise<Assignment[]> {
+  return courseAssignments(courseId).filter((a) => includeDrafts || a.isPublished);
+}
+
+/** Simule la remise d'un fichier : remplace la remise précédente, s'il y en a une. */
+export async function submitAssignment(
+  courseId: number,
+  assignmentId: number,
+  fileNames: string[]
+): Promise<Assignment> {
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Devoir introuvable');
+  const now = new Date();
+  assignment.submission = {
+    fileNames,
+    submittedAt: now.toISOString(),
+    late: assignment.dueAt != null && now > new Date(assignment.dueAt),
+    submittedBy: assignment.team ? 'Vous' : undefined,
+  };
+  return assignment;
+}
+
+/** Crée un devoir, publié ou en brouillon, dans le cours. */
+export async function createAssignment(
+  courseId: number,
+  draft: AssignmentDraft
+): Promise<Assignment> {
+  const assignments = courseAssignments(courseId);
+  const assignment: Assignment = {
+    ...draft,
+    id: Math.max(...assignments.map((a) => a.id)) + 1,
+    courseId,
+    submittedCount: 0,
+    gradedCount: 0,
+    // Un devoir en équipe compte ses équipes, formées ensuite : aucune au départ.
+    studentCount: draft.teamSize ? 0 : 32,
+  };
+  assignments.unshift(assignment);
+  if (draft.teamSize) demoTeamsByAssignment.set(assignment.id, []);
+  return assignment;
+}
+
+/** Enregistre les changements d'un devoir. */
+export async function updateAssignment(
+  courseId: number,
+  assignmentId: number,
+  draft: AssignmentDraft
+): Promise<Assignment> {
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Devoir introuvable');
+  // Un champ vidé dans la fenêtre doit disparaître : `...draft` le met à undefined.
+  const wasTeam = assignment.teamSize != null;
+  Object.assign(assignment, draft);
+  if (wasTeam !== (draft.teamSize != null)) {
+    // Passage entre individuel et équipe : les lignes du suivi ne correspondent plus.
+    demoRowsByAssignment.delete(assignmentId);
+    assignment.studentCount = 32;
+    assignment.team = undefined;
+    if (draft.teamSize) demoTeamsByAssignment.set(assignmentId, []);
+  }
+  if (draft.teamSize) syncTeam(assignment);
+  return assignment;
+}
+
+const demoRowsByAssignment = new Map<number, AssignmentStudentRow[]>();
+
+function assignmentRows(assignment: Assignment): AssignmentStudentRow[] {
+  let rows = demoRowsByAssignment.get(assignment.id);
+  if (!rows) {
+    rows = demoStudentRows(assignment, new Date());
+  }
+  if (assignment.teamSize) {
+    // Une ligne par équipe : les équipes ont pu changer depuis la dernière lecture.
+    const previous = rows;
+    rows = assignmentTeams(assignment).map((team) => ({
+      ...(previous.find((row) => row.id === team.id) ?? {
+        id: team.id,
+        status: 'missing' as const,
+        files: [],
+      }),
+      studentName: team.name,
+      members: team.members,
+    }));
+  }
+  demoRowsByAssignment.set(assignment.id, rows);
+  return rows;
+}
+
+/** Suivi des remises d'un devoir, une ligne par étudiant. */
+export async function fetchAssignmentSubmissions(
+  assignment: Assignment
+): Promise<AssignmentStudentRow[]> {
+  return assignmentRows(assignment).map((row) => ({ ...row }));
+}
+
+/** Remise à noter, avec son devoir et les remises voisines. L'id porte celui du devoir. */
+export async function fetchSubmission(
+  courseId: number,
+  submissionId: number
+): Promise<{ assignment: Assignment; rows: AssignmentStudentRow[] }> {
+  const assignmentId = Math.floor(submissionId / 100);
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error('Remise introuvable');
+  return { assignment, rows: await fetchAssignmentSubmissions(assignment) };
+}
+
+/** Enregistre la note et le commentaire d'une remise. */
+export async function gradeSubmission(
+  courseId: number,
+  submissionId: number,
+  grade: SubmissionGrade
+): Promise<AssignmentStudentRow> {
+  const { assignment } = await fetchSubmission(courseId, submissionId);
+  const row = assignmentRows(assignment).find((r) => r.id === submissionId);
+  if (!row || row.status === 'missing') throw new Error('Remise introuvable');
+  if (row.status !== 'graded') assignment.gradedCount += 1;
+  row.status = 'graded';
+  row.grade = `${grade.score} / 20`;
+  row.comment = grade.comment;
+  return { ...row };
+}
+
+const demoTeamsByAssignment = new Map<number, AssignmentTeam[]>();
+
+function assignmentTeams(assignment: Assignment): AssignmentTeam[] {
+  let teams = demoTeamsByAssignment.get(assignment.id);
+  if (!teams) {
+    teams = demoTeams(assignment);
+    demoTeamsByAssignment.set(assignment.id, teams);
+  }
+  return teams;
+}
+
+/** Remet à jour ce que le devoir dit de ses équipes : leur nombre, et celle de l'étudiant fictif. */
+function syncTeam(assignment: Assignment): void {
+  const teams = assignmentTeams(assignment);
+  assignment.studentCount = teams.length;
+  assignment.team = teams.find((team) => team.members.includes(DEMO_STUDENT));
+}
+
+function teamAssignment(courseId: number, assignmentId: number): Assignment {
+  const assignment = courseAssignments(courseId).find((a) => a.id === assignmentId);
+  if (!assignment?.teamSize) throw new Error('Devoir en équipe introuvable');
+  return assignment;
+}
+
+/** Les équipes d'un devoir, et les étudiants sans équipe. */
+export async function fetchAssignmentTeams(
+  courseId: number,
+  assignmentId: number
+): Promise<AssignmentTeams> {
+  const teams = assignmentTeams(teamAssignment(courseId, assignmentId));
+  const placed = new Set(teams.flatMap((team) => team.members));
+  return {
+    teams: teams.map((team) => ({ ...team, members: [...team.members] })),
+    unassigned: demoCourseStudents().filter((student) => !placed.has(student)),
+  };
+}
+
+/** Enregistre les équipes du prof. Un id négatif marque une nouvelle équipe. */
+export async function saveAssignmentTeams(
+  courseId: number,
+  assignmentId: number,
+  teams: AssignmentTeam[]
+): Promise<Assignment> {
+  const assignment = teamAssignment(courseId, assignmentId);
+  let nextId = Math.max(assignment.id * 100 - 1, ...teams.map((team) => team.id)) + 1;
+  demoTeamsByAssignment.set(
+    assignmentId,
+    teams.map((team) => ({ ...team, id: team.id < 0 ? nextId++ : team.id }))
+  );
+  syncTeam(assignment);
+  return assignment;
+}
+
+/** L'étudiant rejoint une équipe qui a encore de la place. */
+export async function joinAssignmentTeam(
+  courseId: number,
+  assignmentId: number,
+  teamId: number
+): Promise<Assignment> {
+  const assignment = teamAssignment(courseId, assignmentId);
+  const team = assignmentTeams(assignment).find((t) => t.id === teamId);
+  if (!team || team.members.length >= (assignment.teamSize ?? 0)) {
+    throw new Error('Équipe complète');
+  }
+  team.members.push(DEMO_STUDENT);
+  syncTeam(assignment);
+  return assignment;
+}
+
+/** L'étudiant crée une équipe, dont il est le premier membre. */
+export async function createAssignmentTeam(
+  courseId: number,
+  assignmentId: number
+): Promise<Assignment> {
+  const assignment = teamAssignment(courseId, assignmentId);
+  const teams = assignmentTeams(assignment);
+  let number = teams.length + 1;
+  while (teams.some((team) => team.name === `Équipe ${number}`)) number += 1;
+  const id = Math.max(assignment.id * 100 - 1, ...teams.map((team) => team.id)) + 1;
+  teams.push({ id, name: `Équipe ${number}`, members: [DEMO_STUDENT] });
+  syncTeam(assignment);
+  return assignment;
+}
+
+/** L'étudiant quitte son équipe ; une équipe vide disparaît. */
+export async function leaveAssignmentTeam(
+  courseId: number,
+  assignmentId: number
+): Promise<Assignment> {
+  const assignment = teamAssignment(courseId, assignmentId);
+  const remaining = assignmentTeams(assignment)
+    .map((team) => ({ ...team, members: team.members.filter((m) => m !== DEMO_STUDENT) }))
+    .filter((team) => team.members.length > 0);
+  demoTeamsByAssignment.set(assignmentId, remaining);
+  syncTeam(assignment);
+  return assignment;
+}
+
+// ── Horaire et devoirs (#258) : les dates de remise des devoirs deviennent les remises de l'horaire ──
+
+/** Remises de la semaine : les devoirs publiés des cours donnés, à leur date de remise. */
+export async function fetchScheduleDeadlines(
+  weekStart: Date,
+  courses: ScheduleCourse[]
+): Promise<ScheduleTask[]> {
+  if (!assignmentsAvailable()) return [];
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return courses.flatMap((course) =>
+    courseAssignments(course.id)
+      .filter((a) => a.isPublished && a.dueAt && new Date(a.dueAt) >= weekStart && new Date(a.dueAt) < weekEnd)
+      .map((a) => ({
+        // Id négatif : il ne croise jamais celui d'une tâche de l'agenda.
+        id: -(course.id * 1000 + a.id),
+        title: a.title,
+        start: a.dueAt!,
+        end: a.dueAt!,
+        courseId: course.id,
+        reminder: null,
+        notes: a.instructions,
+        color: 'rose' as const,
+        // Remis : la remise est faite ; elle quitte « Mes tâches ».
+        done: a.submission != null,
+        allDay: false,
+        deadline: true,
+        courseDeadline: true,
+        assignmentId: a.id,
+      }))
+  );
 }

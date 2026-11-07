@@ -54,7 +54,7 @@ async function studentPage(browser: Browser, baseURL: string) {
 /** Ouvre « Modifier les quiz » depuis le crayon de la section QUIZ. */
 async function openEditor(page: Page) {
   const nav = await openTestCourse(page);
-  await nav.getByRole('button', { name: 'Modifier la section QUIZ' }).click();
+  await nav.getByRole('button', { name: 'Modifier la section Quiz' }).click();
   await expect(page.getByRole('heading', { name: 'Modifier les quiz' })).toBeVisible();
 }
 
@@ -198,7 +198,7 @@ test('créer un quiz avec les 6 types : publié visible chez l’étudiant, brou
 
   // Barre latérale d'un étudiant : quiz publiés seulement.
   const student = await studentPage(browser, baseURL!);
-  const quizSection = (await openTestCourse(student)).getByRole('region', { name: 'QUIZ' });
+  const quizSection = (await openTestCourse(student)).getByRole('region', { name: 'Quiz' });
   await expect(quizSection.getByRole('button', { name: published })).toBeVisible();
   await expect(quizSection.getByRole('button', { name: draft })).toHaveCount(0);
   await quizSection.getByRole('button', { name: published }).click();
@@ -551,9 +551,9 @@ test('temps réel : l’étudiant voit la mise à jour puis la suppression du qu
 
 test('un étudiant n’a pas accès à l’éditeur de quiz', async ({ browser, baseURL }) => {
   const student = await studentPage(browser, baseURL!);
-  const studentQuiz = (await openTestCourse(student)).getByRole('region', { name: 'QUIZ' });
-  await expect(studentQuiz.getByRole('button', { name: 'QUIZ', exact: true })).toBeVisible();
-  await expect(studentQuiz.getByRole('button', { name: 'Modifier la section QUIZ' })).toHaveCount(
+  const studentQuiz = (await openTestCourse(student)).getByRole('region', { name: 'Quiz' });
+  await expect(studentQuiz.getByRole('button', { name: 'Quiz', exact: true })).toBeVisible();
+  await expect(studentQuiz.getByRole('button', { name: 'Modifier la section Quiz' })).toHaveCount(
     0
   );
   await student.context().close();
@@ -561,6 +561,6 @@ test('un étudiant n’a pas accès à l’éditeur de quiz', async ({ browser, 
   // Témoin : l'Enseignant, lui, a le crayon.
   const page = await profPage(browser);
   const profNav = await openTestCourse(page);
-  await expect(profNav.getByRole('button', { name: 'Modifier la section QUIZ' })).toBeVisible();
+  await expect(profNav.getByRole('button', { name: 'Modifier la section Quiz' })).toBeVisible();
   await page.context().close();
 });

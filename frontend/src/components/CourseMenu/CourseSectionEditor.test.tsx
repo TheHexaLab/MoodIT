@@ -49,7 +49,7 @@ describe('CourseSectionEditor', () => {
   it('section « canaux » : popup générique titré, ne listant que les canaux texte', () => {
     render(
       <CourseSectionEditor
-        section={{ type: 'text', label: 'CANAUX', emptyLabel: 'Aucun canal' }}
+        section={{ type: 'text', label: 'Canaux', emptyLabel: 'Aucun canal' }}
         channels={channels}
         onClose={vi.fn()}
       />
@@ -66,7 +66,7 @@ describe('CourseSectionEditor', () => {
   it('section « forums » : libellés au singulier « forum » et état vide', () => {
     render(
       <CourseSectionEditor
-        section={{ type: 'forum', label: 'FORUMS', emptyLabel: 'Aucun forum' }}
+        section={{ type: 'forum', label: 'Forums', emptyLabel: 'Aucun forum' }}
         channels={[]}
         onClose={vi.fn()}
       />
@@ -100,7 +100,7 @@ describe('CourseSectionEditor', () => {
     const quizzes: Quiz[] = [{ id: 4, title: 'Quiz 1' }];
     render(
       <CourseSectionEditor
-        section={{ type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' }}
+        section={{ type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' }}
         channels={channels}
         onClose={onClose}
         courseId={7}
@@ -126,7 +126,7 @@ describe('CourseSectionEditor', () => {
   it('section « quiz » sans quiz en cache : l’éditeur reçoit une liste vide', () => {
     render(
       <CourseSectionEditor
-        section={{ type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' }}
+        section={{ type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' }}
         channels={[]}
         onClose={vi.fn()}
         courseId={7}
@@ -138,7 +138,7 @@ describe('CourseSectionEditor', () => {
   it('section « quiz » sans courseId : retombe sur le popup générique', () => {
     render(
       <CourseSectionEditor
-        section={{ type: 'quiz', label: 'QUIZ', emptyLabel: 'Aucun quiz' }}
+        section={{ type: 'quiz', label: 'Quiz', emptyLabel: 'Aucun quiz' }}
         channels={channels}
         onClose={vi.fn()}
       />
@@ -152,7 +152,7 @@ describe('CourseSectionEditor', () => {
     const onChange = vi.fn().mockResolvedValue(undefined);
     render(
       <CourseSectionEditor
-        section={{ type: 'text', label: 'CANAUX', emptyLabel: 'Aucun canal' }}
+        section={{ type: 'text', label: 'Canaux', emptyLabel: 'Aucun canal' }}
         channels={channels}
         onClose={vi.fn()}
         onChange={onChange}

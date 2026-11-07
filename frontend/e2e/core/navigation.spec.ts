@@ -1,10 +1,10 @@
 import { devices, expect, test, type Browser, type Page } from './fixtures';
+import { courseTile, enterProgram, programButton } from './admin.helpers';
 import { FORUM_NAME, PROGRAM_NAME, QUIZ_NAME, createEnrolledUser, mainContent } from './helpers';
 import { SECOND_COURSE, enrollInCourses, ensureCourse } from './dashboard.helpers';
 
-// Barre latérale : rail des programmes, sélecteur de cours, sections, poignée de
-// redimensionnement, états vides et tiroir mobile. Comptes neufs : la navigation enregistre le
-// dernier emplacement dans les réglages du compte.
+// Barre latérale : barre du portail (complète et réduite), panneau du cours, sections, poignée de
+// redimensionnement, états vides et tiroir mobile.
 
 const CHANNEL_NAME = 'Discussion — Mathématiques pour ingénieurs I';
 
@@ -19,13 +19,42 @@ async function openProgramWithTwoCourses(browser: Browser, baseURL: string) {
   const context = await browser.newContext({ storageState });
   const page = await context.newPage();
   await page.goto('/home');
-  await page.getByRole('button', { name: PROGRAM_NAME }).click();
+  await enterProgram(page, PROGRAM_NAME);
   await ensureCourse(page, 'MAT115'); // l'ordre des cours n'est pas garanti, cf. ensureCourse
   await expect(courseSelect(page, 'MAT115')).toBeVisible();
   return { context, page };
 }
 
-test('rail des programmes : la sélection marque le programme courant', async ({
+test('Accueil : ouvrir un cours depuis la barre, puis y revenir', async ({ browser, baseURL }) => {
+  const { storageState } = await createEnrolledUser(baseURL!);
+  const context = await browser.newContext({ storageState });
+  const page = await context.newPage();
+  await page.goto('/home');
+
+  const home = page.getByRole('navigation', { name: 'Portail' }).getByRole('link', { name: 'Accueil' });
+  await expect(home).toHaveAttribute('aria-current', 'page');
+  await expect(mainContent(page).getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
+
+  // Le nom du programme ne s'ouvre pas au clic.
+  await programButton(page, PROGRAM_NAME).click();
+  await expect(page).toHaveURL(/\/home$/);
+
+  await courseTile(page, 'MAT115').click();
+  await expect(page).toHaveURL(/\/home\/p\/\d+\/c\/\d+$/);
+  await expect(home).not.toHaveAttribute('aria-current', 'page');
+  await expect(courseTile(page, 'MAT115')).toHaveAttribute('aria-current', 'page');
+  await expect(
+    mainContent(page).getByRole('heading', { name: 'Aucun canal sélectionné' })
+  ).toBeVisible();
+  await expect(courseSelect(page, 'MAT115')).toBeVisible();
+
+  await home.click();
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(mainContent(page).getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
+  await context.close();
+});
+
+test('la barre de l’Accueil se réduit et se déplie sans déplacer ses icônes, et le choix est gardé', async ({
   browser,
   baseURL,
 }) => {
@@ -34,54 +63,61 @@ test('rail des programmes : la sélection marque le programme courant', async ({
   const page = await context.newPage();
   await page.goto('/home');
 
-  const program = page
-    .getByRole('navigation', { name: 'Programme' })
-    .getByRole('button', { name: PROGRAM_NAME });
-  await expect(program).not.toHaveAttribute('aria-current', 'page');
-  await program.click();
-  await expect(program).toHaveAttribute('aria-current', 'page');
-  await expect(
-    mainContent(page).getByRole('heading', { name: 'Aucun canal sélectionné' })
-  ).toBeVisible();
-  await expect(courseSelect(page, 'MAT115')).toBeVisible();
+  const icon = page.getByRole('navigation', { name: 'Portail' }).locator('svg').first();
+  const tile = courseTile(page, 'MAT115').locator('span').first();
+  await expect(tile).toBeVisible();
+  const before = [await icon.boundingBox(), await tile.boundingBox()];
+
+  await page.getByRole('button', { name: 'Réduire le menu' }).click();
+  const expand = page.getByRole('button', { name: 'Déplier le menu' });
+  await expect(expand).toBeVisible();
+  await expect(programButton(page, PROGRAM_NAME)).toBeHidden();
+  await expect.poll(async () => (await icon.boundingBox())?.x).toBe(before[0]!.x);
+  await expect.poll(async () => (await tile.boundingBox())?.x).toBe(before[1]!.x);
+  expect((await tile.boundingBox())!.width).toBe(before[1]!.width);
+
+  await page.reload();
+  await expect(expand).toBeVisible();
+
+  await expand.click();
+  await expect(page.getByRole('button', { name: 'Réduire le menu' })).toBeVisible();
+  await expect(programButton(page, PROGRAM_NAME)).toBeVisible();
   await context.close();
 });
 
-test('sélecteur de cours : recherche, « Aucun résultat », Échap, changement de cours', async ({
+test('dans un cours : barre toujours réduite ; panneau réduit, un clic sur le cours le rouvre', async ({
   browser,
   baseURL,
 }) => {
   const { context, page } = await openProgramWithTwoCourses(browser, baseURL!);
-  const listbox = page.getByRole('listbox');
-  const search = listbox.getByRole('textbox', { name: 'Rechercher un cours…' });
+  await expect(page.getByRole('button', { name: 'Déplier le menu' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Réduire le menu' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Réduire le panneau du cours' }).click();
+  await expect(courseNav(page)).toBeHidden();
+  await expect(page.getByRole('button', { name: /Déplier/ })).toHaveCount(0);
+
+  await page.locator('button[aria-current="page"]').click();
+  await expect(courseNav(page).getByRole('button', { name: CHANNEL_NAME })).toBeVisible();
+
+  // Réduit, puis un autre cours : le panneau se rouvre, avec les canaux de ce cours.
+  await page.getByRole('button', { name: 'Réduire le panneau du cours' }).click();
+  await courseTile(page, SECOND_COURSE.code).click();
+  await expect(courseNav(page).getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
+  await context.close();
+});
+
+test('le titre d’un cours n’ouvre rien au clic ; changer de cours passe par la barre', async ({
+  browser,
+  baseURL,
+}) => {
+  const { context, page } = await openProgramWithTwoCourses(browser, baseURL!);
 
   await courseSelect(page, 'MAT115').click();
-  await expect(courseSelect(page, 'MAT115')).toHaveAttribute('aria-expanded', 'true');
-  await expect(listbox.getByRole('option')).toHaveCount(2);
-  await expect(listbox.getByRole('option', { name: /^MAT115/ })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  );
-  await expect(search).toBeFocused();
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await expect(page.getByRole('menu')).toHaveCount(0);
 
-  await search.fill('GIF');
-  await expect(listbox.getByRole('option')).toHaveCount(1);
-  await expect(listbox.getByRole('option', { name: /^GIF201/ })).toBeVisible();
-
-  await search.fill('zzz-aucun-cours');
-  await expect(listbox.getByRole('option')).toHaveCount(0);
-  await expect(listbox.getByText('Aucun résultat')).toBeVisible();
-
-  await search.press('Escape');
-  await expect(listbox).toBeHidden();
-  await expect(courseSelect(page, 'MAT115')).toHaveAttribute('aria-expanded', 'false');
-
-  // Changer de cours : le sélecteur et la liste des canaux suivent.
-  await courseSelect(page, 'MAT115').click();
-  await listbox
-    .getByRole('option', { name: `${SECOND_COURSE.code} ${SECOND_COURSE.title}` })
-    .click();
-  await expect(listbox).toBeHidden();
+  await courseTile(page, SECOND_COURSE.code).click();
   await expect(courseSelect(page, SECOND_COURSE.code)).toBeVisible();
   await expect(courseNav(page).getByRole('button', { name: SECOND_COURSE.channel })).toBeVisible();
   await expect(courseNav(page).getByRole('button', { name: CHANNEL_NAME })).toHaveCount(0);
@@ -92,9 +128,9 @@ test('sections QUIZ / CANAUX / FORUMS : repli et dépli', async ({ browser, base
   const { context, page } = await openProgramWithTwoCourses(browser, baseURL!);
 
   for (const [section, item] of [
-    ['QUIZ', QUIZ_NAME],
-    ['CANAUX', CHANNEL_NAME],
-    ['FORUMS', FORUM_NAME],
+    ['Quiz', QUIZ_NAME],
+    ['Canaux', CHANNEL_NAME],
+    ['Forums', FORUM_NAME],
   ]) {
     const region = courseNav(page).getByRole('region', { name: section });
     const toggle = region.getByRole('button', { name: section, exact: true });
@@ -165,7 +201,7 @@ test('poignée de redimensionnement : clavier, persistance, double-clic', async 
   await context.close();
 });
 
-test('compte sans programme : « Bienvenue sur MoodIT », sans création de programme', async ({
+test('compte sans programme : Accueil et « Rejoindre un programme », sans création', async ({
   browser,
   baseURL,
 }) => {
@@ -174,16 +210,15 @@ test('compte sans programme : « Bienvenue sur MoodIT », sans création de prog
   const page = await context.newPage();
   await page.goto('/home');
 
-  const main = mainContent(page);
-  await expect(main.getByRole('heading', { name: 'Bienvenue sur MoodIT' })).toBeVisible();
-  await expect(main.getByRole('button', { name: '+ Rejoindre un programme' })).toBeVisible();
-  // Créer un programme est réservé aux administrateurs globaux.
-  await expect(main.getByRole('button', { name: '+ Ajouter un programme' })).toHaveCount(0);
-  // Rail vide (seul le bouton d'ajout) et barre des cours vide.
+  await expect(mainContent(page).getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rejoindre un programme', exact: true })).toBeVisible();
+  // Liste vide.
   await expect(
     page.getByRole('navigation', { name: 'Programme' }).getByRole('listitem')
   ).toHaveCount(0);
-  await expect(courseNav(page).getByText('Aucun cours', { exact: true })).toBeVisible();
+  // Créer un programme est réservé aux administrateurs globaux : le menu du logo ne le propose pas.
+  await page.getByRole('button', { name: 'Ajouter un programme', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: /Créer un programme/ })).toHaveCount(0);
   await context.close();
 });
 
@@ -211,7 +246,10 @@ test.describe('vue mobile', () => {
       page.getByRole('banner').getByRole('button', { name: 'Fermer le menu' })
     ).toHaveAttribute('aria-expanded', 'true');
     await expect(drawer).toBeInViewport();
-    await drawer.getByRole('button', { name: PROGRAM_NAME }).click();
+    // Ouvrir un cours referme le tiroir ; le rouvrir montre le panneau du cours.
+    await drawer.getByRole('button', { name: /MAT115/ }).click();
+    await expectClosed();
+    await open.click();
     await expect(drawer.getByRole('button', { name: CHANNEL_NAME })).toBeVisible();
 
     // Le fond assombri referme le tiroir (clic hors du tiroir, à droite).

@@ -1,5 +1,6 @@
 import { expect, request, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_PROGRAM_ID } from '../setup/accounts';
+import { courseSelector, courseTile } from './admin.helpers';
 
 type StorageState = Awaited<ReturnType<APIRequestContext['storageState']>>;
 
@@ -33,25 +34,19 @@ export async function enrollInCourses(
 }
 
 /**
- * S'assure que le sélecteur de cours affiche `code` (clic, disposition desktop). Le front prend
+ * S'assure que le cours `code` est ouvert (tuile de la barre, disposition desktop). Le front prend
  * `courses[0]` par défaut, or `User.enrollments` n'a pas d'`@OrderBy` : après un remplacement des
  * inscriptions (`POST /api/courses/users`), Postgres peut renvoyer GIF201 avant MAT115 — l'ordre
- * du sélecteur n'est donc pas déterministe (défaut à corriger côté core-service).
+ * des cours n'est donc pas déterministe (défaut à corriger côté core-service).
  */
 export async function ensureCourse(page: Page, code: string) {
-  const picker = page.getByRole('navigation', { name: 'Cours' }).locator('button[aria-haspopup="listbox"]');
-  await expect(picker).toBeVisible();
-  if ((await picker.innerText()).trim() !== code) {
-    await picker.click();
-    await page.getByRole('option', { name: new RegExp(`^${code} `) }).click();
-  }
-  await expect(picker).toHaveText(code);
+  await courseTile(page, code).click();
+  await expect(courseSelector(page, code)).toBeVisible();
 }
 
 /** Réglages utilisateur tels qu'envoyés à PUT /api/me/settings (blob JSON du front). */
 export interface SentSettings {
   theme?: 'light' | 'dark';
-  location?: { programId?: number; courseId?: number; channel?: { id: number; type: string } };
 }
 
 /**

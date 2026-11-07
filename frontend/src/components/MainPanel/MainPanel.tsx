@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './MainPanel.module.css';
+import { Spinner } from '../Spinner/Spinner.tsx';
 import {
   type ChannelMessage,
   type ChannelMessageAuthor,
@@ -7,6 +8,7 @@ import {
   isSameChannel,
 } from '../CourseChannelList/CourseChannelList.tsx';
 import { normalizeCourseChannelsFromSources } from '../CourseChannelList/courseChannelSources.ts';
+import { isAssignmentChannel } from '../CourseChannelList/channelTypeDefinitions.ts';
 import { type Program } from '../ProgramMenu/ProgramMenu.tsx';
 import { ROLE } from '../../helpers/roles.ts';
 import { type MaybePromise } from './ChannelView/useChannelMessages.ts';
@@ -40,12 +42,19 @@ import {
   type RunCodeHandler,
   type SubmitQuizHandler,
 } from './QuizView/quizAttempt.ts';
+import AssignmentView, { type AssignmentHandlers } from './AssignmentView/AssignmentView.tsx';
 import NoProgramState from './states/NoProgramState/NoProgramState.tsx';
 import NoCourseState from './states/NoCourseState/NoCourseState.tsx';
 import EmptyCourseState from './states/EmptyCourseState/EmptyCourseState.tsx';
 import NoActiveChannelState from './states/NoActiveChannelState/NoActiveChannelState.tsx';
 
 interface MainPanelProps {
+  /** Accès aux devoirs ; absent : le canal Devoirs n'existe pas (production, #252). */
+  assignmentHandlers?: AssignmentHandlers;
+  /** Ouvre un devoir, ou la liste des devoirs. */
+  onOpenAssignment?: (assignmentId: number) => void;
+  /** Ouvre la page de notation d'une remise. */
+  onOpenSubmission?: (submissionId: number) => void;
   /**
    * Gestion du CONTENU du programme actif (Enseignant / Administrateur / admin global) :
    * débloque les actions de création dans les états vides. N'accorde PAS la modération.
@@ -128,6 +137,8 @@ interface MainPanelProps {
   quizStale?: boolean;
   /** Ferme/efface la bannière « quiz modifié » (après rechargement ou rejet). */
   onReloadStale?: () => void;
+  /** Programme ou cours en attente : un indicateur discret, plutôt qu'un état vide trompeur. */
+  loading?: boolean;
   /** Ouvre le formulaire de creation de forum (admin). */
   onCreateForum?: () => void;
 }
@@ -139,6 +150,9 @@ interface MainPanelProps {
  * (canal 'Discussion', forum 'Thread', quiz).
  */
 const MainPanel: React.FC<MainPanelProps> = ({
+  assignmentHandlers,
+  onOpenAssignment,
+  onOpenSubmission,
   isAdmin = false,
   isGlobalAdmin = false,
   program,
@@ -177,6 +191,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   quizRefreshKey = 0,
   quizStale = false,
   onReloadStale,
+  loading = false,
 }) => {
   // Modérateur : peut supprimer (jamais éditer) les messages/posts d'autrui. Admin/Gardien
   // GLOBAL (isGlobalAdmin), OU Administrateur DU programme actif (roleName). L'Enseignant N'est
@@ -185,6 +200,14 @@ const MainPanel: React.FC<MainPanelProps> = ({
   const canModerate = isGlobalAdmin || program?.roleName === ROLE.ADMIN;
 
   const content = ((): React.ReactElement => {
+    // Programme ou cours en attente : aucun état vide, qui clignoterait avant le vrai contenu.
+    if (loading) {
+      return (
+        <div className={styles.loading} role="status" aria-label="Chargement du cours">
+          <Spinner size={32} />
+        </div>
+      );
+    }
     // 1 — aucun programme rejoint.
     if (!program) {
       return (
@@ -202,8 +225,23 @@ const MainPanel: React.FC<MainPanelProps> = ({
         <NoCourseState isAdmin={isAdmin} onAddCourse={onAddCourse} onJoinCourse={onJoinCourse} />
       );
     }
-    // 3 — le cours sélectionné est vide (aucun canal/forum/quiz).
     const course = courses.find((c) => c.id === selectedCourse) ?? null;
+    // Canal Devoirs : hors des canaux normalisés, il existe même dans un cours sans contenu.
+    if (course && assignmentHandlers && isAssignmentChannel(selectedChannel?.type)) {
+      return (
+        <AssignmentView
+          key={`assignment-${course.id}`}
+          course={course}
+          assignmentId={selectedChannel?.type === 'assignment' ? selectedChannel.id : 0}
+          submissionId={selectedChannel?.type === 'submission' ? selectedChannel.id : undefined}
+          handlers={assignmentHandlers}
+          canManage={isAdmin}
+          onOpen={(assignmentId) => onOpenAssignment?.(assignmentId)}
+          onOpenSubmission={(submissionId) => onOpenSubmission?.(submissionId)}
+        />
+      );
+    }
+    // 3 — le cours sélectionné est vide (aucun canal/forum/quiz).
     const courseChannels = course
       ? normalizeCourseChannelsFromSources({
           quizzes: course.quizzes,
