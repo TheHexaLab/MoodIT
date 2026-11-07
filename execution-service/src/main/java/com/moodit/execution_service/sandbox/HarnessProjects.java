@@ -105,7 +105,14 @@ public final class HarnessProjects {
                 // Clé de fichier NEUTRE (la classe reste MooditMain, non publique) : si
                 // l'étudiant déclare sa propre classe MooditMain, javac signale un doublon
                 // explicite au lieu de laisser un fichier en écraser un autre dans la map.
-                files.put(base + "MooditEnveloppe.java", """
+                // Et si un fichier étudiant/harnais s'appelle déjà MooditEnveloppe.java (classe
+                // publique de ce nom), la clé est décalée — même parade que la collision du
+                // harnais : rien n'est écrasé en silence.
+                String wrapperFile = "MooditEnveloppe.java";
+                if (wrapperFile.equals(studentFile) || wrapperFile.equals(harnessFile)) {
+                    wrapperFile = "MooditEnveloppe_moodit.java";
+                }
+                files.put(base + wrapperFile, """
                         import java.io.PrintWriter;
 
                         class MooditMain {

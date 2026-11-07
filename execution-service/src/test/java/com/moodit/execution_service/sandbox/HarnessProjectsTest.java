@@ -103,6 +103,17 @@ class HarnessProjectsTest {
     }
 
     @Test
+    void enveloppe_java_decalee_si_une_classe_etudiante_porte_son_nom() {
+        HarnessProjects.Project project = HarnessProjects.build("Java",
+                "public class MooditEnveloppe { }", ONE_CASE, null);
+        // Le code étudiant garde son fichier ; l'enveloppe est décalée, rien n'est écrasé.
+        assertThat(project.files().get("cases/0/src/MooditEnveloppe.java"))
+                .isEqualTo("public class MooditEnveloppe { }");
+        assertThat(project.files().get("cases/0/src/MooditEnveloppe_moodit.java"))
+                .contains("jeton=__MOODIT_T__");
+    }
+
+    @Test
     void deux_canaris_embarquant_le_code_etudiant_sont_ajoutes() {
         HarnessProjects.Project project = HarnessProjects.build("Go", "package main", ONE_CASE, 5000);
         // Cas réels 0..N-1, canaris N (pass) et N+1 (fail), chacun AVEC le code étudiant.

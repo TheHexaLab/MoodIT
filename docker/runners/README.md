@@ -79,7 +79,8 @@ donc toute ouverture de `src/` au run est suspecte).
   harnais). En CI (`SANDBOX_REQUIRED=true`), une précondition manquante FAIT ÉCHOUER le job.
 - Dev local : démon Docker requis (Windows : named pipe, détecté automatiquement par
   `DockerSandbox`). Sans démon ni images, les tests s'ignorent et l'évaluation compilée répond 502
-  (la correction reste « en cours » et sera rejouée).
+  — côté core, la tentative en attente est alors SUPPRIMÉE (`quiz:attempt-failed`) et l'étudiant
+  doit resoumettre : il n'existe pas de rejouage automatique.
 
 Images du mode « exec » : `python` (numpy/pandas/scipy/sympy), `node` (+ tsc — JS, TS et les
 harnais JS de JSON/HTML/JSX/TSX, bundles vendor fournis avec le job), `php`, `bash`, `sqlite`.
