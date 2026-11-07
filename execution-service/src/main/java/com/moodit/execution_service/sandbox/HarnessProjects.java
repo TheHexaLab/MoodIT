@@ -102,7 +102,10 @@ public final class HarnessProjects {
                 files.put(base + harnessFile, harnessCode);
                 // Enveloppe du ConsoleLauncher JUnit : le jeton de fin n'est imprimé qu'une
                 // fois l'exécution terminée — un System.exit(0) forgé le saute.
-                files.put(base + "MooditMain.java", """
+                // Clé de fichier NEUTRE (la classe reste MooditMain, non publique) : si
+                // l'étudiant déclare sa propre classe MooditMain, javac signale un doublon
+                // explicite au lieu de laisser un fichier en écraser un autre dans la map.
+                files.put(base + "MooditEnveloppe.java", """
                         import java.io.PrintWriter;
 
                         class MooditMain {
@@ -202,7 +205,9 @@ public final class HarnessProjects {
         }
     }
 
-    // ── canaris par langage (gabarits __MOODIT_A__/__MOODIT_B__, instanciés au runtime) ──
+    // ── canaris par langage — gabarits instanciés au runtime : valeurs __MOODIT_A__/__MOODIT_B__
+    //    ET NOM __MOODIT_N__ (un nom fixe serait reconnaissable : un code C/C++ qui interpose
+    //    printf laisserait passer les canaris à leur nom et ne forgerait que les cas réels) ──
 
     private static String canaryHarness(String lang) {
         return switch (lang) {
@@ -210,9 +215,9 @@ public final class HarnessProjects {
                     import org.junit.jupiter.api.Test;
                     import static org.junit.jupiter.api.Assertions.assertEquals;
 
-                    class MooditCanary {
+                    class __MOODIT_N__ {
                         @Test
-                        void canari() {
+                        void t__MOODIT_N__() {
                             assertEquals(__MOODIT_A__, __MOODIT_B__);
                         }
                     }
@@ -220,10 +225,10 @@ public final class HarnessProjects {
             case "csharp" -> """
                     using NUnit.Framework;
 
-                    public class MooditCanary
+                    public class __MOODIT_N__
                     {
                         [Test]
-                        public void Canari()
+                        public void T__MOODIT_N__()
                         {
                             Assert.That(__MOODIT_A__, Is.EqualTo(__MOODIT_B__));
                         }
@@ -234,7 +239,7 @@ public final class HarnessProjects {
 
                     import "testing"
 
-                    func TestMooditCanari(t *testing.T) {
+                    func Test__MOODIT_N__(t *testing.T) {
                         if __MOODIT_A__ != __MOODIT_B__ {
                             t.Fatal("canari")
                         }
@@ -242,16 +247,17 @@ public final class HarnessProjects {
                     """;
             case "rust" -> """
                     #[cfg(test)]
-                    mod moodit_canari {
+                    #[allow(non_snake_case)]
+                    mod m__MOODIT_N__ {
                         #[test]
-                        fn canari() {
+                        fn t__MOODIT_N__() {
                             assert_eq!(__MOODIT_A__, __MOODIT_B__);
                         }
                     }
                     """;
             // default = C et C++ (seules valeurs restantes de runnerLanguage()).
             default -> """
-                    MOODIT_TEST(moodit_canari) {
+                    MOODIT_TEST(__MOODIT_N__) {
                         MOODIT_CHECK(__MOODIT_A__ == __MOODIT_B__);
                     }
                     """;

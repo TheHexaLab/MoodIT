@@ -58,7 +58,8 @@ anti-triche) : `DockerRunnerIntegrationTest`.
 
 ## Limites du bac à sable (#24)
 
-- **Par exécution** : temps limite par cas (défaut 3 s en « exec », 10 s par cas de notation,
+- **Par exécution** : temps limite par cas (défaut 3 s en « exec » — plancher 10 s pour Java,
+  dont la compilation JEP 330 vit dans la fenêtre de run —, 10 s par cas de notation,
   configurable par question jusqu'à 60 s) ; mémoire/PID/CPU bornés PAR CONTENEUR
   (`SANDBOX_MEMORY_MB` 1,5 Go, `SANDBOX_PIDS_LIMIT` 512, `SANDBOX_CPUS` 2) ; rlimits du processus
   étudiant (fichiers, nproc, nofile) ; sorties tronquées (64 Ko en notation, 1,2 Mo en exec —

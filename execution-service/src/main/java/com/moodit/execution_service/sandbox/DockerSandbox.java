@@ -34,8 +34,9 @@ import java.util.concurrent.TimeUnit;
  * hôte : compatible docker-outside-of-docker), puis le conteneur est détruit, succès ou non.
  *
  * Toute erreur d'infrastructure (démon Docker injoignable, image absente, budget de temps du
- * conteneur dépassé) devient une {@link SandboxException} → 502, et la correction reste
- * « en cours » côté core (elle sera rejouée).
+ * conteneur dépassé) devient une {@link SandboxException} → 502 ; côté core, la tentative en
+ * attente est alors SUPPRIMÉE (quiz:attempt-failed) et l'étudiant doit resoumettre — il n'existe
+ * pas de rejouage automatique, d'où l'attente interne généreuse (EXEC_INTERNAL_QUEUE_WAIT_MS).
  */
 public class DockerSandbox {
 

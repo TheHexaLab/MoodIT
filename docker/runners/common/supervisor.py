@@ -315,8 +315,16 @@ def enforce_token(passed, detail, stdout, case_index):
 
 
 def prep_run(case_dir, src):
-    """Après compilation : sources verrouillées, chemins du cas traversables, dossier work."""
+    """Après compilation : sources ET caches de build verrouillés — gocache, dépôt cargo,
+    target, HOME/TMP de compilation contiennent des copies des sources substituées (jeton,
+    canaris), leur lecture par l'étudiant serait une extraction silencieuse. Les artefacts à
+    exécuter sont rouverts ensuite (open_artifacts / chmod du binaire)."""
     lock_sources(src)
+    for cache in (os.path.join(BOX, "gocache"), os.path.join(BOX, "cargo"),
+                  os.path.join(case_dir, "target"), os.path.join(case_dir, "home_build"),
+                  os.path.join(case_dir, "tmp_build")):
+        if os.path.isdir(cache):
+            lock_sources(cache)
     os.chmod(case_dir, 0o755)
     os.chmod(os.path.join(BOX, "cases"), 0o755)
     student_dir(case_dir, "work")
@@ -615,7 +623,9 @@ def exec_commands(runtime, entry):
     if runtime == "csharp":
         return ["mcs", entry, "-out:prog.exe"], ["mono", "prog.exe"]
     if runtime == "go":
-        return None, ["go", "run", entry]
+        # Compilation SÉPARÉE (budget EXEC_COMPILE_TIMEOUT_S) : `go run` compilait dans la
+        # fenêtre de run (défaut 3 s) — un « Exécuter » correct pouvait être « Interrompu ».
+        return ["go", "build", "-o", "prog", entry], ["./prog"]
     if runtime == "rust":
         return ["rustc", "-O", entry, "-o", "prog"], ["./prog"]
     return None, None
@@ -687,6 +697,11 @@ def exec_main(job):
 
     timeout_s = max(1, min(MAX_RUN_TIMEOUT_S,
                            int(job.get("timeout_ms") or EXEC_DEFAULT_TIMEOUT_S * 1000) // 1000))
+    if runtime == "java":
+        # Mode fichier-source (JEP 330) : la COMPILATION vit dans la fenêtre de run, et la JVM
+        # froide y ajoute 1 à 2 s — avec le défaut de 3 s, un « Exécuter » correct pouvait être
+        # « Interrompu » par intermittence. Plancher dédié.
+        timeout_s = max(timeout_s, 10)
     code, timed_out = run_proc(run_cmd, src, env, timeout_s,
                                os.path.join(work, "run.out"), os.path.join(work, "run.err"),
                                demote_student, stdin_path=stdin_path)
@@ -744,6 +759,12 @@ def main():
         case_dir = os.path.join(BOX, "cases", str(case["index"]))
         TOKENS[case["index"]] = str(rng.randrange(10**12, 10**13))
         subst = {"__MOODIT_T__": TOKENS[case["index"]]}
+        if case.get("canary"):
+            # Nom du test canari randomisé (identifiant valide, majuscule en tête pour
+            # l'export Go) : un nom FIXE serait reconnaissable par le code étudiant.
+            subst["__MOODIT_N__"] = (rng.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+                                     + "".join(rng.choice("abcdefghijklmnopqrstuvwxyz")
+                                               for _ in range(9)))
         if case.get("canary") == "pass":
             a = rng.randrange(100000, 999999)
             subst.update({"__MOODIT_A__": str(a), "__MOODIT_B__": str(a)})
@@ -782,6 +803,13 @@ def main():
             if not ok:
                 event("canari_incoherent",
                       detail="résultat des canaris contraire à l'attendu — falsification probable")
+        elif any(outcomes[c["index"]].ran for c in cases if not c.get("canary")):
+            # Des cas RÉELS ont tourné mais pas les canaris : une soumission honnête échoue
+            # partout pareil (même code dans tous les cas) — faire échouer la compilation des
+            # seuls canaris (collision de nom de classe…) est une falsification. Fail-closed.
+            canaries = "incoherents"
+            event("canari_incoherent",
+                  detail="canaris non exécutés alors que des cas réels ont tourné")
         else:
             canaries = "indetermines"
 

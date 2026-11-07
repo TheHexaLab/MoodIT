@@ -272,7 +272,11 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   `SYS_PTRACE` pour tracer le processus étudiant et détecter les lectures du harnais). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
-  Pour lancer ces conteneurs, `execution-service` monte `/var/run/docker.sock` : c'est un accès
+  Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 2 en prod) pendant
+  TOUT son conteneur (couramment 1 à 3 min) ; l'attente interne des corrections
+  (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s) absorbe un pic de classe — au-delà, la tentative échoue
+  et l'étudiant resoumet. Pour lancer ces conteneurs, `execution-service` monte
+  `/var/run/docker.sock` : c'est un accès
   root-équivalent au démon de l'hôte, assumé pour ce service interne (aucune route d'admin, appels
   authentifiés par le gateway/`X-Internal-Token`). Les images sont construites par
   `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le

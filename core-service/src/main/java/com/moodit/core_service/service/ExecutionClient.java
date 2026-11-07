@@ -40,7 +40,7 @@ public class ExecutionClient {
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
             @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs,
-            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:15000}}") long internalQueueWaitMs) {
+            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:120000}}") long internalQueueWaitMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
@@ -52,9 +52,9 @@ public class ExecutionClient {
     /**
      * Délai d'attente de la réponse pour {@code pistonCalls} unités de travail du sandbox (#31, #216) :
      * execution-service les fait L'UN APRÈS L'AUTRE, et chacun peut d'abord attendre une place du
-     * sandbox ({@code app.exec.internal-queue-wait-ms}, 15 s par défaut, #24), puis durer jusqu'au
+     * sandbox ({@code app.exec.internal-queue-wait-ms}, 120 s par défaut — une correction compilée tient sa place pendant tout son conteneur, #24), puis durer jusqu'au
      * délai d'une unité de travail du runner ({@code per-test-timeout-ms}, 20 s par défaut). Le budget par
-     * appel est donc la SOMME des deux (35 s par défaut) : ne compter que l'exécution seule faisait
+     * appel est donc la SOMME des deux (140 s par défaut) : ne compter que l'exécution seule faisait
      * échouer la correction quand le sandbox était saturé, alors qu'execution-service corrigeait
      * encore. La part d'attente suit par défaut la variable du {@code .env} partagé qui la
      * règle côté execution-service ({@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : l'augmenter là-bas

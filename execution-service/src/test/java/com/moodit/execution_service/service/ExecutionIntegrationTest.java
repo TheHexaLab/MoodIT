@@ -250,6 +250,30 @@ class ExecutionIntegrationTest {
         assertThat("SIGKILL".equals(run.signal()) || (run.code() != null && run.code() != 0)).isTrue();
     }
 
+    @Test
+    void run_java_plancher_couvre_compilation_et_jvm_froide() {
+        // Mode fichier-source (JEP 330) : la compilation vit dans la fenêtre de run — le
+        // plancher du superviseur (10 s) doit absorber javac en-processus + la JVM froide,
+        // sinon un « Exécuter » correct était « Interrompu » par intermittence (défaut 3 s).
+        requireRuntime("java");
+        RunnerExec.Stage run = RUNNER.execute("java", List.of(new RunnerExec.File("Main.java",
+                "public class Main { public static void main(String[] a) {"
+                        + " System.out.println(\"bonjour java\"); } }"))).run();
+        assertThat(run.code()).isZero();
+        assertThat(run.stdout()).contains("bonjour java");
+    }
+
+    @Test
+    void run_go_compilation_separee_de_la_fenetre_de_run() {
+        requireRuntime("go");
+        RunnerExec.Result res = RUNNER.execute("go", List.of(new RunnerExec.File("main.go",
+                "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"bonjour go\") }\n")));
+        // `go build` : étape de compilation séparée (budget dédié), le run n'exécute que ./prog.
+        assertThat(res.compile()).isNotNull();
+        assertThat(res.run().code()).isZero();
+        assertThat(res.run().stdout()).contains("bonjour go");
+    }
+
     /** Le bundle react-runtime.js est-il présent (nécessaire pour assembler JSX/TSX) ? */
     private static boolean vendorAvailable() {
         String dir = System.getenv().getOrDefault("APP_VENDOR_DIR", "/nonexistent-vendor");

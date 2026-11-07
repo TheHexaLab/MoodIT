@@ -78,7 +78,7 @@ public class DockerEvaluator {
             Integer timeoutMs) {
         if (code != null && code.contains(RESERVED_MARKER)) {
             return cases.stream()
-                    .map(c -> new TestResult(c.name(), c.weight(), false,
+                    .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
                             "Marqueur réservé « __MOODIT_ » dans le code soumis — retire-le pour être corrigé."))
                     .toList();
         }

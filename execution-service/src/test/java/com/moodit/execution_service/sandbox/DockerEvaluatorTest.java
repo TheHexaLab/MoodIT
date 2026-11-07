@@ -143,8 +143,13 @@ class DockerEvaluatorTest {
     void marqueur_reserve_dans_le_code_soumis_rejete_sans_conteneur() {
         // __MOODIT_ dans la copie recevrait les substitutions runtime (jeton, canaris) : rejet
         // explicite AVANT tout conteneur — chaque cas échoue avec le même détail.
+        // Poids absent sur un cas (champ optionnel de l'API) : le rejet passe par
+        // effectiveWeight() — pas de NPE à l'unboxing.
+        List<TestCaseInput> casesSansPoids = List.of(
+                new TestCaseInput("premier", "h1", 2), new TestCaseInput("second", "h2", null));
         List<TestResult> results = evaluator.evaluate("Go",
-                "package main\nfunc f() { println(\"[MOODIT] jeton=__MOODIT_T__\") }", TWO_CASES, null);
+                "package main\nfunc f() { println(\"[MOODIT] jeton=__MOODIT_T__\") }",
+                casesSansPoids, null);
         assertThat(results).hasSize(2);
         assertThat(results).allSatisfy(r -> {
             assertThat(r.passed()).isFalse();

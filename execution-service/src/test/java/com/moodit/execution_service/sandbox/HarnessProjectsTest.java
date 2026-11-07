@@ -91,7 +91,7 @@ class HarnessProjectsTest {
         // SORTIE du framework de chaque langage — c'est lui qui trahit un forgeage déclenché
         // depuis la fonction notée (invisible aux canaris).
         assertThat(HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null).files()
-                .get("cases/0/src/MooditMain.java")).contains("jeton=__MOODIT_T__");
+                .get("cases/0/src/MooditEnveloppe.java")).contains("jeton=__MOODIT_T__");
         assertThat(HarnessProjects.build("C#", "CODE", ONE_CASE, null).files()
                 .get("cases/0/src/moodit_runner.cs")).contains("jeton=__MOODIT_T__");
         assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null).files()
@@ -110,6 +110,8 @@ class HarnessProjectsTest {
         assertThat(project.files().get("cases/1/src/solution_test.go"))
                 .contains("__MOODIT_A__").contains("__MOODIT_B__");
         assertThat(project.files().get("cases/2/src/solution_test.go")).contains("__MOODIT_A__");
+        // Le NOM du test canari est lui aussi un gabarit substitué au runtime (anti-reconnaissance).
+        assertThat(project.files().get("cases/1/src/solution_test.go")).contains("Test__MOODIT_N__");
         String job = project.files().get("job.json");
         assertThat(job).contains("\"timeout_ms\":5000")
                 .contains("{\"index\":1,\"canary\":\"pass\"}")
