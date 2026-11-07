@@ -1,9 +1,10 @@
-// Couche « API » du Dashboard, regroupée ici pour un seul point de bascule vers le
-// vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
-// Dashboard se contente d'orchestrer l'état autour.
+// Couche « API » du Dashboard, regroupée ici pour un seul point d'accès au backend
+// (apiFetch) ; le Dashboard se contente d'orchestrer l'état autour. fetchLanguages
+// (table Language) et evaluateCode (service d'exécution, conteneurs runner — #116)
+// appellent le VRAI backend.
 //
-// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE), evaluateCode (service
-// d'exécution), qui utilisent encore les helpers simulate* ci-dessous, et les devoirs (fin du fichier).
+// Restent en MOCK (à brancher) : l'horaire (scheduleData, #206) et les devoirs
+// (assignmentsData, #252 — fin du fichier).
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -157,6 +158,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       orderIndex: q.orderIndex,
       language: q.language,
       startCode: q.startCode,
+      execTimeoutMs: q.execTimeoutMs,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
         content: a.content,
@@ -289,23 +291,27 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
- * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * Évalue une question Code : le service d'exécution exécute `code + harnais` dans un conteneur
+ * runner jetable (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
+  // Le service d'exécution exécute code + harnais (compilés : runner de notation dédié) et renvoie
+  // le verdict par harnais. timeoutMs : temps limite choisi par le prof (absent → défaut sandbox).
+  const body = {
+    language: input.language,
+    code: input.code,
+    timeoutMs: input.execTimeoutMs,
+    testCases: input.testCases.map((t) => ({
+      name: t.name,
+      harnessCode: t.harnessCode,
+      weight: t.weight,
+    })),
+  };
   const res = await apiFetch('/exec/evaluate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      language: input.language,
-      code: input.code,
-      testCases: input.testCases.map((t) => ({
-        name: t.name,
-        harnessCode: t.harnessCode,
-        weight: t.weight,
-      })),
-    }),
+    body: JSON.stringify(body),
   });
   if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'évaluation du code");

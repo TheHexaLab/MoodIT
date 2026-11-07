@@ -185,115 +185,27 @@ services:
       ollama-init:
         condition: service_completed_successfully
 
-  #Piston (sandbox d'exécution du code étudiant NON FIABLE) --------------
-  # Moteur open-source multi-langages : isolation (isolate/nsjail), pas de réseau à l'exécution,
-  # limites CPU/mémoire/temps. Les paquets de langages sont installés dans le volume piston_data
-  # (persistés entre redémarrages). Seul sur le réseau `sandbox`, partagé avec execution-service :
-  # jamais joignable depuis le gateway, core-service ni aucun autre conteneur.
-  piston:
-    # Image Piston patchée et épinglée par digest (limite body-parser relevée). cf. piston/Dockerfile
-    build: ./piston
-    container_name: moodit_piston
-    # Pas de `privileged` (#24) : isolate n'a besoin que de créer des espaces de noms (SYS_ADMIN,
-    # NET_ADMIN pour la boucle locale de la boîte, SYS_CHROOT) et de gérer ses utilisateurs de boîte
-    # (SETUID/SETGID/CHOWN/DAC_OVERRIDE/FOWNER/KILL). Toutes les autres capacités sont retirées et le
-    # profil seccomp par défaut de Docker reste actif. AppArmor est levé : le profil docker-default
-    # interdit le remontage en écriture de /sys/fs/cgroup (cf. piston/Dockerfile), ce que
-    # `privileged` faisait déjà. cgroup privé : la boîte ne voit que l'arbre cgroup du conteneur.
-    cap_drop: [ALL]
-    cap_add: [SYS_ADMIN, NET_ADMIN, SYS_CHROOT, SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
-    security_opt:
-      - apparmor=unconfined
-    cgroup: private
-    environment:
-      # Sortie max par flux (caractères). Le défaut de Piston (1 024) tronque tout extrait SQL de
-      # plus de 1 Ko ; il faut au moins app.sql.max-dump-chars (512 Ki) plus la sortie de l'étudiant.
-      PISTON_OUTPUT_MAX_SIZE: "1048576"
-      # Plafonds mémoire (octets) appliqués aussi quand l'appelant n'en envoie pas (piston-init).
-      # execution-service envoie les siens (PISTON_RUN/COMPILE_MEMORY_LIMIT_BYTES), qui ne doivent
-      # pas les dépasser : Piston refuserait l'exécution.
-      PISTON_RUN_MEMORY_LIMIT: "256000000"
-      PISTON_COMPILE_MEMORY_LIMIT: "512000000"
-    volumes:
-      - piston_data:/piston/packages
-    networks:
-      - sandbox
-
-  #Piston-init : installe les langages requis puis s'arrête (one-shot, comme ollama-init).
-  # Idempotent (paquets persistés dans piston_data). Les PAQUETS installés (à gauche) diffèrent
-  # parfois du nom de RUNTIME exposé par Piston (node→javascript, gcc→c/c++, mono→csharp) : on
-  # installe par paquet, on vérifie par runtime. Ajouter ici chaque langage supporté par
-  # l'assembleur de execution-service.
-  piston-init:
-    image: curlimages/curl:latest
-    container_name: moodit_piston_init
-    depends_on:
-      - piston
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |-
-        until curl -fsS http://piston:2000/api/v2/runtimes >/dev/null 2>&1; do
-          echo "attente de piston..."; sleep 2;
-        done
-        for pkg in python:3.12.0 node:20.11.1 typescript:5.0.3 bash:5.2.0 php:8.2.3 \
-                   go:1.16.2 rust:1.68.2 gcc:10.2.0 mono:6.12.0 java:15.0.2 sqlite3:3.36.0; do
-          lang=$${pkg%%:*}; ver=$${pkg##*:};
-          echo "installation $$lang $$ver...";
-          curl -sS -X POST http://piston:2000/api/v2/packages \
-            -H 'Content-Type: application/json' \
-            -d "{\"language\":\"$$lang\",\"version\":\"$$ver\"}" || true;
-        done
-        rt=$$(curl -fsS http://piston:2000/api/v2/runtimes);
-        for l in python javascript typescript bash php go rust c c++ csharp java sqlite3; do
-          echo "$$rt" | grep -qF "\"language\":\"$$l\"" || { echo "echec: runtime $$l absent de piston"; exit 1; };
-        done
-        # Réchauffage : la toute première exécution d'un langage compilé (JVM, mono, rustc…) lit
-        # son paquet à froid et peut dépasser la limite de 3 s d'exécution : une bonne réponse
-        # serait alors notée en échec. Une exécution jetable par langage, résultat ignoré.
-        for w in 'java|Main.java|public class Main { public static void main(String[] a) {} }' \
-                 'csharp|main.cs|class P { static void Main() {} }' \
-                 'rust|main.rs|fn main() {}' \
-                 'go|main.go|package main\nfunc main() {}' \
-                 'c|main.c|int main(void) { return 0; }' \
-                 'c++|main.cpp|int main() { return 0; }'; do
-          l=$${w%%|*}; rest=$${w#*|}; f=$${rest%%|*}; src=$${rest#*|};
-          echo "rechauffage $$l...";
-          curl -sS -m 60 -X POST http://piston:2000/api/v2/execute \
-            -H 'Content-Type: application/json' \
-            -d "{\"language\":\"$$l\",\"version\":\"*\",\"files\":[{\"name\":\"$$f\",\"content\":\"$$src\"}]}" >/dev/null || true;
-        done
-        echo "piston pret (12 runtimes ; + JSON via node)";
-    restart: "no"
-    networks:
-      - sandbox
-
-  #Execution service (exécute le code étudiant via le sandbox Piston) ----
+  #Execution service (exécute le code étudiant via les conteneurs runner) ----
   execution-service:
     build: ./execution-service
     container_name: moodit_execution
     env_file:
       - .env.docker
-    environment:
-      PISTON_URL: http://piston:2000 # sandbox, sur le réseau dédié
+    volumes:
+      # Runner des langages COMPILÉS (#116) : execution-service lance des conteneurs jetables
+      # moodit-runner-* (réseau coupé, limites mémoire/PID/CPU) via le démon Docker de l'HÔTE
+      # (docker-outside-of-docker — un montage hôte ne marcherait pas, les fichiers passent par
+      # l'API). Accès root-équivalent au démon : assumé, service interne sans route d'admin ;
+      # cf. deploy/DEPLOY.md. Les images runner sont construites par docker/runners/build.sh.
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - internal # appelé par le gateway et core-service
-      - sandbox # seul service applicatif qui joint Piston
-    depends_on:
-      # Ne démarre qu'une fois les langages installés dans Piston.
-      piston-init:
-        condition: service_completed_successfully
 
 volumes:
   postgres_data:
   ollama_data:
-  piston_data:
 
 networks:
   internal:
     driver: bridge
-  # Réseau du bac à sable (#24) : Piston n'est joignable que par execution-service (et piston-init).
-  # Ni le gateway, ni core-service, ni Postgres n'y sont. Pas `internal: true` : Piston télécharge
-  # ses paquets de langages (piston-init) ; le code exécuté, lui, n'a aucun réseau (isolate).
-  sandbox:
-    driver: bridge
+

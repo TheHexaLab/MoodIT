@@ -298,6 +298,19 @@ export function QuestionFormBody({
 
 
       <EditorFooter>
+        {/* Gestion des harnais (question Code) : dans le pied FIXE → toujours visible, hors du
+            corps défilant (l'éditeur de code de départ peut être long). */}
+        {draft.qType === 'coding' && (
+          <div className={[styles.harnessSummary, styles.footerAddRow].join(' ')}>
+            <div className={styles.harnessSummaryText}>
+              <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
+              <span className={styles.harnessSummarySub}>{t.harnessCount((draft.testCases ?? []).length)}</span>
+            </div>
+            <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
+              {t.manageHarness} <ArrowRight width={14} height={14} />
+            </button>
+          </div>
+        )}
         {/* Bouton d'ajout HORS de la zone défilante (juste au-dessus des actions). */}
         {addEntryLabel && (
           <div className={styles.footerAddRow}>
@@ -564,9 +577,10 @@ export function QuestionFormBody({
   }
 
   function renderCoding(): React.ReactElement {
-    const tests = draft.testCases ?? [];
     const languageName = languages.find((l) => l.id === draft.languageId)?.name;
 
+    // La section « Harnais de test » (gestion) est rendue dans le PIED fixe, pas ici — voir le
+    // bloc `.harnessSummary` du footer : elle reste visible sans défiler jusqu'au bas du code.
     return (
       <>
         <div className={styles.field}>
@@ -590,17 +604,34 @@ export function QuestionFormBody({
           />
         </div>
 
-        <div className={styles.harnessSummary}>
-          <div className={styles.harnessSummaryText}>
-            <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
-            <span className={styles.harnessSummarySub}>
-              {t.harnessCount(tests.length)}
-            </span>
-          </div>
-          <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
-            {t.manageHarness} <ArrowRight width={14} height={14} />
-          </button>
-        </div>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t.execTimeoutLabel}</span>
+          {/* Saisie en SECONDES, stockée en ms (draft.execTimeoutMs) ; vide → défaut du sandbox. */}
+          <input
+            className={styles.input}
+            type="number"
+            min={1}
+            max={60}
+            step={1}
+            value={draft.execTimeoutMs != null ? String(Math.round(draft.execTimeoutMs / 1000)) : ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              const seconds = Number(raw);
+              patch({
+                execTimeoutMs:
+                  raw === '' || Number.isNaN(seconds) ? undefined : Math.round(seconds * 1000),
+              });
+            }}
+            onBlur={() => {
+              // Borné comme à l'enregistrement (1 à 60 s, entier) : « Tester » utilise la même
+              // valeur que la correction réelle — pas d'aperçu qui diverge (0 s, 120 s…).
+              if (draft.execTimeoutMs == null) return;
+              const seconds = Math.min(60, Math.max(1, Math.round(draft.execTimeoutMs / 1000)));
+              patch({ execTimeoutMs: seconds * 1000 });
+            }}
+          />
+          <span className={styles.fieldHint}>{t.execTimeoutHint}</span>
+        </label>
       </>
     );
   }

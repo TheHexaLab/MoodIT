@@ -11,12 +11,13 @@ import org.springframework.web.client.RestClientException;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Appelle le service d'EXÉCUTION (sandbox Piston) pour corriger une question Code. Endpoint
+ * Appelle le service d'EXÉCUTION (conteneurs runner Docker, #116) pour corriger une question Code. Endpoint
  * INTERNE (non exposé par le gateway), authentifié par un jeton partagé {@code X-Internal-Token}.
  * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} si le
  * service est injoignable (le job laisse alors la question « en cours »).
@@ -38,8 +39,8 @@ public class ExecutionClient {
             @Value("${app.internal.token}") String internalToken,
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
-            @Value("${app.execution-service.per-test-timeout-ms:${PISTON_HTTP_TIMEOUT_MS:20000}}") long perTestReadTimeoutMs,
-            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:15000}}") long internalQueueWaitMs) {
+            @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs,
+            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:120000}}") long internalQueueWaitMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
@@ -49,44 +50,98 @@ public class ExecutionClient {
     }
 
     /**
-     * Délai d'attente de la réponse pour {@code pistonCalls} appels au sandbox (#31, #216) :
+     * Délai d'attente de la réponse pour {@code pistonCalls} unités de travail du sandbox (#31, #216) :
      * execution-service les fait L'UN APRÈS L'AUTRE, et chacun peut d'abord attendre une place du
-     * sandbox ({@code app.exec.internal-queue-wait-ms}, 15 s par défaut, #24), puis durer jusqu'au
-     * délai d'un appel Piston ({@code app.piston.http-timeout-ms}, 20 s par défaut). Le budget par
-     * appel est donc la SOMME des deux (35 s par défaut) : ne compter que l'appel Piston faisait
+     * sandbox ({@code app.exec.internal-queue-wait-ms}, 120 s par défaut — une correction compilée tient sa place pendant tout son conteneur, #24), puis durer jusqu'au
+     * délai d'une unité de travail du runner ({@code per-test-timeout-ms}, 20 s par défaut). Le budget par
+     * appel est donc la SOMME des deux (140 s par défaut) : ne compter que l'exécution seule faisait
      * échouer la correction quand le sandbox était saturé, alors qu'execution-service corrigeait
-     * encore. Les deux parts suivent par défaut les variables du {@code .env} partagé qui les
-     * règlent côté execution-service ({@code PISTON_HTTP_TIMEOUT_MS},
-     * {@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : augmenter l'une là-bas impose la même valeur ici, ce
-     * qui est automatique tant qu'elle vient de ce fichier. Un délai fixe faisait échouer la
+     * encore. La part d'attente suit par défaut la variable du {@code .env} partagé qui la
+     * règle côté execution-service ({@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : l'augmenter là-bas
+     * impose la même valeur ici, automatique tant qu'elle vient de ce fichier. Un délai fixe faisait échouer la
      * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
      * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
      */
-    long readTimeoutMs(int pistonCalls) {
+    long readTimeoutMs(String language, int pistonCalls, Integer execTimeoutMs) {
+        // Temps limite par question (#116, max 60 s) : s'il dépasse le budget par défaut d'une
+        // unité, chaque unité doit l'attendre (plus une marge), sinon core abandonne une
+        // correction encore en cours et supprime la tentative — le bug que #216 avait corrigé.
+        long perUnit = Math.max(perTestReadTimeoutMs,
+                execTimeoutMs == null ? 0 : execTimeoutMs + RUN_MARGIN_MS);
+        // TypeScript : CHAQUE unité exec transpile (tsc, jusqu'à 60 s côté runner — le mur de
+        // 75 s de RunnerExec couvre précisément ce budget) ; sans cette marge, le scénario #216
+        // revenait pour les interprétés à compilation.
+        if (transpiled(language)) {
+            perUnit += EXEC_COMPILE_SLACK_MS;
+        }
         return baseReadTimeoutMs
-                + (long) Math.max(pistonCalls, 1) * (perTestReadTimeoutMs + internalQueueWaitMs);
+                + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs)
+                // Compilés : CHAQUE cas (N réels + 2 canaris) recompile son harnais — les unités
+                // valent 2N + 2, donc (unités + 2) / 2 = N + 2 compilations à budgéter.
+                + (compiled(language) ? COMPILE_SLACK_MS * ((Math.max(pistonCalls, 2) + 2L) / 2) : 0);
     }
 
+    /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
+    private static final long RUN_MARGIN_MS = 5_000;
+
     /**
-     * Nombre d'appels au sandbox pour corriger {@code harnessCount} harnais en {@code language} :
-     * un par harnais, sauf en SQL où un harnais de modification ({@code -- @student}) s'exécute en
-     * DEUX phases isolées, chacune avec son attente et son appel Piston. Le mode n'est pas déduit
-     * ici (execution-service l'analyse dans le harnais) : tout harnais SQL compte pour deux, ce qui
-     * ne fait qu'allonger le délai d'une question SQL en lecture seule.
+     * Budget de COMPILATION du runner PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du
+     * superviseur (90 s) : chaque cas compilé (harnais différent) recompile son projet.
+     */
+    private static final long COMPILE_SLACK_MS = 90_000;
+
+    /**
+     * Budget de TRANSPILATION du mode exec (par unité) — miroir de
+     * {@code EXEC_COMPILE_TIMEOUT_S} du superviseur (60 s) : chaque unité TypeScript relance tsc.
+     */
+    private static final long EXEC_COMPILE_SLACK_MS = 60_000;
+
+    /**
+     * Nombre d'unités de travail du sandbox pour corriger {@code harnessCount} harnais en
+     * {@code language} — dimensionne le délai d'attente de la réponse :
+     * <ul>
+     *   <li>un par harnais (interprétés) ;</li>
+     *   <li>DEUX par harnais en SQL : un harnais de modification ({@code -- @student}) s'exécute en
+     *       deux phases isolées, chacune avec son attente et son conteneur runner. Le mode n'est pas
+     *       déduit ici (execution-service l'analyse dans le harnais) : tout harnais SQL compte pour
+     *       deux, ce qui ne fait qu'allonger le délai d'une question SQL en lecture seule ;</li>
+     *   <li>DEUX par harnais + 2 pour un langage COMPILÉ (#116) : le runner Docker COMPILE puis
+     *       exécute chaque cas, et ajoute deux canaris anti-falsification — la compilation (jusqu'à
+     *       90 s de budget côté runner) peut dominer le temps d'exécution.</li>
+     * </ul>
      */
     static int pistonCalls(String language, int harnessCount) {
         String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
         boolean sql = lang.equals("sql") || lang.equals("sqlite") || lang.equals("sqlite3");
-        return sql ? 2 * harnessCount : harnessCount;
+        if (sql) {
+            return 2 * harnessCount;
+        }
+        return compiled(language) ? 2 * harnessCount + 2 : harnessCount;
     }
 
-    // Client par appel : le délai de lecture dépend du nombre d'appels au sandbox. Un sandbox
-    // injoignable ou bloqué échoue proprement (→ null) plutôt que de faire traîner le thread
-    // indéfiniment.
-    private RestClient restClient(int pistonCalls) {
+    /** Langage exec TRANSPILÉ à chaque unité (budget tsc à prévoir par unité). */
+    static boolean transpiled(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return lang.equals("typescript") || lang.equals("ts");
+    }
+
+    /** Langage noté dans le runner compilé (budget de compilation à prévoir côté client). */
+    static boolean compiled(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return switch (lang) {
+            case "c", "c++", "cpp", "cplusplus", "go", "golang", "rust",
+                 "csharp", "c#", "cs", "c-sharp", "java" -> true;
+            default -> false;
+        };
+    }
+
+    // Client par appel : le délai de lecture dépend du nombre d'appels au sandbox, du temps
+    // limite de la question et du langage. Un sandbox injoignable ou bloqué échoue proprement
+    // (→ null) plutôt que de faire traîner le thread indéfiniment.
+    private RestClient restClient(long readTimeoutMs) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
-        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs(pistonCalls)));
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         return RestClient.builder().requestFactory(factory).build();
     }
 
@@ -101,15 +156,26 @@ public class ExecutionClient {
      * verdicts (true = réussi) dans le MÊME ordre que {@code harnesses}, ou {@code null} en cas
      * d'échec d'appel.
      */
+    /** Surcharge sans timeout (défaut du sandbox). */
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses) {
-        Map<String, Object> body = Map.of(
-                "language", language == null ? "" : language,
-                "code", code == null ? "" : code,
-                "testCases", harnesses.stream()
-                        .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
-                        .toList());
+        return evaluate(language, code, harnesses, null);
+    }
+
+    public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs) {
+        // Défense en profondeur : la valeur vient de la BD (normalisée à l'écriture par
+        // QuizService), mais une ligne aberrante ne doit ni gonfler le budget de lecture ni
+        // atteindre execution-service telle quelle.
+        Integer timeout = timeoutMs == null || timeoutMs <= 0 ? null : Math.min(timeoutMs, 60_000);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("language", language == null ? "" : language);
+        body.put("code", code == null ? "" : code);
+        body.put("testCases", harnesses.stream()
+                .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
+                .toList());
+        if (timeout != null) body.put("timeoutMs", timeout);
+        long readTimeout = readTimeoutMs(language, pistonCalls(language, harnesses.size()), timeout);
         try {
-            Verdict[] verdicts = restClient(pistonCalls(language, harnesses.size())).post()
+            Verdict[] verdicts = restClient(readTimeout).post()
                     .uri(baseUrl + "/internal/exec/evaluate")
                     .header("X-Internal-Token", internalToken)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -123,4 +189,5 @@ public class ExecutionClient {
             return null;
         }
     }
+
 }

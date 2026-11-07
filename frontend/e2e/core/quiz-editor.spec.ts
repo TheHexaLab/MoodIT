@@ -290,7 +290,7 @@ test('validations de l’éditeur de question', async ({ browser }) => {
   await page.getByRole('button', { name: 'Fermer' }).click();
 });
 
-test('tester une question : correction locale et évaluation du code par Piston', async ({
+test('tester une question : correction locale et évaluation du code par le runner', async ({
   browser,
 }) => {
   const page = await profPage(browser);
@@ -324,11 +324,11 @@ test('tester une question : correction locale et évaluation du code par Piston'
   const code = page.getByRole('textbox', { name: 'Éditeur de code (Python)' });
   await expect(code).toHaveValue(START_CODE);
 
-  await code.fill('print("bonjour depuis piston")\ndef solution(a, b):\n    return a + b\n');
+  await code.fill('print("bonjour depuis le runner")\ndef solution(a, b):\n    return a + b\n');
   await page.getByRole('button', { name: 'Exécuter' }).click();
   await expect(page.getByText('Console', { exact: true })).toBeVisible();
   // Sortie dans la console (bloc <pre> distinct de la coloration du code, qui contient le print).
-  await expect(page.locator('pre').filter({ hasText: /^bonjour depuis piston\s*$/ })).toBeVisible({
+  await expect(page.locator('pre').filter({ hasText: /^bonjour depuis le runner\s*$/ })).toBeVisible({
     timeout: 30_000,
   });
   await page.getByRole('button', { name: 'Fermer la console' }).click();

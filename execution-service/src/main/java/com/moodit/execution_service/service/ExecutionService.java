@@ -6,7 +6,10 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonClient;
+
+import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.RunnerExec;
+import com.moodit.execution_service.sandbox.SandboxException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,12 +20,18 @@ import java.util.HexFormat;
 import java.util.List;
 
 /**
- * Évalue une soumission contre chaque harnais : assemble code+harnais, exécute dans Piston, en
- * déduit le verdict. ANTI-TRICHE : le verdict ne dépend PAS de l'exit code (falsifiable par un
- * {@code exit(0)} anticipé ou une neutralisation d'exit), mais de la présence d'un NONCE ALÉATOIRE
- * secret que SEUL le harnais émet en cas de succès. Chaque test tourne dans une exécution Piston
- * ISOLÉE. (Résiduel connu : un étudiant qui LIT la source assemblée peut extraire le nonce/harnais
- * — non éliminable dans ce modèle sans passer au « juge par sortie ».)
+ * Évalue une soumission contre chaque harnais. Deux chemins (#116) :
+ * <ul>
+ *   <li><b>Langages COMPILÉS</b> → {@link DockerEvaluator} : conteneur runner jetable par
+ *       soumission (réseau coupé), SUPERVISEUR de confiance (root) qui compile, verrouille les
+ *       sources en 700, exécute chaque cas sous un UID étudiant dédié tracé par strace, et rend
+ *       un verdict FAIL-CLOSED multi-canaux gardé par des CANARIS randomisés. Le harnais du prof
+ *       est un VRAI test du langage (JUnit, NUnit, go test, cargo test, moodit_check.h).</li>
+ *   <li><b>Interprétés / SQL / vues</b> → mode « exec » du runner (ex-Piston), verdict par NONCE ALÉATOIRE : il ne dépend PAS
+ *       de l'exit code (falsifiable par un {@code exit(0)} anticipé), mais de la présence d'un
+ *       nonce secret que SEUL le harnais émet en cas de succès ; le code étudiant vit dans un
+ *       processus séparé qui ne voit jamais le nonce (cf. {@link CodeAssembler}).</li>
+ * </ul>
  */
 @Service
 public class ExecutionService {
@@ -30,28 +39,43 @@ public class ExecutionService {
     private static final SecureRandom RNG = new SecureRandom();
 
     private final CodeAssembler assembler;
-    private final PistonClient piston;
+    private final RunnerExec runner;
     private final ExecutionLimiter limiter;
+    private final DockerEvaluator dockerEvaluator;
 
     /** Taille max du dump d'état transféré phase 1 → phase 2 (borne anti-DoS). Configurable. */
     @Value("${app.sql.max-dump-chars:524288}")
     private int maxSqlDumpChars = 524288;
 
-    /** Sans borne de charge effective (tests unitaires de la logique de verdict). */
-    public ExecutionService(CodeAssembler assembler, PistonClient piston) {
-        this(assembler, piston, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE));
+    /** Sans borne de charge ni runner de notation compilée (tests unitaires de la logique de verdict). */
+    public ExecutionService(CodeAssembler assembler, RunnerExec runner) {
+        this(assembler, runner, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE), null);
+    }
+
+    /** Pour les tests : runner Docker injectable, sans borne de charge. */
+    public ExecutionService(CodeAssembler assembler, RunnerExec runner, DockerEvaluator dockerEvaluator) {
+        this(assembler, runner, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE),
+                dockerEvaluator);
     }
 
     @Autowired
-    public ExecutionService(CodeAssembler assembler, PistonClient piston, ExecutionLimiter limiter) {
+    public ExecutionService(CodeAssembler assembler, RunnerExec runner, ExecutionLimiter limiter,
+            DockerEvaluator dockerEvaluator) {
         this.assembler = assembler;
-        this.piston = piston;
+        this.runner = runner;
         this.limiter = limiter;
+        this.dockerEvaluator = dockerEvaluator;
     }
 
-    /** Un appel au sandbox, dans une place de la limite globale (#24) : file bornée, sinon 429. */
-    private PistonClient.Result execute(String language, String version, List<PistonClient.File> files) {
-        return limiter.withSandboxSlot(() -> piston.execute(language, version, files));
+    /** Un passage au runner, dans une place de la limite globale (#24) : file bornée, sinon 429. */
+    private RunnerExec.Result execute(String runtime, List<RunnerExec.File> files) {
+        return execute(runtime, files, null, null);
+    }
+
+    /** Variante complète : {@code timeoutMs} = temps limite demandé par le prof ({@code null} → défaut). */
+    private RunnerExec.Result execute(String runtime, List<RunnerExec.File> files,
+            String stdin, Integer timeoutMs) {
+        return limiter.withSandboxSlot(() -> runner.execute(runtime, files, stdin, timeoutMs));
     }
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
@@ -62,10 +86,21 @@ public class ExecutionService {
     }
 
     public List<TestResult> evaluate(EvaluateRequest request) {
+        // Langages COMPILÉS (#116) : notés dans un CONTENEUR RUNNER jetable (superviseur root,
+        // code étudiant sous un UID dédié, harnais = vrai framework de test, canaris anti-
+        // falsification). Un conteneur = une place de la limite globale, comme toute exécution.
+        if (CodeAssembler.isCompiled(request.language())) {
+            if (dockerEvaluator == null) {
+                throw new SandboxException("Runner Docker non configuré pour les langages compilés");
+            }
+            return limiter.withSandboxSlot(() -> dockerEvaluator.evaluate(
+                    request.language(), request.code(), request.testCases(), request.timeoutMs()));
+        }
         List<TestResult> results = new ArrayList<>();
         for (TestCaseInput testCase : request.testCases()) {
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
-            results.add(runOne(request.language(), request.version(), request.code(), testCase, newNonce()));
+            results.add(runOne(request.language(), request.code(), testCase, newNonce(),
+                    request.timeoutMs()));
         }
         return results;
     }
@@ -78,9 +113,9 @@ public class ExecutionService {
      */
     public RunResult run(RunRequest request) {
         CodeAssembler.Assembled assembled = assembler.assembleRun(request.language(), request.code());
-        PistonClient.Result result = execute(assembled.pistonLanguage(), request.version(), assembled.files());
+        RunnerExec.Result result = execute(assembled.runtime(), assembled.files());
 
-        PistonClient.Stage compile = result.compile();
+        RunnerExec.Stage compile = result.compile();
         String compileOutput = compile == null ? null : firstNonBlank(compile.stderr(), compile.stdout());
         // Échec de compilation (langages compilés) : pas d'étape run, on remonte la sortie de compil.
         if (compile != null && compile.code() != null && compile.code() != 0) {
@@ -89,7 +124,7 @@ public class ExecutionService {
                     compile.code(), compile.signal(), compileOutput, false);
         }
 
-        PistonClient.Stage run = result.run();
+        RunnerExec.Stage run = result.run();
         if (run == null) {
             return new RunResult("", "Aucune sortie d'exécution", null, null, compileOutput, false);
         }
@@ -98,32 +133,32 @@ public class ExecutionService {
                 compileOutput, timedOut);
     }
 
-    private TestResult runOne(String language, String version, String code, TestCaseInput testCase,
-            String nonce) {
+    private TestResult runOne(String language, String code, TestCaseInput testCase,
+            String nonce, Integer timeoutMs) {
         int weight = testCase.effectiveWeight();
 
         // SQL en mode MODIFICATION (harnais avec « -- @student ») : exécution ISOLÉE en deux phases
         // (bac à sable jetable pour l'étudiant, puis noteur séparé). Cf. runSqlIsolated.
         if (CodeAssembler.isSql(language) && CodeAssembler.sqlHasStudentMarker(testCase.harnessCode())) {
-            return runSqlIsolated(version, code, testCase, nonce, weight);
+            return runSqlIsolated(code, testCase, nonce, weight, timeoutMs);
         }
 
         CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
-        PistonClient.Result result = execute(assembled.pistonLanguage(), version, assembled.files());
+        RunnerExec.Result result = execute(assembled.runtime(), assembled.files(), null, timeoutMs);
 
-        // Échec de compilation (langages compilés) → test échoué, message = stderr de compilation.
-        PistonClient.Stage compile = result.compile();
+        // Échec de compilation (ex. TypeScript) → test échoué, message = stderr de compilation.
+        RunnerExec.Stage compile = result.compile();
         if (compile != null && compile.code() != null && compile.code() != 0) {
             return new TestResult(testCase.name(), weight, false,
                     firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation"));
         }
 
-        PistonClient.Stage run = result.run();
+        RunnerExec.Stage run = result.run();
 
         // SQL : le verdict se lit sur la SORTIE (dernière ligne == 1), pas via l'exit code — SQLite
         // renvoie 0 même pour un booléen faux. Un exit non-zéro = vraie erreur SQL (syntaxe, table
         // manquante…) → échec, message = stderr.
-        if ("sqlite3".equals(assembled.pistonLanguage())) {
+        if ("sqlite3".equals(assembled.runtime())) {
             return sqlResult(testCase.name(), weight, run, nonce);
         }
 
@@ -147,11 +182,11 @@ public class ExecutionService {
      * Le SQL de l'étudiant ne s'exécute JAMAIS dans le processus qui note : l'isolation est
      * structurelle (processus/base), pas un filtrage lexical.
      */
-    private TestResult runSqlIsolated(String version, String code, TestCaseInput testCase,
-            String nonce, int weight) {
+    private TestResult runSqlIsolated(String code, TestCaseInput testCase,
+            String nonce, int weight, Integer timeoutMs) {
         // Phase 1 — bac à sable.
         CodeAssembler.Assembled p1 = assembler.assembleSqlPhase1(code, testCase.harnessCode(), nonce);
-        PistonClient.Stage run1 = execute("sqlite3", version, p1.files()).run();
+        RunnerExec.Stage run1 = execute("sqlite3", p1.files(), null, timeoutMs).run();
         if (run1 == null || run1.signal() != null) {
             return new TestResult(testCase.name(), weight, false,
                     "Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
@@ -169,13 +204,13 @@ public class ExecutionService {
         if (dump.length() > maxSqlDumpChars) {
             return new TestResult(testCase.name(), weight, false, "État de la base trop volumineux");
         }
-        // Liste blanche = tables déclarées par le prof ; découple le filtrage des internes de Piston.
+        // Liste blanche = tables déclarées par le prof ; découple le filtrage des internes de sqlite.
         String data = CodeAssembler.filterDumpToData(dump, CodeAssembler.sqlWorkingTables(testCase.harnessCode()));
 
         // Phase 2 — noteur isolé. Une erreur ici vient du HARNAIS (prof) : message générique, on ne
         // fuit pas son stderr (structure des tables de référence) à l'étudiant.
         CodeAssembler.Assembled p2 = assembler.assembleSqlPhase2(data, testCase.harnessCode(), nonce);
-        PistonClient.Stage run2 = execute("sqlite3", version, p2.files()).run();
+        RunnerExec.Stage run2 = execute("sqlite3", p2.files(), null, timeoutMs).run();
         if (run2 == null || run2.signal() != null || (run2.code() != null && run2.code() != 0)) {
             return new TestResult(testCase.name(), weight, false, "Le harnais n'a pas pu évaluer ton résultat");
         }
@@ -192,7 +227,7 @@ public class ExecutionService {
      * que l'étudiant a pu afficher arrive avant et est ignoré, et il ne peut pas forger le nonce.
      * Sentinelles absentes (ex. un {@code /*} qui les a avalées) → échec.
      */
-    private static TestResult sqlResult(String name, int weight, PistonClient.Stage run, String nonce) {
+    private static TestResult sqlResult(String name, int weight, RunnerExec.Stage run, String nonce) {
         if (run == null) {
             return new TestResult(name, weight, false, "Aucune sortie SQL");
         }
@@ -262,7 +297,7 @@ public class ExecutionService {
     }
 
     /** Message d'échec exploitable pour le prof (signal = timeout/OOM, sinon stderr). */
-    private static String runFailureDetail(PistonClient.Stage run) {
+    private static String runFailureDetail(RunnerExec.Stage run) {
         if (run == null) {
             return "Aucune sortie d'exécution";
         }

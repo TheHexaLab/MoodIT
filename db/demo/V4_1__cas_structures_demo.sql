@@ -1,0 +1,13 @@
+-- #116 — (ANNULÉE) Conversion de la DÉMO vers les cas structurés.
+--
+-- Cette migration convertissait les questions COMPILÉES du démo (doubler + Rectangle POO) du
+-- harnais-code vers une EXPRESSION structurée. Le projet a finalement retenu le HARNAIS-CODE PARTOUT,
+-- y compris pour les compilés : ceux-ci sont notés en DEUX processus (code étudiant isolé dans un
+-- enfant, nonce/verdict dans le parent — POO comprise), ce qui cache déjà l'attendu sans exposer le
+-- harnais. Le démo garde donc les harnais d'origine de V2_3 (compatibles avec le modèle 2-process),
+-- et cette étape ne convertit plus rien.
+--
+-- Conservée en no-op (plutôt que supprimée) pour ne pas « trouer » l'historique Flyway des bases déjà
+-- migrées. Les colonnes expr/expected_json/compare_mode (schéma V4) sont ensuite SUPPRIMÉES par V6
+-- (le chemin « cas structurés » est retiré du produit) ; le démo ne les a jamais utilisées.
+SELECT 1;

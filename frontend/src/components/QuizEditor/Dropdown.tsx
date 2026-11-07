@@ -64,10 +64,12 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
   // scroller À L'INTÉRIEUR de la liste (>3 éléments) ne le ferme pas.
   useLayoutEffect(() => {
     if (!open) return;
+    let placedAt: { top: number; left: number } | null = null;
     const place = () => {
       const el = controlRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      placedAt = { top: r.top, left: r.left };
       const gap = 4;
       const spaceBelow = window.innerHeight - r.bottom;
       const openUp = spaceBelow < MENU_MAX_PX && r.top > spaceBelow;
@@ -87,6 +89,16 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
       // Scroll interne de la liste → on garde le menu ouvert ; sinon (corps/popup) → on ferme.
       const target = e.target as Node | null;
       if (target && menuRef.current?.contains(target)) return;
+      // Les événements de défilement sont dispatchés de façon ASYNCHRONE : un scroll
+      // « fantôme » peut arriver juste après l'ouverture sans rien avoir déplacé (remise
+      // à zéro du corps au changement de vue, transition de taille de la coquille). On ne
+      // ferme que si le contrôle a réellement bougé depuis le placement du menu — un vrai
+      // défilement de l'utilisateur, comme un <select> natif.
+      const el = controlRef.current;
+      if (el && placedAt) {
+        const r = el.getBoundingClientRect();
+        if (Math.abs(r.top - placedAt.top) < 1 && Math.abs(r.left - placedAt.left) < 1) return;
+      }
       setOpen(false);
     };
     window.addEventListener('scroll', onScroll, true);

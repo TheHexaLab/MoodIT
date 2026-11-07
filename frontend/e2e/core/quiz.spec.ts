@@ -137,7 +137,7 @@ test('glisser-déposer, revue des réponses et reprise du quiz', async ({ browse
 });
 
 // Quiz créé par le prof (API), reprises désactivées, avec une question de Code Python corrigée
-// par Piston de façon asynchrone. Compte neuf : la tentative est unique.
+// par le runner de façon asynchrone. Compte neuf : la tentative est unique.
 test('question de code et tentative unique', async ({ browser, baseURL }) => {
   const { api } = await profSession(baseURL!);
   const marker = '[e2e-q]';

@@ -7,8 +7,8 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonClient;
-import com.moodit.execution_service.piston.PistonException;
+import com.moodit.execution_service.sandbox.RunnerExec;
+import com.moodit.execution_service.sandbox.SandboxException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
@@ -41,33 +41,33 @@ import static org.mockito.Mockito.when;
 class ExecutionServiceEdgeCasesTest {
 
     private final CodeAssembler assembler = new CodeAssembler("/nonexistent-vendor");
-    private final PistonClient piston = mock(PistonClient.class);
-    private final ExecutionService service = new ExecutionService(assembler, piston);
+    private final RunnerExec runner = mock(RunnerExec.class);
+    private final ExecutionService service = new ExecutionService(assembler, runner);
 
     private static final Pattern NONCE = Pattern.compile("MOODIT_OK_[0-9a-f]+");
 
-    private static String nonceIn(List<PistonClient.File> files) {
-        for (PistonClient.File f : files) {
+    private static String nonceIn(List<RunnerExec.File> files) {
+        for (RunnerExec.File f : files) {
             Matcher m = NONCE.matcher(f.content());
             if (m.find()) return m.group();
         }
         return "";
     }
 
-    private static PistonClient.Stage stage(String stdout, String stderr, Integer code, String signal, String message) {
-        return new PistonClient.Stage(stdout, stderr, code, signal, message);
+    private static RunnerExec.Stage stage(String stdout, String stderr, Integer code, String signal, String message) {
+        return new RunnerExec.Stage(stdout, stderr, code, signal, message);
     }
 
     /** Piston renvoie le résultat calculé à partir des fichiers soumis. */
-    private void piston(Function<List<PistonClient.File>, PistonClient.Result> fn) {
+    private void piston(Function<List<RunnerExec.File>, RunnerExec.Result> fn) {
         // Re-programmation : on repart d'un mock vierge (sinon when(...) rappelle l'ancienne réponse).
-        reset(piston);
-        when(piston.execute(anyString(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv ->
-                fn.apply(inv.getArgument(2)));
+        reset(runner);
+        when(runner.execute(anyString(), any(), any(), any())).thenAnswer((Answer<RunnerExec.Result>) inv ->
+                fn.apply(inv.getArgument(1)));
     }
 
-    private void pistonRun(Function<List<PistonClient.File>, PistonClient.Stage> runFn) {
-        piston(files -> new PistonClient.Result(null, runFn.apply(files), null));
+    private void pistonRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
+        piston(files -> new RunnerExec.Result(null, runFn.apply(files), null));
     }
 
     private TestResult single(String language, String code, String harness) {
@@ -77,7 +77,7 @@ class ExecutionServiceEdgeCasesTest {
         return r.get(0);
     }
 
-    private static String sqlFenced(List<PistonClient.File> files, String body) {
+    private static String sqlFenced(List<RunnerExec.File> files, String body) {
         String nonce = nonceIn(files);
         return CodeAssembler.sqlVerdictStart(nonce) + "\n" + body + "\n" + CodeAssembler.sqlVerdictEnd(nonce) + "\n";
     }
@@ -85,17 +85,17 @@ class ExecutionServiceEdgeCasesTest {
     // ── run() : exécution simple ────────────────────────────────────────────────
 
     @Test
-    void run_envoie_le_code_brut_avec_la_version_et_renvoie_la_sortie() {
-        when(piston.execute(eq("python"), eq("3.12"), any()))
-                .thenReturn(new PistonClient.Result(null, stage("bonjour\n", "", 0, null, null), null));
+    void run_envoie_le_code_brut_et_renvoie_la_sortie() {
+        when(runner.execute(eq("python"), any(), any(), any()))
+                .thenReturn(new RunnerExec.Result(null, stage("bonjour\n", "", 0, null, null), null));
 
-        RunResult r = service.run(new RunRequest("Python", "3.12", "print('bonjour')"));
+        RunResult r = service.run(new RunRequest("Python", null, "print('bonjour')"));
 
         assertThat(r).isEqualTo(new RunResult("bonjour\n", "", 0, null, null, false));
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<PistonClient.File>> files = ArgumentCaptor.forClass(List.class);
-        verify(piston).execute(eq("python"), eq("3.12"), files.capture());
-        assertThat(files.getValue()).containsExactly(new PistonClient.File("main.py", "print('bonjour')"));
+        ArgumentCaptor<List<RunnerExec.File>> files = ArgumentCaptor.forClass(List.class);
+        verify(runner).execute(eq("python"), files.capture(), any(), any());
+        assertThat(files.getValue()).containsExactly(new RunnerExec.File("main.py", "print('bonjour')"));
     }
 
     @Test
@@ -109,7 +109,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_echec_de_compilation_remonte_la_sortie_de_compilation() {
-        piston(f -> new PistonClient.Result(stage("", "main.c:1: erreur", 1, null, null), null, null));
+        piston(f -> new RunnerExec.Result(stage("", "main.c:1: erreur", 1, null, null), null, null));
 
         RunResult r = service.run(new RunRequest("C", null, "int main( {"));
 
@@ -118,19 +118,19 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_echec_de_compilation_sans_stderr_utilise_le_message_puis_un_libelle_par_defaut() {
-        piston(f -> new PistonClient.Result(stage("sortie compil", "  ", 2, "SIGTERM", "msg Piston"), null, null));
+        piston(f -> new RunnerExec.Result(stage("sortie compil", "  ", 2, "SIGTERM", "msg Piston"), null, null));
         RunResult withMessage = service.run(new RunRequest("C", null, "x"));
         // stderr vide → message ; la sortie de compil retombe sur stdout ; le signal est transmis.
         assertThat(withMessage).isEqualTo(new RunResult("", "msg Piston", 2, "SIGTERM", "sortie compil", false));
 
-        piston(f -> new PistonClient.Result(stage(null, null, 1, null, null), null, null));
+        piston(f -> new RunnerExec.Result(stage(null, null, 1, null, null), null, null));
         RunResult bare = service.run(new RunRequest("C", null, "x"));
         assertThat(bare).isEqualTo(new RunResult("", "Échec de compilation", 1, null, null, false));
     }
 
     @Test
     void run_compilation_reussie_transmet_sa_sortie_avec_celle_du_programme() {
-        piston(f -> new PistonClient.Result(stage("", "warning: unused", 0, null, null),
+        piston(f -> new RunnerExec.Result(stage("", "warning: unused", 0, null, null),
                 stage("42", "", 0, null, null), null));
 
         RunResult r = service.run(new RunRequest("C", null, "int main(){}"));
@@ -140,14 +140,14 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_compilation_au_code_absent_n_est_pas_un_echec() {
-        piston(f -> new PistonClient.Result(stage("", "", null, null, null), stage("ok", "", 0, null, null), null));
+        piston(f -> new RunnerExec.Result(stage("", "", null, null, null), stage("ok", "", 0, null, null), null));
 
         assertThat(service.run(new RunRequest("Rust", null, "fn main(){}")).stdout()).isEqualTo("ok");
     }
 
     @Test
     void run_sans_etape_run_renvoie_un_message_explicite() {
-        piston(f -> new PistonClient.Result(null, null, null));
+        piston(f -> new RunnerExec.Result(null, null, null));
 
         RunResult r = service.run(new RunRequest("Python", null, ""));
 
@@ -179,27 +179,27 @@ class ExecutionServiceEdgeCasesTest {
     void run_langage_non_supporte_n_appelle_pas_piston() {
         assertThatThrownBy(() -> service.run(new RunRequest("HTML", null, "<p>")))
                 .isInstanceOf(UnsupportedLanguageException.class);
-        verify(piston, never()).execute(anyString(), any(), any());
+        verify(runner, never()).execute(anyString(), any(), any(), any());
     }
 
     @Test
-    void run_erreur_piston_est_propagee() {
-        when(piston.execute(anyString(), any(), any())).thenThrow(new PistonException("injoignable"));
+    void run_erreur_du_runner_est_propagee() {
+        when(runner.execute(anyString(), any(), any(), any())).thenThrow(new SandboxException("injoignable"));
 
         assertThatThrownBy(() -> service.run(new RunRequest("Python", null, "")))
-                .isInstanceOf(PistonException.class).hasMessage("injoignable");
+                .isInstanceOf(SandboxException.class).hasMessage("injoignable");
     }
 
     // ── evaluate() : verdict et messages d'échec ────────────────────────────────
 
     @Test
-    void evaluate_transmet_langage_piston_et_version() {
+    void evaluate_transmet_le_runtime_normalise_au_runner() {
         pistonRun(f -> stage("", nonceIn(f), 0, null, null));
 
-        service.evaluate(new EvaluateRequest("Python", "3.10.0", "def f(): pass",
+        service.evaluate(new EvaluateRequest("Python", null, "def f(): pass",
                 List.of(new TestCaseInput("t", "return True", 1))));
 
-        verify(piston).execute(eq("python"), eq("3.10.0"), any());
+        verify(runner).execute(eq("python"), any(), any(), any());
     }
 
     @Test
@@ -244,7 +244,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_sans_etape_run_echoue_avec_message() {
-        piston(f -> new PistonClient.Result(null, null, null));
+        piston(f -> new RunnerExec.Result(null, null, null));
 
         TestResult t = single("Python", "", "return True");
 
@@ -273,27 +273,21 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_echec_de_compilation_sans_stderr() {
-        piston(f -> new PistonClient.Result(stage("", "", 1, null, "compile killed"), null, null));
-        assertThat(single("C", "", "return 1;").detail()).isEqualTo("compile killed");
+        // TypeScript : seul langage encore assemblé pour Piston avec une étape de compilation (#116).
+        piston(f -> new RunnerExec.Result(stage("", "", 1, null, "compile killed"), null, null));
+        assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("compile killed");
 
-        piston(f -> new PistonClient.Result(stage("", "", 1, null, null), null, null));
-        TestResult t = single("C", "", "return 1;");
+        piston(f -> new RunnerExec.Result(stage("", "", 1, null, null), null, null));
+        TestResult t = single("TypeScript", "", "return true;");
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Échec de compilation");
-    }
-
-    @Test
-    void evaluate_compilation_reussie_puis_nonce_vaut_reussite() {
-        piston(f -> new PistonClient.Result(stage("", "", 0, null, null), stage("", nonceIn(f), 0, null, null), null));
-
-        assertThat(single("C", "int s(){return 1;}", "return s();").passed()).isTrue();
     }
 
     // ── SQL lecture seule : verdict dégradé ─────────────────────────────────────
 
     @Test
     void sql_sans_etape_run() {
-        piston(f -> new PistonClient.Result(null, null, null));
+        piston(f -> new RunnerExec.Result(null, null, null));
 
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
 
@@ -378,18 +372,18 @@ class ExecutionServiceEdgeCasesTest {
     private static final String MUTATION_HARNESS =
             "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(1);\n-- @student\nSELECT (SELECT n FROM t) = 0;";
 
-    private static boolean isPhase1(List<PistonClient.File> files) {
+    private static boolean isPhase1(List<RunnerExec.File> files) {
         return files.get(0).content().contains(".dump");
     }
 
-    private static String dump(List<PistonClient.File> files, String body) {
+    private static String dump(List<RunnerExec.File> files, String body) {
         String n = nonceIn(files);
         return CodeAssembler.sqlDumpStart(n) + "\n" + body + CodeAssembler.sqlDumpEnd(n) + "\n";
     }
 
     @Test
     void sql_modification_phase1_sans_run_ou_interrompue() {
-        piston(f -> new PistonClient.Result(null, null, null));
+        piston(f -> new RunnerExec.Result(null, null, null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
                 .isEqualTo("Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
 
@@ -406,7 +400,7 @@ class ExecutionServiceEdgeCasesTest {
         TestResult t = single("SQL", "x", MUTATION_HARNESS);
 
         assertThat(t.detail()).isEqualTo("near \"x\": syntax error");
-        verify(piston, times(1)).execute(eq("sqlite3"), any(), any());
+        verify(runner, times(1)).execute(eq("sqlite3"), any(), any(), any());
     }
 
     @Test
@@ -425,7 +419,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base introuvable après ton code");
-        verify(piston, times(1)).execute(anyString(), any(), any());
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -437,7 +431,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base trop volumineux");
-        verify(piston, times(1)).execute(anyString(), any(), any());
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -452,7 +446,7 @@ class ExecutionServiceEdgeCasesTest {
 
         assertThat(body).hasSize(50);
         assertThat(t.passed()).isTrue();
-        verify(piston, times(2)).execute(anyString(), any(), any());
+        verify(runner, times(2)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -493,8 +487,8 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void sql_modification_phase2_sans_run_ou_interrompue() {
         piston(f -> isPhase1(f)
-                ? new PistonClient.Result(null, stage(dump(f, ""), "", 0, null, null), null)
-                : new PistonClient.Result(null, null, null));
+                ? new RunnerExec.Result(null, stage(dump(f, ""), "", 0, null, null), null)
+                : new RunnerExec.Result(null, null, null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
                 .isEqualTo("Le harnais n'a pas pu évaluer ton résultat");
 

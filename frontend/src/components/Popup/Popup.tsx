@@ -141,11 +141,23 @@ export function Popup({
     (explicit ?? field ?? candidates[0] ?? panel).focus({ preventScroll: true });
   }, []);
 
-  // Fermeture : le focus revient à l'élément qui a ouvert la popup, s'il est toujours affiché.
+  // Fermeture : le focus revient à l'élément qui a ouvert la popup, s'il est toujours affiché —
+  // SAUF si l'utilisateur a déjà posé le focus ailleurs pendant l'animation de sortie (ex. une
+  // liste déroulante rouverte aussitôt) : le lui reprendre refermerait son widget. Un focus resté
+  // dans le panneau est « orphelin » au démontage (retombé sur <body>, ou sur un panneau déjà
+  // détaché) : c'est le cas où on restitue.
   useEffect(() => {
     const timer = fallbackTimer;
+    const panel = panelRef.current; // capturé au montage : au démontage le ref est déjà vidé
     return () => {
       if (timer.current != null) window.clearTimeout(timer.current);
+      const active = document.activeElement;
+      const orphaned =
+        !active ||
+        active === document.body ||
+        !active.isConnected ||
+        (panel != null && panel.contains(active));
+      if (!orphaned) return;
       if (opener && opener.isConnected && typeof opener.focus === 'function') {
         opener.focus({ preventScroll: true });
       }

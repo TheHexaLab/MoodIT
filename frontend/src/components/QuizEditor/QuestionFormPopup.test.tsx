@@ -326,6 +326,33 @@ describe('QuestionFormBody', () => {
     expect(saveButton(t.add).disabled).toBe(false);
   });
 
+  it('code : le temps limite saisi en secondes est stocké en millisecondes', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel, { exact: false }), { target: { value: '5' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(5000);
+  });
+
+  it('code : vider le temps limite revient au défaut du sandbox', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      execTimeoutMs: 8000,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    expect(input.value).toBe('8');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBeUndefined();
+  });
+
   it('code : changer de langage repose le code de départ et vide les harnais', () => {
     const draft: QuestionDraft = {
       ...emptyQuestionDraft('coding'),

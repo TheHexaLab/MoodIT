@@ -1,0 +1,318 @@
+package com.moodit.execution_service.sandbox;
+
+import com.moodit.execution_service.assembly.UnsupportedLanguageException;
+import com.moodit.execution_service.dto.TestCaseInput;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Construit l'ARBORESCENCE DE PROJET envoyée au conteneur runner d'un langage compilé (#116) :
+ * un dossier {@code cases/<i>/src/} par harnais, dans la disposition NATIVE du framework de test
+ * du langage — le harnais du prof est un VRAI test (JUnit, NUnit, go test, cargo test,
+ * moodit_check.h), le code étudiant un vrai fichier source à côté. Aucune génération de code :
+ * la POO, les champs privés, les génériques… sont du simple code de test.
+ *
+ * Deux CANARIS sont ajoutés en fin de liste (indices N et N+1) : des cas dont le harnais est un
+ * gabarit {@code __MOODIT_A__ == __MOODIT_B__} que le SUPERVISEUR instancie à l'exécution avec
+ * des valeurs tirées au sort — l'un doit réussir, l'autre échouer. Ils embarquent aussi le code
+ * étudiant : un code qui détourne le framework depuis un init/constructeur (exécuté partout)
+ * casse leurs résultats et se fait détecter.
+ *
+ * Chaque cas porte de plus un JETON DE FIN D'EXÉCUTION (gabarit {@code __MOODIT_T__}, substitué
+ * par le superviseur) imprimé par le POINT DE SORTIE du framework, après tous les tests : un
+ * forgeage déclenché depuis la fonction notée elle-même (qui ne s'exécute pas dans les canaris)
+ * produit un rapport sans jeton → verdict échoué ({@code jeton_absent}).
+ *
+ * Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.
+ */
+public final class HarnessProjects {
+
+    private HarnessProjects() {
+    }
+
+    /** Projet prêt à copier dans /box : chemins relatifs → contenu, plus la liste des cas. */
+    public record Project(String runnerLanguage, Map<String, String> files, int caseCount) {}
+
+    /** Langage canonique du runner, ou exception si le langage n'est pas un compilé pris en charge. */
+    public static String runnerLanguage(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return switch (lang) {
+            case "java" -> "java";
+            case "cs", "c-sharp", "csharp", "c#" -> "csharp";
+            case "go", "golang" -> "go";
+            case "rust" -> "rust";
+            case "c" -> "c";
+            case "cpp", "cplusplus", "c++" -> "cpp";
+            default -> throw new UnsupportedLanguageException(
+                    "Langage compilé non pris en charge par le runner : " + language);
+        };
+    }
+
+    public static Project build(String language, String studentCode, List<TestCaseInput> cases,
+            Integer timeoutMs) {
+        String lang = runnerLanguage(language);
+        String code = studentCode == null ? "" : studentCode;
+        Map<String, String> files = new LinkedHashMap<>();
+
+        StringBuilder caseList = new StringBuilder();
+        int index = 0;
+        for (TestCaseInput testCase : cases) {
+            addCase(files, lang, index, code, testCase.harnessCode() == null ? "" : testCase.harnessCode());
+            caseList.append(index > 0 ? "," : "")
+                    .append("{\"index\":").append(index)
+                    .append(",\"name\":").append(jsonString(testCase.name())).append("}");
+            index++;
+        }
+        // Canaris (voir javadoc) : harnais gabarit instancié par le superviseur.
+        for (String kind : new String[] {"pass", "fail"}) {
+            addCase(files, lang, index, code, canaryHarness(lang));
+            caseList.append(",{\"index\":").append(index)
+                    .append(",\"canary\":\"").append(kind).append("\"}");
+            index++;
+        }
+
+        files.put("job.json", "{\"language\":\"" + lang + "\","
+                + "\"timeout_ms\":" + (timeoutMs == null ? "null" : timeoutMs.toString()) + ","
+                + "\"cases\":[" + caseList + "]}");
+        return new Project(lang, files, cases.size());
+    }
+
+    // ── disposition par langage ───────────────────────────────────────────────
+
+    private static void addCase(Map<String, String> files, String lang, int index,
+            String studentCode, String harnessCode) {
+        String base = "cases/" + index + "/src/";
+        switch (lang) {
+            case "java" -> {
+                String studentFile = javaFileName(studentCode, "Solution");
+                String harnessFile = javaFileName(harnessCode, "MooditHarness");
+                if (harnessFile.equals(studentFile)) {
+                    // Même classe publique des deux côtés : garder les DEUX fichiers (sinon le
+                    // second écrase le premier en silence) — javac produira une erreur de
+                    // compilation EXPLICITE (classe dupliquée / mauvais nom de fichier) au lieu
+                    // d'un déroutant « classe introuvable ».
+                    harnessFile = "MooditHarnais_" + harnessFile;
+                }
+                files.put(base + studentFile, studentCode);
+                files.put(base + harnessFile, harnessCode);
+                // Enveloppe du ConsoleLauncher JUnit : le jeton de fin n'est imprimé qu'une
+                // fois l'exécution terminée — un System.exit(0) forgé le saute.
+                // Clé de fichier NEUTRE (la classe reste MooditMain, non publique) : si
+                // l'étudiant déclare sa propre classe MooditMain, javac signale un doublon
+                // explicite au lieu de laisser un fichier en écraser un autre dans la map.
+                // Et si un fichier étudiant/harnais s'appelle déjà MooditEnveloppe.java (classe
+                // publique de ce nom), la clé est décalée — même parade que la collision du
+                // harnais : rien n'est écrasé en silence.
+                String wrapperFile = "MooditEnveloppe.java";
+                if (wrapperFile.equals(studentFile) || wrapperFile.equals(harnessFile)) {
+                    wrapperFile = "MooditEnveloppe_moodit.java";
+                }
+                files.put(base + wrapperFile, """
+                        import java.io.PrintWriter;
+
+                        class MooditMain {
+                            public static void main(String[] args) {
+                                int code = org.junit.platform.console.ConsoleLauncher
+                                        .run(new PrintWriter(System.out, true),
+                                                new PrintWriter(System.err, true), args)
+                                        .getExitCode();
+                                System.out.println("[MOODIT] jeton=__MOODIT_T__");
+                                System.exit(code);
+                            }
+                        }
+                        """);
+            }
+            case "csharp" -> {
+                files.put(base + "solution.cs", studentCode);
+                files.put(base + "harness.cs", harnessCode);
+                // Point d'entrée NUnitLite : exécute tous les [Test] de l'assemblage. Généré ici
+                // (pas à la charge du prof) ; `mcs -main:MooditRunner` l'impose comme entrée même
+                // si le code étudiant a son propre Main.
+                // Le jeton de fin n'est imprimé qu'une fois Execute terminé : un
+                // Environment.Exit(0) forgé dans le code étudiant le saute.
+                files.put(base + "moodit_runner.cs", """
+                        class MooditRunner
+                        {
+                            static int Main(string[] args)
+                            {
+                                int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
+                                System.Console.WriteLine("[MOODIT] jeton=__MOODIT_T__");
+                                return code;
+                            }
+                        }
+                        """);
+            }
+            case "go" -> {
+                files.put(base + "go.mod", "module moodit\n\ngo 1.23\n");
+                files.put(base + "main.go", studentCode);
+                // Même package que l'étudiant : les identifiants non exportés restent accessibles,
+                // comme dans un vrai test Go.
+                files.put(base + "solution_test.go", harnessCode);
+                // Le jeton de fin n'est imprimé qu'après m.Run() : un os.Exit(0) forgé dans le
+                // code étudiant le saute. (Un harnais qui définirait son propre TestMain ne
+                // compile pas — doublon explicite, cas assumé.)
+                files.put(base + "moodit_main_test.go", """
+                        package main
+
+                        import (
+                            "fmt"
+                            "os"
+                            "testing"
+                        )
+
+                        func TestMain(m *testing.M) {
+                            code := m.Run()
+                            fmt.Println("[MOODIT] jeton=__MOODIT_T__")
+                            os.Exit(code)
+                        }
+                        """);
+            }
+            case "rust" -> {
+                files.put(base + "Cargo.toml", """
+                        [package]
+                        name = "moodit"
+                        version = "0.1.0"
+                        edition = "2021"
+                        """);
+                // Idiome Rust : module de tests DANS le fichier (use super::*) → accès aux items
+                // privés du code étudiant, comme un vrai test unitaire. Le module jeton se nomme
+                // zzzz_* : dernier par ordre alphabétique (libtest trie, --test-threads=1) — un
+                // exit(0) forgé dans un test antérieur le saute (--nocapture côté superviseur).
+                files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n\n" + """
+                        #[cfg(test)]
+                        mod zzzz_moodit_jeton {
+                            #[test]
+                            fn zzzz_jeton() {
+                                println!("[MOODIT] jeton=__MOODIT_T__");
+                            }
+                        }
+                        """);
+            }
+            // default = C et C++ : lang vient de runnerLanguage(), qui ne renvoie que les six
+            // valeurs canoniques — il ne reste que "c" et "cpp" ici.
+            default -> {
+                String ext = lang.equals("c") ? "c" : "cpp";
+                files.put(base + "solution." + ext, studentCode);
+                // Prélude généré : inclut le code étudiant (main neutralisé) + moodit_check.h ;
+                // le harnais du prof ne contient que des MOODIT_TEST.
+                files.put(base + "harness." + ext,
+                        "/* Prélude MoodIT : code étudiant inclus (son main est renommé), puis le harnais. */\n"
+                        + "#define main __moodit_student_main\n"
+                        + "#include \"solution." + ext + "\"\n"
+                        + "#undef main\n"
+                        + "#define MOODIT_JETON \"__MOODIT_T__\"\n"
+                        + "#include <moodit_check.h>\n\n"
+                        + harnessCode);
+            }
+        }
+    }
+
+    // ── canaris par langage — gabarits instanciés au runtime : valeurs __MOODIT_A__/__MOODIT_B__
+    //    ET NOM __MOODIT_N__ (un nom fixe serait reconnaissable : un code C/C++ qui interpose
+    //    printf laisserait passer les canaris à leur nom et ne forgerait que les cas réels) ──
+
+    private static String canaryHarness(String lang) {
+        return switch (lang) {
+            case "java" -> """
+                    import org.junit.jupiter.api.Test;
+                    import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                    class __MOODIT_N__ {
+                        @Test
+                        void t__MOODIT_N__() {
+                            assertEquals(__MOODIT_A__, __MOODIT_B__);
+                        }
+                    }
+                    """;
+            case "csharp" -> """
+                    using NUnit.Framework;
+
+                    public class __MOODIT_N__
+                    {
+                        [Test]
+                        public void T__MOODIT_N__()
+                        {
+                            Assert.That(__MOODIT_A__, Is.EqualTo(__MOODIT_B__));
+                        }
+                    }
+                    """;
+            case "go" -> """
+                    package main
+
+                    import "testing"
+
+                    func Test__MOODIT_N__(t *testing.T) {
+                        if __MOODIT_A__ != __MOODIT_B__ {
+                            t.Fatal("canari")
+                        }
+                    }
+                    """;
+            case "rust" -> """
+                    #[cfg(test)]
+                    #[allow(non_snake_case)]
+                    mod m__MOODIT_N__ {
+                        #[test]
+                        fn t__MOODIT_N__() {
+                            assert_eq!(__MOODIT_A__, __MOODIT_B__);
+                        }
+                    }
+                    """;
+            // default = C et C++ (seules valeurs restantes de runnerLanguage()).
+            default -> """
+                    MOODIT_TEST(__MOODIT_N__) {
+                        MOODIT_CHECK(__MOODIT_A__ == __MOODIT_B__);
+                    }
+                    """;
+        };
+    }
+
+    // ── utilitaires ───────────────────────────────────────────────────────────
+
+    private static final Pattern JAVA_PUBLIC_CLASS =
+            Pattern.compile("(?m)^\\s*public\\s+(?:final\\s+|abstract\\s+)?(?:class|interface|record|enum)\\s+(\\w+)");
+    private static final Pattern JAVA_ANY_CLASS =
+            Pattern.compile("(?m)^\\s*(?:class|interface|record|enum)\\s+(\\w+)");
+
+    /** Nom de fichier imposé par javac : celui de la classe publique, sinon la première classe. */
+    static String javaFileName(String source, String fallback) {
+        Matcher pub = JAVA_PUBLIC_CLASS.matcher(source);
+        if (pub.find()) {
+            return pub.group(1) + ".java";
+        }
+        Matcher any = JAVA_ANY_CLASS.matcher(source);
+        if (any.find()) {
+            return any.group(1) + ".java";
+        }
+        return fallback + ".java";
+    }
+
+    private static String jsonString(String value) {
+        if (value == null) {
+            return "\"\"";
+        }
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.append('"').toString();
+    }
+}

@@ -62,8 +62,7 @@ step() { printf '\n[%s] ===== %s =====\n' "$(date '+%F %T')" "$*" >>"$LOG"
 fail() { printf '[%s] ÉCHEC : %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
          printf '\n%s✖ ÉCHEC : %s%s\n' "$RED" "$*" "$RST"; exit 1; }
 
-# Conteneurs à longue durée de vie (piston_init et db_migrate sont one-shot, traités à part).
-SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_piston moodit_execution"
+SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_execution"
 BOX_H="${BOX_H:-14}"   # hauteur (lignes) de la boîte de sortie du build
 
 # Répète un caractère n fois (gère l'UTF-8 des bordures).
@@ -169,9 +168,6 @@ hcheck() {
       printf '[%s] health %s: %s%s (KO)\n' "$(date '+%F %T')" "$name" "$st" "${health:+ ($health)}" >>"$LOG"; allok=0
     fi
   done
-  st="$(docker inspect -f '{{.State.Status}}' moodit_piston_init 2>/dev/null || echo absent)"
-  health="$(docker inspect -f '{{.State.ExitCode}}' moodit_piston_init 2>/dev/null || echo '?')"
-  printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "piston_init" "$DIM" "$st" "$health" "$RST"
   st="$(docker inspect -f '{{.State.Status}}' moodit_db_migrate 2>/dev/null || echo absent)"
   health="$(docker inspect -f '{{.State.ExitCode}}' moodit_db_migrate 2>/dev/null || echo '?')"
   printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "db_migrate" "$DIM" "$st" "$health" "$RST"
@@ -268,10 +264,14 @@ rollback() {
 step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
+# Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
+if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
 ok "Images construites."
 
 step "5/5 · Redémarrage des services"
-if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
+# --remove-orphans : retire les conteneurs des services disparus du compose (ex. piston,
+# piston-init après #116) — sinon ils tournent pour toujours (restart: unless-stopped).
+if ! stream "Démarrage des services" $COMPOSE up -d --remove-orphans; then rollback; fi
 ok "Services démarrés."
 
 # Le Caddyfile est monté comme fichier seul : `up -d` ne recrée pas Caddy quand seul ce fichier

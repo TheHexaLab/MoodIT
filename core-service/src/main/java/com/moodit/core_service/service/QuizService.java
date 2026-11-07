@@ -353,7 +353,7 @@ public class QuizService {
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
-            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses) {}
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses, Integer timeoutMs) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -515,10 +515,14 @@ public class QuizService {
             SubmittedAnswerDTO answer = byQuestion.get(question.getId());
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
+            // Harnais-code pour TOUS les langages, côté execution-service : conteneur runner de
+            // notation pour les compilés (vrai framework de test, canaris, jeton — #116), mode
+            // exec (programmes RPC à nonce) pour les interprétés/SQL/vues.
             List<ExecutionClient.Harness> inputs = harnesses.stream()
                     .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
                     .toList();
-            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs));
+            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs,
+                    question.getExecTimeoutMs()));
         }
         return tasks;
     }
@@ -532,7 +536,8 @@ public class QuizService {
     private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
-            List<Boolean> verdicts = executionClient.evaluate(task.language(), task.code(), task.harnesses());
+            List<Boolean> verdicts =
+                    executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -574,6 +579,7 @@ public class QuizService {
     private static int weightOf(TestCase testCase) {
         return testCase.getWeight() != null && testCase.getWeight() > 0 ? testCase.getWeight() : 1;
     }
+
 
     /**
      * Historique des tentatives (résumés). earned/max sont calculés DYNAMIQUEMENT à partir
@@ -972,6 +978,7 @@ public class QuizService {
             q.setQuiz(quiz);
             q.setPrompt(qd.getPrompt());
             q.setStartCode(qd.getStartCode());
+            q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
             q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
@@ -997,11 +1004,23 @@ public class QuizService {
                 .orElseThrow(() -> new IllegalArgumentException("Type de question inconnu: " + qd.getQType()));
     }
 
+    /**
+     * Temps limite d'exécution par question : null (défaut du sandbox) si absent ou non positif,
+     * sinon borné au plafond du runner (RunnerExec.MAX_RUN_TIMEOUT_MS = 60 s). Une valeur
+     * aberrante envoyée à l'API ne doit jamais atteindre la base (mur de conteneur négatif,
+     * budgets de lecture faussés).
+     */
+    private static Integer normalizeExecTimeout(Integer ms) {
+        if (ms == null || ms <= 0) return null;
+        return Math.min(ms, 60_000);
+    }
+
     /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */
     private void applyQuestionFields(Question q, QuestionDTO qd, int index, Quiz quiz) {
         q.setQuiz(quiz);
         q.setPrompt(qd.getPrompt());
         q.setStartCode(qd.getStartCode());
+        q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
         q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));
@@ -1243,6 +1262,7 @@ public class QuizService {
                         .name(question.getLanguage().getName())
                         .build())
                 .startCode(question.getStartCode())
+                .execTimeoutMs(question.getExecTimeoutMs())
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
                         .map(a -> toAnswerDTO(a, includeCorrection)).toList())

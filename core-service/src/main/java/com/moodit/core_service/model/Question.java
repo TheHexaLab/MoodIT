@@ -27,6 +27,11 @@ public class Question {
     @Column(name = "start_code", columnDefinition = "TEXT")
     private String startCode;
 
+    /** Temps limite d'exécution d'un harnais (ms) choisi par le prof pour une question Code ; null →
+     *  défaut du sandbox. Borné côté execution-service (RunnerExec.MAX_RUN_TIMEOUT_MS). */
+    @Column(name = "exec_timeout_ms")
+    private Integer execTimeoutMs;
+
     @Column(name = "order_index")
     private Integer orderIndex;
 

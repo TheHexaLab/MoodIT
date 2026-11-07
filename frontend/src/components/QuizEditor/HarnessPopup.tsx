@@ -80,10 +80,12 @@ function WeightInput({
 
 /**
  * Corps « Harnais de test » : édition des harnais cachés d'une question Code.
- * Chaque harnais = nom (retour à l'étudiant) + poids (crédit partiel) + code qui
- * renvoie vrai/faux. Le langage des harnais est celui configuré pour le langage de
- * la question (Language.harness_language_id) — voir [[quiz-subsystem]]. Rendu dans la
- * coquille commune (`EditorShell`) par `QuizEditor` : page empilée, pas un nouveau popup.
+ * Chaque harnais = nom (retour à l'étudiant) + poids (crédit partiel) + code de TEST
+ * exécutable. Interprétés/SQL/vues : code qui renvoie vrai/faux, dans le langage configuré
+ * (Language.harness_language_id). Compilés (#116) : un VRAI test du langage (JUnit, NUnit,
+ * go test, cargo test, moodit_check.h), exécuté par le runner Docker isolé d'execution-service
+ * — le gabarit du langage montre la forme attendue. Rendu dans la coquille commune
+ * (`EditorShell`) par `QuizEditor` : page empilée, pas un nouveau popup.
  */
 export function HarnessBody({
   testCases,
@@ -99,10 +101,28 @@ export function HarnessBody({
   // automatique — l'utilisateur ajoute via « + Ajouter un harnais ».
   const [cases, setCases] = useState<TestCaseDraft[]>(() => testCases.map((tc) => ({ ...tc })));
 
+  // Défilement vers le cas qu'on vient d'ajouter : le bouton « + » est dans le pied FIXE, donc
+  // le nouveau cas (en bas de la liste défilante) peut être hors écran. `pendingScroll` est armé
+  // par `add()` et consommé après le rendu.
+  const listRef = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef(false);
+
   // Page harnais = contexte Code → on s'assure que les langages sont chargés.
   useEffect(() => {
     onRequestLanguages?.();
   }, [onRequestLanguages]);
+
+  // Après l'ajout d'un cas, amène le nouveau (dernière carte) à l'écran. rAF : laisse l'éditeur
+  // de code finir son auto-dimensionnement avant de calculer la position.
+  useEffect(() => {
+    if (!pendingScroll.current) return;
+    pendingScroll.current = false;
+    const id = requestAnimationFrame(() => {
+      const last = listRef.current?.lastElementChild;
+      last?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [cases.length]);
 
   function update(index: number, patch: Partial<TestCaseDraft>) {
     setCases((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
@@ -111,19 +131,20 @@ export function HarnessBody({
     setCases((prev) => prev.filter((_, i) => i !== index));
   }
   function add() {
+    pendingScroll.current = true;
     // Squelette du langage de la question (ex. HTML → harnais JS spécifique), pas un stub fixe.
     setCases((prev) => [...prev, { name: '', harnessCode: defaultHarnessCode ?? '', weight: 1 }]);
   }
 
-  // Enregistrement bloqué s'il n'y a aucun harnais, ou si l'un n'a pas de nom OU a un
-  // poids ≤ 0.
-  const isValid = cases.length > 0 && cases.every((c) => c.name.trim() !== '' && c.weight > 0);
+  // Enregistrement bloqué s'il n'y a aucun cas, ou si l'un n'a pas de nom / poids ≤ 0.
+  const isValid =
+    cases.length > 0 && cases.every((c) => c.name.trim() !== '' && c.weight > 0);
 
   return (
     <>
       <div className={styles.infoBanner}>{t.infoBanner}</div>
 
-      <div className={[styles.list, styles.harnessList].join(' ')}>
+      <div className={[styles.list, styles.harnessList].join(' ')} ref={listRef}>
         {cases.map((c, i) => (
           <div key={i} className={styles.harnessCard}>
             <div className={styles.harnessCardHead}>
@@ -165,24 +186,26 @@ export function HarnessBody({
         ))}
       </div>
 
-      <button type="button" className={styles.addButton} onClick={add}>
-        + {t.add}
-      </button>
-
       <EditorFooter>
-        <div className={styles.footer}>
-          <span className={styles.footerSpacer} />
-          <button type="button" className={styles.ghostButton} onClick={onCancel}>
-            {t.cancel}
+        {/* Bouton d'ajout dans le pied FIXE (hors du corps défilant) pour rester toujours visible. */}
+        <div className={styles.footerStack}>
+          <button type="button" className={styles.addButton} onClick={add}>
+            + {t.add}
           </button>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            disabled={!isValid}
-            onClick={() => onSave(cases)}
-          >
-            {t.save}
-          </button>
+          <div className={styles.footer}>
+            <span className={styles.footerSpacer} />
+            <button type="button" className={styles.ghostButton} onClick={onCancel}>
+              {t.cancel}
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={!isValid}
+              onClick={() => onSave(cases)}
+            >
+              {t.save}
+            </button>
+          </div>
         </div>
       </EditorFooter>
     </>

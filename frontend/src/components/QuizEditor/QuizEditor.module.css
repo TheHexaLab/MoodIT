@@ -823,6 +823,13 @@
 }
 
 /* ── Barre d'actions (dans le pied fixe `.panelFooter`) ── */
+/* Empile un éventuel bouton d'ajout (harnais) AU-DESSUS de la barre d'actions, le tout
+   dans le pied fixe → le bouton reste visible hors du corps défilant. */
+.footerStack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
 .footer {
     display: flex;
     align-items: center;

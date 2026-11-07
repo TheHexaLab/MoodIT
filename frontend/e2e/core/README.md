@@ -40,7 +40,7 @@ Arrêt et effacement de la base : la commande `down -v` affichée à la fin de `
 | Services Spring | Profil **dev** : endpoint de validation `/auth/verify/{username}`, code 2FA fixe `000000` (`DevFixedTwoFactorCode`, refusé hors dev). Valeurs bidons, y compris par-dessus un `.env.docker` local : aucun secret. |
 | Courriels | Capturés par **Mailpit** (http://localhost:8025) : les tests y lisent les codes de validation et de réinitialisation (`readCodeFromMail`). |
 | mcp-service | Sans clé LLM : **repli déterministe**, sans Ollama ni réseau. |
-| Piston | Sans `piston-init` : seul **Python** est installé (par `start-stack.sh`). |
+| Runner de code | Seule l’image `moodit-runner-python` est construite (par `start-stack.sh`) — seul langage des quiz e2e (#116). |
 
 `bootstrap.sh` (appelé par `start-stack.sh`) crée les comptes à rôles et l'établissement des
 comptes à courriels lus.
@@ -64,7 +64,7 @@ un compte **neuf**.
 | `auth`, `account`, `profile`, `navigation` | compte, réglages, barre latérale |
 | `subscription`, `course-admin`, `sections`, `establishments`, `roles`, `audit` | gestion (abonnements, cours, programmes, rôles, journal) |
 | `chat`, `forum`, `mcp` | temps réel, forum complet, analyse MCP |
-| `quiz`, `quiz-editor` | quiz côté étudiant (6 types, Piston) et éditeur |
+| `quiz`, `quiz-editor` | quiz côté étudiant (6 types, runner Docker) et éditeur |
 | `errors` | chaque action sous panne serveur (500) puis réseau (`abort`) : message, saisie conservée, reprise |
 | `scrolling`, `details` | défilements infinis ; Markdown complet, validations, longueurs max, quiz du jour, hors-ligne |
 | `a11y`, `keyboard`, `focus-visible` | audit axe (WCAG 2.1 AA, clair + sombre), navigation clavier, indicateur de focus |

@@ -210,6 +210,9 @@ export interface Question {
   language?: Language;
   /** Squelette de code montré à l'étudiant (table Question.start_code). */
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais en ms (table Question.exec_timeout_ms) ; absent → défaut
+   *  du sandbox. Borné côté execution-service (60 s max). */
+  execTimeoutMs?: number;
   /**
    * Harnais de tests CACHÉS (table Test_Case). Présent seulement dans les vues
    * enseignant/éditeur ; jamais renvoyé au répondant.
@@ -241,13 +244,15 @@ export interface DragItem {
 }
 
 /**
- * Cas de test d'une question `coding` (table Test_Case). Contrat minimal : le harnais
- * renvoie un BOOLÉEN (passe/échoue). `weight` donne le crédit partiel. Données cachées.
+ * Cas de test d'une question `coding` (table Test_Case) : un TEST exécutable contre la
+ * soumission. Interprétés/SQL/vues : code qui renvoie un booléen ; compilés : vrai test du
+ * langage (JUnit, NUnit, go test…), exécuté par le runner isolé (#116). `weight` donne le
+ * crédit partiel. Données cachées à l'étudiant.
  */
 export interface TestCase {
   id: number;
   name: string;
-  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). */
+  /** Code du test exécuté contre la soumission (table Test_Case.harness_code). */
   harnessCode: string;
   weight: number;
 }
@@ -473,6 +478,8 @@ export interface QuestionResponse {
   /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
   language?: Language;
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais (ms) ; absent → défaut du sandbox. */
+  execTimeoutMs?: number;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
   /** Catégories (zones) d'une association : groupes distincts, exposés même en passation. */

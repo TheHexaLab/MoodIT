@@ -1,6 +1,6 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,8 +12,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,145 +34,6 @@ class CodeAssemblerLanguagesTest {
         return a.files().get(0).content();
     }
 
-    // ── Langages compilés : propriétés du programme assemblé ────────────────────
-    //
-    // On ne compare plus le programme caractère par caractère (fragile, et ça ne prouve pas qu'il
-    // s'exécute : c'est le rôle d'ExecutionIntegrationTest contre un vrai Piston). On vérifie les
-    // INVARIANTS dont dépend la correction : un seul point d'entrée (le nôtre), le code étudiant
-    // présent tel quel (au renommage de son main près), le harnais intact dans sa fonction, le nonce
-    // émis une seule fois, par notre main, APRÈS l'appel du harnais, et aucun code étudiant dans la
-    // partie « noteur ». Un harnais = un programme : le nonce est le marqueur propre à chaque test.
-
-    /**
-     * Cas d'un langage compilé. {@code studentSegment} = code étudiant attendu dans le programme
-     * (identique à la soumission pour C/C++, main renommé ailleurs) ; {@code macroGuard} = le main
-     * étudiant est neutralisé par {@code #define main} (C/C++) plutôt que par renommage.
-     */
-    private record Compiled(String language, String pistonLanguage, String fileName, String studentCode,
-            String studentSegment, String harness, String harnessSignature, String harnessCall,
-            String entryPoint, boolean macroGuard) {
-        @Override
-        public String toString() {
-            return language;
-        }
-    }
-
-    private static final String MARK = "ETUDIANT_SEULEMENT";
-    private static final String NONCE = "MOODIT_OK_n0nce";
-
-    static Stream<Compiled> compiledLanguages() {
-        return Stream.of(
-                new Compiled("Go", "go", "main.go",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
-                        "return solution() == 5", "func __moodit_harness() bool {", "__moodit_harness()",
-                        "func\\s+main\\s*\\(", false),
-                // Espaces autour de « main » : le renommage doit quand même s'appliquer.
-                new Compiled("Rust", "rust", "main.rs",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn  main ()  {}",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn __moodit_student_main()  {}",
-                        "solution() == 5", "fn __moodit_harness() -> bool {", "__moodit_harness()",
-                        "fn\\s+main\\s*\\(", false),
-                new Compiled("C", "c", "main.c",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "return solution() == 5;", "static int __moodit_harness(void) {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
-                new Compiled("C++", "c++", "main.cpp",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "return solution() == 5;", "static bool __moodit_harness() {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
-                // Les deux formes de Main (void et int) doivent être renommées.
-                new Compiled("C#", "csharp", "main.cs",
-                        "// " + MARK + "\nclass A { static void Main(string[] a) {} }\n"
-                                + "class B { static int Main () { return 0; } }",
-                        "// " + MARK + "\nclass A { static void __moodit_student_main(string[] a) {} }\n"
-                                + "class B { static int __moodit_student_main () { return 0; } }",
-                        "return true;", "static bool __moodit_run() {", "__moodit_run()",
-                        "static\\s+(?:void|int)\\s+Main\\s*\\(", false),
-                new Compiled("Java", "java", "Main.java",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
-                                + "public static void main(String[] a){} }",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
-                                + "public static void __moodit_student_main(String[] a){} }",
-                        "return Solution.solution() == 5;", "static boolean __moodit_harness() {",
-                        "__moodit_harness()", "static\\s+void\\s+main\\s*\\(\\s*String", false));
-    }
-
-    private static int occurrences(String text, String needle) {
-        return text.split(Pattern.quote(needle), -1).length - 1;
-    }
-
-    private static int matches(String regex, String text) {
-        return (int) Pattern.compile(regex).matcher(text).results().count();
-    }
-
-    /** Programme assemblé, découpé en segment étudiant et partie « noteur » (tout le reste). */
-    private record Split(String program, int studentStart, int studentEnd) {
-        String grader() {
-            return program.substring(0, studentStart) + program.substring(studentEnd);
-        }
-    }
-
-    private Split assembleCompiled(Compiled c) {
-        var a = assembler.assemble(c.language(), c.studentCode(), c.harness(), NONCE);
-        assertThat(a.pistonLanguage()).isEqualTo(c.pistonLanguage());
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly(c.fileName());
-        String program = onlyFileContent(a);
-        // Le code étudiant figure une seule fois, tel quel (main renommé le cas échéant).
-        assertThat(occurrences(program, c.studentSegment())).isEqualTo(1);
-        int start = program.indexOf(c.studentSegment());
-        return new Split(program, start, start + c.studentSegment().length());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_un_seul_point_d_entree_et_le_code_etudiant_intact(Compiled c) {
-        Split s = assembleCompiled(c);
-
-        // Exactement UN point d'entrée effectif : le nôtre, dans la partie noteur.
-        assertThat(matches(c.entryPoint(), s.grader())).isEqualTo(1);
-        if (c.macroGuard()) {
-            // C/C++ : le main étudiant reste dans le texte, mais encadré par la macro qui le renomme.
-            assertThat(s.program().substring(0, s.studentStart())).isEqualTo("#define main __moodit_student_main\n");
-            assertThat(s.program().substring(s.studentEnd())).startsWith("\n#undef main\n");
-        } else {
-            assertThat(matches(c.entryPoint(), c.studentSegment())).isZero();
-        }
-
-        // Aucun fragment étudiant dans le noteur, ni harnais/nonce dans le segment étudiant.
-        assertThat(s.grader()).doesNotContain(MARK);
-        assertThat(c.studentSegment()).doesNotContain(NONCE).doesNotContain(c.harness());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_harnais_intact_et_nonce_emis_par_notre_main_apres_le_harnais(Compiled c) {
-        Split s = assembleCompiled(c);
-        String grader = s.grader();
-
-        // Le harnais est le corps exact de SA fonction, dans le noteur.
-        assertThat(occurrences(grader, c.harnessSignature() + "\n" + c.harness() + "\n")).isEqualTo(1);
-
-        // Notre main appelle le harnais, puis seulement émet le nonce (une seule émission en tout).
-        assertThat(occurrences(s.program(), NONCE)).isEqualTo(1);
-        Matcher entry = Pattern.compile(c.entryPoint()).matcher(grader);
-        assertThat(entry.find()).isTrue();
-        int callAt = grader.indexOf(c.harnessCall(), entry.end());
-        assertThat(callAt).isPositive();
-        assertThat(grader.indexOf(NONCE)).isGreaterThan(callAt);
-    }
-
-    @Test
-    void java_notre_classe_d_entree_vient_en_premier() {
-        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté.
-        String program = onlyFileContent(assembler.assemble("Java",
-                "public class Main { public static void main(String[] a){} }", "return true;", "N"));
-
-        assertThat(program).startsWith("public class __MooditMain {");
-    }
-
     // ── HTML (bundle vendor) ────────────────────────────────────────────────────
 
     @Test
@@ -184,8 +43,8 @@ class CodeAssemblerLanguagesTest {
 
         var a = asm.assemble("HTML", "<h1>Bonjour</h1>", "return doc.querySelector('h1') !== null;", "MOODIT_OK_html");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("main.js", "htmlparser.js", "submission.html");
         assertThat(a.files().get(0).content())
                 .contains("require('./htmlparser.js')")
@@ -299,17 +158,21 @@ class CodeAssemblerLanguagesTest {
             "node, javascript",
             "' Python ', python",
             "ts, typescript",
-            "cplusplus, c++",
-            "cs, csharp",
-            "c-sharp, csharp",
             "shell, bash",
             "sh, bash",
-            "golang, go",
             "sqlite, sqlite3",
             "SQLITE3, sqlite3",
     })
-    void alias_de_langage_resolus_a_l_assemblage(String language, String pistonLanguage) {
-        assertThat(assembler.assemble(language, "", "", "N").pistonLanguage()).isEqualTo(pistonLanguage);
+    void alias_de_langage_resolus_a_l_assemblage(String language, String runtime) {
+        assertThat(assembler.assemble(language, "", "", "N").runtime()).isEqualTo(runtime);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"cplusplus", "cs", "c-sharp", "golang", "Java", "Rust", "C"})
+    void alias_compiles_refuses_a_l_assemblage_le_runner_docker_les_note(String language) {
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
+        assertThatThrownBy(() -> assembler.assemble(language, "", "", "N"))
+                .isInstanceOf(UnsupportedLanguageException.class);
     }
 
     @Test
@@ -348,12 +211,12 @@ class CodeAssemblerLanguagesTest {
             "SQL, sqlite3, main.sql",
             "Java, java, Main.java",
     })
-    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String pistonLanguage,
+    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String runtime,
             String fileName) {
         String code = "// code étudiant de " + language;
         var a = assembler.assembleRun(language, code);
 
-        assertThat(a.pistonLanguage()).isEqualTo(pistonLanguage);
+        assertThat(a.runtime()).isEqualTo(runtime);
         assertThat(a.files()).singleElement().satisfies(f -> {
             assertThat(f.name()).isEqualTo(fileName);
             assertThat(f.content()).isEqualTo(code);   // aucun harnais, aucune enveloppe
@@ -371,8 +234,8 @@ class CodeAssemblerLanguagesTest {
     void run_json_valide_et_reindente_sans_harnais() {
         var a = assembler.assembleRun("JSON", "{\"a\":1}");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.js", "submission.json");
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name).containsExactly("main.js", "submission.json");
         assertThat(a.files().get(0).content())
                 .contains("console.log(JSON.stringify(data, null, 2));")
                 .contains("console.error('JSON invalide: '")

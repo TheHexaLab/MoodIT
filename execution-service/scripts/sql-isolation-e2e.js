@@ -1,9 +1,9 @@
-// Test d'intégration : valide l'isolation SQL 2 phases DIRECTEMENT contre Piston réel.
+// Test d'intégration : valide l'isolation SQL 2 phases DIRECTEMENT contre un sqlite3 réel.
 // Rejoue la même logique que ExecutionService.runSqlIsolated (setup -> code etudiant -> .dump ->
-// filtre tables de travail -> verdict encadre par nonce). A lancer DANS le conteneur Piston
-// (localhost:2000). Cf. scripts/README.md. Aucun effet de bord (sandbox jetable).
-const http = require('http');
-const OPT = { host: 'localhost', port: 2000, path: '/api/v2/execute', method: 'POST' };
+// filtre tables de travail -> verdict encadre par nonce), avec la même commande que le mode
+// exec du runner (sqlite3 -bail -batch :memory:). Nécessite node ET sqlite3 dans le PATH.
+// Cf. scripts/README.md. Aucun effet de bord (base en mémoire, jetable).
+const { spawnSync } = require('child_process');
 const NONCE = 'MOODIT_TEST_NONCE';
 const DS = NONCE + '_DUMP_START', DE = NONCE + '_DUMP_END';
 const VS = NONCE + '_VERDICT_START', VE = NONCE + '_VERDICT_END';
@@ -14,17 +14,11 @@ const VERDICT = "SELECT (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 3;
 const WORKING_TABLES = ['utilisateurs']; // liste blanche = tables du setup (cf. sqlWorkingTables)
 
 function run(sql) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ language: 'sqlite3', version: '*',
-      files: [{ name: 'main.sql', content: sql }], run_timeout: 3000 });
-    const opt = Object.assign({}, OPT, { headers: { 'content-type': 'application/json',
-      'content-length': Buffer.byteLength(body) } });
-    const req = http.request(opt, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => { try { resolve(JSON.parse(d).run || {}); } catch (e) { reject(e); } });
-    });
-    req.on('error', reject); req.write(body); req.end();
-  });
+  const r = spawnSync('sqlite3', ['-bail', '-batch', ':memory:'],
+    { input: sql, encoding: 'utf8', timeout: 3000 });
+  if (r.error) return Promise.reject(r.error);
+  return Promise.resolve({ code: r.status === null ? -1 : r.status,
+    stdout: r.stdout || '', stderr: r.stderr || '' });
 }
 function between(out, a, b) {
   const L = (out || '').split('\n'); let s = -1, e = -1;
@@ -68,6 +62,6 @@ async function grade(student) {
     console.log((good ? 'OK      ' : 'MISMATCH') + ' | passed=' + res.ok + ' (attendu ' + c[2] + ') | ' + c[0] +
       (res.why ? ' [' + res.why + ']' : ''));
   }
-  console.log(allGood ? 'TOUS OK : isolation 2 phases validee sur Piston reel.' : 'ECHEC : cas inattendu.');
+  console.log(allGood ? 'TOUS OK : isolation 2 phases validee sur sqlite3 reel.' : 'ECHEC : cas inattendu.');
   process.exit(allGood ? 0 : 1);
 })();

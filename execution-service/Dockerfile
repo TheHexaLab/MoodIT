@@ -1,5 +1,5 @@
-# JS vendor stage : bundle en fichiers UNIQUES les libs JS injectées dans le sandbox Piston pour
-# les langages « données/vues » (HTML → parseur DOM). Piston n'a ni npm ni réseau : on embarque
+# JS vendor stage : bundle en fichiers UNIQUES les libs JS injectées dans le conteneur runner pour
+# les langages « données/vues » (HTML → parseur DOM). Le runner n'a ni npm ni réseau : on embarque
 # ces bundles dans l'image et l'assembleur les joint à la soumission.
 FROM node:24-alpine AS jsvendor
 WORKDIR /vendor
