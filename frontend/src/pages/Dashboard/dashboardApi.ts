@@ -1,9 +1,7 @@
-// Couche « API » du Dashboard, regroupée ici pour un seul point de bascule vers le
-// vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
-// Dashboard se contente d'orchestrer l'état autour.
-//
-// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE) et evaluateCode
-// (service d'exécution). Elles utilisent encore les helpers simulate* ci-dessous.
+// Couche « API » du Dashboard, regroupée ici pour un seul point d'accès au backend
+// (apiFetch) ; le Dashboard se contente d'orchestrer l'état autour. Toutes les
+// fonctions appellent le vrai backend — y compris fetchLanguages (table Language)
+// et evaluateCode (service d'exécution, conteneurs runner).
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -258,12 +256,12 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
- * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * Évalue une question Code : le service d'exécution exécute `code + harnais` dans un conteneur
+ * runner jetable (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
-  // Le service d'exécution assemble code + harnais (compilés : en deux processus isolés) et renvoie
+  // Le service d'exécution exécute code + harnais (compilés : runner de notation dédié) et renvoie
   // le verdict par harnais. timeoutMs : temps limite choisi par le prof (absent → défaut sandbox).
   const body = {
     language: input.language,

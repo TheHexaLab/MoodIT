@@ -143,6 +143,23 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 
 ### Changement de schéma : migrations Flyway
 
+> **Déploiement du runner (#116) — contrôle unique avant la mise à jour** : `V7` ne convertit
+> que les GABARITS de harnais compilés (les questions futures) ; une question Go/Rust/C/C++/C#/Java
+> créée AVANT cette version garde un harnais ancien format, qui ne compile plus dans le runner
+> (tous ses cas échoueraient). Vérifier qu'il n'en existe aucune :
+>
+> ```bash
+> docker exec moodit_postgres psql -U postgres -d moodit_db -tAc \
+>   "SELECT l.name, count(*) FROM Test_Case tc JOIN Question q ON q.id = tc.question_id \
+>    JOIN Language l ON l.id = q.language_id \
+>    WHERE l.name IN ('C','C++','C#','Java','Go','Rust') GROUP BY l.name"
+> ```
+>
+> Résultat vide → rien à faire. Sinon, convertir ces harnais au format framework (cf. les
+> exemples de `db/demo/V7_1__demo_harnais_frameworks.sql`) avant d'ouvrir l'app aux étudiants.
+> Au même déploiement : `docker volume rm moodit_piston_data` (volume orphelin depuis le
+> retrait de Piston).
+
 Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
 service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de
 `db/migration/` pas encore enregistrées dans la table `flyway_schema_history` ; les services qui

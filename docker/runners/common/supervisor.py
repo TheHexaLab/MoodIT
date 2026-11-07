@@ -96,6 +96,15 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
+def preexec_compile():
+    """preexec_fn des compilations du mode evaluate (root) : groupe de processus dédié —
+    sans setsid, killpg au timeout échouait (le compilateur partage le pgid du superviseur)
+    et proc.wait() bloquait jusqu'au budget mural du conteneur (502 au lieu d'un verdict
+    « Échec de compilation »). Pas de rlimits : un binaire de test (debug) peut dépasser
+    la borne FSIZE des processus étudiants."""
+    os.setsid()
+
+
 def preexec_root():
     """preexec_fn quand strace (root) encapsule le processus étudiant (-u student).
 
@@ -124,7 +133,9 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except OSError:
-                pass
+                # Pas de groupe dédié (preexec sans setsid) : au moins tuer le processus
+                # lui-même, sinon proc.wait() bloque pour toujours et tout le job meurt en 502.
+                proc.kill()
             proc.wait()
             return None, True
 
@@ -186,11 +197,17 @@ def run_student(cmd, case_dir, env, timeout_s, tag):
     return code, timed_out, read_capped(out_path), read_capped(err_path), None
 
 
-def scan_trace(trace_path, locked_dir, case_index):
-    """Toute ouverture d'une source verrouillée par le processus étudiant = événement.
+def scan_trace(trace_path, locked_dir, case_index, binaries=()):
+    """Ouverture d'une source verrouillée OU du binaire de test lui-même (langages natifs :
+    seule voie d'extraction du jeton de fin) par le processus étudiant = événement.
     Le chemin peut être absolu (/box/cases/<i>/src/…) ou relatif au cwd du cas ("src/…")."""
     if not trace_path or not os.path.exists(trace_path):
         return
+    probes = []
+    for binary in binaries:
+        if binary:
+            probes += ['"' + binary + '"', '"./' + os.path.basename(binary) + '"',
+                       '"' + os.path.basename(binary) + '"']
     try:
         with open(trace_path, "r", errors="replace") as f:
             for line in f:
@@ -198,6 +215,9 @@ def scan_trace(trace_path, locked_dir, case_index):
                     continue
                 if locked_dir in line or '"src/' in line or '"./src/' in line:
                     event("lecture_source_tentee", case=case_index, detail=line.strip()[:300])
+                    return
+                if probes and ("/proc/self/exe" in line or any(p in line for p in probes)):
+                    event("lecture_binaire_tentee", case=case_index, detail=line.strip()[:300])
                     return
     except OSError:
         pass
@@ -251,6 +271,23 @@ class CaseOutcome:
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
 
 
+# Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
+TOKENS = {}
+
+
+def enforce_token(passed, detail, stdout, case_index):
+    """Un verdict « réussi » exige le jeton de fin d'exécution dans la sortie : il n'est imprimé
+    qu'APRÈS tous les tests par le point de sortie du framework — un rapport forgé suivi d'un
+    exit(0) depuis le code étudiant ne l'a pas. Absent alors que tout le reste est cohérent :
+    échec + événement."""
+    token = TOKENS.get(case_index)
+    if not passed or not token or ("[MOODIT] jeton=" + token) in stdout:
+        return passed, detail
+    event("jeton_absent", case=case_index,
+          detail="sortie sans jeton de fin d'exécution — rapport forgé probable")
+    return False, "Échec du harnais (jeton de fin d'exécution absent)"
+
+
 def prep_run(case_dir, src):
     """Après compilation : sources verrouillées, chemins du cas traversables, dossier work."""
     lock_sources(src)
@@ -270,13 +307,13 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
         [compiler, std, "-O1", "-I/opt/moodit", os.path.join(src, "harness." + ext),
          "-o", tests_bin, "-lm"],
         case_dir, env, COMPILE_TIMEOUT_S,
-        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), None)
+        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), preexec_compile)
     if timed_out or code != 0:
         return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
     prep_run(case_dir, src)
     open_artifacts(tests_bin)
     exit_code, t_out, stdout, stderr, trace = run_student([tests_bin], case_dir, env, timeout_s, "run")
-    scan_trace(trace, src, case_index)
+    scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
     summary = re.search(r"^\[MOODIT\] summary total=(\d+) failed=(\d+)$", stdout, re.M)
@@ -286,6 +323,7 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire moodit_check")
     detail = None if passed else (first_lines(stdout, r"^\[MOODIT\] fail ")
                                   or first_lines(stderr, r".") or "Échec du harnais")
+    passed, detail = enforce_token(passed, detail, stdout, case_index)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -306,7 +344,7 @@ def run_java(case_dir, env, timeout_s, case_index):
     code, timed_out = run_proc(
         ["javac", "-encoding", "UTF-8", "-cp", junit, "-d", classes] + sources,
         case_dir, env, COMPILE_TIMEOUT_S,
-        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), None)
+        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), preexec_compile)
     if timed_out or code != 0:
         return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
     prep_run(case_dir, src)
@@ -317,7 +355,9 @@ def run_java(case_dir, env, timeout_s, case_index):
     exit_code, t_out, stdout, stderr, trace = run_student(
         ["java", "-XX:MaxRAMPercentage=50",
          "-Djava.io.tmpdir=" + os.path.join(case_dir, "work", "tmp"),
-         "-cp", junit + ":" + classes, "org.junit.platform.console.ConsoleLauncher",
+         # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime le
+         # jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
+         "-cp", junit + ":" + classes, "MooditMain",
          "execute", "--scan-class-path", "--include-classname=.*",
          "--fail-if-no-tests", "--disable-banner", "--details=summary",
          "--reports-dir", reports],
@@ -340,6 +380,7 @@ def run_java(case_dir, env, timeout_s, case_index):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport JUnit exploitable")
     detail = None if passed else (first_lines(stdout, r"MethodSource|expected|Failures")
                                   or first_lines(stderr, r".") or "Échec du harnais JUnit")
+    passed, detail = enforce_token(passed, detail, stdout, case_index)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -351,7 +392,7 @@ def run_csharp(case_dir, env, timeout_s, case_index):
         ["mcs", "-r:/opt/moodit/nunit.framework.dll", "-r:/opt/moodit/nunitlite.dll",
          "-main:MooditRunner", "-out:" + exe] + sources,
         case_dir, env, COMPILE_TIMEOUT_S,
-        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), None)
+        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), preexec_compile)
     if timed_out or code != 0:
         return None, ("Échec de compilation :\n"
                       + (read_capped(os.path.join(case_dir, "cc.err"))
@@ -378,6 +419,7 @@ def run_csharp(case_dir, env, timeout_s, case_index):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport NUnit « Passed »")
     detail = None if passed else (first_lines(stdout, r"Failed|Error|Exception")
                                   or first_lines(stderr, r".") or "Échec du harnais NUnit")
+    passed, detail = enforce_token(passed, detail, stdout, case_index)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -387,7 +429,7 @@ def run_go(case_dir, env, timeout_s, case_index):
     code, timed_out = run_proc(
         ["go", "test", "-count=1", "-c", "-o", tests_bin, "."],
         src, env, COMPILE_TIMEOUT_S,
-        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), None)
+        os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"), preexec_compile)
     if timed_out or code != 0:
         return None, ("Échec de compilation :\n"
                       + (read_capped(os.path.join(case_dir, "cc.err"))
@@ -396,7 +438,7 @@ def run_go(case_dir, env, timeout_s, case_index):
     open_artifacts(tests_bin)
     exit_code, t_out, stdout, stderr, trace = run_student(
         [tests_bin, "-test.v", "-test.count=1"], case_dir, env, timeout_s, "run")
-    scan_trace(trace, src, case_index)
+    scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
     ran_tests = len(re.findall(r"^=== RUN\s", stdout, re.M))
@@ -408,6 +450,7 @@ def run_go(case_dir, env, timeout_s, case_index):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire PASS de go test")
     detail = None if passed else (first_lines(stdout, r"_test\.go:\d+:|^--- FAIL|panic:")
                                   or first_lines(stderr, r".") or "Échec du harnais go test")
+    passed, detail = enforce_token(passed, detail, stdout, case_index)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -416,7 +459,7 @@ def run_rust(case_dir, env, timeout_s, case_index):
     build_out = os.path.join(case_dir, "cc.out")
     code, timed_out = run_proc(
         ["cargo", "test", "--offline", "--no-run", "--message-format=json"],
-        src, env, COMPILE_TIMEOUT_S, build_out, os.path.join(case_dir, "cc.err"), None)
+        src, env, COMPILE_TIMEOUT_S, build_out, os.path.join(case_dir, "cc.err"), preexec_compile)
     if timed_out or code != 0:
         err = read_capped(os.path.join(case_dir, "cc.err"))
         human = first_lines(err, r"error(\[|:)", 12) or err[:1500]
@@ -436,8 +479,8 @@ def run_rust(case_dir, env, timeout_s, case_index):
     os.chmod(tests_bin, 0o755)
     make_traversable(tests_bin, case_dir)
     exit_code, t_out, stdout, stderr, trace = run_student(
-        [tests_bin, "--test-threads=1"], case_dir, env, timeout_s, "run")
-    scan_trace(trace, src, case_index)
+        [tests_bin, "--test-threads=1", "--nocapture"], case_dir, env, timeout_s, "run")
+    scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
     summary = re.search(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed", stdout, re.M)
@@ -446,8 +489,12 @@ def run_rust(case_dir, env, timeout_s, case_index):
               and int(summary.group(3)) == 0)
     if exit_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire cargo test")
-    detail = None if passed else (first_lines(stdout, r"panicked at|^failures:|^---- ")
+    # --nocapture (requis pour le jeton) : les messages de panique partent sur STDERR au fil de
+    # l'eau — on les y cherche d'abord, la liste `failures:` de stdout est maigre sans eux.
+    detail = None if passed else (first_lines(stderr, r"panicked at")
+                                  or first_lines(stdout, r"panicked at|^failures:|^---- ")
                                   or first_lines(stderr, r".") or "Échec du harnais cargo test")
+    passed, detail = enforce_token(passed, detail, stdout, case_index)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -461,8 +508,9 @@ RUNNERS = {
 }
 
 
-def substitute_canary(case_dir, a, b):
-    """Remplace les gabarits __MOODIT_A__/__MOODIT_B__ du harnais canari par les valeurs tirées."""
+def substitute_placeholders(case_dir, mapping):
+    """Remplace les gabarits (__MOODIT_A__/__MOODIT_B__ des canaris, __MOODIT_T__ du jeton)
+    dans les sources du cas par les valeurs tirées au sort."""
     for root, _, files in os.walk(os.path.join(case_dir, "src")):
         for name in files:
             path = os.path.join(root, name)
@@ -471,8 +519,9 @@ def substitute_canary(case_dir, a, b):
                     content = f.read()
             except (OSError, UnicodeDecodeError):
                 continue
-            if "__MOODIT_A__" in content or "__MOODIT_B__" in content:
-                content = content.replace("__MOODIT_A__", str(a)).replace("__MOODIT_B__", str(b))
+            if any(key in content for key in mapping):
+                for key, value in mapping.items():
+                    content = content.replace(key, value)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
 
@@ -651,16 +700,25 @@ def main():
                            int(job.get("timeout_ms") or DEFAULT_RUN_TIMEOUT_S * 1000) // 1000))
 
     cases = job["cases"]
-    # Canaris : valeurs tirées MAINTENANT (imprévisibles), ordre d'exécution mélangé.
+    # Canaris et JETONS : valeurs tirées MAINTENANT (imprévisibles), ordre d'exécution mélangé.
+    # Le jeton de fin d'exécution (un par cas, gabarit __MOODIT_T__) est imprimé par le POINT DE
+    # SORTIE du framework, après tous les tests : un code étudiant qui forge un rapport puis
+    # exit(0) depuis la FONCTION NOTÉE saute cette impression → verdict échoué (jeton_absent).
+    # L'obtenir exige de lire la source verrouillée (EACCES + tracé) ou son propre binaire
+    # (tracé aussi, lecture_binaire_tentee) — l'attaque redevient bruyante.
     rng = random.SystemRandom()
     for case in cases:
         case_dir = os.path.join(BOX, "cases", str(case["index"]))
+        TOKENS[case["index"]] = str(rng.randrange(10**12, 10**13))
+        subst = {"__MOODIT_T__": TOKENS[case["index"]]}
         if case.get("canary") == "pass":
             a = rng.randrange(100000, 999999)
-            substitute_canary(case_dir, a, a)
+            subst.update({"__MOODIT_A__": str(a), "__MOODIT_B__": str(a)})
         elif case.get("canary") == "fail":
             a = rng.randrange(100000, 999999)
-            substitute_canary(case_dir, a, a + 1 + rng.randrange(1000))
+            subst.update({"__MOODIT_A__": str(a),
+                          "__MOODIT_B__": str(a + 1 + rng.randrange(1000))})
+        substitute_placeholders(case_dir, subst)
     order = list(cases)
     rng.shuffle(order)
 

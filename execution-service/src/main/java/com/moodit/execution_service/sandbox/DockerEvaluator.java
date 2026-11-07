@@ -126,7 +126,8 @@ public class DockerEvaluator {
 
     private static boolean isSuspicious(String type) {
         return switch (type) {
-            case "lecture_source_tentee", "rapport_incoherent", "canari_incoherent" -> true;
+            case "lecture_source_tentee", "lecture_binaire_tentee", "rapport_incoherent",
+                 "canari_incoherent", "jeton_absent" -> true;
             default -> false;
         };
     }

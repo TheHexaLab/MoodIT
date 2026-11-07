@@ -115,10 +115,10 @@ public class CodeAssembler {
     }
 
     /**
-     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Comme les interprétés, ils sont
-     * notés en DEUX processus (le code étudiant ne voit jamais le nonce) ; le programme unique
-     * se dédouble par {@code fork()} (C/C++) ou re-exec de soi-même (Go/Rust/C#/Java). Le nonce est lu
-     * sur le stdin du PARENT (noteur) au runtime, pas gravé dans le source (cf. ExecutionService).
+     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Ces langages ne passent PAS
+     * par l'assemblage : leur notation vit dans le runner dédié ({@code sandbox/DockerEvaluator}
+     * + {@code HarnessProjects}, harnais = vrai test du framework, canaris, jeton de fin) —
+     * ce prédicat sert au ROUTAGE dans {@code ExecutionService}.
      */
     public static boolean isCompiled(String language) {
         return switch (canon(language)) {

@@ -86,6 +86,23 @@ class HarnessProjectsTest {
     }
 
     @Test
+    void chaque_disposition_porte_le_jeton_de_fin_d_execution() {
+        // Le gabarit __MOODIT_T__ (substitué par le superviseur) doit être émis par le POINT DE
+        // SORTIE du framework de chaque langage — c'est lui qui trahit un forgeage déclenché
+        // depuis la fonction notée (invisible aux canaris).
+        assertThat(HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null).files()
+                .get("cases/0/src/MooditMain.java")).contains("jeton=__MOODIT_T__");
+        assertThat(HarnessProjects.build("C#", "CODE", ONE_CASE, null).files()
+                .get("cases/0/src/moodit_runner.cs")).contains("jeton=__MOODIT_T__");
+        assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null).files()
+                .get("cases/0/src/moodit_main_test.go")).contains("jeton=__MOODIT_T__");
+        assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
+                .get("cases/0/src/src/lib.rs")).contains("zzzz_moodit_jeton");
+        assertThat(HarnessProjects.build("C", "CODE", ONE_CASE, null).files()
+                .get("cases/0/src/harness.c")).contains("#define MOODIT_JETON \"__MOODIT_T__\"");
+    }
+
+    @Test
     void deux_canaris_embarquant_le_code_etudiant_sont_ajoutes() {
         HarnessProjects.Project project = HarnessProjects.build("Go", "package main", ONE_CASE, 5000);
         // Cas réels 0..N-1, canaris N (pass) et N+1 (fail), chacun AVEC le code étudiant.

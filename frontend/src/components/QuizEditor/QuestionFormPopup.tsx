@@ -616,7 +616,18 @@ export function QuestionFormBody({
             value={draft.execTimeoutMs != null ? String(Math.round(draft.execTimeoutMs / 1000)) : ''}
             onChange={(e) => {
               const raw = e.target.value.trim();
-              patch({ execTimeoutMs: raw === '' ? undefined : Math.round(Number(raw) * 1000) });
+              const seconds = Number(raw);
+              patch({
+                execTimeoutMs:
+                  raw === '' || Number.isNaN(seconds) ? undefined : Math.round(seconds * 1000),
+              });
+            }}
+            onBlur={() => {
+              // Borné comme à l'enregistrement (1 à 60 s, entier) : « Tester » utilise la même
+              // valeur que la correction réelle — pas d'aperçu qui diverge (0 s, 120 s…).
+              if (draft.execTimeoutMs == null) return;
+              const seconds = Math.min(60, Math.max(1, Math.round(draft.execTimeoutMs / 1000)));
+              patch({ execTimeoutMs: seconds * 1000 });
             }}
           />
           <span className={styles.fieldHint}>{t.execTimeoutHint}</span>

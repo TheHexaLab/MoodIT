@@ -176,24 +176,27 @@ public class DockerSandbox {
                     .start()
                     .awaitStatusCode(wallTimeoutMs, TimeUnit.MILLISECONDS);
 
-            StringBuilder stdout = new StringBuilder();
-            StringBuilder stderr = new StringBuilder();
+            // Accumuler les OCTETS puis décoder UNE fois : un caractère UTF-8 scindé entre deux
+            // frames deviendrait sinon « � » dans le détail d'un verdict.
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
             docker.logContainerCmd(containerId)
                     .withStdOut(true)
                     .withStdErr(true)
                     .exec(new ResultCallback.Adapter<Frame>() {
                         @Override
                         public void onNext(Frame frame) {
-                            String text = new String(frame.getPayload(), StandardCharsets.UTF_8);
+                            byte[] payload = frame.getPayload();
                             if (frame.getStreamType() == StreamType.STDOUT) {
-                                stdout.append(text);
+                                stdout.write(payload, 0, payload.length);
                             } else {
-                                stderr.append(text);
+                                stderr.write(payload, 0, payload.length);
                             }
                         }
                     })
                     .awaitCompletion(30, TimeUnit.SECONDS);
-            return new ContainerRun(stdout.toString(), stderr.toString(), status == null ? -1 : status);
+            return new ContainerRun(stdout.toString(StandardCharsets.UTF_8),
+                    stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status);
         } catch (NotFoundException e) {
             throw new SandboxException("Image runner absente : " + image
                     + " — construire les images (docker/runners/build.sh)", e);

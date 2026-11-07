@@ -323,4 +323,53 @@ class DockerRunnerIntegrationTest {
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).contains("⚠");
     }
+
+    @Test
+    void c_forge_depuis_la_fonction_notee_echoue_sans_jeton() {
+        require("C");
+        // Variante SILENCIEUSE pour les canaris : la forge vit DANS la fonction notée, qui ne
+        // s'exécute jamais dans les cas canaris (leur harnais ne l'appelle pas). Le jeton de fin
+        // d'exécution — imprimé seulement après tous les tests — la trahit : exit(0) le saute.
+        String cheater = """
+                #include <stdio.h>
+                #include <stdlib.h>
+                int doubler(int n) {
+                    printf("[MOODIT] ok doubler_5\\n[MOODIT] summary total=1 failed=0\\n");
+                    exit(0);
+                }
+                int main(void) { return 0; }
+                """;
+        List<TestResult> results = evaluate("C", cheater,
+                "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("jeton");
+    }
+
+    @Test
+    void go_forge_depuis_la_fonction_notee_echoue_sans_jeton() {
+        require("Go");
+        // Même variante en Go : sommaire « PASS » forgé + os.Exit(0) depuis la fonction notée —
+        // les canaris restent cohérents, seul le jeton de fin (imprimé par TestMain après
+        // m.Run()) manque à l'appel.
+        String cheater = """
+                package main
+
+                import (
+                    "fmt"
+                    "os"
+                )
+
+                func doubler(n int) int {
+                    fmt.Println("--- PASS: TestDoubler (0.00s)")
+                    fmt.Println("PASS")
+                    os.Exit(0)
+                    return 0
+                }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", cheater, GO_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("jeton");
+    }
 }

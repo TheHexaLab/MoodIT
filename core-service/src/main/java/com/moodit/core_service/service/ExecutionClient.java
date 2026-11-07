@@ -62,15 +62,21 @@ public class ExecutionClient {
      * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
      * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
      */
-    long readTimeoutMs(int pistonCalls, Integer execTimeoutMs, boolean compiled) {
+    long readTimeoutMs(String language, int pistonCalls, Integer execTimeoutMs) {
         // Temps limite par question (#116, max 60 s) : s'il dépasse le budget par défaut d'une
         // unité, chaque unité doit l'attendre (plus une marge), sinon core abandonne une
         // correction encore en cours et supprime la tentative — le bug que #216 avait corrigé.
         long perUnit = Math.max(perTestReadTimeoutMs,
                 execTimeoutMs == null ? 0 : execTimeoutMs + RUN_MARGIN_MS);
+        // TypeScript : CHAQUE unité exec transpile (tsc, jusqu'à 60 s côté runner — le mur de
+        // 75 s de RunnerExec couvre précisément ce budget) ; sans cette marge, le scénario #216
+        // revenait pour les interprétés à compilation.
+        if (transpiled(language)) {
+            perUnit += EXEC_COMPILE_SLACK_MS;
+        }
         return baseReadTimeoutMs
                 + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs)
-                + (compiled ? COMPILE_SLACK_MS : 0);
+                + (compiled(language) ? COMPILE_SLACK_MS : 0);
     }
 
     /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
@@ -82,6 +88,12 @@ public class ExecutionClient {
      * n'a pas lieu par cas.
      */
     private static final long COMPILE_SLACK_MS = 90_000;
+
+    /**
+     * Budget de TRANSPILATION du mode exec (par unité) — miroir de
+     * {@code EXEC_COMPILE_TIMEOUT_S} du superviseur (60 s) : chaque unité TypeScript relance tsc.
+     */
+    private static final long EXEC_COMPILE_SLACK_MS = 60_000;
 
     /**
      * Nombre d'unités de travail du sandbox pour corriger {@code harnessCount} harnais en
@@ -104,6 +116,12 @@ public class ExecutionClient {
             return 2 * harnessCount;
         }
         return compiled(language) ? 2 * harnessCount + 2 : harnessCount;
+    }
+
+    /** Langage exec TRANSPILÉ à chaque unité (budget tsc à prévoir par unité). */
+    static boolean transpiled(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return lang.equals("typescript") || lang.equals("ts");
     }
 
     /** Langage noté dans le runner compilé (budget de compilation à prévoir côté client). */
@@ -143,15 +161,18 @@ public class ExecutionClient {
     }
 
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs) {
+        // Défense en profondeur : la valeur vient de la BD (normalisée à l'écriture par
+        // QuizService), mais une ligne aberrante ne doit ni gonfler le budget de lecture ni
+        // atteindre execution-service telle quelle.
+        Integer timeout = timeoutMs == null || timeoutMs <= 0 ? null : Math.min(timeoutMs, 60_000);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("language", language == null ? "" : language);
         body.put("code", code == null ? "" : code);
         body.put("testCases", harnesses.stream()
                 .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
                 .toList());
-        if (timeoutMs != null) body.put("timeoutMs", timeoutMs);
-        long readTimeout = readTimeoutMs(pistonCalls(language, harnesses.size()), timeoutMs,
-                compiled(language));
+        if (timeout != null) body.put("timeoutMs", timeout);
+        long readTimeout = readTimeoutMs(language, pistonCalls(language, harnesses.size()), timeout);
         try {
             Verdict[] verdicts = restClient(readTimeout).post()
                     .uri(baseUrl + "/internal/exec/evaluate")

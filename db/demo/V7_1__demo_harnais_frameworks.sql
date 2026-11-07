@@ -202,10 +202,13 @@ class HarnaisRectangle {
 }
 $h$)
 ) AS v(oidx, name, hc)
+-- IN (et non =) : un re-seed de dev (scripts/migrate-dev-seed.sh FORCE=1) peut dupliquer le
+-- quiz démo — on convertit alors TOUTES les copies au lieu de planter sur une sous-requête
+-- scalaire à deux lignes. Sans doublon (CI, e2e, prod), strictement équivalent.
 WHERE Test_Case.name = v.name
-  AND Test_Case.question_id = (
+  AND Test_Case.question_id IN (
       SELECT qn.id FROM Question qn
       WHERE qn.order_index = v.oidx
-        AND qn.quiz_id = (SELECT id FROM Quiz
-                          WHERE title = 'Démo — Questions de code (multi-langages)'
-                            AND course_id = (SELECT id FROM Course WHERE code = 'GIF201')));
+        AND qn.quiz_id IN (SELECT id FROM Quiz
+                           WHERE title = 'Démo — Questions de code (multi-langages)'
+                             AND course_id IN (SELECT id FROM Course WHERE code = 'GIF201')));

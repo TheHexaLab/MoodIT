@@ -83,6 +83,11 @@ int main(void) {
         }
     }
     printf("[MOODIT] summary total=%d failed=%d\n", moodit_test_count, failed);
+#ifdef MOODIT_JETON
+    /* Jeton de fin d'exécution (substitué au runtime par le superviseur) : n'est imprimé
+     * qu'ici, après tous les tests — un exit(0) forgé depuis le code étudiant le saute. */
+    printf("[MOODIT] jeton=%s\n", MOODIT_JETON);
+#endif
     fflush(stdout);
     return failed > 0 ? 1 : 0;
 }

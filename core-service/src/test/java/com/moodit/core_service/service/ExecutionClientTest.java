@@ -29,6 +29,7 @@ class ExecutionClientTest {
     private HttpServer server;
     private final AtomicReference<String> receivedToken = new AtomicReference<>();
     private final AtomicReference<String> receivedPath = new AtomicReference<>();
+    private final AtomicReference<String> receivedBody = new AtomicReference<>();
 
     @AfterEach
     void stopServer() {
@@ -41,7 +42,7 @@ class ExecutionClientTest {
         server.createContext("/internal/exec", exchange -> {
             receivedPath.set(exchange.getRequestURI().getPath());
             receivedToken.set(exchange.getRequestHeaders().getFirst("X-Internal-Token"));
-            exchange.getRequestBody().readAllBytes();
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             try {
                 Thread.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -130,10 +131,10 @@ class ExecutionClientTest {
         // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
-        assertThat(client.readTimeoutMs(1, null, false)).isEqualTo(45_000);
-        assertThat(client.readTimeoutMs(5, null, false)).isEqualTo(185_000);
-        assertThat(client.readTimeoutMs(100, null, false)).isEqualTo(3_510_000);
-        assertThat(client.readTimeoutMs(0, null, false)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(185_000);
+        assertThat(client.readTimeoutMs("Python", 100, null)).isEqualTo(3_510_000);
+        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(45_000);
     }
 
     @Test
@@ -142,16 +143,19 @@ class ExecutionClientTest {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
-        assertThat(client.readTimeoutMs(1, 60_000, false)).isEqualTo(10_000 + 65_000 + 15_000);
+        assertThat(client.readTimeoutMs("Python", 1, 60_000)).isEqualTo(10_000 + 65_000 + 15_000);
         // Sous le défaut (5 s + 5 s < 20 s) : le budget par défaut reste.
-        assertThat(client.readTimeoutMs(1, 5_000, false)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(45_000);
         // Langage compilé : budget de compilation (90 s, une fois) en plus.
-        assertThat(client.readTimeoutMs(4, 60_000, true))
+        assertThat(client.readTimeoutMs("Java", 4, 60_000))
                 .isEqualTo(10_000 + 4 * (65_000 + 15_000) + 90_000);
+        // TypeScript : tsc relancé à CHAQUE unité → 60 s de marge par unité (mur exec 75 s).
+        assertThat(client.readTimeoutMs("TypeScript", 2, null))
+                .isEqualTo(10_000 + 2 * (20_000 + 60_000 + 15_000));
     }
 
     @Test
-    @DisplayName("compiled() reconnaît les langages du runner compilé")
+    @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
     void compiled_reconnaitLesLangagesCompiles() {
         assertThat(ExecutionClient.compiled("Java")).isTrue();
         assertThat(ExecutionClient.compiled(" c++ ")).isTrue();
@@ -159,6 +163,28 @@ class ExecutionClientTest {
         assertThat(ExecutionClient.compiled("Python")).isFalse();
         assertThat(ExecutionClient.compiled("sql")).isFalse();
         assertThat(ExecutionClient.compiled(null)).isFalse();
+        assertThat(ExecutionClient.transpiled("TypeScript")).isTrue();
+        assertThat(ExecutionClient.transpiled("ts")).isTrue();
+        assertThat(ExecutionClient.transpiled("JavaScript")).isFalse();
+        assertThat(ExecutionClient.transpiled(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Le temps limite de la question part dans le corps HTTP (timeoutMs), replafonné")
+    void evaluate_envoieLeTimeoutDansLeCorps() throws IOException {
+        String url = startStub(200,
+                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 0);
+        ExecutionClient client = client(url, 10_000, 20_000, 15_000);
+
+        client.evaluate("Python", "code", TWO_HARNESSES, 30_000);
+        assertThat(receivedBody.get()).contains("\"timeoutMs\":30000");
+
+        client.evaluate("Python", "code", TWO_HARNESSES, 999_999);
+        assertThat(receivedBody.get()).contains("\"timeoutMs\":60000");
+
+        client.evaluate("Python", "code", TWO_HARNESSES, -5);
+        assertThat(receivedBody.get()).doesNotContain("timeoutMs");
     }
 
     @Test

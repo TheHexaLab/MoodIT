@@ -10,6 +10,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# NB : côté build le tag vient de MOODIT_RUNNER_TAG ; côté execution-service, l'image utilisée
+# vient de SANDBOX_IMAGE_TAG (app.sandbox.image-tag). Les deux valent « latest » par défaut —
+# si l'un change, changer l'autre.
 TAG="${MOODIT_RUNNER_TAG:-latest}"
 
 for lang in java csharp go rust c python node php bash sqlite; do

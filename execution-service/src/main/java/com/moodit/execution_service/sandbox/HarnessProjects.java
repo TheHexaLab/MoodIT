@@ -20,8 +20,13 @@ import java.util.regex.Pattern;
  * Deux CANARIS sont ajoutés en fin de liste (indices N et N+1) : des cas dont le harnais est un
  * gabarit {@code __MOODIT_A__ == __MOODIT_B__} que le SUPERVISEUR instancie à l'exécution avec
  * des valeurs tirées au sort — l'un doit réussir, l'autre échouer. Ils embarquent aussi le code
- * étudiant : un code qui détourne le framework (init/constructeur qui forge un rapport) casse
- * leurs résultats et se fait détecter.
+ * étudiant : un code qui détourne le framework depuis un init/constructeur (exécuté partout)
+ * casse leurs résultats et se fait détecter.
+ *
+ * Chaque cas porte de plus un JETON DE FIN D'EXÉCUTION (gabarit {@code __MOODIT_T__}, substitué
+ * par le superviseur) imprimé par le POINT DE SORTIE du framework, après tous les tests : un
+ * forgeage déclenché depuis la fonction notée elle-même (qui ne s'exécute pas dans les canaris)
+ * produit un rapport sans jeton → verdict échoué ({@code jeton_absent}).
  *
  * Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.
  */
@@ -84,8 +89,33 @@ public final class HarnessProjects {
         String base = "cases/" + index + "/src/";
         switch (lang) {
             case "java" -> {
-                files.put(base + javaFileName(studentCode, "Solution"), studentCode);
-                files.put(base + javaFileName(harnessCode, "MooditHarness"), harnessCode);
+                String studentFile = javaFileName(studentCode, "Solution");
+                String harnessFile = javaFileName(harnessCode, "MooditHarness");
+                if (harnessFile.equals(studentFile)) {
+                    // Même classe publique des deux côtés : garder les DEUX fichiers (sinon le
+                    // second écrase le premier en silence) — javac produira une erreur de
+                    // compilation EXPLICITE (classe dupliquée / mauvais nom de fichier) au lieu
+                    // d'un déroutant « classe introuvable ».
+                    harnessFile = "MooditHarnais_" + harnessFile;
+                }
+                files.put(base + studentFile, studentCode);
+                files.put(base + harnessFile, harnessCode);
+                // Enveloppe du ConsoleLauncher JUnit : le jeton de fin n'est imprimé qu'une
+                // fois l'exécution terminée — un System.exit(0) forgé le saute.
+                files.put(base + "MooditMain.java", """
+                        import java.io.PrintWriter;
+
+                        class MooditMain {
+                            public static void main(String[] args) {
+                                int code = org.junit.platform.console.ConsoleLauncher
+                                        .run(new PrintWriter(System.out, true),
+                                                new PrintWriter(System.err, true), args)
+                                        .getExitCode();
+                                System.out.println("[MOODIT] jeton=__MOODIT_T__");
+                                System.exit(code);
+                            }
+                        }
+                        """);
             }
             case "csharp" -> {
                 files.put(base + "solution.cs", studentCode);
@@ -93,12 +123,16 @@ public final class HarnessProjects {
                 // Point d'entrée NUnitLite : exécute tous les [Test] de l'assemblage. Généré ici
                 // (pas à la charge du prof) ; `mcs -main:MooditRunner` l'impose comme entrée même
                 // si le code étudiant a son propre Main.
+                // Le jeton de fin n'est imprimé qu'une fois Execute terminé : un
+                // Environment.Exit(0) forgé dans le code étudiant le saute.
                 files.put(base + "moodit_runner.cs", """
                         class MooditRunner
                         {
                             static int Main(string[] args)
                             {
-                                return new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
+                                int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
+                                System.Console.WriteLine("[MOODIT] jeton=__MOODIT_T__");
+                                return code;
                             }
                         }
                         """);
@@ -109,6 +143,24 @@ public final class HarnessProjects {
                 // Même package que l'étudiant : les identifiants non exportés restent accessibles,
                 // comme dans un vrai test Go.
                 files.put(base + "solution_test.go", harnessCode);
+                // Le jeton de fin n'est imprimé qu'après m.Run() : un os.Exit(0) forgé dans le
+                // code étudiant le saute. (Un harnais qui définirait son propre TestMain ne
+                // compile pas — doublon explicite, cas assumé.)
+                files.put(base + "moodit_main_test.go", """
+                        package main
+
+                        import (
+                            "fmt"
+                            "os"
+                            "testing"
+                        )
+
+                        func TestMain(m *testing.M) {
+                            code := m.Run()
+                            fmt.Println("[MOODIT] jeton=__MOODIT_T__")
+                            os.Exit(code)
+                        }
+                        """);
             }
             case "rust" -> {
                 files.put(base + "Cargo.toml", """
@@ -118,8 +170,18 @@ public final class HarnessProjects {
                         edition = "2021"
                         """);
                 // Idiome Rust : module de tests DANS le fichier (use super::*) → accès aux items
-                // privés du code étudiant, comme un vrai test unitaire.
-                files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n");
+                // privés du code étudiant, comme un vrai test unitaire. Le module jeton se nomme
+                // zzzz_* : dernier par ordre alphabétique (libtest trie, --test-threads=1) — un
+                // exit(0) forgé dans un test antérieur le saute (--nocapture côté superviseur).
+                files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n\n" + """
+                        #[cfg(test)]
+                        mod zzzz_moodit_jeton {
+                            #[test]
+                            fn zzzz_jeton() {
+                                println!("[MOODIT] jeton=__MOODIT_T__");
+                            }
+                        }
+                        """);
             }
             // default = C et C++ : lang vient de runnerLanguage(), qui ne renvoie que les six
             // valeurs canoniques — il ne reste que "c" et "cpp" ici.
@@ -133,6 +195,7 @@ public final class HarnessProjects {
                         + "#define main __moodit_student_main\n"
                         + "#include \"solution." + ext + "\"\n"
                         + "#undef main\n"
+                        + "#define MOODIT_JETON \"__MOODIT_T__\"\n"
                         + "#include <moodit_check.h>\n\n"
                         + harnessCode);
             }
