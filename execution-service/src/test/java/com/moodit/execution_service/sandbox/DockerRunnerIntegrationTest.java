@@ -32,8 +32,9 @@ class DockerRunnerIntegrationTest {
             Boolean.parseBoolean(System.getenv().getOrDefault("SANDBOX_REQUIRED", "false"));
 
     // Tag surchargeable (MOODIT_RUNNER_TAG) : utile pour tester un lot d'images candidat.
-    private final DockerEvaluator evaluator = new DockerEvaluator("", "moodit-runner-",
-            System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"), 1536, 512, 2.0);
+    private final DockerEvaluator evaluator = new DockerEvaluator(
+            new DockerSandbox("", 1536, 512, 2.0), "moodit-runner-",
+            System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
 
     private static void gate(boolean available, String what) {
         if (available) {

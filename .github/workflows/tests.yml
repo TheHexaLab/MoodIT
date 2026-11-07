@@ -464,7 +464,7 @@ jobs:
   # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
   # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
   integration:
-    name: execution-service — intégration (Piston réel)
+    name: execution-service — intégration (runner Docker réel)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -476,23 +476,6 @@ jobs:
           java-version: '25'
           cache: gradle
 
-      - name: Démarrer Piston + installer les runtimes
-        # docker compose interpole et VALIDE tout le fichier prod même si on ne démarre que piston : les
-        # ports des autres services (${GATEWAY_PORT}, ${FRONTEND_PORT}) doivent résoudre vers une valeur,
-        # sinon « no port specified: :<empty> ». L'interpolation ${VAR} lit l'ENVIRONNEMENT DU SHELL (pas
-        # le fichier `env_file:` des services, qui n'injecte que dans les conteneurs) → on les met ici.
-        # Valeurs bidons : ces services ne démarrent pas dans ce job.
-        env:
-          FRONTEND_PORT: "5173"
-          GATEWAY_PORT: "8080"
-          POSTGRES_USER: postgres
-          POSTGRES_DB: moodit_db
-        run: |
-          touch .env.docker   # requis : des services le déclarent en `env_file:` (vide suffit ici)
-          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml up -d --build piston
-          # piston-init attend Piston puis installe les runtimes (langages) et s'arrête.
-          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml run --rm piston-init
-
       - name: Bundle react-runtime.js (nécessaire aux cas JSX/TSX)
         run: |
           docker build --target jsvendor -t moodit-jsvendor execution-service
@@ -501,21 +484,20 @@ jobs:
           docker cp "$cid:/out/." vendor-ci/
           docker rm "$cid"
 
-      # Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
-      # Exigées par DockerRunnerIntegrationTest (notation compilée + matrice anti-triche).
-      - name: Construire les images runner (langages compilés)
+      # Les 10 images du RUNNER (#116) : notation des compilés (java, csharp, go, rust, c) et
+      # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les deux filets
+      # d'intégration (interprétés/SQL/vues ET compilés + matrice anti-triche).
+      - name: Construire les images runner
         run: bash docker/runners/build.sh
 
       - name: Tests d'intégration
         working-directory: execution-service
         env:
-          PISTON_URL: http://localhost:2000
           APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
-          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent, démon
-          # Docker/images runner absents) doit FAIRE ÉCHOUER le job, pas l'ignorer : sinon un Piston
-          # ou un runner qui ne démarre pas laisserait ce gate de sécurité passer au vert sans avoir
-          # rien exécuté. (En local, drapeaux absents → tests ignorés.)
-          PISTON_REQUIRED: "true"
+          # En CI, une précondition manquante (bundle vendor absent, démon Docker ou images runner
+          # absents) doit FAIRE ÉCHOUER le job, pas l'ignorer : sinon un runner qui ne construit pas
+          # laisserait ce gate de sécurité passer au vert sans avoir rien exécuté. (En local,
+          # drapeau absent → tests ignorés.)
           SANDBOX_REQUIRED: "true"
         run: |
           chmod +x ./gradlew

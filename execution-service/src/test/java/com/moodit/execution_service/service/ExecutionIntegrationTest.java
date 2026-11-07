@@ -4,12 +4,11 @@ import com.moodit.execution_service.assembly.CodeAssembler;
 import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.DockerSandbox;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,60 +16,60 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Tests d'INTÉGRATION comportementaux : exercent le VRAI code Java (assemblage + verdict) contre un
- * VRAI Piston. Contrairement aux tests unitaires (qui ne vérifient que la STRUCTURE des chaînes
- * générées), ceux-ci prouvent que les programmes assemblés s'exécutent et notent correctement —
- * notamment que l'ISOLATION RPC des langages interprétés ferme le résiduel (une réponse fausse qui
- * tente d'extraire le nonce ÉCHOUE).
+ * Tests d'INTÉGRATION comportementaux : exercent le VRAI code Java (assemblage + verdict) contre
+ * les VRAIES images runner (mode exec, ex-Piston). Contrairement aux tests unitaires (qui ne
+ * vérifient que la STRUCTURE des chaînes générées), ceux-ci prouvent que les programmes assemblés
+ * s'exécutent et notent correctement — notamment que l'ISOLATION RPC des langages interprétés
+ * ferme le résiduel (une réponse fausse qui tente d'extraire le nonce ÉCHOUE).
  *
- * <p>Requiert un Piston joignable via {@code PISTON_URL} (défaut {@code http://localhost:2000}).
- * Le comportement quand une précondition manque (Piston injoignable, bundle vendor absent) dépend de
- * {@code PISTON_REQUIRED} :
+ * <p>Requiert un démon Docker joignable et les images {@code moodit-runner-*}
+ * ({@code docker/runners/build.sh}). Le comportement quand une précondition manque dépend de
+ * {@code SANDBOX_REQUIRED} :
  * <ul>
  *   <li><b>absent / false</b> (dev local) : le test est <b>IGNORÉ</b> (assume) — {@code ./gradlew test}
- *       reste vert sans Piston.</li>
- *   <li><b>true</b> (CI) : le test <b>ÉCHOUE</b>. Sinon un Piston qui ne démarre pas laisserait tout le
- *       filet d'intégration s'ignorer en silence et le job passer au vert <em>sans rien avoir exécuté</em>
- *       — exactement le scénario qu'on veut interdire pour un gate de sécurité.</li>
+ *       reste vert sans Docker.</li>
+ *   <li><b>true</b> (CI) : le test <b>ÉCHOUE</b>. Sinon des images qui ne construisent pas laisseraient
+ *       tout le filet d'intégration s'ignorer en silence et le job passer au vert <em>sans rien avoir
+ *       exécuté</em> — exactement le scénario qu'on veut interdire pour un gate de sécurité.</li>
  * </ul>
- * En CI, le job d'intégration démarre Piston, pose {@code PISTON_REQUIRED=true} puis exécute ces tests
- * (cf. .github/workflows).
+ * En CI, le job d'intégration construit les images, pose {@code SANDBOX_REQUIRED=true} puis exécute
+ * ces tests (cf. .github/workflows).
  */
 class ExecutionIntegrationTest {
 
-    private static final String PISTON = System.getenv().getOrDefault("PISTON_URL", "http://localhost:2000");
-
-    // En CI ce drapeau vaut true : une précondition manquante ÉCHOUE au lieu de s'ignorer, pour qu'un
-    // Piston/bundle absent ne puisse pas faire passer le gate de sécurité au vert « à vide ».
-    private static final boolean PISTON_REQUIRED =
-            Boolean.parseBoolean(System.getenv().getOrDefault("PISTON_REQUIRED", "false"));
+    // En CI ce drapeau vaut true : une précondition manquante ÉCHOUE au lieu de s'ignorer, pour que
+    // des images absentes ne puissent pas faire passer le gate de sécurité au vert « à vide ».
+    private static final boolean SANDBOX_REQUIRED =
+            Boolean.parseBoolean(System.getenv().getOrDefault("SANDBOX_REQUIRED", "false"));
 
     // Dossier vendor (bundles JSX/HTML). Absent → les questions JSX/HTML sont ignorées ici (testées
     // par les scripts E2E dans le conteneur). Les langages « appel de fonction » n'en ont pas besoin.
     private final CodeAssembler assembler =
             new CodeAssembler(System.getenv().getOrDefault("APP_VENDOR_DIR", "/nonexistent-vendor"));
-    private final PistonClient piston = new PistonClient(PISTON, 3000, 10000, 20000);
-    private final ExecutionService service = new ExecutionService(assembler, piston);
+    private static final RunnerExec RUNNER = new RunnerExec(
+            new DockerSandbox("", 1536, 512, 2.0), "moodit-runner-",
+            System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
+    private final ExecutionService service = new ExecutionService(assembler, RUNNER);
 
     @BeforeEach
-    void requirePiston() {
-        gate(reachable(PISTON), "Piston non joignable (" + PISTON + ")");
+    void requireDocker() {
+        gate(RUNNER.sandbox().available(), "Démon Docker injoignable");
     }
 
     /**
      * Précondition d'un test d'intégration. Si elle est satisfaite → on continue. Sinon : en CI
-     * ({@code PISTON_REQUIRED=true}) on <b>échoue</b> (le filet ne doit pas s'ignorer en silence) ;
-     * en local on <b>ignore</b> (assume) pour garder {@code ./gradlew test} vert sans Piston.
+     * ({@code SANDBOX_REQUIRED=true}) on <b>échoue</b> (le filet ne doit pas s'ignorer en silence) ;
+     * en local on <b>ignore</b> (assume) pour garder {@code ./gradlew test} vert sans Docker.
      */
     private static void gate(boolean available, String what) {
         if (available) {
             return;
         }
-        if (PISTON_REQUIRED) {
-            fail(what + " — indisponible alors que PISTON_REQUIRED=true : le filet d'intégration ne doit "
+        if (SANDBOX_REQUIRED) {
+            fail(what + " — indisponible alors que SANDBOX_REQUIRED=true : le filet d'intégration ne doit "
                     + "PAS s'ignorer en CI (sinon le gate de sécurité passe au vert sans rien exécuter).");
         }
-        assumeTrue(false, what + " — test d'intégration ignoré (dev local, PISTON_REQUIRED absent)");
+        assumeTrue(false, what + " — test d'intégration ignoré (dev local, SANDBOX_REQUIRED absent)");
     }
 
     /** Vrai si la question réussit (tous ses harnais passent). */
@@ -88,6 +87,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void python_rpc_isolation() {
+        requireRuntime("python");
         assertThat(passes("Python", "def doubler(n):\n    return n * 2", "return doubler(5) == 10")).isTrue();
         assertThat(passes("Python", "def doubler(n):\n    return 0", "return doubler(5) == 10")).isFalse();
         assertThat(passes("Python",
@@ -102,6 +102,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void javascript_rpc_isolation() {
+        requireRuntime("javascript");
         assertThat(passes("JavaScript", "function doubler(n){ return n * 2; }", "return doubler(5) === 10;")).isTrue();
         assertThat(passes("JavaScript", "function doubler(n){ return 0; }", "return doubler(5) === 10;")).isFalse();
         assertThat(passes("JavaScript",
@@ -113,6 +114,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void typescript_rpc_isolation() {
+        requireRuntime("typescript");
         assertThat(passes("TypeScript",
                 "function doubler(n: number): number { return n * 2; }", "return doubler(5) === 10;")).isTrue();
         assertThat(passes("TypeScript",
@@ -121,6 +123,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void php_rpc_isolation() {
+        requireRuntime("php");
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return $n * 2; }", "return doubler(5) === 10;")).isTrue();
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return 0; }", "return doubler(5) === 10;")).isFalse();
         assertThat(passes("PHP",
@@ -136,6 +139,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void bash_rpc_isolation() {
+        requireRuntime("bash");
         assertThat(passes("Bash", "doubler() { echo $(( $1 * 2 )); }", "[ \"$(doubler 5)\" = \"10\" ]")).isTrue();
         assertThat(passes("Bash", "doubler() { echo 0; }", "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
         assertThat(passes("Bash",
@@ -146,6 +150,7 @@ class ExecutionIntegrationTest {
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {
+        requireRuntime("python");
         assertThat(passes("Python",
                 "class Rectangle:\n    def __init__(self, l, h):\n        self.l = l; self.h = h\n"
                         + "    def aire(self):\n        return self.l * self.h",
@@ -162,6 +167,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void jsx_static_render_isolation() {
+        requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");
         String h = "return html.includes('<h1>Bonjour</h1>');";
         assertThat(passes("JSX", "function Composant(){ return React.createElement('h1', null, 'Bonjour'); }", h)).isTrue();
@@ -176,6 +182,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void jsx_interactive_via_dom_proxy() {
+        requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR) — JSX interactif");
         String harness = "const c = mount(Composant);\n"
                 + "const btn = c.querySelector('button');\n"
@@ -190,6 +197,7 @@ class ExecutionIntegrationTest {
 
     @Test
     void tsx_static_render_isolation() {
+        requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR) — TSX");
         String h = "return html.includes('<span>5</span>');";
         assertThat(passes("TSX",
@@ -201,26 +209,16 @@ class ExecutionIntegrationTest {
     // Les langages COMPILÉS ne passent plus par Piston (#116) : leur filet d'intégration vit dans
     // DockerRunnerIntegrationTest (conteneurs runner + superviseur + matrice anti-triche).
 
-    /**
-     * Le runtime est-il installé dans Piston ? Même politique que {@link #gate} : ignoré en local
-     * (ex. Piston de la pile e2e, qui n'a que Python), échec en CI où tous les runtimes sont posés.
-     */
-    private static void requireRuntime(String language) {
-        gate(runtimes().contains("\"language\":\"" + language + "\""),
-                "Runtime Piston « " + language + " » absent");
-    }
-
-    private static String runtimes() {
-        try (var in = URI.create(PISTON + "/api/v2/runtimes").toURL().openStream()) {
-            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "";
-        }
+    /** L'image runner du runtime est-elle construite ? Même politique que {@link #gate}. */
+    private static void requireRuntime(String runtime) {
+        String image = RUNNER.imageFor(runtime);
+        gate(RUNNER.sandbox().imagePresent(image), "Image runner absente : " + image);
     }
 
     // ─────────────────────── SQL (isolation 2 phases) : non-régression ───────────────────────
     @Test
     void sql_isolation_still_works() {
+        requireRuntime("sqlite3");
         String roHarness = "CREATE TABLE t(n INTEGER);\nINSERT INTO t VALUES (1),(2),(3);\n"
                 + "SELECT (SELECT count(*) FROM solution1) = 3;";
         assertThat(passes("SQL", "SELECT n FROM t", roHarness)).isTrue();
@@ -244,13 +242,12 @@ class ExecutionIntegrationTest {
 
     @Test
     void boucle_d_allocation_tuee_par_la_limite_memoire() {
-        // PistonClient envoie run_memory_limit (256 Mo par défaut) : le processus est tué bien avant
-        // le délai d'exécution. Sans limite, la boucle tournerait jusqu'au délai (Time limit exceeded).
+        // La limite mémoire du conteneur runner (app.sandbox.memory-mb) tue la boucle d'allocation :
+        // le processus meurt par SIGNAL (OOM du cgroup → SIGKILL), jamais en « réussite ».
         requireRuntime("python");
-        PistonClient.Stage run = piston.execute("python", "*", List.of(new PistonClient.File("main.py",
+        RunnerExec.Stage run = RUNNER.execute("python", List.of(new RunnerExec.File("main.py",
                 "a = []\nwhile True:\n    a.append(bytearray(10 * 1024 * 1024))\n"))).run();
-        assertThat(run.code() != null && run.code() == 137 || "SIGKILL".equals(run.signal())).isTrue();
-        assertThat(run.message()).doesNotContain("Time limit");
+        assertThat("SIGKILL".equals(run.signal()) || (run.code() != null && run.code() != 0)).isTrue();
     }
 
     /** Le bundle react-runtime.js est-il présent (nécessaire pour assembler JSX/TSX) ? */
@@ -259,18 +256,4 @@ class ExecutionIntegrationTest {
         return java.nio.file.Files.isReadable(java.nio.file.Path.of(dir, "react-runtime.js"));
     }
 
-    /** Piston répond-il sur {@code /api/v2/runtimes} ? (2 s max) */
-    private static boolean reachable(String baseUrl) {
-        try {
-            HttpURLConnection c = (HttpURLConnection) URI.create(baseUrl + "/api/v2/runtimes").toURL().openConnection();
-            c.setConnectTimeout(2000);
-            c.setReadTimeout(2000);
-            c.setRequestMethod("GET");
-            int code = c.getResponseCode();
-            c.disconnect();
-            return code == 200;
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }

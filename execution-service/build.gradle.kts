@@ -83,7 +83,7 @@ tasks.test {
 pitest {
 	pitestVersion = "1.30.1"
 	junit5PluginVersion = "1.2.3"
-	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.piston.*", "com.moodit.execution_service.sandbox.*")
+	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.sandbox.*")
 	// DockerSandbox = enveloppe d'infra (client Docker) : couverte par DockerRunnerIntegrationTest
 	// (exclu de PIT comme toute intégration), pas par les tests unitaires → on ne la mute pas.
 	excludedClasses = setOf("com.moodit.execution_service.sandbox.DockerSandbox")

@@ -41,18 +41,9 @@ public class DockerEvaluator {
     private final String imageTag;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public DockerEvaluator(
-            @Value("${app.sandbox.docker-host:}") String dockerHost,
+    public DockerEvaluator(DockerSandbox sandbox,
             @Value("${app.sandbox.image-prefix:moodit-runner-}") String imagePrefix,
-            @Value("${app.sandbox.image-tag:latest}") String imageTag,
-            @Value("${app.sandbox.memory-mb:1536}") long memoryMb,
-            @Value("${app.sandbox.pids-limit:512}") long pidsLimit,
-            @Value("${app.sandbox.cpus:2.0}") double cpus) {
-        this(new DockerSandbox(dockerHost, memoryMb, pidsLimit, cpus), imagePrefix, imageTag);
-    }
-
-    /** Pour les tests : sandbox injectable. */
-    public DockerEvaluator(DockerSandbox sandbox, String imagePrefix, String imageTag) {
+            @Value("${app.sandbox.image-tag:latest}") String imageTag) {
         this.sandbox = sandbox;
         this.imagePrefix = imagePrefix;
         this.imageTag = imageTag;

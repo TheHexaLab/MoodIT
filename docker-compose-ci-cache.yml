@@ -40,8 +40,3 @@ services:
       context: ./execution-service
       cache_from: ["type=gha,scope=moodit-execution"]
       cache_to: ["type=gha,scope=moodit-execution,mode=max"]
-  piston:
-    build:
-      context: ./piston
-      cache_from: ["type=gha,scope=moodit-piston"]
-      cache_to: ["type=gha,scope=moodit-piston,mode=max"]

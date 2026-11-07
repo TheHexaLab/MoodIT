@@ -17,7 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Appelle le service d'EXÉCUTION (sandbox Piston) pour corriger une question Code. Endpoint
+ * Appelle le service d'EXÉCUTION (conteneurs runner Docker, #116) pour corriger une question Code. Endpoint
  * INTERNE (non exposé par le gateway), authentifié par un jeton partagé {@code X-Internal-Token}.
  * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} si le
  * service est injoignable (le job laisse alors la question « en cours »).
@@ -39,7 +39,7 @@ public class ExecutionClient {
             @Value("${app.internal.token}") String internalToken,
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
-            @Value("${app.execution-service.per-test-timeout-ms:${PISTON_HTTP_TIMEOUT_MS:20000}}") long perTestReadTimeoutMs,
+            @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs,
             @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:15000}}") long internalQueueWaitMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
@@ -50,16 +50,15 @@ public class ExecutionClient {
     }
 
     /**
-     * Délai d'attente de la réponse pour {@code pistonCalls} appels au sandbox (#31, #216) :
+     * Délai d'attente de la réponse pour {@code pistonCalls} unités de travail du sandbox (#31, #216) :
      * execution-service les fait L'UN APRÈS L'AUTRE, et chacun peut d'abord attendre une place du
      * sandbox ({@code app.exec.internal-queue-wait-ms}, 15 s par défaut, #24), puis durer jusqu'au
-     * délai d'un appel Piston ({@code app.piston.http-timeout-ms}, 20 s par défaut). Le budget par
-     * appel est donc la SOMME des deux (35 s par défaut) : ne compter que l'appel Piston faisait
+     * délai d'une unité de travail du runner ({@code per-test-timeout-ms}, 20 s par défaut). Le budget par
+     * appel est donc la SOMME des deux (35 s par défaut) : ne compter que l'exécution seule faisait
      * échouer la correction quand le sandbox était saturé, alors qu'execution-service corrigeait
-     * encore. Les deux parts suivent par défaut les variables du {@code .env} partagé qui les
-     * règlent côté execution-service ({@code PISTON_HTTP_TIMEOUT_MS},
-     * {@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : augmenter l'une là-bas impose la même valeur ici, ce
-     * qui est automatique tant qu'elle vient de ce fichier. Un délai fixe faisait échouer la
+     * encore. La part d'attente suit par défaut la variable du {@code .env} partagé qui la
+     * règle côté execution-service ({@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : l'augmenter là-bas
+     * impose la même valeur ici, automatique tant qu'elle vient de ce fichier. Un délai fixe faisait échouer la
      * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
      * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
      */
@@ -74,7 +73,7 @@ public class ExecutionClient {
      * <ul>
      *   <li>un par harnais (interprétés) ;</li>
      *   <li>DEUX par harnais en SQL : un harnais de modification ({@code -- @student}) s'exécute en
-     *       deux phases isolées, chacune avec son attente et son appel Piston. Le mode n'est pas
+     *       deux phases isolées, chacune avec son attente et son conteneur runner. Le mode n'est pas
      *       déduit ici (execution-service l'analyse dans le harnais) : tout harnais SQL compte pour
      *       deux, ce qui ne fait qu'allonger le délai d'une question SQL en lecture seule ;</li>
      *   <li>DEUX par harnais + 2 pour un langage COMPILÉ (#116) : le runner Docker COMPILE puis

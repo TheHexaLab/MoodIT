@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 /**
  * Bornes de charge du sandbox (#24), à deux niveaux :
  * <ul>
- *   <li><b>Globale</b> : au plus {@code maxConcurrent} exécutions Piston simultanées, tous appelants
+ *   <li><b>Globale</b> : au plus {@code maxConcurrent} conteneurs runner simultanés, tous appelants
  *       confondus (« Tester », « play », correction interne). Une exécution en trop attend une place
  *       au plus {@code queueWaitMs} (file d'attente courte), puis est refusée. La correction
  *       interne des soumissions ({@link #asInternal}) attend plus longtemps

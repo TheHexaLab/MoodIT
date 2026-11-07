@@ -5,7 +5,7 @@ import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import com.moodit.execution_service.sandbox.DockerEvaluator;
 import com.moodit.execution_service.sandbox.SandboxException;
 import org.junit.jupiter.api.Test;
@@ -35,14 +35,14 @@ import static org.mockito.Mockito.when;
 class ExecutionServiceTest {
 
     private final CodeAssembler assembler = new CodeAssembler("/nonexistent-vendor");
-    private final PistonClient piston = mock(PistonClient.class);
-    private final ExecutionService service = new ExecutionService(assembler, piston);
+    private final RunnerExec runner = mock(RunnerExec.class);
+    private final ExecutionService service = new ExecutionService(assembler, runner);
 
     private static final Pattern NONCE = Pattern.compile("MOODIT_OK_[0-9a-f]+");
 
     /** Retrouve le nonce injecté dans les fichiers assemblés (pour simuler un harnais qui réussit). */
-    private static String nonceIn(List<PistonClient.File> files) {
-        for (PistonClient.File f : files) {
+    private static String nonceIn(List<RunnerExec.File> files) {
+        for (RunnerExec.File f : files) {
             Matcher m = NONCE.matcher(f.content());
             if (m.find()) return m.group();
         }
@@ -54,10 +54,10 @@ class ExecutionServiceTest {
     }
 
     /** Fait renvoyer à Piston une étape run(stdout, stderr) calculée à partir des fichiers soumis. */
-    private void pistonRun(Function<List<PistonClient.File>, PistonClient.Stage> runFn) {
-        when(piston.execute(anyString(), any(), any(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
-            List<PistonClient.File> files = inv.getArgument(2);
-            return new PistonClient.Result(null, runFn.apply(files), null);
+    private void pistonRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
+        when(runner.execute(anyString(), any(), any(), any())).thenAnswer((Answer<RunnerExec.Result>) inv -> {
+            List<RunnerExec.File> files = inv.getArgument(1);
+            return new RunnerExec.Result(null, runFn.apply(files), null);
         });
     }
 
@@ -70,29 +70,29 @@ class ExecutionServiceTest {
     @Test
     void passes_when_harness_emits_the_nonce() {
         // Harnais réussi = il a écrit le nonce sur stderr.
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isTrue();
     }
 
     @Test
     void fails_when_nonce_absent_even_though_exit_zero() {
         // ANTI-TRICHE : exit 0 mais AUCUN nonce (ex. sys.exit(0) anticipé) → échec.
-        pistonRun(files -> new PistonClient.Stage("", "", 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage("", "", 0, null, null));
         assertThat(verdict(oneTest("Python", "import sys; sys.exit(0)", "return False"))).isFalse();
     }
 
     @Test
     void fails_when_harness_returns_false() {
         // Échec légitime : le programme s'est terminé sans émettre le nonce.
-        pistonRun(files -> new PistonClient.Stage("", "", 1, null, null));
+        pistonRun(files -> new RunnerExec.Stage("", "", 1, null, null));
         assertThat(verdict(oneTest("Python", "def solution(): return 5", "return solution() == 6"))).isFalse();
     }
 
     @Test
     void fails_on_compile_error() {
         // TypeScript : seul langage encore assemblé pour Piston avec une étape de compilation.
-        when(piston.execute(anyString(), any(), any(), any(), any())).thenReturn(new PistonClient.Result(
-                new PistonClient.Stage("", "erreur de compilation", 1, null, null), null, null));
+        when(runner.execute(anyString(), any(), any(), any())).thenReturn(new RunnerExec.Result(
+                new RunnerExec.Stage("", "erreur de compilation", 1, null, null), null, null));
         List<TestResult> r = service.evaluate(
                 oneTest("TypeScript", "function solution(): number { return 5; }", "return true;"));
         assertThat(r).singleElement().satisfies(t -> {
@@ -103,12 +103,12 @@ class ExecutionServiceTest {
 
     @Test
     void fails_on_timeout_signal() {
-        pistonRun(files -> new PistonClient.Stage("", "", null, "SIGKILL", null));
+        pistonRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
         assertThat(verdict(oneTest("Python", "while True: pass", "return True"))).isFalse();
     }
 
     /** Sortie SQL = verdict encadré par les sentinelles au nonce (comme le produit main.sql). */
-    private static String sqlFenced(List<PistonClient.File> files, String verdictLine) {
+    private static String sqlFenced(List<RunnerExec.File> files, String verdictLine) {
         String nonce = nonceIn(files);
         return CodeAssembler.sqlVerdictStart(nonce) + "\n" + verdictLine + "\n"
                 + CodeAssembler.sqlVerdictEnd(nonce) + "\n";
@@ -116,13 +116,13 @@ class ExecutionServiceTest {
 
     @Test
     void sql_passes_when_fenced_verdict_is_one() {
-        pistonRun(files -> new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT nom FROM t", "SELECT 1;"))).isTrue();
     }
 
     @Test
     void sql_fails_when_fenced_verdict_is_zero() {
-        pistonRun(files -> new PistonClient.Stage(sqlFenced(files, "0"), "", 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage(sqlFenced(files, "0"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT nom FROM t", "SELECT 0;"))).isFalse();
     }
 
@@ -130,14 +130,14 @@ class ExecutionServiceTest {
     void sql_ignores_student_output_printed_before_the_fence() {
         // ANTI-FORGERIE : l'étudiant affiche « 1 » AVANT la sentinelle, mais le vrai verdict (entre
         // sentinelles) vaut « 0 » → échec. Sans encadrement, la ligne « 1 » aurait fait réussir.
-        pistonRun(files -> new PistonClient.Stage("1\n" + sqlFenced(files, "0"), "", 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage("1\n" + sqlFenced(files, "0"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT 1", "SELECT 0;"))).isFalse();
     }
 
     @Test
     void sql_fails_when_the_fence_is_absent() {
         // Sentinelles avalées (ex. un /* étudiant) → verdict introuvable → échec.
-        pistonRun(files -> new PistonClient.Stage("1\n", "", 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage("1\n", "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT 1", "SELECT 0;"))).isFalse();
     }
 
@@ -154,9 +154,9 @@ class ExecutionServiceTest {
                 String dump = CodeAssembler.sqlDumpStart(nonce) + "\n"
                         + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
                         + CodeAssembler.sqlDumpEnd(nonce) + "\n";
-                return new PistonClient.Stage(dump, "", 0, null, null);
+                return new RunnerExec.Stage(dump, "", 0, null, null);
             }
-            return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null);
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
         });
         assertThat(verdict(oneTest("SQL", "UPDATE t SET n = 0", SQL_MUTATION_HARNESS))).isTrue();
     }
@@ -168,12 +168,12 @@ class ExecutionServiceTest {
             String nonce = nonceIn(files);
             if (files.get(0).content().contains(".dump")) {
                 assertThat(files.get(0).content()).contains("UPDATE t SET n = 0"); // phase 1 : oui
-                return new PistonClient.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
+                return new RunnerExec.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
                         + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
                         + CodeAssembler.sqlDumpEnd(nonce) + "\n", "", 0, null, null);
             }
             assertThat(files.get(0).content()).doesNotContain("UPDATE t SET n = 0"); // phase 2 : jamais
-            return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null);
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
         });
         assertThat(verdict(oneTest("SQL", "UPDATE t SET n = 0", SQL_MUTATION_HARNESS))).isTrue();
     }
@@ -181,7 +181,7 @@ class ExecutionServiceTest {
     @Test
     void sql_mutation_fails_when_student_phase_errors() {
         // Erreur SQL de l'étudiant en phase 1 (exit != 0) → test échoué, sans lancer la phase 2.
-        pistonRun(files -> new PistonClient.Stage("", "near \"x\": syntax error", 1, null, null));
+        pistonRun(files -> new RunnerExec.Stage("", "near \"x\": syntax error", 1, null, null));
         assertThat(verdict(oneTest("SQL", "x", SQL_MUTATION_HARNESS))).isFalse();
     }
 
@@ -191,14 +191,14 @@ class ExecutionServiceTest {
         // routage ne regarde QUE le harnais. Harnais SANS marqueur → lecture seule = UN seul appel
         // Piston (un mode 2 phases en ferait deux). On compte les appels pour le prouver.
         final int[] calls = { 0 };
-        pistonRun(files -> { calls[0]++; return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null); });
+        pistonRun(files -> { calls[0]++; return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null); });
         assertThat(verdict(oneTest("SQL", "SELECT 1 -- @student", "SELECT (SELECT count(*) FROM solution1) >= 0;"))).isTrue();
         assertThat(calls[0]).isEqualTo(1);
     }
 
     @Test
     void weights_are_reported_per_test() {
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 3)));
         assertThat(service.evaluate(req)).singleElement()
@@ -210,8 +210,8 @@ class ExecutionServiceTest {
         // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel Piston (run, harnais,
         // SQL en deux phases) doit passer par cette place, donc être refusé sans appeler Piston.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
-        ExecutionService limited = new ExecutionService(assembler, piston, limiter, null);
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        ExecutionService limited = new ExecutionService(assembler, runner, limiter, null);
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
 
         limiter.withSandboxSlot(() -> {
             assertThatThrownBy(() -> limited.run(new RunRequest("Python", null, "print(1)")))
@@ -222,7 +222,7 @@ class ExecutionServiceTest {
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
-        verify(piston, never()).execute(anyString(), any(), any(), any(), any());
+        verify(runner, never()).execute(anyString(), any(), any(), any());
 
         // Place rendue : la même exécution passe.
         assertThat(limited.evaluate(oneTest("Python", "def f(): pass", "return True")))
@@ -234,7 +234,7 @@ class ExecutionServiceTest {
     @Test
     void compiled_languages_route_to_docker_evaluator_not_piston() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
-        ExecutionService routed = new ExecutionService(assembler, piston, docker);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
         List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
         when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(expected);
 
@@ -242,7 +242,7 @@ class ExecutionServiceTest {
             assertThat(routed.evaluate(oneTest(language, "code", "harnais"))).isEqualTo(expected);
         }
         verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any());
-        verify(piston, never()).execute(anyString(), any(), any(), any(), any());
+        verify(runner, never()).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -257,7 +257,7 @@ class ExecutionServiceTest {
         // Un conteneur runner consomme une place de la limite globale, comme un appel Piston.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
         DockerEvaluator docker = mock(DockerEvaluator.class);
-        ExecutionService limited = new ExecutionService(assembler, piston, limiter, docker);
+        ExecutionService limited = new ExecutionService(assembler, runner, limiter, docker);
         limiter.withSandboxSlot(() -> {
             assertThatThrownBy(() -> limited.evaluate(oneTest("Go", "code", "harnais")))
                     .isInstanceOf(ExecutionBusyException.class);
@@ -269,7 +269,7 @@ class ExecutionServiceTest {
     @Test
     void timeout_is_forwarded_to_docker_evaluator() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
-        ExecutionService routed = new ExecutionService(assembler, piston, docker);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
         when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(List.of());
         routed.evaluate(new EvaluateRequest("Rust", null, "code",
                 List.of(new TestCaseInput("t", "harnais", 1)), 42_000));

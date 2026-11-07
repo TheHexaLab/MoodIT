@@ -1,7 +1,7 @@
 # Déploiement MoodIT sur un VPS Hetzner (~8 €/mois)
 
 Guide de bout en bout : d'un compte Hetzner vide à l'app en HTTPS.
-LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
+LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **conteneurs runner Docker** (#116 — nécessite un VPS avec Docker, pas un PaaS).
 
 ---
 
@@ -24,9 +24,8 @@ Dans la console Hetzner → **Add Server** :
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images Docker du projet se buildent sur place, **sauf Piston** : son image
-> amont (`ghcr.io/engineer-man/piston`, épinglée par digest dans `piston/Dockerfile`) n'existe
-> qu'en linux/amd64. Pour Piston, prendre un serveur **x86** (CX32), comme la prod actuelle.
+> ARM (CAX) : les images Docker du projet (services et runners) se buildent sur place ;
+> la prod actuelle tourne sur **x86** (CX32).
 
 ## 2. Pointer le domaine
 
@@ -94,9 +93,8 @@ Depuis la **racine** du repo :
 docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
-Le premier build prend quelques minutes (6 services Java + frontend + Piston).
-`piston-init` installe les 12 langages puis s'arrête (normal), de même que `db-migrate`, qui crée
-le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
+Le premier build prend quelques minutes (6 services Java + frontend + les 10 images runner).
+`db-migrate` s'arrête après avoir créé le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
 
 Suivre les logs :
 
@@ -108,7 +106,7 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 
 - Ouvre **https://moodit.example.com** → l'app se charge en HTTPS (cadenas OK).
 - Crée un compte → tu reçois le **code par email** → connexion.
-- Ouvre un quiz de code, soumets → correction via Piston (WebSocket met à jour le score).
+- Ouvre un quiz de code, soumets → correction via les conteneurs runner (WebSocket met à jour le score).
 - (Admin) lance une **analyse MCP** → résultat via Groq, ou repli déterministe si la clé est absente.
 
 ---
@@ -234,24 +232,14 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Seuls les ports **80/443** sont exposés (Caddy). Tous les services applicatifs et la base
   restent sur le réseau Docker `internal`, injoignables depuis Internet.
 - Le TLS est géré et renouvelé automatiquement par Caddy.
-- Piston est seul sur le réseau `sandbox`, partagé uniquement avec `execution-service` (et
-  `piston-init`) : ni le gateway, ni core-service, ni Postgres ne peuvent le joindre. Le code
-  exécuté n'a aucun accès réseau (espace de noms réseau vide d'isolate).
-- Piston ne tourne **plus** en `privileged` : capacités limitées à ce qu'isolate utilise
-  (`SYS_ADMIN`, `NET_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`,
-  `FOWNER`, `KILL`), seccomp par défaut de Docker actif, cgroup privé. AppArmor est levé pour ce
-  seul conteneur (le profil `docker-default` interdit de remonter `/sys/fs/cgroup` en écriture).
-  Si Piston ne démarre pas (« remontage de /sys/fs/cgroup impossible »), vérifier que l'hôte est
-  en cgroup v2 et que `cap_add` / `cgroup: private` sont bien appliqués.
-- Limites par exécution : 3 s d'exécution, 10 s de compilation, 256 Mo de mémoire à l'exécution
-  et 512 Mo à la compilation, 1 Mio de sortie par flux. Côté execution-service : 2 exécutions
-  simultanées au plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par
-  utilisateur (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
-  Le conteneur Piston est plafonné à 1,5 Go (`mem_limit`) : 2 compilations de 512 Mo, plus une
-  marge pour l'API Piston. Relever `EXEC_MAX_CONCURRENT` impose de relever ce plafond d'autant.
-- Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
-  `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
-  puis vérifier le job CI `integration` (vrai Piston) avant de déployer.
+- Le code étudiant ne s'exécute QUE dans les conteneurs runner jetables (voir ci-dessous) :
+  réseau coupé, limites mémoire/PID/CPU, UID dédié. Aucun service n'exécute de code non fiable
+  dans son propre processus.
+- Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
+  notation, configurable par question jusqu'à 60 s), 1,5 Go de mémoire par conteneur
+  (`SANDBOX_MEMORY_MB`), sorties tronquées. Côté execution-service : 2 exécutions simultanées au
+  plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par utilisateur
+  (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
   des conteneurs jetables `moodit-runner-*` (réseau coupé, 1,5 Go de mémoire, 512 PID, 2 CPU,
   `no-new-privileges` ; seule capacité ajoutée : `SYS_PTRACE`, pour que le superviseur trace le

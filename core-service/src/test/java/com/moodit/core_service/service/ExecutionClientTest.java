@@ -125,9 +125,9 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + appel Piston), au moins un")
+    @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + exécution), au moins un")
     void readTimeout_couvreAttenteEtAppelParHarnais() {
-        // Valeurs par défaut : 10 s de base, PISTON_HTTP_TIMEOUT_MS = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
+        // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         assertThat(client.readTimeoutMs(1)).isEqualTo(45_000);

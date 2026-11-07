@@ -6,7 +6,6 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonException;
 import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionBusyException;
 import com.moodit.execution_service.service.ExecutionLimiter;
@@ -103,15 +102,6 @@ class ExecutionControllersTest {
                         .content("{\"language\":\"COBOL\",\"code\":\"x\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.detail").value("Langage non encore supporté par l'exécution : COBOL"));
-    }
-
-    @Test
-    void piston_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
-        when(service.evaluate(any())).thenThrow(new PistonException("Appel Piston échoué : http://piston:2000 refusé"));
-
-        mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
-                .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"));
     }
 
     @Test

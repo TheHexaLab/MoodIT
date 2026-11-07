@@ -1,7 +1,10 @@
 # Runner de notation des langages compilés (#116)
 
-Les questions Code **Go, Rust, C, C++, C#, Java** ne sont pas notées via Piston : `execution-service`
-lance un **conteneur jetable** `moodit-runner-<langage>` par évaluation. Le harnais du prof y est un
+TOUTE exécution de code étudiant passe par un **conteneur jetable** `moodit-runner-*` lancé par
+`execution-service` (Piston a été retiré). Deux modes du superviseur : « evaluate » (notation des
+compilés **Go, Rust, C, C++, C#, Java**, décrite ci-dessous) et « exec » (exécution générique :
+programmes RPC à nonce des interprétés/SQL/vues, et bouton « Exécuter » de tous les langages —
+tout y tourne sous l'UID étudiant, sorties à la Piston). Le harnais du prof y est un
 **vrai test du langage** — classe JUnit 5 (Java), classe NUnit (C#), fichier `_test.go` (Go), module
 `#[cfg(test)]` (Rust), `MOODIT_TEST` de `moodit_check.h` (C/C++) — et la POO est du simple code de
 test (`new Rectangle(3, 4).aire()`), sans génération de code.
@@ -75,7 +78,8 @@ donc toute ouverture de `src/` au run est suspecte).
   harnais). En CI (`SANDBOX_REQUIRED=true`), une précondition manquante FAIT ÉCHOUER le job.
 - Dev local : démon Docker requis (Windows : named pipe, détecté automatiquement par
   `DockerSandbox`). Sans démon ni images, les tests s'ignorent et l'évaluation compilée répond 502
-  (la correction reste « en cours », comme Piston injoignable).
+  (la correction reste « en cours » et sera rejouée).
 
-Piston reste utilisé pour : les langages interprétés/SQL/vues, et le bouton « Exécuter »
-(`/exec/run`) de TOUS les langages, compilés compris.
+Images du mode « exec » : `python` (numpy/pandas/scipy/sympy), `node` (+ tsc — JS, TS et les
+harnais JS de JSON/HTML/JSX/TSX, bundles vendor fournis avec le job), `php`, `bash`, `sqlite`.
+Les compilés réutilisent leurs images de notation pour le bouton « Exécuter ».

@@ -1,6 +1,6 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,9 +30,9 @@ class CodeAssemblerTest {
     void python_isolates_student_in_a_separate_process_via_rpc() {
         var a = assembler.assemble("Python", "def solution():\n    return 5",
                 "return solution() == 5", "MOODIT_OK_deadbeef");
-        assertThat(a.pistonLanguage()).isEqualTo("python");
+        assertThat(a.runtime()).isEqualTo("python");
         // Deux fichiers : le NOTEUR (grader.py, en 1er = point d'entrée) et le SERVEUR étudiant.
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.py", "student_server.py");
         String grader = a.files().get(0).content();
         String server = a.files().get(1).content();
@@ -66,8 +66,8 @@ class CodeAssemblerTest {
     void javascript_isolates_student_via_rpc() {
         var a = assembler.assemble("JavaScript", "function doubler(n){ return n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_js");
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.js", "student_server.js");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n)", "MOODIT_OK_js");
         assertThat(a.files().get(0).content())
@@ -76,13 +76,14 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void typescript_uses_extensionless_names_and_ts_nocheck() {
+    void typescript_nomme_en_ts_et_neutralise_le_typage() {
         var a = assembler.assemble("TypeScript", "function doubler(n: number): number { return n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_ts");
-        assertThat(a.pistonLanguage()).isEqualTo("typescript");
-        // Fichiers SANS extension → Piston écrit du .ts et compile en .js (student_server.js).
-        assertThat(a.files()).extracting(PistonClient.File::name)
-                .containsExactly("grader", "student_server");
+        assertThat(a.runtime()).isEqualTo("typescript");
+        // Fichiers .ts : transpilés côte à côte par le runner (tsc --noCheck) en .js
+        // (student_server.js, résolu par le spawn du grader).
+        assertThat(a.files()).extracting(RunnerExec.File::name)
+                .containsExactly("grader.ts", "student_server.ts");
         assertThat(a.files().get(0).content()).startsWith("// @ts-nocheck");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n: number)", "MOODIT_OK_ts");
     }
@@ -91,8 +92,8 @@ class CodeAssemblerTest {
     void php_isolates_student_via_rpc() {
         var a = assembler.assemble("PHP", "<?php\nfunction doubler($n){ return $n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_php");
-        assertThat(a.pistonLanguage()).isEqualTo("php");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("php");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.php", "student_server.php");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler($n)", "MOODIT_OK_php");
         assertThat(a.files().get(0).content())
@@ -103,8 +104,8 @@ class CodeAssemblerTest {
     void bash_isolates_student_via_rpc() {
         var a = assembler.assemble("Bash", "doubler() { echo $(( $1 * 2 )); }",
                 "[ \"$(doubler 5)\" = \"10\" ]", "MOODIT_OK_bash");
-        assertThat(a.pistonLanguage()).isEqualTo("bash");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("bash");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.sh", "student_server.sh");
         assertRpcIsolation(a, "$(doubler 5)", "doubler() {", "MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
@@ -139,7 +140,7 @@ class CodeAssemblerTest {
         var asm = new CodeAssembler(vendorDir.toString());
         var a = asm.assemble("JSX", "function Composant(){ return React.createElement('h1', null, 'Bonjour'); }",
                 "return html.includes('<h1>Bonjour</h1>');", "MOODIT_OK_jsx");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("main.js", "jsx-server.js", "react-runtime.js", "component.tsx")
                 .doesNotContain("moodit-nonce.txt", "harness.js");   // plus de fichier nonce ni harnais voisin
         String grader = a.files().get(0).content();
@@ -158,7 +159,7 @@ class CodeAssemblerTest {
 
     @Test
     void language_aliases_are_resolved() {
-        assertThat(assembler.assemble("js", "function solution(){}", "return true;", "N").pistonLanguage())
+        assertThat(assembler.assemble("js", "function solution(){}", "return true;", "N").runtime())
                 .isEqualTo("javascript");
     }
 
@@ -175,15 +176,15 @@ class CodeAssemblerTest {
     @Test
     void json_produces_main_and_submission_files() {
         var a = assembler.assemble("JSON", "{\"nom\":\"Alice\"}", "return data.nom === 'Alice';", "N");
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactlyInAnyOrder("main.js", "submission.json");
     }
 
     @Test
     void sql_exposes_student_query_as_solution_view() {
         var a = assembler.assemble("SQL", "SELECT nom FROM t", "SELECT count(*) FROM solution = 1;", "N");
-        assertThat(a.pistonLanguage()).isEqualTo("sqlite3");
+        assertThat(a.runtime()).isEqualTo("sqlite3");
         // Requête unique → solution1, et l'alias « solution » pour la compat mono-requête.
         assertThat(onlyFileContent(a))
                 .contains("CREATE VIEW solution1 AS")
@@ -358,7 +359,7 @@ class CodeAssemblerTest {
     @Test
     void run_returns_student_code_verbatim() {
         var a = assembler.assembleRun("Python", "print('hi')");
-        assertThat(a.pistonLanguage()).isEqualTo("python");
+        assertThat(a.runtime()).isEqualTo("python");
         assertThat(onlyFileContent(a)).isEqualTo("print('hi')");
     }
 

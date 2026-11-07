@@ -21,7 +21,7 @@ public record EvaluateRequest(
         @NotNull @Size(max = 100_000) String code,
         @NotEmpty @Size(max = 100) List<@Valid TestCaseInput> testCases,
         /** Temps limite d'exécution demandé par le prof (ms) ; {@code null} → défaut serveur.
-         *  Borné côté {@link com.moodit.execution_service.piston.PistonClient} (MAX_RUN_TIMEOUT_MS). */
+         *  Borné côté {@link com.moodit.execution_service.sandbox.RunnerExec} (MAX_RUN_TIMEOUT_MS). */
         Integer timeoutMs) {
 
     /** Constructeur de compatibilité (sans timeout → défaut serveur). */

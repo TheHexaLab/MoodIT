@@ -1,6 +1,6 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,8 +43,8 @@ class CodeAssemblerLanguagesTest {
 
         var a = asm.assemble("HTML", "<h1>Bonjour</h1>", "return doc.querySelector('h1') !== null;", "MOODIT_OK_html");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("main.js", "htmlparser.js", "submission.html");
         assertThat(a.files().get(0).content())
                 .contains("require('./htmlparser.js')")
@@ -163,8 +163,8 @@ class CodeAssemblerLanguagesTest {
             "sqlite, sqlite3",
             "SQLITE3, sqlite3",
     })
-    void alias_de_langage_resolus_a_l_assemblage(String language, String pistonLanguage) {
-        assertThat(assembler.assemble(language, "", "", "N").pistonLanguage()).isEqualTo(pistonLanguage);
+    void alias_de_langage_resolus_a_l_assemblage(String language, String runtime) {
+        assertThat(assembler.assemble(language, "", "", "N").runtime()).isEqualTo(runtime);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -211,12 +211,12 @@ class CodeAssemblerLanguagesTest {
             "SQL, sqlite3, main.sql",
             "Java, java, Main.java",
     })
-    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String pistonLanguage,
+    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String runtime,
             String fileName) {
         String code = "// code étudiant de " + language;
         var a = assembler.assembleRun(language, code);
 
-        assertThat(a.pistonLanguage()).isEqualTo(pistonLanguage);
+        assertThat(a.runtime()).isEqualTo(runtime);
         assertThat(a.files()).singleElement().satisfies(f -> {
             assertThat(f.name()).isEqualTo(fileName);
             assertThat(f.content()).isEqualTo(code);   // aucun harnais, aucune enveloppe
@@ -234,8 +234,8 @@ class CodeAssemblerLanguagesTest {
     void run_json_valide_et_reindente_sans_harnais() {
         var a = assembler.assembleRun("JSON", "{\"a\":1}");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.js", "submission.json");
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name).containsExactly("main.js", "submission.json");
         assertThat(a.files().get(0).content())
                 .contains("console.log(JSON.stringify(data, null, 2));")
                 .contains("console.error('JSON invalide: '")

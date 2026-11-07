@@ -1,6 +1,6 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,11 +21,11 @@ import java.util.stream.Collectors;
 
 /**
  * Assemble {@code code étudiant + harnais} en un programme exécutable dont l'EXIT CODE traduit le
- * verdict (0 = réussi, non-zéro = échec) — Piston ne renvoie que stdout/stderr/exit, pas de valeur
+ * verdict (0 = réussi, non-zéro = échec) — le mode exec du runner ne renvoie que stdout/stderr/exit, pas de valeur
  * de retour. Le contrat du harnais (le corps RENVOIE un booléen ; une exception/panic vaut échec)
  * est enveloppé ici, PAR LANGAGE, en miroir des {@code harness_template} semés en base.
  *
- * <p>Langages assemblés ici (Piston) : Python, JavaScript, TypeScript, Bash, PHP, JSON, SQL, HTML,
+ * <p>Langages assemblés ici (mode exec du runner, ex-Piston) : Python, JavaScript, TypeScript, Bash, PHP, JSON, SQL, HTML,
  * JSX, TSX. Les langages « données/vues » sont validés par un harnais JS via des libs EMBARQUÉES
  * injectées dans la soumission : HTML → parseur DOM ({@code htmlparser.js}, {@code doc}) ;
  * JSX/TSX → Babel + React + ReactDOMServer ({@code react-runtime.js}, rendu en {@code html}).
@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  *
  * <p>Les langages COMPILÉS (Go, Rust, C, C++, C#, Java) ne passent PLUS par ici pour l'évaluation
  * (#116) : ils sont notés par le RUNNER DOCKER ({@code sandbox/DockerEvaluator} + superviseur),
- * où le harnais est un vrai test du langage. Seul leur mode « run » (bouton play) reste sur Piston.
+ * où le harnais est un vrai test du langage. Leur mode « run » (bouton play) passe par le mode exec des mêmes images.
  */
 @Component
 public class CodeAssembler {
@@ -58,8 +58,8 @@ public class CodeAssembler {
         });
     }
 
-    /** Programme prêt pour Piston : langage Piston + fichiers. */
-    public record Assembled(String pistonLanguage, List<PistonClient.File> files) {}
+    /** Programme prêt pour le mode exec du runner : runtime + fichiers (le premier est l'entrée). */
+    public record Assembled(String runtime, List<RunnerExec.File> files) {}
 
     public Assembled assemble(String language, String studentCode, String harnessCode, String nonce) {
         String code = studentCode == null ? "" : studentCode;
@@ -71,9 +71,9 @@ public class CodeAssembler {
             case "php" -> assemblePhpRpc(code, harness, nonce);
             case "bash" -> assembleBashRpc(code, harness, nonce);
             // Langages COMPILÉS (#116) : notés par le RUNNER DOCKER (sandbox/DockerEvaluator),
-            // jamais assemblés pour Piston — ExecutionService route avant d'arriver ici.
+            // jamais assemblés ici — ExecutionService route avant d'arriver au switch.
             case "go", "rust", "c", "c++", "csharp", "java" -> throw new UnsupportedLanguageException(
-                    "Langage compilé « " + language + " » : évaluation via le runner Docker, pas Piston");
+                    "Langage compilé « " + language + " » : évaluation via le mode evaluate du runner");
             case "json" -> assembleJson(code, harness, nonce);
             case "sql" -> assembleSql(code, harness, nonce);
             case "html" -> assembleHtml(code, harness, nonce);
@@ -116,7 +116,7 @@ public class CodeAssembler {
 
     /**
      * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Comme les interprétés, ils sont
-     * notés en DEUX processus (le code étudiant ne voit jamais le nonce) ; le binaire unique de Piston
+     * notés en DEUX processus (le code étudiant ne voit jamais le nonce) ; le programme unique
      * se dédouble par {@code fork()} (C/C++) ou re-exec de soi-même (Go/Rust/C#/Java). Le nonce est lu
      * sur le stdin du PARENT (noteur) au runtime, pas gravé dans le source (cf. ExecutionService).
      */
@@ -142,8 +142,8 @@ public class CodeAssembler {
         };
     }
 
-    private static Assembled run(String pistonLanguage, String fileName, String code) {
-        return new Assembled(pistonLanguage, List.of(new PistonClient.File(fileName, code)));
+    private static Assembled run(String runtime, String fileName, String code) {
+        return new Assembled(runtime, List.of(new RunnerExec.File(fileName, code)));
     }
 
     /** Indente chaque ligne non vide par {@code prefix} (préserve l'indentation relative). */
@@ -242,8 +242,8 @@ public class CodeAssembler {
                 + "        print(__moodit_json.dumps(r), flush=True)\n"
                 + "__moodit_serve()\n";
         return new Assembled("python", List.of(
-                new PistonClient.File("grader.py", grader),
-                new PistonClient.File("student_server.py", server)));
+                new RunnerExec.File("grader.py", grader),
+                new RunnerExec.File("student_server.py", server)));
     }
 
     /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
@@ -271,12 +271,13 @@ public class CodeAssembler {
      * fd du sous-processus. Le nonce est émis par le noteur (aucun code étudiant → infalsifiable).
      */
     private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript) {
-        // TS : fichiers nommés SANS extension → Piston les écrit en .ts et compile en .js (student_server.js,
-        // grader.js). `// @ts-nocheck` neutralise les erreurs de type (on veut exécuter, pas typer).
+        // TS : fichiers .ts, transpilés côte à côte par le runner (tsc --noCheck) en .js
+        // (student_server.js, grader.js). `// @ts-nocheck` neutralise aussi les erreurs de type
+        // à la transpilation (on veut exécuter, pas typer).
         String header = typescript ? "// @ts-nocheck\n" : "";
-        String pistonLang = typescript ? "typescript" : "javascript";
-        String graderName = typescript ? "grader" : "grader.js";
-        String serverName = typescript ? "student_server" : "student_server.js";
+        String runtimeName = typescript ? "typescript" : "javascript";
+        String graderName = typescript ? "grader.ts" : "grader.js";
+        String serverName = typescript ? "student_server.ts" : "student_server.js";
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> callables = new java.util.LinkedHashSet<>();
         Matcher mc = JS_CALLABLE.matcher(studentCode);
@@ -335,9 +336,9 @@ public class CodeAssembler {
                 + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
                 + "    process.stdout.write(JSON.stringify(r)+__moodit_NL);\n"
                 + "  }}); }\n__moodit_serve();\n";
-        return new Assembled(pistonLang, List.of(
-                new PistonClient.File(graderName, grader),
-                new PistonClient.File(serverName, server)));
+        return new Assembled(runtimeName, List.of(
+                new RunnerExec.File(graderName, grader),
+                new RunnerExec.File(serverName, server)));
     }
 
     // ── PHP ──────────────────────────────────────────────────────────────────────
@@ -408,8 +409,8 @@ public class CodeAssembler {
                 + "  fwrite(STDOUT, \"\\n\".json_encode($__moodit_r).\"\\n\");\n"
                 + "}\n";
         return new Assembled("php", List.of(
-                new PistonClient.File("grader.php", grader),
-                new PistonClient.File("student_server.php", server)));
+                new RunnerExec.File("grader.php", grader),
+                new RunnerExec.File("student_server.php", server)));
     }
 
     // ── Bash ─────────────────────────────────────────────────────────────────────
@@ -440,8 +441,8 @@ public class CodeAssembler {
                 + "\nread -r __moodit_name __moodit_rest\n"
                 + "$__moodit_name $__moodit_rest\n";
         return new Assembled("bash", List.of(
-                new PistonClient.File("grader.sh", grader),
-                new PistonClient.File("student_server.sh", server)));
+                new RunnerExec.File("grader.sh", grader),
+                new RunnerExec.File("student_server.sh", server)));
     }
 
 
@@ -483,8 +484,8 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("submission.json", studentJson)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("submission.json", studentJson)));
     }
 
     /**
@@ -501,8 +502,8 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("submission.json", studentJson)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("submission.json", studentJson)));
     }
 
     // ── SQL (SQLite) ─────────────────────────────────────────────────────────────
@@ -528,7 +529,7 @@ public class CodeAssembler {
     /**
      * Noms (minuscules) des tables de TRAVAIL déclarées dans le SETUP du harnais (partie avant le
      * marqueur). Sert de LISTE BLANCHE au filtrage du dump : la phase 2 ne recharge QUE ces tables.
-     * Découple le filtrage de la plomberie du paquet Piston (ex. table {@code argv}) : tout ce qui
+     * Découple le filtrage de la plomberie de l'environnement sqlite (ex. table {@code argv}) : tout ce qui
      * n'est pas déclaré par le prof — plomberie, {@code sqlite_*}, tables fabriquées par l'étudiant —
      * est ignoré, quel que soit le paquet.
      */
@@ -577,7 +578,7 @@ public class CodeAssembler {
         }
         program.append('\n');
         appendFenced(program, harnessCode, nonce);
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -600,7 +601,7 @@ public class CodeAssembler {
         program.append("SELECT '").append(sqlDumpStart(nonce)).append("';\n");
         program.append(".dump\n");
         program.append("SELECT '").append(sqlDumpEnd(nonce)).append("';\n");
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -618,7 +619,7 @@ public class CodeAssembler {
             program.append('\n');
         }
         appendFenced(program, verdict, nonce);
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -626,7 +627,7 @@ public class CodeAssembler {
      * {@code INSERT}) portant sur une table de la LISTE BLANCHE {@code allowedTables} (les tables de
      * travail déclarées par le prof, cf. {@link #sqlWorkingTables}). On jette donc TOUT le reste :
      * {@code CREATE VIEW}/{@code TRIGGER}/{@code INDEX}, {@code PRAGMA}, {@code BEGIN}/{@code COMMIT},
-     * la plomberie du paquet Piston ({@code argv}), les tables {@code sqlite_*}, et toute table
+     * la plomberie de l'environnement sqlite ({@code argv}), les tables {@code sqlite_*}, et toute table
      * fabriquée par l'étudiant. La phase 2 ne rejoue ainsi que des tables ATTENDUES + des INSERT à
      * littéraux échappés — aucun objet exécutable, aucun couplage aux internes du paquet.
      */
@@ -766,9 +767,9 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("htmlparser.js", vendor("htmlparser.js")),
-                new PistonClient.File("submission.html", studentHtml)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("htmlparser.js", vendor("htmlparser.js")),
+                new RunnerExec.File("submission.html", studentHtml)));
     }
 
     // ── JSX / TSX (React) ────────────────────────────────────────────────────────
@@ -847,9 +848,9 @@ public class CodeAssembler {
                 + "try{ child.stdin.end(); }catch(e){}\n"
                 + "process.exit(__moodit_r?0:1);\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", grader),
-                new PistonClient.File("jsx-server.js", server),
-                new PistonClient.File("react-runtime.js", vendor("react-runtime.js")),
-                new PistonClient.File("component.tsx", studentCode)));
+                new RunnerExec.File("main.js", grader),
+                new RunnerExec.File("jsx-server.js", server),
+                new RunnerExec.File("react-runtime.js", vendor("react-runtime.js")),
+                new RunnerExec.File("component.tsx", studentCode)));
     }
 }

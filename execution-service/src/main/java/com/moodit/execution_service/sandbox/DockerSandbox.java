@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  *
  * Toute erreur d'infrastructure (démon Docker injoignable, image absente, budget de temps du
  * conteneur dépassé) devient une {@link SandboxException} → 502, et la correction reste
- * « en cours » côté core (même sémantique que Piston injoignable).
+ * « en cours » côté core (elle sera rejouée).
  */
 public class DockerSandbox {
 

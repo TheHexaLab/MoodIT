@@ -17,9 +17,18 @@ Modèle de confiance :
     est disponible ; toute ouverture d'une source verrouillée devient un événement
     `lecture_source_tentee`. Dégradation propre sans strace (`trace_indisponible`).
 
-Entrée  : /box/job.json + /box/cases/<i>/src/… copiés par execution-service APRÈS le démarrage
-          (tmpfs) ; la sentinelle /box/.ready marque la fin de la copie.
-Sortie  : UN objet JSON sur stdout (résultats alignés sur l'ordre des cas + événements).
+Deux MODES (job.json) :
+  - « evaluate » (défaut) : notation des langages COMPILÉS décrite ci-dessus
+    (/box/cases/<i>/src/… ; résultats alignés sur l'ordre des cas + événements).
+  - « exec » : exécution GÉNÉRIQUE d'un programme assemblé (/box/src/…) — reprend le rôle de
+    Piston pour les interprétés/SQL/vues (programmes RPC 2-processus à nonce, inchangés) et pour
+    le bouton « Exécuter » de tous les langages. Tout y tourne sous l'UID étudiant (le noteur
+    assemblé embarque sa propre protection : nonce, auto-suppression), avec une étape de
+    compilation (root) pour les langages qui en ont une. Sortie : {compile?, run} à la Piston.
+
+Entrée  : /box/job.json + les sources, copiés par execution-service APRÈS le démarrage (tmpfs) ;
+          la sentinelle /box/.ready marque la fin de la copie.
+Sortie  : UN objet JSON sur stdout.
 Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les deux en phase.
 """
 
@@ -62,12 +71,12 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def read_capped(path):
+def read_capped(path, cap=OUTPUT_CAP):
     try:
         with open(path, "rb") as f:
-            data = f.read(OUTPUT_CAP + 1)
+            data = f.read(cap + 1)
         text = data.decode("utf-8", errors="replace")
-        if len(data) > OUTPUT_CAP:
+        if len(data) > cap:
             text += "\n… (sortie tronquée)"
         return text
     except OSError:
@@ -91,11 +100,14 @@ def preexec_root():
     resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
 
 
-def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec):
+def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
     """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out)."""
+    stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
     with open(out_path, "wb") as out, open(err_path, "wb") as err:
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err,
-                                stdin=subprocess.DEVNULL, preexec_fn=preexec)
+                                stdin=stdin, preexec_fn=preexec)
+        if stdin is not subprocess.DEVNULL:
+            stdin.close()
         try:
             code = proc.wait(timeout=timeout_s)
             return code, False
@@ -470,6 +482,128 @@ def execute_case(language, case, timeout_s):
     return outcome, elapsed_ms
 
 
+# ────────────────────────── mode « exec » (ex-Piston) ──────────────────────────
+# Exécution générique d'un programme assemblé par execution-service : les interprétés/SQL/vues
+# (programmes RPC 2-processus à nonce, inchangés) et le bouton « Exécuter » de tous les langages.
+# TOUT tourne sous l'UID étudiant, compilation comprise (le job entier est non fiable, comme dans
+# Piston : le noteur assemblé embarque sa propre protection). Sémantique de sortie à la Piston :
+# étapes {stdout, stderr, code, signal} — signal = "SIGKILL" en cas de temps dépassé.
+
+EXEC_OUTPUT_CAP = 1_200_000     # ≥ 1 Mio : le dump SQL de la phase 1 peut approcher 512 Ki
+EXEC_COMPILE_TIMEOUT_S = 60
+EXEC_DEFAULT_TIMEOUT_S = 3
+
+
+def exec_commands(runtime, entry):
+    """(commande de compilation ou None, commande d'exécution) pour un runtime donné."""
+    quoted = "'" + entry.replace("'", "'\\''") + "'"
+    if runtime == "python":
+        return None, ["python3", entry]
+    if runtime == "javascript":
+        return None, ["node", entry]
+    if runtime == "typescript":
+        # Transpile tous les .ts côte à côte (le grader spawn `node student_server` → .js résolu).
+        # --noCheck : transpilation seule, typage permissif à l'exécution (parité avec l'ancien
+        # runtime Piston ; les erreurs de SYNTAXE restent des erreurs de compilation).
+        return (["sh", "-c", "tsc --noCheck --target es2020 --module commonjs --esModuleInterop "
+                             "--skipLibCheck *.ts"],
+                ["node", entry[:-3] + ".js" if entry.endswith(".ts") else entry])
+    if runtime == "php":
+        return None, ["php", entry]
+    if runtime == "bash":
+        return None, ["bash", entry]
+    if runtime == "sqlite3":
+        # -bail : une erreur SQL arrête le script avec un exit non nul (verdict « erreur SQL »).
+        return None, ["sh", "-c", "exec sqlite3 -bail -batch :memory: < " + quoted]
+    if runtime == "c":
+        return ["gcc", "-O2", entry, "-o", "prog", "-lm"], ["./prog"]
+    if runtime == "c++":
+        return ["g++", "-std=c++20", "-O2", entry, "-o", "prog"], ["./prog"]
+    if runtime == "java":
+        return None, ["java", entry]  # mode fichier-source (JEP 330)
+    if runtime == "csharp":
+        return ["mcs", entry, "-out:prog.exe"], ["mono", "prog.exe"]
+    if runtime == "go":
+        return None, ["go", "run", entry]
+    if runtime == "rust":
+        return ["rustc", "-O", entry, "-o", "prog"], ["./prog"]
+    return None, None
+
+
+def exec_stage(code, timed_out, out_path, err_path):
+    # Processus tué par un signal (OOM du cgroup, limite mémoire…) : returncode négatif →
+    # rapporté comme SIGNAL, à la Piston (code null + signal), comme un temps dépassé.
+    signal_name = None
+    if timed_out:
+        signal_name = "SIGKILL"
+    elif code is not None and code < 0:
+        try:
+            signal_name = signal.Signals(-code).name
+        except ValueError:
+            signal_name = "SIG" + str(-code)
+        code = None
+    return {"stdout": read_capped(out_path, EXEC_OUTPUT_CAP),
+            "stderr": read_capped(err_path, EXEC_OUTPUT_CAP),
+            "code": code, "signal": signal_name}
+
+
+def exec_env(work):
+    env = dict(base_env(BOX))
+    env["HOME"] = os.path.join(work, "home")
+    env["TMPDIR"] = os.path.join(work, "tmp")
+    env["GOCACHE"] = os.path.join(work, "gocache")
+    env["GOPATH"] = os.path.join(work, "gopath")
+    env["CARGO_TARGET_DIR"] = os.path.join(work, "target")
+    return env
+
+
+def exec_main(job):
+    src = os.path.join(BOX, "src")
+    work = os.path.join(BOX, "work")
+    for name in ("home", "tmp"):
+        os.makedirs(os.path.join(work, name), exist_ok=True)
+    # Tout le job est non fiable : sources possédées par l'étudiant (le grader s'auto-supprime).
+    for root, dirs, files in os.walk(BOX):
+        for name in dirs + files:
+            os.chown(os.path.join(root, name), STUDENT_UID, STUDENT_GID)
+    os.chown(BOX, STUDENT_UID, STUDENT_GID)
+
+    runtime = job.get("runtime", "")
+    entry = job.get("entry", "")
+    compile_cmd, run_cmd = exec_commands(runtime, entry)
+    if run_cmd is None:
+        print(json.dumps({"v": 1, "error": "runtime non pris en charge : " + runtime}))
+        return
+    env = exec_env(work)
+
+    stdin_path = None
+    if job.get("stdin"):
+        stdin_path = os.path.join(BOX, "stdin.txt")
+        with open(stdin_path, "w", encoding="utf-8") as f:
+            f.write(job["stdin"])
+        os.chown(stdin_path, STUDENT_UID, STUDENT_GID)
+
+    compile_stage = None
+    if compile_cmd is not None:
+        code, timed_out = run_proc(compile_cmd, src, env, EXEC_COMPILE_TIMEOUT_S,
+                                   os.path.join(work, "cc.out"), os.path.join(work, "cc.err"),
+                                   demote_student)
+        compile_stage = exec_stage(code, timed_out, os.path.join(work, "cc.out"),
+                                   os.path.join(work, "cc.err"))
+        if timed_out or code != 0:
+            print(json.dumps({"v": 1, "compile": compile_stage, "run": None}, ensure_ascii=False))
+            return
+
+    timeout_s = max(1, min(MAX_RUN_TIMEOUT_S,
+                           int(job.get("timeout_ms") or EXEC_DEFAULT_TIMEOUT_S * 1000) // 1000))
+    code, timed_out = run_proc(run_cmd, src, env, timeout_s,
+                               os.path.join(work, "run.out"), os.path.join(work, "run.err"),
+                               demote_student, stdin_path=stdin_path)
+    run_stage = exec_stage(code, timed_out, os.path.join(work, "run.out"),
+                           os.path.join(work, "run.err"))
+    print(json.dumps({"v": 1, "compile": compile_stage, "run": run_stage}, ensure_ascii=False))
+
+
 def wait_for_files():
     """Les fichiers du job arrivent APRÈS le démarrage (docker cp dans le tmpfs /box)."""
     deadline = time.monotonic() + READY_WAIT_S
@@ -487,6 +621,9 @@ def main():
         return
     with open(os.path.join(BOX, "job.json"), "r", encoding="utf-8") as f:
         job = json.load(f)
+    if job.get("mode") == "exec":
+        exec_main(job)
+        return
     language = job["language"]
     if language not in RUNNERS:
         print(json.dumps({"v": 1, "error": "langage non pris en charge : " + language}))

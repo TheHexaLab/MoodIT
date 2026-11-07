@@ -29,7 +29,7 @@ le noteur, il ne peut ni lire le nonce ni forger le verdict : **passer = produir
 Détails : identifiants internes préfixés `__moodit_` (pas de collision) ; en Python le proxy de classe
 référence le RPC via `globals()["__moodit_rpc"]` (le *name mangling* renommerait `__moodit_rpc`).
 
-## Dépendances fragiles (à vérifier lors d'une mise à jour Piston / runtime)
+## Dépendances fragiles (à vérifier lors d'une mise à jour des images runner)
 
 Ces points reposent sur des comportements précis de l'environnement. **Un test d'intégration réel les
 couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à jour.
@@ -38,10 +38,11 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 - **`child.stdout._handle.fd`** (interne Node non documenté) pour le `fs.readSync` **synchrone** en JS/TS/JSX.
 - **`process.mainModule`** : vecteur d'évasion en JSX **corrigé** par l'isolation (le composant ne peut
   plus atteindre le nonce). À re-tester si le runtime React/Node change.
-- **Compilation TS** : fichiers nommés sans extension → Piston écrit `.ts` et compile `.js`.
+- **Compilation TS** : `tsc --noCheck` (transpilation seule — typage permissif à l'exécution) ;
+  le grader spawn `node student_server` → résolu vers le `.js` transpilé.
 - **Bash** : `grader.sh` supprimé mais lisible via son fd déjà ouvert (sémantique unlink Unix).
-- **Compilés** : notés HORS Piston, dans le runner Docker (voir plus bas) ; seule l'exécution
-  simple (bouton « Exécuter ») passe encore par Piston pour ces langages.
+- **Compilés** : notés dans le runner Docker en mode « evaluate » (voir plus bas) ; le bouton
+  « Exécuter » passe par le mode « exec » des mêmes images.
 
 ### Runner Docker des compilés (#116)
 
@@ -57,18 +58,17 @@ anti-triche) : `DockerRunnerIntegrationTest`.
 
 ## Limites du bac à sable (#24)
 
-- **Par exécution** (envoyées par `PistonClient` à chaque appel) : `run_timeout` 3 s,
-  `compile_timeout` 10 s, `run_memory_limit` 256 Mo, `compile_memory_limit` 512 Mo
-  (`PISTON_RUN_MEMORY_LIMIT_BYTES` / `PISTON_COMPILE_MEMORY_LIMIT_BYTES`). Piston a les mêmes plafonds
-  côté serveur (compose) : une valeur plus haute côté execution-service serait refusée.
-- **Sortie** : `PISTON_OUTPUT_MAX_SIZE` = 1 Mio par flux (compose). Le défaut de Piston (1 024
-  caractères) tronquait le dump SQL de la phase 1, qui peut atteindre `app.sql.max-dump-chars` (512 Ki).
-- **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` appels Piston simultanés (file
+- **Par exécution** : temps limite par cas (défaut 3 s en « exec », 10 s par cas de notation,
+  configurable par question jusqu'à 60 s) ; mémoire/PID/CPU bornés PAR CONTENEUR
+  (`SANDBOX_MEMORY_MB` 1,5 Go, `SANDBOX_PIDS_LIMIT` 512, `SANDBOX_CPUS` 2) ; rlimits du processus
+  étudiant (fichiers, nproc, nofile) ; sorties tronquées (64 Ko en notation, 1,2 Mo en exec —
+  le dump SQL de la phase 1 peut approcher `app.sql.max-dump-chars`).
+- **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` conteneurs runner simultanés (file
   d'attente de `EXEC_QUEUE_WAIT_MS`), et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur sur
   `/exec/**`. Au-delà : 429 avec un message en français. L'appel interne (correction des soumissions)
   ne compte que dans la limite globale.
-- **Conteneur** : réseau `sandbox` dédié (execution-service seul), pas de `privileged` (capacités
-  minimales, cf. `deploy/DEPLOY.md`), image épinglée par digest (`piston/Dockerfile`).
+- **Conteneurs runner** : réseau coupé (`--network none`), `no-new-privileges`, UID étudiant dédié ;
+  détails et capacités dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
 
 ## Résiduel connu
 
@@ -80,9 +80,9 @@ calculer la bonne sortie) — c'est le problème classique des **cas de test con
 
 ## Tester
 
-- Unitaires (structure des programmes assemblés) : `./gradlew test` (sans Piston).
-- **Intégration (comportement réel contre Piston)** : `ExecutionIntegrationTest`, exécuté par le job CI
-  `integration` (démarre Piston + runtimes). Couvre Python/JS/TS/PHP/Bash/C/SQL **et** JSX/TSX (rendu
+- Unitaires (structure des programmes assemblés) : `./gradlew test` (sans Docker).
+- **Intégration (comportement réel contre les images runner)** : `ExecutionIntegrationTest`, exécuté
+  par le job CI `integration` (construit les 10 images). Couvre Python/JS/TS/PHP/Bash/C/SQL **et** JSX/TSX (rendu
   statique + interactif). Les cas JSX/TSX exigent le bundle `react-runtime.js` via `APP_VENDOR_DIR`
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
   Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une boucle d'allocation
