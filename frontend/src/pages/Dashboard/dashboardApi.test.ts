@@ -410,7 +410,7 @@ describe('evaluateCode', () => {
       language: 'Python',
       code: 'print(1)',
       execTimeoutMs: 5000,
-      testCases: [{ name: 't', harnessCode: 'assert', weight: 1 }],
+      testCases: [{ id: 1, name: 't', harnessCode: 'assert', weight: 1 }],
     });
     const [, init] = callArgs();
     expect(JSON.parse(init?.body as string).timeoutMs).toBe(5000);

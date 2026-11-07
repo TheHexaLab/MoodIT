@@ -105,6 +105,28 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
+def canary_verdict(cases, outcomes):
+    """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) :
+    « aucun » (pas de canaris), « ok », « incoherents » (résultat contraire à l'attendu, OU
+    canaris non exécutés alors que des cas réels ont tourné — faire échouer la compilation des
+    seuls canaris, p. ex. par collision de nom de classe, est une falsification : fail-closed),
+    « indetermines » (rien n'a tourné : échec de compilation global, honnête)."""
+    canary_cases = [c for c in cases if c.get("canary")]
+    if not canary_cases:
+        return "aucun"
+    if all(outcomes[c["index"]].ran for c in canary_cases):
+        ok = all(outcomes[c["index"]].passed == (c["canary"] == "pass") for c in canary_cases)
+        if not ok:
+            event("canari_incoherent",
+                  detail="résultat des canaris contraire à l'attendu — falsification probable")
+        return "ok" if ok else "incoherents"
+    if any(outcomes[c["index"]].ran for c in cases if not c.get("canary")):
+        event("canari_incoherent",
+              detail="canaris non exécutés alors que des cas réels ont tourné")
+        return "incoherents"
+    return "indetermines"
+
+
 def kill_student_survivors():
     """Balaye les processus UID étudiant restés en vie (fork + setsid échappe au killpg du
     timeout) : isolation entre les cas d'une même évaluation. Appelé entre deux cas."""
@@ -794,24 +816,7 @@ def main():
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
     # compilation du code étudiant les explique déjà, et les vrais cas échouent de toute façon).
-    canaries = "aucun"
-    canary_cases = [c for c in cases if c.get("canary")]
-    if canary_cases:
-        if all(outcomes[c["index"]].ran for c in canary_cases):
-            ok = all(outcomes[c["index"]].passed == (c["canary"] == "pass") for c in canary_cases)
-            canaries = "ok" if ok else "incoherents"
-            if not ok:
-                event("canari_incoherent",
-                      detail="résultat des canaris contraire à l'attendu — falsification probable")
-        elif any(outcomes[c["index"]].ran for c in cases if not c.get("canary")):
-            # Des cas RÉELS ont tourné mais pas les canaris : une soumission honnête échoue
-            # partout pareil (même code dans tous les cas) — faire échouer la compilation des
-            # seuls canaris (collision de nom de classe…) est une falsification. Fail-closed.
-            canaries = "incoherents"
-            event("canari_incoherent",
-                  detail="canaris non exécutés alors que des cas réels ont tourné")
-        else:
-            canaries = "indetermines"
+    canaries = canary_verdict(cases, outcomes)
 
     results = []
     for case in cases:

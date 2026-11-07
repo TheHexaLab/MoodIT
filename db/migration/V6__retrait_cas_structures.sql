@@ -1,8 +1,8 @@
 -- #116 — Retrait du chemin « cas structurés » (introduit par V4).
 --
 -- Le projet retient le HARNAIS-CODE PARTOUT, y compris pour les langages compilés : ceux-ci sont
--- notés en DEUX processus isolés par execution-service (code étudiant dans un enfant, nonce/verdict
--- dans le parent — POO comprise), ce qui cache déjà l'attendu sans exposer le harnais. Les colonnes
+-- notés dans un CONTENEUR RUNNER dédié (harnais = vrai framework de test, sources verrouillées,
+-- canaris — cf. docker/runners/README.md), ce qui cache l'attendu sans exposer le harnais. Les colonnes
 -- structurées (expr / expected_json / compare_mode) et le gabarit d'expression par langage
 -- (expr_template) n'ont donc plus de raison d'être. On les retire ici plutôt que de modifier V4
 -- (déjà appliquée sur les bases de dev) : Flyway est forward-only.

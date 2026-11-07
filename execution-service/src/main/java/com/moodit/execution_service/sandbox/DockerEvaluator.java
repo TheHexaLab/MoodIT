@@ -137,7 +137,12 @@ public class DockerEvaluator {
                     : (node.path("detail").isString() ? node.path("detail").asString() : null);
             String suspicious = eventByCase.get(i);
             if (suspicious != null) {
-                detail = "⚠ Comportement suspect détecté (" + suspicious + ")."
+                // Une tentative de lecture détectée FAIT ÉCHOUER le cas — pas une simple
+                // annotation : lire son propre binaire de test (seule voie d'extraction du
+                // jeton sur les natifs) peut RÉUSSIR, et aucun code honnête ne le fait ;
+                // toute ouverture de src/ au run est suspecte par construction (verrouillé).
+                passed = false;
+                detail = "⚠ Comportement suspect détecté (" + suspicious + ") — cas refusé."
                         + (detail == null || detail.isBlank() ? "" : "\n" + detail);
             }
             results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), passed, detail));

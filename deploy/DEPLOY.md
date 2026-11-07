@@ -165,7 +165,9 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > docker rm -f moodit_piston moodit_piston_init 2>/dev/null
 > docker volume rm moodit_piston_data
 > docker network rm moodit_sandbox 2>/dev/null   # réseau « sandbox » du compose, s'il reste
-> docker image prune -f                          # image Piston (~1,5 Go) devenue orpheline
+> # L'image Piston (~1,5 Go) est TAGUÉE : `prune` ne la retire pas — la nommer explicitement
+> # (son nom exact : `docker images | grep -i piston`).
+> docker image rm $(docker images --filter "reference=*piston*" -q)
 > ```
 
 Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
@@ -274,8 +276,13 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 2 en prod) pendant
   TOUT son conteneur (couramment 1 à 3 min) ; l'attente interne des corrections
-  (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s) absorbe un pic de classe — au-delà, la tentative échoue
-  et l'étudiant resoumet. Pour lancer ces conteneurs, `execution-service` monte
+  (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s) absorbe un pic — au-delà, la tentative échoue et
+  l'étudiant resoumet. **Ordre de grandeur à 2 places : ~2 corrections compilées/min, et les
+  soumissions au-delà de ~5-6 simultanées dépassent l'attente.** Une CLASSE ENTIÈRE qui soumet
+  un quiz compilé dans la même minute (fin de créneau, examen) dépassera cette capacité :
+  avant ce scénario, augmenter `EXEC_MAX_CONCURRENT`/l'attente à la mesure du groupe
+  (`nb_étudiants × durée_correction / places`), étaler les soumissions, ou attendre le rejouage
+  automatique côté core (suivi ouvert — il n'existe pas encore). Pour lancer ces conteneurs, `execution-service` monte
   `/var/run/docker.sock` : c'est un accès
   root-équivalent au démon de l'hôte, assumé pour ce service interne (aucune route d'admin, appels
   authentifiés par le gateway/`X-Internal-Token`). Les images sont construites par

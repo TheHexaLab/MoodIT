@@ -287,14 +287,17 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @SuppressWarnings("unchecked")
         void succes_persisteVerdictsEtPousse() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            // Le temps limite de la QUESTION doit arriver tel quel à l'exécution (épinglé par
+            // eq(30_000) plus bas : un null silencieux passerait avec any()).
+            codeQ.setExecTimeoutMs(30_000);
             // Harnais triés par id (31 puis 32) → verdicts alignés sur cet ordre.
-            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), any())).thenReturn(List.of(true, false));
+            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), eq(30_000))).thenReturn(List.of(true, false));
 
             service.gradeAttempt(ATTEMPT_ID);
 
             ArgumentCaptor<List<ExecutionClient.Harness>> harnesses = ArgumentCaptor.forClass(List.class);
             // Une seule question exécutée : celle sans harnais et la question à choix sont ignorées.
-            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), any());
+            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), eq(30_000));
             assertThat(harnesses.getValue()).containsExactly(
                     new ExecutionClient.Harness("cas A", "assert cas A", 2),
                     new ExecutionClient.Harness("cas B", "assert cas B", 1));

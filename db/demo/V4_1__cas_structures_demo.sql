@@ -8,6 +8,6 @@
 -- et cette étape ne convertit plus rien.
 --
 -- Conservée en no-op (plutôt que supprimée) pour ne pas « trouer » l'historique Flyway des bases déjà
--- migrées. Les colonnes expr/expected_json/compare_mode (schéma V4) restent disponibles pour une
--- éventuelle question à cas structuré créée via l'API, mais le démo ne les utilise plus.
+-- migrées. Les colonnes expr/expected_json/compare_mode (schéma V4) sont ensuite SUPPRIMÉES par V6
+-- (le chemin « cas structurés » est retiré du produit) ; le démo ne les a jamais utilisées.
 SELECT 1;

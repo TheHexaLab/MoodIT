@@ -400,4 +400,79 @@ class DockerRunnerIntegrationTest {
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).contains("Marqueur réservé");
     }
+
+    @Test
+    void cpp_forge_depuis_la_fonction_notee_echoue_sans_jeton() {
+        require("C++");
+        String cheater = """
+                #include <cstdio>
+                #include <cstdlib>
+                int doubler(int n) {
+                    std::printf("[MOODIT] ok doubler_5\\n[MOODIT] summary total=1 failed=0\\n");
+                    std::exit(0);
+                }
+                int main() { return 0; }
+                """;
+        List<TestResult> results = evaluate("C++", cheater,
+                "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("jeton");
+    }
+
+    @Test
+    void rust_forge_depuis_la_fonction_notee_echoue_sans_jeton() {
+        require("Rust");
+        // Sommaire libtest forgé + exit(0) : exit code et sortie semblent bons, le jeton
+        // (test zzzz exécuté en dernier, --test-threads=1) manque à l'appel.
+        String cheater = """
+                pub fn doubler(n: i32) -> i32 {
+                    println!("running 1 test");
+                    println!("test moodit_tests::d ... ok");
+                    println!("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out");
+                    std::process::exit(0);
+                }
+                fn main() {}
+                """;
+        List<TestResult> results = evaluate("Rust", cheater, """
+                #[cfg(test)]
+                mod moodit_tests {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("jeton");
+    }
+
+    @Test
+    void csharp_rapport_nunit_forge_echoue_sans_jeton() {
+        require("C#");
+        // Le chemin du rapport est prévisible (work/nunit.xml, dossier étudiant) : un rapport
+        // « Passed » forgé + Environment.Exit(0) satisfait exit code ET XML — seul le jeton
+        // (imprimé par MooditRunner APRÈS Execute) le trahit.
+        String cheater = """
+                using System;
+                using System.IO;
+
+                public class Solution {
+                    public static int Doubler(int n) {
+                        File.WriteAllText("work/nunit.xml",
+                            "<test-run result=\\"Passed\\" testcasecount=\\"1\\"></test-run>");
+                        Environment.Exit(0);
+                        return 0;
+                    }
+                }
+                """;
+        List<TestResult> results = evaluate("C#", cheater, """
+                using NUnit.Framework;
+
+                public class MooditTests {
+                    [Test]
+                    public void Doubler5() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("jeton");
+    }
 }

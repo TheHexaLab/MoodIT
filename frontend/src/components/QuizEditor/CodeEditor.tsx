@@ -239,7 +239,6 @@ export function CodeEditor({
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
 
-
     // Tab = indentation (4 espaces) plutôt que changement de champ.
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();

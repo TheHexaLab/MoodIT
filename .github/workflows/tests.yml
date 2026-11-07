@@ -487,6 +487,12 @@ jobs:
       # Les 10 images du RUNNER (#116) : notation des compilés (java, csharp, go, rust, c) et
       # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les deux filets
       # d'intégration (interprétés/SQL/vues ET compilés + matrice anti-triche).
+      # La logique de verdict du superviseur (canaris, jeton, tête+queue, scan de trace) est
+      # testée UNITAIREMENT avant de construire quoi que ce soit — elle n'est pas couverte par
+      # JaCoCo/PIT (Python), ce lot est son filet.
+      - name: Tests unitaires du superviseur
+        run: python3 docker/runners/common/test_supervisor.py
+
       - name: Construire les images runner
         run: bash docker/runners/build.sh
 

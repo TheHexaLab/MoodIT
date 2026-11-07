@@ -104,10 +104,11 @@ class DockerEvaluatorTest {
                 ],"canaries":"ok"}
                 """);
         List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
-        // Le verdict reste celui du superviseur, mais le détail porte l'alerte, même sur un réussi.
-        assertThat(results.get(0).passed()).isTrue();
+        // Une lecture détectée FAIT ÉCHOUER le cas, même « réussi » côté framework : lire son
+        // binaire de test peut réussir (extraction du jeton) — annoter ne suffisait pas.
+        assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).contains("⚠ Comportement suspect")
-                .contains("lecture_source_tentee");
+                .contains("cas refusé").contains("lecture_source_tentee");
         // trace_indisponible (événement d'environnement, pas de triche) n'alerte pas le cas 1.
         assertThat(results.get(1).detail()).isEqualTo("échec");
     }
