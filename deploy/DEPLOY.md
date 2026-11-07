@@ -87,7 +87,7 @@ Depuis la **racine** du repo :
 ```bash
 # Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
 # Conteneurs jetables lancés par execution-service pour noter Go/Rust/C/C++/C#/Java
-# (~6 Go d'images au total ; à relancer quand docker/runners/ change).
+# (les 10 images, ~8,5 Go au total ; à relancer quand docker/runners/ change).
 ./docker/runners/build.sh
 
 docker compose -f docker-compose-hetzner.yml up -d --build
@@ -157,8 +157,16 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > Résultat vide → rien à faire. Sinon, convertir ces harnais au format framework (cf. les
 > exemples de `db/demo/V7_1__demo_harnais_frameworks.sql`) avant d'ouvrir l'app aux étudiants.
-> Au même déploiement : `docker volume rm moodit_piston_data` (volume orphelin depuis le
-> retrait de Piston).
+>
+> Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
+> survivent au retrait du compose et gardent le volume occupé :
+>
+> ```bash
+> docker rm -f moodit_piston moodit_piston_init 2>/dev/null
+> docker volume rm moodit_piston_data
+> docker network rm moodit_sandbox 2>/dev/null   # réseau « sandbox » du compose, s'il reste
+> docker image prune -f                          # image Piston (~1,5 Go) devenue orpheline
+> ```
 
 Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
 service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de

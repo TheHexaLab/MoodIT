@@ -74,13 +74,22 @@ def log(msg):
 
 
 def read_capped(path, cap=OUTPUT_CAP):
+    """Relit une sortie capturée en bornant la mémoire : TÊTE + QUEUE du fichier quand il
+    dépasse le plafond. La queue est indispensable aux canaux de VERDICT — jeton de fin,
+    sommaire du framework, verdict encadré par nonce du mode exec — tous imprimés en fin de
+    sortie : tronquer seulement la tête transformait une copie honnête mais bavarde
+    (> 64 Kio de print de débogage) en « jeton absent », fausse accusation de triche."""
     try:
+        size = os.path.getsize(path)
         with open(path, "rb") as f:
-            data = f.read(cap + 1)
-        text = data.decode("utf-8", errors="replace")
-        if len(data) > cap:
-            text += "\n… (sortie tronquée)"
-        return text
+            if size <= cap:
+                return f.read().decode("utf-8", errors="replace")
+            head = f.read(cap // 2)
+            f.seek(size - cap // 2)
+            tail = f.read()
+        return (head.decode("utf-8", errors="replace")
+                + "\n… (sortie tronquée au milieu : " + str(size) + " octets)\n"
+                + tail.decode("utf-8", errors="replace"))
     except OSError:
         return ""
 
@@ -94,6 +103,23 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
+
+
+def kill_student_survivors():
+    """Balaye les processus UID étudiant restés en vie (fork + setsid échappe au killpg du
+    timeout) : isolation entre les cas d'une même évaluation. Appelé entre deux cas."""
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open("/proc/" + pid + "/status", "r") as f:
+                for line in f:
+                    if line.startswith("Uid:"):
+                        if int(line.split()[1]) == STUDENT_UID:
+                            os.kill(int(pid), signal.SIGKILL)
+                        break
+        except (OSError, ValueError):
+            continue
 
 
 def preexec_compile():
@@ -465,14 +491,21 @@ def run_rust(case_dir, env, timeout_s, case_index):
         human = first_lines(err, r"error(\[|:)", 12) or err[:1500]
         return None, "Échec de compilation :\n" + human
     tests_bin = None
-    for line in read_capped(build_out).splitlines():
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        if (msg.get("reason") == "compiler-artifact" and msg.get("profile", {}).get("test")
-                and msg.get("executable")):
-            tests_bin = msg["executable"]
+    # Lecture EN FLUX (pas read_capped) : un code riche en warnings peut pousser la ligne
+    # compiler-artifact au-delà de tout plafond — la tronquer donnait « binaire introuvable »
+    # pour un code qui compile.
+    try:
+        with open(build_out, "r", errors="replace") as f:
+            for line in f:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if (msg.get("reason") == "compiler-artifact" and msg.get("profile", {}).get("test")
+                        and msg.get("executable")):
+                    tests_bin = msg["executable"]
+    except OSError:
+        pass
     if not tests_bin or not os.path.exists(tests_bin):
         return None, "Binaire de test introuvable après compilation"
     prep_run(case_dir, src)
@@ -733,6 +766,10 @@ def main():
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms
+        # Isolation inter-cas : un processus étudiant qui a fait fork + setsid a quitté le
+        # groupe tué au timeout — il survivrait au cas et pourrait peser sur (voire tracer,
+        # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
+        kill_student_survivors()
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
     # compilation du code étudiant les explique déjà, et les vrais cas échouent de toute façon).

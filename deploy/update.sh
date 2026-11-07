@@ -265,11 +265,13 @@ step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
 # Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
-if ! stream "Build des images runner (langages compilés)" bash docker/runners/build.sh; then rollback; fi
+if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
 ok "Images construites."
 
 step "5/5 · Redémarrage des services"
-if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
+# --remove-orphans : retire les conteneurs des services disparus du compose (ex. piston,
+# piston-init après #116) — sinon ils tournent pour toujours (restart: unless-stopped).
+if ! stream "Démarrage des services" $COMPOSE up -d --remove-orphans; then rollback; fi
 ok "Services démarrés."
 
 # Le Caddyfile est monté comme fichier seul : `up -d` ne recrée pas Caddy quand seul ce fichier

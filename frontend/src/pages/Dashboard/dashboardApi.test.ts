@@ -402,6 +402,20 @@ describe('evaluateCode', () => {
     expect(out).toEqual([{ name: 't', passed: true, weight: 1 }]);
   });
 
+  it('transmet le temps limite du prof (execTimeoutMs → timeoutMs du corps)', async () => {
+    // Sans cette assertion, retirer timeoutMs du corps ne faisait échouer aucun test :
+    // « Tester » deviendrait silencieusement sourd au temps limite choisi par le prof.
+    mockedApiFetch.mockResolvedValueOnce(res([{ name: 't', passed: true, weight: 1 }]));
+    await evaluateCode({
+      language: 'Python',
+      code: 'print(1)',
+      execTimeoutMs: 5000,
+      testCases: [{ name: 't', harnessCode: 'assert', weight: 1 }],
+    });
+    const [, init] = callArgs();
+    expect(JSON.parse(init?.body as string).timeoutMs).toBe(5000);
+  });
+
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(

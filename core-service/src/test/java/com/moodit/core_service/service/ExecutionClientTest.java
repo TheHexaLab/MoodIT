@@ -146,9 +146,10 @@ class ExecutionClientTest {
         assertThat(client.readTimeoutMs("Python", 1, 60_000)).isEqualTo(10_000 + 65_000 + 15_000);
         // Sous le défaut (5 s + 5 s < 20 s) : le budget par défaut reste.
         assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(45_000);
-        // Langage compilé : budget de compilation (90 s, une fois) en plus.
+        // Langage compilé : 90 s de compilation PAR CAS (unités 2N+2 → N+2 compilations).
+        // 4 unités = 1 harnais → 3 compilations (cas + 2 canaris).
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 4 * (65_000 + 15_000) + 90_000);
+                .isEqualTo(10_000 + 4 * (65_000 + 15_000) + 3 * 90_000);
         // TypeScript : tsc relancé à CHAQUE unité → 60 s de marge par unité (mur exec 75 s).
         assertThat(client.readTimeoutMs("TypeScript", 2, null))
                 .isEqualTo(10_000 + 2 * (20_000 + 60_000 + 15_000));

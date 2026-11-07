@@ -122,9 +122,9 @@ class DockerEvaluatorTest {
     void budget_mural_borne_et_image_du_langage_utilisee() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         evaluator.evaluate("C++", "code", List.of(new TestCaseInput("t", "h", 1)), 5000);
-        // 30 s de base + 90 s de compilation (une fois) + (1 cas + 2 canaris) × (5 s + 10 s de
-        // marge) = 165 s.
-        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(165_000L));
+        // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + 90 s de compilation PAR
+        // CAS — chaque cas recompile son harnais) = 345 s.
+        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(345_000L));
     }
 
     @Test
@@ -132,10 +132,24 @@ class DockerEvaluatorTest {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         // Négatif (valeur stockée aberrante) : borné à 1 ms — le mur reste positif et sensé.
         evaluator.evaluate("Java", "code", List.of(new TestCaseInput("t", "h", 1)), -100_000);
-        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(150_003L));
+        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(330_003L));
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code", List.of(new TestCaseInput("t", "h", 1)), 999_999);
-        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(330_000L));
+        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(510_000L));
+    }
+
+    @Test
+    void marqueur_reserve_dans_le_code_soumis_rejete_sans_conteneur() {
+        // __MOODIT_ dans la copie recevrait les substitutions runtime (jeton, canaris) : rejet
+        // explicite AVANT tout conteneur — chaque cas échoue avec le même détail.
+        List<TestResult> results = evaluator.evaluate("Go",
+                "package main\nfunc f() { println(\"[MOODIT] jeton=__MOODIT_T__\") }", TWO_CASES, null);
+        assertThat(results).hasSize(2);
+        assertThat(results).allSatisfy(r -> {
+            assertThat(r.passed()).isFalse();
+            assertThat(r.detail()).contains("Marqueur réservé");
+        });
+        org.mockito.Mockito.verifyNoInteractions(sandbox);
     }
 }

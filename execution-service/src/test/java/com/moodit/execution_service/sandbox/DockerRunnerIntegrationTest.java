@@ -372,4 +372,32 @@ class DockerRunnerIntegrationTest {
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).contains("jeton");
     }
+
+    @Test
+    void go_exfiltration_du_jeton_par_gabarit_rejetee() {
+        require("Go");
+        // Écrire __MOODIT_T__ dans sa copie recevrait le VRAI jeton à la substitution runtime :
+        // le code est rejeté avant même de lancer un conteneur.
+        String cheater = """
+                package main
+
+                import (
+                    "fmt"
+                    "os"
+                )
+
+                func doubler(n int) int {
+                    fmt.Println("--- PASS: TestDoubler (0.00s)")
+                    fmt.Println("PASS")
+                    fmt.Println("[MOODIT] jeton=__MOODIT_T__")
+                    os.Exit(0)
+                    return 0
+                }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", cheater, GO_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("Marqueur réservé");
+    }
 }

@@ -33,7 +33,11 @@ public class DockerEvaluator {
     /** Marge par cas pour le va-et-vient du superviseur (strace, collecte, kill), ms. */
     private static final long PER_CASE_OVERHEAD_MS = 10_000;
     private static final long BASE_OVERHEAD_MS = 30_000;
-    /** Budget de COMPILATION (une fois par job) — miroir de COMPILE_TIMEOUT_S du superviseur. */
+    /**
+     * Budget de COMPILATION PAR CAS — miroir de COMPILE_TIMEOUT_S du superviseur (90 s) :
+     * chaque cas (harnais différent) recompile son projet. Beaucoup de cas lents peuvent
+     * atteindre le plafond MAX_WALL_MS (15 min) — limite assumée, documentée dans le README.
+     */
     private static final long COMPILE_BUDGET_MS = 90_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
@@ -61,16 +65,33 @@ public class DockerEvaluator {
         return imagePrefix + name + ":" + imageTag;
     }
 
+    /**
+     * Marqueur réservé des gabarits runtime (canaris {@code __MOODIT_A__}/{@code __MOODIT_B__},
+     * jeton {@code __MOODIT_T__}) : le superviseur substitue ces gabarits dans TOUS les fichiers
+     * du cas — code étudiant compris (en Rust il partage même le fichier du harnais). Un code
+     * soumis qui contient ce préfixe recevrait donc les vraies valeurs : rejet immédiat, verdict
+     * explicite, sans lancer de conteneur.
+     */
+    private static final String RESERVED_MARKER = "__MOODIT_";
+
     public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
             Integer timeoutMs) {
+        if (code != null && code.contains(RESERVED_MARKER)) {
+            return cases.stream()
+                    .map(c -> new TestResult(c.name(), c.weight(), false,
+                            "Marqueur réservé « __MOODIT_ » dans le code soumis — retire-le pour être corrigé."))
+                    .toList();
+        }
         // Borné des DEUX côtés : une valeur stockée aberrante (négative, nulle, > 60 s) ne doit
         // jamais produire un mur négatif (SandboxException systématique) ni un job sans fin.
         long perRun = Math.min(Math.max(timeoutMs == null ? DEFAULT_RUN_TIMEOUT_MS : timeoutMs, 1),
                 RunnerExec.MAX_RUN_TIMEOUT_MS);
         HarnessProjects.Project project = HarnessProjects.build(language, code, cases, (int) perRun);
-        // Compilation (une fois) + cas + 2 canaris, chacun : run (temps limite du prof) + marge.
+        // Chaque cas (cas réels + 2 canaris) recompile SON harnais : compilation (budget du
+        // superviseur) + run (temps limite du prof) + marge, PAR CAS.
         long wall = Math.min(MAX_WALL_MS,
-                BASE_OVERHEAD_MS + COMPILE_BUDGET_MS + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS));
+                BASE_OVERHEAD_MS
+                        + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS));
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), wall);

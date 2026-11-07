@@ -76,16 +76,17 @@ public class ExecutionClient {
         }
         return baseReadTimeoutMs
                 + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs)
-                + (compiled(language) ? COMPILE_SLACK_MS : 0);
+                // Compilés : CHAQUE cas (N réels + 2 canaris) recompile son harnais — les unités
+                // valent 2N + 2, donc (unités + 2) / 2 = N + 2 compilations à budgéter.
+                + (compiled(language) ? COMPILE_SLACK_MS * ((Math.max(pistonCalls, 2) + 2L) / 2) : 0);
     }
 
     /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
     private static final long RUN_MARGIN_MS = 5_000;
 
     /**
-     * Budget de COMPILATION du runner (une fois par job compilé) — miroir de
-     * {@code COMPILE_TIMEOUT_S} du superviseur (90 s). Compté une seule fois : la compilation
-     * n'a pas lieu par cas.
+     * Budget de COMPILATION du runner PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du
+     * superviseur (90 s) : chaque cas compilé (harnais différent) recompile son projet.
      */
     private static final long COMPILE_SLACK_MS = 90_000;
 

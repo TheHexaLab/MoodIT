@@ -37,7 +37,8 @@ compatible docker-outside-of-docker : aucun montage hôte), en mode `0600` root 
 | **Harnais illisible par l'étudiant** | sources `700` root après compilation, processus étudiant sous UID dédié → `EACCES` ; tentative **tracée** (`lecture_source_tentee`) | les constantes compilées dans les artefacts (binaire de test, `.class`) restent extractibles par un étudiant déterminé |
 | **Pas de fuite réseau** | `--network none` | — |
 | **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box` (768 Mo) et `/tmp` (64 Mo), comptés dans la mémoire (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile — posés sur les DEUX chemins, strace compris) + temps limite par cas (prof, max 60 s) + budget mural du conteneur | — |
-| **Détection** | événements remontés dans le détail des verdicts + logs serveur : `canari_incoherent`, `rapport_incoherent`, `lecture_source_tentee`, `trace_indisponible`, `erreur_superviseur` | l'acheminement vers le journal d'audit (Gardien) est un suivi |
+| **Isolation entre cas** | dossier par cas, groupe de processus tué au timeout, et **balayage des survivants UID étudiant entre deux cas** (un `fork` + `setsid` échappe au kill de groupe) | pendant UN cas, les processus étudiants du même cas partagent l'UID (ptrace entre eux possible selon le `ptrace_scope` de l'hôte) — sans portée inter-cas grâce au balayage |
+| **Détection** | événements remontés dans le détail des verdicts + logs serveur : `canari_incoherent`, `rapport_incoherent`, `jeton_absent`, `lecture_source_tentee`, `lecture_binaire_tentee`, `trace_indisponible`, `erreur_superviseur` | l'acheminement vers le journal d'audit (Gardien) est un suivi |
 
 Le **hardcoding** (un étudiant qui code `if (x == 5) return 10;` pour les entrées visibles de
 l'énoncé) n'est pas une falsification : c'est la limite de tout système de tests fixes — la parade
@@ -70,7 +71,7 @@ donc toute ouverture de `src/` au run est suspecte).
 ## Construire / tester
 
 ```bash
-./docker/runners/build.sh          # construit les 5 images (tag MOODIT_RUNNER_TAG, défaut latest)
+./docker/runners/build.sh          # construit les 10 images (tag MOODIT_RUNNER_TAG, défaut latest)
 ```
 
 - Filet d'intégration : `execution-service` → `DockerRunnerIntegrationTest` (notation, POO,

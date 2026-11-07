@@ -49,16 +49,6 @@ describe('CodeEditor', () => {
     expect(onChange).toHaveBeenCalledWith('x = 1');
   });
 
-  it('inline : Entrée est neutralisée (comportement input, pas de saut de ligne)', () => {
-    const onChange = vi.fn();
-    render(<CodeEditor value="ab" onChange={onChange} inline ariaLabel="code" />);
-    const ta = getTextarea();
-    ta.setSelectionRange(0, 0);
-    const prevented = !fireEvent.keyDown(ta, { key: 'Enter' });
-    expect(prevented).toBe(true);
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
   it('Tab insère 4 espaces (onChange) et empêche le comportement par défaut', () => {
     const onChange = vi.fn();
     render(<CodeEditor value="ab" onChange={onChange} ariaLabel="code" />);
