@@ -19,7 +19,7 @@ Attendu : les 4 cas affichent `OK` (dont 2 tentatives de triche qui échouent).
 ## 2. `sql-deployed-e2e.js` — valide le BINAIRE DÉPLOYÉ
 
 Frappe le vrai endpoint interne `POST /internal/exec/evaluate` de l'execution-service **déployé**
-(donc le code Java réel, `runSqlIsolated` + 2 appels Piston). Couvre les deux modes (lecture seule
+(donc le code Java réel, `runSqlIsolated` + 2 conteneurs runner). Couvre les deux modes (lecture seule
 `solution#` et modification isolée).
 
 ```sh

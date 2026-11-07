@@ -40,7 +40,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  *   1. exécution indisponible → la tentative pending est SUPPRIMÉE (rien ne subsiste, l'étudiant
  *      peut renvoyer sans consommer sa tentative) ;
  *   2. exécution réussie → verdicts persistés, tentative {@code "done"}, question Code notée.
- * {@link ExecutionClient} est mocké (pas de sandbox Piston dans un test).
+ * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
  */
 @DataJpaTest
 @Import({QuizService.class, AuditLogService.class, QuizItemObfuscator.class})

@@ -411,7 +411,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
-      # Même script qu'en local : construction, BD, attente, Python dans Piston, comptes à rôles.
+      # Même script qu'en local : construction, BD, attente, image runner Python, comptes à rôles.
       - name: Démarrer et préparer la pile
         run: sh frontend/e2e/core/start-stack.sh
 
@@ -458,9 +458,9 @@ jobs:
             frontend/e2e/results/
           if-no-files-found: ignore
 
-  # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
+  # ── Intégration : execution-service contre de VRAIS conteneurs runner ──────────
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
-  # exécute le VRAI code (assemblage + verdict) contre un Piston réel — c'est le filet qui prouve
+  # exécute le VRAI code (assemblage + verdict) contre les images runner réelles — le filet qui prouve
   # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
   # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
   integration:

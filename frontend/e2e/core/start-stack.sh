@@ -32,12 +32,10 @@ until [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: appl
   sleep 1
 done
 
-echo "→ Python dans Piston (questions de code)"
-# Seul langage des quiz de code testés ; piston-init (12 langages) serait bien plus long.
-until curl -fsS http://localhost:2000/api/v2/runtimes > /dev/null 2>&1; do sleep 1; done
-curl -fsS http://localhost:2000/api/v2/runtimes | grep -q '"language":"python"' ||
-  curl -fsS -X POST http://localhost:2000/api/v2/packages -H 'Content-Type: application/json' \
-    -d '{"language":"python","version":"3.12.0"}' > /dev/null
+echo "→ Image runner Python (questions de code)"
+# Seul langage des quiz de code testés ; les 10 images (docker/runners/build.sh) seraient bien
+# plus longues à construire. execution-service la lance via le démon Docker de l'hôte.
+docker build -t moodit-runner-python:latest -f docker/runners/python/Dockerfile docker/runners
 
 sh frontend/e2e/core/bootstrap.sh
 

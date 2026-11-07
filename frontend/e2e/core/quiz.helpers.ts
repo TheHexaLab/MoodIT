@@ -61,7 +61,7 @@ export interface QuestionPayload {
   testCases?: { name: string; harnessCode: string; weight: number }[];
 }
 
-/** Id du langage Python (seul installé dans le Piston de la pile E2E). */
+/** Id du langage Python (seule image runner construite par la pile E2E). */
 export async function pythonLanguage(api: APIRequestContext) {
   const res = await api.get('/api/languages');
   expect(res.ok()).toBe(true);
