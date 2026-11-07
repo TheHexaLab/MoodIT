@@ -130,10 +130,35 @@ class ExecutionClientTest {
         // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
-        assertThat(client.readTimeoutMs(1)).isEqualTo(45_000);
-        assertThat(client.readTimeoutMs(5)).isEqualTo(185_000);
-        assertThat(client.readTimeoutMs(100)).isEqualTo(3_510_000);
-        assertThat(client.readTimeoutMs(0)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs(1, null, false)).isEqualTo(45_000);
+        assertThat(client.readTimeoutMs(5, null, false)).isEqualTo(185_000);
+        assertThat(client.readTimeoutMs(100, null, false)).isEqualTo(3_510_000);
+        assertThat(client.readTimeoutMs(0, null, false)).isEqualTo(45_000);
+    }
+
+    @Test
+    @DisplayName("Le temps limite de la question entre dans le budget par unité dès qu'il dépasse le défaut")
+    void readTimeout_integreLeTempsLimiteDeLaQuestion() {
+        ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
+
+        // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
+        assertThat(client.readTimeoutMs(1, 60_000, false)).isEqualTo(10_000 + 65_000 + 15_000);
+        // Sous le défaut (5 s + 5 s < 20 s) : le budget par défaut reste.
+        assertThat(client.readTimeoutMs(1, 5_000, false)).isEqualTo(45_000);
+        // Langage compilé : budget de compilation (90 s, une fois) en plus.
+        assertThat(client.readTimeoutMs(4, 60_000, true))
+                .isEqualTo(10_000 + 4 * (65_000 + 15_000) + 90_000);
+    }
+
+    @Test
+    @DisplayName("compiled() reconnaît les langages du runner compilé")
+    void compiled_reconnaitLesLangagesCompiles() {
+        assertThat(ExecutionClient.compiled("Java")).isTrue();
+        assertThat(ExecutionClient.compiled(" c++ ")).isTrue();
+        assertThat(ExecutionClient.compiled("go")).isTrue();
+        assertThat(ExecutionClient.compiled("Python")).isFalse();
+        assertThat(ExecutionClient.compiled("sql")).isFalse();
+        assertThat(ExecutionClient.compiled(null)).isFalse();
     }
 
     @Test

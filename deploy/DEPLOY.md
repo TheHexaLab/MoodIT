@@ -241,9 +241,10 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par utilisateur
   (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
-  des conteneurs jetables `moodit-runner-*` (réseau coupé, 1,5 Go de mémoire, 512 PID, 2 CPU,
-  `no-new-privileges` ; seule capacité ajoutée : `SYS_PTRACE`, pour que le superviseur trace le
-  processus étudiant et détecte les lectures du harnais). Dans le conteneur, le code étudiant
+  des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
+  tmpfs bornés `/box`/`/tmp`, comptés dans la mémoire, 1,5 Go de mémoire, 512 PID, 2 CPU,
+  `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
+  `SYS_PTRACE` pour tracer le processus étudiant et détecter les lectures du harnais). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Pour lancer ces conteneurs, `execution-service` monte `/var/run/docker.sock` : c'est un accès

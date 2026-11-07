@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Superviseur de notation MoodIT (#116) — processus de CONFIANCE du conteneur runner.
 
-Tourne en root dans un conteneur jetable (réseau coupé, rootfs read-only, /box en tmpfs).
+Tourne en root dans un conteneur jetable (réseau coupé, /box et /tmp en tmpfs bornés — seuls
+points d'écriture de l'UID étudiant, les images verrouillant leurs répertoires monde-inscriptibles).
 Le code étudiant, lui, ne tourne JAMAIS en root : chaque cas est exécuté sous l'UID `student`,
 sans toolchain (binaires de test autonomes), sources verrouillées en 700 root.
 
@@ -26,8 +27,9 @@ Deux MODES (job.json) :
     assemblé embarque sa propre protection : nonce, auto-suppression), avec une étape de
     compilation (root) pour les langages qui en ont une. Sortie : {compile?, run} à la Piston.
 
-Entrée  : /box/job.json + les sources, copiés par execution-service APRÈS le démarrage (tmpfs) ;
-          la sentinelle /box/.ready marque la fin de la copie.
+Entrée  : job.json + les sources, copiés par execution-service AVANT le démarrage dans
+          /opt/moodit/staging (sentinelle .ready en dernier), puis déplacés ici dans le
+          tmpfs /box par wait_for_files().
 Sortie  : UN objet JSON sur stdout.
 Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les deux en phase.
 """
@@ -95,9 +97,16 @@ def demote_student():
 
 
 def preexec_root():
-    """preexec_fn quand strace (root) encapsule le processus étudiant (-u student)."""
+    """preexec_fn quand strace (root) encapsule le processus étudiant (-u student).
+
+    Les rlimits posées ici sont HÉRITÉES par le processus étudiant que strace lance
+    après son setuid : le chemin strace (nominal) porte donc les mêmes bornes que le
+    chemin direct (demote_student). RLIMIT_NPROC ne compte que contre l'UID étudiant
+    (root n'est pas limité), et 256 descripteurs suffisent largement à strace."""
     os.setsid()
     resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+    resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
 def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
@@ -604,15 +613,25 @@ def exec_main(job):
     print(json.dumps({"v": 1, "compile": compile_stage, "run": run_stage}, ensure_ascii=False))
 
 
+STAGING = "/opt/moodit/staging"
+
+
 def wait_for_files():
-    """Les fichiers du job arrivent APRÈS le démarrage (docker cp dans le tmpfs /box)."""
+    """Le job est copié par docker cp AVANT le démarrage dans STAGING (couche image : docker cp
+    ne sait pas écrire dans un tmpfs). On attend la sentinelle .ready (dernière entrée du tar)
+    puis on DÉPLACE le job dans le tmpfs /box — seul point d'écriture du code étudiant."""
     deadline = time.monotonic() + READY_WAIT_S
-    ready = os.path.join(BOX, ".ready")
-    while time.monotonic() < deadline:
-        if os.path.exists(ready):
-            return True
+    ready = os.path.join(STAGING, ".ready")
+    while not os.path.exists(ready):
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.05)
-    return False
+    os.makedirs(BOX, exist_ok=True)
+    for name in os.listdir(STAGING):
+        if name != ".ready":
+            shutil.move(os.path.join(STAGING, name), os.path.join(BOX, name))
+    shutil.rmtree(STAGING, ignore_errors=True)
+    return True
 
 
 def main():

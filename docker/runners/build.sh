@@ -2,6 +2,11 @@
 # Construit les images runner (#116) : notation des compilés (java, csharp, go, rust, c — C++
 # partage l'image C) et mode exec ex-Piston (python, node, php, bash, sqlite).
 # Utilisé en dev local, par la CI et au déploiement.
+#
+# Les FROM sont épinglés par DIGEST (#24, même pratique que les actions CI) et les
+# téléchargements (jar JUnit, paquets NuGet) vérifiés par SHA-256 : le socle de la sandbox ne
+# bouge jamais sans revue. Mise à jour d'une base : `docker buildx imagetools inspect <tag>`
+# pour le nouveau digest, puis reconstruire et passer le job CI `integration`.
 set -euo pipefail
 cd "$(dirname "$0")"
 

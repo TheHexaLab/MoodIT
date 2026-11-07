@@ -25,7 +25,8 @@ public class TestCase {
     private String name;
 
     /** Code du harnais exécuté contre la soumission (renvoie vrai/faux). */
-    @Column(name = "harness_code", columnDefinition = "TEXT")
+    // NOT NULL rétabli en base par V6 (chaque harnais porte son code) : l'entité suit.
+    @Column(name = "harness_code", nullable = false, columnDefinition = "TEXT")
     private String harnessCode;
 
     @Column(nullable = false)

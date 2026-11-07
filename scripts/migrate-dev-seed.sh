@@ -6,10 +6,10 @@
 # Réutilise les fichiers db/demo/* en les envoyant à psql via STDIN (pas de docker cp ni de chemins
 # dans le conteneur → aucun souci de conversion de chemin sous Git Bash/Windows). Idempotent : ne
 # fait rien si des établissements existent déjà (FORCE=1 pour re-seeder malgré tout). Donne
-# l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code en cas
-# structurés (expr).
+# l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code
+# multi-langages (harnais convertis au format runner par V7_1 : vrais tests pour les compilés).
 #
-# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V4). Ce script ne
+# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V8). Ce script ne
 # migre PAS — il SÈME. Usage dev uniquement ; la prod réelle reste volontairement vierge.
 #
 # Usage :
@@ -35,7 +35,7 @@ fi
 # Garde d'idempotence : la table establishment existe-t-elle, et est-elle vide ?
 count="$(pg -tAc 'SELECT count(*) FROM establishment' 2>/dev/null | tr -d '[:space:]')" || count=""
 if [ -z "$count" ]; then
-  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (V1→V4) ? Lance la pile." >&2
+  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (V1→V8) ? Lance la pile." >&2
   exit 1
 fi
 if [ "$count" != "0" ] && [ "${FORCE:-0}" != "1" ]; then
@@ -49,9 +49,10 @@ cat "$DEMO"/V2_1__*.sql \
     "$DEMO"/V2_3__*.sql \
     "$DEMO"/V2_4__*.sql \
     "$DEMO"/V4_1__*.sql \
+    "$DEMO"/V7_1__*.sql \
   | pg -v ON_ERROR_STOP=1 -q
 
 echo
 echo "✓ Terminé. Établissements autorisés :"
 pg -tAc 'SELECT domain_email FROM establishment ORDER BY domain_email' | sed 's/^/  - /'
-echo "Inscris-toi avec un courriel @usherbrooke.ca ; le quiz de code est en cas structurés (expr)."
+echo "Inscris-toi avec un courriel @usherbrooke.ca ; le quiz de code couvre les 16 langages (harnais au format runner)."

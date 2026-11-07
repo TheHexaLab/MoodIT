@@ -26,11 +26,12 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Lance le CONTENEUR RUNNER jetable d'une notation compilée (#116) et en rapporte la sortie JSON
- * du superviseur. Un conteneur par évaluation : réseau coupé, mémoire/PID/CPU bornés,
- * {@code no-new-privileges} ; {@code SYS_PTRACE} ajouté pour que le superviseur trace le processus
- * étudiant (détection des lectures du harnais). Les fichiers du job sont copiés dans le conteneur
- * AVANT son démarrage (pas de montage hôte : compatible docker-outside-of-docker), puis le
- * conteneur est détruit, succès ou non.
+ * du superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
+ * tmpfs bornés {@code /box} et {@code /tmp}, mémoire/PID/CPU bornés, toutes les capacités
+ * retirées sauf le minimum du superviseur, {@code no-new-privileges} ; {@code SYS_PTRACE} gardé
+ * pour que le superviseur trace le processus étudiant (détection des lectures du harnais). Les
+ * fichiers du job sont copiés dans le tmpfs {@code /box} APRÈS le démarrage (pas de montage
+ * hôte : compatible docker-outside-of-docker), puis le conteneur est détruit, succès ou non.
  *
  * Toute erreur d'infrastructure (démon Docker injoignable, image absente, budget de temps du
  * conteneur dépassé) devient une {@link SandboxException} → 502, et la correction reste
@@ -131,7 +132,27 @@ public class DockerSandbox {
                     .withMemorySwap(memoryBytes)
                     .withPidsLimit(pidsLimit)
                     .withNanoCPUs(nanoCpus)
-                    .withCapAdd(Capability.SYS_PTRACE)
+                    // Écritures de l'UID étudiant CONFINÉES aux deux tmpfs bornés ci-dessous
+                    // (comptés dans la mémoire du conteneur) : les images verrouillent leurs
+                    // répertoires monde-inscriptibles (/var/tmp, /go, cargo… — cf. Dockerfiles),
+                    // il ne reste donc que /box et /tmp — le code étudiant ne peut pas remplir le
+                    // disque de l'hôte. (`ReadonlyRootfs` ferait pareil en plus strict, mais le
+                    // démon refuse alors TOUT `docker cp`, même vers un tmpfs.) /box porte le job
+                    // ET les artefacts de compilation (cible cargo, GOCACHE…) donc PAS de noexec ;
+                    // /tmp couvre les outils qui l'exigent en dur (JVM hsperfdata, mono, sort…).
+                    .withTmpFs(Map.of(
+                            // `exec` EXPLICITE : les tmpfs Docker sont noexec par défaut, et les
+                            // binaires de test compilés (Go/Rust/C/C++) s'exécutent depuis /box.
+                            "/box", "rw,nosuid,exec,size=768m",
+                            "/tmp", "rw,nosuid,noexec,size=64m"))
+                    // Capacités : on retire TOUT puis on rend le strict nécessaire au superviseur
+                    // root — chown/droits sur les fichiers du job (CHOWN, FOWNER, DAC_OVERRIDE),
+                    // bascule vers l'UID étudiant (SETUID, SETGID), nettoyage des groupes de
+                    // processus (KILL) et traçage strace du processus étudiant (SYS_PTRACE).
+                    .withCapDrop(Capability.ALL)
+                    .withCapAdd(Capability.CHOWN, Capability.FOWNER, Capability.DAC_OVERRIDE,
+                            Capability.SETUID, Capability.SETGID, Capability.KILL,
+                            Capability.SYS_PTRACE)
                     .withSecurityOpts(List.of("no-new-privileges"))
                     .withAutoRemove(false);
             CreateContainerResponse created = docker.createContainerCmd(image)
@@ -139,9 +160,14 @@ public class DockerSandbox {
                     .exec();
             containerId = created.getId();
 
+            // Copier AVANT le démarrage, dans la ZONE DE TRANSIT de l'image (/opt/moodit/staging,
+            // 0600 root) : `docker cp` ne sait pas écrire dans un tmpfs (l'extraction atterrit
+            // dans la couche image, masquée par le montage). Au démarrage, le superviseur attend
+            // la sentinelle .ready (dernière entrée du tar) puis DÉPLACE le job dans le tmpfs
+            // /box, seul endroit où le code étudiant écrit.
             docker.copyArchiveToContainerCmd(containerId)
                     .withTarInputStream(new ByteArrayInputStream(tarOf(files)))
-                    .withRemotePath("/")
+                    .withRemotePath("/opt/moodit")
                     .exec();
 
             docker.startContainerCmd(containerId).exec();
@@ -190,18 +216,19 @@ public class DockerSandbox {
     }
 
     /**
-     * Tar en mémoire : chaque fichier sous {@code box/}, en 0600 root (le harnais est illisible
-     * par l'UID étudiant dès l'extraction), et la sentinelle {@code box/.ready} EN DERNIER —
-     * le superviseur ne démarre la notation qu'une fois toute la copie terminée.
+     * Tar en mémoire, extrait dans {@code /opt/moodit} : chaque fichier sous {@code staging/},
+     * en 0600 root (le harnais est illisible par l'UID étudiant dès l'extraction), et la
+     * sentinelle {@code staging/.ready} EN DERNIER — le superviseur ne déplace le job vers
+     * {@code /box} qu'une fois toute la copie terminée.
      */
     static byte[] tarOf(Map<String, String> files) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         try (TarArchiveOutputStream tar = new TarArchiveOutputStream(buffer)) {
             tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
             for (Map.Entry<String, String> entry : files.entrySet()) {
-                writeEntry(tar, "box/" + entry.getKey(), entry.getValue());
+                writeEntry(tar, "staging/" + entry.getKey(), entry.getValue());
             }
-            writeEntry(tar, "box/.ready", "ok\n");
+            writeEntry(tar, "staging/.ready", "ok\n");
         }
         return buffer.toByteArray();
     }

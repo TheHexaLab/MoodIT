@@ -67,8 +67,12 @@ anti-triche) : `DockerRunnerIntegrationTest`.
   d'attente de `EXEC_QUEUE_WAIT_MS`), et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur sur
   `/exec/**`. Au-delà : 429 avec un message en français. L'appel interne (correction des soumissions)
   ne compte que dans la limite globale.
-- **Conteneurs runner** : réseau coupé (`--network none`), `no-new-privileges`, UID étudiant dédié ;
-  détails et capacités dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
+- **Conteneurs runner** : réseau coupé (`--network none`), écritures de l'UID étudiant **confinées
+  aux tmpfs bornés** `/box` (768 Mo) et `/tmp` (64 Mo), comptés dans la mémoire du conteneur — les
+  images verrouillent leurs répertoires monde-inscriptibles (`/var/tmp`, `/go`, cargo…), le disque
+  de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
+  minimum du superviseur (chown/droits, setuid étudiant, kill, strace), `no-new-privileges`,
+  UID étudiant dédié ; détails dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
 
 ## Résiduel connu
 

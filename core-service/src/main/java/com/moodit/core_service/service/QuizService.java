@@ -977,7 +977,7 @@ public class QuizService {
             q.setQuiz(quiz);
             q.setPrompt(qd.getPrompt());
             q.setStartCode(qd.getStartCode());
-            q.setExecTimeoutMs(qd.getExecTimeoutMs());
+            q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
             q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
@@ -1003,12 +1003,23 @@ public class QuizService {
                 .orElseThrow(() -> new IllegalArgumentException("Type de question inconnu: " + qd.getQType()));
     }
 
+    /**
+     * Temps limite d'exécution par question : null (défaut du sandbox) si absent ou non positif,
+     * sinon borné au plafond du runner (RunnerExec.MAX_RUN_TIMEOUT_MS = 60 s). Une valeur
+     * aberrante envoyée à l'API ne doit jamais atteindre la base (mur de conteneur négatif,
+     * budgets de lecture faussés).
+     */
+    private static Integer normalizeExecTimeout(Integer ms) {
+        if (ms == null || ms <= 0) return null;
+        return Math.min(ms, 60_000);
+    }
+
     /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */
     private void applyQuestionFields(Question q, QuestionDTO qd, int index, Quiz quiz) {
         q.setQuiz(quiz);
         q.setPrompt(qd.getPrompt());
         q.setStartCode(qd.getStartCode());
-        q.setExecTimeoutMs(qd.getExecTimeoutMs());
+        q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
         q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));

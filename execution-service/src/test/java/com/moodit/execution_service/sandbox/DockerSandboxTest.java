@@ -33,8 +33,9 @@ class DockerSandboxTest {
                 contents.add(new String(tar.readAllBytes(), StandardCharsets.UTF_8));
             }
         }
+        // Sous staging/ (extrait dans /opt/moodit, déplacé vers /box par le superviseur) ; .ready en dernier.
         assertThat(entries).extracting(TarArchiveEntry::getName)
-                .containsExactly("box/job.json", "box/cases/0/src/main.go", "box/.ready");
+                .containsExactly("staging/job.json", "staging/cases/0/src/main.go", "staging/.ready");
         // 0600 : illisible par l'UID étudiant dès l'extraction (le superviseur relâche les artefacts).
         assertThat(entries).allSatisfy(e -> assertThat(e.getMode() & 0777).isEqualTo(0600));
         assertThat(contents.get(1)).isEqualTo("package main");
@@ -109,7 +110,7 @@ class DockerSandboxTest {
         var copy = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CopyArchiveToContainerCmd.class);
         org.mockito.Mockito.when(docker.copyArchiveToContainerCmd("cid")).thenReturn(copy);
         org.mockito.Mockito.when(copy.withTarInputStream(org.mockito.ArgumentMatchers.any())).thenReturn(copy);
-        org.mockito.Mockito.when(copy.withRemotePath("/")).thenReturn(copy);
+        org.mockito.Mockito.when(copy.withRemotePath("/opt/moodit")).thenReturn(copy);
 
         var start = org.mockito.Mockito.mock(com.github.dockerjava.api.command.StartContainerCmd.class);
         org.mockito.Mockito.when(docker.startContainerCmd("cid")).thenReturn(start);

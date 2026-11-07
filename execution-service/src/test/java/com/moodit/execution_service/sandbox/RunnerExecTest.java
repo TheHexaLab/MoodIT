@@ -60,7 +60,7 @@ class RunnerExecTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
-        verify(sandbox).run(eq("moodit-runner-python:latest"), files.capture(), eq(50_000L));
+        verify(sandbox).run(eq("moodit-runner-python:latest"), files.capture(), eq(80_000L));
         assertThat(files.getValue().get("src/grader.py")).isEqualTo("GRADER");
         assertThat(files.getValue().get("src/student_server.py")).isEqualTo("SERVEUR");
         assertThat(files.getValue().get("job.json"))
@@ -75,10 +75,10 @@ class RunnerExecTest {
     void temps_limite_borne_a_60s_et_defaut_3s() {
         supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
         runner.execute("bash", List.of(new RunnerExec.File("main.sh", "x")), null, 999_999);
-        verify(sandbox).run(any(), anyMap(), eq(45_000L + 60_000L));
+        verify(sandbox).run(any(), anyMap(), eq(75_000L + 60_000L));
 
         runner.execute("bash", List.of(new RunnerExec.File("main.sh", "x")));
-        verify(sandbox).run(any(), anyMap(), eq(45_000L + 3_000L));
+        verify(sandbox).run(any(), anyMap(), eq(75_000L + 3_000L));
     }
 
     @Test

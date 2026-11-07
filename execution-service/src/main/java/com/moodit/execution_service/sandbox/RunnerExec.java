@@ -40,7 +40,12 @@ public class RunnerExec {
     public static final int MAX_RUN_TIMEOUT_MS = 60_000;
 
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
-    private static final long WALL_OVERHEAD_MS = 45_000;   // démarrage conteneur + compilation
+    /**
+     * Démarrage du conteneur + compilation : doit COUVRIR le budget de compilation du superviseur
+     * (EXEC_COMPILE_TIMEOUT_S = 60 s), sinon le mur tue le conteneur pendant une compilation
+     * légitime (rustc, mcs…) et l'utilisateur reçoit un 502 au lieu d'une erreur claire.
+     */
+    private static final long WALL_OVERHEAD_MS = 75_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 3_000;
 
     private final DockerSandbox sandbox;

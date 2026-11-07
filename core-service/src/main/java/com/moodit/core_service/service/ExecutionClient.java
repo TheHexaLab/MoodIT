@@ -62,10 +62,26 @@ public class ExecutionClient {
      * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
      * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
      */
-    long readTimeoutMs(int pistonCalls) {
+    long readTimeoutMs(int pistonCalls, Integer execTimeoutMs, boolean compiled) {
+        // Temps limite par question (#116, max 60 s) : s'il dépasse le budget par défaut d'une
+        // unité, chaque unité doit l'attendre (plus une marge), sinon core abandonne une
+        // correction encore en cours et supprime la tentative — le bug que #216 avait corrigé.
+        long perUnit = Math.max(perTestReadTimeoutMs,
+                execTimeoutMs == null ? 0 : execTimeoutMs + RUN_MARGIN_MS);
         return baseReadTimeoutMs
-                + (long) Math.max(pistonCalls, 1) * (perTestReadTimeoutMs + internalQueueWaitMs);
+                + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs)
+                + (compiled ? COMPILE_SLACK_MS : 0);
     }
+
+    /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
+    private static final long RUN_MARGIN_MS = 5_000;
+
+    /**
+     * Budget de COMPILATION du runner (une fois par job compilé) — miroir de
+     * {@code COMPILE_TIMEOUT_S} du superviseur (90 s). Compté une seule fois : la compilation
+     * n'a pas lieu par cas.
+     */
+    private static final long COMPILE_SLACK_MS = 90_000;
 
     /**
      * Nombre d'unités de travail du sandbox pour corriger {@code harnessCount} harnais en
@@ -87,21 +103,26 @@ public class ExecutionClient {
         if (sql) {
             return 2 * harnessCount;
         }
-        boolean compiled = switch (lang) {
+        return compiled(language) ? 2 * harnessCount + 2 : harnessCount;
+    }
+
+    /** Langage noté dans le runner compilé (budget de compilation à prévoir côté client). */
+    static boolean compiled(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return switch (lang) {
             case "c", "c++", "cpp", "cplusplus", "go", "golang", "rust",
                  "csharp", "c#", "cs", "c-sharp", "java" -> true;
             default -> false;
         };
-        return compiled ? 2 * harnessCount + 2 : harnessCount;
     }
 
-    // Client par appel : le délai de lecture dépend du nombre d'appels au sandbox. Un sandbox
-    // injoignable ou bloqué échoue proprement (→ null) plutôt que de faire traîner le thread
-    // indéfiniment.
-    private RestClient restClient(int pistonCalls) {
+    // Client par appel : le délai de lecture dépend du nombre d'appels au sandbox, du temps
+    // limite de la question et du langage. Un sandbox injoignable ou bloqué échoue proprement
+    // (→ null) plutôt que de faire traîner le thread indéfiniment.
+    private RestClient restClient(long readTimeoutMs) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
-        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs(pistonCalls)));
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         return RestClient.builder().requestFactory(factory).build();
     }
 
@@ -129,8 +150,10 @@ public class ExecutionClient {
                 .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
                 .toList());
         if (timeoutMs != null) body.put("timeoutMs", timeoutMs);
+        long readTimeout = readTimeoutMs(pistonCalls(language, harnesses.size()), timeoutMs,
+                compiled(language));
         try {
-            Verdict[] verdicts = restClient(pistonCalls(language, harnesses.size())).post()
+            Verdict[] verdicts = restClient(readTimeout).post()
                     .uri(baseUrl + "/internal/exec/evaluate")
                     .header("X-Internal-Token", internalToken)
                     .contentType(MediaType.APPLICATION_JSON)

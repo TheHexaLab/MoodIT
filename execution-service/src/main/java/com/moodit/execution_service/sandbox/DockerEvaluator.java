@@ -30,9 +30,11 @@ public class DockerEvaluator {
     private static final Logger log = LoggerFactory.getLogger(DockerEvaluator.class);
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
-    /** Budget fixe accordé aux compilations et au va-et-vient conteneur (par cas, ms). */
-    private static final long PER_CASE_OVERHEAD_MS = 25_000;
+    /** Marge par cas pour le va-et-vient du superviseur (strace, collecte, kill), ms. */
+    private static final long PER_CASE_OVERHEAD_MS = 10_000;
     private static final long BASE_OVERHEAD_MS = 30_000;
+    /** Budget de COMPILATION (une fois par job) — miroir de COMPILE_TIMEOUT_S du superviseur. */
+    private static final long COMPILE_BUDGET_MS = 90_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
 
@@ -61,11 +63,14 @@ public class DockerEvaluator {
 
     public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
             Integer timeoutMs) {
-        HarnessProjects.Project project = HarnessProjects.build(language, code, cases, timeoutMs);
-        long perRun = Math.min(timeoutMs == null ? DEFAULT_RUN_TIMEOUT_MS : timeoutMs, 60_000);
-        // Cas + 2 canaris, chacun : compilation (budget fixe) + run (temps limite du prof).
+        // Borné des DEUX côtés : une valeur stockée aberrante (négative, nulle, > 60 s) ne doit
+        // jamais produire un mur négatif (SandboxException systématique) ni un job sans fin.
+        long perRun = Math.min(Math.max(timeoutMs == null ? DEFAULT_RUN_TIMEOUT_MS : timeoutMs, 1),
+                RunnerExec.MAX_RUN_TIMEOUT_MS);
+        HarnessProjects.Project project = HarnessProjects.build(language, code, cases, (int) perRun);
+        // Compilation (une fois) + cas + 2 canaris, chacun : run (temps limite du prof) + marge.
         long wall = Math.min(MAX_WALL_MS,
-                BASE_OVERHEAD_MS + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS));
+                BASE_OVERHEAD_MS + COMPILE_BUDGET_MS + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS));
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), wall);
