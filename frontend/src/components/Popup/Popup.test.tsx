@@ -76,6 +76,22 @@ describe('Popup', () => {
     trigger.remove();
   });
 
+  it("ne reprend pas un focus déjà posé ailleurs pendant la fermeture", () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    const { unmount } = render(<Host onClose={() => {}} />);
+    // L'utilisateur clique un contrôle HORS de la popup pendant l'animation de sortie
+    // (ex. il rouvre une liste déroulante) : la restitution ne doit pas le lui voler.
+    other.focus();
+    unmount();
+    expect(focused()).toBe(other);
+    trigger.remove();
+    other.remove();
+  });
+
   it('confine Tab et Maj+Tab dans le panneau', () => {
     render(<Host onClose={() => {}} />);
     const dialog = screen.getByRole('dialog');
