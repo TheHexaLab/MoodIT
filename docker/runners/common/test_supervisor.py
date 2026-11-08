@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import supervisor  # noqa: E402
 
 
-def outcome(passed, ran=True):
-    return supervisor.CaseOutcome(passed, None, ran=ran)
+def outcome(passed, ran=True, timed_out=False):
+    return supervisor.CaseOutcome(passed, None, ran=ran, timed_out=timed_out)
 
 
 class CanaryVerdictTest(unittest.TestCase):
@@ -46,6 +46,15 @@ class CanaryVerdictTest(unittest.TestCase):
         outcomes = {0: outcome(True), 1: outcome(False, ran=False), 2: outcome(False, ran=False)}
         self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
         self.assertEqual(supervisor.EVENTS[0]["type"], "canari_incoherent")
+
+    def test_tout_expire_indetermine_pas_d_accusation(self):
+        # Temps limite trop court (ou hôte surchargé) : TOUT expire, canaris compris — mauvaise
+        # configuration, pas une falsification. Aucun gain pour un sabotage (cas réels morts).
+        cases = [{"index": 0}, {"index": 1, "canary": "pass"}, {"index": 2, "canary": "fail"}]
+        outcomes = {0: outcome(False, timed_out=True), 1: outcome(False, timed_out=True),
+                    2: outcome(False, timed_out=True)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
 
     def test_indetermine_quand_rien_n_a_tourne(self):
         # Échec de compilation GLOBAL (code étudiant cassé) : honnête, pas d'alerte.

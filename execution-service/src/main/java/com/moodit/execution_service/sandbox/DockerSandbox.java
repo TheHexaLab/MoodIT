@@ -30,8 +30,10 @@ import java.util.concurrent.TimeUnit;
  * tmpfs bornés {@code /box} et {@code /tmp}, mémoire/PID/CPU bornés, toutes les capacités
  * retirées sauf le minimum du superviseur, {@code no-new-privileges} ; {@code SYS_PTRACE} gardé
  * pour que le superviseur trace le processus étudiant (détection des lectures du harnais). Les
- * fichiers du job sont copiés dans le tmpfs {@code /box} APRÈS le démarrage (pas de montage
- * hôte : compatible docker-outside-of-docker), puis le conteneur est détruit, succès ou non.
+ * fichiers du job sont copiés AVANT le démarrage dans la zone de transit de l'image
+ * ({@code /opt/moodit/staging}, 0600 root — {@code docker cp} ne sait pas écrire dans un
+ * tmpfs), puis déplacés dans le tmpfs {@code /box} par le superviseur (pas de montage hôte :
+ * compatible docker-outside-of-docker) ; le conteneur est détruit à la fin, succès ou non.
  *
  * Toute erreur d'infrastructure (démon Docker injoignable, image absente, budget de temps du
  * conteneur dépassé) devient une {@link SandboxException} → 502 ; côté core, la tentative en

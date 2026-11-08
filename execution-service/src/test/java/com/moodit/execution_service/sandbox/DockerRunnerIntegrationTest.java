@@ -446,6 +446,29 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void java_temps_limite_court_plancher_vm() {
+        require("Java");
+        // 1 s de temps limite — valeur légitime pour un doubler : sans plancher, la JVM froide
+        // tuait TOUS les cas (canaris compris) et le verdict accusait de « falsification
+        // probable » une simple configuration. Le plancher VM (10 s, symétrique du mode exec)
+        // doit laisser une soumission honnête passer, sans la moindre alerte.
+        List<TestCaseInput> cases = List.of(new TestCaseInput("doubler", """
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                class MooditHarness {
+                    @Test
+                    void doubler5() { assertEquals(10, Solution.doubler(5)); }
+                }
+                """, 1));
+        List<TestResult> results = evaluator.evaluate("Java",
+                "public class Solution { static int doubler(int n) { return n * 2; } }",
+                cases, 1_000);
+        assertThat(results.get(0).passed()).isTrue();
+        assertThat(results.get(0).detail()).isNull();
+    }
+
+    @Test
     void rust_forge_par_test_tardif_attrapee_par_le_fil_de_detente() {
         require("Rust");
         // Variante raffinée : un test étudiant zzzzz_* (trié APRÈS le jeton) imprime un

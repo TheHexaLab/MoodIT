@@ -279,7 +279,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s) absorbe un pic — au-delà, la tentative échoue et
   l'étudiant resoumet. **Ordre de grandeur à 2 places : ~2 corrections compilées/min, et les
   soumissions au-delà de ~5-6 simultanées dépassent l'attente.** Une CLASSE ENTIÈRE qui soumet
-  un quiz compilé dans la même minute (fin de créneau, examen) dépassera cette capacité :
+  un quiz compilé dans la même minute (fin de créneau, examen) dépassera cette capacité —
+  et le bouton « Tester » d'un prof sur une question compilée pèse autant qu'une correction
+  (même conteneur, même place, plusieurs minutes possibles) :
   avant ce scénario, augmenter `EXEC_MAX_CONCURRENT`/l'attente à la mesure du groupe
   (`nb_étudiants × durée_correction / places`), étaler les soumissions, ou attendre le rejouage
   automatique côté core (suivi ouvert — il n'existe pas encore). Pour lancer ces conteneurs, `execution-service` monte

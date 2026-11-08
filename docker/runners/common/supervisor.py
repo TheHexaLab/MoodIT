@@ -117,6 +117,11 @@ def canary_verdict(cases, outcomes):
     if all(outcomes[c["index"]].ran for c in canary_cases):
         ok = all(outcomes[c["index"]].passed == (c["canary"] == "pass") for c in canary_cases)
         if not ok:
+            if all(outcomes[c["index"]].timed_out for c in cases):
+                # TOUT a expiré, cas réels compris : temps limite trop court pour le langage ou
+                # hôte surchargé — pas une falsification (un sabotage qui gèle tout tue aussi
+                # les cas réels, aucun gain). Pas de fausse accusation.
+                return "indetermines"
             event("canari_incoherent",
                   detail="résultat des canaris contraire à l'attendu — falsification probable")
         return "ok" if ok else "incoherents"
@@ -313,10 +318,11 @@ def first_lines(text, pattern, count=6):
 
 
 class CaseOutcome:
-    def __init__(self, passed, detail=None, ran=False):
+    def __init__(self, passed, detail=None, ran=False, timed_out=False):
         self.passed = passed
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
+        self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
 
 
 # Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
@@ -371,7 +377,7 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
     exit_code, t_out, stdout, stderr, trace = run_student([tests_bin], case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
-        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     summary = re.search(r"^\[MOODIT\] summary total=(\d+) failed=(\d+)$", stdout, re.M)
     coherent = summary is not None and int(summary.group(1)) > 0
     passed = exit_code == 0 and coherent and int(summary.group(2)) == 0
@@ -420,7 +426,7 @@ def run_java(case_dir, env, timeout_s, case_index):
         case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index)
     if t_out:
-        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     tests = failures = 0
     xml_ok = False
     for report in glob.glob(os.path.join(reports, "TEST-*.xml")):
@@ -461,7 +467,7 @@ def run_csharp(case_dir, env, timeout_s, case_index):
         case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index)
     if t_out:
-        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     xml_passed = None
     total = 0
     try:
@@ -496,7 +502,7 @@ def run_go(case_dir, env, timeout_s, case_index):
         [tests_bin, "-test.v", "-test.count=1"], case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
-        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     ran_tests = len(re.findall(r"^=== RUN\s", stdout, re.M))
     coherent = re.search(r"^PASS$", stdout, re.M) is not None and ran_tests > 0
     failed = (re.search(r"^--- FAIL", stdout, re.M) is not None
@@ -545,7 +551,7 @@ def run_rust(case_dir, env, timeout_s, case_index):
         [tests_bin, "--test-threads=1", "--nocapture"], case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
-        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     summary = re.search(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed", stdout, re.M)
     coherent = summary is not None and (int(summary.group(2)) + int(summary.group(3))) > 0
     # Fil de détente anti-forgeage : le jeton Rust est un simple #[test] (tri alphabétique) —
@@ -778,6 +784,11 @@ def main():
         return
     timeout_s = max(1, min(MAX_RUN_TIMEOUT_S,
                            int(job.get("timeout_ms") or DEFAULT_RUN_TIMEOUT_S * 1000) // 1000))
+    if language in ("java", "csharp"):
+        # Plancher VM, symétrique du mode exec : JVM + ConsoleLauncher (ou mono + NUnitLite)
+        # mettent couramment 2 à 5 s à démarrer — un temps limite court mais légitime du prof
+        # (1-5 s) tuait sinon TOUS les cas, canaris compris → « falsification probable » à tort.
+        timeout_s = max(timeout_s, 10)
 
     cases = job["cases"]
     # Canaris et JETONS : valeurs tirées MAINTENANT (imprévisibles), ordre d'exécution mélangé.
