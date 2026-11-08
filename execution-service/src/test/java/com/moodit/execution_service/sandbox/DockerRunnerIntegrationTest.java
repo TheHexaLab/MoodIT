@@ -446,6 +446,46 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void rust_forge_par_test_tardif_attrapee_par_le_fil_de_detente() {
+        require("Rust");
+        // Variante raffinée : un test étudiant zzzzz_* (trié APRÈS le jeton) imprime un
+        // sommaire « ok » forgé puis exit(0) — exit 0, sommaire, jeton (déjà imprimé) et
+        // canaris (fonction notée jamais appelée) passent tous. Seule la ligne
+        // « test … ... FAILED » du vrai test raté, imprimée AVANT par libtest, le trahit.
+        String cheater = """
+                use std::sync::atomic::{AtomicBool, Ordering};
+                pub static TRICHE: AtomicBool = AtomicBool::new(false);
+                pub fn doubler(_n: i32) -> i32 {
+                    TRICHE.store(true, Ordering::SeqCst);
+                    0
+                }
+                fn main() {}
+
+                #[cfg(test)]
+                mod zzzzz_tricheur {
+                    use super::*;
+                    #[test]
+                    fn t() {
+                        if TRICHE.load(Ordering::SeqCst) {
+                            println!("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out");
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                """;
+        List<TestResult> results = evaluate("Rust", cheater, """
+                #[cfg(test)]
+                mod moodit_tests {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("⚠");
+    }
+
+    @Test
     void csharp_rapport_nunit_forge_echoue_sans_jeton() {
         require("C#");
         // Le chemin du rapport est prévisible (work/nunit.xml, dossier étudiant) : un rapport

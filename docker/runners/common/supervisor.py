@@ -548,10 +548,20 @@ def run_rust(case_dir, env, timeout_s, case_index):
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True), None
     summary = re.search(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed", stdout, re.M)
     coherent = summary is not None and (int(summary.group(2)) + int(summary.group(3))) > 0
+    # Fil de détente anti-forgeage : le jeton Rust est un simple #[test] (tri alphabétique) —
+    # un test étudiant trié APRÈS lui (zzzzz_*) pourrait imprimer un sommaire « ok » forgé puis
+    # exit(0). Mais libtest a déjà imprimé « test … ... FAILED » pour le vrai test raté, AVANT
+    # le test tardif, et l'étudiant ne peut pas supprimer cette ligne : sommaire « 0 failed »
+    # + ligne FAILED présente = forgeage.
+    real_failure = re.search(r"^test \S+ \.\.\. FAILED$", stdout, re.M) is not None
     passed = (exit_code == 0 and coherent and summary.group(1) == "ok"
-              and int(summary.group(3)) == 0)
+              and int(summary.group(3)) == 0 and not real_failure)
     if exit_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire cargo test")
+    elif (exit_code == 0 and coherent and summary.group(1) == "ok"
+          and int(summary.group(3)) == 0 and real_failure):
+        event("rapport_incoherent", case=case_index,
+              detail="ligne « ... FAILED » malgré un sommaire « 0 failed » — sommaire forgé probable")
     # --nocapture (requis pour le jeton) : les messages de panique partent sur STDERR au fil de
     # l'eau — on les y cherche d'abord, la liste `failures:` de stdout est maigre sans eux.
     detail = None if passed else (first_lines(stderr, r"panicked at")

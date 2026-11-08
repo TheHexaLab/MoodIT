@@ -183,6 +183,8 @@ public final class HarnessProjects {
                 // privés du code étudiant, comme un vrai test unitaire. Le module jeton se nomme
                 // zzzz_* : dernier par ordre alphabétique (libtest trie, --test-threads=1) — un
                 // exit(0) forgé dans un test antérieur le saute (--nocapture côté superviseur).
+                // Un test étudiant trié APRÈS (zzzzz_*) est contré par le fil de détente du
+                // superviseur : sommaire « 0 failed » + ligne « ... FAILED » = forgeage.
                 files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n\n" + """
                         #[cfg(test)]
                         mod zzzz_moodit_jeton {
