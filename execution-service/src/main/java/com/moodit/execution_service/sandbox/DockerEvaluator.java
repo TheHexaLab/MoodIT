@@ -138,25 +138,42 @@ public class DockerEvaluator {
      * incompréhensible. V7 ne convertit que les gabarits (questions futures) : celles déjà en
      * base doivent être converties à la main, d'où ce diagnostic explicite.
      */
-    private static String frameworkMarker(String runnerLanguage) {
+    private static java.util.regex.Pattern frameworkMarker(String runnerLanguage) {
         return switch (runnerLanguage) {
-            case "java" -> "@Test";
-            case "csharp" -> "[Test]";
-            case "go" -> "func Test";
+            // Toutes les formes idiomatiques, y compris PARAMÉTRÉES et qualifiées : un contrôle
+            // littéral rejetait « [TestCase(3, 4)] » (NUnit) et « @ParameterizedTest » (JUnit 5),
+            // pourtant parfaitement valides — l'étudiant recevait alors 0 avec un diagnostic faux.
+            case "java" -> java.util.regex.Pattern.compile(
+                    "@\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
+            case "csharp" -> java.util.regex.Pattern.compile(
+                    "\\[\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+            case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
+            case "rust" -> java.util.regex.Pattern.compile(
+                    "#\\s*\\[\\s*(?:\\w+\\s*::\\s*)*test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");
+            default -> java.util.regex.Pattern.compile("MOODIT_TEST\\s*\\(");   // c / cpp
+        };
+    }
+
+    /** Forme ATTENDUE, citée dans le diagnostic (lisible par un prof, contrairement à la regex). */
+    private static String frameworkExample(String runnerLanguage) {
+        return switch (runnerLanguage) {
+            case "java" -> "@Test (ou @ParameterizedTest…)";
+            case "csharp" -> "[Test] (ou [TestCase(…)]…)";
+            case "go" -> "func TestXxx(t *testing.T)";
             case "rust" -> "#[test]";
-            default -> "MOODIT_TEST";   // c / cpp
+            default -> "MOODIT_TEST(nom)";
         };
     }
 
     /** Détail d'un harnais resté à l'ancien format, ou {@code null} s'il est au bon format. */
     static String legacyHarnessDetail(String runnerLanguage, String harnessCode) {
-        String marker = frameworkMarker(runnerLanguage);
-        if (harnessCode != null && harnessCode.contains(marker)) {
+        if (harnessCode != null && frameworkMarker(runnerLanguage).matcher(harnessCode).find()) {
             return null;
         }
         return "Ce harnais est resté à l'ancien format (un corps qui renvoie un booléen). "
                 + "Depuis #116, un harnais de langage compilé est un VRAI test du framework : "
-                + "il doit contenir « " + marker + " ». À convertir dans l'éditeur de quiz.";
+                + "il doit déclarer un test (" + frameworkExample(runnerLanguage) + "). "
+                + "À convertir dans l'éditeur de quiz.";
     }
 
     /** {@code maxWallMs} : plafond du mur du conteneur — {@link #PUBLIC_WALL_MS} hors correction interne. */
@@ -176,15 +193,19 @@ public class DockerEvaluator {
             // temps réellement accordé par cas, pas le temps limite court du prof.
             perRun = Math.max(perRun, 10_000);
         }
-        // Mur du conteneur, et budget du superviseur = mur moins la marge de clôture : il
-        // s'arrête AVANT d'être tué et rend les verdicts obtenus (cas restants « non exécuté »).
-        long wallCandidate = BASE_OVERHEAD_MS
-                + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS);
+        // Mur du conteneur, et budget du superviseur. INVARIANT :
+        //     budget + pire cas d'UN cas + marge de clôture ≤ mur
+        // Le superviseur ne teste son budget qu'AVANT de démarrer un cas : un cas lancé juste
+        // avant l'échéance doit pouvoir aller jusqu'au bout (compilation + run) ET laisser le
+        // temps d'imprimer le JSON. Une marge fixe plus courte qu'un cas laissait une fenêtre
+        // où le conteneur était tué au mur — tout le travail perdu, 502, tentative supprimée.
+        long perCase = perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS;
+        long wallCandidate = BASE_OVERHEAD_MS + (cases.size() + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
-        long budget = Math.max(1_000, Math.min(wallCandidate, cap) - CLOSING_MARGIN_MS);
+        long wall = Math.min(cap, wallCandidate);
+        long budget = Math.max(1_000, wall - perCase - CLOSING_MARGIN_MS);
         HarnessProjects.Project project =
                 HarnessProjects.build(language, code, cases, (int) perRun, budget);
-        long wall = Math.min(cap, wallCandidate);
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), wall);

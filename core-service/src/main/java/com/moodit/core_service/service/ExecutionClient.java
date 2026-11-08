@@ -79,8 +79,13 @@ public class ExecutionClient {
             // (run planché VM + 10 s de marge + 90 s de compilation par cas).
             long cases = (Math.max(pistonCalls, 2) + 2L) / 2;   // unités 2N+2 → N+2
             long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
-            return baseReadTimeoutMs + internalQueueWaitMs
-                    + EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS + COMPILE_SLACK_MS);
+            // Plafonné par le MUR du serveur (DockerEvaluator.MAX_WALL_MS) : au-delà, le
+            // conteneur est tué de toute façon. Sans ce miroir, 100 harnais donnaient un délai
+            // de ~3 h pendant lesquelles un fil @Async serait resté épinglé si le démon se
+            // bloquait sans fermer la socket.
+            long serverWall = Math.min(EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS
+                    + COMPILE_SLACK_MS), EVAL_MAX_WALL_MS);
+            return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS;
         }
         // Interprétés/SQL/vues : UNE place et UN conteneur PAR UNITÉ — chaque unité paie
         // l'attente de file et le mur du runner (75 s, miroir de WALL_OVERHEAD_MS : démarrage
@@ -108,6 +113,9 @@ public class ExecutionClient {
 
     /** Budget de compilation PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du superviseur. */
     private static final long COMPILE_SLACK_MS = 90_000;
+
+    /** Mur maximal d'un conteneur de notation — miroir de {@code DockerEvaluator.MAX_WALL_MS}. */
+    private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
 
     /** Plancher VM du superviseur (JVM/mono froids) — miroir du mode evaluate. */
     private static final long VM_FLOOR_MS = 10_000;

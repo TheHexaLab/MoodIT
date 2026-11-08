@@ -884,8 +884,25 @@ class PermissionServiceTest {
   }
 
   @Test
-  void execEvaluate_anyAuthenticated_allowed() {
+  void execEvaluate_enseignant_allowed() {
+    // « Tester » de l'éditeur de quiz : réservé à ceux qui éditent des quiz — un appel y lance
+    // un conteneur de notation avec du code et des harnais fournis par l'appelant (#116).
     loggedIn(user(5));
+    when(membershipService.hasRoleInAnyProgram(5L, RoleNames.TEACHER)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isTrue();
+  }
+
+  @Test
+  void execEvaluate_etudiant_denied() {
+    // Un étudiant passe par « Exécuter » (/exec/run) et par la soumission de quiz, jamais ici.
+    loggedIn(user(5));
+    assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isFalse();
+  }
+
+  @Test
+  void execEvaluate_gardien_global_allowed() {
+    loggedIn(user(5));
+    when(membershipService.hasGlobalRole(5L)).thenReturn(true);
     assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isTrue();
   }
 

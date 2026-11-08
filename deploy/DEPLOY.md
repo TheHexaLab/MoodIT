@@ -303,7 +303,15 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   `execution-service` les balaie à son démarrage, et on peut les lister à la main avec
   `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
   `/var/run/docker.sock` : c'est un accès
-  root-équivalent au démon de l'hôte, assumé pour ce service interne (aucune route d'admin, appels
-  authentifiés par le gateway/`X-Internal-Token`). Les images sont construites par
+  **root-équivalent au démon de l'hôte**, et il faut en mesurer la portée — contrairement à
+  l'ancien Piston (isolé sur son réseau dédié), `execution-service` est routé depuis Internet
+  (`/exec/**` via le gateway) et c'est lui qui analyse le code étudiant, les harnais et la sortie
+  des conteneurs. Un défaut d'exécution de code dans ce service ne se paierait donc plus par un
+  conteneur sandbox compromis, mais par l'hôte entier (Postgres et Caddy compris). Les appels
+  restent authentifiés (gateway, `X-Internal-Token`), `/exec/evaluate` est réservé aux éditeurs
+  de quiz et le service n'expose aucune route d'administration — mais **le durcissement attendu
+  est un proxy de socket restreint** (du type `tecnativa/docker-socket-proxy`, n'autorisant que
+  `containers/create|start|wait|logs|delete` et `images/inspect`) : c'est le suivi ouvert avant
+  tout usage à plus grande échelle. Les images sont construites par
   `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
   fait automatiquement).

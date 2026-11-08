@@ -156,10 +156,13 @@ class ExecutionClientTest {
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
         // (N + 2 canaris) × (run + 10 s + 90 s). 4 unités = 1 harnais → 3 cas.
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (60_000 + 10_000 + 90_000));
+                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (60_000 + 10_000 + 90_000) + 5_000);
         // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
         assertThat(client.readTimeoutMs("Java", 4, 1_000))
-                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (10_000 + 10_000 + 90_000));
+                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (10_000 + 10_000 + 90_000) + 5_000);
+        // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
+        assertThat(client.readTimeoutMs("Java", 202, 60_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000);
         // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
         assertThat(client.readTimeoutMs("TypeScript", 2, null))
                 .isEqualTo(10_000 + 2 * 110_000);

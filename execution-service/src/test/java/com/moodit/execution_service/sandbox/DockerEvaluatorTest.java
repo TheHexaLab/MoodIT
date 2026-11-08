@@ -190,6 +190,33 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void formes_parametrees_et_qualifiees_acceptees() {
+        // Formes IDIOMATIQUES que le contrôle littéral rejetait à tort : l'étudiant recevait 0
+        // avec « harnais resté à l'ancien format » alors que le harnais était valide.
+        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
+                List.of(new TestCaseInput("t", "[TestCase(3, 4, 12)] public void Aire(…) {}", 1))))
+                .isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
+                List.of(new TestCaseInput("t", "[ TestCaseSource(nameof(Cas)) ] void T() {}", 1))))
+                .isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
+                List.of(new TestCaseInput("t", "@ParameterizedTest @ValueSource(ints = {1}) void t(int n) {}", 1))))
+                .isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
+                List.of(new TestCaseInput("t", "@org.junit.jupiter.api.Test void t() {}", 1))))
+                .isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
+                List.of(new TestCaseInput("t", "@RepeatedTest(3) void t() {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Go",
+                List.of(new TestCaseInput("t", "func TestAire(t *testing.T) {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Rust",
+                List.of(new TestCaseInput("t", "#[cfg(test)] mod m { #[test] fn t() {} }", 1))))
+                .isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("C++",
+                List.of(new TestCaseInput("t", "MOODIT_TEST (aire) { }", 1)))).isNull();
+    }
+
+    @Test
     void un_seul_harnais_ancien_format_arrete_toute_la_question() {
         List<TestResult> results = DockerEvaluator.legacyHarnessRejection("Go", List.of(
                 new TestCaseInput("bon", "func TestA(t *testing.T) {}", 1),

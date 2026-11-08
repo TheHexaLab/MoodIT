@@ -132,15 +132,24 @@ def randomize_student_uid():
     et on le signale dans les logs."""
     global STUDENT_UID, STUDENT_GID
     uid = random.SystemRandom().randrange(20000, 60000)
+    # TOUT OU RIEN : les deux contenus sont calculés AVANT la moindre écriture. Écrire
+    # /etc/passwd puis échouer sur /etc/group laisserait le système et STUDENT_UID
+    # désaccordés — l'étudiant ne pourrait plus écrire dans son work/, TOUS les cas
+    # échoueraient (canaris compris) et la soumission serait étiquetée « falsification
+    # probable » pour une simple erreur de configuration d'image.
+    updates = {}
     try:
-        for path, gid_field in (("/etc/passwd", True), ("/etc/group", False)):
+        for path in ("/etc/passwd", "/etc/group"):
             with open(path, "r", encoding="utf-8") as f:
                 updated = with_uid(f.read(), STUDENT_NAME, uid, uid)
             if updated is None:
-                log("superviseur: utilisateur %s absent de %s" % (STUDENT_NAME, path))
+                log("superviseur: utilisateur %s absent de %s — UID de l'image conservé"
+                    % (STUDENT_NAME, path))
                 return
+            updates[path] = updated
+        for path, content in updates.items():
             with open(path, "w", encoding="utf-8") as f:
-                f.write(updated)
+                f.write(content)
     except OSError as e:
         log("superviseur: UID étudiant non randomisé (%r) — rlimit partagée entre conteneurs" % e)
         return

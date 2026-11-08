@@ -202,9 +202,15 @@ services:
       - .env.docker
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
-      # 2 exécutions simultanées au plus : borne le nombre de CONTENEURS RUNNER simultanés (#116),
-      # soit 2 × SANDBOX_MEMORY_MB en pointe — surveiller la RAM du VPS avant de l'augmenter.
-      EXEC_MAX_CONCURRENT: "2"
+      # 3 exécutions simultanées au plus : borne le nombre de CONTENEURS RUNNER simultanés
+      # (#116), soit 3 × SANDBOX_MEMORY_MB en POINTE (plafond, pas une réservation) —
+      # surveiller la RAM du VPS avant de l'augmenter. Une place reste réservée aux
+      # corrections internes, il en reste donc DEUX pour « Exécuter »/« Tester » : avec une
+      # seule, deux étudiants qui cliquent en même temps recevaient un 429 en routine.
+      EXEC_MAX_CONCURRENT: "3"
+      # Un appel public tient maintenant un conteneur entier (quelques secondes pour un
+      # interprété) au lieu d'une requête HTTP sous-seconde : l'attente d'une place suit.
+      EXEC_QUEUE_WAIT_MS: "15000"
       # Conteneurs runner (#116) : 1 vCPU et 1 Go chacun sur ce VPS — deux notations
       # simultanées ne doivent pas monopoliser la machine (Caddy, Postgres, services Java)
       # pendant plusieurs minutes. Les valeurs par défaut (2 vCPU, 1,5 Go) visent le dev.
