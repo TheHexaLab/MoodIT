@@ -28,6 +28,9 @@ import java.util.function.Supplier;
 @Component
 public class ExecutionLimiter {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(ExecutionLimiter.class);
+
     private final Semaphore global;
     /**
      * Places accessibles aux appels PUBLICS (« Tester », « play ») : {@code maxConcurrent - 1}
@@ -62,7 +65,16 @@ public class ExecutionLimiter {
         }
         // Équitable : les exécutions en attente passent dans leur ordre d'arrivée.
         this.global = new Semaphore(maxConcurrent, true);
-        this.publicCap = new Semaphore(Math.max(1, maxConcurrent - 1), true);
+        int publicSlots = Math.max(1, maxConcurrent - 1);
+        this.publicCap = new Semaphore(publicSlots, true);
+        if (maxPerUser >= publicSlots) {
+            // Sinon la borne par utilisateur ne borne plus rien : UN compte peut occuper
+            // toutes les places publiques (un appel public tient un conteneur entier, pas
+            // une requête HTTP) et refuser « Exécuter »/« Tester » à toute l'instance.
+            LOG.warn("app.exec.max-per-user ({}) ≥ places publiques ({}) : un seul utilisateur "
+                    + "peut saturer le sandbox public — abaisser max-per-user ou relever "
+                    + "max-concurrent", maxPerUser, publicSlots);
+        }
         this.queueWaitMs = queueWaitMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
         this.maxPerUser = maxPerUser;

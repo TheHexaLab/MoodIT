@@ -182,6 +182,21 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
+# Alphabets d'un identifiant tiré au sort : première lettre, puis lettres/chiffres/_ — et
+# LONGUEUR variable. Un nom de forme fixe (« 1 majuscule + 9 minuscules ») restait
+# reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les
+# fonctions de sortie : il suffisait de relayer honnêtement les tests dont le nom a cette
+# forme (les canaris) et de ne forger que les autres.
+IDENT_FIRST = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+IDENT_REST = IDENT_FIRST + "0123456789_"
+
+
+def random_identifier(rng, min_len=5, max_len=16):
+    """Identifiant valide dans les six langages (lettre en tête), de longueur variable."""
+    length = rng.randrange(min_len, max_len + 1)
+    return rng.choice(IDENT_FIRST) + "".join(rng.choice(IDENT_REST) for _ in range(length - 1))
+
+
 def canary_verdict(cases, outcomes):
     """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) :
     « aucun » (pas de canaris), « ok », « incoherents » (résultat contraire à l'attendu, OU
@@ -277,9 +292,18 @@ def preexec_root():
 def open_output(path):
     """Ouvre un fichier de sortie SANS suivre un lien symbolique : en mode exec, /box
     appartient à l'UID étudiant, qui pouvait remplacer run.out par un lien et faire écrire
-    root ailleurs (nuisance dans un conteneur jetable, mais primitive gratuite à supprimer)."""
+    root ailleurs (nuisance dans un conteneur jetable, mais primitive gratuite à supprimer).
+    Si le chemin EST un lien, O_NOFOLLOW échoue : on le retire et on recommence — sans ça,
+    l'OSError remontait jusqu'en haut et le job entier répondait 502."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
-    return os.fdopen(os.open(path, flags, 0o600), "wb")
+    try:
+        return os.fdopen(os.open(path, flags, 0o600), "wb")
+    except OSError:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return os.fdopen(os.open(path, flags, 0o600), "wb")
 
 
 def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
@@ -949,9 +973,7 @@ def main():
         if case.get("canary"):
             # Nom du test canari randomisé (identifiant valide, majuscule en tête pour
             # l'export Go) : un nom FIXE serait reconnaissable par le code étudiant.
-            subst["__MOODIT_N__"] = (rng.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-                                     + "".join(rng.choice("abcdefghijklmnopqrstuvwxyz")
-                                               for _ in range(9)))
+            subst["__MOODIT_N__"] = random_identifier(rng)
         if case.get("canary") == "pass":
             a = rng.randrange(100000, 999999)
             subst.update({"__MOODIT_A__": str(a), "__MOODIT_B__": str(a)})

@@ -190,6 +190,24 @@ class RustVerdictTest(unittest.TestCase):
         self.assertEqual(supervisor.rust_verdict(1, out), (False, None))
 
 
+class RandomIdentifierTest(unittest.TestCase):
+    """Nom des canaris : une forme FIXE (« 1 majuscule + 9 minuscules ») restait
+    reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les
+    fonctions de sortie — il relayait alors honnêtement les tests à cette forme."""
+
+    def test_identifiant_valide_et_de_longueur_variable(self):
+        import random
+        rng = random.Random(12345)
+        noms = {supervisor.random_identifier(rng) for _ in range(300)}
+        self.assertGreater(len({len(n) for n in noms}), 3)       # longueurs variées
+        for nom in noms:
+            self.assertRegex(nom, r"^[A-Za-z][A-Za-z0-9_]*$")    # identifiant valide partout
+            self.assertGreaterEqual(len(nom), 5)
+        # L'alphabet dépasse la casse unique : chiffres et _ apparaissent.
+        self.assertTrue(any(c.isdigit() or c == "_" for n in noms for c in n))
+        self.assertTrue(any(c.isupper() for n in noms for c in n[1:]))
+
+
 class BoxExhaustedTest(unittest.TestCase):
     """Saturation du tmpfs /box : un code honnête mais bogué (fichiers temporaires jamais
     supprimés) faisait échouer les cas SUIVANTS, canaris compris → « falsification probable ».

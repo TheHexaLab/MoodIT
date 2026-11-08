@@ -211,6 +211,11 @@ services:
       # Un appel public tient maintenant un conteneur entier (quelques secondes pour un
       # interprété) au lieu d'une requête HTTP sous-seconde : l'attente d'une place suit.
       EXEC_QUEUE_WAIT_MS: "15000"
+      # Requêtes en vol par utilisateur. DOIT rester STRICTEMENT sous le nombre de places
+      # publiques (EXEC_MAX_CONCURRENT − 1, soit 2 ici) : à égalité, un seul compte peut les
+      # occuper toutes et refuser « Exécuter »/« Tester » à toute l'instance — un appel public
+      # tient un conteneur entier (jusqu'à ~60 s de compilation pour un langage compilé).
+      EXEC_MAX_PER_USER: "1"
       # Conteneurs runner (#116) : 1 vCPU et 1 Go chacun sur ce VPS — deux notations
       # simultanées ne doivent pas monopoliser la machine (Caddy, Postgres, services Java)
       # pendant plusieurs minutes. Les valeurs par défaut (2 vCPU, 1,5 Go) visent le dev.

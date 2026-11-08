@@ -148,18 +148,19 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > créée AVANT cette version garde un harnais ancien format, qui ne compile plus dans le runner
 > (tous ses cas échoueraient). Vérifier qu'il n'en existe aucune :
 >
-> La requête ne compte QUE les harnais dépourvus du marqueur de framework de leur langage —
-> miroir exact de `DockerEvaluator.frameworkMarker`, qui refuse ces harnais à l'exécution :
+> La requête ne compte QUE les harnais dépourvus du marqueur de framework de leur langage, avec
+> les MÊMES expressions régulières que `DockerEvaluator.frameworkMarker` (formes paramétrées et
+> qualifiées comprises : `[TestCase(…)]`, `@ParameterizedTest`, `#[cfg(test)]`…) :
 >
 > ```bash
 > docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
 >   "SELECT l.name, count(*) FROM Test_Case tc JOIN Question q ON q.id = tc.question_id \
 >    JOIN Language l ON l.id = q.language_id \
->    WHERE (l.name = 'Java' AND tc.harness_code NOT LIKE '%@Test%') \
->       OR (l.name = 'C#'   AND tc.harness_code NOT LIKE '%[Test]%') \
->       OR (l.name = 'Go'   AND tc.harness_code NOT LIKE '%func Test%') \
->       OR (l.name = 'Rust' AND tc.harness_code NOT LIKE '%#[test]%') \
->       OR (l.name IN ('C','C++') AND tc.harness_code NOT LIKE '%MOODIT_TEST%') \
+>    WHERE (l.name = 'Java' AND tc.harness_code !~ '@\s*(\w+\s*\.\s*)*(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\y') \
+>       OR (l.name = 'C#'   AND tc.harness_code !~ '\[\s*(\w+\s*\.\s*)*(Test|TestCase|TestCaseSource|Theory|TestFixture)\y') \
+>       OR (l.name = 'Go'   AND tc.harness_code !~ 'func\s+Test\w*\s*\(') \
+>       OR (l.name = 'Rust' AND tc.harness_code !~ '#\s*\[\s*(\w+\s*::\s*)*test\s*\]|#\s*\[\s*cfg\s*\(\s*test\s*\)') \
+>       OR (l.name IN ('C','C++') AND tc.harness_code !~ 'MOODIT_TEST\s*\(') \
 >    GROUP BY l.name"
 > ```
 >

@@ -130,9 +130,14 @@ public class DockerSandbox {
     public int removeOrphans() {
         int removed = 0;
         try {
+            // Statuts TERMINÉS seulement : plusieurs instances peuvent partager le démon
+            // (pile e2e + dev, ou un update.sh pendant une correction). Balayer tout ce qui
+            // porte l'étiquette tuait une notation EN VOL — 502, tentative supprimée, soit
+            // précisément le mode d'échec que le reste de la PR s'applique à éliminer.
             List<com.github.dockerjava.api.model.Container> orphans = client().listContainersCmd()
                     .withShowAll(true)
                     .withLabelFilter(Map.of(RUNNER_LABEL, "1"))
+                    .withStatusFilter(List.of("exited", "created", "dead"))
                     .exec();
             for (com.github.dockerjava.api.model.Container container : orphans) {
                 try {

@@ -230,6 +230,10 @@ class DockerSandboxTest {
         org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
         org.mockito.Mockito.when(list.withLabelFilter(
                 org.mockito.ArgumentMatchers.<Map<String, String>>any())).thenReturn(list);
+        // Seuls les conteneurs TERMINÉS sont balayés : une notation en vol (autre instance
+        // sur le même démon) ne doit pas être tuée.
+        org.mockito.Mockito.when(list.withStatusFilter(
+                org.mockito.ArgumentMatchers.<java.util.Collection<String>>any())).thenReturn(list);
         org.mockito.Mockito.when(list.exec()).thenReturn(java.util.List.of(orphan));
         org.mockito.Mockito.when(docker.removeContainerCmd("vieux")).thenReturn(remove);
         org.mockito.Mockito.when(remove.withForce(true)).thenReturn(remove);
