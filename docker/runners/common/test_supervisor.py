@@ -122,6 +122,74 @@ class EnforceTokenTest(unittest.TestCase):
         self.assertEqual(supervisor.EVENTS, [])
 
 
+class RustVerdictTest(unittest.TestCase):
+    """Verdict Rust : avec --nocapture, libtest imprime « test <nom> ... » SANS saut de ligne,
+    la sortie du test s'y colle et « FAILED » peut se retrouver seul sur sa ligne. Un fil de
+    détente ancré sur « ^test X ... FAILED$ » ne voyait donc rien dès que le code étudiant
+    imprimait quelque chose."""
+
+    def test_succes_honnete(self):
+        out = ("running 2 tests\n"
+               "test moodit_tests::aire ... ok\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... [MOODIT] jeton=42\n"
+               "ok\n"
+               "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        self.assertEqual(supervisor.rust_verdict(0, out), (True, None))
+
+    def test_echec_honnete(self):
+        out = ("running 2 tests\n"
+               "test moodit_tests::aire ... FAILED\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... ok\n"
+               "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(101, out)
+        self.assertFalse(passed)
+        self.assertIsNone(incoherence)
+
+    def test_forgeage_par_test_tardif_avec_sortie_detecte(self):
+        # EXPLOIT : la fonction notée imprime (le « FAILED » du vrai test se retrouve seul sur
+        # sa ligne), puis un test zzzzz_* trié après le jeton forge le sommaire et exit(0).
+        out = ("running 3 tests\n"
+               "test moodit_tests::aire ... coucou depuis la fonction notee\n"
+               "FAILED\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... [MOODIT] jeton=42\n"
+               "ok\n"
+               "test zzzzz_tricheur::t ... \n"
+               "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(0, out)
+        self.assertFalse(passed)
+        self.assertIn("forgé", incoherence)
+
+    def test_forgeage_sans_sortie_detecte(self):
+        # Variante naïve : le « FAILED » reste collé au marqueur de début.
+        out = ("running 3 tests\n"
+               "test moodit_tests::aire ... FAILED\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... ok\n"
+               "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(0, out)
+        self.assertFalse(passed)
+        self.assertIn("forgé", incoherence)
+
+    def test_sommaire_annonce_moins_de_tests_que_demarres(self):
+        # Forgeur qui sort tôt : trois tests démarrés, deux annoncés.
+        out = ("running 3 tests\n"
+               "test a::x ... ok\n"
+               "test b::y ... ok\n"
+               "test c::z ... \n"
+               "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(0, out)
+        self.assertFalse(passed)
+        self.assertIn("démarrés", incoherence)
+
+    def test_exit_zero_sans_sommaire(self):
+        passed, incoherence = supervisor.rust_verdict(0, "running 1 test\n")
+        self.assertFalse(passed)
+        self.assertIn("sans sommaire", incoherence)
+
+    def test_exit_non_nul_jamais_reussi(self):
+        out = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+        self.assertEqual(supervisor.rust_verdict(1, out), (False, None))
+
+
 class ReadCappedTest(unittest.TestCase):
     def test_petit_fichier_entier(self):
         with tempfile.NamedTemporaryFile("w", suffix=".out", delete=False) as f:

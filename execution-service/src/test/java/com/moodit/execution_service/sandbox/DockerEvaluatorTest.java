@@ -159,4 +159,76 @@ class DockerEvaluatorTest {
         });
         org.mockito.Mockito.verifyNoInteractions(sandbox);
     }
+
+    // ── Harnais restés à l'ancien format (#116) ──────────────────────────────────
+
+    @Test
+    void harnais_ancien_format_rejete_avec_un_message_explicite() {
+        // Un harnais d'avant #116 est un CORPS qui renvoie un booléen : il ne compile pas dans
+        // le runner, et l'étudiant n'y lirait qu'un « Échec de compilation » incompréhensible.
+        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("Java",
+                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)));
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("ancien format").contains("@Test");
+    }
+
+    @Test
+    void harnais_au_format_framework_accepte_dans_les_six_langages() {
+        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
+                List.of(new TestCaseInput("t", "@Test void t() {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
+                List.of(new TestCaseInput("t", "[Test] public void T() {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Go",
+                List.of(new TestCaseInput("t", "func TestT(t *testing.T) {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("Rust",
+                List.of(new TestCaseInput("t", "#[test] fn t() {}", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("C",
+                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)))).isNull();
+        assertThat(DockerEvaluator.legacyHarnessRejection("C++",
+                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)))).isNull();
+    }
+
+    @Test
+    void un_seul_harnais_ancien_format_arrete_toute_la_question() {
+        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("Go", List.of(
+                new TestCaseInput("bon", "func TestA(t *testing.T) {}", 1),
+                new TestCaseInput("vieux", "return doubler(5) == 10", 1)));
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).detail()).contains("un autre harnais");
+        assertThat(results.get(1).detail()).contains("ancien format");
+    }
+
+    @Test
+    void langage_non_compile_n_est_pas_concerne() {
+        assertThat(DockerEvaluator.legacyHarnessRejection("Python",
+                List.of(new TestCaseInput("t", "return True", 1)))).isNull();
+    }
+
+    @Test
+    void mur_plafonne_pour_un_appel_public() {
+        supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
+        // 10 cas × (60 s + 10 s + 90 s) dépasserait largement le plafond public (4 min).
+        List<TestCaseInput> many = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(i -> new TestCaseInput("c" + i, "h", 1)).toList();
+        evaluator.evaluate("Go", "code", many, 60_000, DockerEvaluator.PUBLIC_WALL_MS);
+        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(),
+                eq(DockerEvaluator.PUBLIC_WALL_MS));
+    }
+
+    @Test
+    void canaris_incoherents_neutralisent_les_verdicts_cote_java() {
+        // Défense en PROFONDEUR : même si le superviseur renvoyait « passed », Java refuse.
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":true,"detail":null},
+                  {"index":1,"passed":true,"detail":null}
+                ],"events":[],"canaries":"incoherents"}
+                """);
+        List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
+        assertThat(results).allSatisfy(r -> {
+            assertThat(r.passed()).isFalse();
+            assertThat(r.detail()).contains("Incohérence détectée");
+        });
+    }
 }

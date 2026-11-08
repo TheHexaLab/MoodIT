@@ -213,4 +213,34 @@ class DockerSandboxTest {
 
         assertThat(sandbox.run("img", Map.of("job.json", "{}"), 5000).exitCode()).isZero();
     }
+
+    @Test
+    void balayage_des_conteneurs_orphelins_au_demarrage() {
+        // Si la JVM meurt pendant une notation, le nettoyage du finally n'a pas lieu : les
+        // conteneurs survivants portent l'étiquette moodit.runner et sont balayés au démarrage.
+        com.github.dockerjava.api.DockerClient docker =
+                org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var list = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.ListContainersCmd.class);
+        var remove = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var orphan = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(orphan.getId()).thenReturn("vieux");
+        org.mockito.Mockito.when(docker.listContainersCmd()).thenReturn(list);
+        org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
+        org.mockito.Mockito.when(list.withLabelFilter(
+                org.mockito.ArgumentMatchers.<Map<String, String>>any())).thenReturn(list);
+        org.mockito.Mockito.when(list.exec()).thenReturn(java.util.List.of(orphan));
+        org.mockito.Mockito.when(docker.removeContainerCmd("vieux")).thenReturn(remove);
+        org.mockito.Mockito.when(remove.withForce(true)).thenReturn(remove);
+
+        assertThat(new DockerSandbox(docker, 512, 64, 1.0).removeOrphans()).isEqualTo(1);
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
+    void balayage_silencieux_si_le_demon_est_injoignable() {
+        // Un démon absent ne doit pas empêcher le service de démarrer.
+        assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
+    }
 }

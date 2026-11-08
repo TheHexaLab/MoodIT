@@ -125,4 +125,18 @@ class RunnerExecTest {
         assertThatThrownBy(() -> runner.execute("python", null, null, null))
                 .isInstanceOf(SandboxException.class);
     }
+
+    @Test
+    void alias_de_runtime_normalises_et_images_dediees() {
+        assertThat(runner.imageFor("csharp")).isEqualTo("moodit-runner-csharp:latest");
+        assertThat(runner.imageFor("rust")).isEqualTo("moodit-runner-rust:latest");
+        assertThat(runner.imageFor("  JAVA  ")).isEqualTo("moodit-runner-java:latest");
+    }
+
+    @Test
+    void runtime_null_normalise_dans_le_job() {
+        supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
+        assertThatThrownBy(() -> runner.execute(null, List.of(new RunnerExec.File("x", "y"))))
+                .isInstanceOf(RuntimeException.class);
+    }
 }

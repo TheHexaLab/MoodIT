@@ -245,4 +245,13 @@ class ExecutionLimiterTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void le_contexte_interne_est_visible_et_restaure() {
+        // Le mur du conteneur dépend de ce drapeau (public : plafond court).
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 2);
+        assertThat(limiter.isInternal()).isFalse();
+        assertThat(limiter.asInternal(limiter::isInternal)).isTrue();
+        assertThat(limiter.isInternal()).isFalse();
+    }
 }

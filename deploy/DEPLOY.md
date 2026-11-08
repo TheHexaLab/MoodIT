@@ -148,15 +148,24 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > créée AVANT cette version garde un harnais ancien format, qui ne compile plus dans le runner
 > (tous ses cas échoueraient). Vérifier qu'il n'en existe aucune :
 >
+> La requête ne compte QUE les harnais dépourvus du marqueur de framework de leur langage —
+> miroir exact de `DockerEvaluator.frameworkMarker`, qui refuse ces harnais à l'exécution :
+>
 > ```bash
-> docker exec moodit_postgres psql -U postgres -d moodit_db -tAc \
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
 >   "SELECT l.name, count(*) FROM Test_Case tc JOIN Question q ON q.id = tc.question_id \
 >    JOIN Language l ON l.id = q.language_id \
->    WHERE l.name IN ('C','C++','C#','Java','Go','Rust') GROUP BY l.name"
+>    WHERE (l.name = 'Java' AND tc.harness_code NOT LIKE '%@Test%') \
+>       OR (l.name = 'C#'   AND tc.harness_code NOT LIKE '%[Test]%') \
+>       OR (l.name = 'Go'   AND tc.harness_code NOT LIKE '%func Test%') \
+>       OR (l.name = 'Rust' AND tc.harness_code NOT LIKE '%#[test]%') \
+>       OR (l.name IN ('C','C++') AND tc.harness_code NOT LIKE '%MOODIT_TEST%') \
+>    GROUP BY l.name"
 > ```
 >
 > Résultat vide → rien à faire. Sinon, convertir ces harnais au format framework (cf. les
-> exemples de `db/demo/V7_1__demo_harnais_frameworks.sql`) avant d'ouvrir l'app aux étudiants.
+> exemples de `db/demo/V7_1__demo_harnais_frameworks.sql`) avant d'ouvrir l'app aux étudiants ;
+> sans conversion, l'étudiant reçoit 0 avec le message « harnais resté à l'ancien format ».
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :

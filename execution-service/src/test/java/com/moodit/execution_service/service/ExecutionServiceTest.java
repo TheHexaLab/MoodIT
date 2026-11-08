@@ -26,6 +26,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -303,5 +304,33 @@ class ExecutionServiceTest {
         routed.evaluate(new EvaluateRequest("Rust", null, "code",
                 List.of(new TestCaseInput("t", frameworkHarness("Rust"), 1)), 42_000));
         verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000), anyLong());
+    }
+
+    @Test
+    void rejets_avant_la_prise_de_place_et_mur_plafonne_selon_l_appelant() {
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
+        ExecutionService routed = new ExecutionService(assembler, runner, limiter, docker);
+
+        // 1. Marqueur réservé dans le code : verdict explicite, aucun conteneur.
+        List<TestResult> marker = routed.evaluate(
+                oneTest("Go", "jeton=__MOODIT_T__", frameworkHarness("Go")));
+        assertThat(marker.get(0).passed()).isFalse();
+        assertThat(marker.get(0).detail()).contains("Marqueur réservé");
+
+        // 2. Harnais resté à l'ancien format : diagnostic explicite, aucun conteneur.
+        List<TestResult> legacy = routed.evaluate(oneTest("Go", "code", "return vrai;"));
+        assertThat(legacy.get(0).detail()).contains("ancien format");
+        verifyNoInteractions(docker);
+
+        // 3. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong()))
+                .thenReturn(List.of());
+        routed.evaluate(oneTest("Go", "code", frameworkHarness("Go")));
+        verify(docker).evaluate(anyString(), anyString(), any(), any(),
+                eq(DockerEvaluator.PUBLIC_WALL_MS));
+
+        limiter.asInternal(() -> routed.evaluate(oneTest("Go", "code", frameworkHarness("Go"))));
+        verify(docker).evaluate(anyString(), anyString(), any(), any(), eq(Long.MAX_VALUE));
     }
 }

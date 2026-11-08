@@ -584,6 +584,49 @@ def run_go(case_dir, env, timeout_s, case_index):
     return CaseOutcome(passed, detail, ran=True), None
 
 
+# Marqueur de DÉBUT de test imprimé par libtest. Avec --nocapture (requis pour que le jeton
+# apparaisse), il n'est PAS suivi d'un saut de ligne : la sortie du test s'y colle, et le
+# verdict (« ok » / « FAILED ») atterrit où il peut — parfois seul sur sa ligne.
+RUST_TEST_START = re.compile(r"test \S+ \.\.\. ")
+# « FAILED » de libtest, quelle que soit sa position : collé au marqueur de début, ou seul sur
+# sa ligne quand la sortie du test s'est terminée par un saut de ligne.
+RUST_FAILED = re.compile(r"(?m)(?:^|\.\.\. )FAILED\s*$")
+RUST_SUMMARY = re.compile(
+    r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored", re.M)
+
+
+def rust_verdict(exit_code, stdout):
+    """Verdict d'un cas Rust — FONCTION PURE (couverte par test_supervisor.py).
+    → (passed, incohérence ou None).
+
+    Le jeton Rust est un simple #[test] : un test étudiant trié APRÈS lui (zzzzz_*) peut
+    imprimer un sommaire « ok » forgé puis exit(0), alors que le jeton est déjà sorti et que
+    les canaris (qui n'appellent pas la fonction notée) restent honnêtes. DEUX recoupements
+    ferment ce canal, et aucun ne dépend de la mise en forme exacte :
+      1. le « FAILED » que libtest imprime pour le VRAI test raté est dans la sortie, et
+         l'étudiant ne peut pas l'empêcher — un sommaire « 0 failed » qui le contredit est forgé ;
+      2. le nombre de tests DÉMARRÉS doit égaler le total annoncé par le sommaire : un forgeur
+         qui sort avant la fin en annonce moins qu'il n'en a démarré.
+    """
+    summary = RUST_SUMMARY.search(stdout)
+    if exit_code != 0:
+        return False, None
+    if summary is None:
+        return False, "exit 0 sans sommaire cargo test"
+    ok, n_passed, n_failed, n_ignored = (summary.group(1), int(summary.group(2)),
+                                         int(summary.group(3)), int(summary.group(4)))
+    if n_passed + n_failed == 0:
+        return False, "exit 0 sans sommaire cargo test"
+    if RUST_FAILED.search(stdout) and n_failed == 0:
+        return False, ("« FAILED » dans la sortie malgré un sommaire « 0 failed » — "
+                       "sommaire forgé probable")
+    started = len(RUST_TEST_START.findall(stdout))
+    if started > n_passed + n_failed + n_ignored:
+        return False, ("%d tests démarrés pour %d annoncés par le sommaire — "
+                       "sortie tronquée ou sommaire forgé" % (started, n_passed + n_failed + n_ignored))
+    return ok == "ok" and n_failed == 0, None
+
+
 def run_rust(case_dir, env, timeout_s, case_index):
     src = os.path.join(case_dir, "src")  # projet cargo complet (Cargo.toml + src/lib.rs)
     build_out = os.path.join(case_dir, "cc.out")
@@ -620,22 +663,9 @@ def run_rust(case_dir, env, timeout_s, case_index):
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    summary = re.search(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed", stdout, re.M)
-    coherent = summary is not None and (int(summary.group(2)) + int(summary.group(3))) > 0
-    # Fil de détente anti-forgeage : le jeton Rust est un simple #[test] (tri alphabétique) —
-    # un test étudiant trié APRÈS lui (zzzzz_*) pourrait imprimer un sommaire « ok » forgé puis
-    # exit(0). Mais libtest a déjà imprimé « test … ... FAILED » pour le vrai test raté, AVANT
-    # le test tardif, et l'étudiant ne peut pas supprimer cette ligne : sommaire « 0 failed »
-    # + ligne FAILED présente = forgeage.
-    real_failure = re.search(r"^test \S+ \.\.\. FAILED$", stdout, re.M) is not None
-    passed = (exit_code == 0 and coherent and summary.group(1) == "ok"
-              and int(summary.group(3)) == 0 and not real_failure)
-    if exit_code == 0 and not coherent:
-        event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire cargo test")
-    elif (exit_code == 0 and coherent and summary.group(1) == "ok"
-          and int(summary.group(3)) == 0 and real_failure):
-        event("rapport_incoherent", case=case_index,
-              detail="ligne « ... FAILED » malgré un sommaire « 0 failed » — sommaire forgé probable")
+    passed, incoherence = rust_verdict(exit_code, stdout)
+    if incoherence:
+        event("rapport_incoherent", case=case_index, detail=incoherence)
     # --nocapture (requis pour le jeton) : les messages de panique partent sur STDERR au fil de
     # l'eau — on les y cherche d'abord, la liste `failures:` de stdout est maigre sans eux.
     detail = None if passed else (first_lines(stderr, r"panicked at")

@@ -442,7 +442,10 @@ class DockerRunnerIntegrationTest {
                 }
                 """);
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("jeton");
+        // Deux filets peuvent attraper ce forgeage : le recoupement du sommaire (le plus
+        // précoce — « FAILED » présent malgré « 0 failed ») ou l'absence de jeton. On exige
+        // le refus et une alerte, sans figer lequel des deux a mordu.
+        assertThat(results.get(0).detail()).containsAnyOf("jeton", "⚠");
     }
 
     @Test
@@ -479,6 +482,10 @@ class DockerRunnerIntegrationTest {
                 use std::sync::atomic::{AtomicBool, Ordering};
                 pub static TRICHE: AtomicBool = AtomicBool::new(false);
                 pub fn doubler(_n: i32) -> i32 {
+                    // IMPRIME : avec --nocapture, le « FAILED » du vrai test raté se retrouve
+                    // alors SEUL sur sa ligne — c'est ce qui mettait en défaut un fil de
+                    // détente ancré sur « ^test X ... FAILED$ » (exploit de la revue).
+                    println!("sortie de la fonction notee");
                     TRICHE.store(true, Ordering::SeqCst);
                     0
                 }

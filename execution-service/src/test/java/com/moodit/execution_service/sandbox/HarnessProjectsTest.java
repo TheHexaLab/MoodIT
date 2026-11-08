@@ -149,4 +149,26 @@ class HarnessProjectsTest {
             assertThat(canaryPresent).as("canari de " + language).isTrue();
         }
     }
+
+    @Test
+    void entrees_nulles_et_collision_de_harnais_java() {
+        // Code et harnais null : traités comme des chaînes vides, aucune NPE.
+        HarnessProjects.Project vide = HarnessProjects.build("C", null,
+                List.of(new TestCaseInput("t", null, 1)), null);
+        assertThat(vide.files().get("cases/0/src/solution.c")).isEmpty();
+
+        // Même classe publique des deux côtés : le harnais est décalé, rien n'est écrasé.
+        HarnessProjects.Project collision = HarnessProjects.build("Java",
+                "public class Meme {}", List.of(new TestCaseInput("t", "public class Meme {}", 1)),
+                null);
+        assertThat(collision.files()).containsKey("cases/0/src/Meme.java");
+        assertThat(collision.files()).containsKey("cases/0/src/MooditHarnais_Meme.java");
+    }
+
+    @Test
+    void nom_de_cas_null_devient_une_chaine_json_vide() {
+        HarnessProjects.Project project = HarnessProjects.build("Go", "package main",
+                List.of(new TestCaseInput(null, "func TestT(t *testing.T) {}", 1)), null);
+        assertThat(project.files().get("job.json")).contains("\"name\":\"\"");
+    }
 }

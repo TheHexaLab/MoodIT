@@ -3,8 +3,8 @@
 // (table Language) et evaluateCode (service d'exécution, conteneurs runner — #116)
 // appellent le VRAI backend.
 //
-// Restent en MOCK (à brancher) : l'horaire (scheduleData, #206) et les devoirs
-// (assignmentsData, #252 — fin du fichier).
+// Les fonctions encore en MOCK importent leurs données de `src/mocks/` : cette liste
+// bouge à chaque branchement, elle n'est donc pas recopiée ici — suivre les imports.
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
