@@ -41,6 +41,8 @@ public class DockerEvaluator {
     private static final long COMPILE_BUDGET_MS = 90_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
+    /** Marge laissée au superviseur pour clore et imprimer son JSON avant le mur. */
+    private static final long CLOSING_MARGIN_MS = 20_000;
 
     private final DockerSandbox sandbox;
     private final String imagePrefix;
@@ -105,12 +107,14 @@ public class DockerEvaluator {
             // temps réellement accordé par cas, pas le temps limite court du prof.
             perRun = Math.max(perRun, 10_000);
         }
-        HarnessProjects.Project project = HarnessProjects.build(language, code, cases, (int) perRun);
-        // Chaque cas (cas réels + 2 canaris) recompile SON harnais : compilation (budget du
-        // superviseur) + run (temps limite du prof) + marge, PAR CAS.
-        long wall = Math.min(MAX_WALL_MS,
-                BASE_OVERHEAD_MS
-                        + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS));
+        // Mur du conteneur, et budget du superviseur = mur moins la marge de clôture : il
+        // s'arrête AVANT d'être tué et rend les verdicts obtenus (cas restants « non exécuté »).
+        long wallCandidate = BASE_OVERHEAD_MS
+                + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS);
+        long budget = Math.max(1_000, Math.min(wallCandidate, MAX_WALL_MS) - CLOSING_MARGIN_MS);
+        HarnessProjects.Project project =
+                HarnessProjects.build(language, code, cases, (int) perRun, budget);
+        long wall = Math.min(MAX_WALL_MS, wallCandidate);
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), wall);

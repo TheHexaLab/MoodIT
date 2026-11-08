@@ -106,6 +106,7 @@ class DockerSandboxTest {
         var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
         org.mockito.Mockito.when(docker.createContainerCmd("img")).thenReturn(create);
         org.mockito.Mockito.when(create.withHostConfig(org.mockito.ArgumentMatchers.any())).thenReturn(create);
+        org.mockito.Mockito.when(create.withLabels(org.mockito.ArgumentMatchers.<java.util.Map<String, String>>any())).thenReturn(create);
 
         var copy = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CopyArchiveToContainerCmd.class);
         org.mockito.Mockito.when(docker.copyArchiveToContainerCmd("cid")).thenReturn(copy);
@@ -179,6 +180,7 @@ class DockerSandboxTest {
     void image_absente_message_actionnable() {
         var create = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CreateContainerCmd.class);
         org.mockito.Mockito.when(create.withHostConfig(org.mockito.ArgumentMatchers.any())).thenReturn(create);
+        org.mockito.Mockito.when(create.withLabels(org.mockito.ArgumentMatchers.<java.util.Map<String, String>>any())).thenReturn(create);
         org.mockito.Mockito.when(create.exec())
                 .thenThrow(new com.github.dockerjava.api.exception.NotFoundException("no such image"));
         var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);

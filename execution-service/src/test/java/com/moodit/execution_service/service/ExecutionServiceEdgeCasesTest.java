@@ -273,9 +273,11 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_echec_de_compilation_sans_stderr() {
-        // TypeScript : seul langage encore assemblé pour Piston avec une étape de compilation (#116).
-        piston(f -> new RunnerExec.Result(stage("", "", 1, null, "compile killed"), null, null));
-        assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("compile killed");
+        // TypeScript : seul langage encore assemblé avec une étape de compilation (#116).
+        // Chemin RÉEL du runner : le diagnostic arrive par stderr (le superviseur n'alimente
+        // jamais `message` — cf. RunnerExec.Stage).
+        piston(f -> new RunnerExec.Result(stage("", "erreur tsc", 1, null, null), null, null));
+        assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("erreur tsc");
 
         piston(f -> new RunnerExec.Result(stage("", "", 1, null, null), null, null));
         TestResult t = single("TypeScript", "", "return true;");

@@ -55,6 +55,16 @@ public final class HarnessProjects {
 
     public static Project build(String language, String studentCode, List<TestCaseInput> cases,
             Integer timeoutMs) {
+        return build(language, studentCode, cases, timeoutMs, null);
+    }
+
+    /**
+     * {@code budgetMs} : budget GLOBAL du job (le mur du conteneur moins une marge). Le
+     * superviseur s'y arrête et renvoie les verdicts obtenus plutôt que de se faire tuer au
+     * mur — un conteneur tué perd TOUT le travail (502, tentative supprimée côté core).
+     */
+    public static Project build(String language, String studentCode, List<TestCaseInput> cases,
+            Integer timeoutMs, Long budgetMs) {
         String lang = runnerLanguage(language);
         String code = studentCode == null ? "" : studentCode;
         Map<String, String> files = new LinkedHashMap<>();
@@ -78,6 +88,7 @@ public final class HarnessProjects {
 
         files.put("job.json", "{\"language\":\"" + lang + "\","
                 + "\"timeout_ms\":" + (timeoutMs == null ? "null" : timeoutMs.toString()) + ","
+                + "\"budget_ms\":" + (budgetMs == null ? "null" : budgetMs.toString()) + ","
                 + "\"cases\":[" + caseList + "]}");
         return new Project(lang, files, cases.size());
     }

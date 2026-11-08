@@ -65,6 +65,25 @@ class CanaryVerdictTest(unittest.TestCase):
         self.assertEqual(supervisor.EVENTS, [])
 
 
+class StudentUidTest(unittest.TestCase):
+    """UID étudiant unique par conteneur : RLIMIT_NPROC compte par UID RÉEL sur l'hôte, un UID
+    fixe en faisait un budget partagé entre notations simultanées."""
+
+    def test_reecrit_uid_et_gid_dans_passwd(self):
+        passwd = ("root:x:0:0:root:/root:/bin/bash\n"
+                  "student:x:1300:1300::/nonexistent:/usr/sbin/nologin\n")
+        out = supervisor.with_uid(passwd, "student", 45678, 45678)
+        self.assertIn("student:x:45678:45678::/nonexistent:/usr/sbin/nologin", out)
+        self.assertIn("root:x:0:0:", out)          # les autres lignes sont intactes
+
+    def test_reecrit_gid_dans_group(self):
+        out = supervisor.with_uid("student:x:1300:\n", "student", 45678, 45678)
+        self.assertEqual(out, "student:x:45678:\n")
+
+    def test_utilisateur_absent_renvoie_none(self):
+        self.assertIsNone(supervisor.with_uid("root:x:0:0:\n", "student", 1, 1))
+
+
 class EnforceTokenTest(unittest.TestCase):
     def setUp(self):
         supervisor.EVENTS.clear()

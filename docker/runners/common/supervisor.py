@@ -48,6 +48,10 @@ import time
 import xml.etree.ElementTree as ET
 
 BOX = "/box"
+STUDENT_NAME = "student"
+# UID/GID de l'étudiant : valeurs des images, RANDOMISÉES au démarrage par
+# randomize_student_uid() — voir sa docstring (RLIMIT_NPROC est un budget PARTAGÉ entre
+# conteneurs quand l'UID est le même).
 STUDENT_UID = 1300
 STUDENT_GID = 1300
 READY_WAIT_S = 30
@@ -92,6 +96,56 @@ def read_capped(path, cap=OUTPUT_CAP):
                 + tail.decode("utf-8", errors="replace"))
     except OSError:
         return ""
+
+
+def with_uid(content, name, uid, gid):
+    """Réécrit la ligne de {@code name} d'un /etc/passwd ou /etc/group avec de nouveaux
+    UID/GID. FONCTION PURE (couverte par test_supervisor.py). Renvoie None si l'utilisateur
+    est absent (rien à réécrire)."""
+    lines = content.splitlines(keepends=True)
+    found = False
+    for i, line in enumerate(lines):
+        fields = line.rstrip("\n").split(":")
+        if len(fields) < 3 or fields[0] != name:
+            continue
+        fields[2] = str(uid)
+        if len(fields) > 3 and fields[3].isdigit():   # /etc/passwd : le 4e champ est le GID
+            fields[3] = str(gid)
+        lines[i] = ":".join(fields) + ("\n" if line.endswith("\n") else "")
+        found = True
+    return "".join(lines) if found else None
+
+
+def randomize_student_uid():
+    """Donne à l'utilisateur étudiant un UID/GID TIRÉ AU SORT, propre à ce conteneur.
+
+    RLIMIT_NPROC n'est pas une limite par conteneur : le noyau compte les processus par UID
+    RÉEL et par espace de noms utilisateur — que les conteneurs runner partagent avec l'hôte.
+    Avec l'UID fixe des images (1300), les 128 processus autorisés formaient un budget COMMUN
+    à toutes les notations simultanées : un étudiant qui fork en boucle jusqu'à sa rlimit
+    faisait échouer la correction d'un AUTRE (EAGAIN à sa première création de thread) — et,
+    ses canaris tombant avec le reste, le faisait accuser de falsification. Un UID distinct
+    par conteneur rend la rlimit réellement individuelle.
+
+    Le nom (`student`) ne change pas : `strace -u student` et les Dockerfiles restent valides.
+    Si /etc/passwd n'est pas réinscriptible, on garde l'UID de l'image (durcissement au mieux)
+    et on le signale dans les logs."""
+    global STUDENT_UID, STUDENT_GID
+    uid = random.SystemRandom().randrange(20000, 60000)
+    try:
+        for path, gid_field in (("/etc/passwd", True), ("/etc/group", False)):
+            with open(path, "r", encoding="utf-8") as f:
+                updated = with_uid(f.read(), STUDENT_NAME, uid, uid)
+            if updated is None:
+                log("superviseur: utilisateur %s absent de %s" % (STUDENT_NAME, path))
+                return
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(updated)
+    except OSError as e:
+        log("superviseur: UID étudiant non randomisé (%r) — rlimit partagée entre conteneurs" % e)
+        return
+    STUDENT_UID = uid
+    STUDENT_GID = uid
 
 
 def demote_student():
@@ -770,6 +824,8 @@ def wait_for_files():
 
 
 def main():
+    # AVANT tout chown/setuid : l'UID étudiant de ce conteneur est tiré au sort.
+    randomize_student_uid()
     if not wait_for_files():
         print(json.dumps({"v": 1, "error": "fichiers du job non reçus"}))
         return
@@ -821,7 +877,22 @@ def main():
 
     outcomes = {}
     timings = {}
+    # Budget GLOBAL du job (ms), transmis par execution-service : son mur de conteneur moins
+    # une marge. Au-delà, le superviseur CLÔT proprement et renvoie les verdicts obtenus — les
+    # cas non exécutés comptent échoués avec un détail explicite. Sans lui, le démon tuait le
+    # conteneur au mur et TOUT le travail était perdu : 502 → la tentative de l'étudiant était
+    # supprimée (sans rejouage), de façon reproductible sur une question à beaucoup de cas.
+    budget_ms = job.get("budget_ms")
+    deadline = (time.monotonic() + budget_ms / 1000.0) if budget_ms else None
+
     for case in order:
+        if deadline is not None and time.monotonic() >= deadline:
+            outcomes[case["index"]] = CaseOutcome(
+                False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
+                ran=False)
+            timings[case["index"]] = 0
+            event("budget_depasse", case=case["index"])
+            continue
         try:
             outcome, ms = execute_case(language, case, timeout_s)
         except Exception as e:  # défaut du superviseur : fail-closed, jamais de faux « réussi »

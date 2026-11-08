@@ -18,6 +18,9 @@ public class SandboxBeans {
             @Value("${app.sandbox.memory-mb:1536}") long memoryMb,
             @Value("${app.sandbox.pids-limit:512}") long pidsLimit,
             @Value("${app.sandbox.cpus:2.0}") double cpus) {
-        return new DockerSandbox(dockerHost, memoryMb, pidsLimit, cpus);
+        DockerSandbox sandbox = new DockerSandbox(dockerHost, memoryMb, pidsLimit, cpus);
+        // Restes d'une instance précédente tuée en pleine notation (voir removeOrphans()).
+        sandbox.removeOrphans();
+        return sandbox;
     }
 }

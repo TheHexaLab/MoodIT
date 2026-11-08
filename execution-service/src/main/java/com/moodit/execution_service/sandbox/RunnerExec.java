@@ -31,6 +31,12 @@ public class RunnerExec {
     public record File(String name, String content) {}
 
     /** Étape (compilation ou exécution) : sorties, code de sortie, signal (SIGKILL = temps dépassé). */
+    /**
+     * Une étape (compilation ou exécution). {@code message} est un canal de diagnostic
+     * OPTIONNEL du contrat : le superviseur actuel ne l'alimente jamais (il met tout dans
+     * {@code stderr}) — il n'est lu qu'en repli par {@code firstNonBlank}. À retirer si le
+     * contrat se stabilise sans lui.
+     */
     public record Stage(String stdout, String stderr, Integer code, String signal, String message) {}
 
     /** Résultat complet ; {@code compile} est null pour les langages sans compilation. */

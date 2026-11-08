@@ -284,7 +284,11 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   (même conteneur, même place, plusieurs minutes possibles) :
   avant ce scénario, augmenter `EXEC_MAX_CONCURRENT`/l'attente à la mesure du groupe
   (`nb_étudiants × durée_correction / places`), étaler les soumissions, ou attendre le rejouage
-  automatique côté core (suivi ouvert — il n'existe pas encore). Pour lancer ces conteneurs, `execution-service` monte
+  automatique côté core (suivi ouvert — il n'existe pas encore).
+  Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
+  notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
+  `execution-service` les balaie à son démarrage, et on peut les lister à la main avec
+  `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
   `/var/run/docker.sock` : c'est un accès
   root-équivalent au démon de l'hôte, assumé pour ce service interne (aucune route d'admin, appels
   authentifiés par le gateway/`X-Internal-Token`). Les images sont construites par

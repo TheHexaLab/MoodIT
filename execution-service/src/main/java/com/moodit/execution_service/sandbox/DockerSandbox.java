@@ -47,6 +47,9 @@ public class DockerSandbox {
     /** Sortie (stdout = JSON du superviseur) et code de sortie du conteneur. */
     public record ContainerRun(String stdout, String stderr, long exitCode) {}
 
+    /** Étiquette posée sur tout conteneur runner : permet de retrouver les orphelins. */
+    public static final String RUNNER_LABEL = "moodit.runner";
+
     private final String dockerHost;
     private final long memoryBytes;
     private final long pidsLimit;
@@ -103,6 +106,36 @@ public class DockerSandbox {
         }
     }
 
+    /**
+     * Supprime les conteneurs runner laissés par une instance précédente (JVM tuée pendant une
+     * notation : son {@code finally} de nettoyage n'a jamais tourné). Appelé au démarrage du
+     * service ; sans effet si le démon est injoignable — ce n'est pas une raison de ne pas
+     * démarrer.
+     */
+    public int removeOrphans() {
+        int removed = 0;
+        try {
+            List<com.github.dockerjava.api.model.Container> orphans = client().listContainersCmd()
+                    .withShowAll(true)
+                    .withLabelFilter(Map.of(RUNNER_LABEL, "1"))
+                    .exec();
+            for (com.github.dockerjava.api.model.Container container : orphans) {
+                try {
+                    client().removeContainerCmd(container.getId()).withForce(true).exec();
+                    removed++;
+                } catch (RuntimeException e) {
+                    log.warn("Conteneur orphelin {} non supprimé : {}", container.getId(), e.getMessage());
+                }
+            }
+            if (removed > 0) {
+                log.info("{} conteneur(s) runner orphelin(s) supprimé(s) au démarrage", removed);
+            }
+        } catch (RuntimeException e) {
+            log.debug("Balayage des conteneurs orphelins impossible : {}", e.getMessage());
+        }
+        return removed;
+    }
+
     public boolean imagePresent(String image) {
         try {
             client().inspectImageCmd(image).exec();
@@ -147,7 +180,11 @@ public class DockerSandbox {
                             // `exec` EXPLICITE : les tmpfs Docker sont noexec par défaut, et les
                             // binaires de test compilés (Go/Rust/C/C++) s'exécutent depuis /box.
                             "/box", "rw,nosuid,exec,size=768m",
-                            "/tmp", "rw,nosuid,noexec,size=64m"))
+                            "/tmp", "rw,nosuid,noexec,size=64m",
+                            // Docker monte TOUJOURS /dev/shm (tmpfs 1777, 64 Mo par défaut) :
+                            // sans cette entrée, il échappait à l'inventaire des points
+                            // d'écriture de l'UID étudiant. Borné et noexec comme /tmp.
+                            "/dev/shm", "rw,nosuid,noexec,size=16m"))
                     // Capacités : on retire TOUT puis on rend le strict nécessaire au superviseur
                     // root — chown/droits sur les fichiers du job (CHOWN, FOWNER, DAC_OVERRIDE),
                     // bascule vers l'UID étudiant (SETUID, SETGID), nettoyage des groupes de
@@ -160,6 +197,11 @@ public class DockerSandbox {
                     .withAutoRemove(false);
             CreateContainerResponse created = docker.createContainerCmd(image)
                     .withHostConfig(hostConfig)
+                    // Étiquette : seul moyen de RETROUVER ces conteneurs. Si la JVM meurt
+                    // pendant une notation (OOM, redémarrage, update.sh), le `finally` de
+                    // nettoyage ci-dessous ne s'exécute jamais et le conteneur reste en
+                    // « Exited » — `removeOrphans()` les balaie au démarrage du service.
+                    .withLabels(Map.of(RUNNER_LABEL, "1"))
                     .exec();
             containerId = created.getId();
 
