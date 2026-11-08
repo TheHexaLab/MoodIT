@@ -100,8 +100,20 @@ public class ExecutionService {
             if (rejected != null) {
                 return rejected;
             }
+            // Harnais d'avant #116 (corps renvoyant un booléen) : diagnostic explicite plutôt
+            // qu'un « Échec de compilation » incompréhensible — V7 n'a converti que les gabarits.
+            List<TestResult> legacy = DockerEvaluator.legacyHarnessRejection(
+                    request.language(), request.testCases());
+            if (legacy != null) {
+                return legacy;
+            }
+            // Mur plafonné selon l'appelant : une correction interne a droit au budget complet,
+            // un « Tester » public est borné (route ouverte à tout authentifié, 100 cas max).
+            long maxWall = limiter.isInternal()
+                    ? Long.MAX_VALUE : DockerEvaluator.PUBLIC_WALL_MS;
             return limiter.withSandboxSlot(() -> dockerEvaluator.evaluate(
-                    request.language(), request.code(), request.testCases(), request.timeoutMs()));
+                    request.language(), request.code(), request.testCases(), request.timeoutMs(),
+                    maxWall));
         }
         List<TestResult> results = new ArrayList<>();
         for (TestCaseInput testCase : request.testCases()) {

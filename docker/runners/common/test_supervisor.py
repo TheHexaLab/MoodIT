@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import supervisor  # noqa: E402
 
 
-def outcome(passed, ran=True, timed_out=False):
-    return supervisor.CaseOutcome(passed, None, ran=ran, timed_out=timed_out)
+def outcome(passed, ran=True, timed_out=False, skipped=False):
+    return supervisor.CaseOutcome(passed, None, ran=ran, timed_out=timed_out, skipped=skipped)
 
 
 class CanaryVerdictTest(unittest.TestCase):
@@ -46,6 +46,16 @@ class CanaryVerdictTest(unittest.TestCase):
         outcomes = {0: outcome(True), 1: outcome(False, ran=False), 2: outcome(False, ran=False)}
         self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
         self.assertEqual(supervisor.EVENTS[0]["type"], "canari_incoherent")
+
+    def test_canari_saute_faute_de_budget_pas_d_accusation(self):
+        # Budget global dépassé : l'ordre étant tiré au sort, un canari peut tomber dans la
+        # queue non exécutée alors que des cas réels ont tourné. Une soumission simplement
+        # TROP LENTE ne doit jamais être étiquetée « falsification probable ».
+        cases = [{"index": 0}, {"index": 1, "canary": "pass"}, {"index": 2, "canary": "fail"}]
+        outcomes = {0: outcome(True), 1: outcome(True),
+                    2: outcome(False, ran=False, skipped=True)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
 
     def test_tout_expire_indetermine_pas_d_accusation(self):
         # Temps limite trop court (ou hôte surchargé) : TOUT expire, canaris compris — mauvaise

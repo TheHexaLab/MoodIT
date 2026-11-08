@@ -247,7 +247,11 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 ## Notes de coût / dimensionnement
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
-  dans le compose). Total observé ≈ 3,5-4 Go → marge confortable.
+  dans le compose). Total observé ≈ 3,5-4 Go au repos. **Pointes de notation (#116)** : chaque
+  conteneur runner s'ajoute à ce total pendant qu'il tourne — `SANDBOX_MEMORY_MB` × 
+  `EXEC_MAX_CONCURRENT`, soit 2 Go et 2 vCPU au plus sur ce VPS (valeurs fixées dans
+  `docker-compose-hetzner.yml` ; les défauts 1,5 Go / 2 vCPU visent le dev). Marge encore
+  confortable, mais c'est le poste à surveiller avant d'augmenter l'une des deux bornes.
 - **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.

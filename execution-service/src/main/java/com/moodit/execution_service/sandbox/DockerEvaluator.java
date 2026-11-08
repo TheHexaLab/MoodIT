@@ -41,6 +41,14 @@ public class DockerEvaluator {
     private static final long COMPILE_BUDGET_MS = 90_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
+    /**
+     * Plafond du mur pour un appel PUBLIC (« Tester » d'un prof). La route
+     * {@code /exec/evaluate} est ouverte à tout authentifié et accepte jusqu'à 100 cas : sans
+     * ce plafond, une seule requête tenait la place publique un quart d'heure, et un étudiant
+     * pouvait refuser le sandbox à tout le monde en boucle. Au-delà, le superviseur rend des
+     * verdicts partiels (« non exécuté : budget dépassé »), ce qui reste lisible pour le prof.
+     */
+    public static final long PUBLIC_WALL_MS = 4 * 60_000;
     /** Marge laissée au superviseur pour clore et imprimer son JSON avant le mur. */
     private static final long CLOSING_MARGIN_MS = 20_000;
 
@@ -81,6 +89,33 @@ public class DockerEvaluator {
      * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
      * sous saturation, le rejet explicite vaut mieux qu'un 429).
      */
+    /**
+     * Verdicts explicites si au moins un harnais est resté à l'ancien format, sinon
+     * {@code null}. Comme {@link #reservedMarkerRejection}, à appeler AVANT de prendre une
+     * place du sandbox : aucun conteneur ne peut rien en faire.
+     */
+    public static List<TestResult> legacyHarnessRejection(String language, List<TestCaseInput> cases) {
+        String runnerLanguage;
+        try {
+            runnerLanguage = HarnessProjects.runnerLanguage(language);
+        } catch (RuntimeException e) {
+            return null;   // langage non compilé : pas notre affaire
+        }
+        boolean anyLegacy = cases.stream()
+                .anyMatch(c -> legacyHarnessDetail(runnerLanguage, c.harnessCode()) != null);
+        if (!anyLegacy) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> {
+                    String detail = legacyHarnessDetail(runnerLanguage, c.harnessCode());
+                    return new TestResult(c.name(), c.effectiveWeight(), false,
+                            detail != null ? detail : "Non évalué : un autre harnais de cette "
+                                    + "question est resté à l'ancien format.");
+                })
+                .toList();
+    }
+
     public static List<TestResult> reservedMarkerRejection(String code, List<TestCaseInput> cases) {
         if (code == null || !code.contains(RESERVED_MARKER)) {
             return null;
@@ -93,6 +128,40 @@ public class DockerEvaluator {
 
     public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
             Integer timeoutMs) {
+        return evaluate(language, code, cases, timeoutMs, MAX_WALL_MS);
+    }
+
+    /**
+     * Marqueur OBLIGATOIRE d'un harnais au format « vrai test du framework » (#116), par
+     * langage du runner. Un harnais d'avant cette version est un CORPS qui renvoie un booléen :
+     * il ne compile pas dans le runner, et l'étudiant n'y lirait qu'un « Échec de compilation »
+     * incompréhensible. V7 ne convertit que les gabarits (questions futures) : celles déjà en
+     * base doivent être converties à la main, d'où ce diagnostic explicite.
+     */
+    private static String frameworkMarker(String runnerLanguage) {
+        return switch (runnerLanguage) {
+            case "java" -> "@Test";
+            case "csharp" -> "[Test]";
+            case "go" -> "func Test";
+            case "rust" -> "#[test]";
+            default -> "MOODIT_TEST";   // c / cpp
+        };
+    }
+
+    /** Détail d'un harnais resté à l'ancien format, ou {@code null} s'il est au bon format. */
+    static String legacyHarnessDetail(String runnerLanguage, String harnessCode) {
+        String marker = frameworkMarker(runnerLanguage);
+        if (harnessCode != null && harnessCode.contains(marker)) {
+            return null;
+        }
+        return "Ce harnais est resté à l'ancien format (un corps qui renvoie un booléen). "
+                + "Depuis #116, un harnais de langage compilé est un VRAI test du framework : "
+                + "il doit contenir « " + marker + " ». À convertir dans l'éditeur de quiz.";
+    }
+
+    /** {@code maxWallMs} : plafond du mur du conteneur — {@link #PUBLIC_WALL_MS} hors correction interne. */
+    public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
+            Integer timeoutMs, long maxWallMs) {
         List<TestResult> rejected = reservedMarkerRejection(code, cases);
         if (rejected != null) {
             return rejected;
@@ -111,10 +180,11 @@ public class DockerEvaluator {
         // s'arrête AVANT d'être tué et rend les verdicts obtenus (cas restants « non exécuté »).
         long wallCandidate = BASE_OVERHEAD_MS
                 + (cases.size() + 2L) * (perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS);
-        long budget = Math.max(1_000, Math.min(wallCandidate, MAX_WALL_MS) - CLOSING_MARGIN_MS);
+        long cap = Math.min(maxWallMs, MAX_WALL_MS);
+        long budget = Math.max(1_000, Math.min(wallCandidate, cap) - CLOSING_MARGIN_MS);
         HarnessProjects.Project project =
                 HarnessProjects.build(language, code, cases, (int) perRun, budget);
-        long wall = Math.min(MAX_WALL_MS, wallCandidate);
+        long wall = Math.min(cap, wallCandidate);
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), wall);
@@ -133,6 +203,11 @@ public class DockerEvaluator {
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
         }
+
+        // Défense en PROFONDEUR : le superviseur neutralise déjà les verdicts quand les canaris
+        // sont incohérents, mais Java ne doit pas lui faire confiance aveuglément — une
+        // régression côté superviseur ne doit pas pouvoir produire un « réussi ».
+        boolean canariesIncoherents = "incoherents".equals(root.path("canaries").asString(""));
 
         Map<Integer, JsonNode> byIndex = new HashMap<>();
         for (JsonNode result : root.path("results")) {
@@ -158,6 +233,11 @@ public class DockerEvaluator {
             boolean passed = node != null && node.path("passed").asBoolean(false);
             String detail = node == null ? "Notation incomplète (cas sans verdict)"
                     : (node.path("detail").isString() ? node.path("detail").asString() : null);
+            if (canariesIncoherents && passed) {
+                passed = false;
+                detail = "⚠ Incohérence détectée pendant la notation (falsification probable)."
+                        + (detail == null || detail.isBlank() ? "" : "\n" + detail);
+            }
             String suspicious = eventByCase.get(i);
             if (suspicious != null) {
                 // Une tentative de lecture détectée FAIT ÉCHOUER le cas — pas une simple

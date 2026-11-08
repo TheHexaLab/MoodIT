@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -231,17 +232,29 @@ class ExecutionServiceTest {
 
     // ── Routage des langages COMPILÉS vers le runner Docker (#116) ────────────────
 
+    /** Marqueur de « vrai test du framework » attendu par langage (cf. legacyHarnessRejection). */
+    private static String frameworkHarness(String language) {
+        return switch (language) {
+            case "Java" -> "@Test void t() {}";
+            case "C#" -> "[Test] public void T() {}";
+            case "Go" -> "func TestT(t *testing.T) {}";
+            case "Rust" -> "#[test] fn t() {}";
+            default -> "MOODIT_TEST(t) { }";          // C / C++
+        };
+    }
+
     @Test
     void compiled_languages_route_to_docker_evaluator_not_piston() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
         List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
-        when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(expected);
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(expected);
 
         for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            assertThat(routed.evaluate(oneTest(language, "code", "harnais"))).isEqualTo(expected);
+            assertThat(routed.evaluate(oneTest(language, "code", frameworkHarness(language))))
+                    .isEqualTo(expected);
         }
-        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any());
+        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
         verify(runner, never()).execute(anyString(), any(), any(), any());
     }
 
@@ -259,11 +272,12 @@ class ExecutionServiceTest {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService limited = new ExecutionService(assembler, runner, limiter, docker);
         limiter.withSandboxSlot(() -> {
-            assertThatThrownBy(() -> limited.evaluate(oneTest("Go", "code", "harnais")))
+            assertThatThrownBy(() -> limited.evaluate(
+                    oneTest("Go", "code", frameworkHarness("Go"))))
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
-        verify(docker, never()).evaluate(anyString(), anyString(), any(), any());
+        verify(docker, never()).evaluate(anyString(), anyString(), any(), any(), anyLong());
     }
 
     @Test
@@ -285,9 +299,9 @@ class ExecutionServiceTest {
     void timeout_is_forwarded_to_docker_evaluator() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
-        when(docker.evaluate(anyString(), anyString(), any(), any())).thenReturn(List.of());
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(List.of());
         routed.evaluate(new EvaluateRequest("Rust", null, "code",
-                List.of(new TestCaseInput("t", "harnais", 1)), 42_000));
-        verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000));
+                List.of(new TestCaseInput("t", frameworkHarness("Rust"), 1)), 42_000));
+        verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000), anyLong());
     }
 }

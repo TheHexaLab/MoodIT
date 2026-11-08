@@ -203,8 +203,13 @@ services:
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m"
       # 2 exécutions simultanées au plus : borne le nombre de CONTENEURS RUNNER simultanés (#116),
-      # soit 2 × 1,5 Go en pointe — surveiller la RAM du VPS avant de l'augmenter.
+      # soit 2 × SANDBOX_MEMORY_MB en pointe — surveiller la RAM du VPS avant de l'augmenter.
       EXEC_MAX_CONCURRENT: "2"
+      # Conteneurs runner (#116) : 1 vCPU et 1 Go chacun sur ce VPS — deux notations
+      # simultanées ne doivent pas monopoliser la machine (Caddy, Postgres, services Java)
+      # pendant plusieurs minutes. Les valeurs par défaut (2 vCPU, 1,5 Go) visent le dev.
+      SANDBOX_CPUS: "1.0"
+      SANDBOX_MEMORY_MB: "1024"
     mem_limit: 512m
     volumes:
       # Runner des langages COMPILÉS (#116) : conteneurs jetables moodit-runner-* via le démon

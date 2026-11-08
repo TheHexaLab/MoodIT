@@ -179,6 +179,11 @@ def canary_verdict(cases, outcomes):
             event("canari_incoherent",
                   detail="résultat des canaris contraire à l'attendu — falsification probable")
         return "ok" if ok else "incoherents"
+    if any(outcomes[c["index"]].skipped for c in canary_cases):
+        # Canari SAUTÉ faute de budget global (l'ordre est tiré au sort : n'importe quel cas
+        # peut tomber dans la queue non exécutée). Rien à reprocher à l'étudiant — sa
+        # soumission est seulement trop lente, et les cas sautés comptent déjà échoués.
+        return "indetermines"
     if any(outcomes[c["index"]].ran for c in cases if not c.get("canary")):
         event("canari_incoherent",
               detail="canaris non exécutés alors que des cas réels ont tourné")
@@ -225,10 +230,18 @@ def preexec_root():
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
+def open_output(path):
+    """Ouvre un fichier de sortie SANS suivre un lien symbolique : en mode exec, /box
+    appartient à l'UID étudiant, qui pouvait remplacer run.out par un lien et faire écrire
+    root ailleurs (nuisance dans un conteneur jetable, mais primitive gratuite à supprimer)."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    return os.fdopen(os.open(path, flags, 0o600), "wb")
+
+
 def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
     """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out)."""
     stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
-    with open(out_path, "wb") as out, open(err_path, "wb") as err:
+    with open_output(out_path) as out, open_output(err_path) as err:
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err,
                                 stdin=stdin, preexec_fn=preexec)
         if stdin is not subprocess.DEVNULL:
@@ -372,11 +385,12 @@ def first_lines(text, pattern, count=6):
 
 
 class CaseOutcome:
-    def __init__(self, passed, detail=None, ran=False, timed_out=False):
+    def __init__(self, passed, detail=None, ran=False, timed_out=False, skipped=False):
         self.passed = passed
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
         self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
+        self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
 
 
 # Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
@@ -889,7 +903,7 @@ def main():
         if deadline is not None and time.monotonic() >= deadline:
             outcomes[case["index"]] = CaseOutcome(
                 False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
-                ran=False)
+                ran=False, skipped=True)
             timings[case["index"]] = 0
             event("budget_depasse", case=case["index"])
             continue
