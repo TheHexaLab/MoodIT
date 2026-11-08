@@ -254,4 +254,24 @@ class ExecutionLimiterTest {
         assertThat(limiter.asInternal(limiter::isInternal)).isTrue();
         assertThat(limiter.isInternal()).isFalse();
     }
+
+    @Test
+    void l_attente_publique_ne_depasse_pas_le_delai_configure() throws Exception {
+        // Les deux acquisitions (place publique puis place globale) partagent UNE échéance :
+        // sinon l'appelant patientait 2 × queue-wait-ms avant son 429.
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 300, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            occupy(pool, release, limiter::withSandboxSlot);   // occupe l'unique place publique
+            long start = System.nanoTime();
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
+                    .isInstanceOf(ExecutionBusyException.class);
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertThat(elapsedMs).isLessThan(600);            // < 2 × 300 ms
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
 }

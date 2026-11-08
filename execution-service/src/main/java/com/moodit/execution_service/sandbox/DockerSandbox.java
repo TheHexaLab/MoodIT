@@ -69,6 +69,21 @@ public class DockerSandbox {
         this.client = client;
     }
 
+    /** Espace de travail du job (sources, artefacts de build) : 60 % de la mémoire, ≥ 256 Mo. */
+    long boxSizeMb() {
+        return Math.max(256, memoryBytes / (1024 * 1024) * 60 / 100);
+    }
+
+    /** {@code /tmp} : exigé en dur par certains outils (hsperfdata de la JVM, mono, sort). */
+    long tmpSizeMb() {
+        return Math.max(32, memoryBytes / (1024 * 1024) * 6 / 100);
+    }
+
+    /** {@code /dev/shm} : monté d'office par Docker, borné ici pour rester dans le cgroup. */
+    long shmSizeMb() {
+        return Math.max(16, memoryBytes / (1024 * 1024) * 2 / 100);
+    }
+
     /** Démon local par défaut selon l'OS (dev Windows : npipe ; Linux/conteneur : socket Unix). */
     static String defaultDockerHost() {
         String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
@@ -176,15 +191,18 @@ public class DockerSandbox {
                     // démon refuse alors TOUT `docker cp`, même vers un tmpfs.) /box porte le job
                     // ET les artefacts de compilation (cible cargo, GOCACHE…) donc PAS de noexec ;
                     // /tmp couvre les outils qui l'exigent en dur (JVM hsperfdata, mono, sort…).
+                    // Tailles DÉRIVÉES de la mémoire du conteneur : un tmpfs est compté dans
+                    // le cgroup, les coder en dur les faisait occuper jusqu'à 83 % de la
+                    // mémoire quand SANDBOX_MEMORY_MB est abaissé (1 Go en prod).
                     .withTmpFs(Map.of(
                             // `exec` EXPLICITE : les tmpfs Docker sont noexec par défaut, et les
                             // binaires de test compilés (Go/Rust/C/C++) s'exécutent depuis /box.
-                            "/box", "rw,nosuid,exec,size=768m",
-                            "/tmp", "rw,nosuid,noexec,size=64m",
+                            "/box", "rw,nosuid,exec,size=" + boxSizeMb() + "m",
+                            "/tmp", "rw,nosuid,noexec,size=" + tmpSizeMb() + "m",
                             // Docker monte TOUJOURS /dev/shm (tmpfs 1777, 64 Mo par défaut) :
                             // sans cette entrée, il échappait à l'inventaire des points
                             // d'écriture de l'UID étudiant. Borné et noexec comme /tmp.
-                            "/dev/shm", "rw,nosuid,noexec,size=16m"))
+                            "/dev/shm", "rw,nosuid,noexec,size=" + shmSizeMb() + "m"))
                     // Capacités : on retire TOUT puis on rend le strict nécessaire au superviseur
                     // root — chown/droits sur les fichiers du job (CHOWN, FOWNER, DAC_OVERRIDE),
                     // bascule vers l'UID étudiant (SETUID, SETGID), nettoyage des groupes de

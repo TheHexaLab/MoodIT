@@ -257,10 +257,12 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
   dans le compose). Total observé ≈ 3,5-4 Go au repos. **Pointes de notation (#116)** : chaque
-  conteneur runner s'ajoute à ce total pendant qu'il tourne — `SANDBOX_MEMORY_MB` × 
-  `EXEC_MAX_CONCURRENT`, soit 2 Go et 2 vCPU au plus sur ce VPS (valeurs fixées dans
-  `docker-compose-hetzner.yml` ; les défauts 1,5 Go / 2 vCPU visent le dev). Marge encore
-  confortable, mais c'est le poste à surveiller avant d'augmenter l'une des deux bornes.
+  conteneur runner s'ajoute à ce total pendant qu'il tourne : la pointe vaut
+  `SANDBOX_MEMORY_MB` × `EXEC_MAX_CONCURRENT` et autant de vCPU que `SANDBOX_CPUS` ×
+  `EXEC_MAX_CONCURRENT`. **Valeurs effectives de ce VPS** (`docker-compose-hetzner.yml`) :
+  1 Go et 1 vCPU par conteneur, 3 places → **3 Go et 3 vCPU en pointe** (les défauts 1,5 Go /
+  2 vCPU visent le dev). Sur ~3,5-4 Go au repos, la marge restante est donc d'environ 1 Go :
+  c'est le poste à surveiller avant d'augmenter l'une de ces bornes.
 - **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
@@ -276,28 +278,33 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   réseau coupé, limites mémoire/PID/CPU, UID dédié. Aucun service n'exécute de code non fiable
   dans son propre processus.
 - Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
-  notation, configurable par question jusqu'à 60 s), 1,5 Go de mémoire par conteneur
-  (`SANDBOX_MEMORY_MB`), sorties tronquées. Côté execution-service : 2 exécutions simultanées au
-  plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par utilisateur
-  (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
+  notation, configurable par question jusqu'à 60 s), mémoire par conteneur
+  (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
+  `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod, dont **une place réservée
+  aux corrections** : il en reste deux pour « Exécuter »/« Tester »), file d'attente publique
+  `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
+  au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
   des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
-  tmpfs bornés `/box`/`/tmp`, comptés dans la mémoire, 1,5 Go de mémoire, 512 PID, 2 CPU,
+  tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
+  comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,
   `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
   `SYS_PTRACE` pour tracer le processus étudiant et détecter les lectures du harnais). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
-  Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 2 en prod) pendant
-  TOUT son conteneur (couramment 1 à 3 min) ; l'attente interne des corrections
-  (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s) absorbe un pic — au-delà, la tentative échoue et
-  l'étudiant resoumet. **Ordre de grandeur à 2 places : ~2 corrections compilées/min, et les
-  soumissions au-delà de ~5-6 simultanées dépassent l'attente.** Une CLASSE ENTIÈRE qui soumet
-  un quiz compilé dans la même minute (fin de créneau, examen) dépassera cette capacité —
-  et le bouton « Tester » d'un prof sur une question compilée pèse autant qu'une correction
-  (même conteneur, même place, plusieurs minutes possibles) :
-  avant ce scénario, augmenter `EXEC_MAX_CONCURRENT`/l'attente à la mesure du groupe
-  (`nb_étudiants × durée_correction / places`), étaler les soumissions, ou attendre le rejouage
-  automatique côté core (suivi ouvert — il n'existe pas encore).
+  Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 3 en prod) pendant
+  TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
+  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet. **Le débit de correction
+  est en réalité plafonné par le pool `quizExecutor` de core-service** (`AsyncConfig`,
+  `corePoolSize=2`, file de 100) : un `ThreadPoolTaskExecutor` ne dépasse son cœur qu'une fois
+  la file pleine, donc **deux corrections en vol au maximum**, quel que soit
+  `EXEC_MAX_CONCURRENT` — relever l'un sans l'autre ne change rien. Le bouton « Tester » d'un
+  prof sur une question compilée pèse autant qu'une correction (même conteneur, même place).
+  Une CLASSE ENTIÈRE qui soumet un quiz compilé dans la même minute (fin de créneau, examen)
+  dépassera cette capacité : avant ce scénario, relever **ensemble** `quizExecutor.corePoolSize`
+  et `EXEC_MAX_CONCURRENT` à la mesure du groupe (`nb_étudiants × durée_correction / places`,
+  la RAM suit — voir « coût / dimensionnement »), étaler les soumissions, ou attendre le
+  rejouage automatique côté core (suivi ouvert — il n'existe pas encore).
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
   `execution-service` les balaie à son démarrage, et on peut les lister à la main avec

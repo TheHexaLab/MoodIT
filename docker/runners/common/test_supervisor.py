@@ -190,6 +190,29 @@ class RustVerdictTest(unittest.TestCase):
         self.assertEqual(supervisor.rust_verdict(1, out), (False, None))
 
 
+class BoxExhaustedTest(unittest.TestCase):
+    """Saturation du tmpfs /box : un code honnête mais bogué (fichiers temporaires jamais
+    supprimés) faisait échouer les cas SUIVANTS, canaris compris → « falsification probable ».
+    Le cas est désormais sauté avec un verdict honnête."""
+
+    def test_sous_le_seuil_est_sature(self):
+        # 100 blocs de 4 Kio = 400 Kio, bien en dessous du seuil de 48 Mio.
+        self.assertTrue(supervisor.free_bytes_under(100, 4096, 48 * 1024 * 1024))
+
+    def test_au_dessus_du_seuil_est_sain(self):
+        # 100 000 blocs de 4 Kio = 390 Mio.
+        self.assertFalse(supervisor.free_bytes_under(100000, 4096, 48 * 1024 * 1024))
+
+    def test_cas_saute_pour_saturation_n_accuse_pas(self):
+        # Même traitement qu'un budget dépassé : skipped → « indetermines », jamais
+        # « incoherents » (vérifié par le verdict des canaris).
+        cases = [{"index": 0}, {"index": 1, "canary": "pass"}, {"index": 2, "canary": "fail"}]
+        outcomes = {0: outcome(True), 1: outcome(False, ran=False, skipped=True),
+                    2: outcome(False, ran=False, skipped=True)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+
 class ReadCappedTest(unittest.TestCase):
     def test_petit_fichier_entier(self):
         with tempfile.NamedTemporaryFile("w", suffix=".out", delete=False) as f:

@@ -243,4 +243,21 @@ class DockerSandboxTest {
         // Un démon absent ne doit pas empêcher le service de démarrer.
         assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
     }
+
+    @Test
+    void tailles_des_tmpfs_derivees_de_la_memoire_du_conteneur() {
+        // Un tmpfs est compté dans le cgroup : codées en dur, les trois tailles occupaient
+        // jusqu'à 83 % de la mémoire quand SANDBOX_MEMORY_MB est abaissé (1 Go en prod).
+        DockerSandbox prod = new DockerSandbox("tcp://localhost:1", 1024, 512, 1.0);
+        assertThat(prod.boxSizeMb()).isEqualTo(614);
+        assertThat(prod.tmpSizeMb()).isEqualTo(61);
+        assertThat(prod.shmSizeMb()).isEqualTo(20);
+        assertThat(prod.boxSizeMb() + prod.tmpSizeMb() + prod.shmSizeMb()).isLessThan(1024);
+
+        // Planchers : une mémoire minuscule garde des tmpfs utilisables.
+        DockerSandbox minuscule = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
+        assertThat(minuscule.boxSizeMb()).isEqualTo(256);
+        assertThat(minuscule.tmpSizeMb()).isEqualTo(32);
+        assertThat(minuscule.shmSizeMb()).isEqualTo(16);
+    }
 }

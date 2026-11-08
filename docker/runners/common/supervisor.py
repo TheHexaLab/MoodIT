@@ -137,19 +137,33 @@ def randomize_student_uid():
     # désaccordés — l'étudiant ne pourrait plus écrire dans son work/, TOUS les cas
     # échoueraient (canaris compris) et la soumission serait étiquetée « falsification
     # probable » pour une simple erreur de configuration d'image.
+    originals = {}
     updates = {}
     try:
         for path in ("/etc/passwd", "/etc/group"):
             with open(path, "r", encoding="utf-8") as f:
-                updated = with_uid(f.read(), STUDENT_NAME, uid, uid)
+                originals[path] = f.read()
+            updated = with_uid(originals[path], STUDENT_NAME, uid, uid)
             if updated is None:
                 log("superviseur: utilisateur %s absent de %s — UID de l'image conservé"
                     % (STUDENT_NAME, path))
                 return
             updates[path] = updated
-        for path, content in updates.items():
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
+        written = []
+        try:
+            for path, content in updates.items():
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                written.append(path)
+        except OSError:
+            # Échec À MI-CHEMIN : on REVIENT en arrière. Laisser /etc/passwd sur le nouvel UID
+            # alors que STUDENT_UID vaut encore celui de l'image désaccorderait le système —
+            # l'étudiant ne pourrait plus écrire dans son work/, tous les cas échoueraient
+            # (canaris compris) et la soumission serait étiquetée « falsification probable ».
+            for path in written:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(originals[path])
+            raise
     except OSError as e:
         log("superviseur: UID étudiant non randomisé (%r) — rlimit partagée entre conteneurs" % e)
         return
@@ -198,6 +212,27 @@ def canary_verdict(cases, outcomes):
               detail="canaris non exécutés alors que des cas réels ont tourné")
         return "incoherents"
     return "indetermines"
+
+
+# En dessous de ce seuil, /box ne peut plus accueillir une compilation : on le traite comme une
+# saturation plutôt que de laisser échouer les cas suivants avec un diagnostic trompeur.
+BOX_MIN_FREE_BYTES = 48 * 1024 * 1024
+
+
+def box_exhausted():
+    """Le tmpfs /box est-il saturé ? (partagé par tous les cas, compté dans la mémoire du
+    conteneur). FONCTION PURE à l'exception de l'appel système — couverte indirectement par
+    le test de free_bytes_under."""
+    try:
+        st = os.statvfs(BOX)
+    except OSError:
+        return False
+    return free_bytes_under(st.f_bavail, st.f_frsize, BOX_MIN_FREE_BYTES)
+
+
+def free_bytes_under(blocks_available, block_size, threshold):
+    """Espace libre (blocs × taille) sous le seuil ? Isolé pour être testable sans montage."""
+    return blocks_available * block_size < threshold
 
 
 def kill_student_survivors():
@@ -939,6 +974,17 @@ def main():
     deadline = (time.monotonic() + budget_ms / 1000.0) if budget_ms else None
 
     for case in order:
+        if box_exhausted():
+            # Espace de travail saturé (par un cas précédent, ou par la copie du job) : rien
+            # à reprocher à l'étudiant, et surtout pas une falsification — un cas « sauté »
+            # n'entre pas dans le verdict des canaris.
+            outcomes[case["index"]] = CaseOutcome(
+                False, "Espace de travail saturé : le code écrit trop de fichiers "
+                       "(ou des fichiers trop gros) dans son dossier temporaire.",
+                ran=False, skipped=True)
+            timings[case["index"]] = 0
+            event("espace_sature", case=case["index"])
+            continue
         if deadline is not None and time.monotonic() >= deadline:
             outcomes[case["index"]] = CaseOutcome(
                 False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
@@ -962,9 +1008,12 @@ def main():
         # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
         # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
         # « Échec de compilation », voire OOM). Le gocache partagé, lui, sert aux cas suivants.
-        done_dir = os.path.join(BOX, "cases", str(case["index"]))
-        for heavy in ("target", "home_build", "tmp_build"):
-            shutil.rmtree(os.path.join(done_dir, heavy), ignore_errors=True)
+        # Le cas est noté : TOUT son répertoire est libéré, work/ compris (HOME et TMPDIR de
+        # l'étudiant — ses seuls points d'écriture). Ne libérer que les caches de build laissait
+        # un code qui écrit des fichiers saturer le tmpfs /box, partagé par tous les cas : les
+        # suivants ne compilaient plus, canaris inclus, et la soumission — honnête mais boguée —
+        # était étiquetée « falsification probable ». Le gocache partagé (hors cases/) survit.
+        shutil.rmtree(os.path.join(BOX, "cases", str(case["index"])), ignore_errors=True)
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
     # compilation du code étudiant les explique déjà, et les vrais cas échouent de toute façon).

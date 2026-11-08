@@ -85,15 +85,19 @@ public class ExecutionLimiter {
     public <T> T withSandboxSlot(Supplier<T> action) {
         boolean internal = internalCall.get();
         long waitMs = internal ? internalQueueWaitMs : queueWaitMs;
+        // ÉCHÉANCE unique pour les DEUX acquisitions : les attendre l'une après l'autre avec
+        // le délai complet chacune laissait un appel public patienter 2 × queue-wait-ms avant
+        // son 429 — le double de ce qu'annoncent la configuration et DEPLOY.md.
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
         boolean publicAcquired = false;
         try {
             if (!internal) {
-                publicAcquired = publicCap.tryAcquire(waitMs, TimeUnit.MILLISECONDS);
+                publicAcquired = publicCap.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS);
                 if (!publicAcquired) {
                     throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
                 }
             }
-            if (!global.tryAcquire(waitMs, TimeUnit.MILLISECONDS)) {
+            if (!global.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS)) {
                 throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
             }
             try {
@@ -109,6 +113,11 @@ public class ExecutionLimiter {
                 publicCap.release();
             }
         }
+    }
+
+    /** Millisecondes restantes avant l'échéance (jamais négatif : 0 = plus d'attente). */
+    private static long remainingMs(long deadlineNanos) {
+        return Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
     }
 
     /**
