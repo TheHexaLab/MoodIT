@@ -187,12 +187,17 @@ def demote_student():
 # reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les
 # fonctions de sortie : il suffisait de relayer honnêtement les tests dont le nom a cette
 # forme (les canaris) et de ne forger que les autres.
-IDENT_FIRST = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-IDENT_REST = IDENT_FIRST + "0123456789_"
+# PREMIÈRE lettre en MAJUSCULE, impérativement : le canari Go s'appelle « Test<N> », et Go
+# exige que le caractère suivant « Test » ne soit pas une minuscule (cmd/go isTest) — sinon la
+# fonction n'est pas enregistrée comme test et `go vet` la refuse. Une initiale minuscule
+# faisait échouer le canari d'une soumission Go HONNÊTE, donc l'accusait de falsification.
+IDENT_FIRST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+IDENT_REST = IDENT_FIRST + "abcdefghijklmnopqrstuvwxyz0123456789_"
 
 
 def random_identifier(rng, min_len=5, max_len=16):
-    """Identifiant valide dans les six langages (lettre en tête), de longueur variable."""
+    """Identifiant valide dans les six langages, de longueur variable. Majuscule en tête
+    (contrainte Go « TestXxx ») ; la suite mélange casses, chiffres et _."""
     length = rng.randrange(min_len, max_len + 1)
     return rng.choice(IDENT_FIRST) + "".join(rng.choice(IDENT_REST) for _ in range(length - 1))
 
@@ -994,6 +999,14 @@ def main():
     # supprimée (sans rejouage), de façon reproductible sur une question à beaucoup de cas.
     budget_ms = job.get("budget_ms")
     deadline = (time.monotonic() + budget_ms / 1000.0) if budget_ms else None
+    # Les CANARIS gardent leur part du budget : sans réserve, un code dont chaque cas coûte
+    # cher pouvait faire sauter la fin de la file — canaris compris — et neutraliser ainsi le
+    # contrôle anti-falsification (le cas sauté ne pouvant, à juste titre, accuser personne).
+    # Un dépassement saute donc des cas RÉELS en premier. L'ordre reste tiré au sort : exécuter
+    # les canaris d'abord les rendrait reconnaissables.
+    canary_reserve_s = 0.0
+    if deadline is not None and timeout_s:
+        canary_reserve_s = 2.0 * (timeout_s + COMPILE_TIMEOUT_S)
 
     for case in order:
         if box_exhausted():
@@ -1007,7 +1020,11 @@ def main():
             timings[case["index"]] = 0
             event("espace_sature", case=case["index"])
             continue
-        if deadline is not None and time.monotonic() >= deadline:
+        # Un cas réel doit laisser la réserve des canaris intacte ; un canari puise dedans.
+        case_deadline = deadline
+        if deadline is not None and not case.get("canary"):
+            case_deadline = deadline - canary_reserve_s
+        if case_deadline is not None and time.monotonic() >= case_deadline:
             outcomes[case["index"]] = CaseOutcome(
                 False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
                 ran=False, skipped=True)

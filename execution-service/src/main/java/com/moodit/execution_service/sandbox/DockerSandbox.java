@@ -137,7 +137,10 @@ public class DockerSandbox {
             List<com.github.dockerjava.api.model.Container> orphans = client().listContainersCmd()
                     .withShowAll(true)
                     .withLabelFilter(Map.of(RUNNER_LABEL, "1"))
-                    .withStatusFilter(List.of("exited", "created", "dead"))
+                    // « created » EXCLU : c'est la fenêtre entre createContainerCmd et
+                    // startContainerCmd d'une autre instance — la balayer ferait échouer son
+                    // démarrage (502, tentative supprimée).
+                    .withStatusFilter(List.of("exited", "dead"))
                     .exec();
             for (com.github.dockerjava.api.model.Container container : orphans) {
                 try {

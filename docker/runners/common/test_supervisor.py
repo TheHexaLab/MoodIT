@@ -201,7 +201,10 @@ class RandomIdentifierTest(unittest.TestCase):
         noms = {supervisor.random_identifier(rng) for _ in range(300)}
         self.assertGreater(len({len(n) for n in noms}), 3)       # longueurs variées
         for nom in noms:
-            self.assertRegex(nom, r"^[A-Za-z][A-Za-z0-9_]*$")    # identifiant valide partout
+            # MAJUSCULE en tête, impérativement : le canari Go s'appelle « Test<N> » et Go
+            # exige une non-minuscule après « Test » (sinon la fonction n'est pas un test et
+            # `go vet` la refuse) — une soumission Go honnête serait accusée de falsification.
+            self.assertRegex(nom, r"^[A-Z][A-Za-z0-9_]*$")
             self.assertGreaterEqual(len(nom), 5)
         # L'alphabet dépasse la casse unique : chiffres et _ apparaissent.
         self.assertTrue(any(c.isdigit() or c == "_" for n in noms for c in n))
