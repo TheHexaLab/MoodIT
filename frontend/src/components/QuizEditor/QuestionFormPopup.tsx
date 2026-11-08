@@ -617,9 +617,13 @@ export function QuestionFormBody({
             onChange={(e) => {
               const raw = e.target.value.trim();
               const seconds = Number(raw);
+              // Borné DÈS la saisie (1-60 s, entier) : l'invariant ne dépend pas d'un blur qui
+              // pourrait ne jamais venir (le serveur reborne de toute façon).
               patch({
                 execTimeoutMs:
-                  raw === '' || Number.isNaN(seconds) ? undefined : Math.round(seconds * 1000),
+                  raw === '' || Number.isNaN(seconds)
+                    ? undefined
+                    : Math.min(60, Math.max(1, Math.round(seconds))) * 1000,
               });
             }}
             onBlur={() => {

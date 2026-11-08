@@ -93,6 +93,13 @@ public class ExecutionService {
             if (dockerEvaluator == null) {
                 throw new SandboxException("Runner Docker non configuré pour les langages compilés");
             }
+            // Rejet du marqueur réservé AVANT la prise de place : aucun conteneur n'est
+            // nécessaire, et sous saturation le verdict explicite vaut mieux qu'un 429.
+            List<TestResult> rejected = DockerEvaluator.reservedMarkerRejection(
+                    request.code(), request.testCases());
+            if (rejected != null) {
+                return rejected;
+            }
             return limiter.withSandboxSlot(() -> dockerEvaluator.evaluate(
                     request.language(), request.code(), request.testCases(), request.timeoutMs()));
         }

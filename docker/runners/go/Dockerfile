@@ -1,7 +1,10 @@
 # Runner de notation Go (#116) : toolchain Go (go test) + superviseur.
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
 # /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
+# cgo inutile aux harnais et surface en moins pour la compilation ROOT de sources non fiables.
 FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
+
+ENV CGO_ENABLED=0
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 strace \

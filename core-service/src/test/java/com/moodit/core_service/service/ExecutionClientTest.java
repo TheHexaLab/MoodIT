@@ -105,12 +105,17 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Réponse plus lente que le délai calculé → null")
-    void evaluate_reponseTropLente_null() throws Exception {
-        String url = startStub(200, "[]", 1_500);
-
-        // 2 harnais : 100 + 2 × 100 = 300 ms < 1,5 s.
-        assertThat(client(url, 100, 100).evaluate("Python", "code", TWO_HARNESSES)).isNull();
+    @DisplayName("Même avec des réglages minuscules, le budget couvre le mur du runner")
+    void readTimeout_plancherDuMurDuRunner() {
+        // Depuis le runner (#116), chaque unité exec peut légitimement durer jusqu'à son mur
+        // (75 s) : des réglages trop bas ne doivent plus pouvoir produire un budget qui
+        // abandonne une correction en cours (#216). Un stub « plus lent que le budget » est
+        // donc devenu inconstructible à l'échelle d'un test unitaire — le chemin « échec
+        // d'appel → null » reste couvert par le test du sandbox injoignable.
+        ExecutionClient client = client("http://localhost:1", 1, 1, 1);
+        assertThat(client.readTimeoutMs("Python", 1, null)).isGreaterThanOrEqualTo(75_000);
+        assertThat(client.readTimeoutMs("Java", 4, null))
+                .isGreaterThanOrEqualTo(30_000 + 3 * 100_000);
     }
 
     @Test
@@ -131,10 +136,11 @@ class ExecutionClientTest {
         // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
-        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(45_000);
-        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(185_000);
-        assertThat(client.readTimeoutMs("Python", 100, null)).isEqualTo(3_510_000);
-        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(45_000);
+        // Par unité : attente de file (15 s) + max(20 s, temps limite + 5 s) + 75 s de mur
+        // du runner (miroir de WALL_OVERHEAD_MS : démarrage du conteneur, compilation exec).
+        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + 110_000);
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * 110_000);
+        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + 110_000);
     }
 
     @Test
@@ -143,16 +149,20 @@ class ExecutionClientTest {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
-        assertThat(client.readTimeoutMs("Python", 1, 60_000)).isEqualTo(10_000 + 65_000 + 15_000);
-        // Sous le défaut (5 s + 5 s < 20 s) : le budget par défaut reste.
-        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(45_000);
-        // Langage compilé : 90 s de compilation PAR CAS (unités 2N+2 → N+2 compilations).
-        // 4 unités = 1 harnais → 3 compilations (cas + 2 canaris).
+        assertThat(client.readTimeoutMs("Python", 1, 60_000))
+                .isEqualTo(10_000 + (65_000 + 75_000 + 15_000));
+        // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
+        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 110_000);
+        // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
+        // (N + 2 canaris) × (run + 10 s + 90 s). 4 unités = 1 harnais → 3 cas.
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 4 * (65_000 + 15_000) + 3 * 90_000);
-        // TypeScript : tsc relancé à CHAQUE unité → 60 s de marge par unité (mur exec 75 s).
+                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (60_000 + 10_000 + 90_000));
+        // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
+        assertThat(client.readTimeoutMs("Java", 4, 1_000))
+                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (10_000 + 10_000 + 90_000));
+        // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
         assertThat(client.readTimeoutMs("TypeScript", 2, null))
-                .isEqualTo(10_000 + 2 * (20_000 + 60_000 + 15_000));
+                .isEqualTo(10_000 + 2 * 110_000);
     }
 
     @Test
@@ -164,10 +174,10 @@ class ExecutionClientTest {
         assertThat(ExecutionClient.compiled("Python")).isFalse();
         assertThat(ExecutionClient.compiled("sql")).isFalse();
         assertThat(ExecutionClient.compiled(null)).isFalse();
-        assertThat(ExecutionClient.transpiled("TypeScript")).isTrue();
-        assertThat(ExecutionClient.transpiled("ts")).isTrue();
-        assertThat(ExecutionClient.transpiled("JavaScript")).isFalse();
-        assertThat(ExecutionClient.transpiled(null)).isFalse();
+        assertThat(ExecutionClient.vmLanguage("Java")).isTrue();
+        assertThat(ExecutionClient.vmLanguage("C#")).isTrue();
+        assertThat(ExecutionClient.vmLanguage("go")).isFalse();
+        assertThat(ExecutionClient.vmLanguage(null)).isFalse();
     }
 
     @Test

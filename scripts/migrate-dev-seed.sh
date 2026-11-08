@@ -3,8 +3,10 @@
 # Peuple une base de DÉVELOPPEMENT déjà migrée (y compris une pile PROD lancée en local) avec les
 # données de test, SANS e2e, SANS Flyway, SANS recréer de volume. Rapide et rejouable.
 #
-# Réutilise les fichiers db/demo/* en les envoyant à psql via STDIN (pas de docker cp ni de chemins
-# dans le conteneur → aucun souci de conversion de chemin sous Git Bash/Windows). Idempotent : ne
+# Réutilise les fichiers db/demo/* en les envoyant à psql via STDIN, EN UNE TRANSACTION (-1 :
+# un échec à mi-parcours ne laisse pas une base à moitié peuplée que la garde d'idempotence
+# refuserait ensuite de réparer). Pas de docker cp ni de chemins dans le conteneur → aucun
+# souci de conversion de chemin sous Git Bash/Windows. Idempotent : ne
 # fait rien si des établissements existent déjà (FORCE=1 pour re-seeder malgré tout). Donne
 # l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code
 # multi-langages (harnais convertis au format runner par V7_1 : vrais tests pour les compilés).
@@ -50,7 +52,7 @@ cat "$DEMO"/V2_1__*.sql \
     "$DEMO"/V2_4__*.sql \
     "$DEMO"/V4_1__*.sql \
     "$DEMO"/V7_1__*.sql \
-  | pg -v ON_ERROR_STOP=1 -q
+  | pg -v ON_ERROR_STOP=1 -1 -q
 
 echo
 echo "✓ Terminé. Établissements autorisés :"

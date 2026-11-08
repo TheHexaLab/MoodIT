@@ -63,6 +63,7 @@ describe('HarnessBody', () => {
   it('« Ajouter » fait défiler la liste jusqu’au nouveau harnais', () => {
     // jsdom n'implémente pas scrollIntoView, et rAF est rendu synchrone pour observer l'effet.
     const scrolled = vi.fn();
+    const previousScrollIntoView = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = scrolled;
     const raf = vi
       .spyOn(globalThis, 'requestAnimationFrame')
@@ -76,6 +77,8 @@ describe('HarnessBody', () => {
       expect(scrolled).toHaveBeenCalled();
     } finally {
       raf.mockRestore();
+      // Restaurer le prototype : sans ça, le mock fuyait dans les tests suivants du fichier.
+      Element.prototype.scrollIntoView = previousScrollIntoView;
     }
   });
 

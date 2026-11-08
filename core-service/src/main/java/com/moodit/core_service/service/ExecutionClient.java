@@ -50,51 +50,76 @@ public class ExecutionClient {
     }
 
     /**
-     * Délai d'attente de la réponse pour {@code pistonCalls} unités de travail du sandbox (#31, #216) :
-     * execution-service les fait L'UN APRÈS L'AUTRE, et chacun peut d'abord attendre une place du
-     * sandbox ({@code app.exec.internal-queue-wait-ms}, 120 s par défaut — une correction compilée tient sa place pendant tout son conteneur, #24), puis durer jusqu'au
-     * délai d'une unité de travail du runner ({@code per-test-timeout-ms}, 20 s par défaut). Le budget par
-     * appel est donc la SOMME des deux (140 s par défaut) : ne compter que l'exécution seule faisait
-     * échouer la correction quand le sandbox était saturé, alors qu'execution-service corrigeait
-     * encore. La part d'attente suit par défaut la variable du {@code .env} partagé qui la
-     * règle côté execution-service ({@code EXEC_INTERNAL_QUEUE_WAIT_MS}) : l'augmenter là-bas
-     * impose la même valeur ici, automatique tant qu'elle vient de ce fichier. Un délai fixe faisait échouer la
-     * correction d'une question à beaucoup de harnais alors que la sandbox répondait. La correction
-     * tourne en tâche de fond : une longue attente ne bloque aucune requête utilisateur.
+     * Délai d'attente de la réponse (#31, #216), modélisé sur le PIRE CAS réel du runner (#116) :
+     * <ul>
+     *   <li><b>Interprétés/SQL/vues</b> — une place et un conteneur PAR unité : chaque unité
+     *       paie l'attente de file ({@code app.exec.internal-queue-wait-ms}, 120 s par défaut —
+     *       seule variable encore PARTAGÉE avec execution-service via le {@code .env} commun,
+     *       {@code EXEC_INTERNAL_QUEUE_WAIT_MS} : la surcharger d'un côté impose la même valeur
+     *       de l'autre), plus {@code max(per-test-timeout-ms, temps limite + marge)}, plus le
+     *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris) ;</li>
+     *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
+     *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + 90 s de
+     *       compilation par cas)).</li>
+     * </ul>
+     * Surestimer est sans danger (la correction tourne en tâche de fond) ; sous-estimer supprime
+     * la tentative d'un étudiant pendant une correction encore en cours — le bug de #216.
+     * {@code per-test-timeout-ms} est désormais un réglage de CORE seul (l'homologue serveur a
+     * disparu avec Piston).
      */
     long readTimeoutMs(String language, int pistonCalls, Integer execTimeoutMs) {
-        // Temps limite par question (#116, max 60 s) : s'il dépasse le budget par défaut d'une
-        // unité, chaque unité doit l'attendre (plus une marge), sinon core abandonne une
-        // correction encore en cours et supprime la tentative — le bug que #216 avait corrigé.
-        long perUnit = Math.max(perTestReadTimeoutMs,
-                execTimeoutMs == null ? 0 : execTimeoutMs + RUN_MARGIN_MS);
-        // TypeScript : CHAQUE unité exec transpile (tsc, jusqu'à 60 s côté runner — le mur de
-        // 75 s de RunnerExec couvre précisément ce budget) ; sans cette marge, le scénario #216
-        // revenait pour les interprétés à compilation.
-        if (transpiled(language)) {
-            perUnit += EXEC_COMPILE_SLACK_MS;
+        // Invariant anti-#216 : budget client ≥ PIRE CAS serveur, modélisé d'après le vrai
+        // contrat du runner (#116) — surestimer est sans danger (correction asynchrone),
+        // sous-estimer supprime la tentative d'un étudiant pendant une correction en cours.
+        long run = execTimeoutMs == null ? DEFAULT_RUN_MS
+                : Math.min(Math.max(execTimeoutMs, 1), 60_000);
+        if (compiled(language)) {
+            // UN conteneur pour tout le job (une seule attente de file, une seule place) :
+            // miroir du mur de DockerEvaluator — 30 s de base + (N cas + 2 canaris) ×
+            // (run planché VM + 10 s de marge + 90 s de compilation par cas).
+            long cases = (Math.max(pistonCalls, 2) + 2L) / 2;   // unités 2N+2 → N+2
+            long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
+            return baseReadTimeoutMs + internalQueueWaitMs
+                    + EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS + COMPILE_SLACK_MS);
         }
+        // Interprétés/SQL/vues : UNE place et UN conteneur PAR UNITÉ — chaque unité paie
+        // l'attente de file et le mur du runner (75 s, miroir de WALL_OVERHEAD_MS : démarrage
+        // du conteneur et compilation exec, tsc compris) en plus de son temps limite.
+        long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS) + EXEC_WALL_SLACK_MS;
         return baseReadTimeoutMs
-                + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs)
-                // Compilés : CHAQUE cas (N réels + 2 canaris) recompile son harnais — les unités
-                // valent 2N + 2, donc (unités + 2) / 2 = N + 2 compilations à budgéter.
-                + (compiled(language) ? COMPILE_SLACK_MS * ((Math.max(pistonCalls, 2) + 2L) / 2) : 0);
+                + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs);
     }
 
     /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
     private static final long RUN_MARGIN_MS = 5_000;
 
-    /**
-     * Budget de COMPILATION du runner PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du
-     * superviseur (90 s) : chaque cas compilé (harnais différent) recompile son projet.
-     */
+    /** Temps limite par défaut quand la question n'en fixe pas (défaut du superviseur). */
+    private static final long DEFAULT_RUN_MS = 10_000;
+
+    /** Mur du mode exec PAR UNITÉ — miroir de {@code RunnerExec.WALL_OVERHEAD_MS} (75 s) :
+     * démarrage du conteneur et compilation exec (tsc…), le temps limite s'y ajoute. */
+    private static final long EXEC_WALL_SLACK_MS = 75_000;
+
+    /** Base du conteneur de notation compilée — miroir de {@code BASE_OVERHEAD_MS} (30 s). */
+    private static final long EVAL_BASE_MS = 30_000;
+
+    /** Marge par cas de notation — miroir de {@code PER_CASE_OVERHEAD_MS} (10 s). */
+    private static final long EVAL_CASE_MARGIN_MS = 10_000;
+
+    /** Budget de compilation PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du superviseur. */
     private static final long COMPILE_SLACK_MS = 90_000;
 
-    /**
-     * Budget de TRANSPILATION du mode exec (par unité) — miroir de
-     * {@code EXEC_COMPILE_TIMEOUT_S} du superviseur (60 s) : chaque unité TypeScript relance tsc.
-     */
-    private static final long EXEC_COMPILE_SLACK_MS = 60_000;
+    /** Plancher VM du superviseur (JVM/mono froids) — miroir du mode evaluate. */
+    private static final long VM_FLOOR_MS = 10_000;
+
+    /** Langage à machine virtuelle lente au départ (plancher du superviseur). */
+    static boolean vmLanguage(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return switch (lang) {
+            case "java", "csharp", "c#", "cs", "c-sharp" -> true;
+            default -> false;
+        };
+    }
 
     /**
      * Nombre d'unités de travail du sandbox pour corriger {@code harnessCount} harnais en
@@ -117,12 +142,6 @@ public class ExecutionClient {
             return 2 * harnessCount;
         }
         return compiled(language) ? 2 * harnessCount + 2 : harnessCount;
-    }
-
-    /** Langage exec TRANSPILÉ à chaque unité (budget tsc à prévoir par unité). */
-    static boolean transpiled(String language) {
-        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
-        return lang.equals("typescript") || lang.equals("ts");
     }
 
     /** Langage noté dans le runner compilé (budget de compilation à prévoir côté client). */

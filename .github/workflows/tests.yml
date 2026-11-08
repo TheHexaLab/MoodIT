@@ -496,6 +496,20 @@ jobs:
       - name: Construire les images runner
         run: bash docker/runners/build.sh
 
+      # Filet de régression du confinement : la propriété « écritures étudiantes confinées aux
+      # tmpfs » repose sur le verrouillage des répertoires monde-inscriptibles des images — une
+      # mise à jour de digest pourrait en réintroduire un sans aucun signal.
+      - name: Aucun répertoire monde-inscriptible dans les images (hors /tmp)
+        run: |
+          for lang in java csharp go rust c python node php bash sqlite; do
+            extra=$(docker run --rm --entrypoint sh "moodit-runner-$lang:latest" \
+              -c "find / -xdev -type d -perm -0002 2>/dev/null" | grep -v '^/tmp$' || true)
+            if [ -n "$extra" ]; then
+              echo "::error::Répertoires monde-inscriptibles dans moodit-runner-$lang : $extra"
+              exit 1
+            fi
+          done
+
       - name: Tests d'intégration
         working-directory: execution-service
         env:

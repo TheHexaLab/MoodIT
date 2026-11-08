@@ -267,6 +267,21 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void timeout_is_forwarded_to_the_runner_for_interpreted_and_sql() {
+        // Un retour silencieux au défaut (3 s) passerait avec any() : on épingle eq(42_000)
+        // sur le chemin interprété ET sur le chemin SQL (chaque phase a son conteneur).
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        service.evaluate(new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("t", "return True", 1)), 42_000));
+        verify(runner).execute(eq("python"), any(), any(), eq(42_000));
+
+        service.evaluate(new EvaluateRequest("SQL", null, "SELECT 1;",
+                List.of(new TestCaseInput("t", "SELECT 1;", 1)), 42_000));
+        verify(runner, org.mockito.Mockito.atLeastOnce())
+                .execute(eq("sqlite3"), any(), any(), eq(42_000));
+    }
+
+    @Test
     void timeout_is_forwarded_to_docker_evaluator() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);

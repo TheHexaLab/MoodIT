@@ -131,9 +131,10 @@ class DockerEvaluatorTest {
     @Test
     void temps_limite_aberrant_borne_jamais_de_mur_negatif() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
-        // Négatif (valeur stockée aberrante) : borné à 1 ms — le mur reste positif et sensé.
+        // Négatif (valeur stockée aberrante) : borné à 1 ms, puis PLANCHER VM (10 s — miroir
+        // du superviseur, JVM froide) — le mur reste positif et couvre le temps réel accordé.
         evaluator.evaluate("Java", "code", List.of(new TestCaseInput("t", "h", 1)), -100_000);
-        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(330_003L));
+        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(360_000L));
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code", List.of(new TestCaseInput("t", "h", 1)), 999_999);

@@ -74,18 +74,37 @@ public class DockerEvaluator {
      */
     private static final String RESERVED_MARKER = "__MOODIT_";
 
+    /**
+     * Verdicts de rejet si {@code code} contient le marqueur réservé, sinon {@code null}.
+     * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
+     * sous saturation, le rejet explicite vaut mieux qu'un 429).
+     */
+    public static List<TestResult> reservedMarkerRejection(String code, List<TestCaseInput> cases) {
+        if (code == null || !code.contains(RESERVED_MARKER)) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
+                        "Marqueur réservé « __MOODIT_ » dans le code soumis — retire-le pour être corrigé."))
+                .toList();
+    }
+
     public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
             Integer timeoutMs) {
-        if (code != null && code.contains(RESERVED_MARKER)) {
-            return cases.stream()
-                    .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
-                            "Marqueur réservé « __MOODIT_ » dans le code soumis — retire-le pour être corrigé."))
-                    .toList();
+        List<TestResult> rejected = reservedMarkerRejection(code, cases);
+        if (rejected != null) {
+            return rejected;
         }
         // Borné des DEUX côtés : une valeur stockée aberrante (négative, nulle, > 60 s) ne doit
         // jamais produire un mur négatif (SandboxException systématique) ni un job sans fin.
         long perRun = Math.min(Math.max(timeoutMs == null ? DEFAULT_RUN_TIMEOUT_MS : timeoutMs, 1),
                 RunnerExec.MAX_RUN_TIMEOUT_MS);
+        String runnerLanguage = HarnessProjects.runnerLanguage(language);
+        if ("java".equals(runnerLanguage) || "csharp".equals(runnerLanguage)) {
+            // Miroir du plancher VM du superviseur (JVM/mono froids) : le MUR doit couvrir le
+            // temps réellement accordé par cas, pas le temps limite court du prof.
+            perRun = Math.max(perRun, 10_000);
+        }
         HarnessProjects.Project project = HarnessProjects.build(language, code, cases, (int) perRun);
         // Chaque cas (cas réels + 2 canaris) recompile SON harnais : compilation (budget du
         // superviseur) + run (temps limite du prof) + marge, PAR CAS.

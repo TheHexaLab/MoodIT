@@ -119,7 +119,7 @@ export function HarnessBody({
     pendingScroll.current = false;
     const id = requestAnimationFrame(() => {
       const last = listRef.current?.lastElementChild;
-      last?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      last?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' }); // absent en jsdom
     });
     return () => cancelAnimationFrame(id);
   }, [cases.length]);

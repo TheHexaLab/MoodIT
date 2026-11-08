@@ -834,6 +834,13 @@ def main():
         # groupe tué au timeout — il survivrait au cas et pourrait peser sur (voire tracer,
         # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
         kill_student_survivors()
+        # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
+        # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
+        # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
+        # « Échec de compilation », voire OOM). Le gocache partagé, lui, sert aux cas suivants.
+        done_dir = os.path.join(BOX, "cases", str(case["index"]))
+        for heavy in ("target", "home_build", "tmp_build"):
+            shutil.rmtree(os.path.join(done_dir, heavy), ignore_errors=True)
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
     # compilation du code étudiant les explique déjà, et les vrais cas échouent de toute façon).

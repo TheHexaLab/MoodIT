@@ -29,6 +29,15 @@ import java.util.function.Supplier;
 public class ExecutionLimiter {
 
     private final Semaphore global;
+    /**
+     * Places accessibles aux appels PUBLICS (« Tester », « play ») : {@code maxConcurrent - 1}
+     * dès que possible — une place reste RÉSERVÉE aux corrections internes. Depuis le runner
+     * (#116), une évaluation compilée tient sa place pendant toute la vie de son conteneur
+     * (minutes) : sans réserve, deux « Tester » publics suffisaient à affamer les corrections
+     * (tentatives d'étudiants supprimées en rafale). À {@code maxConcurrent = 1}, pas de
+     * réserve possible : tout le monde partage l'unique place.
+     */
+    private final Semaphore publicCap;
     private final long queueWaitMs;
     private final long internalQueueWaitMs;
     private final int maxPerUser;
@@ -53,28 +62,43 @@ public class ExecutionLimiter {
         }
         // Équitable : les exécutions en attente passent dans leur ordre d'arrivée.
         this.global = new Semaphore(maxConcurrent, true);
+        this.publicCap = new Semaphore(Math.max(1, maxConcurrent - 1), true);
         this.queueWaitMs = queueWaitMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
         this.maxPerUser = maxPerUser;
     }
 
-    /** Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus). */
+    /**
+     * Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus).
+     * Les appels publics passent d'abord par {@link #publicCap} : une place reste réservée
+     * aux corrections internes.
+     */
     public <T> T withSandboxSlot(Supplier<T> action) {
-        boolean acquired;
+        boolean internal = internalCall.get();
+        long waitMs = internal ? internalQueueWaitMs : queueWaitMs;
+        boolean publicAcquired = false;
         try {
-            long waitMs = internalCall.get() ? internalQueueWaitMs : queueWaitMs;
-            acquired = global.tryAcquire(waitMs, TimeUnit.MILLISECONDS);
+            if (!internal) {
+                publicAcquired = publicCap.tryAcquire(waitMs, TimeUnit.MILLISECONDS);
+                if (!publicAcquired) {
+                    throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+                }
+            }
+            if (!global.tryAcquire(waitMs, TimeUnit.MILLISECONDS)) {
+                throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+            }
+            try {
+                return action.get();
+            } finally {
+                global.release();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        if (!acquired) {
-            throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        try {
-            return action.get();
         } finally {
-            global.release();
+            if (publicAcquired) {
+                publicCap.release();
+            }
         }
     }
 
