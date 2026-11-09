@@ -277,7 +277,11 @@ public class DockerEvaluator {
 
     private static boolean isSuspicious(String type) {
         return switch (type) {
-            case "lecture_source_tentee", "lecture_binaire_tentee", "rapport_incoherent",
+            // « rapport_incoherent » N'ACCUSE PAS : il se déclenche sur des recoupements qui
+            // lisent la sortie LIBRE de l'étudiant (un programme Rust qui imprime « FAILED »,
+            // une sortie tronquée…). Le cas reste refusé par le superviseur, mais sans
+            // bandeau de falsification — une soumission honnête ne doit jamais en porter un.
+            case "lecture_source_tentee", "lecture_binaire_tentee",
                  "canari_incoherent", "jeton_absent" -> true;
             default -> false;
         };

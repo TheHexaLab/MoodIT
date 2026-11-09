@@ -441,11 +441,10 @@ class DockerRunnerIntegrationTest {
                     fn d() { assert_eq!(doubler(5), 10); }
                 }
                 """);
+        // Plusieurs filets peuvent mordre (sommaire incohérent, jeton absent) : on exige le
+        // REFUS et un motif, sans figer lequel a joué.
         assertThat(results.get(0).passed()).isFalse();
-        // Deux filets peuvent attraper ce forgeage : le recoupement du sommaire (le plus
-        // précoce — « FAILED » présent malgré « 0 failed ») ou l'absence de jeton. On exige
-        // le refus et une alerte, sans figer lequel des deux a mordu.
-        assertThat(results.get(0).detail()).containsAnyOf("jeton", "⚠");
+        assertThat(results.get(0).detail()).isNotBlank();
     }
 
     @Test
@@ -474,8 +473,10 @@ class DockerRunnerIntegrationTest {
                     fn d() { assert_eq!(doubler(5), 10); }
                 }
                 """);
-        assertThat(results.get(0).detail() == null ? "" : results.get(0).detail())
-                .doesNotContain("falsification").doesNotContain("Incohérence");
+        // Le cas doit être RÉUSSI : le test (faux) de l'étudiant ne compte pas dans le
+        // verdict, seul celui du harnais du prof est exécuté.
+        assertThat(results.get(0).passed()).isTrue();
+        assertThat(results.get(0).detail()).isNull();
     }
 
     @Test
@@ -499,8 +500,8 @@ class DockerRunnerIntegrationTest {
                     void doubler5() { assertEquals(10, Solution.doubler(5)); }
                 }
                 """);
-        assertThat(java.get(0).detail() == null ? "" : java.get(0).detail())
-                .doesNotContain("falsification").doesNotContain("Incohérence");
+        assertThat(java.get(0).passed()).isTrue();
+        assertThat(java.get(0).detail()).isNull();
 
         require("C#");
         List<TestResult> cs = evaluate("C#", """
@@ -515,8 +516,8 @@ class DockerRunnerIntegrationTest {
                     [Test] public void Doubler5() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
                 }
                 """);
-        assertThat(cs.get(0).detail() == null ? "" : cs.get(0).detail())
-                .doesNotContain("falsification").doesNotContain("Incohérence");
+        assertThat(cs.get(0).passed()).isTrue();
+        assertThat(cs.get(0).detail()).isNull();
     }
 
     @Test
@@ -596,8 +597,10 @@ class DockerRunnerIntegrationTest {
                     fn d() { assert_eq!(doubler(5), 10); }
                 }
                 """);
+        // Le test tricheur n'est même plus EXÉCUTÉ : seuls les modules du harnais et le
+        // jeton le sont. L'attaque n'est plus détectée, elle est devenue impossible — le cas
+        // échoue simplement parce que la réponse est fausse.
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("⚠");
     }
 
     @Test

@@ -171,4 +171,24 @@ class HarnessProjectsTest {
                 List.of(new TestCaseInput(null, "func TestT(t *testing.T) {}", 1)), null);
         assertThat(project.files().get("job.json")).contains("\"name\":\"\"");
     }
+
+    @Test
+    void conteneurs_de_tests_du_harnais_declares_dans_le_job() {
+        // Le superviseur n'exécute que ces conteneurs : sans eux, les tests unitaires de
+        // l'étudiant (compilés dans la même unité) comptaient dans le verdict du cas réel.
+        assertThat(HarnessProjects.harnessTypes("java", "class MesTests { @Test void t() {} }"))
+                .containsExactly("MesTests");
+        assertThat(HarnessProjects.harnessTypes("csharp",
+                "public class A { }\ninternal class B { }")).containsExactly("A", "B");
+        assertThat(HarnessProjects.harnessTypes("rust", "#[cfg(test)]\nmod moodit_tests { }"))
+                .containsExactly("moodit_tests");
+        // Go et C/C++ : non concernés (un TestXxx de l'étudiant n'est pas un test `go test`).
+        assertThat(HarnessProjects.harnessTypes("go", "func TestA(t *testing.T) {}")).isEmpty();
+        assertThat(HarnessProjects.harnessTypes("c", "MOODIT_TEST(t) { }")).isEmpty();
+        // Rien d'extractible → liste vide : le superviseur exécute tout, comme avant.
+        assertThat(HarnessProjects.harnessTypes("java", "// vide")).isEmpty();
+
+        assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
+                .get("job.json")).contains("\"harness_types\":[");
+    }
 }

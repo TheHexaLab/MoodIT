@@ -75,7 +75,10 @@ public final class HarnessProjects {
             addCase(files, lang, index, code, testCase.harnessCode() == null ? "" : testCase.harnessCode());
             caseList.append(index > 0 ? "," : "")
                     .append("{\"index\":").append(index)
-                    .append(",\"name\":").append(jsonString(testCase.name())).append("}");
+                    .append(",\"name\":").append(jsonString(testCase.name()))
+                    .append(",\"harness_types\":")
+                    .append(jsonArray(harnessTypes(lang, testCase.harnessCode())))
+                    .append("}");
             index++;
         }
         // Canaris (voir javadoc) : harnais gabarit instancié par le superviseur.
@@ -282,6 +285,53 @@ public final class HarnessProjects {
                     }
                     """;
         };
+    }
+
+    // ── conteneurs de tests déclarés par le HARNAIS ───────────────────────────
+
+    private static final Pattern JAVA_TYPE = Pattern.compile(
+            "(?m)^\\s*(?:public\\s+|final\\s+|abstract\\s+|static\\s+)*(?:class|record|enum)\\s+(\\w+)");
+    private static final Pattern CSHARP_TYPE = Pattern.compile(
+            "(?m)^\\s*(?:public\\s+|internal\\s+|sealed\\s+|static\\s+|partial\\s+)*class\\s+(\\w+)");
+    private static final Pattern RUST_MOD = Pattern.compile("(?m)^\\s*(?:pub\\s+)?mod\\s+(\\w+)");
+
+    /**
+     * Noms des classes (Java, C#) ou modules (Rust) déclarés par le HARNAIS DU PROF. Le
+     * superviseur s'en sert pour n'exécuter QUE ces tests : le code étudiant est compilé dans
+     * la même unité (c'est ce qui donne l'accès aux membres privés), donc ses PROPRES tests
+     * unitaires — idiome courant, souvent copié d'un tutoriel — étaient découverts et comptés
+     * dans le verdict. Un test d'étudiant simplement faux mettait alors toute la question à 0.
+     *
+     * <p>Liste vide = on n'a rien su extraire : le superviseur exécute alors tout, comme avant
+     * (on préfère le comportement d'origine à un cas non noté). Go et C/C++ ne sont pas
+     * concernés : un {@code TestXxx} de l'étudiant dans {@code main.go} n'est pas un test de
+     * {@code go test}, et {@code MOODIT_TEST} n'est pas défini quand son fichier est compilé.
+     */
+    static List<String> harnessTypes(String runnerLanguage, String harnessCode) {
+        String code = harnessCode == null ? "" : harnessCode;
+        Pattern pattern = switch (runnerLanguage) {
+            case "java" -> JAVA_TYPE;
+            case "csharp" -> CSHARP_TYPE;
+            case "rust" -> RUST_MOD;
+            default -> null;
+        };
+        if (pattern == null) {
+            return List.of();
+        }
+        List<String> names = new java.util.ArrayList<>();
+        Matcher matcher = pattern.matcher(code);
+        while (matcher.find()) {
+            names.add(matcher.group(1));
+        }
+        return List.copyOf(names);
+    }
+
+    private static String jsonArray(List<String> values) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            sb.append(i > 0 ? "," : "").append(jsonString(values.get(i)));
+        }
+        return sb.append(']').toString();
     }
 
     // ── utilitaires ───────────────────────────────────────────────────────────

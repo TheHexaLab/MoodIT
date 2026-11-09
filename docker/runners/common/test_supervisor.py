@@ -169,6 +169,19 @@ class RustVerdictTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("forgé", incoherence)
 
+    def test_sortie_honnete_contenant_failed_reste_un_echec_sans_accusation(self):
+        # Avec --nocapture, les println! de l'étudiant sont MÊLÉS aux lignes de libtest : un
+        # programme qui imprime « FAILED » (p. ex. `println!("{}", if ok {"OK"} else {"FAILED"})`)
+        # déclenchait le recoupement. Le cas est refusé — on ne peut pas distinguer —, mais
+        # l'événement ne doit plus porter d'accusation côté Java (cf. isSuspicious).
+        out = ("running 2 tests\n"
+               "test moodit_tests::d ... FAILED\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... ok\n"
+               "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(0, out)
+        self.assertFalse(passed)
+        self.assertIsNotNone(incoherence)
+
     def test_sommaire_annonce_moins_de_tests_que_demarres(self):
         # Forgeur qui sort tôt : trois tests démarrés, deux annoncés.
         out = ("running 3 tests\n"

@@ -203,23 +203,33 @@ def random_identifier(rng, min_len=5, max_len=16):
 
 
 def junit_selection(case_index):
-    """Cas canari : SA classe seulement ; cas réel : tout le classpath."""
+    """Classes à exécuter : celle du canari, sinon celles du harnais du prof. Sans information
+    exploitable, on retombe sur le balayage complet (comportement d'origine)."""
     name = CANARY_NAMES.get(case_index)
-    return ["--select-class=" + name] if name else ["--scan-class-path"]
+    if name:
+        return ["--select-class=" + name]
+    types = HARNESS_TYPES.get(case_index) or []
+    return [("--select-class=" + t) for t in types] if types else ["--scan-class-path"]
 
 
 def nunit_selection(case_index):
-    """Cas canari : SA classe seulement (NUnitLite `--test=`)."""
+    """Idem pour NUnitLite (`--test=` accepte plusieurs occurrences)."""
     name = CANARY_NAMES.get(case_index)
-    return ["--test=" + name] if name else []
+    if name:
+        return ["--test=" + name]
+    return [("--test=" + t) for t in (HARNESS_TYPES.get(case_index) or [])]
 
 
 def libtest_selection(case_index):
-    """Cas canari : son test ET celui du jeton (libtest accepte plusieurs filtres --exact)."""
+    """Canari : son test et celui du jeton (filtres --exact). Cas réel : les modules du
+    harnais (filtres par préfixe) et le jeton — sans --exact, libtest filtre par sous-chaîne."""
     name = CANARY_NAMES.get(case_index)
-    if not name:
+    if name:
+        return ["--exact", "m%s::t%s" % (name, name), "zzzz_moodit_jeton::zzzz_jeton"]
+    types = HARNESS_TYPES.get(case_index) or []
+    if not types:
         return []
-    return ["--exact", "m%s::t%s" % (name, name), "zzzz_moodit_jeton::zzzz_jeton"]
+    return [("%s::" % t) for t in types] + ["zzzz_moodit_jeton::"]
 
 
 def canary_reserve_seconds(budget_s, timeout_s):
@@ -512,6 +522,12 @@ class CaseOutcome:
 # toujours au chargement : le forgeage qu'il s'agit d'attraper reste détecté.
 CANARY_NAMES = {}
 
+# Conteneurs de tests déclarés par le HARNAIS du prof, par index de cas (Java/C#/Rust).
+# Même raison que CANARY_NAMES : le code étudiant est compilé dans la même unité, donc SES
+# tests unitaires étaient exécutés et comptés dans le verdict du cas réel — un test d'étudiant
+# simplement faux mettait la question à 0. Liste vide = on exécute tout (comportement d'origine).
+HARNESS_TYPES = {}
+
 # Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
 TOKENS = {}
 
@@ -692,8 +708,10 @@ def run_go(case_dir, env, timeout_s, case_index):
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     ran_tests = len(re.findall(r"^=== RUN\s", stdout, re.M))
     coherent = re.search(r"^PASS$", stdout, re.M) is not None and ran_tests > 0
-    failed = (re.search(r"^--- FAIL", stdout, re.M) is not None
-              or re.search(r"^FAIL$", stdout, re.M) is not None)
+    # Ancré sur la ligne de libtest (« --- FAIL: TestX (0.00s) ») : un « FAIL » nu imprimé
+    # par le programme de l'étudiant faisait échouer un cas honnête. Un vrai échec donne de
+    # toute façon un code de sortie non nul, déjà exigé ci-dessous.
+    failed = re.search(r"^--- FAIL: \S", stdout, re.M) is not None
     passed = exit_code == 0 and coherent and not failed
     if exit_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire PASS de go test")
@@ -1021,6 +1039,7 @@ def main():
     for case in cases:
         case_dir = os.path.join(BOX, "cases", str(case["index"]))
         TOKENS[case["index"]] = str(rng.randrange(10**12, 10**13))
+        HARNESS_TYPES[case["index"]] = case.get("harness_types") or []
         subst = {"__MOODIT_T__": TOKENS[case["index"]]}
         if case.get("canary"):
             # Nom du test canari randomisé (identifiant valide, majuscule en tête pour
