@@ -39,6 +39,13 @@ public class DockerEvaluator {
      * atteindre le plafond MAX_WALL_MS (15 min) — limite assumée, documentée dans le README.
      */
     private static final long COMPILE_BUDGET_MS = 90_000;
+    /**
+     * Budget de l'inventaire `--list` du superviseur (Rust) — miroir de son LIST_TIMEOUT_S.
+     * C'est un run étudiant de plus dans le même cas : sans ce terme, le pire cas d'un cas
+     * Rust dépassait ce que l'invariant ci-dessous budgète, et un cas lancé juste avant
+     * l'échéance se faisait tuer au mur — tous les verdicts du job perdus.
+     */
+    private static final long LIST_BUDGET_MS = 5_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
     /**
@@ -200,7 +207,7 @@ public class DockerEvaluator {
         // avant l'échéance doit pouvoir aller jusqu'au bout (compilation + run) ET laisser le
         // temps d'imprimer le JSON. Une marge fixe plus courte qu'un cas laissait une fenêtre
         // où le conteneur était tué au mur — tout le travail perdu, 502, tentative supprimée.
-        long perCase = perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS;
+        long perCase = perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS + LIST_BUDGET_MS;
         long wallCandidate = BASE_OVERHEAD_MS + (cases.size() + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
         long wall = Math.min(cap, wallCandidate);

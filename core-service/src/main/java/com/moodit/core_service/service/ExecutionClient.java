@@ -60,7 +60,7 @@ public class ExecutionClient {
      *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris) ;</li>
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
      *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + 90 s de
-     *       compilation par cas)).</li>
+     *       compilation par cas + 5 s d'inventaire {@code --list})).</li>
      * </ul>
      * Surestimer est sans danger (la correction tourne en tâche de fond) ; sous-estimer supprime
      * la tentative d'un étudiant pendant une correction encore en cours — le bug de #216.
@@ -76,7 +76,9 @@ public class ExecutionClient {
         if (compiled(language)) {
             // UN conteneur pour tout le job (une seule attente de file, une seule place) :
             // miroir du mur de DockerEvaluator — 30 s de base + (N cas + 2 canaris) ×
-            // (run planché VM + 10 s de marge + 90 s de compilation par cas).
+            // (run planché VM + 10 s de marge + 90 s de compilation par cas + 5 s d'inventaire).
+            // CHAQUE terme du perCase serveur doit avoir son miroir ici : il est multiplié par
+            // le nombre de cas, donc en oublier un creuse un écart proportionnel.
             long cases = (Math.max(pistonCalls, 2) + 2L) / 2;   // unités 2N+2 → N+2
             long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
             // Plafonné par le MUR du serveur (DockerEvaluator.MAX_WALL_MS) : au-delà, le
@@ -84,13 +86,15 @@ public class ExecutionClient {
             // de ~3 h pendant lesquelles un fil @Async serait resté épinglé si le démon se
             // bloquait sans fermer la socket.
             long serverWall = Math.min(EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS
-                    + COMPILE_SLACK_MS), EVAL_MAX_WALL_MS);
-            return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS;
+                    + COMPILE_SLACK_MS + LIST_SLACK_MS), EVAL_MAX_WALL_MS);
+            return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS
+                    + CONTAINER_LIFECYCLE_MS;
         }
         // Interprétés/SQL/vues : UNE place et UN conteneur PAR UNITÉ — chaque unité paie
         // l'attente de file et le mur du runner (75 s, miroir de WALL_OVERHEAD_MS : démarrage
         // du conteneur et compilation exec, tsc compris) en plus de son temps limite.
-        long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS) + EXEC_WALL_SLACK_MS;
+        long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS)
+                + EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS;
         return baseReadTimeoutMs
                 + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs);
     }
@@ -114,8 +118,25 @@ public class ExecutionClient {
     /** Budget de compilation PAR CAS — miroir de {@code COMPILE_TIMEOUT_S} du superviseur. */
     private static final long COMPILE_SLACK_MS = 90_000;
 
+    /**
+     * Inventaire {@code --list} PAR CAS (Rust) — miroir de {@code LIST_BUDGET_MS} de
+     * DockerEvaluator et de {@code LIST_TIMEOUT_S} du superviseur. Ce terme est PROPORTIONNEL
+     * au nombre de cas : l'omettre rendait le miroir plus court que le mur réel, et le read
+     * timeout expirait pendant une notation encore en cours — le bug de #216.
+     */
+    private static final long LIST_SLACK_MS = 5_000;
+
     /** Mur maximal d'un conteneur de notation — miroir de {@code DockerEvaluator.MAX_WALL_MS}. */
     private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
+
+    /**
+     * Cycle de vie du conteneur HORS mur, par unité de travail : création, copie du job,
+     * démarrage, suppression, et surtout la collecte des logs — {@code DockerSandbox} l'attend
+     * jusqu'à 30 s APRÈS le mur. Sans ce miroir, l'invariant « budget client ≥ pire cas
+     * serveur » était faux au sens strict, et un flux de logs qui traîne pouvait faire
+     * abandonner une correction encore en cours (le défaut de #216).
+     */
+    private static final long CONTAINER_LIFECYCLE_MS = 35_000;
 
     /** Plancher VM du superviseur (JVM/mono froids) — miroir du mode evaluate. */
     private static final long VM_FLOOR_MS = 10_000;

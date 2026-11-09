@@ -521,6 +521,244 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void un_code_faux_echoue_meme_avec_des_tests_etudiants(/* contrôle négatif */) {
+        require("Rust");
+        // CONTRÔLE NÉGATIF du test précédent : même forme, mais le code étudiant est FAUX.
+        // Sans lui, un filtrage qui écarterait AUSSI les tests du prof laisserait le cas
+        // « réussi » et le test positif resterait vert — c'est ce trou qui a laissé passer
+        // deux notes pleines sur du code arbitrairement faux.
+        String faux = """
+                pub fn doubler(n: i32) -> i32 { n * 3 }
+                fn main() {}
+
+                #[cfg(test)]
+                mod tests {
+                    use super::*;
+                    #[test]
+                    fn mon_test_a_moi() { assert_eq!(doubler(2), 6); }
+                }
+                """;
+        List<TestResult> results = evaluate("Rust", faux, """
+                #[cfg(test)]
+                mod moodit_tests {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void module_etudiant_court_ne_peut_pas_ecarter_le_harnais() {
+        require("Rust");
+        // « --skip s:: » filtre par SOUS-CHAÎNE : il écarterait « harnais::… ». Le nom est
+        // neutralisé à l'assemblage, et l'invariant « un test du harnais a tourné » le
+        // rattraperait de toute façon.
+        String faux = """
+                pub fn doubler(n: i32) -> i32 { n * 3 }
+                fn main() {}
+
+                #[cfg(test)]
+                mod s {
+                    use super::*;
+                    // Test PERSONNEL qui RÉUSSIT : sans lui, le cas échouerait de toute façon
+                    // faute de test à faire passer, et le contrôle ne distinguerait pas
+                    // « le harnais a tourné » de « aucun test n'a tourné ».
+                    #[test]
+                    fn le_mien_passe() { assert_eq!(doubler(1), 3); }
+                }
+                """;
+        List<TestResult> results = evaluate("Rust", faux, """
+                #[cfg(test)]
+                mod harnais {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void nom_du_harnais_cite_en_commentaire_ne_l_ecarte_pas() {
+        require("C#");
+        // L'extraction est textuelle sur un texte que l'étudiant contrôle : citer le nom du
+        // harnais dans un commentaire ferait sinon exclure les tests du prof — et NUnit
+        // renvoyait « Passed » alors qu'AUCUN test n'avait tourné.
+        String faux = """
+                /*
+                public class Harnais
+                */
+                public class Solution { public static int Doubler(int n) { return n * 3; } }
+
+                // Test PERSONNEL qui RÉUSSIT : le cas ne peut devenir vert que si un test du
+                // HARNAIS a réellement tourné, pas simplement « un test quelconque ».
+                public class MesTestsAMoi {
+                    [NUnit.Framework.Test] public void Mien() {
+                        NUnit.Framework.Assert.That(Solution.Doubler(1), NUnit.Framework.Is.EqualTo(3));
+                    }
+                }
+                """;
+        List<TestResult> results = evaluate("C#", faux, """
+                using NUnit.Framework;
+                public class Harnais {
+                    [Test] public void D() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void harnais_non_identifie_execute_quand_meme_ses_tests() {
+        require("C#");
+        // Harnais déclaré avec son attribut SUR LA MÊME LIGNE : la regex ne le capte pas.
+        // Aucune exclusion n'est alors appliquée — ses tests tournent, et le code faux échoue.
+        // C'est ce qui rend l'extraction non critique pour l'INTÉGRITÉ de la note.
+        String faux = """
+                public class Solution { public static int Doubler(int n) { return n * 3; } }
+
+                public class MesTestsAMoi {
+                    [NUnit.Framework.Test] public void Mien() {
+                        NUnit.Framework.Assert.That(Solution.Doubler(1), NUnit.Framework.Is.EqualTo(3));
+                    }
+                }
+                """;
+        List<TestResult> results = evaluate("C#", faux, """
+                using NUnit.Framework;
+                [TestFixture] public class Harnais {
+                    [Test] public void D() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void listing_tronque_ne_fait_pas_sauter_le_harnais() {
+        require("Rust");
+        // ATTAQUE : noyer `--list` sous assez de tests pour que sa sortie soit tronquée au
+        // MILIEU — là où tombe le harnais. Le filtre bâti sur ce listing l'écartait, et seuls
+        // les tests de l'étudiant tournaient : note pleine sur un code faux.
+        StringBuilder faux = new StringBuilder("pub fn doubler(n: i32) -> i32 { n * 3 }\nfn main() {}\n");
+        String nomLong = "t".repeat(200);
+        for (String module : new String[] {"aaa", "zzz"}) {
+            faux.append("#[cfg(test)]\nmod ").append(module).append(" {\n    use super::*;\n");
+            for (int i = 0; i < 160; i++) {
+                faux.append("    #[test]\n    fn ").append(nomLong).append(i)
+                        .append("() { assert_eq!(doubler(1), 3); }\n");
+            }
+            faux.append("}\n");
+        }
+        List<TestResult> results = evaluate("Rust", faux.toString(), """
+                #[cfg(test)]
+                mod moodit_tests {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void harnais_java_non_identifie_execute_quand_meme_ses_tests() {
+        require("Java");
+        // ATTAQUE : le harnais porte une annotation, donc la regex (ancrée sur les
+        // modificateurs) ne le capte pas ; l'étudiant cite son nom en commentaire pour le
+        // faire exclure et garde un test personnel QUI RÉUSSIT pour satisfaire le comptage.
+        String faux = """
+                /*
+                class MooditHarness
+                */
+                public class Solution {
+                    public static int doubler(int n) { return n * 3; }
+                }
+                """;
+        List<TestResult> results = evaluate("Java", faux, """
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.*;
+
+                @SuppressWarnings("all")
+                class MooditHarness {
+                    @Test void d() { assertEquals(10, Solution.doubler(5)); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void harnais_rust_non_identifie_execute_quand_meme_ses_tests() {
+        require("Rust");
+        // Même attaque en Rust : `#[cfg(test)] mod harnais {` sur une seule ligne échappe à la
+        // regex, et l'étudiant cite « mod harnais » en commentaire.
+        String faux = """
+                pub fn doubler(n: i32) -> i32 { n * 3 }
+                fn main() {}
+                /*
+                mod harnais
+                */
+                #[cfg(test)]
+                mod a_moi {
+                    use super::*;
+                    #[test]
+                    fn le_mien_passe() { assert_eq!(doubler(1), 3); }
+                }
+                """;
+        List<TestResult> results = evaluate("Rust", faux, """
+                #[cfg(test)] mod harnais {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(super::doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void harnais_java_a_classe_de_test_imbriquee_note_correctement() {
+        require("Java");
+        // JUnit rapporte un @Nested sous « Harnais$Cas » : sans tolérer l'imbrication,
+        // l'invariant « un test du harnais a tourné » notait 0 TOUS les étudiants sur ce
+        // harnais pourtant idiomatique. Code étudiant CORRECT → doit RÉUSSIR.
+        List<TestResult> results = evaluate("Java", """
+                public class Solution {
+                    public static int doubler(int n) { return n * 2; }
+                }
+                """, """
+                import org.junit.jupiter.api.Nested;
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.*;
+
+                class Harnais {
+                    @Nested
+                    class Cas {
+                        @Test void doubler5() { assertEquals(10, Solution.doubler(5)); }
+                    }
+                }
+                """);
+        assertThat(results.get(0).passed()).isTrue();
+    }
+
+    @Test
+    void harnais_rust_a_tests_racine_note_correctement() {
+        require("Rust");
+        // Harnais qui déclare un module d'aide ET ses #[test] au niveau racine : ces tests
+        // sont rapportés sous le nom de leur fonction, pas sous un module. Code étudiant
+        // CORRECT → doit RÉUSSIR.
+        List<TestResult> results = evaluate("Rust", """
+                pub fn doubler(n: i32) -> i32 { n * 2 }
+                fn main() {}
+                """, """
+                mod aides { pub const ATTENDU: i32 = 10; }
+
+                #[cfg(test)]
+                #[test]
+                fn doubler5() { assert_eq!(crate::doubler(5), aides::ATTENDU); }
+                """);
+        assertThat(results.get(0).passed()).isTrue();
+    }
+
+    @Test
     void tester_public_note_vraiment_les_cas() {
         require("Go");
         // Chemin PUBLIC (« Tester » du prof) : mur plafonné à PUBLIC_WALL_MS. Aucun test ne
@@ -630,7 +868,9 @@ class DockerRunnerIntegrationTest {
                     public void Doubler5() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
                 }
                 """);
+        // Le rapport forgé n'annonce AUCUN test exécuté (« total ») : le cas est refusé avant
+        // même le contrôle du jeton. On exige le refus, sans figer quel filet a mordu.
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("jeton");
+        assertThat(results.get(0).detail()).isNotBlank();
     }
 }

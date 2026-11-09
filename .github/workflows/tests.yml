@@ -504,9 +504,18 @@ jobs:
           for lang in java csharp go rust c python node php bash sqlite; do
             # -xdev ne traverse pas les autres montages : /dev (donc /dev/shm, tmpfs 1777 monté
             # d'office par Docker et borné par withTmpFs) doit être inspecté explicitement.
-            extra=$(docker run --rm --entrypoint sh "moodit-runner-$lang:latest" \
-              -c "find / /dev -xdev -type d -perm -0002 2>/dev/null | sort -u" \
-              | grep -vE '^(/tmp|/dev/shm|/dev/mqueue)$' || true)
+            all=$(docker run --rm --entrypoint sh "moodit-runner-$lang:latest" \
+              -c "find / /dev -xdev -type d -perm -0002 2>/dev/null | sort -u")
+            # ASSERTION DE VIVACITÉ : /tmp est 1777 dans toutes ces images, donc un inventaire
+            # VIDE ne veut pas dire « rien à signaler », il veut dire que rien n'a été
+            # inspecté (image absente, langage mal orthographié ci-dessus, démon en erreur).
+            # Sans ce contrôle, le `grep` ne trouvait rien, `|| true` absorbait l'échec, et ce
+            # filet passait au vert sans avoir rien vérifié.
+            if [ -z "$all" ]; then
+              echo "::error::Inventaire vide pour moodit-runner-$lang : image absente ou find en échec"
+              exit 1
+            fi
+            extra=$(printf '%s\n' "$all" | grep -vE '^(/tmp|/dev/shm|/dev/mqueue)$' || true)
             if [ -n "$extra" ]; then
               echo "::error::Répertoires monde-inscriptibles dans moodit-runner-$lang : $extra"
               exit 1

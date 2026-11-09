@@ -84,12 +84,14 @@ pitest {
 	pitestVersion = "1.30.1"
 	junit5PluginVersion = "1.2.3"
 	targetClasses = setOf("com.moodit.execution_service.assembly.*", "com.moodit.execution_service.service.*", "com.moodit.execution_service.sandbox.*")
-	// DockerSandbox = enveloppe d'infra (client Docker) : couverte par DockerRunnerIntegrationTest
-	// (exclu de PIT comme toute intégration), pas par les tests unitaires → on ne la mute pas.
-	excludedClasses = setOf("com.moodit.execution_service.sandbox.DockerSandbox")
+	// DockerSandbox EST mutée : DockerSandboxTest la couvre en unitaire (DockerClient mocké, pas
+	// de démon) — tailles de tmpfs dérivées, mode 0600 du tar et ordre de la sentinelle, statuts
+	// filtrés du balayage des orphelins. Autant de décisions qui portent des propriétés de
+	// sécurité : les exclure rétrécissait le dénominateur du seuil de mutation sur du code neuf.
 	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest", "*DockerRunnerIntegrationTest")
 	threads = 4
 	outputFormats = setOf("XML", "HTML")
 	timestampedReports = false
-	mutationThreshold = 90 // seuil commun aux six services ; score mesuré le 2026-10-25 : 96 %
+	mutationThreshold = 90 // seuil commun aux six services ; mesuré le 2026-11-09 : 92 % (#116,
+	// DockerSandbox désormais incluse — la marge est de 2 points, soit ~9 mutations)
 }

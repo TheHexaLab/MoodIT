@@ -193,6 +193,18 @@ class RustVerdictTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("démarrés", incoherence)
 
+    def test_seul_le_jeton_a_tourne_est_refuse(self):
+        # Si un filtrage trop large écarte tous les tests du prof, il ne reste que le jeton :
+        # sommaire cohérent, exit 0, jeton présent — le cas était noté RÉUSSI sur un code
+        # arbitrairement faux. L'invariant « au moins deux tests » ferme ce trou.
+        out = ("running 1 test\n"
+               "test zzzz_moodit_jeton::zzzz_jeton ... [MOODIT] jeton=42\n"
+               "ok\n"
+               "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out\n")
+        passed, incoherence = supervisor.rust_verdict(0, out)
+        self.assertFalse(passed)
+        self.assertIn("jeton", incoherence)
+
     def test_exit_zero_sans_sommaire(self):
         passed, incoherence = supervisor.rust_verdict(0, "running 1 test\n")
         self.assertFalse(passed)
@@ -201,6 +213,145 @@ class RustVerdictTest(unittest.TestCase):
     def test_exit_non_nul_jamais_reussi(self):
         out = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
         self.assertEqual(supervisor.rust_verdict(1, out), (False, None))
+
+
+class SelectionTest(unittest.TestCase):
+    """Filtres d'exécution : un cas CANARI n'exécute que son test ; un cas RÉEL exécute tout
+    SAUF les conteneurs déclarés par l'étudiant. L'exclusion est un choix de sûreté — une
+    extraction incomplète réintroduit au pire l'ancien défaut d'équité, elle ne peut pas
+    n'exécuter aucun test du prof et accorder la note."""
+
+    def setUp(self):
+        supervisor.CANARY_NAMES.clear()
+        supervisor.STUDENT_TYPES.clear()
+
+    def test_cas_reel_exclut_les_types_de_l_etudiant(self):
+        supervisor.STUDENT_TYPES[0] = ["Solution", "MesTests"]
+        self.assertEqual(supervisor.junit_selection(0),
+                         ["--scan-class-path",
+                          "--exclude-classname=^Solution$", "--exclude-classname=^MesTests$"])
+        self.assertEqual(supervisor.nunit_selection(0),
+                         ["--where", "class != 'Solution' and class != 'MesTests'"])
+        self.assertEqual(supervisor.libtest_selection(0, ""), [])   # sans listing : pas de filtre
+
+    def test_rust_selectionne_par_nom_exact_depuis_le_listing(self):
+        listing = ("moodit_tests::d: test\n"
+                   "tests::x: test\n"
+                   "zzzz_moodit_jeton::zzzz_jeton: test\n\n3 tests, 0 benchmarks\n")
+        self.assertEqual(supervisor.libtest_listed_tests(listing),
+                         ["moodit_tests::d", "tests::x", "zzzz_moodit_jeton::zzzz_jeton"])
+        supervisor.STUDENT_TYPES[0] = ["tests"]
+        # « tests » et « moodit_tests » restent distincts : la comparaison porte sur le
+        # PREMIER SEGMENT, là où --skip aurait filtré les deux (sous-chaîne).
+        self.assertEqual(supervisor.libtest_selection(0, listing),
+                         ["--exact", "moodit_tests::d", "zzzz_moodit_jeton::zzzz_jeton"])
+
+    def test_rust_module_court_ne_filtre_pas_le_harnais(self):
+        listing = "harnais::d: test\ns::x: test\nzzzz_moodit_jeton::zzzz_jeton: test\n"
+        supervisor.STUDENT_TYPES[0] = ["s"]
+        self.assertEqual(supervisor.libtest_selection(0, listing),
+                         ["--exact", "harnais::d", "zzzz_moodit_jeton::zzzz_jeton"])
+
+    def test_rust_listing_forge_ne_peut_pas_injecter_une_option(self):
+        # Le run `--list` exécute déjà du code étudiant : sa sortie n'est pas digne de
+        # confiance. Une ligne forgée commençant par « - » deviendrait une OPTION de libtest
+        # dans l'argv et détournerait le filtre. Seuls des chemins de test Rust bien formés
+        # sont retenus.
+        forge = ("harnais::d: test\n"
+                 "--skip: test\n"
+                 "-Zunstable-options: test\n"
+                 "mes_tests::x: test\n")
+        # TOUT OU RIEN : on renonce au filtre entier. Ignorer la ligne en silence serait
+        # pire — la sélection est une LISTE BLANCHE, donc un nom écarté ne tournerait pas.
+        self.assertIsNone(supervisor.libtest_listed_tests(forge))
+        supervisor.STUDENT_TYPES[0] = ["mes_tests"]
+        self.assertEqual(supervisor.libtest_selection(0, forge), [])
+
+    def test_rust_nom_de_test_non_ascii_fait_renoncer_au_filtre(self):
+        # Rust accepte les identifiants non ASCII et bruts, et `--list` les imprime tels quels.
+        # Les écarter en silence aurait SAUTÉ ce test du harnais — sans que l'invariant
+        # « un test du harnais a tourné » s'en aperçoive, un seul lui suffisant.
+        for nom in ("moodit_tests::teste_données", "moodit_tests::r#match"):
+            listing = ("moodit_tests::ascii_ok: test\n%s: test\n"
+                       "zzzz_moodit_jeton::zzzz_jeton: test\n" % nom)
+            self.assertIsNone(supervisor.libtest_listed_tests(listing), nom)
+            supervisor.STUDENT_TYPES[0] = ["tests"]
+            self.assertEqual(supervisor.libtest_selection(0, listing), [], nom)
+
+    def test_rust_listing_tronque_pas_de_filtre(self):
+        # Un listing plafonné perd les tests du MILIEU : un filtre bâti dessus pouvait écarter
+        # le harnais à l'insu de tous. On renonce au filtre (l'invariant reste le garde-fou).
+        tronque = ("harnais::a: test\n… (sortie tronquée au milieu : 99999 octets)\n"
+                   "zzz::b: test\n")
+        supervisor.STUDENT_TYPES[0] = ["zzz"]
+        self.assertNotIn("--exact", supervisor.libtest_selection(0, ""))
+        self.assertEqual(supervisor.libtest_listed_tests(tronque),
+                         ["harnais::a", "zzz::b"])   # la troncature est repérée en amont
+
+    def test_rust_listing_illisible_pas_de_filtre(self):
+        supervisor.STUDENT_TYPES[0] = ["tests"]
+        self.assertEqual(supervisor.libtest_selection(0, ""), [])
+
+    def test_sans_type_extrait_aucun_filtre(self):
+        # Comportement d'origine : on exécute tout (défaut d'équité, jamais de note offerte).
+        supervisor.STUDENT_TYPES[0] = []
+        self.assertEqual(supervisor.junit_selection(0), ["--scan-class-path"])
+        self.assertEqual(supervisor.nunit_selection(0), [])
+        self.assertEqual(supervisor.libtest_selection(0), [])
+
+    def test_canari_n_execute_que_son_test(self):
+        supervisor.CANARY_NAMES[1] = "Abcdef"
+        supervisor.STUDENT_TYPES[1] = ["Solution"]
+        self.assertEqual(supervisor.junit_selection(1), ["--select-class=Abcdef"])
+        self.assertEqual(supervisor.nunit_selection(1), ["--test=Abcdef"])
+        self.assertEqual(supervisor.libtest_selection(1, ""),
+                         ["--exact", "mAbcdef::tAbcdef", "zzzz_moodit_jeton::zzzz_jeton"])
+
+    def test_nom_de_type_echappe_dans_la_regex_junit(self):
+        # Un point de nom qualifié ne doit pas devenir un joker de regex.
+        supervisor.STUDENT_TYPES[0] = ["devoir.un.Solution"]
+        self.assertEqual(supervisor.junit_selection(0),
+                         ["--scan-class-path", "--exclude-classname=^devoir\\.un\\.Solution$"])
+
+
+class HarnessRanTest(unittest.TestCase):
+    """L'INVARIANT DE SÛRETÉ de la notation : un cas n'est réussi que si au moins un test du
+    HARNAIS a réellement tourné. Un comptage anonyme ne suffisait pas — l'exclusion est bâtie
+    sur un texte que l'étudiant contrôle, et dès qu'elle emportait le harnais, un seul test
+    personnel survivant faisait noter « réussi » un code arbitrairement faux."""
+
+    def test_un_test_du_harnais_a_tourne(self):
+        self.assertTrue(supervisor.harness_ran(["Harnais", "MesTests"], ["Harnais"]))
+
+    def test_seuls_les_tests_de_l_etudiant_ont_tourne(self):
+        # Le cœur du défaut : des tests ont tourné, tous à l'étudiant, et ils passent.
+        self.assertFalse(supervisor.harness_ran(["MesTests"], ["Harnais"]))
+
+    def test_aucun_test_n_a_tourne(self):
+        self.assertFalse(supervisor.harness_ran([], ["Harnais"]))
+
+    def test_type_de_test_imbrique_appartient_au_harnais(self):
+        # JUnit rapporte un @Nested « Harnais$Cas », NUnit « Harnais+Cas », alors que le
+        # harnais ne déclare que « Harnais » au niveau racine. Sans tolérer l'imbrication,
+        # l'invariant notait 0 TOUS les étudiants sur ce harnais pourtant légitime.
+        self.assertEqual(supervisor.enclosing_type("Harnais$Cas"), "Harnais")
+        self.assertEqual(supervisor.enclosing_type("Devoir.Harnais+Cas"), "Devoir.Harnais")
+        self.assertTrue(supervisor.harness_ran(["Harnais$Cas"], ["Harnais"]))
+        self.assertTrue(supervisor.harness_ran(["Devoir.Harnais+Cas"], ["Devoir.Harnais"]))
+        # Tolérer l'imbrication ne rend pas l'invariant permissif pour autant.
+        self.assertFalse(supervisor.harness_ran(["MesTests$Cas"], ["Harnais"]))
+
+    def test_harnais_non_identifie_rien_a_verifier(self):
+        # Extraction en échec : aucune exclusion n'est appliquée, donc le harnais a tourné.
+        self.assertTrue(supervisor.harness_ran(["MesTests"], []))
+
+    def test_modules_executes_lus_dans_la_sortie_libtest(self):
+        out = ("running 2 tests\n"
+               "test harnais::d ... ok\n"
+               "test mes_tests::x ... FAILED\n"
+               "test result: FAILED. 1 passed; 1 failed; 0 ignored\n")
+        self.assertEqual(supervisor.libtest_ran_tests(out), ["harnais", "mes_tests"])
+        self.assertTrue(supervisor.harness_ran(supervisor.libtest_ran_tests(out), ["harnais"]))
 
 
 class CanaryReserveTest(unittest.TestCase):

@@ -37,7 +37,7 @@ compatible docker-outside-of-docker : aucun montage hôte), en mode `0600` root 
 | **Harnais illisible par l'étudiant** | sources `700` root après compilation, processus étudiant sous UID dédié → `EACCES` ; tentative **tracée** (`lecture_source_tentee`) | les constantes compilées dans les artefacts (binaire de test, `.class`) restent extractibles par un étudiant déterminé |
 | **Pas de fuite réseau** | `--network none` | — |
 | **Notation bornée dans le temps** | budget GLOBAL transmis au superviseur (mur du conteneur moins une marge, plafonné à **15 min**) : au-delà il CLÔT et renvoie les verdicts obtenus, les cas restants comptant « non exécuté » (`budget_depasse`) — le conteneur n'est plus tué au mur, ce qui perdait tout le travail et supprimait la tentative | une question à beaucoup de cas dont les compilations sont réellement lentes peut donc être notée partiellement ; le budget par cas (90 s de compilation) est très pessimiste par rapport au réel (quelques secondes) |
-| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box` (768 Mo) et `/tmp` (64 Mo), comptés dans la mémoire (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile — posés sur les DEUX chemins, strace compris ; l'UID étudiant est **tiré au sort par conteneur**, sans quoi RLIMIT_NPROC — compté par UID réel sur l'hôte — aurait été un budget COMMUN : un étudiant qui fork en boucle faisait échouer la notation d'un autre) + temps limite par cas (prof, max 60 s) + budget mural du conteneur | — |
+| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, comptés dans la mémoire et **dérivés de `SANDBOX_MEMORY_MB`** (60 % / 6 % / 2 %, planchers 256 / 32 / 16 Mo — `DockerSandbox.boxSizeMb/tmpSizeMb/shmSizeMb` ; en dur, ils pouvaient dépasser la mémoire allouée au conteneur) (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile — posés sur les DEUX chemins, strace compris ; l'UID étudiant est **tiré au sort par conteneur**, sans quoi RLIMIT_NPROC — compté par UID réel sur l'hôte — aurait été un budget COMMUN : un étudiant qui fork en boucle faisait échouer la notation d'un autre) + temps limite par cas (prof, max 60 s) + budget mural du conteneur | — |
 | **Isolation entre cas** | dossier par cas, groupe de processus tué au timeout, et **balayage des survivants UID étudiant entre deux cas** (un `fork` + `setsid` échappe au kill de groupe) | pendant UN cas, les processus étudiants du même cas partagent l'UID (ptrace entre eux possible selon le `ptrace_scope` de l'hôte) — sans portée inter-cas grâce au balayage |
 | **Détection** | événements remontés dans le détail des verdicts + logs serveur : `canari_incoherent` (fait échouer TOUTE la soumission), `lecture_source_tentee` et `lecture_binaire_tentee` (font échouer LE CAS — lire son binaire peut réussir, annoter ne suffisait pas), `jeton_absent`, `rapport_incoherent`, `trace_indisponible`, `erreur_superviseur` | l'acheminement vers le journal d'audit (Gardien) est un suivi |
 
@@ -48,7 +48,23 @@ est pédagogique (varier les cas).
 ## Protocole
 
 - `execution-service` construit l'arborescence (`HarnessProjects`) : `cases/<i>/src/…` par cas,
-  `job.json` (`{language, timeout_ms, cases:[{index, name} | {index, canary:"pass"|"fail"}]}`).
+  `job.json` (`{language, timeout_ms, budget_ms,
+  cases:[{index, name, harness_types, student_types} | {index, canary:"pass"|"fail"}]}`).
+  - `budget_ms` : temps total que le superviseur s'accorde pour l'ensemble des cas. Il le teste
+    AVANT de démarrer un cas ; au-delà, les cas restants sont rendus « non exécuté ».
+  - `harness_types` : conteneurs de tests déclarés par le HARNAIS (classes Java/C#, modules
+    Rust), en nom pleinement qualifié. Ils portent l'INVARIANT DE NOTATION : un cas n'est
+    « réussi » que si au moins un test exécuté leur appartient. Liste vide = harnais non
+    identifié : aucune exclusion n'est appliquée, donc tous ses tests tournent et l'invariant
+    est satisfait par construction.
+  - `student_types` : conteneurs déclarés par le CODE ÉTUDIANT, EXCLUS de l'exécution — son
+    code est compilé dans la même unité que le harnais, donc ses propres tests unitaires
+    étaient comptés dans son verdict. L'extraction est textuelle sur un texte qu'il contrôle :
+    elle ne joue que sur l'ÉQUITÉ, jamais sur l'intégrité de la note, que garde l'invariant
+    ci-dessus. En Rust, l'exclusion passe par une sélection `--exact` bâtie sur un inventaire
+    `--list` préalable (un run étudiant de plus, borné à `LIST_TIMEOUT_S` = 5 s et budgété en
+    miroir par `DockerEvaluator.LIST_BUDGET_MS` et `ExecutionClient.LIST_SLACK_MS`) ; un
+    inventaire tronqué ou mal formé fait renoncer au filtre.
 - Les harnais canaris contiennent `__MOODIT_A__`/`__MOODIT_B__`, substitués par le superviseur
   avec des valeurs aléatoires AU RUNTIME (introuvables dans l'archive).
 - Réponse (stdout) : `{"v":1, "results":[{index, name, passed, detail, ms}], "events":[…],

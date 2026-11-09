@@ -78,6 +78,8 @@ public final class HarnessProjects {
                     .append(",\"name\":").append(jsonString(testCase.name()))
                     .append(",\"harness_types\":")
                     .append(jsonArray(harnessTypes(lang, testCase.harnessCode())))
+                    .append(",\"student_types\":")
+                    .append(jsonArray(safeStudentTypes(lang, code, testCase.harnessCode())))
                     .append("}");
             index++;
         }
@@ -289,41 +291,118 @@ public final class HarnessProjects {
 
     // ── conteneurs de tests déclarés par le HARNAIS ───────────────────────────
 
+    // Types de NIVEAU RACINE uniquement (ancrés en colonne 0) : un type imbriqué ou annoté
+    // @Nested n'est pas sélectionnable par son nom simple, et une sélection invalide fait
+    // échouer TOUTE la découverte (JUnit) ou n'exécute rien (NUnit).
     private static final Pattern JAVA_TYPE = Pattern.compile(
-            "(?m)^\\s*(?:public\\s+|final\\s+|abstract\\s+|static\\s+)*(?:class|record|enum)\\s+(\\w+)");
+            "(?m)^(?:public\\s+|final\\s+|abstract\\s+|sealed\\s+|non-sealed\\s+|strictfp\\s+)*"
+            + "(?:class|record|enum|interface)\\s+(\\w+)");
     private static final Pattern CSHARP_TYPE = Pattern.compile(
-            "(?m)^\\s*(?:public\\s+|internal\\s+|sealed\\s+|static\\s+|partial\\s+)*class\\s+(\\w+)");
-    private static final Pattern RUST_MOD = Pattern.compile("(?m)^\\s*(?:pub\\s+)?mod\\s+(\\w+)");
+            "(?m)^\\s{0,4}(?:public\\s+|internal\\s+|sealed\\s+|static\\s+|partial\\s+|abstract\\s+)*"
+            + "class\\s+(\\w+)");
+    private static final Pattern RUST_MOD = Pattern.compile("(?m)^\\s{0,4}(?:pub\\s+)?mod\\s+(\\w+)");
+    /** {@code package a.b;} (Java) ou {@code namespace a.b} / {@code namespace a.b;} (C#). */
+    private static final Pattern JAVA_PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
+    private static final Pattern CSHARP_NAMESPACE = Pattern.compile("(?m)^\\s*namespace\\s+([\\w.]+)");
 
     /**
-     * Noms des classes (Java, C#) ou modules (Rust) déclarés par le HARNAIS DU PROF. Le
-     * superviseur s'en sert pour n'exécuter QUE ces tests : le code étudiant est compilé dans
-     * la même unité (c'est ce qui donne l'accès aux membres privés), donc ses PROPRES tests
-     * unitaires — idiome courant, souvent copié d'un tutoriel — étaient découverts et comptés
-     * dans le verdict. Un test d'étudiant simplement faux mettait alors toute la question à 0.
+     * Noms PLEINEMENT QUALIFIÉS des classes (Java, C#) ou modules (Rust) déclarés par le CODE
+     * ÉTUDIANT. Le superviseur les EXCLUT de l'exécution : le code étudiant est compilé dans
+     * la même unité que le harnais (c'est ce qui donne l'accès aux membres privés), donc ses
+     * PROPRES tests unitaires — idiome courant, souvent copié d'un tutoriel — étaient
+     * découverts et comptés dans le verdict. Un test d'étudiant simplement faux mettait alors
+     * toute la question à 0.
      *
-     * <p>Liste vide = on n'a rien su extraire : le superviseur exécute alors tout, comme avant
-     * (on préfère le comportement d'origine à un cas non noté). Go et C/C++ ne sont pas
-     * concernés : un {@code TestXxx} de l'étudiant dans {@code main.go} n'est pas un test de
-     * {@code go test}, et {@code MOODIT_TEST} n'est pas défini quand son fichier est compilé.
+     * <p>EXCLURE plutôt que SÉLECTIONNER est un choix de sûreté : si l'extraction manque une
+     * forme, les tests de l'étudiant comptent à nouveau (le défaut d'équité d'origine, visible
+     * et corrigeable), là où une sélection incomplète pouvait n'exécuter AUCUN test du prof et
+     * accorder la note pleine. Une liste vide revient donc au comportement d'avant ce filtre.
+     *
+     * <p>Go et C/C++ ne sont pas concernés : un {@code TestXxx} de l'étudiant dans
+     * {@code main.go} n'est pas un test de {@code go test}, et {@code MOODIT_TEST} n'est pas
+     * défini quand son fichier est compilé.
      */
-    static List<String> harnessTypes(String runnerLanguage, String harnessCode) {
-        String code = harnessCode == null ? "" : harnessCode;
-        Pattern pattern = switch (runnerLanguage) {
-            case "java" -> JAVA_TYPE;
-            case "csharp" -> CSHARP_TYPE;
-            case "rust" -> RUST_MOD;
-            default -> null;
-        };
+    static List<String> studentTypes(String runnerLanguage, String studentCode) {
+        String code = studentCode == null ? "" : studentCode;
+        Pattern pattern;
+        String prefix = "";
+        switch (runnerLanguage) {
+            case "java" -> {
+                pattern = JAVA_TYPE;
+                Matcher pkg = JAVA_PACKAGE.matcher(code);
+                prefix = pkg.find() ? pkg.group(1) + "." : "";
+            }
+            case "csharp" -> {
+                pattern = CSHARP_TYPE;
+                Matcher ns = CSHARP_NAMESPACE.matcher(code);
+                prefix = ns.find() ? ns.group(1) + "." : "";
+            }
+            case "rust" -> pattern = RUST_MOD;
+            default -> pattern = null;
+        }
         if (pattern == null) {
             return List.of();
         }
         List<String> names = new java.util.ArrayList<>();
         Matcher matcher = pattern.matcher(code);
         while (matcher.find()) {
-            names.add(matcher.group(1));
+            names.add(prefix + matcher.group(1));
         }
         return List.copyOf(names);
+    }
+
+    /** Un {@code #[test]} Rust déclaré au niveau RACINE du harnais (hors de tout module). */
+    private static final Pattern RUST_ROOT_TEST = Pattern.compile("(?m)^#\\[test\\]");
+
+    /**
+     * Conteneurs de tests du HARNAIS, tels que le superviseur les verra dans les rapports.
+     * Ils portent l'invariant « au moins un test du harnais a tourné ».
+     *
+     * <p>En Rust, un test est identifié par son MODULE. Si le harnais place des
+     * {@code #[test]} au niveau racine, ils seront rapportés sous le nom de leur fonction, qui
+     * n'est pas un module : l'invariant ne les reconnaîtrait pas et noterait 0 un code
+     * pourtant correct. Dans ce cas on renvoie une liste VIDE — aucune exclusion n'est alors
+     * appliquée, tous les tests tournent, et l'invariant est satisfait par construction. On
+     * perd l'équité sur cette forme de harnais, jamais la justesse de la note.
+     */
+    static List<String> harnessTypes(String runnerLanguage, String harnessCode) {
+        if ("rust".equals(runnerLanguage) && harnessCode != null
+                && RUST_ROOT_TEST.matcher(harnessCode).find()) {
+            return List.of();
+        }
+        return studentTypes(runnerLanguage, harnessCode);
+    }
+
+    /**
+     * Types de l'étudiant qu'on peut exclure SANS RISQUE d'écarter aussi un conteneur du
+     * harnais. L'extraction est purement textuelle sur un texte que l'étudiant contrôle : un
+     * commentaire {@code /* class Harnais *}{@code /} suffirait sinon à faire exclure les
+     * tests du prof. Et en Rust, {@code --skip} filtre par SOUS-CHAÎNE : un module nommé
+     * {@code s} écarterait {@code harnais::…}.
+     *
+     * <p>Un nom écarté ici revient simplement au défaut d'équité (les tests de l'étudiant
+     * comptent), jamais à une note offerte — qui reste par ailleurs impossible grâce à
+     * l'invariant « au moins un test du harnais a tourné » côté superviseur.
+     */
+    static List<String> safeStudentTypes(String runnerLanguage, String studentCode,
+            String harnessCode) {
+        List<String> harness = harnessTypes(runnerLanguage, harnessCode);
+        // Harnais NON identifié : aucune exclusion. Sans ses conteneurs, le superviseur ne
+        // peut pas vérifier qu'un de ses tests a tourné ; on exécute donc tout, ce qui le
+        // garantit par construction (au prix de l'équité, jamais de l'intégrité de la note).
+        if (harness.isEmpty()) {
+            return List.of();
+        }
+        List<String> safe = new java.util.ArrayList<>();
+        for (String candidate : studentTypes(runnerLanguage, studentCode)) {
+            // Le filtrage compare des noms EXACTS des deux côtés (regex ancrée en Java,
+            // égalité en C#, premier segment en Rust) : seule une coïncidence stricte avec un
+            // conteneur du harnais est dangereuse.
+            if (harness.stream().noneMatch(candidate::equals)) {
+                safe.add(candidate);
+            }
+        }
+        return List.copyOf(safe);
     }
 
     private static String jsonArray(List<String> values) {

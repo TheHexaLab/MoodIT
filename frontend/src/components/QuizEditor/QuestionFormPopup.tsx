@@ -10,6 +10,7 @@ import { TrashCan } from '../../assets/TrashCan';
 import { Check } from '../../assets/Check';
 import { ArrowRight } from '../../assets/ArrowRight';
 import { Spinner } from '../Spinner/Spinner';
+import { clampTimeoutSeconds } from './execTimeout';
 import {
   QUESTION_TYPE_LABELS,
   type Language,
@@ -135,6 +136,12 @@ export function QuestionFormBody({
   // DIXIÈME (format X.X, ≥ 0.1) au `blur`. `draft.totalScore` suit (0 tant que vide → bloque
   // l'enregistrement via canSave).
   const [pointsText, setPointsText] = useState<string>(String(initialDraft.totalScore));
+  // Tampon TEXTE du temps limite, comme pour les points : un <input type="number"> renvoie
+  // '' pour toute saisie intermédiaire invalide ('2.', '-', '1e'). Sans tampon, l'état repassait
+  // à undefined et le champ se vidait sous les doigts.
+  const [timeoutText, setTimeoutText] = useState<string>(
+    initialDraft.execTimeoutMs != null ? String(Math.round(initialDraft.execTimeoutMs / 1000)) : ''
+  );
   /** Mobile (associations) : index de la ligne active dont la flèche devient poubelle. */
   const [activeMatch, setActiveMatch] = useState<number | null>(null);
   const matchingListRef = useRef<HTMLDivElement>(null);
@@ -230,6 +237,9 @@ export function QuestionFormBody({
 
   /** Changement de type : on repart d'un brouillon vierge du type, en gardant énoncé + points. */
   function changeType(qType: QuestionType) {
+    // Le champ « Temps limite » est piloté par un tampon texte : le remettre à vide avec
+    // le brouillon, sinon il affichait une valeur qui n'était plus enregistrée.
+    setTimeoutText('');
     onDirty?.();
     setDraft((d) => ({ ...emptyQuestionDraft(qType), id: d.id, prompt: d.prompt, totalScore: d.totalScore }));
   }
@@ -613,25 +623,31 @@ export function QuestionFormBody({
             min={1}
             max={60}
             step={1}
-            value={draft.execTimeoutMs != null ? String(Math.round(draft.execTimeoutMs / 1000)) : ''}
+            value={timeoutText}
             onChange={(e) => {
-              const raw = e.target.value.trim();
-              const seconds = Number(raw);
-              // Borné DÈS la saisie (1-60 s, entier) : l'invariant ne dépend pas d'un blur qui
-              // pourrait ne jamais venir (le serveur reborne de toute façon).
+              // La frappe est conservée telle quelle (tampon texte) ; l'état ne reçoit qu'une
+              // valeur exploitable, bornée au blur comme le champ « Points ».
+              const raw = e.target.value;
+              setTimeoutText(raw);
+              const seconds = Number(raw.trim());
               patch({
                 execTimeoutMs:
-                  raw === '' || Number.isNaN(seconds)
+                  raw.trim() === '' || Number.isNaN(seconds)
                     ? undefined
-                    : Math.min(60, Math.max(1, Math.round(seconds))) * 1000,
+                    : clampTimeoutSeconds(seconds) * 1000,
               });
             }}
             onBlur={() => {
               // Borné comme à l'enregistrement (1 à 60 s, entier) : « Tester » utilise la même
               // valeur que la correction réelle — pas d'aperçu qui diverge (0 s, 120 s…).
-              if (draft.execTimeoutMs == null) return;
-              const seconds = Math.min(60, Math.max(1, Math.round(draft.execTimeoutMs / 1000)));
-              patch({ execTimeoutMs: seconds * 1000 });
+              if (timeoutText.trim() === '') {
+                patch({ execTimeoutMs: undefined });
+                return;
+              }
+              const seconds = Number(timeoutText.trim());
+              const clamped = Number.isNaN(seconds) ? null : clampTimeoutSeconds(seconds);
+              patch({ execTimeoutMs: clamped == null ? undefined : clamped * 1000 });
+              setTimeoutText(clamped == null ? '' : String(clamped));
             }}
           />
           <span className={styles.fieldHint}>{t.execTimeoutHint}</span>

@@ -1,3 +1,7 @@
+# NB (#116) : ce fichier NE FIXE PAS les bornes du sandbox (EXEC_MAX_CONCURRENT,
+# EXEC_MAX_PER_USER, SANDBOX_CPUS, SANDBOX_MEMORY_MB) : il retombe sur les défauts de
+# execution-service, calibrés pour le DEV et la pile e2e. Le déploiement réel les
+# surcharge dans docker-compose-hetzner.yml — les y modifier en même temps.
 services:
   postgres:
     image: postgres:16

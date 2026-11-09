@@ -124,8 +124,8 @@ class DockerEvaluatorTest {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         evaluator.evaluate("C++", "code", List.of(new TestCaseInput("t", "h", 1)), 5000);
         // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + 90 s de compilation PAR
-        // CAS — chaque cas recompile son harnais) = 345 s.
-        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(345_000L));
+        // CAS — chaque cas recompile son harnais — + 5 s d'inventaire `--list`) = 360 s.
+        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(360_000L));
     }
 
     @Test
@@ -134,11 +134,11 @@ class DockerEvaluatorTest {
         // Négatif (valeur stockée aberrante) : borné à 1 ms, puis PLANCHER VM (10 s — miroir
         // du superviseur, JVM froide) — le mur reste positif et couvre le temps réel accordé.
         evaluator.evaluate("Java", "code", List.of(new TestCaseInput("t", "h", 1)), -100_000);
-        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(360_000L));
+        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(375_000L));
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code", List.of(new TestCaseInput("t", "h", 1)), 999_999);
-        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(510_000L));
+        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(525_000L));
     }
 
     @Test

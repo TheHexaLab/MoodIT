@@ -56,6 +56,7 @@ STUDENT_UID = 1300
 STUDENT_GID = 1300
 READY_WAIT_S = 30
 COMPILE_TIMEOUT_S = 90
+LIST_TIMEOUT_S = 5              # inventaire `--list` : s'ajoute au pire cas, donc borné court
 DEFAULT_RUN_TIMEOUT_S = 10
 MAX_RUN_TIMEOUT_S = 60
 OUTPUT_CAP = 64 * 1024          # tronque ce qu'on relit des sorties capturées
@@ -203,33 +204,120 @@ def random_identifier(rng, min_len=5, max_len=16):
 
 
 def junit_selection(case_index):
-    """Classes à exécuter : celle du canari, sinon celles du harnais du prof. Sans information
-    exploitable, on retombe sur le balayage complet (comportement d'origine)."""
+    """Canari : SA classe seulement. Cas réel : tout le classpath, MOINS les classes
+    déclarées par l'étudiant (leurs tests ne doivent pas compter dans le verdict)."""
     name = CANARY_NAMES.get(case_index)
     if name:
         return ["--select-class=" + name]
-    types = HARNESS_TYPES.get(case_index) or []
-    return [("--select-class=" + t) for t in types] if types else ["--scan-class-path"]
+    selection = ["--scan-class-path"]
+    for student_type in STUDENT_TYPES.get(case_index) or []:
+        selection.append("--exclude-classname=^" + re.escape(student_type) + "$")
+    return selection
 
 
 def nunit_selection(case_index):
-    """Idem pour NUnitLite (`--test=` accepte plusieurs occurrences)."""
+    """Canari : SA classe seulement. Cas réel : filtre d'EXCLUSION des classes de l'étudiant
+    (`--where "class != A and class != B"`)."""
     name = CANARY_NAMES.get(case_index)
     if name:
         return ["--test=" + name]
-    return [("--test=" + t) for t in (HARNESS_TYPES.get(case_index) or [])]
-
-
-def libtest_selection(case_index):
-    """Canari : son test et celui du jeton (filtres --exact). Cas réel : les modules du
-    harnais (filtres par préfixe) et le jeton — sans --exact, libtest filtre par sous-chaîne."""
-    name = CANARY_NAMES.get(case_index)
-    if name:
-        return ["--exact", "m%s::t%s" % (name, name), "zzzz_moodit_jeton::zzzz_jeton"]
-    types = HARNESS_TYPES.get(case_index) or []
+    types = STUDENT_TYPES.get(case_index) or []
     if not types:
         return []
-    return [("%s::" % t) for t in types] + ["zzzz_moodit_jeton::"]
+    # Noms QUOTÉS : sans cela, un type étudiant nommé « and »/« or » produisait une
+    # expression invalide — NUnitLite sortait en erreur, sans XML, sur une soumission honnête.
+    return ["--where", " and ".join("class != '%s'" % t for t in types)]
+
+
+JETON_MODULE = "zzzz_moodit_jeton"
+
+
+def enclosing_type(container):
+    """Type ENGLOBANT d'un conteneur de tests rapporté par le framework. JUnit écrit un type
+    imbriqué « Harnais$Cas », NUnit « Harnais+Cas », alors que le harnais ne déclare que
+    « Harnais » au niveau racine. FONCTION PURE (testée)."""
+    return container.split("$")[0].split("+")[0]
+
+
+def harness_ran(executed_containers, harness_types):
+    """L'invariant de sûreté : au moins un test exécuté appartient-il au harnais ?
+    FONCTION PURE (testée). Harnais non identifié → rien à vérifier, donc True (aucune
+    exclusion n'a été appliquée dans ce cas, le harnais a forcément tourné).
+
+    La comparaison tolère l'IMBRICATION (`@Nested`, `[TestFixture]` interne) : seul
+    l'invariant est permissif, le filtrage d'exclusion reste par nom exact, donc l'intégrité
+    de la note n'est pas affaiblie."""
+    if not harness_types:
+        return True
+    expected = set(harness_types) | {enclosing_type(t) for t in harness_types}
+    return any(c in expected or enclosing_type(c) in expected for c in executed_containers)
+
+
+def libtest_ran_tests(stdout):
+    """Modules des tests réellement exécutés, d'après les lignes « test mod::nom ... ok »
+    de libtest (--nocapture). FONCTION PURE (testée)."""
+    modules = []
+    for line in stdout.splitlines():
+        match = re.match(r"^test ([\w:]+) \.\.\.", line.strip())
+        if match:
+            modules.append(match.group(1).split("::")[0])
+    return modules
+
+
+RUST_TEST_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def libtest_listed_tests(listing):
+    """Noms des tests d'un binaire libtest, depuis sa sortie `--list` (« mod::test: test »).
+    FONCTION PURE (testée).
+
+    Ces noms repartent dans l'ARGV du binaire. Or le run `--list` exécute déjà du code
+    étudiant (un constructeur de section d'initialisation tourne avant libtest), donc la
+    sortie n'est PAS digne de confiance : une ligne forgée commençant par « - » deviendrait
+    une OPTION de libtest et détournerait le filtre. On n'accepte donc que des chemins de test
+    Rust bien formés — un identifiant, éventuellement qualifié par « :: ».
+
+    TOUT OU RIEN : une seule ligne non conforme fait renvoyer None, et l'appelant renonce au
+    filtre. Ignorer la ligne en silence serait pire que ne rien filtrer : la sélection est une
+    LISTE BLANCHE, donc un nom écarté ici n'est pas exécuté du tout. Un harnais au nom de test
+    accentué (`fn teste_données`, naturel dans un projet francophone) ou en identifiant brut
+    (`r#match`) aurait ainsi vu ce test sauté, sans que l'invariant `harness_ran` s'en
+    aperçoive — il lui suffit d'UN test du harnais. Renoncer au filtre ne coûte que l'équité."""
+    names = []
+    for line in listing.splitlines():
+        line = line.strip()
+        if line.endswith(": test"):
+            name = line[: -len(": test")].strip()
+            if not RUST_TEST_PATH.match(name):
+                log("superviseur: nom de test libtest inattendu — filtre abandonné")
+                return None
+            names.append(name)
+    return names
+
+
+def libtest_selection(case_index, listing=""):
+    """Canari : son test et celui du jeton. Cas réel : sélection EXACTE de tous les tests qui
+    n'appartiennent pas à un module de l'étudiant.
+
+    On sélectionne par nom COMPLET plutôt que d'exclure par `--skip`, parce que `--skip`
+    filtre par SOUS-CHAÎNE : un module étudiant nommé `s` écartait « harnais::… » et il ne
+    restait que le jeton — cas noté réussi sur un code arbitrairement faux. Ici la
+    comparaison porte sur le PREMIER SEGMENT, donc `mod tests` (étudiant) et
+    `mod moodit_tests` (prof) ne se confondent plus."""
+    name = CANARY_NAMES.get(case_index)
+    if name:
+        return ["--exact", "m%s::t%s" % (name, name), JETON_MODULE + "::zzzz_jeton"]
+    excluded = {t for t in (STUDENT_TYPES.get(case_index) or []) if t != JETON_MODULE}
+    if not excluded:
+        return []
+    names = libtest_listed_tests(listing) or []
+    keep = [n for n in names if n.split("::")[0] not in excluded]
+    # Rien à retirer, ou rien à garder (listing illisible, tronqué ou refusé) : pas de filtre —
+    # au pire les tests de l'étudiant comptent dans son verdict, et l'invariant « un test du
+    # harnais a tourné » reste le garde-fou de l'intégrité de la note.
+    if not names or not keep or len(keep) == len(names):
+        return []
+    return ["--exact"] + keep
 
 
 def canary_reserve_seconds(budget_s, timeout_s):
@@ -522,10 +610,25 @@ class CaseOutcome:
 # toujours au chargement : le forgeage qu'il s'agit d'attraper reste détecté.
 CANARY_NAMES = {}
 
-# Conteneurs de tests déclarés par le HARNAIS du prof, par index de cas (Java/C#/Rust).
-# Même raison que CANARY_NAMES : le code étudiant est compilé dans la même unité, donc SES
-# tests unitaires étaient exécutés et comptés dans le verdict du cas réel — un test d'étudiant
-# simplement faux mettait la question à 0. Liste vide = on exécute tout (comportement d'origine).
+# Conteneurs de tests déclarés par le CODE ÉTUDIANT, par index de cas (Java/C#/Rust) : ils
+# sont EXCLUS de l'exécution. Le code étudiant est compilé dans la même unité que le harnais,
+# donc ses PROPRES tests unitaires étaient comptés dans le verdict — un test d'étudiant
+# simplement faux mettait la question à 0. Exclure plutôt que sélectionner est un choix de
+# SÛRETÉ : une extraction incomplète ne peut que réintroduire ce défaut d'équité, jamais
+# n'exécuter aucun test du prof et offrir la note. Liste vide = comportement d'origine.
+STUDENT_TYPES = {}
+
+# Conteneurs de tests déclarés par le HARNAIS, par index de cas. Ils portent l'invariant de
+# sûreté : pour qu'un cas soit RÉUSSI, au moins un test exécuté doit leur appartenir.
+#
+# Un comptage anonyme (« au moins un test a tourné ») ne suffisait pas : l'exclusion est
+# construite à partir d'un texte que l'ÉTUDIANT contrôle, et dès qu'elle emportait le harnais,
+# un seul test personnel survivant au filtre suffisait à faire noter le cas « réussi » sur un
+# code arbitrairement faux. Vérifier l'appartenance rend l'extraction non critique : elle
+# n'optimise que l'ÉQUITÉ, elle ne décide plus de l'intégrité de la note.
+#
+# Liste vide = harnais non identifié : aucune exclusion n'est appliquée (tous ses tests
+# tournent donc) et l'invariant n'a rien à vérifier.
 HARNESS_TYPES = {}
 
 # Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
@@ -617,30 +720,45 @@ def run_java(case_dir, env, timeout_s, case_index):
     reports = os.path.join(case_dir, "work", "reports")
     # Forme -cp + ConsoleLauncher (― pas `-jar`, qui fige le classpath au seul jar) et
     # --include-classname=.* : sans lui, seules les classes nommées *Test*/*Tests sont découvertes.
-    exit_code, t_out, stdout, stderr, trace = run_student(
-        ["java", "-XX:MaxRAMPercentage=50",
-         "-Djava.io.tmpdir=" + os.path.join(case_dir, "work", "tmp"),
-         # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime le
-         # jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
-         "-cp", junit + ":" + classes, "MooditMain",
-         "execute"] + junit_selection(case_index) + ["--include-classname=.*",
-         "--fail-if-no-tests", "--disable-banner", "--details=summary",
-         "--reports-dir", reports],
-        case_dir, env, timeout_s, "run")
+    def launch(selection):
+        shutil.rmtree(reports, ignore_errors=True)
+        return run_student(
+            ["java", "-XX:MaxRAMPercentage=50",
+             "-Djava.io.tmpdir=" + os.path.join(case_dir, "work", "tmp"),
+             # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime
+             # le jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
+             "-cp", junit + ":" + classes, "MooditMain",
+             "execute"] + selection + ["--include-classname=.*",
+             "--fail-if-no-tests", "--disable-banner", "--details=summary",
+             "--reports-dir", reports],
+            case_dir, env, timeout_s, "run")
+
+    def junit_report():
+        tests = failures = 0
+        xml_ok = False
+        containers = []
+        for report in glob.glob(os.path.join(reports, "TEST-*.xml")):
+            try:
+                root = ET.parse(report).getroot()
+                tests += int(root.get("tests", "0"))
+                failures += int(root.get("failures", "0")) + int(root.get("errors", "0"))
+                containers += [tc.get("classname") for tc in root.iter("testcase")
+                               if tc.get("classname")]
+                xml_ok = True
+            except (ET.ParseError, OSError):
+                pass
+        return tests, failures, xml_ok, containers
+
+    exit_code, t_out, stdout, stderr, trace = launch(junit_selection(case_index))
+    tests, failures, xml_ok, containers = (0, 0, False, []) if t_out else junit_report()
     scan_trace(trace, src, case_index)
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    tests = failures = 0
-    xml_ok = False
-    for report in glob.glob(os.path.join(reports, "TEST-*.xml")):
-        try:
-            root = ET.parse(report).getroot()
-            tests += int(root.get("tests", "0"))
-            failures += int(root.get("failures", "0")) + int(root.get("errors", "0"))
-            xml_ok = True
-        except (ET.ParseError, OSError):
-            pass
     passed = exit_code == 0 and xml_ok and tests > 0 and failures == 0
+    if passed and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
+        event("harnais_non_execute", case=case_index,
+              detail="aucun test du harnais n'a été exécuté")
+        return CaseOutcome(False, "Aucun test du harnais n'a été exécuté", ran=True), None
     if exit_code == 0 and (not xml_ok or tests == 0):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport JUnit exploitable")
     detail = None if passed else (first_lines(stdout, r"MethodSource|expected|Failures")
@@ -665,21 +783,31 @@ def run_csharp(case_dir, env, timeout_s, case_index):
     prep_run(case_dir, src)
     open_artifacts(exe)
     result_xml = os.path.join(case_dir, "work", "nunit.xml")
+
+    def nunit_report():
+        try:
+            root = ET.parse(result_xml).getroot()
+            # « total » = tests EXÉCUTÉS ; « testcasecount » = tests DÉCOUVERTS. Avec le
+            # second, un filtre qui écarte tout donnait result="Passed", testcasecount>0 et
+            # exit 0 : le cas était noté réussi alors qu'AUCUN test n'avait tourné.
+            containers = [tc.get("classname") for tc in root.iter("test-case")
+                          if tc.get("classname") and tc.get("result") in ("Passed", "Failed")]
+            return root.get("result") == "Passed", int(root.get("total", "0")), containers
+        except (ET.ParseError, OSError):
+            return None, 0, []
+
     exit_code, t_out, stdout, stderr, trace = run_student(
         ["mono", exe, "--result:" + result_xml] + nunit_selection(case_index),
         case_dir, env, timeout_s, "run")
+    xml_passed, total, containers = (None, 0, []) if t_out else nunit_report()
     scan_trace(trace, src, case_index)
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    xml_passed = None
-    total = 0
-    try:
-        root = ET.parse(result_xml).getroot()
-        xml_passed = root.get("result") == "Passed"
-        total = int(root.get("testcasecount", "0"))
-    except (ET.ParseError, OSError):
-        pass
     passed = exit_code == 0 and xml_passed is True and total > 0
+    if passed and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
+        event("harnais_non_execute", case=case_index,
+              detail="aucun test du harnais n'a été exécuté")
+        return CaseOutcome(False, "Aucun test du harnais n'a été exécuté", ran=True), None
     if exit_code == 0 and xml_passed is not True:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport NUnit « Passed »")
     detail = None if passed else (first_lines(stdout, r"Failed|Error|Exception")
@@ -732,9 +860,15 @@ RUST_SUMMARY = re.compile(
     r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored", re.M)
 
 
-def rust_verdict(exit_code, stdout):
+def rust_verdict(exit_code, stdout, min_tests=2):
     """Verdict d'un cas Rust — FONCTION PURE (couverte par test_supervisor.py).
     → (passed, incohérence ou None).
+
+    {@code min_tests} : nombre MINIMAL de tests exécutés. Le jeton en est un ; un cas réel
+    comme un canari en exécutent donc au moins DEUX. C'est l'invariant de sûreté qui ne dépend
+    pas de la qualité du filtrage : si une exclusion trop large écartait tous les tests du
+    prof, il ne resterait que le jeton — sommaire cohérent, exit 0, jeton présent — et le cas
+    aurait été noté RÉUSSI sur un code arbitrairement faux.
 
     Le jeton Rust est un simple #[test] : un test étudiant trié APRÈS lui (zzzzz_*) peut
     imprimer un sommaire « ok » forgé puis exit(0), alors que le jeton est déjà sorti et que
@@ -754,6 +888,9 @@ def rust_verdict(exit_code, stdout):
                                          int(summary.group(3)), int(summary.group(4)))
     if n_passed + n_failed == 0:
         return False, "exit 0 sans sommaire cargo test"
+    if n_passed + n_failed < min_tests:
+        return False, ("un seul test exécuté (le jeton) : aucun test du harnais n'a tourné — "
+                       "filtrage trop large ou harnais sans test")
     if RUST_FAILED.search(stdout) and n_failed == 0:
         return False, ("« FAILED » dans la sortie malgré un sommaire « 0 failed » — "
                        "sommaire forgé probable")
@@ -795,13 +932,38 @@ def run_rust(case_dir, env, timeout_s, case_index):
     prep_run(case_dir, src)
     os.chmod(tests_bin, 0o755)
     make_traversable(tests_bin, case_dir)
+    # Inventaire des tests du binaire (sous l'UID étudiant) : sert à sélectionner par nom
+    # exact ceux qui n'appartiennent pas à un module de l'étudiant.
+    listing = ""
+    if STUDENT_TYPES.get(case_index):
+        # Temps limite COURT : un inventaire honnête prend moins d'une seconde, et ce run
+        # s'ajoute au pire cas du cas. Avec le temps limite complet, un cas Rust pouvait
+        # coûter « compilation + 2 × perRun » alors que DockerEvaluator n'en budgète qu'un :
+        # un cas lancé juste avant l'échéance dépassait le mur du conteneur, et TOUS les
+        # verdicts du job étaient perdus. Un dépassement retombe proprement sur « pas de
+        # filtre » ci-dessous.
+        _, listing_timed_out, listing, _, listing_trace = run_student(
+            [tests_bin, "--list"], case_dir, env, min(timeout_s, LIST_TIMEOUT_S), "list")
+        # Ce run exécute du code étudiant (un constructeur .init_array tourne avant main) :
+        # sa trace doit être dépouillée comme celle de la notation, sinon une lecture du
+        # binaire ou des sources verrouillées s'y ferait sans lever d'événement.
+        scan_trace(listing_trace, src, case_index, binaries=(tests_bin,))
+        # Un listing TRONQUÉ (sortie plafonnée) perdrait les tests du milieu : construire un
+        # filtre dessus pouvait écarter le harnais sans qu'on le sache. On renonce alors au
+        # filtre — tous les tests tournent, l'équité est perdue mais pas l'intégrité.
+        if listing_timed_out or "sortie tronquée au milieu" in listing:
+            listing = ""
     exit_code, t_out, stdout, stderr, trace = run_student(
-        [tests_bin, "--test-threads=1", "--nocapture"] + libtest_selection(case_index),
+        [tests_bin, "--test-threads=1", "--nocapture"] + libtest_selection(case_index, listing),
         case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     passed, incoherence = rust_verdict(exit_code, stdout)
+    if passed and not harness_ran(libtest_ran_tests(stdout), HARNESS_TYPES.get(case_index) or []):
+        event("harnais_non_execute", case=case_index,
+              detail="aucun test du harnais n'a été exécuté")
+        return CaseOutcome(False, "Aucun test du harnais n'a été exécuté", ran=True), None
     if incoherence:
         event("rapport_incoherent", case=case_index, detail=incoherence)
     # --nocapture (requis pour le jeton) : les messages de panique partent sur STDERR au fil de
@@ -1039,6 +1201,7 @@ def main():
     for case in cases:
         case_dir = os.path.join(BOX, "cases", str(case["index"]))
         TOKENS[case["index"]] = str(rng.randrange(10**12, 10**13))
+        STUDENT_TYPES[case["index"]] = case.get("student_types") or []
         HARNESS_TYPES[case["index"]] = case.get("harness_types") or []
         subst = {"__MOODIT_T__": TOKENS[case["index"]]}
         if case.get("canary"):

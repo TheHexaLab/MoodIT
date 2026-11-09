@@ -137,10 +137,11 @@ class ExecutionClientTest {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // Par unité : attente de file (15 s) + max(20 s, temps limite + 5 s) + 75 s de mur
-        // du runner (miroir de WALL_OVERHEAD_MS : démarrage du conteneur, compilation exec).
-        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + 110_000);
-        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * 110_000);
-        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + 110_000);
+        // du runner (miroir de WALL_OVERHEAD_MS) + 35 s de cycle de vie du conteneur
+        // (création, copie, démarrage, collecte des logs — hors mur côté serveur).
+        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + 145_000);
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * 145_000);
+        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + 145_000);
     }
 
     @Test
@@ -150,22 +151,27 @@ class ExecutionClientTest {
 
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
         assertThat(client.readTimeoutMs("Python", 1, 60_000))
-                .isEqualTo(10_000 + (65_000 + 75_000 + 15_000));
+                .isEqualTo(10_000 + (65_000 + 75_000 + 35_000 + 15_000));
         // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
-        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 110_000);
+        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 145_000);
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
-        // (N + 2 canaris) × (run + 10 s + 90 s). 4 unités = 1 harnais → 3 cas.
+        // (N + 2 canaris) × (run + 10 s de marge + 90 s de compilation + 5 s d'inventaire
+        // `--list`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
+        // terme ajouté au perCase serveur doit apparaître ici, sinon le miroir est plus court
+        // que le mur réel et le read timeout expire pendant une notation en cours (#216).
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (60_000 + 10_000 + 90_000) + 5_000);
+                .isEqualTo(10_000 + 15_000 + 30_000
+                        + 3 * (60_000 + 10_000 + 90_000 + 5_000) + 5_000 + 35_000);
         // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
         assertThat(client.readTimeoutMs("Java", 4, 1_000))
-                .isEqualTo(10_000 + 15_000 + 30_000 + 3 * (10_000 + 10_000 + 90_000) + 5_000);
+                .isEqualTo(10_000 + 15_000 + 30_000
+                        + 3 * (10_000 + 10_000 + 90_000 + 5_000) + 5_000 + 35_000);
         // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
         assertThat(client.readTimeoutMs("Java", 202, 60_000))
-                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
         // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
         assertThat(client.readTimeoutMs("TypeScript", 2, null))
-                .isEqualTo(10_000 + 2 * 110_000);
+                .isEqualTo(10_000 + 2 * 145_000);
     }
 
     @Test

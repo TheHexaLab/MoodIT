@@ -173,22 +173,72 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void conteneurs_de_tests_du_harnais_declares_dans_le_job() {
-        // Le superviseur n'exécute que ces conteneurs : sans eux, les tests unitaires de
+    void types_du_code_etudiant_declares_dans_le_job() {
+        // Le superviseur EXCLUT ces conteneurs : sans cela, les tests unitaires de
         // l'étudiant (compilés dans la même unité) comptaient dans le verdict du cas réel.
-        assertThat(HarnessProjects.harnessTypes("java", "class MesTests { @Test void t() {} }"))
-                .containsExactly("MesTests");
-        assertThat(HarnessProjects.harnessTypes("csharp",
+        // Exclure plutôt que sélectionner : une extraction incomplète ne peut que
+        // réintroduire ce défaut, jamais n'exécuter aucun test du prof et offrir la note.
+        assertThat(HarnessProjects.studentTypes("java", "class Solution { }"))
+                .containsExactly("Solution");
+        assertThat(HarnessProjects.studentTypes("csharp",
                 "public class A { }\ninternal class B { }")).containsExactly("A", "B");
-        assertThat(HarnessProjects.harnessTypes("rust", "#[cfg(test)]\nmod moodit_tests { }"))
-                .containsExactly("moodit_tests");
+        assertThat(HarnessProjects.studentTypes("rust", "#[cfg(test)]\nmod mes_tests { }"))
+                .containsExactly("mes_tests");
         // Go et C/C++ : non concernés (un TestXxx de l'étudiant n'est pas un test `go test`).
-        assertThat(HarnessProjects.harnessTypes("go", "func TestA(t *testing.T) {}")).isEmpty();
-        assertThat(HarnessProjects.harnessTypes("c", "MOODIT_TEST(t) { }")).isEmpty();
-        // Rien d'extractible → liste vide : le superviseur exécute tout, comme avant.
-        assertThat(HarnessProjects.harnessTypes("java", "// vide")).isEmpty();
+        assertThat(HarnessProjects.studentTypes("go", "func TestA(t *testing.T) {}")).isEmpty();
+        assertThat(HarnessProjects.studentTypes("c", "MOODIT_TEST(t) { }")).isEmpty();
+        // Rien d'extractible → liste vide : aucune exclusion, comportement d'origine.
+        assertThat(HarnessProjects.studentTypes("java", "// vide")).isEmpty();
+
+        // Noms PLEINEMENT QUALIFIÉS et types de niveau racine seulement : un nom imbriqué
+        // ou non qualifié ne désignerait pas la bonne classe à l'exclusion.
+        assertThat(HarnessProjects.studentTypes("java",
+                "class Solution {\n    record Point(int x, int y) {}\n}"))
+                .containsExactly("Solution");
+        assertThat(HarnessProjects.studentTypes("java",
+                "package devoir.un;\n\npublic class Solution { }"))
+                .containsExactly("devoir.un.Solution");
+        assertThat(HarnessProjects.studentTypes("csharp",
+                "namespace Devoir;\npublic class Solution { }"))
+                .containsExactly("Devoir.Solution");
 
         assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
-                .get("job.json")).contains("\"harness_types\":[");
+                .get("job.json")).contains("\"student_types\":[");
+    }
+
+
+    @Test
+    void un_type_etudiant_qui_filtrerait_le_harnais_n_est_pas_exclu() {
+        // L'extraction est textuelle sur un texte que l'étudiant contrôle : un nom qui
+        // coïncide avec un conteneur du harnais (ou qui le filtrerait par sous-chaîne en
+        // Rust) est écarté — au pire ses tests comptent, jamais la note n'est offerte.
+        assertThat(HarnessProjects.safeStudentTypes("csharp",
+                "/*\npublic class Harnais\n*/\npublic class Solution { }",
+                "public class Harnais { }")).containsExactly("Solution");
+        assertThat(HarnessProjects.safeStudentTypes("java",
+                "class Harnais { }\nclass Solution { }", "class Harnais { }"))
+                .containsExactly("Solution");
+        // Rust : un module court n'a plus besoin d'être écarté — la sélection se fait par
+        // nom EXACT depuis `--list` (premier segment), « s » ne peut plus filtrer « harnais ».
+        assertThat(HarnessProjects.safeStudentTypes("rust",
+                "#[cfg(test)]\nmod s { }", "#[cfg(test)]\nmod harnais { }")).containsExactly("s");
+        assertThat(HarnessProjects.safeStudentTypes("rust",
+                "#[cfg(test)]\nmod mes_tests { }", "#[cfg(test)]\nmod harnais { }"))
+                .containsExactly("mes_tests");
+    }
+
+    @Test
+    void harnais_rust_avec_des_tests_racine_n_active_pas_l_exclusion() {
+        // En Rust un test est identifié par son MODULE : un #[test] au niveau racine
+        // serait rapporté sous le nom de sa fonction, que l'invariant ne reconnaîtrait
+        // pas → 0 pour un code correct. Liste vide = aucune exclusion, tous les tests
+        // tournent, l'invariant est satisfait par construction.
+        assertThat(HarnessProjects.harnessTypes("rust",
+                "mod aides { }\n#[test]\nfn d() { }")).isEmpty();
+        assertThat(HarnessProjects.safeStudentTypes("rust", "#[cfg(test)]\nmod a { }",
+                "mod aides { }\n#[test]\nfn d() { }")).isEmpty();
+        // Un #[test] INDENTÉ est dans un module : la forme normale reste exploitée.
+        assertThat(HarnessProjects.harnessTypes("rust",
+                "#[cfg(test)]\nmod harnais {\n    #[test]\n    fn d() { }\n}")).containsExactly("harnais");
     }
 }
