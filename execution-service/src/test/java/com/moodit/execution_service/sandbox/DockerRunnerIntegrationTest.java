@@ -449,6 +449,77 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void test_unitaire_de_l_etudiant_qui_echoue_n_accuse_pas() {
+        require("Rust");
+        // L'idiome Rust le plus répandu : l'étudiant garde son propre module de tests, copié
+        // d'un tutoriel, et SON test est faux. Ce test est découvert dans le cas CANARI (qui
+        // embarque le code étudiant) : s'il y fait échouer le canari « pass », toute la
+        // soumission est refusée avec « falsification probable » — alors qu'elle est honnête.
+        String code = """
+                pub fn doubler(n: i32) -> i32 { n * 2 }
+                fn main() {}
+
+                #[cfg(test)]
+                mod tests {
+                    use super::*;
+                    #[test]
+                    fn mon_test_a_moi() { assert_eq!(doubler(2), 5); }   // FAUX, mais honnête
+                }
+                """;
+        List<TestResult> results = evaluate("Rust", code, """
+                #[cfg(test)]
+                mod moodit_tests {
+                    use super::*;
+                    #[test]
+                    fn d() { assert_eq!(doubler(5), 10); }
+                }
+                """);
+        assertThat(results.get(0).detail() == null ? "" : results.get(0).detail())
+                .doesNotContain("falsification").doesNotContain("Incohérence");
+    }
+
+    @Test
+    void test_unitaire_de_l_etudiant_qui_echoue_n_accuse_pas_java_et_csharp() {
+        require("Java");
+        // Même scénario qu'en Rust : l'étudiant garde un @Test / [Test] à lui, qui échoue.
+        List<TestResult> java = evaluate("Java", """
+                public class Solution {
+                    static int doubler(int n) { return n * 2; }
+                }
+                class MesTests {
+                    @org.junit.jupiter.api.Test
+                    void aMoi() { org.junit.jupiter.api.Assertions.assertEquals(5, Solution.doubler(2)); }
+                }
+                """, """
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                class MooditHarness {
+                    @Test
+                    void doubler5() { assertEquals(10, Solution.doubler(5)); }
+                }
+                """);
+        assertThat(java.get(0).detail() == null ? "" : java.get(0).detail())
+                .doesNotContain("falsification").doesNotContain("Incohérence");
+
+        require("C#");
+        List<TestResult> cs = evaluate("C#", """
+                using NUnit.Framework;
+                public class Solution { public static int Doubler(int n) { return n * 2; } }
+                public class MesTests {
+                    [Test] public void AMoi() { Assert.That(Solution.Doubler(2), Is.EqualTo(5)); }
+                }
+                """, """
+                using NUnit.Framework;
+                public class MooditTests {
+                    [Test] public void Doubler5() { Assert.That(Solution.Doubler(5), Is.EqualTo(10)); }
+                }
+                """);
+        assertThat(cs.get(0).detail() == null ? "" : cs.get(0).detail())
+                .doesNotContain("falsification").doesNotContain("Incohérence");
+    }
+
+    @Test
     void tester_public_note_vraiment_les_cas() {
         require("Go");
         // Chemin PUBLIC (« Tester » du prof) : mur plafonné à PUBLIC_WALL_MS. Aucun test ne

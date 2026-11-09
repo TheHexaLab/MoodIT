@@ -202,15 +202,39 @@ def random_identifier(rng, min_len=5, max_len=16):
     return rng.choice(IDENT_FIRST) + "".join(rng.choice(IDENT_REST) for _ in range(length - 1))
 
 
+def junit_selection(case_index):
+    """Cas canari : SA classe seulement ; cas réel : tout le classpath."""
+    name = CANARY_NAMES.get(case_index)
+    return ["--select-class=" + name] if name else ["--scan-class-path"]
+
+
+def nunit_selection(case_index):
+    """Cas canari : SA classe seulement (NUnitLite `--test=`)."""
+    name = CANARY_NAMES.get(case_index)
+    return ["--test=" + name] if name else []
+
+
+def libtest_selection(case_index):
+    """Cas canari : son test ET celui du jeton (libtest accepte plusieurs filtres --exact)."""
+    name = CANARY_NAMES.get(case_index)
+    if not name:
+        return []
+    return ["--exact", "m%s::t%s" % (name, name), "zzzz_moodit_jeton::zzzz_jeton"]
+
+
 def canary_reserve_seconds(budget_s, timeout_s):
     """Part du budget global gardée pour les deux canaris — FONCTION PURE (testée).
 
     Le pire cas théorique (2 × compilation + run) peut DÉPASSER le budget lui-même : sur un
     appel public, le mur est plafonné à 4 min. Le réserver tel quel ne laissait plus de place
     au moindre cas réel — le « Tester » du prof ne notait plus rien. La réserve est donc
-    bornée au TIERS du budget : les canaris gardent une part garantie (un soumettant ne peut
-    pas les faire sauter pour neutraliser le contrôle), et les deux tiers restants suffisent
-    toujours à démarrer des cas réels."""
+    bornée au TIERS du budget : les canaris passent en priorité sur les cas réels, et les deux
+    tiers restants suffisent toujours à en démarrer. LIMITE ASSUMÉE : cette part peut rester
+    inférieure au pire cas des deux canaris (2 × (timeout + compilation)) — un premier canari
+    très lent peut donc déborder et faire sauter le second. Le verdict devient alors
+    « indetermines » (jamais une accusation), au prix d'un contrôle anti-falsification
+    affaibli ce coup-là : c'est un épuisement de budget, pas une porte ouverte — il faudrait
+    d'abord savoir forger le jeton (résiduel déjà assumé, cf. docker/runners/README.md)."""
     if budget_s <= 0:
         return 0.0
     return min(2.0 * (timeout_s + COMPILE_TIMEOUT_S), budget_s / 3.0)
@@ -480,6 +504,14 @@ class CaseOutcome:
         self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
 
 
+# Nom du test canari tiré au sort, par index de cas (vide pour un cas réel). Sert à
+# N'EXÉCUTER QUE LUI dans un cas canari : le code étudiant y est compilé, donc SES PROPRES
+# tests unitaires (idiome courant en Rust/Java/C#) étaient découverts et exécutés — un test
+# d'étudiant simplement FAUX faisait échouer le canari « pass », et toute la soumission était
+# refusée pour « falsification probable ». Les init/constructeurs du code étudiant tournent
+# toujours au chargement : le forgeage qu'il s'agit d'attraper reste détecté.
+CANARY_NAMES = {}
+
 # Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
 TOKENS = {}
 
@@ -575,7 +607,7 @@ def run_java(case_dir, env, timeout_s, case_index):
          # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime le
          # jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
          "-cp", junit + ":" + classes, "MooditMain",
-         "execute", "--scan-class-path", "--include-classname=.*",
+         "execute"] + junit_selection(case_index) + ["--include-classname=.*",
          "--fail-if-no-tests", "--disable-banner", "--details=summary",
          "--reports-dir", reports],
         case_dir, env, timeout_s, "run")
@@ -618,7 +650,7 @@ def run_csharp(case_dir, env, timeout_s, case_index):
     open_artifacts(exe)
     result_xml = os.path.join(case_dir, "work", "nunit.xml")
     exit_code, t_out, stdout, stderr, trace = run_student(
-        ["mono", exe, "--result:" + result_xml],
+        ["mono", exe, "--result:" + result_xml] + nunit_selection(case_index),
         case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index)
     if t_out:
@@ -746,7 +778,8 @@ def run_rust(case_dir, env, timeout_s, case_index):
     os.chmod(tests_bin, 0o755)
     make_traversable(tests_bin, case_dir)
     exit_code, t_out, stdout, stderr, trace = run_student(
-        [tests_bin, "--test-threads=1", "--nocapture"], case_dir, env, timeout_s, "run")
+        [tests_bin, "--test-threads=1", "--nocapture"] + libtest_selection(case_index),
+        case_dir, env, timeout_s, "run")
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
@@ -993,6 +1026,7 @@ def main():
             # Nom du test canari randomisé (identifiant valide, majuscule en tête pour
             # l'export Go) : un nom FIXE serait reconnaissable par le code étudiant.
             subst["__MOODIT_N__"] = random_identifier(rng)
+            CANARY_NAMES[case["index"]] = subst["__MOODIT_N__"]
         if case.get("canary") == "pass":
             a = rng.randrange(100000, 999999)
             subst.update({"__MOODIT_A__": str(a), "__MOODIT_B__": str(a)})
