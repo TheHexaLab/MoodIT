@@ -759,6 +759,100 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void java_rapport_reecrit_et_code_de_sortie_ecrase_ne_suffisent_pas() {
+        require("Java");
+        // Le jeton prouvait que l'exécution était allée au bout, PAS que les tests passaient.
+        // Le verdict arrivait par DEUX canaux que l'étudiant contrôle APRÈS son impression :
+        // son rapport (sous work/, qui lui appartient) et le code de sortie du PROCESSUS. Ce
+        // cas falsifie les deux depuis un hook d'arrêt — rapport crédible annonçant 0 échec
+        // sur la vraie classe du harnais, puis halt(0) pour écraser le code de sortie.
+        //
+        // CONTRÔLE DE NON-RÉGRESSION : vérifié en simulant le retour du verdict sur exit_code,
+        // ce test échoue alors. Il tient donc le CÂBLAGE « le verdict vient de la ligne du
+        // jeton », pas seulement l'existence des fonctions qui le calculent.
+        // (Attributs XML en apostrophes simples : valide, et évite l'échappement.)
+        String faux = """
+                import java.io.File;
+                import java.io.FileWriter;
+
+                public class Solution {
+                    public static int doubler(int n) { return n * 3; }
+
+                    static {
+                        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                            try {
+                                File dossier = new File("work/reports");
+                                File[] rapports = dossier.listFiles();
+                                if (rapports != null) {
+                                    for (File rapport : rapports) { rapport.delete(); }
+                                }
+                                FileWriter sortie = new FileWriter(
+                                        new File(dossier, "TEST-MooditHarness.xml"));
+                                sortie.write("<testsuite tests='1' failures='0' errors='0'>"
+                                        + "<testcase classname='MooditHarness' name='d'/>"
+                                        + "</testsuite>");
+                                sortie.close();
+                            } catch (Exception ignore) {
+                                // rien : l'essentiel est le halt(0) ci-dessous
+                            }
+                            Runtime.getRuntime().halt(0);
+                        }));
+                    }
+                }
+                """;
+        List<TestResult> results = evaluate("Java", faux, """
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.*;
+
+                class MooditHarness {
+                    @Test void d() { assertEquals(10, Solution.doubler(5)); }
+                }
+                """);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void panique_go_au_chargement_n_accuse_pas_de_falsification() {
+        require("Go");
+        // Le code étudiant est dans le MÊME `package main` que l'enveloppe et les canaris :
+        // une panique à l'initialisation de paquet fait donc échouer TOUS les cas, canaris
+        // compris. Et elle sort avec le statut 2 — ni expiration, ni signal — donc le verdict
+        // des canaris y voyait une cause « concluante » et mettait toute la soumission à zéro
+        // avec le bandeau de falsification, pour un bug d'initialisation banal.
+        String faux = """
+                package main
+
+                var table = construire()
+
+                func construire() map[string]int {
+                    var m map[string]int
+                    m["boum"] = 1          // panique : écriture dans une map nil
+                    return m
+                }
+
+                func doubler(n int) int { return n * 2 }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", faux, """
+                package main
+
+                import "testing"
+
+                func TestDoubler(t *testing.T) {
+                    if doubler(5) != 10 {
+                        t.Fatalf("doubler(5) = %d", doubler(5))
+                    }
+                }
+                """);
+        // Le cas échoue (le code ne tourne pas), mais SANS accusation.
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).doesNotContain("Incohérence")
+                .doesNotContain("falsification")
+                .doesNotContain("suspect");
+    }
+
+    @Test
     void tester_public_note_vraiment_les_cas() {
         require("Go");
         // Chemin PUBLIC (« Tester » du prof) : mur plafonné à PUBLIC_WALL_MS. Aucun test ne

@@ -117,7 +117,14 @@ public final class HarnessProjects {
                 files.put(base + studentFile, studentCode);
                 files.put(base + harnessFile, harnessCode);
                 // Enveloppe du ConsoleLauncher JUnit : le jeton de fin n'est imprimé qu'une
-                // fois l'exécution terminée — un System.exit(0) forgé le saute.
+                // fois l'exécution terminée — un System.exit(0) forgé le saute. Il porte AUSSI
+                // le code de sortie du framework, et c'est LUI qui fait le verdict : le rapport
+                // XML vit sous work/ (inscriptible par l'étudiant) et le code de sortie du
+                // processus est écrasable après coup (halt(0) dans un hook d'arrêt). Les deux
+                // canaux étaient donc forgeables sans jamais extraire le jeton. Une ligne DÉJÀ
+                // CONSOMMÉE PAR ROOT, elle, est hors d'atteinte : le superviseur donne au
+                // processus noté un TUBE, pas le fichier qu'il relira (voir run_proc) — un
+                // fichier régulier en stdout lui laissait un descripteur positionnable.
                 // Clé de fichier NEUTRE (la classe reste MooditMain, non publique) : si
                 // l'étudiant déclare sa propre classe MooditMain, javac signale un doublon
                 // explicite au lieu de laisser un fichier en écraser un autre dans la map.
@@ -137,7 +144,8 @@ public final class HarnessProjects {
                                         .run(new PrintWriter(System.out, true),
                                                 new PrintWriter(System.err, true), args)
                                         .getExitCode();
-                                System.out.println("[MOODIT] jeton=__MOODIT_T__");
+                                System.out.println(
+                                        "[MOODIT] jeton=__MOODIT_T__ code=" + code);
                                 System.exit(code);
                             }
                         }
@@ -150,14 +158,18 @@ public final class HarnessProjects {
                 // (pas à la charge du prof) ; `mcs -main:MooditRunner` l'impose comme entrée même
                 // si le code étudiant a son propre Main.
                 // Le jeton de fin n'est imprimé qu'une fois Execute terminé : un
-                // Environment.Exit(0) forgé dans le code étudiant le saute.
+                // Environment.Exit(0) forgé dans le code étudiant le saute. Il porte AUSSI le
+                // code de NUnitLite, qui fait le verdict — même raison qu'en Java : le XML de
+                // résultat est sous work/, donc réécrivable, et le code de sortie du processus
+                // est écrasable par un thread de premier plan après le retour d'Execute.
                 files.put(base + "moodit_runner.cs", """
                         class MooditRunner
                         {
                             static int Main(string[] args)
                             {
                                 int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
-                                System.Console.WriteLine("[MOODIT] jeton=__MOODIT_T__");
+                                System.Console.WriteLine(
+                                    "[MOODIT] jeton=__MOODIT_T__ code=" + code);
                                 return code;
                             }
                         }
@@ -170,8 +182,12 @@ public final class HarnessProjects {
                 // comme dans un vrai test Go.
                 files.put(base + "solution_test.go", harnessCode);
                 // Le jeton de fin n'est imprimé qu'après m.Run() : un os.Exit(0) forgé dans le
-                // code étudiant le saute. (Un harnais qui définirait son propre TestMain ne
-                // compile pas — doublon explicite, cas assumé.)
+                // code étudiant le saute. Il porte AUSSI le code de m.Run(), qui fait le
+                // verdict — le code de sortie du processus, lui, s'écrase après coup.
+                // (Un harnais qui définirait son propre TestMain ne compile pas — doublon
+                // explicite, cas assumé.) NB : dans le bloc de texte ci-dessous, la fin de
+                // ligne du Printf est écrite en double antislash, sinon Java l'interprète et
+                // coupe la chaîne Go en deux.
                 files.put(base + "moodit_main_test.go", """
                         package main
 
@@ -183,7 +199,7 @@ public final class HarnessProjects {
 
                         func TestMain(m *testing.M) {
                             code := m.Run()
-                            fmt.Println("[MOODIT] jeton=__MOODIT_T__")
+                            fmt.Printf("[MOODIT] jeton=__MOODIT_T__ code=%d\\n", code)
                             os.Exit(code)
                         }
                         """);

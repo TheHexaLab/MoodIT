@@ -241,4 +241,22 @@ class HarnessProjectsTest {
         assertThat(HarnessProjects.harnessTypes("rust",
                 "#[cfg(test)]\nmod harnais {\n    #[test]\n    fn d() { }\n}")).containsExactly("harnais");
     }
+
+    @Test
+    void les_enveloppes_publient_le_code_du_framework_sur_la_ligne_du_jeton() {
+        // Le rapport du framework vit sous work/ (possédé par l'étudiant) et le code de
+        // sortie du processus s'écrase après coup : le verdict doit voyager sur la ligne
+        // du jeton, qu'une ligne déjà émise rend infalsifiable sans connaître le jeton.
+        assertThat(HarnessProjects.build("Java", "class Solution { }", ONE_CASE, null)
+                .files().get("cases/0/src/MooditEnveloppe.java"))
+                .contains("jeton=__MOODIT_T__ code=")
+                .contains("+ code");
+        assertThat(HarnessProjects.build("C#", "class Solution { }", ONE_CASE, null)
+                .files().get("cases/0/src/moodit_runner.cs"))
+                .contains("jeton=__MOODIT_T__ code=")
+                .contains("+ code");
+        assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null)
+                .files().get("cases/0/src/moodit_main_test.go"))
+                .contains("jeton=__MOODIT_T__ code=%d");
+    }
 }

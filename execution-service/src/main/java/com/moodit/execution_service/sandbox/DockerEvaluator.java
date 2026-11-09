@@ -289,7 +289,7 @@ public class DockerEvaluator {
             // une sortie tronquée…). Le cas reste refusé par le superviseur, mais sans
             // bandeau de falsification — une soumission honnête ne doit jamais en porter un.
             case "lecture_source_tentee", "lecture_binaire_tentee",
-                 "canari_incoherent", "jeton_absent" -> true;
+                 "canari_incoherent", "jeton_absent", "jeton_duplique" -> true;
             default -> false;
         };
     }

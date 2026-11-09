@@ -34,6 +34,7 @@ Sortie  : UN objet JSON sur stdout.
 Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les deux en phase.
 """
 
+import collections
 import glob
 import json
 import os
@@ -44,6 +45,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -61,6 +63,41 @@ DEFAULT_RUN_TIMEOUT_S = 10
 MAX_RUN_TIMEOUT_S = 60
 OUTPUT_CAP = 64 * 1024          # tronque ce qu'on relit des sorties capturées
 FSIZE_LIMIT = 32 * 1024 * 1024  # borne les fichiers écrits par le processus étudiant
+# Plafond des fichiers de sortie, miroir de FSIZE_LIMIT : ils sont désormais écrits par
+# ROOT (qui n'est pas soumis à la rlimit de l'étudiant), donc la borne doit être ici.
+OUTPUT_FILE_CAP = FSIZE_LIMIT
+PUMP_JOIN_S = 10                # attente bornée des pompes de sortie après la mort
+PUMP_SWEEP_JOIN_S = 1           # attente APRÈS le balayage de secours (tube libéré)
+# Queue conservée quand la sortie dépasse le plafond : CALÉE sur la fenêtre de queue de
+# read_capped, pour que tout ce que la pompe garde soit effectivement relu.
+PUMP_TAIL_BYTES = OUTPUT_CAP // 2
+
+class EtatSortie:
+    """Capture des sorties d'UN cas : des octets ont-ils été perdus (tmpfs saturé) ?
+
+    La queue est alors perdue, donc la ligne du jeton aussi. Sans cet état, Java et C#
+    tiraient leur « looked_ok » du XML sous work/ (déjà écrit) et concluaient « jeton
+    absent », c'est-à-dire une accusation de forgeage pour une saturation.
+
+    C'est un OBJET remplacé à chaque cas, et non un drapeau global : les pompes de sortie
+    peuvent SURVIVRE à leur run_proc, et un global aurait été repositionné par une pompe
+    retardataire pendant le cas SUIVANT — désarmant la détection de forgeage sur un cas où
+    rien n'avait saturé. Une pompe retardataire n'écrit que dans l'état de SON cas."""
+
+    def __init__(self, case_index=None):
+        self.perdue = False
+        self.case = case_index
+        # Un processus du cas est mort PAR SIGNAL (OOM du cgroup, SIGSEGV…). Posé ici plutôt
+        # que dans chacun des six runners : run_proc est le seul endroit qui voie le code brut.
+        self.tue_par_signal = False
+        # Un processus du cas a dépassé son temps limite. Les runners écrasent l'information
+        # (« if timed_out or code != 0: Échec de compilation »), si bien qu'une COMPILATION
+        # expirée arrivait avec timed_out=False et passait pour une cause concluante : un code
+        # lent à compiler se faisait accuser de sabotage.
+        self.expire = False
+
+
+ETAT_SORTIE = EtatSortie()
 
 EVENTS = []
 
@@ -339,35 +376,77 @@ def canary_reserve_seconds(budget_s, timeout_s):
 
 
 def canary_verdict(cases, outcomes):
-    """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) :
-    « aucun » (pas de canaris), « ok », « incoherents » (résultat contraire à l'attendu, OU
-    canaris non exécutés alors que des cas réels ont tourné — faire échouer la compilation des
-    seuls canaris, p. ex. par collision de nom de classe, est une falsification : fail-closed),
-    « indetermines » (rien n'a tourné : échec de compilation global, honnête)."""
+    """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) : « aucun »,
+    « ok », « incoherents » (falsification probable) ou « indetermines » (rien de concluant,
+    sans accusation).
+
+    Les canaris sont deux cas que le superviseur ajoute et dont il CONNAÎT le résultat attendu
+    (l'un doit réussir, l'autre échouer), aux valeurs tirées au sort et à la position mélangée.
+    Leur rôle : attraper un forgeage AVEUGLE, qui ne sait pas distinguer un cas réel d'un
+    canari et finit donc par rendre vert celui qui devait échouer.
+
+    Le jugement ne porte PAS sur la branche d'exécution (tous ont tourné / certains non) mais,
+    canari par canari, sur la QUALITÉ DE LA PREUVE qu'il apporte. Trois états :
+      - CONFIRMÉ : il a tourné et son résultat est bien celui attendu ;
+      - NON CONFIRMÉ, cause CONCLUANTE : il a tourné et contredit son attendu, ou sa
+        compilation a échoué sans cause non concluante (casser la compilation des seuls
+        canaris, p. ex. par collision de nom de classe, est une falsification) ;
+      - NON CONFIRMÉ, cause NON CONCLUANTE : temps limite dépassé ou mort par signal (OOM du
+        cgroup, SIGSEGV). On ne peut rien en déduire sur l'intention — cf. inconclusive().
+
+    D'où les règles, dans cet ordre :
+      1. un canari non confirmé n'accuse QUE SI L'ÉTUDIANT Y GAGNE, c'est-à-dire si un cas
+         réel ressort VERT. C'est le critère unique : un forgeage ne rapporte rien si aucun
+         cas réel n'est vert, donc aucune détection n'est perdue, et toutes les façons dont un
+         code HONNÊTE peut faire échouer ses canaris cessent d'accuser — expiration, mort par
+         signal, mais aussi sortie non nulle sans signal (une panique Go au chargement sort
+         avec le statut 2 ; en Go et C/C++ le code étudiant partage l'unité de compilation du
+         canari, donc son init()/constructeur global y tourne aussi) ;
+      2. un canari dont la COMPILATION a échoué pour une cause NON CONCLUANTE n'accuse jamais,
+         même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
+      3. sinon tout est confirmé → « ok », ou « indetermines » si un canari n'a rien vérifié
+         (non imputable, ou non compilé pour une cause non concluante) : on n'accuse pas, mais
+         on ne prétend pas non plus avoir tout vérifié.
+
+    Cette règle unique remplace quatre conditions accumulées, chacune ayant révélé l'angle
+    mort de la suivante. Elle est validée par table de vérité exhaustive (2 canaris × 7 états
+    × 0-2 cas réels)."""
     canary_cases = [c for c in cases if c.get("canary")]
     if not canary_cases:
         return "aucun"
-    if all(outcomes[c["index"]].ran for c in canary_cases):
-        ok = all(outcomes[c["index"]].passed == (c["canary"] == "pass") for c in canary_cases)
-        if not ok:
-            if all(outcomes[c["index"]].timed_out for c in cases):
-                # TOUT a expiré, cas réels compris : temps limite trop court pour le langage ou
-                # hôte surchargé — pas une falsification (un sabotage qui gèle tout tue aussi
-                # les cas réels, aucun gain). Pas de fausse accusation.
-                return "indetermines"
-            event("canari_incoherent",
-                  detail="résultat des canaris contraire à l'attendu — falsification probable")
-        return "ok" if ok else "incoherents"
-    if any(outcomes[c["index"]].skipped for c in canary_cases):
-        # Canari SAUTÉ faute de budget global (l'ordre est tiré au sort : n'importe quel cas
-        # peut tomber dans la queue non exécutée). Rien à reprocher à l'étudiant — sa
-        # soumission est seulement trop lente, et les cas sautés comptent déjà échoués.
+    # Les canaris NON IMPUTABLES sont écartés du jugement : sautés faute de budget global
+    # (l'ordre est tiré au sort) ou victimes d'une défaillance du noteur (tmpfs saturé).
+    jugeables = [c for c in canary_cases if not outcomes[c["index"]].skipped]
+    non_imputables = len(jugeables) < len(canary_cases)
+    if not jugeables:
         return "indetermines"
-    if any(outcomes[c["index"]].ran for c in cases if not c.get("canary")):
-        event("canari_incoherent",
-              detail="canaris non exécutés alors que des cas réels ont tourné")
-        return "incoherents"
-    return "indetermines"
+    reels = [c for c in cases if not c.get("canary") and not outcomes[c["index"]].skipped]
+
+    confirmes, accusables = [], []
+    for c in jugeables:
+        issue = outcomes[c["index"]]
+        if issue.ran and issue.passed == (c["canary"] == "pass"):
+            confirmes.append(c)                       # CONFIRMÉ
+        elif issue.ran or not inconclusive(issue):
+            accusables.append(c)                      # non confirmé, et imputable a priori
+        # sinon : compilation échouée pour une cause non concluante — règle 2, jamais d'accusation
+
+    if accusables:
+        # LE critère : l'étudiant y gagne-t-il ? Sans cas réel vert, faire échouer des canaris
+        # ne rapporte rien — accuser ne protégerait donc personne et frapperait un code
+        # honnête. C'est aussi ce qui couvre l'échec de compilation global (aucun cas vert).
+        if any(outcomes[c["index"]].passed for c in reels):
+            event("canari_incoherent",
+                  detail="canaris non conformes alors qu'un cas réel a réussi "
+                         "— falsification probable")
+            return "incoherents"
+        return "indetermines"
+    # « ok » exige que CHAQUE canari ait été CONFIRMÉ : un canari non compilé pour une cause
+    # non concluante n'accuse pas, mais il n'a rien vérifié non plus — répondre « ok »
+    # prétendrait le contraire. Idem si l'un était non imputable.
+    if non_imputables or len(confirmes) != len(jugeables):
+        return "indetermines"
+    return "ok"
 
 
 # En dessous de ce seuil, /box ne peut plus accueillir une compilation : on le traite comme une
@@ -447,17 +526,112 @@ def open_output(path):
         return os.fdopen(os.open(path, flags, 0o600), "wb")
 
 
+def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
+               etat=None):
+    """Recopie un tube du processus exécuté vers son fichier de sortie, côté ROOT.
+
+    MIROIR de read_capped : au-delà du plafond, on garde la TÊTE puis la QUEUE. Tous les
+    canaux de verdict sont en FIN de sortie (ligne du jeton, sommaire du framework, verdict
+    encadré par nonce du mode exec) ; n'écrire que la tête les perdait, et une copie honnête
+    mais bavarde devenait « jeton absent », c'est-à-dire une fausse accusation de triche. La
+    queue est tamponnée en RAM dans un deque borné : quelques dizaines de Kio par flux.
+
+    On ne cesse JAMAIS de lire avant l'EOF, et on ne ferme pas le tube : le remplir bloquerait
+    le processus, le fermer le tuerait par SIGPIPE. Une erreur d'écriture (tmpfs saturé) fait
+    donc passer en lecture seule, pas en fermeture."""
+    written = 0
+    tail = collections.deque(maxlen=tail_bytes)
+    dropped = 0
+    writable = True
+    tete_ouverte = True
+    try:
+        while True:
+            chunk = src.read(65536)
+            if not chunk:
+                break
+            if writable and tete_ouverte:
+                part = chunk[: cap - written]
+                if len(part) < len(chunk):
+                    # Le plafond tombe DANS ce bloc : la tête se ferme DÉFINITIVEMENT, coupée
+                    # à la dernière fin de ligne. Coupée à l'octet près, le marqueur de
+                    # troncature scinderait la ligne en cours — et si c'est celle du jeton,
+                    # token_exit_code ne la reconnaît plus : fausse accusation de forgeage.
+                    # DÉFINITIVEMENT, parce que la coupe laisse written < cap : sans ce
+                    # verrou, un bloc suivant assez court repartait dans la tête, qui
+                    # devenait discontinue — et le DERNIER bloc, celui qui porte la ligne du
+                    # jeton, pouvait s'y retrouver AVANT le marqueur, hors de la fenêtre que
+                    # read_capped relit. Même fausse accusation, par un autre chemin.
+                    tete_ouverte = False
+                    coupe = part.rfind(b"\n")
+                    part = part[: coupe + 1] if coupe >= 0 else b""
+                try:
+                    dst.write(part)
+                    written += len(part)
+                except (OSError, ValueError):
+                    writable = False      # tmpfs saturé / fichier refermé : on continue à LIRE
+                    part = b""
+                    if etat is not None:
+                        etat.perdue = True
+                chunk = chunk[len(part):]
+            if chunk:
+                dropped += len(chunk)
+                tail.extend(chunk)
+        if writable and dropped:
+            kept = bytes(tail)
+            dropped -= len(kept)
+            # MÊME libellé que read_capped, au mot près : libtest_selection s'en sert pour
+            # détecter une sortie tronquée et renoncer alors au filtre.
+            marqueur = ("\n… (sortie tronquée au milieu : %d octets)\n"
+                        % (written + dropped + len(kept))).encode("utf-8")
+            try:
+                dst.write(marqueur)
+                dst.write(kept)
+            except (OSError, ValueError):
+                if etat is not None:
+                    etat.perdue = True
+    except (OSError, ValueError):
+        pass          # tube rompu : le processus est mort, rien de plus à lire
+
+
 def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
-    """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out)."""
+    """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out).
+
+    Les sorties passent par des TUBES que le superviseur (root) recopie dans les fichiers : le
+    processus exécuté NE DOIT PAS tenir de descripteur sur ce que le superviseur relit ensuite.
+    Un fichier régulier passé directement en stdout lui en donnait un, inscriptible ET
+    POSITIONNABLE (open_output n'ouvre pas en O_APPEND) : lseek+write, pwrite64 ou ftruncate
+    permettaient de RÉÉCRIRE après coup des octets déjà émis — la ligne du jeton qui porte le
+    verdict et les sommaires des frameworks compris, et sans jamais lire le fichier (sa
+    relecture par chemin reste refusée) ni connaître le jeton. Les droits 0600 root ne
+    protégeaient rien : ils ne sont vérifiés qu'au open(2). Les octets déjà consommés par root
+    sont, eux, hors d'atteinte par construction."""
     stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
-    with open_output(out_path) as out, open_output(err_path) as err:
-        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err,
-                                stdin=stdin, preexec_fn=preexec)
+    # PAS de `with` sur ces deux fichiers : c'est ROOT qui les écrit depuis le passage aux
+    # tubes, donc leur tampon peut contenir des octets non écrits. Sur un /box saturé, le
+    # close() implicite du `with` RELÈVE l'OSError que le flush vient de laisser (CPython garde
+    # les octets en tampon et refait le flush à la fermeture) — l'exception remplaçait alors la
+    # valeur de retour, devenait « Erreur interne du noteur », et sur un CANARI une accusation
+    # de falsification pour une simple saturation. On ferme donc soi-même, en avalant l'erreur.
+    out = err = None
+    etat = ETAT_SORTIE          # état DU CAS en cours, capturé une fois pour toutes
+    try:
+        out, err = open_output(out_path), open_output(err_path)
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, stdin=stdin, preexec_fn=preexec)
         if stdin is not subprocess.DEVNULL:
             stdin.close()
+        pumps = [threading.Thread(target=drain_pipe,
+                                  args=(proc.stdout, out, OUTPUT_FILE_CAP,
+                                        PUMP_TAIL_BYTES, etat), daemon=True),
+                 threading.Thread(target=drain_pipe,
+                                  args=(proc.stderr, err, OUTPUT_FILE_CAP,
+                                        PUMP_TAIL_BYTES, etat), daemon=True)]
+        for pump in pumps:
+            pump.start()
         try:
-            code = proc.wait(timeout=timeout_s)
-            return code, False
+            code, timed_out = proc.wait(timeout=timeout_s), False
+            if code is not None and code < 0:
+                etat.tue_par_signal = True      # subprocess rend -N pour un signal
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -466,7 +640,70 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
                 # lui-même, sinon proc.wait() bloque pour toujours et tout le job meurt en 502.
                 proc.kill()
             proc.wait()
-            return None, True
+            code, timed_out = None, True
+            etat.expire = True
+        # Le processus noté est mort, mais ses DESCENDANTS peuvent encore tenir ses tubes
+        # ouverts, et drain_pipe reste alors bloqué dans read() jusqu'à l'EOF. On BALAYE
+        # D'ABORD, puisque c'est précisément ce qui libère le tube : attendre avant de balayer
+        # coûtait PUMP_JOIN_S (10 s) à CHAQUE exécution laissant un processus d'arrière-plan
+        # — system("… &"), ProcessBuilder, exec.Command().Start() : du code étudiant tout à
+        # fait ordinaire —, soit deux minutes sur une question à dix cas.
+        #
+        # Balayer tôt est aussi plus conforme à l'isolation voulue : le verdict ne tient qu'à
+        # la sortie du processus noté, déjà émise, et les survivants ne doivent de toute façon
+        # pas traverser vers le cas suivant. killpg ET kill_student_survivors : le premier
+        # couvre les rejetons root de la compilation, le second ceux qui se sont échappés du
+        # groupe par setsid.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        kill_student_survivors()
+        echeance = time.monotonic() + PUMP_SWEEP_JOIN_S
+        for pump in pumps:
+            pump.join(timeout=max(0, echeance - time.monotonic()))
+        if any(pump.is_alive() for pump in pumps):
+            # Dernier recours : un survivant que ni le groupe ni l'UID étudiant n'ont attrapé.
+            # Échéance BORNÉE — un fil encore vivant au fork du Popen suivant est un risque
+            # (preexec_fn n'est pas sûr depuis un processus multithreadé), mais pendre ici
+            # ferait tuer le conteneur au mur et perdrait TOUTE la notation.
+            echeance = time.monotonic() + PUMP_JOIN_S
+            for pump in pumps:
+                pump.join(timeout=max(0, echeance - time.monotonic()))
+        for pump, flux in zip(pumps, (proc.stdout, proc.stderr)):
+            # Fermer un tube dont la pompe est ENCORE VIVANTE bloquerait : elle attend dans
+            # read() en tenant le verrou du tampon, et close() doit l'acquérir — sans borne, ce
+            # qui annulerait le join borné ci-dessus et ferait tuer le conteneur au mur (toute
+            # la notation perdue). Le superviseur est éphémère : un descripteur laissé ouvert
+            # disparaît avec lui.
+            if not pump.is_alive():
+                try:
+                    flux.close()
+                except (OSError, ValueError):
+                    pass
+        return code, timed_out
+    except OSError as e:
+        # Un /box saturé fait échouer jusqu'à l'OUVERTURE des fichiers de sortie (ENOSPC sur
+        # O_CREAT), et Popen peut lever (fork ENOMEM). Laisser remonter aurait rendu le cas
+        # « Erreur interne du noteur » — accusation sur une saturation. On dégrade : pas de
+        # sortie, donc pas de verdict « réussi » possible, mais rien d'imputable.
+        etat.perdue = True
+        event("espace_sature", case=etat.case,
+              detail="ouverture des sorties impossible : %r" % e)
+        return None, False
+    finally:
+        sature = False
+        for flux in (out, err):
+            if flux is None:
+                continue
+            try:
+                flux.close()
+            except OSError:
+                sature = True      # une saturation est UNE condition, pas une par flux
+        if sature:
+            etat.perdue = True
+            event("espace_sature", case=etat.case,
+                  detail="écriture des sorties impossible")
 
 
 def student_dir(case_dir, name):
@@ -594,12 +831,24 @@ def first_lines(text, pattern, count=6):
 
 
 class CaseOutcome:
-    def __init__(self, passed, detail=None, ran=False, timed_out=False, skipped=False):
+    def __init__(self, passed, detail=None, ran=False, timed_out=False, skipped=False,
+                 killed=False):
         self.passed = passed
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
         self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
         self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
+        self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
+
+
+def inconclusive(outcome):
+    """L'échec de ce cas a-t-il une cause NON CONCLUANTE ? FONCTION PURE (testée).
+
+    Temps limite dépassé ou mort par signal : on ne peut rien en déduire sur l'intention.
+    Le verdict des canaris s'en sert pour ne pas accuser — wrapper_verdict prend déjà soin
+    de ne pas accuser un processus tué après les tests, et canary_verdict défaisait cette
+    précaution par l'autre porte."""
+    return outcome.timed_out or outcome.killed
 
 
 # Nom du test canari tiré au sort, par index de cas (vide pour un cas réel). Sert à
@@ -635,7 +884,69 @@ HARNESS_TYPES = {}
 TOKENS = {}
 
 
-def enforce_token(passed, detail, stdout, case_index):
+def token_exit_code(stdout, case_index):
+    """Code de sortie du framework tel que l'ENVELOPPE DE CONFIANCE l'a publié, sur la ligne du
+    jeton, après l'exécution des tests. FONCTION PURE (testée). → entier, ou None si la ligne
+    est absente (jeton non atteint, ou enveloppe sans code — cas non concerné).
+
+    C'est la SEULE voie de confiance pour le verdict des langages à enveloppe. Les deux autres
+    canaux sont sous le contrôle de l'étudiant APRÈS l'impression du jeton : le rapport du
+    framework vit sous work/ (possédé par l'étudiant) et le code de sortie du processus
+    s'écrase après coup. Une ligne déjà CONSOMMÉE PAR ROOT, non : stdout passe par un tube que
+    run_proc recopie, le fichier relu n'est jamais confié au processus noté. Forger cette ligne
+    suppose donc de connaître le jeton — le résiduel déjà documenté (lecture en-processus),
+    rien de moins."""
+    token = TOKENS.get(case_index)
+    if not token:
+        return None
+    codes = re.findall(r"\[MOODIT\] jeton=" + re.escape(token) + r" code=(-?\d+)", stdout)
+    if len(codes) == 1:
+        return int(codes[0])
+    if codes:
+        # L'enveloppe n'en imprime qu'UNE. Plusieurs = une autre a été produite depuis le code
+        # noté, donc le jeton a fuité : on ne choisit pas entre elles, on refuse.
+        event("jeton_duplique", case=case_index,
+              detail="plusieurs lignes de jeton — verdict forgé probable")
+    return None
+
+
+def wrapper_verdict(framework_code, looked_ok, detail, case_index, exit_code=0,
+                    sortie_perdue=False):
+    """Verdict d'un langage À ENVELOPPE (Java, C#, Go) → (passed, détail).
+
+    {@code framework_code} : code publié par l'enveloppe SUR LA LIGNE DU JETON (voir
+    token_exit_code). {@code looked_ok} : tout le reste semblait cohérent (rapport exploitable,
+    tests comptés, aucun échec signalé). {@code exit_code} : code de sortie du PROCESSUS.
+
+    Les deux codes sont exigés ENSEMBLE, et c'est strictement plus fort que l'un ou l'autre :
+    - substituer la ligne du jeton au code de sortie AFFAIBLIRAIT Go, où tout le verdict vient
+      alors de stdout — or `os.Stdout` y est une variable de paquet, réassignable depuis un
+      `init()` du fichier étudiant (même `package main` que l'enveloppe), donc la sortie est
+      réécrivable EN VOL sans jamais connaître le jeton ;
+    - s'en tenir au code de sortie laissait Java et C# forgeables, lui étant écrasable après
+      l'impression du jeton (halt(0) dans un hook d'arrêt, thread de premier plan).
+    Exiger les deux ne coûte rien à une soumission honnête : l'enveloppe sort avec le code
+    qu'elle vient de publier.
+
+    Ligne du jeton ABSENTE alors que tout le reste semble bon = signature d'une sortie forgée
+    avant la fin des tests : le cas échoue ET l'événement est levé, pour que le prof le voie.
+    Sans cet aiguillage, le refus arriverait silencieusement par le verdict seul."""
+    if framework_code == 0 and looked_ok and exit_code == 0:
+        return True, None
+    if framework_code is None and looked_ok and exit_code == 0 and not sortie_perdue:
+        # exit_code == 0 EXIGÉ : c'est la signature du forgeage (un exit(0)/halt(0) posé après
+        # les tests). Un processus TUÉ après la fin des tests — OOM du cgroup, SIGXFSZ, signal —
+        # laisse aussi un rapport crédible sans ligne de jeton, mais sort avec un code non nul :
+        # l'accuser de triche serait une fausse accusation sur une soumission honnête.
+        # sortie_perdue : si le tmpfs a saturé, la ligne du jeton a pu ne jamais être ÉCRITE
+        # alors que le rapport sous work/ l'était déjà — même fausse accusation, autre cause.
+        event("jeton_absent", case=case_index,
+              detail="sortie sans jeton de fin d'exécution — rapport forgé probable")
+        return False, "Échec du harnais (jeton de fin d'exécution absent ou incohérent)"
+    return False, detail
+
+
+def enforce_token(passed, detail, stdout, case_index, sortie_perdue=False):
     """Un verdict « réussi » exige le jeton de fin d'exécution dans la sortie : il n'est imprimé
     qu'APRÈS tous les tests par le point de sortie du framework — un rapport forgé suivi d'un
     exit(0) depuis le code étudiant ne l'a pas. Absent alors que tout le reste est cohérent :
@@ -643,6 +954,11 @@ def enforce_token(passed, detail, stdout, case_index):
     token = TOKENS.get(case_index)
     if not passed or not token or ("[MOODIT] jeton=" + token) in stdout:
         return passed, detail
+    if sortie_perdue:
+        # Sortie non écrite (tmpfs saturé) : le jeton a pu ne jamais atteindre le fichier.
+        # Le cas échoue, mais sans accusation — on ne distingue pas une saturation d'un
+        # forgeage, et dans le doute on n'accuse pas.
+        return False, "Échec du harnais (sortie incomplète)"
     event("jeton_absent", case=case_index,
           detail="sortie sans jeton de fin d'exécution — rapport forgé probable")
     return False, "Échec du harnais (jeton de fin d'exécution absent)"
@@ -686,12 +1002,16 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     summary = re.search(r"^\[MOODIT\] summary total=(\d+) failed=(\d+)$", stdout, re.M)
     coherent = summary is not None and int(summary.group(1)) > 0
+    # C/C++ : pas d'enveloppe qui tienne le code de sortie du framework (le jeton est imprimé
+    # par moodit_check.h), donc le verdict reste sur exit_code + sommaire. L'interposition de
+    # printf est le résiduel assumé et documenté pour ces deux langages.
     passed = exit_code == 0 and coherent and int(summary.group(2)) == 0
     if exit_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire moodit_check")
     detail = None if passed else (first_lines(stdout, r"^\[MOODIT\] fail ")
                                   or first_lines(stderr, r".") or "Échec du harnais")
-    passed, detail = enforce_token(passed, detail, stdout, case_index)
+    passed, detail = enforce_token(passed, detail, stdout, case_index,
+                                   ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -754,16 +1074,23 @@ def run_java(case_dir, env, timeout_s, case_index):
     scan_trace(trace, src, case_index)
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    passed = exit_code == 0 and xml_ok and tests > 0 and failures == 0
-    if passed and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
+    # Le verdict vient de la ligne du JETON, pas du code de sortie du processus ni du seul
+    # rapport XML : ces deux-là sont forgeables depuis le code étudiant après les tests.
+    # Le XML ne sert plus qu'au décompte, au détail et à l'invariant « un test du harnais a
+    # tourné » — le forger n'avance à rien si le code publié n'est pas 0.
+    framework_code = token_exit_code(stdout, case_index)
+    looked_ok = xml_ok and tests > 0 and failures == 0
+    if framework_code == 0 and looked_ok \
+            and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
         event("harnais_non_execute", case=case_index,
               detail="aucun test du harnais n'a été exécuté")
         return CaseOutcome(False, "Aucun test du harnais n'a été exécuté", ran=True), None
-    if exit_code == 0 and (not xml_ok or tests == 0):
+    if framework_code == 0 and (not xml_ok or tests == 0):
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport JUnit exploitable")
-    detail = None if passed else (first_lines(stdout, r"MethodSource|expected|Failures")
-                                  or first_lines(stderr, r".") or "Échec du harnais JUnit")
-    passed, detail = enforce_token(passed, detail, stdout, case_index)
+    detail = (first_lines(stdout, r"MethodSource|expected|Failures")
+              or first_lines(stderr, r".") or "Échec du harnais JUnit")
+    passed, detail = wrapper_verdict(framework_code, looked_ok, detail,
+                                     case_index, exit_code, ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -803,16 +1130,19 @@ def run_csharp(case_dir, env, timeout_s, case_index):
     scan_trace(trace, src, case_index)
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    passed = exit_code == 0 and xml_passed is True and total > 0
-    if passed and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
+    framework_code = token_exit_code(stdout, case_index)   # cf. run_java : seule voie de confiance
+    looked_ok = xml_passed is True and total > 0
+    if framework_code == 0 and looked_ok \
+            and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
         event("harnais_non_execute", case=case_index,
               detail="aucun test du harnais n'a été exécuté")
         return CaseOutcome(False, "Aucun test du harnais n'a été exécuté", ran=True), None
-    if exit_code == 0 and xml_passed is not True:
+    if framework_code == 0 and xml_passed is not True:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans rapport NUnit « Passed »")
-    detail = None if passed else (first_lines(stdout, r"Failed|Error|Exception")
-                                  or first_lines(stderr, r".") or "Échec du harnais NUnit")
-    passed, detail = enforce_token(passed, detail, stdout, case_index)
+    detail = (first_lines(stdout, r"Failed|Error|Exception")
+              or first_lines(stderr, r".") or "Échec du harnais NUnit")
+    passed, detail = wrapper_verdict(framework_code, looked_ok, detail,
+                                     case_index, exit_code, ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -840,12 +1170,14 @@ def run_go(case_dir, env, timeout_s, case_index):
     # par le programme de l'étudiant faisait échouer un cas honnête. Un vrai échec donne de
     # toute façon un code de sortie non nul, déjà exigé ci-dessous.
     failed = re.search(r"^--- FAIL: \S", stdout, re.M) is not None
-    passed = exit_code == 0 and coherent and not failed
-    if exit_code == 0 and not coherent:
+    framework_code = token_exit_code(stdout, case_index)   # cf. run_java : seule voie de confiance
+    looked_ok = coherent and not failed
+    if framework_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire PASS de go test")
-    detail = None if passed else (first_lines(stdout, r"_test\.go:\d+:|^--- FAIL|panic:")
-                                  or first_lines(stderr, r".") or "Échec du harnais go test")
-    passed, detail = enforce_token(passed, detail, stdout, case_index)
+    detail = (first_lines(stdout, r"_test\.go:\d+:|^--- FAIL|panic:")
+              or first_lines(stderr, r".") or "Échec du harnais go test")
+    passed, detail = wrapper_verdict(framework_code, looked_ok, detail,
+                                     case_index, exit_code, ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -971,7 +1303,8 @@ def run_rust(case_dir, env, timeout_s, case_index):
     detail = None if passed else (first_lines(stderr, r"panicked at")
                                   or first_lines(stdout, r"panicked at|^failures:|^---- ")
                                   or first_lines(stderr, r".") or "Échec du harnais cargo test")
-    passed, detail = enforce_token(passed, detail, stdout, case_index)
+    passed, detail = enforce_token(passed, detail, stdout, case_index,
+                                   ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -1004,6 +1337,10 @@ def substitute_placeholders(case_dir, mapping):
 
 
 def execute_case(language, case, timeout_s):
+    # État de capture NEUF pour ce cas (voir EtatSortie : une pompe retardataire du cas
+    # précédent ne doit pas désarmer la détection ici).
+    global ETAT_SORTIE
+    ETAT_SORTIE = EtatSortie(case["index"])
     case_dir = os.path.join(BOX, "cases", str(case["index"]))
     runner = RUNNERS[language]
     env = base_env(case_dir)
@@ -1013,7 +1350,29 @@ def execute_case(language, case, timeout_s):
     outcome, compile_error = runner(case_dir, env, timeout_s, case["index"])
     elapsed_ms = int((time.monotonic() - start) * 1000)
     if compile_error is not None:
-        return CaseOutcome(False, compile_error, ran=False), elapsed_ms
+        outcome = CaseOutcome(False, compile_error, ran=False)
+    if ETAT_SORTIE.tue_par_signal and not outcome.passed:
+        outcome.killed = True
+    if ETAT_SORTIE.expire and not outcome.passed:
+        # Vaut aussi pour une COMPILATION expirée, que les runners rapportent en simple
+        # « Échec de compilation » : c'est une cause NON CONCLUANTE, pas un sabotage.
+        outcome.timed_out = True
+    if ETAT_SORTIE.perdue and not outcome.passed:
+        # Saturation du tmpfs : NON IMPUTABLE, exactement comme une erreur interne. Sans ce
+        # marquage, un canari tombé sur une saturation échouait, et canary_verdict concluait
+        # « incoherents » → bandeau « falsification probable » et mise à zéro de TOUTE la
+        # soumission, pour un disque plein. Ne pas accuser le noteur ni l'étudiant.
+        #
+        # SEULEMENT sur un cas en ÉCHEC : « perdue » est posé dès qu'un des deux flux (ou la
+        # fermeture d'un des deux fichiers) échoue, or le verdict a pu conclure « réussi » sur
+        # un stdout intact — la ligne du jeton ET le code de sortie étaient alors bien là. Un
+        # cas vert n'a rien à protéger, et il recevait un détail qui le contredisait.
+        outcome.skipped = True
+        # Et DIRE la cause : le détail serait resté « Échec du harnais JUnit » (ou l'équivalent
+        # du langage), envoyant l'étudiant chercher un bug de logique inexistant. Les deux
+        # autres chemins de la même condition sont explicites, celui-ci doit l'être aussi.
+        outcome.detail = ("Espace de travail saturé : le code écrit trop de fichiers ou trop "
+                          "de sorties — notation impossible")
     return outcome, elapsed_ms
 
 
@@ -1265,7 +1624,12 @@ def main():
             outcome, ms = execute_case(language, case, timeout_s)
         except Exception as e:  # défaut du superviseur : fail-closed, jamais de faux « réussi »
             log("superviseur: exception sur le cas %s : %r" % (case["index"], e))
-            outcome, ms = CaseOutcome(False, "Erreur interne du noteur", ran=False), 0
+            # skipped=True : NON IMPUTABLE. Le cas échoue (fail-closed), mais un canari tombé
+            # sur une erreur interne — un /box saturé, par exemple — passait sinon par la porte
+            # « incoherents » de canary_verdict, donc par « falsification probable » et la mise
+            # à zéro de toute la soumission. Une défaillance du noteur ne doit jamais accuser.
+            outcome, ms = CaseOutcome(False, "Erreur interne du noteur",
+                                      ran=False, skipped=True), 0
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms

@@ -8,8 +8,10 @@ indisponible sous Windows).
 """
 
 import os
+import shutil
 import sys
 import tempfile
+import io
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -114,6 +116,17 @@ class EnforceTokenTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("jeton", detail)
         self.assertEqual(supervisor.EVENTS[0]["type"], "jeton_absent")
+
+    def test_jeton_absent_mais_sortie_perdue_n_accuse_pas(self):
+        # Rust et C/C++ passent par ici (pas d'enveloppe tenant le code du framework) et
+        # doivent obeir a la meme regle que wrapper_verdict : un tmpfs sature a pu empecher
+        # l'ECRITURE du jeton. On ne distingue pas une saturation d'un forgeage, donc dans le
+        # doute on refuse le cas SANS accuser.
+        passed, detail = supervisor.enforce_token(True, None, "PASS\n", 0,
+                                                  sortie_perdue=True)
+        self.assertFalse(passed)
+        self.assertIn("incomplète", detail)
+        self.assertEqual(supervisor.EVENTS, [])
 
     def test_echec_reste_echec_sans_alerte(self):
         passed, detail = supervisor.enforce_token(False, "boum", "FAIL\n", 0)
@@ -312,6 +325,586 @@ class SelectionTest(unittest.TestCase):
         supervisor.STUDENT_TYPES[0] = ["devoir.un.Solution"]
         self.assertEqual(supervisor.junit_selection(0),
                          ["--scan-class-path", "--exclude-classname=^devoir\\.un\\.Solution$"])
+
+
+class TokenExitCodeTest(unittest.TestCase):
+    """Le verdict des langages à enveloppe se lit SUR LA LIGNE DU JETON. Les deux autres
+    canaux sont sous le contrôle de l'étudiant APRÈS les tests : le rapport du framework vit
+    sous work/ (possédé par l'étudiant) et le code de sortie du processus s'écrase après coup
+    (hook d'arrêt). Une ligne déjà écrite sur stdout, non."""
+
+    def setUp(self):
+        supervisor.TOKENS.clear()
+        supervisor.TOKENS[0] = "4242424242424"
+
+    def test_code_lu_sur_la_ligne_du_jeton(self):
+        out = "…\n[MOODIT] jeton=4242424242424 code=0\n"
+        self.assertEqual(supervisor.token_exit_code(out, 0), 0)
+        out = "…\n[MOODIT] jeton=4242424242424 code=1\n"
+        self.assertEqual(supervisor.token_exit_code(out, 0), 1)
+
+    def test_ligne_absente_aucun_verdict(self):
+        # Jeton non atteint (exit forgé avant la fin) : pas de code → jamais « réussi ».
+        self.assertIsNone(supervisor.token_exit_code("rien du tout", 0))
+        # Jeton présent mais SANS code : l'ancienne forme ne vaut pas un verdict.
+        self.assertIsNone(supervisor.token_exit_code("[MOODIT] jeton=4242424242424\n", 0))
+
+    def test_plusieurs_lignes_de_jeton_refusees(self):
+        # L'enveloppe n'en imprime qu'UNE : plusieurs = une autre vient du code note, donc le
+        # jeton a fuite. On ne choisit pas entre elles (ni la premiere, ni la derniere) — on
+        # refuse, et l'evenement dit pourquoi.
+        supervisor.EVENTS.clear()
+        out = ("[MOODIT] jeton=4242424242424 code=0\n"
+               "[MOODIT] jeton=4242424242424 code=0\n")
+        self.assertIsNone(supervisor.token_exit_code(out, 0))
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["jeton_duplique"])
+
+    def test_jeton_d_un_autre_cas_ne_compte_pas(self):
+        # Le jeton est tiré par cas : celui du voisin ne vaut pas verdict ici.
+        self.assertIsNone(supervisor.token_exit_code("[MOODIT] jeton=9999999999999 code=0", 0))
+
+    def test_code_non_nul_meme_si_le_reste_est_coherent(self):
+        # Cœur du défaut corrigé : un rapport réécrit en « 0 échec » et un code de sortie
+        # écrasé à 0 ne suffisent plus — le code publié par l'enveloppe, lui, reste à 1.
+        out = "[MOODIT] jeton=4242424242424 code=1\n"
+        self.assertNotEqual(supervisor.token_exit_code(out, 0), 0)
+
+
+class DrainPipeTest(unittest.TestCase):
+    """Les sorties passent par des tubes recopies par ROOT : le processus execute ne tient
+    aucun descripteur sur le fichier que le superviseur relit. Un fichier regulier passe
+    directement en stdout lui en donnait un, positionnable — donc reecrivable apres coup."""
+
+    def test_recopie_integrale_sous_le_plafond(self):
+        src, dst = io.BytesIO(b"ligne 1\nligne 2\n"), io.BytesIO()
+        supervisor.drain_pipe(src, dst, cap=1024)
+        self.assertEqual(dst.getvalue(), b"ligne 1\nligne 2\n")
+
+    def test_queue_preservee_au_dela_du_plafond(self):
+        # TOUS les canaux de verdict sont en FIN de sortie (ligne du jeton, sommaire du
+        # framework). N'ecrire que la tete les perdait : une copie honnete mais bavarde
+        # devenait « jeton absent », soit une FAUSSE ACCUSATION de triche. Miroir de
+        # read_capped, qui garde tete + queue pour exactement cette raison.
+        supervisor.TOKENS[0] = "4242424242424"
+        verdict = b"[MOODIT] jeton=4242424242424 code=0\n"
+        bavard = (b"B" * 49 + b"\n") * 100            # 5000 octets, en lignes
+        src, dst = io.BytesIO(bavard + verdict), io.BytesIO()
+        supervisor.drain_pipe(src, dst, cap=100, tail_bytes=256)
+        sortie = dst.getvalue()
+        self.assertIn(verdict, sortie)                  # la queue porteuse du verdict
+        self.assertTrue(sortie.startswith(b"B" * 49 + b"\n"))   # tete alignee
+        self.assertIn("tronquée au milieu".encode("utf-8"), sortie)
+        # Le total compte TOUT ce qui est passe par le tube, pas seulement la tete ecrite.
+        self.assertIn(b"5036 octets", sortie)
+        self.assertEqual(supervisor.token_exit_code(
+            sortie.decode("utf-8"), 0), 0)                   # le verdict reste lisible
+
+    def test_ligne_du_jeton_a_cheval_sur_le_plafond_reste_lisible(self):
+        # Le plafond tombe AU MILIEU de la ligne du jeton : couper la tete a l'octet pres
+        # scindait cette ligne en deux autour du marqueur, token_exit_code ne la reconnaissait
+        # plus et le cas recoltait « jeton absent » — fausse accusation sur une soumission
+        # honnete. La tete doit donc etre coupee sur une FIN DE LIGNE.
+        supervisor.TOKENS[0] = "4242424242424"
+        verdict = b"[MOODIT] jeton=4242424242424 code=0\n"
+        tete = b"bavard\n" * 10                      # 70 octets
+        src, dst = io.BytesIO(tete + verdict), io.BytesIO()
+        # Plafond tombant 12 octets apres le debut de la ligne de verdict.
+        supervisor.drain_pipe(src, dst, cap=len(tete) + 12, tail_bytes=512)
+        self.assertEqual(supervisor.token_exit_code(
+            dst.getvalue().decode("utf-8"), 0), 0)
+
+    def test_tete_collante_la_fin_de_sortie_reste_dans_la_queue(self):
+        # La coupe sur fin de ligne laisse written < cap. Sans verrou, un bloc suivant
+        # assez court repartait dans la tete : le DERNIER bloc, celui qui porte la ligne
+        # du jeton, s y retrouvait AVANT le marqueur — hors de la fenetre relue par
+        # read_capped — et le cas recoltait « jeton absent » sur un code honnete.
+        supervisor.TOKENS[0] = "4242424242424"
+        verdict = b"[MOODIT] jeton=4242424242424 code=0\n"
+        # Exactement un bloc de lecture (65536 o) de lignes, puis le verdict seul.
+        corps = (b"z" * 63 + b"\n") * 1024
+        src, dst = io.BytesIO(corps + verdict), io.BytesIO()
+        supervisor.drain_pipe(src, dst, cap=100, tail_bytes=4096)
+        sortie = dst.getvalue()
+        marqueur = "tronquée au milieu".encode("utf-8")
+        self.assertIn(marqueur, sortie)
+        self.assertIn(verdict, sortie)
+        # L ORDRE est le point du test : le verdict doit etre APRES le marqueur.
+        self.assertLess(sortie.index(marqueur), sortie.index(verdict))
+        self.assertEqual(supervisor.token_exit_code(
+            sortie.decode("utf-8"), 0), 0)
+
+    def test_saturation_a_la_fermeture_ne_fait_pas_echouer_run_proc(self):
+        # CPython garde les octets en tampon quand flush() echoue : le close() implicite
+        # du `with` relevait la MEME OSError apres le flush garde, remplacait la valeur de
+        # retour et devenait « Erreur interne du noteur » — et sur un canari une
+        # accusation de falsification pour une simple saturation de /box.
+        class FichierSature(io.BytesIO):
+            def close(self):
+                raise OSError(28, "No space left on device")
+
+        origine = supervisor.open_output
+        supervisor.open_output = lambda chemin: FichierSature()
+        supervisor.EVENTS.clear()
+        try:
+            code, expire = supervisor.run_proc(
+                ["true"], ".", dict(os.environ), 10, "o.out", "e.err", None)
+        finally:
+            supervisor.open_output = origine
+        self.assertEqual((code, expire), (0, False))
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["espace_sature"])
+
+    def test_erreur_d_ecriture_ne_ferme_pas_le_tube(self):
+        # Fermer le tube tuerait le processus note par SIGPIPE, et cesser de lire le bloquerait.
+        # Un tmpfs sature doit donc faire perdre la SORTIE, pas tuer le cas.
+        class DestinationSaturee(io.BytesIO):
+            def write(self, donnees):
+                raise OSError(28, "No space left on device")
+
+        src = io.BytesIO(b"x" * 4096)
+        etat = supervisor.EtatSortie(case_index=7)
+        supervisor.drain_pipe(src, DestinationSaturee(), cap=1024, etat=etat)
+        # La perte est ENREGISTREE : c'est elle qui empechera d'accuser le cas.
+        self.assertTrue(etat.perdue)
+        self.assertTrue(src.closed is False or True)   # pas d'exception remontee
+        self.assertEqual(src.read(), b"")              # tout a ete lu jusqu'a l'EOF
+
+    def test_plafond_respecte_mais_lecture_poursuivie(self):
+        # Le fichier est maintenant ecrit par root, que la rlimit de l'etudiant ne borne pas :
+        # le plafond doit etre ici. Et il faut continuer de LIRE, sinon le tube se remplit et
+        # le processus se bloque.
+        class SourceComptee(io.BytesIO):
+            lus = 0
+
+            def read(self, taille=-1):
+                bloc = super().read(taille)
+                SourceComptee.lus += len(bloc)
+                return bloc
+
+        src, dst = SourceComptee((b"A" * 49 + b"\n") * 100), io.BytesIO()
+        supervisor.drain_pipe(src, dst, cap=100, tail_bytes=64)
+        self.assertTrue(dst.getvalue().startswith(b"A" * 49 + b"\n"))
+        self.assertEqual(SourceComptee.lus, 5000)       # lue jusqu au bout
+        # Ecrit = tete + marqueur + queue bornee, et JAMAIS les 5000 octets.
+        self.assertLess(len(dst.getvalue()), 300)
+        # La pompe ne ferme PLUS le tube (SIGPIPE) : c'est run_proc qui s'en charge
+        # une fois le processus mort et les pompes jointes.
+        self.assertFalse(src.closed)
+
+    def test_fichier_deja_referme_ne_leve_pas(self):
+        # L'appelant referme le fichier apres un join borne : une pompe en retard ne doit pas
+        # faire remonter d'exception et tuer le job.
+        src, dst = io.BytesIO(b"x" * 10), io.BytesIO()
+        dst.close()
+        supervisor.drain_pipe(src, dst, cap=1024)   # ne doit pas lever
+        self.assertEqual(src.read(), b"")           # et la lecture va jusqu'a l'EOF
+
+
+class ExecuteCaseSaturationTest(unittest.TestCase):
+    """Marquage « non imputable » d'un cas touche par une saturation du tmpfs."""
+
+    def setUp(self):
+        self.dossier = tempfile.mkdtemp()
+        self.box = supervisor.BOX
+        supervisor.BOX = self.dossier
+        self.runners = dict(supervisor.RUNNERS)
+        self.base_env = supervisor.base_env
+        supervisor.base_env = lambda case_dir: {"HOME": self.dossier,
+                                                "TMPDIR": self.dossier}
+
+    def tearDown(self):
+        supervisor.BOX = self.box
+        supervisor.RUNNERS.clear()
+        supervisor.RUNNERS.update(self.runners)
+        supervisor.base_env = self.base_env
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def _executer(self, issue, perdue):
+        def faux_runner(case_dir, env, timeout_s, case_index):
+            supervisor.ETAT_SORTIE.perdue = perdue
+            return issue, None
+
+        supervisor.RUNNERS["Java"] = faux_runner
+        return supervisor.execute_case("Java", {"index": 0}, 10)[0]
+
+    def test_cas_en_echec_devient_non_imputable_et_dit_la_cause(self):
+        issue = self._executer(supervisor.CaseOutcome(
+            False, "Échec du harnais JUnit", ran=True), perdue=True)
+        self.assertTrue(issue.skipped)
+        self.assertIn("saturé", issue.detail)
+
+    def test_cas_reussi_n_est_pas_contredit(self):
+        # « perdue » est pose des qu'UN des deux flux echoue, or le verdict a pu conclure
+        # « reussi » sur un stdout intact. Un cas vert accompagne de « notation impossible »
+        # etait un message contradictoire, qui imputait au code une panne du noteur.
+        issue = self._executer(supervisor.CaseOutcome(True, None, ran=True), perdue=True)
+        self.assertFalse(issue.skipped)
+        self.assertIsNone(issue.detail)
+        self.assertTrue(issue.passed)
+
+    def test_mort_par_signal_remontee_sur_l_issue(self):
+        def faux_runner(case_dir, env, timeout_s, case_index):
+            supervisor.ETAT_SORTIE.tue_par_signal = True
+            return supervisor.CaseOutcome(False, "echec", ran=True), None
+
+        supervisor.RUNNERS["Java"] = faux_runner
+        issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+        self.assertTrue(issue.killed)
+        self.assertTrue(supervisor.inconclusive(issue))
+
+    def test_sans_saturation_rien_ne_change(self):
+        issue = self._executer(supervisor.CaseOutcome(
+            False, "assertion ratee", ran=True), perdue=False)
+        self.assertFalse(issue.skipped)
+        self.assertEqual(issue.detail, "assertion ratee")
+
+
+class EtatSortieTest(unittest.TestCase):
+    """L'etat de capture est un OBJET PAR CAS, pas un drapeau global : les pompes peuvent
+    survivre a leur run_proc, et un global aurait ete repositionne pendant le cas SUIVANT."""
+
+    def test_une_pompe_retardataire_n_affecte_que_son_cas(self):
+        etat_cas_1 = supervisor.EtatSortie(case_index=1)
+        etat_cas_2 = supervisor.EtatSortie(case_index=2)
+        # La pompe du cas 1, encore vivante, finit par echouer a ecrire.
+        class DestinationFermee(io.BytesIO):
+            def write(self, donnees):
+                raise ValueError("I/O operation on closed file")
+
+        supervisor.drain_pipe(io.BytesIO(b"tardif\n"), DestinationFermee(),
+                              cap=1024, etat=etat_cas_1)
+        self.assertTrue(etat_cas_1.perdue)
+        self.assertFalse(etat_cas_2.perdue)   # le cas en cours reste armé
+
+    def test_sans_etat_aucune_erreur(self):
+        # drain_pipe reste utilisable sans etat (compilation, mode exec).
+        supervisor.drain_pipe(io.BytesIO(b"ok\n"), io.BytesIO(), cap=1024)
+
+
+class ErreurInterneTest(unittest.TestCase):
+    """Une defaillance du NOTEUR (tmpfs sature, fork impossible) ne doit jamais accuser :
+    le cas echoue, mais marque skipped, donc non imputable."""
+
+    def test_mort_par_signal_au_chargement_n_accuse_pas(self):
+        # Un code qui PLANTE ou sature la memoire au CHARGEMENT fait echouer les canaris sans
+        # les faire expirer : en Go et C/C++ le code etudiant partage leur unite de
+        # compilation, donc son init()/constructeur global y tourne aussi. L'ancien garde-fou
+        # n'acceptait que l'expiration, et accusait donc de triche.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "tue", ran=True, killed=True),
+            1: supervisor.CaseOutcome(False, "tue", ran=True, killed=True),
+            2: supervisor.CaseOutcome(False, "tue", ran=True, killed=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_sans_aucun_cas_reel_jugeable_pas_d_accusation(self):
+        # Les cas reels sont sautes AVANT les canaris (reserve de budget, saturation) : un code
+        # honnete a compilation lente pouvait n'avoir plus que ses canaris, et se faire accuser
+        # faute d'un cas reel pour l'exempter. Aucun cas reel jugeable = aucune preuve a charge.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}, {"index": 3}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            1: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            2: supervisor.CaseOutcome(False, "non execute", ran=False, skipped=True),
+            3: supervisor.CaseOutcome(False, "non execute", ran=False, skipped=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_canari_dont_la_compilation_est_tuee_n_accuse_pas(self):
+        # Un canari dont la COMPILATION meurt par signal (OOM du cgroup) n'a pas ete sabote :
+        # il n'a pas pu etre compile. L'ancienne branche accusait sur cette seule base.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "compilation tuee", ran=False, killed=True),
+            1: supervisor.CaseOutcome(False, "compilation tuee", ran=False, killed=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_compilation_des_seuls_canaris_cassee_reste_accusee(self):
+        # La detection a NE PAS perdre : faire echouer la compilation des seuls canaris (p. ex.
+        # par collision de nom de classe) est une falsification — la cause n'est pas un signal.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "classe dupliquee", ran=False),
+            1: supervisor.CaseOutcome(False, "classe dupliquee", ran=False),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["canari_incoherent"])
+
+    def test_un_canari_qui_contredit_accuse_meme_si_l_autre_n_a_pas_compile(self):
+        # Angle mort de l'ancienne forme : elle jugeait par BRANCHE d'execution. Des qu'un
+        # canari n'avait pas compile pour une cause non concluante, elle rendait
+        # « indetermines » et jetait la preuve portee par l'AUTRE — ici la signature de
+        # forgeage la plus franche (le canari « fail » ressort VERT), avec des cas reels verts
+        # qui gardaient donc leurs points.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "compilation tuee", ran=False, killed=True),
+            1: supervisor.CaseOutcome(True, None, ran=True),      # devait ECHOUER
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["canari_incoherent"])
+
+    def test_canari_gele_sans_cas_reel_vert_n_accuse_pas(self):
+        # Autre angle mort : la condition portait sur « un cas reel a une cause non
+        # concluante » au lieu de « un cas reel est VERT ». Un etudiant dont le code est
+        # simplement FAUX — le cas le plus courant — bloquait donc l'exemption et se faisait
+        # accuser quand un canari expirait par flottement de l'hote.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            1: supervisor.CaseOutcome(False, "echoue comme prevu", ran=True),
+            2: supervisor.CaseOutcome(False, "test faux", ran=True),   # honnetement rouge
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_aucun_canari_confirme_n_est_pas_ok(self):
+        # « ok » ne doit etre rendu que si CHAQUE canari a ete confirme : sans cela, deux
+        # canaris non compiles (cause non concluante) donnaient « ok », donc une verification
+        # proclamee alors que rien n'avait ete verifie.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "compilation tuee", ran=False, killed=True),
+            1: supervisor.CaseOutcome(False, "compilation tuee", ran=False, killed=True),
+            2: supervisor.CaseOutcome(False, "non compile", ran=False),
+        }
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+
+    def test_panique_au_chargement_n_accuse_pas(self):
+        # Une panique Go au chargement sort avec le STATUT 2 : ni expiration, ni signal, donc
+        # l'ancienne forme y voyait une cause « concluante » et accusait — alors que le code
+        # etudiant partage le package du canari, si bien que TOUS les cas plantent pareil. Le
+        # critere est desormais unique : sans cas reel VERT, l'etudiant n'y gagne rien.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "panic: nil map", ran=True),
+            1: supervisor.CaseOutcome(False, "panic: nil map", ran=True),
+            2: supervisor.CaseOutcome(False, "panic: nil map", ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_compilation_expiree_est_une_cause_non_concluante(self):
+        # Les runners rapportent une compilation expiree en simple « Echec de compilation »,
+        # donc sans timed_out : un code lent a compiler (gros templates C++) dont le canari
+        # franchit la limite par flottement de l'hote passait pour un sabotage.
+        def faux_runner(case_dir, env, timeout_s, case_index):
+            supervisor.ETAT_SORTIE.expire = True
+            return supervisor.CaseOutcome(False, "Échec de compilation", ran=False), None
+
+        runners = dict(supervisor.RUNNERS)
+        base_env = supervisor.base_env
+        box = supervisor.BOX
+        dossier = tempfile.mkdtemp()
+        supervisor.BOX = dossier
+        supervisor.base_env = lambda case_dir: {"HOME": dossier, "TMPDIR": dossier}
+        supervisor.RUNNERS["Java"] = faux_runner
+        try:
+            issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+        finally:
+            supervisor.BOX = box
+            supervisor.base_env = base_env
+            supervisor.RUNNERS.clear()
+            supervisor.RUNNERS.update(runners)
+            shutil.rmtree(dossier, ignore_errors=True)
+        self.assertTrue(issue.timed_out)
+        self.assertTrue(supervisor.inconclusive(issue))
+
+    def test_gel_selectif_des_canaris_reste_accuse(self):
+        # La detection que le garde-fou ne doit PAS perdre : geler les seuls canaris en
+        # laissant les cas reels verts. Aucun cas reel n'a de cause non concluante, donc
+        # l'exemption ne s'applique pas.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            1: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),      # cas reel « reussi »
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["canari_incoherent"])
+
+    def test_cause_non_concluante(self):
+        self.assertTrue(supervisor.inconclusive(
+            supervisor.CaseOutcome(False, timed_out=True)))
+        self.assertTrue(supervisor.inconclusive(
+            supervisor.CaseOutcome(False, killed=True)))
+        self.assertFalse(supervisor.inconclusive(
+            supervisor.CaseOutcome(False, "assertion ratee")))
+
+    def test_tout_a_expire_n_accuse_pas_meme_avec_un_cas_non_imputable(self):
+        # Un code qui se bloque au CHARGEMENT fait expirer tous les cas, canaris compris : le
+        # canari « pass » contredit alors son attendu sans qu'il y ait falsification (un
+        # sabotage qui gele tout tue aussi les cas reels, aucun gain). Le garde-fou doit
+        # ignorer les cas NON IMPUTABLES, qui ont timed_out=False par construction : sinon un
+        # seul cas saute faute de budget suffisait a retomber sur l'accusation.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}, {"index": 3}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            1: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            2: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+            # Dernier cas SAUTE faute de budget : ni tente, ni fautif.
+            3: supervisor.CaseOutcome(False, "non execute", ran=False, skipped=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_un_canari_sature_ne_desarme_pas_l_autre(self):
+        # Renoncer a juger des que UN SEUL canari est non imputable laissait passer un
+        # forgeage de l'autre, et sur TOUTE la soumission. Les non imputables sont ecartes,
+        # ceux qui restent sont juges.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "sature", ran=True, skipped=True),
+            # Le canari « fail » REUSSIT : contraire a l'attendu, donc forgeage.
+            1: supervisor.CaseOutcome(True, None, ran=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["canari_incoherent"])
+
+    def test_tous_les_canaris_non_imputables_donnent_indetermines(self):
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "sature", ran=True, skipped=True),
+            1: supervisor.CaseOutcome(False, "sature", ran=True, skipped=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        supervisor.EVENTS.clear()
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_canari_sature_donne_indetermines(self):
+        # Une saturation du tmpfs pendant un CANARI le faisait echouer, et canary_verdict
+        # concluait « incoherents » → bandeau « falsification probable » et mise a zero de
+        # toute la soumission, pour un disque plein. Marquee skipped, elle n'accuse plus.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "Échec du harnais (sortie incomplète)",
+                                      ran=True, skipped=True),
+            1: supervisor.CaseOutcome(False, "echoue comme prevu", ran=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+
+    def test_canari_en_erreur_interne_donne_indetermines(self):
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
+                 {"index": 2}]
+        # Le canari 0 tombe sur une erreur interne : ran=False, skipped=True.
+        outcomes = {
+            0: supervisor.CaseOutcome(False, "Erreur interne du noteur",
+                                      ran=False, skipped=True),
+            1: supervisor.CaseOutcome(False, "echoue comme prevu", ran=True),
+            2: supervisor.CaseOutcome(True, None, ran=True),
+        }
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        # Sans le marquage, le meme cas passait par « incoherents » → falsification probable.
+        outcomes[0] = supervisor.CaseOutcome(False, "Erreur interne du noteur", ran=False)
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+
+
+class WrapperVerdictTest(unittest.TestCase):
+    """Verdict des langages a enveloppe (Java, C#, Go) : il ne tient qu'au code publie sur la
+    ligne du jeton, et l'absence de cette ligne reste SIGNALEE au prof."""
+
+    def setUp(self):
+        supervisor.EVENTS.clear()
+
+    def test_code_zero_et_reste_coherent_reussi(self):
+        self.assertEqual(supervisor.wrapper_verdict(0, True, "peu importe", 0), (True, None))
+
+    def test_les_deux_codes_sont_exiges_ensemble(self):
+        # Exiger les DEUX est strictement plus fort que l'un ou l'autre :
+        # - le seul code de sortie laissait Java/C# forgeables (halt(0) dans un hook d'arret) ;
+        # - la seule ligne du jeton affaiblissait Go, ou tout le verdict vient alors de stdout,
+        #   reecrivable en vol depuis un init() qui reassigne os.Stdout — sans connaitre le
+        #   jeton. Le code de sortie Go, lui, n'est pas remplacable.
+        self.assertEqual(supervisor.wrapper_verdict(0, True, "x", 0, exit_code=0), (True, None))
+        # Ligne du jeton a 0 mais processus sorti autrement : refuse.
+        passed, _ = supervisor.wrapper_verdict(0, True, "x", 0, exit_code=1)
+        self.assertFalse(passed)
+        # Processus sorti a 0 mais code publie non nul : refuse aussi.
+        passed, _ = supervisor.wrapper_verdict(1, True, "x", 0, exit_code=0)
+        self.assertFalse(passed)
+
+    def test_code_non_nul_echoue_avec_le_detail(self):
+        passed, detail = supervisor.wrapper_verdict(1, True, "assertion ratee", 0)
+        self.assertFalse(passed)
+        self.assertEqual(detail, "assertion ratee")
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_ligne_absente_mais_reste_coherent_signale(self):
+        # Sortie forgee avant la fin : rapport credible, mais pas de ligne de jeton. Le cas
+        # echoue ET l'evenement est leve — sans quoi le prof ne verrait qu'un echec ordinaire.
+        passed, detail = supervisor.wrapper_verdict(None, True, "ignore", 3, exit_code=0)
+        self.assertFalse(passed)
+        self.assertIn("jeton", detail)
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["jeton_absent"])
+        self.assertEqual(supervisor.EVENTS[0]["case"], 3)
+
+    def test_sortie_perdue_n_accuse_pas(self):
+        # Tmpfs sature : la ligne du jeton a pu ne jamais etre ECRITE alors que le rapport
+        # sous work/ l etait deja. Java et C# tirent leur « looked_ok » de ce rapport, donc
+        # tout semblait credible sauf le jeton — et le cas recoltait « jeton absent », une
+        # accusation de forgeage pour une saturation. Dans le doute, on n accuse pas.
+        passed, detail = supervisor.wrapper_verdict(None, True, "x", 0, exit_code=0,
+                                                   sortie_perdue=True)
+        self.assertFalse(passed)
+        self.assertEqual(supervisor.EVENTS, [])
+        # Sans saturation, la meme forme reste la signature du forgeage : on accuse.
+        passed, _ = supervisor.wrapper_verdict(None, True, "x", 0, exit_code=0,
+                                               sortie_perdue=False)
+        self.assertFalse(passed)
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["jeton_absent"])
+
+    def test_mort_anormale_apres_les_tests_n_accuse_pas(self):
+        # Rapport credible, pas de ligne de jeton, mais le processus a ete TUE (OOM du cgroup,
+        # SIGXFSZ, signal) : code de sortie non nul. Accuser de triche serait une fausse
+        # accusation sur une soumission honnete — le cas echoue, sans evenement.
+        passed, detail = supervisor.wrapper_verdict(None, True, "tue", 0, exit_code=137)
+        self.assertFalse(passed)
+        self.assertEqual(detail, "tue")
+        self.assertEqual(supervisor.EVENTS, [])
+        # Meme situation mais sorti a 0 : c'est la signature du forgeage, on accuse.
+        passed, detail = supervisor.wrapper_verdict(None, True, "ignore", 0, exit_code=0)
+        self.assertFalse(passed)
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["jeton_absent"])
+
+    def test_ligne_absente_et_reste_incoherent_echec_ordinaire(self):
+        # Rien de credible : echec simple, pas d'accusation de forgeage.
+        passed, detail = supervisor.wrapper_verdict(None, False, "ne compile pas", 0)
+        self.assertFalse(passed)
+        self.assertEqual(detail, "ne compile pas")
+        self.assertEqual(supervisor.EVENTS, [])
 
 
 class HarnessRanTest(unittest.TestCase):
