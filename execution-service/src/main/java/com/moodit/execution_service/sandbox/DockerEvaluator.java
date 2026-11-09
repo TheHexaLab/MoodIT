@@ -93,11 +93,6 @@ public class DockerEvaluator {
     private static final String RESERVED_MARKER = "__MOODIT_";
 
     /**
-     * Verdicts de rejet si {@code code} contient le marqueur réservé, sinon {@code null}.
-     * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
-     * sous saturation, le rejet explicite vaut mieux qu'un 429).
-     */
-    /**
      * Verdicts explicites si au moins un harnais est resté à l'ancien format, sinon
      * {@code null}. Comme {@link #reservedMarkerRejection}, à appeler AVANT de prendre une
      * place du sandbox : aucun conteneur ne peut rien en faire.
@@ -124,6 +119,11 @@ public class DockerEvaluator {
                 .toList();
     }
 
+    /**
+     * Verdicts de rejet si {@code code} contient le marqueur réservé, sinon {@code null}.
+     * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
+     * sous saturation, le rejet explicite vaut mieux qu'un 429).
+     */
     public static List<TestResult> reservedMarkerRejection(String code, List<TestCaseInput> cases) {
         if (code == null || !code.contains(RESERVED_MARKER)) {
             return null;

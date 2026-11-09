@@ -249,6 +249,58 @@ class DockerSandboxTest {
     }
 
     @Test
+    void host_config_pose_toutes_les_garanties_d_isolation() {
+        // Le bloc HostConfig PORTE le modèle de menace de #116 : une ligne retirée par un
+        // refactoring ou une résolution de conflit ne casse AUCUN autre test (la matrice
+        // anti-triche note juste, elle ne tente pas de sortir du conteneur). D'où ces
+        // assertions ligne par ligne : réseau, capacités, privilèges, bornes, tmpfs, montages.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 1024, 512, 2.0);
+
+        // Assertion de VIVACITÉ : sans un run complet, les assertions ci-dessous porteraient
+        // sur un HostConfig jamais construit et passeraient toutes.
+        assertThat(sandbox.run("img", Map.of("job.json", "{}"), 5000).exitCode()).isZero();
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.github.dockerjava.api.model.HostConfig.class);
+        org.mockito.Mockito.verify(create).withHostConfig(captor.capture());
+        com.github.dockerjava.api.model.HostConfig hostConfig = captor.getValue();
+
+        // Réseau COUPÉ : la propriété centrale (ni exfiltration du harnais, ni requête sortante
+        // depuis le VPS). Doublée par un cas d'intégration (sortie TCP refusée).
+        assertThat(hostConfig.getNetworkMode()).isEqualTo("none");
+        // Aucun montage hôte : les fichiers du job arrivent par docker cp (docker-outside-of-docker).
+        assertThat(hostConfig.getBinds()).isNullOrEmpty();
+
+        // Capacités : tout retiré, puis le strict nécessaire au superviseur root.
+        assertThat(hostConfig.getCapDrop()).containsExactly(com.github.dockerjava.api.model.Capability.ALL);
+        assertThat(hostConfig.getCapAdd()).containsExactlyInAnyOrder(
+                com.github.dockerjava.api.model.Capability.CHOWN,
+                com.github.dockerjava.api.model.Capability.FOWNER,
+                com.github.dockerjava.api.model.Capability.DAC_OVERRIDE,
+                com.github.dockerjava.api.model.Capability.SETUID,
+                com.github.dockerjava.api.model.Capability.SETGID,
+                com.github.dockerjava.api.model.Capability.KILL,
+                com.github.dockerjava.api.model.Capability.SYS_PTRACE);
+        // Pas d'élévation de privilège possible depuis l'UID étudiant (setuid, fscaps).
+        assertThat(hostConfig.getSecurityOpts()).containsExactly("no-new-privileges");
+
+        // Bornes : mémoire SANS swap (sinon la limite mémoire ne borne plus rien), PID, CPU.
+        assertThat(hostConfig.getMemory()).isEqualTo(1024L * 1024 * 1024);
+        assertThat(hostConfig.getMemorySwap()).isEqualTo(hostConfig.getMemory());
+        assertThat(hostConfig.getPidsLimit()).isEqualTo(512L);
+        assertThat(hostConfig.getNanoCPUs()).isEqualTo(2_000_000_000L);
+
+        // Les trois SEULS points d'écriture de l'UID étudiant : bornés, nosuid, et noexec
+        // partout sauf /box (qui porte les binaires de test compilés).
+        assertThat(hostConfig.getTmpFs())
+                .containsOnlyKeys("/box", "/tmp", "/dev/shm")
+                .containsEntry("/box", "rw,nosuid,exec,size=614m")
+                .containsEntry("/tmp", "rw,nosuid,noexec,size=61m")
+                .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m");
+    }
+
+    @Test
     void tailles_des_tmpfs_derivees_de_la_memoire_du_conteneur() {
         // Un tmpfs est compté dans le cgroup : codées en dur, les trois tailles occupaient
         // jusqu'à 83 % de la mémoire quand SANDBOX_MEMORY_MB est abaissé (1 Go en prod).

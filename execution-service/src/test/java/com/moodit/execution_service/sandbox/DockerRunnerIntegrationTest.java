@@ -967,4 +967,75 @@ class DockerRunnerIntegrationTest {
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).isNotBlank();
     }
+
+    // ───────────────────── ISOLATION du conteneur (vraies options) ─────────────────────
+    // DockerSandboxTest vérifie que les options d'isolation sont POSÉES ; ici on vérifie
+    // qu'elles OPÈRENT. Les deux sondes sont FAIL-CLOSED : si la sonde ne peut pas être mise
+    // en place, le code étudiant renvoie la bonne réponse — le cas passe et le test échoue,
+    // plutôt que de passer à vide. Et chacune exige le détail « doubler(5) = 0 » du framework :
+    // une sonde qui ne compilerait plus ferait AUSSI échouer le cas (détail « compilation »),
+    // donc le seul échec accepté est celui qui vient du refus attendu.
+
+    @Test
+    void sortie_reseau_refusee_depuis_le_code_etudiant() {
+        require("Go");
+        // --network none : aucune interface hors loopback, donc connect() échoue IMMÉDIATEMENT
+        // (réseau inatteignable) — aucune dépendance à un hôte externe, aucune attente.
+        // Sans cette garantie, le code étudiant exfiltrerait le harnais et le jeton depuis le VPS.
+        String prober = """
+                package main
+
+                import "net"
+
+                func doubler(n int) int {
+                    conn, err := net.Dial("tcp", "1.1.1.1:80")
+                    if err == nil {
+                        conn.Close()
+                        return n * 2 // sortie réseau obtenue : l'isolation est rompue
+                    }
+                    return 0
+                }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", prober, GO_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("doubler(5) = 0");
+    }
+
+    @Test
+    void execution_depuis_tmp_refusee_depuis_le_code_etudiant() {
+        require("Go");
+        // /tmp est monté noexec : un binaire déposé par l'UID étudiant ne peut pas être exécuté
+        // (seul /box, qui porte les binaires de test compilés, est exec). La sonde copie /bin/sh
+        // dans /tmp puis tente de le lancer ; tout échec de MISE EN PLACE renvoie la bonne
+        // réponse pour que le test échoue au lieu de passer à vide.
+        String prober = """
+                package main
+
+                import (
+                    "os"
+                    "os/exec"
+                )
+
+                func doubler(n int) int {
+                    sh, err := os.ReadFile("/bin/sh")
+                    if err != nil {
+                        return n * 2 // sonde impossible : on ne conclut pas
+                    }
+                    if err := os.WriteFile("/tmp/moodit_exec_probe", sh, 0o700); err != nil {
+                        return n * 2 // sonde impossible : on ne conclut pas
+                    }
+                    if err := exec.Command("/tmp/moodit_exec_probe", "-c", "exit 0").Run(); err == nil {
+                        return n * 2 // binaire exécuté depuis /tmp : noexec est tombé
+                    }
+                    return 0
+                }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", prober, GO_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("doubler(5) = 0");
+    }
 }
