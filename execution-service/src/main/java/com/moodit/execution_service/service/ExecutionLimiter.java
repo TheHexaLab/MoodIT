@@ -83,7 +83,7 @@ public class ExecutionLimiter {
     /**
      * Sommes-nous dans un appel INTERNE (correction d'une soumission par core-service) ?
      * Les appels publics (« Tester », « play ») sont plus sévèrement bornés : la route
-     * {@code /exec/evaluate} est ouverte à tout authentifié.
+     * {@code /exec/run} est ouverte à tout authentifié (bouton « Exécuter » de l'étudiant).
      */
     public boolean isInternal() {
         return internalCall.get();

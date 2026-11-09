@@ -449,6 +449,20 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void tester_public_note_vraiment_les_cas() {
+        require("Go");
+        // Chemin PUBLIC (« Tester » du prof) : mur plafonné à PUBLIC_WALL_MS. Aucun test ne
+        // l'empruntait, et une réserve de budget mal bornée y faisait répondre « Non exécuté :
+        // budget de notation dépassé » sur TOUS les cas des six langages compilés.
+        List<TestCaseInput> cases = List.of(new TestCaseInput("doubler", GO_HARNESS, 1));
+        List<TestResult> results = evaluator.evaluate("Go", GO_OK, cases, null,
+                DockerEvaluator.PUBLIC_WALL_MS);
+        // passed=true et detail null : noté pour de bon, sans « budget de notation dépassé ».
+        assertThat(results.get(0).passed()).isTrue();
+        assertThat(results.get(0).detail()).isNull();
+    }
+
+    @Test
     void java_temps_limite_court_plancher_vm() {
         require("Java");
         // 1 s de temps limite — valeur légitime pour un doubler : sans plancher, la JVM froide

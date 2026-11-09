@@ -108,7 +108,8 @@ public class ExecutionService {
                 return legacy;
             }
             // Mur plafonné selon l'appelant : une correction interne a droit au budget complet,
-            // un « Tester » public est borné (route ouverte à tout authentifié, 100 cas max).
+            // un « Tester » public est borné (route réservée aux éditeurs de quiz, mais
+            // jusqu'à 100 cas fournis par l'appelant).
             long maxWall = limiter.isInternal()
                     ? Long.MAX_VALUE : DockerEvaluator.PUBLIC_WALL_MS;
             return limiter.withSandboxSlot(() -> dockerEvaluator.evaluate(

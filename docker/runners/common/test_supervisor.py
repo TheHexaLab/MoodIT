@@ -190,6 +190,29 @@ class RustVerdictTest(unittest.TestCase):
         self.assertEqual(supervisor.rust_verdict(1, out), (False, None))
 
 
+class CanaryReserveTest(unittest.TestCase):
+    """Réserve de budget des canaris : bornée au tiers du budget. Non bornée, elle dépassait
+    le budget lui-même sur un appel public (mur plafonné à 4 min) et AUCUN cas réel ne
+    démarrait — le « Tester » du prof ne notait plus rien sur les six langages compilés."""
+
+    def test_toujours_de_la_place_pour_des_cas_reels(self):
+        # Toutes les combinaisons atteignables des deux chemins (public et interne).
+        for budget_s in (60, 110, 119, 212, 230, 330, 616, 670, 720, 770, 779):
+            for timeout_s in (1, 10, 30, 60):
+                reserve = supervisor.canary_reserve_seconds(budget_s, timeout_s)
+                self.assertGreater(budget_s - reserve, 0,
+                                   "budget=%s timeout=%s" % (budget_s, timeout_s))
+                self.assertGreaterEqual(reserve, 0)
+                self.assertLessEqual(reserve, budget_s / 3.0 + 1e-9)
+
+    def test_reserve_nulle_sans_budget(self):
+        self.assertEqual(supervisor.canary_reserve_seconds(0, 10), 0.0)
+
+    def test_pire_cas_retenu_quand_le_budget_est_large(self):
+        # 2 × (10 + 90) = 200 s, bien en dessous du tiers d'un gros budget.
+        self.assertEqual(supervisor.canary_reserve_seconds(3000, 10), 200.0)
+
+
 class RandomIdentifierTest(unittest.TestCase):
     """Nom des canaris : une forme FIXE (« 1 majuscule + 9 minuscules ») restait
     reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les

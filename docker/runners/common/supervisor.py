@@ -202,6 +202,20 @@ def random_identifier(rng, min_len=5, max_len=16):
     return rng.choice(IDENT_FIRST) + "".join(rng.choice(IDENT_REST) for _ in range(length - 1))
 
 
+def canary_reserve_seconds(budget_s, timeout_s):
+    """Part du budget global gardée pour les deux canaris — FONCTION PURE (testée).
+
+    Le pire cas théorique (2 × compilation + run) peut DÉPASSER le budget lui-même : sur un
+    appel public, le mur est plafonné à 4 min. Le réserver tel quel ne laissait plus de place
+    au moindre cas réel — le « Tester » du prof ne notait plus rien. La réserve est donc
+    bornée au TIERS du budget : les canaris gardent une part garantie (un soumettant ne peut
+    pas les faire sauter pour neutraliser le contrôle), et les deux tiers restants suffisent
+    toujours à démarrer des cas réels."""
+    if budget_s <= 0:
+        return 0.0
+    return min(2.0 * (timeout_s + COMPILE_TIMEOUT_S), budget_s / 3.0)
+
+
 def canary_verdict(cases, outcomes):
     """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) :
     « aucun » (pas de canaris), « ok », « incoherents » (résultat contraire à l'attendu, OU
@@ -1005,8 +1019,8 @@ def main():
     # Un dépassement saute donc des cas RÉELS en premier. L'ordre reste tiré au sort : exécuter
     # les canaris d'abord les rendrait reconnaissables.
     canary_reserve_s = 0.0
-    if deadline is not None and timeout_s:
-        canary_reserve_s = 2.0 * (timeout_s + COMPILE_TIMEOUT_S)
+    if deadline is not None and budget_ms:
+        canary_reserve_s = canary_reserve_seconds(budget_ms / 1000.0, timeout_s)
 
     for case in order:
         if box_exhausted():
