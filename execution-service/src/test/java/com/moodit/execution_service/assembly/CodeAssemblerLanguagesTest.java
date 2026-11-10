@@ -146,9 +146,22 @@ class CodeAssemblerLanguagesTest {
         assertThat(grader).contains("doubler() { __moodit_rpc doubler \"$@\"; }\n")
                 .doesNotContain("__moodit_rpc() { __moodit_rpc")
                 .endsWith("if __moodit_harness; then printf '%s' 'MOODIT_OK_sh' >&2; exit 0; else exit 1; fi\n");
+        // Le serveur CADRE sa réponse par l'identifiant reçu du noteur : un `echo` de premier
+        // niveau du code étudiant ne vaut plus réponse. C'était la forge naïve du chemin
+        // interprété — imprimer l'attendu et ne rien imprimer dans sa fonction. Et il ne peut
+        // pas non plus CONTREFAIRE la ligne de réponse : l'identifiant est lu AVANT que son code
+        // soit chargé, et ce chargement se fait dans un sous-shell qui ne l'a pas en portée et
+        // dont la sortie est capturée.
         assertThat(a.files().get(1).content())
-                .isEqualTo("function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }"
-                        + "\nread -r __moodit_name __moodit_rest\n$__moodit_name $__moodit_rest\n");
+                .isEqualTo("read -r __moodit_id __moodit_name __moodit_rest\n"
+                        + "__moodit_val=$(unset __moodit_id;"
+                        + " . ./solution.sh >/dev/null 2>&1;"
+                        + " $__moodit_name $__moodit_rest)\n"
+                        + "printf '%s|%s\\n' \"$__moodit_id\" \"$__moodit_val\"\n");
+        // Le code soumis vit dans son propre fichier, tel quel.
+        assertThat(a.files().get(2).name()).isEqualTo("solution.sh");
+        assertThat(a.files().get(2).content())
+                .isEqualTo("function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }");
     }
 
     // ── Alias et normalisation ──────────────────────────────────────────────────

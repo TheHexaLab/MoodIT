@@ -323,6 +323,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   **ERREUR** (« strace inutilisable : détection des lectures DÉSARMÉE ») : à traiter comme une
   alerte, pas comme un avertissement de routine. La matrice anti-triche de la CI couvre le cas
   avant déploiement (un `strace` cassé y fait tomber les tests de détection de lecture), pas après.
+  Avec un **harnais booléen** (la forme des gabarits), ces détections ne portent de toute façon
+  pas le verdict : il repose sur la séparation en deux processus sous deux UID, et un `strace`
+  indisponible ne la relâche pas.
 - **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —

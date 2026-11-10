@@ -190,13 +190,16 @@ class DockerEvaluatorTest {
 
     @Test
     void harnais_ancien_format_rejete_avec_un_message_explicite() {
-        // Un harnais d'avant #116 est un CORPS qui renvoie un booléen : il ne compile pas dans
-        // le runner, et l'étudiant n'y lirait qu'un « Échec de compilation » incompréhensible.
-        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("Java",
-                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)));
+        // Un harnais qui renvoie un BOOLÉEN n'est plus « ancien » en Java : c'est le format SÛR,
+        // noté dans deux processus sous deux UID (non falsifiable). Il reste refusé là où ce
+        // chemin n'existe pas encore — ici Rust, dont le harnais doit déclarer #[test].
+        assertThat(DockerEvaluator.legacyHarnessRejection("java",
+                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)))).isNull();
+        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("rust",
+                List.of(new TestCaseInput("t", "doubler(5) == 10", 1)));
         assertThat(results).hasSize(1);
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("ancien format").contains("@Test");
+        assertThat(results.get(0).detail()).contains("ancien format").contains("#[test]");
     }
 
     @Test

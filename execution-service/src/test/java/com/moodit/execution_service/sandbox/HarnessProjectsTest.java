@@ -13,8 +13,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Dispositions de projet par langage envoyées au runner (#116) : structure, canaris, job.json. */
 class HarnessProjectsTest {
 
-    private static final List<TestCaseInput> ONE_CASE =
-            List.of(new TestCaseInput("aire du rectangle", "HARNAIS", 2));
+    /**
+     * Harnais au format FRAMEWORK : c'est lui qui exerce l'ancienne disposition (un seul
+     * processus). Un harnais BOOLÉEN, lui, part sur le chemin non falsifiable — deux processus,
+     * deux UID — et produit une disposition différente, couverte par ses propres tests.
+     */
+    private static final Map<String, String> HARNAIS_FRAMEWORK = Map.of(
+            "Java", "@Test void t() { }",
+            "C#", "[Test] public void T() { }",
+            "Go", "func TestT(t *testing.T) {}",
+            "Rust", "#[test] fn t() {}",
+            "C", "MOODIT_TEST(t) { }",
+            "C++", "MOODIT_TEST(t) { }");
+
+    /** Harnais au format framework du langage visé. */
+    private static String harnais(String language) {
+        return HARNAIS_FRAMEWORK.getOrDefault(language, "MOODIT_TEST(t) { }");
+    }
+
+    /** Un cas dont le harnais est au format FRAMEWORK du langage visé (ancienne disposition). */
+    private static List<TestCaseInput> oneCase(String language) {
+        return List.of(new TestCaseInput("aire du rectangle",
+                HARNAIS_FRAMEWORK.getOrDefault(language, "MOODIT_TEST(t) { }"), 2));
+    }
 
     @Test
     void runner_language_resout_les_alias_et_rejette_les_interpretes() {
@@ -32,7 +53,7 @@ class HarnessProjectsTest {
     void java_nomme_les_fichiers_selon_la_classe_publique() {
         HarnessProjects.Project project = HarnessProjects.build("Java",
                 "public class Solution { }",
-                List.of(new TestCaseInput("t", "class MonHarnais { }", 1)), null);
+                List.of(new TestCaseInput("t", "class MonHarnais { @Test void t() { } }", 1)), null);
         assertThat(project.files()).containsKey("cases/0/src/Solution.java");
         assertThat(project.files()).containsKey("cases/0/src/MonHarnais.java");
     }
@@ -46,25 +67,25 @@ class HarnessProjectsTest {
 
     @Test
     void go_pose_module_code_et_test_dans_le_meme_package() {
-        HarnessProjects.Project project = HarnessProjects.build("Go", "package main", ONE_CASE, null);
+        HarnessProjects.Project project = HarnessProjects.build("Go", "package main", oneCase("Go"), null);
         assertThat(project.files().get("cases/0/src/go.mod")).contains("module moodit");
         assertThat(project.files().get("cases/0/src/main.go")).isEqualTo("package main");
-        assertThat(project.files().get("cases/0/src/solution_test.go")).isEqualTo("HARNAIS");
+        assertThat(project.files().get("cases/0/src/solution_test.go")).isEqualTo(harnais("Go"));
     }
 
     @Test
     void rust_concatene_etudiant_et_module_de_tests() {
-        HarnessProjects.Project project = HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null);
+        HarnessProjects.Project project = HarnessProjects.build("Rust", "fn main() {}", oneCase("Rust"), null);
         assertThat(project.files().get("cases/0/src/Cargo.toml")).contains("name = \"moodit\"");
         assertThat(project.files().get("cases/0/src/src/lib.rs"))
-                .startsWith("fn main() {}").contains("HARNAIS");
+                .startsWith("fn main() {}").contains(harnais("Rust"));
     }
 
     @Test
     void c_et_cpp_incluent_l_etudiant_avec_main_neutralise() {
         for (String language : List.of("C", "C++")) {
             String ext = language.equals("C") ? "c" : "cpp";
-            HarnessProjects.Project project = HarnessProjects.build(language, "CODE", ONE_CASE, null);
+            HarnessProjects.Project project = HarnessProjects.build(language, "CODE", oneCase(language), null);
             assertThat(project.files().get("cases/0/src/solution." + ext)).isEqualTo("CODE");
             String harness = project.files().get("cases/0/src/harness." + ext);
             assertThat(harness)
@@ -72,15 +93,15 @@ class HarnessProjectsTest {
                     .contains("#include \"solution." + ext + "\"")
                     .contains("#undef main")
                     .contains("#include <moodit_check.h>")
-                    .contains("HARNAIS");
+                    .contains(harnais(language));
         }
     }
 
     @Test
     void csharp_genere_le_point_d_entree_nunitlite() {
-        HarnessProjects.Project project = HarnessProjects.build("C#", "CODE", ONE_CASE, null);
+        HarnessProjects.Project project = HarnessProjects.build("C#", "CODE", oneCase("C#"), null);
         assertThat(project.files().get("cases/0/src/solution.cs")).isEqualTo("CODE");
-        assertThat(project.files().get("cases/0/src/harness.cs")).isEqualTo("HARNAIS");
+        assertThat(project.files().get("cases/0/src/harness.cs")).isEqualTo(harnais("C#"));
         assertThat(project.files().get("cases/0/src/moodit_runner.cs"))
                 .contains("class MooditRunner").contains("NUnitLite.AutoRun");
     }
@@ -95,14 +116,14 @@ class HarnessProjectsTest {
         // DOIT ouvrir à l'UID étudiant (chargement par la JVM / mono). Le code noté le lisait
         // et forgeait le verdict complet, sans lecture traçable. Il arrive donc par stdin
         // (tube), et le verdict part sur le descripteur BRUT.
-        String enveloppeJava = HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null)
+        String enveloppeJava = HarnessProjects.build("Java", "class Solution {}", oneCase("Java"), null)
                 .files().get("cases/0/src/MooditEnveloppe.java");
         assertThat(enveloppeJava).doesNotContain("__MOODIT_T__");
         // Jeton par stdin, verdict sur les DEUX descripteurs bruts (fermer un seul des flux
         // standards ne doit pas faire disparaître le verdict d'une réponse juste).
         assertThat(enveloppeJava).contains("System.in")
                 .contains("FileDescriptor.out").contains("FileDescriptor.err");
-        String enveloppeCs = HarnessProjects.build("C#", "CODE", ONE_CASE, null)
+        String enveloppeCs = HarnessProjects.build("C#", "CODE", oneCase("C#"), null)
                 .files().get("cases/0/src/moodit_runner.cs");
         assertThat(enveloppeCs).doesNotContain("__MOODIT_T__");
         // Lecture BRUTE de stdin + effacement du tampon : Console.In garderait le jeton dans
@@ -112,18 +133,18 @@ class HarnessProjectsTest {
                 .contains("OpenStandardOutput").contains("OpenStandardError");
         // Go garde la substitution : son init() étudiant tourne AVANT toute instruction de
         // l'enveloppe, donc une livraison par stdin serait lisible par le code noté en premier.
-        assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null).files()
+        assertThat(HarnessProjects.build("Go", "package main", oneCase("Go"), null).files()
                 .get("cases/0/src/moodit_main_test.go")).contains("jeton=__MOODIT_T__");
-        assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
+        assertThat(HarnessProjects.build("Rust", "fn main() {}", oneCase("Rust"), null).files()
                 .get("cases/0/src/src/lib.rs")).contains("zzzz_moodit_jeton");
-        assertThat(HarnessProjects.build("C", "CODE", ONE_CASE, null).files()
+        assertThat(HarnessProjects.build("C", "CODE", oneCase("C"), null).files()
                 .get("cases/0/src/harness.c")).contains("#define MOODIT_JETON \"__MOODIT_T__\"");
     }
 
     @Test
     void enveloppe_java_decalee_si_une_classe_etudiante_porte_son_nom() {
         HarnessProjects.Project project = HarnessProjects.build("Java",
-                "public class MooditEnveloppe { }", ONE_CASE, null);
+                "public class MooditEnveloppe { }", oneCase("Java"), null);
         // Le code étudiant garde son fichier ; l'enveloppe est décalée, rien n'est écrasé.
         assertThat(project.files().get("cases/0/src/MooditEnveloppe.java"))
                 .isEqualTo("public class MooditEnveloppe { }");
@@ -133,7 +154,7 @@ class HarnessProjectsTest {
 
     @Test
     void deux_canaris_embarquant_le_code_etudiant_sont_ajoutes() {
-        HarnessProjects.Project project = HarnessProjects.build("Go", "package main", ONE_CASE, 5000);
+        HarnessProjects.Project project = HarnessProjects.build("Go", "package main", oneCase("Go"), 5000);
         // Cas réels 0..N-1, canaris N (pass) et N+1 (fail), chacun AVEC le code étudiant.
         assertThat(project.files().get("cases/1/src/main.go")).isEqualTo("package main");
         assertThat(project.files().get("cases/1/src/solution_test.go"))
@@ -161,7 +182,7 @@ class HarnessProjectsTest {
     @Test
     void chaque_langage_a_un_gabarit_de_canari() {
         for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            Map<String, String> files = HarnessProjects.build(language, "code", ONE_CASE, null).files();
+            Map<String, String> files = HarnessProjects.build(language, "code", oneCase(language), null).files();
             boolean canaryPresent = files.entrySet().stream()
                     .anyMatch(e -> e.getKey().startsWith("cases/1/") && e.getValue().contains("__MOODIT_A__"));
             assertThat(canaryPresent).as("canari de " + language).isTrue();
@@ -177,7 +198,7 @@ class HarnessProjectsTest {
 
         // Même classe publique des deux côtés : le harnais est décalé, rien n'est écrasé.
         HarnessProjects.Project collision = HarnessProjects.build("Java",
-                "public class Meme {}", List.of(new TestCaseInput("t", "public class Meme {}", 1)),
+                "public class Meme {}", List.of(new TestCaseInput("t", "public class Meme { @Test void t() { } }", 1)),
                 null);
         assertThat(collision.files()).containsKey("cases/0/src/Meme.java");
         assertThat(collision.files()).containsKey("cases/0/src/MooditHarnais_Meme.java");
@@ -220,7 +241,7 @@ class HarnessProjectsTest {
                 "namespace Devoir;\npublic class Solution { }"))
                 .containsExactly("Devoir.Solution");
 
-        assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
+        assertThat(HarnessProjects.build("Rust", "fn main() {}", oneCase("Rust"), null).files()
                 .get("job.json")).contains("\"student_types\":[");
     }
 
@@ -268,17 +289,17 @@ class HarnessProjectsTest {
         // Java/C# : jeton reçu sur stdin, verdict publié sur le descripteur BRUT (fd 1) — un
         // System.setOut()/Console.SetOut() du code noté voyait sinon passer la ligne et n'avait
         // qu'à y réécrire « code=1 » en « code=0 », sans même connaître le jeton.
-        assertThat(HarnessProjects.build("Java", "class Solution { }", ONE_CASE, null)
+        assertThat(HarnessProjects.build("Java", "class Solution { }", oneCase("Java"), null)
                 .files().get("cases/0/src/MooditEnveloppe.java"))
                 .contains("String verdict = \"[MOODIT] jeton=\" + jeton + \" code=\" + code")
                 .contains("brut.println(verdict)").contains("brutErr.println(verdict)")
                 .contains("new FileOutputStream(FileDescriptor.out)");
-        assertThat(HarnessProjects.build("C#", "class Solution { }", ONE_CASE, null)
+        assertThat(HarnessProjects.build("C#", "class Solution { }", oneCase("C#"), null)
                 .files().get("cases/0/src/moodit_runner.cs"))
                 .contains("string verdict = \"[MOODIT] jeton=\" + jeton + \" code=\" + code")
                 .contains("brut.WriteLine(verdict)").contains("brutErr.WriteLine(verdict)")
                 .contains("Console.OpenStandardOutput()");
-        assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null)
+        assertThat(HarnessProjects.build("Go", "package main", oneCase("Go"), null)
                 .files().get("cases/0/src/moodit_main_test.go"))
                 .contains("jeton=__MOODIT_T__ code=%d");
     }

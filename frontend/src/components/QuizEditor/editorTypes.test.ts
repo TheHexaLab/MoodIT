@@ -59,8 +59,8 @@ describe('defaultHarness', () => {
   it('replie sur le langage de la question si aucun langage de harnais', () => {
     const questionLang: Language = { id: 6, name: 'C' };
     const out = defaultHarness(questionLang, undefined);
-    // squelette C : renvoie 0 si correct
-    expect(out).toContain('0');
+    // squelette C : un corps qui renvoie vrai/faux (la forme notée sans falsification possible)
+    expect(out).toContain('vrai');
   });
 
   it('renvoie une chaîne vide si rien de connu', () => {

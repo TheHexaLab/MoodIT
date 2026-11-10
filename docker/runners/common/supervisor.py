@@ -1247,14 +1247,42 @@ def c_verdict(stdout, stderr, token, case_index):
 
 
 def run_c(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_c_rpc(case_dir, env, timeout_s, case_index, "gcc", "-std=c17", "c")
     return c_family(case_dir, env, timeout_s, case_index, "gcc", "-std=c17", "c")
 
 
 def run_cpp(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_c_rpc(case_dir, env, timeout_s, case_index, "g++", "-std=c++20", "cpp")
     return c_family(case_dir, env, timeout_s, case_index, "g++", "-std=c++20", "cpp")
 
 
+def harness_rpc_body(case_dir):
+    """Corps du harnais BOOLÉEN d'un cas, ou None si le cas est au format framework.
+
+    Le marqueur est posé par HarnessProjects : un harnais qui renvoie un booléen prend le chemin
+    NON FALSIFIABLE (deux processus, deux UID), un vrai test de framework garde l'ancien."""
+    src = os.path.join(case_dir, "src")
+    if not os.path.isdir(src):
+        return None
+    for nom in sorted(os.listdir(src)):
+        chemin = os.path.join(src, nom)
+        if not os.path.isfile(chemin):
+            continue
+        try:
+            with open(chemin, "r", encoding="utf-8", errors="replace") as f:
+                contenu = f.read()
+        except OSError:
+            continue
+        if "__MOODIT_HARNAIS__" in contenu:
+            return contenu.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
+    return None
+
+
 def run_java(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_java_rpc(case_dir, env, timeout_s, case_index)
     src = os.path.join(case_dir, "src")
     classes = os.path.join(case_dir, "classes")
     os.makedirs(classes, exist_ok=True)
@@ -1338,6 +1366,8 @@ def run_java(case_dir, env, timeout_s, case_index):
 
 
 def run_csharp(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_csharp_rpc(case_dir, env, timeout_s, case_index)
     src = os.path.join(case_dir, "src")
     exe = os.path.join(case_dir, "tests.exe")
     sources = glob.glob(os.path.join(src, "*.cs"))
@@ -1391,6 +1421,8 @@ def run_csharp(case_dir, env, timeout_s, case_index):
 
 
 def run_go(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_go_rpc(case_dir, env, timeout_s, case_index)
     src = os.path.join(case_dir, "src")
     tests_bin = os.path.join(case_dir, "tests")
     code, timed_out = run_proc(
@@ -1478,6 +1510,8 @@ def rust_verdict(exit_code, stdout, min_tests=2):
 
 
 def run_rust(case_dir, env, timeout_s, case_index):
+    if harness_rpc_body(case_dir) is not None:
+        return run_rust_rpc(case_dir, env, timeout_s, case_index)
     src = os.path.join(case_dir, "src")  # projet cargo complet (Cargo.toml + src/lib.rs)
     build_out = os.path.join(case_dir, "cc.out")
     code, timed_out = run_proc(
@@ -1549,6 +1583,2330 @@ def run_rust(case_dir, env, timeout_s, case_index):
     passed, detail = enforce_token(passed, detail, stdout + "\n" + stderr, case_index,
                                    ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
+
+
+# ──────────── NOTATION NON FALSIFIABLE DES COMPILÉS : RPC À DEUX PROCESSUS ────────────
+#
+# Le harnais du prof redevient un CORPS QUI RENVOIE UN BOOLÉEN (la forme d'avant #116). Ce qui
+# change, c'est qu'il n'est plus compilé avec le code de l'étudiant : il vit dans un PROCESSUS
+# DISTINCT, sous un UID DISTINCT, avec le nonce. Le code noté ne peut donc ni le lire, ni le
+# modifier, ni forger le verdict — il n'habite pas le processus qui le rend.
+#
+# C'est la propriété que les langages INTERPRÉTÉS tiennent déjà (cf. CodeAssembler : noteur +
+# serveur étudiant, nonce dans le noteur), transposée aux compilés. Les cinq attaques trouvées en
+# revue — lecture d'un artefact, détournement d'un flux, interposition de printf, dup2,
+# /proc/self/mem — deviennent SANS OBJET : il n'y a plus aucun secret dans le processus de
+# l'étudiant. Elles ne sont plus « détectées », elles sont impossibles.
+#
+# Les bouchons d'appel exigent des SIGNATURES. On ne les devine pas et le prof n'a rien à
+# déclarer : on compile le code étudiant SEUL, puis on lit ses signatures avec javap.
+
+JAVAP_SIGNATURE = re.compile(
+    r"^\s+public\s+static\s+([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
+
+# Types marshalables par le protocole de ce premier jalon. Une méthode qui en sort n'est PAS
+# proxifiée : le harnais qui l'appelle échoue alors à la compilation — message clair pour le
+# prof, jamais un faux verdict pour l'étudiant.
+JSON_TYPES = {"int": "Integer", "long": "Long", "double": "Double", "boolean": "Boolean",
+              "java.lang.String": "String"}
+
+
+JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.$]+)", re.M)
+JAVAP_CTOR = re.compile(r"^\s+public\s+([\w.$]+)\(([^)]*)\);", re.M)
+JAVAP_METHOD = re.compile(r"^\s+public\s+([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
+
+
+def java_class_api(javap_output):
+    """API OBJET d'une classe compilée → (nom source, [constructeurs], [méthodes d'instance]).
+
+    FONCTION PURE (testée). Permet de proxifier `new Rectangle(3, 4).aire()` : le harnais du prof
+    garde l'écriture naturelle, mais l'objet VIT dans le processus de l'étudiant — le noteur n'en
+    manipule qu'une POIGNÉE. Les types non marshalables écartent la signature concernée, jamais la
+    classe entière.
+
+    `nom source` : les classes imbriquées sont compilées en `Outer$Inner` ; le harnais les écrit
+    `Outer.Inner`, et c'est cette forme qu'on rend."""
+    classe = JAVAP_CLASS.search(javap_output or "")
+    if not classe:
+        return None, [], []
+    binaire = classe.group(1)
+    simple = binaire.split("$")[-1]
+    ctors = []
+    for nom, args in JAVAP_CTOR.findall(javap_output):
+        if nom.split("$")[-1] != simple and nom != binaire:
+            continue
+        types = [a.strip() for a in args.split(",") if a.strip()]
+        if all(t in JSON_TYPES for t in types):
+            ctors.append(types)
+    methodes = []
+    for retour, nom, args in JAVAP_METHOD.findall(javap_output):
+        if nom == "main" or retour not in JSON_TYPES:
+            continue
+        types = [a.strip() for a in args.split(",") if a.strip()]
+        if all(t in JSON_TYPES for t in types):
+            methodes.append((retour, nom, types))
+    # Les méthodes STATIQUES sont déjà proxifiées par java_signatures : on ne garde ici que
+    # l'instance, pour ne pas générer deux fois le même bouchon.
+    statiques = {(r, n, tuple(t)) for r, n, t in java_signatures(javap_output)}
+    methodes = [m for m in methodes if (m[0], m[1], tuple(m[2])) not in statiques]
+    return binaire.replace("$", "."), ctors, methodes
+
+
+def java_object_stub(nom_source, ctors, methodes):
+    """Bouchon d'une classe OBJET : constructeur → poignée, méthodes → appel sur la poignée.
+
+    FONCTION PURE (testée). Une classe imbriquée (`Outer.Inner`) est rendue dans sa coquille, pour
+    que le harnais puisse l'écrire exactement comme l'étudiant l'a déclarée."""
+    simple = nom_source.split(".")[-1]
+    corps = ["    public static final class " + simple + " {",
+             "        private final int __h;"]
+    for types in ctors or [[]]:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        corps += ["        public %s(%s) {" % (simple, params),
+                  "            this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
+                  % (nom_source, args),
+                  "        }"]
+    for retour, nom, types in methodes:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        corps += ["        public %s %s(%s) {" % (retour, nom, params),
+                  "            return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
+                  % ("m" + JSON_TYPES[retour].lower(), nom, args),
+                  "        }"]
+    corps.append("    }")
+    return "\n".join(corps)
+
+
+def java_signatures(javap_output):
+    """Méthodes statiques publiques du code étudiant → [(retour, nom, [types])].
+
+    FONCTION PURE (testée). `main` est écartée (point d'entrée, pas une API notée), ainsi que
+    toute signature dont un type n'est pas marshalable."""
+    trouvees = []
+    for retour, nom, args in JAVAP_SIGNATURE.findall(javap_output or ""):
+        if nom == "main":
+            continue
+        types = [a.strip() for a in args.split(",") if a.strip()]
+        if retour not in JSON_TYPES or any(t not in JSON_TYPES for t in types):
+            continue
+        trouvees.append((retour, nom, types))
+    return trouvees
+
+
+def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instance=()):
+    """Classe-BOUCHON compilée avec le harnais : mêmes signatures, corps = appel RPC.
+
+    FONCTION PURE (testée). Le harnais du prof compile contre elle sans rien savoir ; aucune
+    ligne de code étudiant n'entre dans ce programme. `objects` apporte les classes IMBRIQUÉES
+    proxifiées par poignée, pour que `new Solution.Rectangle(3, 4).aire()` s'écrive naturellement
+    alors que l'objet vit, lui, dans le processus de l'étudiant."""
+    lignes = ["public final class " + class_name + " {"]
+    if self_ctors and self_instance:
+        # La classe de premier niveau EST l'objet : c'est le cas d'une question POO dont la
+        # classe publique est `Rectangle`, et le harnais écrit `new Rectangle(3, 4).aire()`.
+        lignes.append("    private final int __h;")
+        for types in self_ctors or [[]]:
+            params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            lignes += ["    public %s(%s) {" % (class_name, params),
+                       "        this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
+                       % (class_name, args),
+                       "    }"]
+        for retour, nom, types in self_instance:
+            params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            lignes += ["    public %s %s(%s) {" % (retour, nom, params),
+                       "        return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
+                       % ("m" + JSON_TYPES[retour].lower(), nom, args),
+                       "    }"]
+    else:
+        lignes.append("    private " + class_name + "() {}")
+    for nom_source, ctors, instance in objects:
+        lignes.append(java_object_stub(nom_source, ctors, instance))
+    for retour, nom, types in methods:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        lignes += ["    public static %s %s(%s) {" % (retour, nom, params),
+                   "        return MooditRpc.%s(\"%s\", new Object[]{%s});"
+                   % (JSON_TYPES[retour].lower(), nom, args),
+                   "    }"]
+    lignes.append("}")
+    return "\n".join(lignes) + "\n"
+
+
+def java_grader_source(harness_code, nonce):
+    """Programme NOTEUR : runtime RPC + harnais booléen du prof + nonce.
+
+    FONCTION PURE (testée). stdin/stdout sont le tube vers le processus étudiant ; le nonce part
+    sur stderr, que l'étudiant ne tient pas. Une exception du harnais vaut faux (fail-closed)."""
+    return """import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+
+final class MooditRpc {
+    private static final BufferedReader ENTREE =
+            new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+    private static final PrintStream SORTIE = System.out;
+
+    private MooditRpc() {}
+
+    private static final java.security.SecureRandom ALEA = new java.security.SecureRandom();
+
+    /**
+     * Un appel = une ligne JSON vers le processus étudiant, une ligne JSON en retour.
+     *
+     * Chaque appel porte un IDENTIFIANT IMPRÉVISIBLE que la réponse doit renvoyer. Sans lui, le
+     * code noté — dont le stdout EST le canal de réponse — n'avait qu'à imprimer
+     * {"ok":true,"value":<attendu>} avant même d'être appelé : le noteur consommait cette ligne
+     * comme réponse et le harnais passait au vert sur un code faux. Il doit maintenant répondre
+     * à la question posée, et il ne peut pas la devancer.
+     */
+    /** Envoie la requête et attend LA réponse portant cet identifiant. */
+    private static String attend(String id, String requete) {
+        SORTIE.println(requete);
+        SORTIE.flush();
+        try {
+            String ligne;
+            String marqueur = "\\"id\\":\\"" + id + "\\"";
+            while ((ligne = ENTREE.readLine()) != null) {
+                // Le code étudiant partage stdout avec les réponses : seule une réponse portant
+                // l'identifiant DE CET APPEL compte. Tout le reste est du bruit (ou une tentative
+                // de devancer la question) et est ignoré.
+                if (ligne.startsWith("{\\"ok\\":") && ligne.contains(marqueur)) { return ligne; }
+            }
+        } catch (Exception e) {
+            // tombe dans l'échec ci-dessous
+        }
+        throw new RuntimeException("processus etudiant termine");
+    }
+
+    private static String echange(String nom, Object[] args) {
+        String id = Long.toHexString(ALEA.nextLong()) + Long.toHexString(ALEA.nextLong());
+        StringBuilder b = new StringBuilder("{\\"op\\":\\"call\\",\\"id\\":\\"").append(id)
+                .append("\\",\\"name\\":\\"").append(nom)
+                .append("\\",\\"args\\":[");
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) { b.append(','); }
+            b.append(litteral(args[i]));
+        }
+        return attend(id, b.append("]}").toString());
+    }
+
+    private static String litteral(Object o) {
+        if (o instanceof String) {
+            return "\\"" + ((String) o).replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"") + "\\"";
+        }
+        return String.valueOf(o);
+    }
+
+    private static String valeur(String reponse) {
+        if (reponse.contains("\\"ok\\":false")) {
+            // On relaie le message de l'etudiant : c'est le diagnostic du prof (exception dans
+            // la fonction notee, methode absente, type inattendu). Aucun secret n'y transite.
+            throw new RuntimeException("appel refuse par le code soumis : " + reponse);
+        }
+        int i = reponse.indexOf("\\"value\\":");
+        if (i < 0) { throw new RuntimeException("reponse sans valeur"); }
+        String v = reponse.substring(i + 8).trim();
+        if (v.endsWith("}")) { v = v.substring(0, v.length() - 1).trim(); }
+        return v;
+    }
+
+    /** Construit un objet CHEZ L'ÉTUDIANT et n'en rapporte qu'une poignée. */
+    static int nouvelle(String classe, Object[] args) {
+        String id = Long.toHexString(ALEA.nextLong()) + Long.toHexString(ALEA.nextLong());
+        StringBuilder b = new StringBuilder("{\\"op\\":\\"new\\",\\"id\\":\\"").append(id)
+                .append("\\",\\"class\\":\\"").append(classe).append("\\",\\"args\\":[");
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) { b.append(','); }
+            b.append(litteral(args[i]));
+        }
+        return Integer.parseInt(valeur(attend(id, b.append("]}").toString())));
+    }
+
+    private static String appelMethode(int handle, String nom, Object[] args) {
+        String id = Long.toHexString(ALEA.nextLong()) + Long.toHexString(ALEA.nextLong());
+        StringBuilder b = new StringBuilder("{\\"op\\":\\"method\\",\\"id\\":\\"").append(id)
+                .append("\\",\\"handle\\":").append(handle)
+                .append(",\\"name\\":\\"").append(nom).append("\\",\\"args\\":[");
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) { b.append(','); }
+            b.append(litteral(args[i]));
+        }
+        return attend(id, b.append("]}").toString());
+    }
+
+    static int minteger(int h, String n, Object[] a) { return Integer.parseInt(valeur(appelMethode(h, n, a))); }
+    static long mlong(int h, String n, Object[] a) { return Long.parseLong(valeur(appelMethode(h, n, a))); }
+    static double mdouble(int h, String n, Object[] a) { return Double.parseDouble(valeur(appelMethode(h, n, a))); }
+    static boolean mboolean(int h, String n, Object[] a) { return Boolean.parseBoolean(valeur(appelMethode(h, n, a))); }
+    static String mstring(int h, String n, Object[] a) { return dechaine(valeur(appelMethode(h, n, a))); }
+
+    static int integer(String nom, Object[] args) { return Integer.parseInt(valeur(echange(nom, args))); }
+    static long long_(String nom, Object[] args) { return Long.parseLong(valeur(echange(nom, args))); }
+    static double double_(String nom, Object[] args) { return Double.parseDouble(valeur(echange(nom, args))); }
+    static boolean boolean_(String nom, Object[] args) { return Boolean.parseBoolean(valeur(echange(nom, args))); }
+    static String string(String nom, Object[] args) { return dechaine(valeur(echange(nom, args))); }
+
+    private static String dechaine(String v) {
+        if (v.length() >= 2 && v.startsWith("\\"")) { v = v.substring(1, v.length() - 1); }
+        return v.replace("\\\\\\"", "\\"").replace("\\\\\\\\", "\\\\");
+    }
+}
+
+public final class MooditGrader {
+    private static boolean harnais() throws Exception {
+__CORPS__
+    }
+
+    public static void main(String[] args) {
+        boolean ok;
+        try {
+            ok = harnais();
+        } catch (Throwable t) {
+            // fail-closed, mais JAMAIS en silence : un harnais qui lève doit le dire au prof
+            // (c'est son code, pas celui de l'étudiant). Aucun secret ne transite par là.
+            ok = false;
+            System.err.println("[MOODIT] harnais: " + t);
+        }
+        if (ok) {
+            // Nonce sur STDERR : stdout est le tube vers l'étudiant, et l'étudiant ne tient
+            // aucun descripteur sur ce flux-ci.
+            System.err.print("__NONCE__");
+            System.err.flush();
+        }
+        System.exit(ok ? 0 : 1);
+    }
+}
+""".replace("__CORPS__", indent_java(harness_code)).replace("__NONCE__", nonce)
+
+
+def indent_java(corps):
+    """Corps du harnais indenté dans la méthode. FONCTION PURE (testée)."""
+    return "\n".join("        " + l if l.strip() else l for l in (corps or "").splitlines())
+
+
+def java_server_source(class_name):
+    """Programme ÉTUDIANT : son code, plus une boucle qui répond aux appels par RÉFLEXION.
+
+    FONCTION PURE (testée). Aucun nonce, aucun harnais, aucun attendu : ce processus ne peut
+    rien apprendre du verdict, et rien de ce qu'il écrit ne peut le produire."""
+    return """import java.lang.reflect.Method;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
+public final class MooditServer {
+    public static void main(String[] args) throws Exception {
+        BufferedReader entree =
+                new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        String ligne;
+        while ((ligne = entree.readLine()) != null) {
+            String reponse;
+            try {
+                reponse = traite(ligne);
+            } catch (Throwable t) {
+                reponse = "{\\"ok\\":false,\\"error\\":\\"" + String.valueOf(t) .replace('"', '\\'') + "\\"}";
+            }
+            System.out.println(reponse);
+            System.out.flush();
+        }
+    }
+
+    /** Objets construits CHEZ L'ÉTUDIANT : le noteur n'en connaît que la poignée. */
+    private static final java.util.List<Object> OBJETS = new java.util.ArrayList<>();
+
+    private static String traite(String ligne) throws Exception {
+        String op = entre(ligne, "\\"op\\":\\"", "\\"");
+        if (op.equals("new")) { return construit(ligne); }
+        if (op.equals("method")) { return methode(ligne); }
+        String id = entre(ligne, "\\"id\\":\\"", "\\"");
+        String nom = entre(ligne, "\\"name\\":\\"", "\\"");
+        String brut = entre(ligne, "\\"args\\":[", "]");
+        Object[] args = decoupe(brut);
+        Method cible = null;
+        for (Method m : Class.forName("__CLASSE__").getDeclaredMethods()) {
+            if (m.getName().equals(nom) && m.getParameterCount() == args.length) { cible = m; break; }
+        }
+        if (cible == null) { throw new NoSuchMethodException(nom); }
+        cible.setAccessible(true);
+        Object[] convertis = new Object[args.length];
+        Class<?>[] types = cible.getParameterTypes();
+        for (int i = 0; i < args.length; i++) { convertis[i] = convertit(types[i], (String) args[i]); }
+        Object valeur = cible.invoke(null, convertis);
+        return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":" + encode(valeur) + "}";
+    }
+
+    private static String construit(String ligne) throws Exception {
+        String id = entre(ligne, "\\"id\\":\\"", "\\"");
+        String classe = entre(ligne, "\\"class\\":\\"", "\\"").replace('.', '$');
+        Object[] args = decoupe(entre(ligne, "\\"args\\":[", "]"));
+        Class<?> cible = Class.forName(classe);
+        for (java.lang.reflect.Constructor<?> c : cible.getDeclaredConstructors()) {
+            if (c.getParameterCount() != args.length) { continue; }
+            c.setAccessible(true);
+            Class<?>[] types = c.getParameterTypes();
+            Object[] convertis = new Object[args.length];
+            for (int i = 0; i < args.length; i++) {
+                convertis[i] = convertit(types[i], (String) args[i]);
+            }
+            OBJETS.add(c.newInstance(convertis));
+            return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":" + (OBJETS.size() - 1) + "}";
+        }
+        throw new NoSuchMethodException("constructeur " + classe);
+    }
+
+    private static String methode(String ligne) throws Exception {
+        String id = entre(ligne, "\\"id\\":\\"", "\\"");
+        String nom = entre(ligne, "\\"name\\":\\"", "\\"");
+        int handle = Integer.parseInt(entre(ligne + ",", "\\"handle\\":", ",").trim());
+        Object[] args = decoupe(entre(ligne, "\\"args\\":[", "]"));
+        Object instance = OBJETS.get(handle);
+        for (Method m : instance.getClass().getDeclaredMethods()) {
+            if (!m.getName().equals(nom) || m.getParameterCount() != args.length) { continue; }
+            m.setAccessible(true);
+            Class<?>[] types = m.getParameterTypes();
+            Object[] convertis = new Object[args.length];
+            for (int i = 0; i < args.length; i++) {
+                convertis[i] = convertit(types[i], (String) args[i]);
+            }
+            return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":"
+                    + encode(m.invoke(instance, convertis)) + "}";
+        }
+        throw new NoSuchMethodException(nom);
+    }
+
+    private static Object convertit(Class<?> type, String brut) {
+        String v = brut.trim();
+        if (type == int.class || type == Integer.class) { return Integer.valueOf(v); }
+        if (type == long.class || type == Long.class) { return Long.valueOf(v); }
+        if (type == double.class || type == Double.class) { return Double.valueOf(v); }
+        if (type == boolean.class || type == Boolean.class) { return Boolean.valueOf(v); }
+        if (v.length() >= 2 && v.startsWith("\\"")) { v = v.substring(1, v.length() - 1); }
+        return v;
+    }
+
+    private static String encode(Object valeur) {
+        if (valeur instanceof String) {
+            return "\\"" + ((String) valeur).replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"") + "\\"";
+        }
+        return String.valueOf(valeur);
+    }
+
+    private static String entre(String s, String debut, String fin) {
+        int i = s.indexOf(debut);
+        if (i < 0) { return ""; }
+        int j = s.indexOf(fin, i + debut.length());
+        return j < 0 ? "" : s.substring(i + debut.length(), j);
+    }
+
+    private static Object[] decoupe(String brut) {
+        if (brut.trim().isEmpty()) { return new Object[0]; }
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        boolean chaine = false;
+        StringBuilder courant = new StringBuilder();
+        for (int i = 0; i < brut.length(); i++) {
+            char c = brut.charAt(i);
+            if (c == '"') { chaine = !chaine; courant.append(c); }
+            else if (c == ',' && !chaine) { parts.add(courant.toString()); courant.setLength(0); }
+            else { courant.append(c); }
+        }
+        parts.add(courant.toString());
+        return parts.toArray();
+    }
+}
+""".replace("__CLASSE__", class_name)
+
+
+# ─────────────────────────── Go : bouchon et aiguillage TYPÉS ───────────────────────────
+# Go n'a pas de réflexion utilisable ici : les deux côtés sont générés à partir des signatures
+# lues dans la source de l'étudiant. Le code noté part dans un BINAIRE séparé (le harnais n'est
+# ni compilé avec lui, ni présent dans son système de fichiers).
+
+GO_FUNC = re.compile(r"^func\s+(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+GO_TYPES = {"int": "int", "int64": "int64", "float64": "float64", "bool": "bool",
+            "string": "string"}
+
+
+def go_signatures(source):
+    """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])].
+
+    FONCTION PURE (testée). On accepte `func f(a int, b int) int` et la forme groupée
+    `func f(a, b int) int`. `main` est écartée, ainsi que toute signature dont un type n'est pas
+    marshalable : le harnais qui l'appellerait ne compilerait pas — message au prof, jamais un
+    faux verdict."""
+    trouvees = []
+    for nom, params, retour in GO_FUNC.findall(source or ""):
+        if nom == "main" or (retour or "") not in GO_TYPES:
+            continue
+        types = []
+        valide = True
+        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+            morceaux = groupe.split()
+            if len(morceaux) == 2:
+                types.append(morceaux[1])
+            elif len(morceaux) == 1:
+                types.append(None)          # type porté par le groupe suivant (a, b int)
+            else:
+                valide = False
+        # Propagation à rebours des types groupés : (a, b int) → [int, int]
+        dernier = None
+        for i in range(len(types) - 1, -1, -1):
+            if types[i] is None:
+                types[i] = dernier
+            else:
+                dernier = types[i]
+        if not valide or any(t not in GO_TYPES for t in types):
+            continue
+        trouvees.append((retour, nom, types))
+    return trouvees
+
+
+GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
+GO_METHOD = re.compile(
+    r"^func\s+\(\s*\w+\s+\*?(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+
+
+def go_object_api(source):
+    """API OBJET Go → [(type, [(nom de constructeur, [types])], [(retour, méthode, [types])])].
+
+    FONCTION PURE (testée). Go n'a pas de constructeur, et DEUX formes sont proxifiées, parce que
+    les deux sont l'idiome : la fonction qui renvoie la structure (`NewRectangle(3, 4)`), et le
+    littéral à champs nommés (`Rectangle{largeur: 3, hauteur: 4}`), pris en charge par capture de
+    champs (cf. go_object_stub). Un type sans méthode marshalable n'est pas proxifié : le harnais
+    qui l'appelle ne compilera pas — message au prof, jamais un faux verdict."""
+    champs = go_struct_fields(source)
+    structs = set(GO_STRUCT.findall(source or ""))
+    if not structs:
+        return []
+    par_type = {s: ([], []) for s in structs}
+    for nom, params, retour in GO_FUNC.findall(source or ""):
+        if retour not in structs or nom == "main":
+            continue
+        types = _go_param_types(params)
+        if types is not None:
+            par_type[retour][0].append((nom, types))
+    for recepteur, nom, params, retour in GO_METHOD.findall(source or ""):
+        if recepteur not in structs or (retour or "") not in GO_TYPES:
+            continue
+        types = _go_param_types(params)
+        if types is not None:
+            par_type[recepteur][1].append((retour, nom, types))
+    return [(t, c, m) for t, (c, m) in sorted(par_type.items()) if m and (c or t in champs)]
+
+
+def _go_param_types(params):
+    """Types des paramètres d'une signature Go, ou None si l'un n'est pas marshalable. PURE."""
+    types = []
+    for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+        morceaux = groupe.split()
+        if len(morceaux) == 2:
+            types.append(morceaux[1])
+        elif len(morceaux) == 1:
+            types.append(None)
+        else:
+            return None
+    dernier = None
+    for i in range(len(types) - 1, -1, -1):
+        if types[i] is None:
+            types[i] = dernier
+        else:
+            dernier = types[i]
+    return types if all(t in GO_TYPES for t in types) else None
+
+
+GO_RPC_RUNTIME = '''
+type mooditReq struct {
+    Op     string        `json:"op"`
+    Id     string        `json:"id"`
+    Name   string        `json:"name"`
+    Handle int           `json:"handle"`
+    Args   []interface{} `json:"args"`
+}
+
+type mooditRep struct {
+    Ok    bool        `json:"ok"`
+    Id    string      `json:"id"`
+    Value interface{} `json:"value"`
+    Error string      `json:"error"`
+}
+'''
+
+
+GO_CONV = {"int": "int(mooditNombre(%s))", "int64": "int64(mooditNombre(%s))",
+           "float64": "mooditNombre(%s)", "bool": "%s.(bool)", "string": "%s.(string)"}
+
+
+GO_STRUCT_BODY = re.compile(r"^type\s+(\w+)\s+struct\s*\{([^}]*)\}", re.M | re.S)
+
+
+def go_struct_fields(source):
+    """Champs des structures du code étudiant → {type: [(champ, type)]}. PURE (testée).
+
+    Sert à proxifier l'IDIOME Go : `Rectangle{largeur: 3, hauteur: 4}`. Il n'y a pas de
+    constructeur dans ce langage, donc exiger une fonction-constructeur écarterait la façon
+    normale d'écrire — et c'est celle que les profs emploient."""
+    champs = {}
+    for typ, corps in GO_STRUCT_BODY.findall(source or ""):
+        liste = []
+        for ligne in corps.splitlines():
+            nue = ligne.split("//")[0].strip()
+            if not nue:
+                continue
+            morceaux = nue.replace(",", " ").split()
+            if len(morceaux) < 2 or morceaux[-1] not in GO_TYPES:
+                liste = None
+                break
+            for nom in morceaux[:-1]:
+                liste.append((nom, morceaux[-1]))
+        if liste:
+            champs[typ] = liste
+    return champs
+
+
+def go_object_stub(objets, champs=None):
+    """Bouchons OBJET Go : littéral à champs capturés ou poignée, et méthodes relayées.
+
+    FONCTION PURE (testée). Quand tous les champs sont marshalables, le bouchon les MIROITE :
+    le harnais écrit son littéral habituel, et la méthode construit l'objet CHEZ l'étudiant au
+    moment de l'appel. Une fonction-constructeur reste proxifiée dans ce mode — elle s'exécute
+    chez l'étudiant et le bouchon RELIT les champs du résultat, ce qui garde la valeur simple et
+    autorise aussi bien `NewRectangle(3, 4)` que le littéral. Sinon : poignée du constructeur."""
+    champs = champs or {}
+    morceaux = []
+    for typ, ctors, methodes in objets:
+        if typ in champs:
+            morceaux.append("type %s struct {\n%s\n}"
+                            % (typ, "\n".join("    %s %s" % (n, t) for n, t in champs[typ])))
+            for nom, types in ctors:
+                params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
+                args = ", ".join("a%d" % i for i in range(len(types)))
+                lectures = ", ".join(
+                    "%s: %s" % (n, GO_CONV[t] % ("mooditIndex(champs, %d)" % i))
+                    for i, (n, t) in enumerate(champs[typ]))
+                morceaux.append('''func %s(%s) %s {
+    champs := mooditChamps("%s", []interface{}{%s})
+    return %s{%s}
+}''' % (nom, params, typ, nom, args, typ, lectures))
+            valeurs = ", ".join("o.%s" % n for n, _ in champs[typ])
+            for retour, nom, types in methodes:
+                params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
+                args = ", ".join("a%d" % i for i in range(len(types)))
+                conv = GO_CONV[retour] % (
+                    'mooditMethode(int(mooditNombre(mooditNouvelle("%s", []interface{}{%s}))), '
+                    '"%s.%s", []interface{}{%s})' % (typ, valeurs, typ, nom, args))
+                morceaux.append('''func (o %s) %s(%s) %s {
+    return %s
+}''' % (typ, nom, params, retour, conv))
+            continue
+        morceaux.append("type %s struct {\n    __h int\n}" % typ)
+        for nom, types in ctors:
+            params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            morceaux.append('''func %s(%s) %s {
+    return %s{__h: int(mooditNombre(mooditNouvelle("%s", []interface{}{%s})))}
+}''' % (nom, params, typ, typ, nom, args))
+        for retour, nom, types in methodes:
+            params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            conv = GO_CONV[retour] % 'mooditMethode(o.__h, "%s.%s", []interface{}{%s})' % (typ, nom, args)
+            morceaux.append('''func (o %s) %s(%s) %s {
+    return %s
+}''' % (typ, nom, params, retour, conv))
+    return "\n\n".join(morceaux)
+
+
+def go_object_dispatch(objets, champs=None):
+    """Aiguillage OBJET côté étudiant : construit et appelle POUR DE VRAI. PURE (testée).
+
+    Un type à champs capturés se construit par son littéral, exactement comme le ferait
+    l'étudiant ; la clé `new` porte alors le NOM DU TYPE, et non celui d'un constructeur."""
+    champs = champs or {}
+    cas_new, cas_methode = [], []
+    for typ, ctors, methodes in objets:
+        if typ in champs:
+            affectations = ", ".join(
+                "%s: %s" % (n, GO_CONV[t] % ("req.Args[%d]" % i))
+                for i, (n, t) in enumerate(champs[typ]))
+            cas_new.append('        case "%s":\n'
+                           '            mooditObjets = append(mooditObjets, %s{%s})\n'
+                           '            valeur = len(mooditObjets) - 1'
+                           % (typ, typ, affectations))
+            # Une fonction-constructeur renvoie les CHAMPS du résultat, pas une poignée : le
+            # bouchon reconstruit alors une valeur simple, utilisable comme un littéral.
+            for nom, types in ctors:
+                args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+                champs_retour = ", ".join("moodit_cree.%s" % n for n, _ in champs[typ])
+                cas_new.append('        case "%s":\n'
+                               '            moodit_cree := %s(%s)\n'
+                               '            valeur = []interface{}{%s}'
+                               % (nom, nom, args, champs_retour))
+        else:
+            for nom, types in ctors:
+                args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+                cas_new.append('        case "%s":\n'
+                               '            mooditObjets = append(mooditObjets, %s(%s))\n'
+                               '            valeur = len(mooditObjets) - 1'
+                               % (nom, nom, args))
+        for retour, nom, types in methodes:
+            args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+            cas_methode.append('        case "%s.%s":\n'
+                               '            valeur = mooditObjets[req.Handle].(%s).%s(%s)'
+                               % (typ, nom, typ, nom, args))
+    return "\n".join(cas_new), "\n".join(cas_methode)
+
+
+def go_grader_source(methods, harness_code, nonce, objets=(), champs=None):
+    """Programme NOTEUR Go : bouchons typés + harnais booléen du prof + nonce. PURE (testée)."""
+    bouchons = []
+    for retour, nom, types in methods:
+        params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        conv = {"int": "int(mooditNombre(v))", "int64": "int64(mooditNombre(v))",
+                "float64": "mooditNombre(v)", "bool": "v.(bool)",
+                "string": "v.(string)"}[retour]
+        bouchons.append("""func %s(%s) %s {
+    v := mooditAppel("%s", []interface{}{%s})
+    return %s
+}""" % (nom, params, retour, nom, args, conv))
+    return '''package main
+
+import (
+    "bufio"
+    "crypto/rand"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "os"
+)
+%s
+var mooditLecteur = bufio.NewReader(os.Stdin)
+
+// Identifiant IMPRÉVISIBLE par appel : sans lui, le code noté — dont le stdout EST le canal de
+// réponse — pouvait imprimer la réponse attendue AVANT la question et faire passer un code faux.
+func mooditId() string {
+    b := make([]byte, 16)
+    rand.Read(b)
+    return hex.EncodeToString(b)
+}
+
+func mooditNombre(v interface{}) float64 {
+    f, _ := v.(float64)
+    return f
+}
+
+func mooditNouvelle(nom string, args []interface{}) interface{} {
+    return mooditEnvoie(mooditReq{Op: "new", Name: nom, Args: args})
+}
+
+// Champs du résultat d'une fonction-constructeur exécutée CHEZ L'ÉTUDIANT : le bouchon les
+// relit pour reconstruire une valeur simple, sans poignée ni champ caché.
+func mooditChamps(nom string, args []interface{}) []interface{} {
+    liste, _ := mooditNouvelle(nom, args).([]interface{})
+    return liste
+}
+
+func mooditIndex(liste []interface{}, i int) interface{} {
+    if i < len(liste) {
+        return liste[i]
+    }
+    return float64(0)
+}
+
+func mooditMethode(handle int, nom string, args []interface{}) interface{} {
+    return mooditEnvoie(mooditReq{Op: "method", Handle: handle, Name: nom, Args: args})
+}
+
+func mooditAppel(nom string, args []interface{}) interface{} {
+    return mooditEnvoie(mooditReq{Op: "call", Name: nom, Args: args})
+}
+
+func mooditEnvoie(req mooditReq) interface{} {
+    id := mooditId()
+    req.Id = id
+    requete, _ := json.Marshal(req)
+    fmt.Println(string(requete))
+    for {
+        ligne, err := mooditLecteur.ReadString('\\n')
+        if err != nil {
+            panic("processus etudiant termine")
+        }
+        var rep mooditRep
+        // Le code noté partage ce flux : seule une réponse portant l'identifiant DE CET APPEL
+        // compte. Tout le reste est du bruit, ou une tentative de devancer la question.
+        if json.Unmarshal([]byte(ligne), &rep) != nil || rep.Id != id {
+            continue
+        }
+        if !rep.Ok {
+            panic("appel refuse par le code soumis : " + rep.Error)
+        }
+        return rep.Value
+    }
+}
+
+%s
+
+%s
+
+func mooditHarnais() bool {
+%s
+}
+
+func main() {
+    ok := false
+    func() {
+        defer func() {
+            if r := recover(); r != nil {
+                // fail-closed, mais jamais en silence : c'est le code du PROF qui a levé.
+                fmt.Fprintln(os.Stderr, "[MOODIT] harnais:", r)
+                ok = false
+            }
+        }()
+        ok = mooditHarnais()
+    }()
+    if ok {
+        fmt.Fprint(os.Stderr, "%s")
+    }
+    if ok {
+        os.Exit(0)
+    }
+    os.Exit(1)
+}
+''' % (GO_RPC_RUNTIME, "\n\n".join(bouchons), go_object_stub(objets, champs),
+       "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
+       nonce)
+
+
+def go_server_source(methods, objets=(), champs=None):
+    """Serveur de l'étudiant : aiguillage TYPÉ vers ses fonctions et ses objets. PURE (testée).
+
+    Aucun nonce, aucun harnais, aucun attendu : ce programme ne peut rien apprendre du verdict."""
+    cas_new, cas_methode = go_object_dispatch(objets, champs)
+    cas = []
+    for retour, nom, types in methods:
+        args = []
+        for i, t in enumerate(types):
+            if t in ("int", "int64"):
+                args.append("%s(mooditNombre(req.Args[%d]))" % (t, i))
+            elif t == "float64":
+                args.append("mooditNombre(req.Args[%d])" % i)
+            elif t == "bool":
+                args.append("req.Args[%d].(bool)" % i)
+            else:
+                args.append("req.Args[%d].(string)" % i)
+        cas.append('        case "%s":\n            valeur = %s(%s)'
+                   % (nom, nom, ", ".join(args)))
+    return '''package main
+
+import (
+    "bufio"
+    "encoding/json"
+    "fmt"
+    "os"
+)
+%s
+func mooditNombre(v interface{}) float64 {
+    f, _ := v.(float64)
+    return f
+}
+
+var mooditObjets []interface{}
+
+func mooditServe() {
+    lecteur := bufio.NewReader(os.Stdin)
+    for {
+        ligne, err := lecteur.ReadString('\\n')
+        if err != nil {
+            return
+        }
+        var req mooditReq
+        if json.Unmarshal([]byte(ligne), &req) != nil {
+            continue
+        }
+        rep := mooditRep{Ok: true, Id: req.Id}
+        func() {
+            defer func() {
+                if r := recover(); r != nil {
+                    rep = mooditRep{Ok: false, Id: req.Id, Error: fmt.Sprint(r)}
+                }
+            }()
+            var valeur interface{}
+            if req.Op == "new" {
+                switch req.Name {
+%s
+                default:
+                    panic("constructeur inconnu : " + req.Name)
+                }
+            } else if req.Op == "method" {
+                switch req.Name {
+%s
+                default:
+                    panic("methode inconnue : " + req.Name)
+                }
+            } else {
+                switch req.Name {
+%s
+                default:
+                    panic("fonction inconnue : " + req.Name)
+                }
+            }
+            rep.Value = valeur
+        }()
+        brut, _ := json.Marshal(rep)
+        fmt.Println(string(brut))
+    }
+}
+
+func main() {
+    mooditServe()
+}
+''' % (GO_RPC_RUNTIME, cas_new or "        case \"\":", cas_methode or "        case \"\":",
+       "\n".join(cas))
+
+
+GO_MAIN_DECL = re.compile(r"^func\s+main\s*\(\s*\)\s*\{", re.M)
+
+
+def go_student_without_main(source):
+    """Code étudiant dont le `main` est renommé : le serveur généré fournit le point d'entrée.
+
+    FONCTION PURE (testée). Même parade que le `#define main` du chemin C : on ne retire rien du
+    code de l'étudiant, on le déplace."""
+    return GO_MAIN_DECL.sub("func __moodit_student_main() {", source or "")
+
+
+# ───────────────────── C / C++ : bouchon et aiguillage TYPÉS, protocole texte ─────────────────────
+# Pas de bibliothèque JSON dans ces images : le protocole est une ligne « id|nom|arg|arg », la
+# réponse « id|ok|valeur ». Chaque paire noteur/étudiant est du même langage, donc chacune peut
+# avoir son protocole — seule compte la propriété : le harnais et le nonce ne sont PAS dans le
+# binaire de l'étudiant, qui tourne sous un autre UID.
+
+C_FUNC = re.compile(r"^\s*(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.M)
+C_TYPES = {"int": "%d", "long": "%ld", "double": "%g"}
+
+
+def cpp_class_spans(source):
+    """Plages (début, fin) des corps de classe/structure C++. FONCTION PURE (testée).
+
+    Sert à ne PAS prendre une méthode pour une fonction libre : `int aire() { … }` indenté dans
+    une classe n'est pas appelable sans objet, et le bouchon généré ne compilait pas."""
+    texte = source or ""
+    plages = []
+    for classe in CPP_CLASS.finditer(texte):
+        try:
+            debut = texte.index("{", classe.start())
+        except ValueError:
+            continue
+        profondeur = 0
+        for i in range(debut, len(texte)):
+            if texte[i] == "{":
+                profondeur += 1
+            elif texte[i] == "}":
+                profondeur -= 1
+                if profondeur == 0:
+                    plages.append((debut, i))
+                    break
+    return plages
+
+
+def c_signatures(source, cpp=False):
+    """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])]. PURE (testée).
+
+    Seuls int/long/double sont marshalés dans ce jalon ; `main` est écartée, ainsi que — en C++ —
+    tout ce qui vit dans un corps de classe (ce sont des méthodes, proxifiées par poignée). Une
+    signature hors liste n'est pas proxifiée : le harnais qui l'appelle ne compilera pas (message
+    au prof, jamais un faux verdict)."""
+    plages = cpp_class_spans(source) if cpp else []
+    trouvees = []
+    for trouve in C_FUNC.finditer(source or ""):
+        if any(debut <= trouve.start() <= fin for debut, fin in plages):
+            continue
+        retour, nom, params = trouve.group(1), trouve.group(2), trouve.group(3)
+        retour = retour.replace(" ", "")
+        if nom == "main" or retour not in C_TYPES:
+            continue
+        types = []
+        valide = True
+        for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
+            morceaux = groupe.replace("*", " ").split()
+            if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
+                valide = False
+                break
+            types.append(morceaux[0])
+        if not valide:
+            continue
+        trouvees.append((retour, nom, types))
+    return trouvees
+
+
+CPP_CLASS = re.compile(r"^\s*(?:class|struct)\s+(\w+)", re.M)
+
+
+def cpp_object_api(source):
+    """API OBJET C++ → [(classe, [constructeurs], [(retour, méthode, [types])])]. PURE (testée).
+
+    Le corps de la classe est découpé par appariement d'accolades, et seules les déclarations de
+    la section PUBLIQUE comptent (une `class` commence en privé, une `struct` en public)."""
+    texte = source or ""
+    resultat = []
+    for classe in CPP_CLASS.finditer(texte):
+        nom_classe = classe.group(1)
+        try:
+            debut = texte.index("{", classe.start())
+        except ValueError:
+            continue
+        profondeur, fin = 0, debut
+        for i in range(debut, len(texte)):
+            if texte[i] == "{":
+                profondeur += 1
+            elif texte[i] == "}":
+                profondeur -= 1
+                if profondeur == 0:
+                    fin = i
+                    break
+        corps = texte[debut + 1:fin]
+        public = texte[classe.start():debut].lstrip().startswith("struct")
+        ctors, methodes = [], []
+        for ligne in corps.splitlines():
+            nue = ligne.strip()
+            if nue.startswith("public:"):
+                public = True
+                nue = nue[len("public:"):].strip()
+            elif nue.startswith("private:") or nue.startswith("protected:"):
+                public = False
+                continue
+            if not public or not nue:
+                continue
+            ctor = re.match(re.escape(nom_classe) + r"\s*\(([^)]*)\)", nue)
+            if ctor:
+                types = _c_param_types(ctor.group(1))
+                if types is not None:
+                    ctors.append(types)
+                continue
+            methode = re.match(r"(int|long|double)\s+(\w+)\s*\(([^)]*)\)", nue)
+            if methode:
+                types = _c_param_types(methode.group(3))
+                if types is not None:
+                    methodes.append((methode.group(1), methode.group(2), types))
+        if ctors and methodes:
+            resultat.append((nom_classe, ctors, methodes))
+    return resultat
+
+
+def _c_param_types(params):
+    """Types des paramètres d'une signature C/C++, ou None si l'un n'est pas marshalable. PURE."""
+    types = []
+    for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
+        morceaux = groupe.replace("*", " ").split()
+        if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
+            return None
+        types.append(morceaux[0])
+    return types
+
+
+def cpp_object_stub(objets):
+    """Bouchons OBJET C++ : classe à poignée, constructeurs et méthodes relayés. PURE (testée)."""
+    morceaux = []
+    for classe, ctors, methodes in objets:
+        corps = ["class %s {" % classe, "    int __h;", "public:"]
+        for types in ctors:
+            params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+            fmt = "".join("|" + C_TYPES[t] for t in types)
+            args = "".join(", a%d" % i for i in range(len(types)))
+            corps += ["    %s(%s) {" % (classe, params),
+                      "        char id[40], requete[4096];",
+                      "        moodit_identifiant(id);",
+                      '        snprintf(requete, sizeof requete, "%%s|new|%s%s", id%s);'
+                      % (classe, fmt, args),
+                      "        moodit_envoie(requete);",
+                      "        __h = atoi(moodit_valeur(id));",
+                      "    }"]
+        for retour, nom, types in methodes:
+            params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+            fmt = "".join("|" + C_TYPES[t] for t in types)
+            args = "".join(", a%d" % i for i in range(len(types)))
+            lecture = {"int": "atoi", "long": "atol", "double": "atof"}[retour]
+            corps += ["    %s %s(%s) {" % (retour, nom, params),
+                      "        char id[40], requete[4096];",
+                      "        moodit_identifiant(id);",
+                      '        snprintf(requete, sizeof requete, "%%s|method|%s.%s|%%d%s", id, __h%s);'
+                      % (classe, nom, fmt, args),
+                      "        moodit_envoie(requete);",
+                      "        return %s(moodit_valeur(id));" % lecture,
+                      "    }"]
+        corps.append("};")
+        morceaux.append("\n".join(corps))
+    return "\n\n".join(morceaux)
+
+
+def cpp_object_dispatch(objets):
+    """Aiguillage OBJET côté étudiant : une pile PAR CLASSE, construction réelle. PURE (testée)."""
+    piles, cas = [], []
+    for classe, ctors, methodes in objets:
+        piles.append("static std::vector<%s> moodit_objets_%s;" % (classe, classe))
+        for types in ctors:
+            lectures = "\n".join(
+                "        %s a%d = %s(moodit_jeton());"
+                % (t, i, {"int": "atoi", "long": "atol", "double": "atof"}[t])
+                for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            cas.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
+%s
+        moodit_objets_%s.push_back(%s(%s));
+        printf("%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
+        fflush(stdout);
+        return;
+    }''' % (classe, lectures, classe, classe, args, classe))
+        for retour, nom, types in methodes:
+            lectures = "\n".join(
+                "        %s a%d = %s(moodit_jeton());"
+                % (t, i, {"int": "atoi", "long": "atol", "double": "atof"}[t])
+                for i, t in enumerate(types))
+            args = ", ".join("a%d" % i for i in range(len(types)))
+            cas.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
+        int h = atoi(moodit_jeton());
+%s
+        printf("%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
+        fflush(stdout);
+        return;
+    }''' % (classe, nom, lectures, C_TYPES[retour], classe, nom, args))
+    return "\n".join(piles), "\n\n".join(cas)
+
+
+C_RUNTIME = r'''
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static char moodit_ligne[8192];
+
+static void moodit_envoie(const char *requete) {
+    fputs(requete, stdout);
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
+/* Lit la reponse PORTANT L'IDENTIFIANT demande ; tout le reste est du bruit (ou une tentative
+   de devancer la question, le stdout du code note etant le canal de reponse). */
+static const char *moodit_attend(const char *id) {
+    while (fgets(moodit_ligne, sizeof moodit_ligne, stdin)) {
+        char *sep = strchr(moodit_ligne, '|');
+        if (!sep) { continue; }
+        *sep = '\0';
+        if (strcmp(moodit_ligne, id) != 0) { continue; }
+        return sep + 1;
+    }
+    return NULL;
+}
+
+/* Valeur de la reponse, ou arret net : factorise ce que chaque bouchon faisait a la main. */
+static const char *moodit_valeur(const char *id) {
+    const char *reponse = moodit_attend(id);
+    if (!reponse || strncmp(reponse, "ok|", 3) != 0) {
+        fprintf(stderr, "[MOODIT] appel refuse par le code soumis\n");
+        exit(3);
+    }
+    return reponse + 3;
+}
+
+'''
+
+
+def c_grader_source(methods, harness_code, nonce, cpp=False, objets=()):
+    """Programme NOTEUR C/C++ : bouchons typés + harnais booléen + nonce. PURE (testée)."""
+    bouchons = []
+    for retour, nom, types in methods:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        fmt = "".join("|" + C_TYPES[t] for t in types)
+        args = "".join(", a%d" % i for i in range(len(types)))
+        lecture = {"int": "atoi", "long": "atol", "double": "atof"}[retour]
+        bouchons.append("""static %s %s(%s) {
+    char id[40], requete[4096];
+    moodit_identifiant(id);
+    snprintf(requete, sizeof requete, "%%s|call|%s%s", id%s);
+    moodit_envoie(requete);
+    return %s(moodit_valeur(id));
+}""" % (retour, nom, params or "void", nom, fmt, args, lecture))
+    entete = "" if cpp else ""
+    return entete + C_RUNTIME + r'''
+/* Identifiant IMPREVISIBLE par appel, tire de /dev/urandom : sans lui, le code note pouvait
+   imprimer la reponse attendue AVANT la question et faire passer un code faux. */
+static void moodit_identifiant(char *sortie) {
+    unsigned char brut[8];
+    FILE *alea = fopen("/dev/urandom", "rb");
+    if (!alea || fread(brut, 1, sizeof brut, alea) != sizeof brut) {
+        fprintf(stderr, "[MOODIT] alea indisponible\n");
+        exit(4);
+    }
+    fclose(alea);
+    for (int i = 0; i < 8; i++) { sprintf(sortie + i * 2, "%02x", brut[i]); }
+    sortie[16] = '\0';
+}
+
+''' + "\n\n".join(bouchons) + "\n\n" + cpp_object_stub(objets) + r'''
+
+static int moodit_harnais(void) {
+''' + "\n".join("    " + l if l.strip() else l
+                for l in (harness_code or "").splitlines()) + r'''
+}
+
+int main(void) {
+    if (moodit_harnais()) {
+        fputs("''' + nonce + r'''", stderr);
+        fflush(stderr);
+        return 0;
+    }
+    return 1;
+}
+'''
+
+
+def c_server_source(methods, student_source, cpp=False, objets=()):
+    """Programme ÉTUDIANT C/C++ : son code (main renommé) + aiguillage typé. PURE (testée)."""
+    cas = []
+    for retour, nom, types in methods:
+        lectures = []
+        for i, t in enumerate(types):
+            conv = {"int": "atoi", "long": "atol", "double": "atof"}[t]
+            lectures.append("        %s a%d = %s(moodit_jeton());" % (t, i, conv))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        cas.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
+%s
+        printf("%%s|ok|%s\\n", id, %s(%s));
+        fflush(stdout);
+        return;
+    }""" % (nom, "\n".join(lectures), C_TYPES[retour], nom, args))
+    piles, cas_objets = cpp_object_dispatch(objets)
+    return ("#define main __moodit_student_main\n"
+            + (student_source or "")
+            + "\n#undef main\n"
+            + ("#include <vector>\n" if objets else "")
+            + C_RUNTIME + piles + r'''
+static char *moodit_reste;
+
+/* Decoupage a la main : strsep n'est pas dans l'ISO C17 (-std=c17), et ceci compile aussi en C++. */
+static const char *moodit_jeton(void) {
+    if (!moodit_reste) { return "0"; }
+    char *debut = moodit_reste;
+    char *sep = strchr(debut, '|');
+    if (sep) { *sep = '\0'; moodit_reste = sep + 1; } else { moodit_reste = NULL; }
+    return debut;
+}
+
+/* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
+static void moodit_traite(const char *id, const char *op, const char *nom) {
+''' + "\n".join(cas) + "\n\n" + cas_objets + r'''
+    printf("%s|err|fonction inconnue\n", id);
+    fflush(stdout);
+}
+
+int main(void) {
+    while (fgets(moodit_ligne, sizeof moodit_ligne, stdin)) {
+        char *fin = strchr(moodit_ligne, '\n');
+        if (fin) { *fin = '\0'; }
+        moodit_reste = moodit_ligne;
+        const char *id = moodit_jeton();
+        const char *op = moodit_jeton();
+        const char *nom = moodit_jeton();
+        moodit_traite(id, op, nom);
+    }
+    return 0;
+}
+''')
+
+
+# ─────────────────── Rust : bouchon et aiguillage TYPÉS, protocole texte ───────────────────
+# Pas de serde dans l'image (aucun réseau à la compilation) : même protocole texte que C.
+
+RUST_FN = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)", re.M)
+RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
+
+
+def rust_signatures(source):
+    """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
+    trouvees = []
+    for nom, params, retour in RUST_FN.findall(source or ""):
+        if nom == "main" or retour not in RUST_TYPES:
+            continue
+        types = []
+        valide = True
+        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+            if ":" not in groupe:
+                valide = False
+                break
+            t = groupe.split(":", 1)[1].strip()
+            if t not in RUST_TYPES:
+                valide = False
+                break
+            types.append(t)
+        if valide:
+            trouvees.append((retour, nom, types))
+    return trouvees
+
+
+RUST_STRUCT = re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)", re.M)
+RUST_IMPL = re.compile(r"^\s*impl\s+(\w+)\s*\{", re.M)
+RUST_FN_IN_IMPL = re.compile(
+    r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)", re.M)
+RUST_CONV = {"i32": "%s.parse::<i32>().unwrap_or_default()",
+             "i64": "%s.parse::<i64>().unwrap_or_default()",
+             "f64": "%s.parse::<f64>().unwrap_or_default()",
+             "bool": "%s.parse::<bool>().unwrap_or_default()",
+             "String": "String::from(%s)"}
+
+
+def rust_object_api(source):
+    """API OBJET Rust → [(type, [(ctor, [types])], [(retour, méthode, [types])])]. PURE (testée).
+
+    Un `impl` est découpé par appariement d'accolades : une fonction associée qui RENVOIE le type
+    est un constructeur (`Rectangle::new`), une fonction qui prend `&self` est une méthode."""
+    texte = source or ""
+    structs = set(RUST_STRUCT.findall(texte))
+    resultat = []
+    for impl in RUST_IMPL.finditer(texte):
+        typ = impl.group(1)
+        if typ not in structs:
+            continue
+        debut = texte.index("{", impl.start())
+        profondeur, fin = 0, debut
+        for i in range(debut, len(texte)):
+            if texte[i] == "{":
+                profondeur += 1
+            elif texte[i] == "}":
+                profondeur -= 1
+                if profondeur == 0:
+                    fin = i
+                    break
+        corps = texte[debut:fin]
+        ctors, methodes = [], []
+        for nom, params, retour in RUST_FN_IN_IMPL.findall(corps):
+            morceaux = [p.strip() for p in params.split(",") if p.strip()]
+            prend_self = bool(morceaux) and morceaux[0].endswith("self")
+            utiles = morceaux[1:] if prend_self else morceaux
+            types = []
+            valide = True
+            for groupe in utiles:
+                if ":" not in groupe or groupe.split(":", 1)[1].strip() not in RUST_TYPES:
+                    valide = False
+                    break
+                types.append(groupe.split(":", 1)[1].strip())
+            if not valide:
+                continue
+            if not prend_self and retour == typ:
+                ctors.append((nom, types))
+            elif prend_self and retour in RUST_TYPES:
+                methodes.append((retour, nom, types))
+        if methodes and (ctors or typ in rust_struct_fields(texte)):
+            resultat.append((typ, ctors, methodes))
+    return resultat
+
+
+RUST_STRUCT_BODY = re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)\s*\{([^}]*)\}", re.M | re.S)
+
+
+def rust_struct_fields(source):
+    """Champs des structures du code étudiant → {type: [(champ, type)]}. PURE (testée).
+
+    Comme en Go, l'idiome Rust d'une structure sans `new` est le LITTÉRAL À CHAMPS NOMMÉS
+    (`Rectangle { largeur: 3, hauteur: 4 }`) : c'est la forme qu'écrivent les profs, donc celle
+    qu'il faut savoir proxifier."""
+    champs = {}
+    for typ, corps in RUST_STRUCT_BODY.findall(source or ""):
+        liste = []
+        for groupe in corps.split(","):
+            nue = groupe.split("//")[0].strip()
+            if not nue:
+                continue
+            if ":" not in nue:
+                liste = None
+                break
+            nom, type_ = (m.strip() for m in nue.split(":", 1))
+            if type_ not in RUST_TYPES or not nom.isidentifier():
+                liste = None
+                break
+            liste.append((nom, type_))
+        if liste:
+            champs[typ] = liste
+    return champs
+
+
+def rust_object_stub(objets, champs=None):
+    """Bouchons OBJET Rust : littéral à champs capturés ou poignée, et méthodes relayées.
+
+    FONCTION PURE (testée). Champs tous marshalables → le bouchon les MIROITE et la méthode
+    construit l'objet CHEZ l'étudiant au moment de l'appel ; sinon, poignée d'un constructeur."""
+    champs = champs or {}
+    morceaux = []
+    for typ, ctors, methodes in objets:
+        if typ in champs:
+            declaration = "struct %s {\n%s\n}" % (
+                typ, "\n".join("    %s: %s," % (n, t) for n, t in champs[typ]))
+            envoi_champs = "".join(' + "|" + &self.%s.to_string()' % n for n, _ in champs[typ])
+            corps = []
+            # Une fonction associée CONSTRUCTRICE (Rectangle::new) reste proxifiée : elle
+            # s'exécute chez l'étudiant et le bouchon relit les champs de son résultat.
+            for nom, types in ctors:
+                params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
+                envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+                lectures = "\n".join(
+                    "        let %s = %s;" % (n, RUST_CONV[t] % 'parts.next().unwrap_or("")')
+                    for n, t in champs[typ])
+                litteral = ", ".join(n for n, _ in champs[typ])
+                corps.append('''    fn %s(%s) -> %s {
+        let id = moodit_id();
+        let brut = moodit_appel(&id, &(id.clone() + "|new|%s"%s));
+        let mut parts = brut.split('|');
+%s
+        %s { %s }
+    }''' % (nom, params, typ, nom, envoi, lectures, typ, litteral))
+            for retour, nom, types in methodes:
+                params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
+                envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+                parse = ("String::from(brut.as_str())" if retour == "String"
+                         else "brut.parse::<%s>().unwrap_or_default()" % retour)
+                corps.append('''    fn %s(%s) -> %s {
+        let cid = moodit_id();
+        let h = moodit_appel(&cid, &(cid.clone() + "|new|%s"%s));
+        let id = moodit_id();
+        let requete = id.clone() + "|method|%s.%s|" + &h%s;
+        let brut = moodit_appel(&id, &requete);
+        %s
+    }''' % (nom, params, retour, typ, envoi_champs, typ, nom, envoi, parse))
+            morceaux.append("%s\n\nimpl %s {\n%s\n}"
+                            % (declaration, typ, "\n\n".join(corps)))
+            continue
+        corps = []
+        for nom, types in ctors:
+            params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
+            envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+            corps.append('''    fn %s(%s) -> %s {
+        let id = moodit_id();
+        let requete = id.clone() + "|new|%s"%s;
+        %s { __h: moodit_appel(&id, &requete).parse::<i64>().unwrap_or_default() }
+    }''' % (nom, params, typ, nom, envoi, typ))
+        for retour, nom, types in methodes:
+            params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
+            envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+            parse = ("String::from(brut.as_str())" if retour == "String"
+                     else "brut.parse::<%s>().unwrap_or_default()" % retour)
+            # Ordre du protocole, commun à tous les langages à protocole texte :
+            #   id|op|nom|poignée|args…   (la poignée ne vaut que pour `method`)
+            corps.append('''    fn %s(%s) -> %s {
+        let id = moodit_id();
+        let requete = id.clone() + "|method|%s.%s|" + &self.__h.to_string()%s;
+        let brut = moodit_appel(&id, &requete);
+        %s
+    }''' % (nom, params, retour, typ, nom, envoi, parse))
+        morceaux.append("struct %s {\n    __h: i64,\n}\n\nimpl %s {\n%s\n}"
+                        % (typ, typ, "\n\n".join(corps)))
+    return "\n\n".join(morceaux)
+
+
+def rust_object_dispatch(objets, champs=None):
+    """Aiguillage OBJET côté étudiant : une pile PAR TYPE, pas d'unsafe. PURE (testée).
+
+    Un type à champs capturés se construit par son littéral, comme l'écrirait l'étudiant ; la clé
+    `new` porte alors le NOM DU TYPE et non celui d'un constructeur."""
+    champs = champs or {}
+    piles, cas = [], []
+    for typ, ctors, methodes in objets:
+        piles.append("    let mut moodit_%s: Vec<%s> = Vec::new();" % (typ.lower(), typ))
+        if typ in champs:
+            lectures = "\n".join(
+                '                let %s = %s;' % (n, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                for n, t in champs[typ])
+            litteral = "%s { %s }" % (typ, ", ".join(n for n, _ in champs[typ]))
+            cas.append('''            "new|%s" => {
+%s
+                moodit_%s.push(%s);
+                format!("{}|ok|{}", id, moodit_%s.len() - 1)
+            }''' % (typ, lectures, typ.lower(), litteral, typ.lower()))
+            for nom, types in ctors:
+                lectures_args = "\n".join(
+                    '                let a%d = %s;'
+                    % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                    for i, t in enumerate(types))
+                appel = "%s::%s(%s)" % (typ, nom, ", ".join("a%d" % i for i in range(len(types))))
+                retours = "".join(
+                    '                                + "|" + &moodit_cree.%s.to_string()' % n
+                    for n, _ in champs[typ])
+                cas.append('''            "new|%s" => {
+%s
+                let moodit_cree = %s;
+                format!("{}|ok", id)
+%s
+            }''' % (nom, lectures_args, appel, retours))
+        for nom, types in ctors:
+            lectures = "\n".join(
+                '                let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                for i, t in enumerate(types))
+            appel = "%s::%s(%s)" % (typ, nom, ", ".join("a%d" % i for i in range(len(types))))
+            cas.append('''            "new|%s" => {
+%s
+                moodit_%s.push(%s);
+                format!("{}|ok|{}", id, moodit_%s.len() - 1)
+            }''' % (nom, lectures, typ.lower(), appel, typ.lower()))
+        for retour, nom, types in methodes:
+            cas.append('''            "method|%s.%s" => {
+                let h = args.next().unwrap_or("0").parse::<usize>().unwrap_or(0);
+                format!("{}|ok|{}", id, moodit_%s[h].%s())
+            }''' % (typ, nom, typ.lower(), nom))
+    return "\n".join(piles), "\n".join(cas)
+
+
+def rust_grader_source(methods, harness_code, nonce, objets=(), champs=None):
+    """Programme NOTEUR Rust : bouchons typés + harnais booléen + nonce. PURE (testée)."""
+    bouchons = []
+    for retour, nom, types in methods:
+        params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
+        envoi = " + \"|\" + ".join(["&a%d.to_string()" % i for i in range(len(types))]) or '""'
+        corps = ("&a0.to_string()" if len(types) == 1 else envoi)
+        parse = "String::from(brut)" if retour == "String" else "brut.parse::<%s>().unwrap()" % retour
+        args = (" + \"|\" + " + corps) if types else ""
+        bouchons.append('''fn %s(%s) -> %s {
+    let id = moodit_id();
+    let requete = id.clone() + "|%s"%s;
+    let brut = moodit_appel(&id, &requete);
+    %s
+}''' % (nom, params, retour, nom, args, parse))
+    return '''use std::io::{BufRead, Write};
+
+fn moodit_id() -> String {
+    // Identifiant IMPRÉVISIBLE par appel, tiré de /dev/urandom : sans lui, le code noté — dont
+    // le stdout EST le canal de réponse — pouvait imprimer la réponse attendue avant la question.
+    let mut brut = [0u8; 8];
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom").unwrap().read_exact(&mut brut).unwrap();
+    brut.iter().map(|o| format!("{:02x}", o)).collect()
+}
+
+fn moodit_appel(id: &str, requete: &str) -> String {
+    println!("{}", requete);
+    std::io::stdout().flush().unwrap();
+    let entree = std::io::stdin();
+    for ligne in entree.lock().lines() {
+        let ligne = match ligne { Ok(l) => l, Err(_) => break };
+        let mut parts = ligne.splitn(3, '|');
+        let recu = parts.next().unwrap_or("");
+        let etat = parts.next().unwrap_or("");
+        let valeur = parts.next().unwrap_or("");
+        // Seule une réponse portant l'identifiant DE CET APPEL compte.
+        if recu != id { continue; }
+        if etat != "ok" {
+            eprintln!("[MOODIT] appel refuse par le code soumis");
+            std::process::exit(3);
+        }
+        return valeur.to_string();
+    }
+    eprintln!("[MOODIT] processus etudiant termine");
+    std::process::exit(3);
+}
+
+%s
+
+%s
+
+fn moodit_harnais() -> bool {
+%s
+}
+
+fn main() {
+    let ok = std::panic::catch_unwind(moodit_harnais).unwrap_or(false);
+    if ok {
+        eprint!("%s");
+        std::io::stderr().flush().unwrap();
+        std::process::exit(0);
+    }
+    std::process::exit(1);
+}
+''' % ("\n\n".join(bouchons), rust_object_stub(objets, champs),
+       "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
+       nonce)
+
+
+def rust_server_source(methods, student_source, objets=(), champs=None):
+    """Programme ÉTUDIANT Rust : son code + aiguillage typé (fonctions et objets). PURE (testée)."""
+    piles, cas_objets = rust_object_dispatch(objets, champs)
+    cas = []
+    for retour, nom, types in methods:
+        lectures = []
+        for i, t in enumerate(types):
+            if t == "String":
+                lectures.append('            let a%d = String::from(args.next().unwrap_or(""));' % i)
+            else:
+                lectures.append('            let a%d = args.next().unwrap_or("0").parse::<%s>().unwrap_or_default();'
+                                % (i, t))
+        appel = "%s(%s)" % (nom, ", ".join("a%d" % i for i in range(len(types))))
+        cas.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
+                   % (nom, "\n".join(lectures), appel))
+    return '''%s
+
+use std::io::{BufRead, Write};
+
+fn moodit_serve() {
+%s
+    let entree = std::io::stdin();
+    for ligne in entree.lock().lines() {
+        let ligne = match ligne { Ok(l) => l, Err(_) => break };
+        let mut args = ligne.split('|');
+        let id = args.next().unwrap_or("").to_string();
+        let premier = args.next().unwrap_or("").to_string();
+        // Protocole : id|op|nom|poignée|args… pour `new`/`method`, id|fonction|args… sinon.
+        let cle = if premier == "new" || premier == "method" {
+            format!("{}|{}", premier, args.next().unwrap_or(""))
+        } else {
+            premier.clone()
+        };
+        let reponse = match cle.as_str() {
+%s
+%s
+            _ => format!("{}|err|fonction inconnue", id),
+        };
+        println!("{}", reponse);
+        std::io::stdout().flush().unwrap();
+    }
+}
+
+fn main() {
+    moodit_serve();
+}
+''' % (rust_without_main(student_source), piles, "\n".join(cas), cas_objets)
+
+
+RUST_MAIN = re.compile(r"^\s*fn\s+main\s*\(\s*\)", re.M)
+
+
+def rust_without_main(source):
+    """Code étudiant dont le `main` est renommé : le serveur fournit le point d'entrée. PURE."""
+    return RUST_MAIN.sub("fn __moodit_student_main()", source or "")
+
+
+# ─────────────────── C# : bouchon et aiguillage TYPÉS, protocole texte ───────────────────
+# mono autorise l'appel natif (dup2) et la réflexion : c'est précisément pourquoi le noteur doit
+# vivre AILLEURS. Ici il n'y a plus rien à détourner dans le processus de l'étudiant.
+
+CS_METHOD = re.compile(
+    r"public\s+static\s+(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
+CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "string": "string"}
+
+
+def cs_signatures(source):
+    """Méthodes statiques publiques du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
+    trouvees = []
+    for retour, nom, params in CS_METHOD.findall(source or ""):
+        if nom == "Main":
+            continue
+        types = []
+        valide = True
+        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+            morceaux = groupe.split()
+            if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
+                valide = False
+                break
+            types.append(morceaux[0])
+        if valide:
+            trouvees.append((retour, nom, types))
+    return trouvees
+
+
+CS_LECTURE = {"int": "int.Parse(v)", "long": "long.Parse(v)",
+              "double": "double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)",
+              "bool": "bool.Parse(v)", "string": "v"}
+
+
+def cs_object_stub(classe, ctors, methodes):
+    """Bouchons OBJET C# : constructeur → poignée, méthodes d'instance → appel sur la poignée.
+
+    FONCTION PURE (testée). `new Rectangle(3, 4).Aire()` s'écrit naturellement dans le harnais,
+    alors que l'objet vit dans le processus de l'étudiant."""
+    morceaux = []
+    for types in ctors:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        morceaux.append('''    public %s(%s) {
+        string id = MooditRpc.Id();
+        __h = int.Parse(MooditRpc.Appel(id, id + "|new|%s"%s));
+    }''' % (classe, params, classe, args))
+    for retour, nom, types in methodes:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        lecture = CS_LECTURE[retour].replace("v", "brut")
+        morceaux.append('''    public %s %s(%s) {
+        string id = MooditRpc.Id();
+        string brut = MooditRpc.Appel(id, id + "|method|" + __h + "|%s"%s);
+        return %s;
+    }''' % (retour, nom, params, nom, args, lecture))
+    return "\n\n".join(morceaux)
+
+
+def cs_grader_source(methods, harness_code, nonce, classe, ctors=(), instance=()):
+    """Programme NOTEUR C# : bouchons typés + harnais booléen + nonce. PURE (testée)."""
+    bouchons = []
+    for retour, nom, types in methods:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        lecture = CS_LECTURE[retour].replace("v", "brut")
+        bouchons.append('''    public static %s %s(%s) {
+        string id = MooditRpc.Id();
+        string brut = MooditRpc.Appel(id, id + "|%s"%s);
+        return %s;
+    }''' % (retour, nom, params, nom, args, lecture))
+    return '''using System;
+using System.IO;
+
+static class MooditRpc {
+    static readonly System.Security.Cryptography.RandomNumberGenerator ALEA =
+        System.Security.Cryptography.RandomNumberGenerator.Create();
+
+    // Identifiant IMPRÉVISIBLE par appel : sans lui, le code noté — dont le stdout EST le canal
+    // de réponse — pouvait imprimer la réponse attendue avant même la question.
+    public static string Id() {
+        byte[] brut = new byte[8];
+        ALEA.GetBytes(brut);
+        return BitConverter.ToString(brut).Replace("-", "");
+    }
+
+    public static string Appel(string id, string requete) {
+        Console.Out.WriteLine(requete);
+        Console.Out.Flush();
+        string ligne;
+        while ((ligne = Console.In.ReadLine()) != null) {
+            string[] parts = ligne.Split(new char[] { '|' }, 3);
+            if (parts.Length < 3 || parts[0] != id) { continue; }   // bruit, ou devancement
+            if (parts[1] != "ok") {
+                Console.Error.WriteLine("[MOODIT] appel refuse par le code soumis");
+                Environment.Exit(3);
+            }
+            return parts[2];
+        }
+        Console.Error.WriteLine("[MOODIT] processus etudiant termine");
+        Environment.Exit(3);
+        return "";
+    }
+}
+
+public class %s {
+    private readonly int __h;
+
+    private %s(int h) { __h = h; }
+%s
+%s
+}
+
+public static class MooditGrader {
+    static bool Harnais() {
+%s
+    }
+
+    public static int Main(string[] args) {
+        bool ok;
+        try {
+            ok = Harnais();
+        } catch (Exception e) {
+            Console.Error.WriteLine("[MOODIT] harnais: " + e.Message);
+            ok = false;
+        }
+        if (ok) {
+            Console.Error.Write("%s");
+            Console.Error.Flush();
+            return 0;
+        }
+        return 1;
+    }
+}
+''' % (classe, classe, cs_object_stub(classe, ctors, instance), "\n\n".join(bouchons),
+       "\n".join("        " + l if l.strip() else l
+                 for l in (harness_code or "").splitlines()), nonce)
+
+
+def cs_server_source(classe):
+    """Programme ÉTUDIANT C# : son code (compilé à côté) + aiguillage par réflexion. PURE."""
+    return '''using System;
+using System.Reflection;
+
+public static class MooditServer {
+    // Objets construits CHEZ L'ÉTUDIANT : le noteur n'en connaît que la poignée.
+    static readonly System.Collections.Generic.List<object> OBJETS =
+        new System.Collections.Generic.List<object>();
+
+    static object[] Convertis(ParameterInfo[] attendus, string[] parts, int depart) {
+        object[] donnes = new object[attendus.Length];
+        for (int i = 0; i < attendus.Length; i++) {
+            donnes[i] = Convert.ChangeType(parts[i + depart], attendus[i].ParameterType,
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return donnes;
+    }
+
+    public static int Main(string[] args) {
+        string ligne;
+        while ((ligne = Console.In.ReadLine()) != null) {
+            string[] parts = ligne.Split('|');
+            string id = parts.Length > 0 ? parts[0] : "";
+            string nom = parts.Length > 1 ? parts[1] : "";
+            string reponse;
+            try {
+                if (nom == "new") {
+                    Type cible2 = typeof(%s);
+                    foreach (var c in cible2.GetConstructors()) {
+                        if (c.GetParameters().Length != parts.Length - 3) { continue; }
+                        OBJETS.Add(c.Invoke(Convertis(c.GetParameters(), parts, 3)));
+                        break;
+                    }
+                    Console.Out.WriteLine(id + "|ok|" + (OBJETS.Count - 1));
+                    Console.Out.Flush();
+                    continue;
+                }
+                if (nom == "method") {
+                    object instance = OBJETS[int.Parse(parts[2])];
+                    string nomMethode = parts[3];
+                    MethodInfo cible3 = null;
+                    foreach (MethodInfo m in instance.GetType().GetMethods()) {
+                        if (m.Name == nomMethode && m.GetParameters().Length == parts.Length - 4) {
+                            cible3 = m;
+                            break;
+                        }
+                    }
+                    if (cible3 == null) { throw new MissingMethodException(nomMethode); }
+                    object v = cible3.Invoke(instance, Convertis(cible3.GetParameters(), parts, 4));
+                    Console.Out.WriteLine(id + "|ok|" + Convert.ToString(v,
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    Console.Out.Flush();
+                    continue;
+                }
+                MethodInfo cible = null;
+                foreach (MethodInfo m in typeof(%s).GetMethods(
+                        BindingFlags.Public | BindingFlags.Static)) {
+                    if (m.Name == nom && m.GetParameters().Length == parts.Length - 2) {
+                        cible = m;
+                        break;
+                    }
+                }
+                if (cible == null) { throw new MissingMethodException(nom); }
+                ParameterInfo[] attendus = cible.GetParameters();
+                object[] donnes = new object[attendus.Length];
+                for (int i = 0; i < attendus.Length; i++) {
+                    donnes[i] = Convert.ChangeType(parts[i + 2], attendus[i].ParameterType,
+                            System.Globalization.CultureInfo.InvariantCulture);
+                }
+                object valeur = cible.Invoke(null, donnes);
+                reponse = id + "|ok|" + Convert.ToString(valeur,
+                        System.Globalization.CultureInfo.InvariantCulture);
+            } catch (Exception e) {
+                reponse = id + "|err|" + e.Message.Replace('|', ' ');
+            }
+            Console.Out.WriteLine(reponse);
+            Console.Out.Flush();
+        }
+        return 0;
+    }
+}
+''' % (classe, classe)
+
+
+CS_CTOR_TPL = r"public\s+%s\s*\(([^)]*)\)"
+CS_INSTANCE = re.compile(
+    r"public\s+(?!static)(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
+
+
+def cs_object_api(source, classe):
+    """API OBJET d'une classe C# → ([constructeurs], [méthodes d'instance]). PURE (testée).
+
+    Lue à la REGEX comme le reste du chemin C# : le prof n'a rien à déclarer, et une signature
+    hors types marshalables est simplement écartée (le harnais qui l'appelle ne compilera pas)."""
+    def types_de(params):
+        resultat = []
+        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+            morceaux = groupe.split()
+            if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
+                return None
+            resultat.append(morceaux[0])
+        return resultat
+
+    ctors = []
+    for params in re.findall(CS_CTOR_TPL % re.escape(classe), source or ""):
+        types = types_de(params)
+        if types is not None:
+            ctors.append(types)
+    methodes = []
+    for retour, nom, params in CS_INSTANCE.findall(source or ""):
+        types = types_de(params)
+        if types is not None and nom != "Main":
+            methodes.append((retour, nom, types))
+    return ctors, methodes
+
+
+CS_CLASS = re.compile(r"(?:public\s+|static\s+)*class\s+(\w+)")
+
+
+def cs_student_class(source):
+    """Première classe déclarée par l'étudiant : celle que le harnais appellera. PURE (testée)."""
+    trouve = CS_CLASS.search(source or "")
+    return trouve.group(1) if trouve else "Solution"
+
+
+def grader_uid():
+    """UID du NOTEUR : distinct de celui de l'étudiant, sans entrée dans /etc/passwd (setuid
+    prend un numéro). C'est cette séparation qui rend /proc/<pid>/mem du noteur inaccessible au
+    code noté, quelles que soient les règles de ptrace de l'hôte."""
+    return STUDENT_UID + 1
+
+
+def demote_grader():
+    """preexec_fn du processus NOTEUR : son propre UID, son propre groupe de processus."""
+    os.setsid()
+    os.setgroups([])
+    os.setgid(grader_uid())
+    os.setuid(grader_uid())
+    resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+
+
+def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, s_err_path):
+    """Lance le NOTEUR et le processus ÉTUDIANT avec des tubes CROISÉS et des UID distincts.
+
+    → (code du noteur, expiré, stderr du noteur, stderr de l'étudiant).
+
+    stdout/stdin du noteur sont le tube vers l'étudiant ; son stderr — où atterrit le nonce —
+    n'est tenu par personne d'autre que root. Le noteur PILOTE : quand il a fini, l'étudiant n'a
+    plus de raison de vivre, et c'est son EOF qui l'arrête (ou un kill, s'il s'accroche)."""
+    req_r, req_w = os.pipe()        # noteur → étudiant
+    rep_r, rep_w = os.pipe()        # étudiant → noteur
+    g_err = s_err = None
+    procs = []
+    try:
+        g_err, s_err = open_output(g_err_path), open_output(s_err_path)
+        noteur = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
+                                  stderr=g_err, preexec_fn=demote_grader)
+        procs.append(noteur)
+        etudiant = subprocess.Popen(student_cmd, cwd=cwd, env=s_env, stdin=req_r, stdout=rep_w,
+                                    stderr=s_err, preexec_fn=demote_student)
+        procs.append(etudiant)
+        for fd in (req_r, req_w, rep_r, rep_w):
+            os.close(fd)            # le parent lâche les quatre extrémités : EOF se propage
+        expire = False
+        try:
+            code = noteur.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            code, expire = None, True
+        for proc in procs:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=PUMP_SWEEP_JOIN_S)
+            except subprocess.TimeoutExpired:
+                pass
+        kill_student_survivors()
+        return code, expire, read_capped(g_err_path), read_capped(s_err_path)
+    except OSError as e:
+        for fd in (req_r, req_w, rep_r, rep_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        ETAT_SORTIE.perdue = True
+        event("espace_sature", case=ETAT_SORTIE.case, detail="lancement du couple impossible : %r" % e)
+        return None, False, "", ""
+    finally:
+        for flux in (g_err, s_err):
+            if flux is not None:
+                try:
+                    flux.close()
+                except OSError:
+                    ETAT_SORTIE.perdue = True
+
+
+def run_java_rpc(case_dir, env, timeout_s, case_index):
+    """Notation NON FALSIFIABLE d'un cas Java : harnais booléen, deux processus, deux UID.
+
+    Le code étudiant est compilé SEUL (il ne voit jamais le harnais) ; ses signatures sont lues
+    avec javap ; un bouchon de mêmes signatures est compilé AVEC le harnais du prof et le nonce.
+    Verdict = le nonce est présent sur le stderr du noteur. L'étudiant ne peut pas le produire :
+    il n'est ni dans son processus, ni dans ses fichiers, ni dans sa mémoire."""
+    src = os.path.join(case_dir, "src")
+    etu_src = os.path.join(case_dir, "etu_src")
+    etu_classes = os.path.join(case_dir, "etu_classes")
+    not_src = os.path.join(case_dir, "not_src")
+    not_classes = os.path.join(case_dir, "not_classes")
+    for d in (etu_src, etu_classes, not_src, not_classes):
+        os.makedirs(d, exist_ok=True)
+
+    # 1. Le code étudiant, SEUL. Son fichier harnais n'est même pas copié ici.
+    student_file = None
+    for nom in sorted(os.listdir(src)):
+        if not nom.endswith(".java") or nom.startswith("Moodit"):
+            continue
+        with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+            contenu = f.read()
+        if "__MOODIT_HARNAIS__" in contenu:
+            continue                      # le harnais du prof ne suit JAMAIS l'etudiant
+        student_file = os.path.join(etu_src, nom)
+        with open(student_file, "w", encoding="utf-8") as f:
+            f.write(contenu)
+    if student_file is None:
+        return None, "Aucun fichier de code soumis"
+    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", etu_classes, student_file],
+                            case_dir, env, COMPILE_TIMEOUT_S,
+                            os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
+                            preexec_compile)
+    if expire or code != 0:
+        return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+
+    # 2. Signatures, lues sur les CLASSES compilées — le prof n'a rien à déclarer. On lit AUSSI
+    #    les classes imbriquées (Outer$Inner), pour proxifier les objets : le harnais écrit
+    #    `new Solution.Rectangle(3, 4).aire()` et l'objet vit, lui, chez l'étudiant.
+    classe = os.path.basename(student_file)[:-len(".java")]
+    binaires = sorted(nom[:-len(".class")] for nom in os.listdir(etu_classes)
+                      if nom.endswith(".class") and not nom.startswith("Moodit"))
+    code, expire = run_proc(["javap", "-p", "-cp", etu_classes] + binaires,
+                            case_dir, env, LIST_TIMEOUT_S,
+                            os.path.join(case_dir, "javap.out"), os.path.join(case_dir, "javap.err"),
+                            preexec_compile)
+    javap = read_capped(os.path.join(case_dir, "javap.out"))
+    methodes = java_signatures(javap)
+    # Une déclaration de classe par bloc : on les sépare pour lire l'API objet de chacune.
+    objets = []
+    soi_ctors, soi_instance = (), ()
+    for bloc in re.split(r"(?=^Compiled from )", javap, flags=re.M):
+        nom_source, ctors, instance = java_class_api(bloc)
+        if not nom_source or not (ctors or instance):
+            continue
+        if nom_source == classe:
+            # La classe publique peut ÊTRE l'objet à instancier (question POO dont la classe
+            # s'appelle Rectangle) : son bouchon porte alors le constructeur et les méthodes.
+            soi_ctors, soi_instance = ctors, instance
+        else:
+            objets.append((nom_source, ctors, instance))
+    if expire or code != 0 or not (methodes or objets or (soi_ctors and soi_instance)):
+        return None, ("Aucune méthode statique publique ni objet exploitable dans la classe "
+                      + classe + " (types acceptés : int, long, double, boolean, String).")
+
+    # 3. Le NOTEUR : bouchon + harnais du prof + nonce. Aucune ligne de code étudiant.
+    harnais = ""
+    for nom in sorted(os.listdir(src)):
+        if nom.endswith(".java"):
+            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+                contenu = f.read()
+            if "__MOODIT_HARNAIS__" in contenu:
+                harnais = contenu.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
+    with open(os.path.join(not_src, classe + ".java"), "w", encoding="utf-8") as f:
+        f.write(java_stub_source(classe, methodes, objets, soi_ctors, soi_instance))
+    with open(os.path.join(not_src, "MooditGrader.java"), "w", encoding="utf-8") as f:
+        f.write(java_grader_source(harnais, TOKENS.get(case_index) or ""))
+    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", not_classes,
+                             os.path.join(not_src, classe + ".java"),
+                             os.path.join(not_src, "MooditGrader.java")],
+                            case_dir, env, COMPILE_TIMEOUT_S,
+                            os.path.join(case_dir, "nc.out"), os.path.join(case_dir, "nc.err"),
+                            preexec_compile)
+    if expire or code != 0:
+        return None, ("Le harnais ne compile pas contre la signature du code soumis :\n"
+                      + read_capped(os.path.join(case_dir, "nc.err"))[:1500])
+
+    # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
+    with open(os.path.join(etu_src, "MooditServer.java"), "w", encoding="utf-8") as f:
+        f.write(java_server_source(classe))
+    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-cp", etu_classes, "-d", etu_classes,
+                             os.path.join(etu_src, "MooditServer.java")],
+                            case_dir, env, COMPILE_TIMEOUT_S,
+                            os.path.join(case_dir, "sc.out"), os.path.join(case_dir, "sc.err"),
+                            preexec_compile)
+    if expire or code != 0:
+        return None, "Erreur interne du noteur (serveur RPC)"
+
+    # 5. CLOISONNEMENT : chacun chez soi, 700. L'étudiant ne peut pas lire le noteur (ni son
+    #    binaire, ni sa source, ni — UID distinct — sa mémoire) ; le harnais du prof est hors
+    #    d'atteinte par construction.
+    lock_sources(src)
+    for chemin in (not_src, not_classes):
+        for racine, dossiers, fichiers in os.walk(chemin):
+            for nom in dossiers + fichiers:
+                os.chown(os.path.join(racine, nom), grader_uid(), grader_uid())
+                os.chmod(os.path.join(racine, nom), 0o700)
+        os.chown(chemin, grader_uid(), grader_uid())
+        os.chmod(chemin, 0o700)
+    for chemin in (etu_src, etu_classes):
+        for racine, dossiers, fichiers in os.walk(chemin):
+            for nom in dossiers + fichiers:
+                os.chown(os.path.join(racine, nom), STUDENT_UID, STUDENT_GID)
+                os.chmod(os.path.join(racine, nom), 0o700)
+        os.chown(chemin, STUDENT_UID, STUDENT_GID)
+        os.chmod(chemin, 0o700)
+    prep_run(case_dir, src)
+
+    # 6. Un HOME et un tmp PAR PROCESSUS, du bon propriétaire : une JVM sans tmpdir inscriptible
+    #    ne démarre pas, et faire pointer le noteur dans le work/ de l'étudiant lui donnerait un
+    #    point d'écriture commun — exactement ce qu'on cloisonne.
+    work = os.path.join(case_dir, "work")
+    os.makedirs(work, exist_ok=True)
+    os.chmod(work, 0o755)
+    etu_tmp = student_dir(work, "tmp")
+    etu_home = student_dir(work, "home")
+    not_tmp = os.path.join(work, "not_tmp")
+    not_home = os.path.join(work, "not_home")
+    for chemin in (not_tmp, not_home):
+        os.makedirs(chemin, exist_ok=True)
+        os.chown(chemin, grader_uid(), grader_uid())
+        os.chmod(chemin, 0o700)
+    g_env = dict(env, HOME=not_home, TMPDIR=not_tmp)
+    s_env = dict(env, HOME=etu_home, TMPDIR=etu_tmp)
+
+    # 7. Les deux processus, tubes croisés.
+    code, expire, g_err, s_err = run_pair(
+        ["java", "-XX:MaxRAMPercentage=35", "--illegal-native-access=deny",
+         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + not_tmp,
+         "-cp", not_classes, "MooditGrader"],
+        ["java", "-XX:MaxRAMPercentage=35", "--illegal-native-access=deny",
+         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + etu_tmp,
+         "-cp", etu_classes, "MooditServer"],
+        case_dir, g_env, s_env, timeout_s,
+        os.path.join(case_dir, "grader.err"), os.path.join(case_dir, "student.err"))
+    if expire:
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
+
+    jeton = TOKENS.get(case_index) or ""
+    passed = bool(jeton) and jeton in g_err
+    detail = None if passed else (first_lines(s_err, r".") or "Le harnais a renvoyé faux")
+    return CaseOutcome(passed, detail, ran=True), None
+
+
+def run_csharp_rpc(case_dir, env, timeout_s, case_index):
+    """Notation NON FALSIFIABLE d'un cas C# : harnais booléen, deux assemblages, deux UID.
+
+    mono autorise l'appel natif et la réflexion — c'est exactement pourquoi le noteur est
+    AILLEURS : il n'y a plus rien à détourner ni à inspecter dans le processus de l'étudiant."""
+    src = os.path.join(case_dir, "src")
+    student_source = ""
+    for nom in sorted(os.listdir(src)):
+        if nom == "solution.cs":
+            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+                student_source = f.read()
+    methodes = cs_signatures(student_source)
+    classe = cs_student_class(student_source)
+    ctors, instance = cs_object_api(student_source, classe)
+    # Une question POO n'a AUCUNE méthode statique : son API, c'est le constructeur et les
+    # méthodes d'instance. Exiger une statique refusait ces questions (dont celles de la démo).
+    if not (methodes or (ctors and instance)):
+        return None, ("Aucune méthode publique exploitable dans le code soumis : ni méthode "
+                      "statique, ni constructeur avec méthode d'instance (types acceptés : "
+                      "int, long, double, bool, string).")
+    harnais = harness_rpc_body(case_dir) or ""
+
+    etu_src = os.path.join(case_dir, "serveur.cs")
+    not_src = os.path.join(case_dir, "noteur.cs")
+    etu_copie = os.path.join(case_dir, "solution_etu.cs")
+    with open(etu_copie, "w", encoding="utf-8") as f:
+        f.write(student_source)
+    with open(etu_src, "w", encoding="utf-8") as f:
+        f.write(cs_server_source(classe))
+    with open(not_src, "w", encoding="utf-8") as f:
+        f.write(cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "", classe,
+                                 ctors, instance))
+    bin_etu = os.path.join(case_dir, "etu.exe")
+    bin_not = os.path.join(case_dir, "noteur.exe")
+    for cmd, etiquette in (
+            (["mcs", "-main:MooditServer", "-out:" + bin_etu, etu_src, etu_copie], "code soumis"),
+            (["mcs", "-main:MooditGrader", "-out:" + bin_not, not_src], "harnais")):
+        code, expire = run_proc(cmd, case_dir, env, COMPILE_TIMEOUT_S,
+                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
+                                preexec_compile)
+        if expire or code != 0:
+            detail = (read_capped(os.path.join(case_dir, "cc.err"))
+                      or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
+            if etiquette == "harnais":
+                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+            return None, "Échec de compilation :\n" + detail
+    os.chown(etu_copie, STUDENT_UID, STUDENT_GID)
+    os.chmod(etu_copie, 0o600)
+    return finish_rpc_pair(case_dir, env, timeout_s, case_index,
+                           not_src, bin_not, etu_src, bin_etu,
+                           grader_cmd=["mono", bin_not], student_cmd=["mono", bin_etu])
+
+
+def run_rust_rpc(case_dir, env, timeout_s, case_index):
+    """Notation NON FALSIFIABLE d'un cas Rust : harnais booléen, deux binaires, deux UID.
+
+    Le harnais n'est plus dans le MÊME FICHIER que le code étudiant : `include_str!` n'a plus
+    rien à inclure, et il n'y a plus de nonce dans ce processus."""
+    src = os.path.join(case_dir, "src")
+    student_source = ""
+    for nom in sorted(os.listdir(src)):
+        if nom == "solution.rs":
+            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+                student_source = f.read()
+    methodes = rust_signatures(student_source)
+    objets = rust_object_api(student_source)
+    champs = rust_struct_fields(student_source)
+    if not (methodes or objets):
+        return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : i32, "
+                      "i64, f64, bool, String).")
+    harnais = harness_rpc_body(case_dir) or ""
+
+    etu_src = os.path.join(case_dir, "etu.rs")
+    not_src = os.path.join(case_dir, "noteur.rs")
+    with open(etu_src, "w", encoding="utf-8") as f:
+        f.write(rust_server_source(methodes, student_source, objets, champs))
+    with open(not_src, "w", encoding="utf-8") as f:
+        f.write(rust_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
+    bin_etu = os.path.join(case_dir, "etu_bin")
+    bin_not = os.path.join(case_dir, "noteur_bin")
+    for source, sortie, etiquette in ((etu_src, bin_etu, "code soumis"),
+                                      (not_src, bin_not, "harnais")):
+        code, expire = run_proc(["rustc", "-O", "--edition", "2021", source, "-o", sortie],
+                                case_dir, env, COMPILE_TIMEOUT_S,
+                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
+                                preexec_compile)
+        if expire or code != 0:
+            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            if etiquette == "harnais":
+                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+            return None, "Échec de compilation :\n" + detail
+    return finish_rpc_pair(case_dir, env, timeout_s, case_index,
+                           not_src, bin_not, etu_src, bin_etu)
+
+
+def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_src, bin_etu,
+                    grader_cmd=None, student_cmd=None):
+    """Cloisonne les deux programmes, les lance en couple, rend le verdict.
+
+    Partie COMMUNE à C/C++ et Rust (et à tout langage dont le noteur est un binaire) : chacun
+    chez soi en 700 sous son UID, puis le nonce du noteur fait le verdict."""
+    lock_sources(os.path.join(case_dir, "src"))
+    for chemin, uid, mode in ((not_src, grader_uid(), 0o600), (bin_not, grader_uid(), 0o500),
+                              (etu_src, STUDENT_UID, 0o600), (bin_etu, STUDENT_UID, 0o500)):
+        if os.path.isdir(chemin):
+            # Go travaille par MODULE : on cloisonne le dossier entier, récursivement.
+            for racine, dossiers, fichiers in os.walk(chemin):
+                for nom in dossiers + fichiers:
+                    cible = os.path.join(racine, nom)
+                    os.chown(cible, uid, uid)
+                    os.chmod(cible, 0o700 if os.path.isdir(cible) else 0o600)
+            os.chown(chemin, uid, uid)
+            os.chmod(chemin, 0o700)
+            continue
+        os.chown(chemin, uid, uid)
+        os.chmod(chemin, mode)
+    prep_run(case_dir, os.path.join(case_dir, "src"))
+    work = os.path.join(case_dir, "work")
+    os.makedirs(work, exist_ok=True)
+    os.chmod(work, 0o755)
+    etu_tmp = student_dir(work, "tmp")
+    not_tmp = os.path.join(work, "not_tmp")
+    os.makedirs(not_tmp, exist_ok=True)
+    os.chown(not_tmp, grader_uid(), grader_uid())
+    os.chmod(not_tmp, 0o700)
+    code, expire, g_err, s_err = run_pair(
+        grader_cmd or [bin_not], student_cmd or [bin_etu], case_dir,
+        dict(env, HOME=not_tmp, TMPDIR=not_tmp), dict(env, HOME=etu_tmp, TMPDIR=etu_tmp),
+        timeout_s, os.path.join(case_dir, "grader.err"), os.path.join(case_dir, "student.err"))
+    if expire:
+        return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
+    jeton = TOKENS.get(case_index) or ""
+    passed = bool(jeton) and jeton in g_err
+    detail = None if passed else (first_lines(g_err, r"^\[MOODIT\]")
+                                  or first_lines(s_err, r".") or "Le harnais a renvoyé faux")
+    return CaseOutcome(passed, detail, ran=True), None
+
+
+def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
+    """Notation NON FALSIFIABLE d'un cas C/C++ : harnais booléen, deux binaires, deux UID.
+
+    Le harnais n'est plus inclus dans l'unité de compilation du code étudiant : un
+    `#define printf …` ne capture plus rien, et il n'y a plus de nonce à intercepter dans ce
+    processus — c'est le résiduel in-process de C/C++ qui disparaît, pas qui se détecte."""
+    src = os.path.join(case_dir, "src")
+    student_source = ""
+    for nom in sorted(os.listdir(src)):
+        if nom.startswith("solution.") :
+            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+                student_source = f.read()
+    objets = cpp_object_api(student_source) if ext == "cpp" else []
+    methodes = c_signatures(student_source, cpp=(ext == "cpp"))
+    if not (methodes or objets):
+        return None, ("Aucune fonction exploitable dans le code soumis "
+                      "(types acceptés : int, long, double).")
+    harnais = harness_rpc_body(case_dir) or ""
+
+    etu_src = os.path.join(case_dir, "etu." + ext)
+    not_src = os.path.join(case_dir, "noteur." + ext)
+    with open(etu_src, "w", encoding="utf-8") as f:
+        f.write(c_server_source(methodes, student_source, cpp=(ext == "cpp"), objets=objets))
+    with open(not_src, "w", encoding="utf-8") as f:
+        f.write(c_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
+                                cpp=(ext == "cpp"), objets=objets))
+    bin_etu = os.path.join(case_dir, "etu_bin")
+    bin_not = os.path.join(case_dir, "noteur_bin")
+    for source, sortie, etiquette in ((etu_src, bin_etu, "code soumis"),
+                                      (not_src, bin_not, "harnais")):
+        code, expire = run_proc([compiler, std, "-O1", source, "-o", sortie, "-lm"],
+                                case_dir, env, COMPILE_TIMEOUT_S,
+                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
+                                preexec_compile)
+        if expire or code != 0:
+            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            if etiquette == "harnais":
+                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+            return None, "Échec de compilation :\n" + detail
+
+    return finish_rpc_pair(case_dir, env, timeout_s, case_index,
+                           not_src, bin_not, etu_src, bin_etu)
+
+
+def run_go_rpc(case_dir, env, timeout_s, case_index):
+    """Notation NON FALSIFIABLE d'un cas Go : harnais booléen, deux binaires, deux UID."""
+    src = os.path.join(case_dir, "src")
+    etu = os.path.join(case_dir, "etu")
+    noteur = os.path.join(case_dir, "noteur")
+    for d in (etu, noteur):
+        os.makedirs(d, exist_ok=True)
+
+    student_source = ""
+    for nom in sorted(os.listdir(src)):
+        if nom.endswith(".go") and nom != "go.mod":
+            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+                contenu = f.read()
+            if "__MOODIT_HARNAIS__" not in contenu and "_test.go" not in nom:
+                student_source = contenu
+    methodes = go_signatures(student_source)
+    objets = go_object_api(student_source)
+    champs = go_struct_fields(student_source)
+    if not (methodes or objets):
+        return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
+                      "int64, float64, bool, string).")
+    harnais = harness_rpc_body(case_dir) or ""
+
+    # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI
+    # présent dans l'arborescence que son processus peut lire.
+    with open(os.path.join(etu, "go.mod"), "w", encoding="utf-8") as f:
+        f.write("module moodit_etu\n\ngo 1.23\n")
+    with open(os.path.join(etu, "solution.go"), "w", encoding="utf-8") as f:
+        f.write(go_student_without_main(student_source))
+    with open(os.path.join(etu, "serveur.go"), "w", encoding="utf-8") as f:
+        f.write(go_server_source(methodes, objets, champs))
+    with open(os.path.join(noteur, "go.mod"), "w", encoding="utf-8") as f:
+        f.write("module moodit_noteur\n\ngo 1.23\n")
+    with open(os.path.join(noteur, "noteur.go"), "w", encoding="utf-8") as f:
+        f.write(go_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
+
+    bin_etu = os.path.join(case_dir, "etu_bin")
+    bin_not = os.path.join(case_dir, "noteur_bin")
+    for dossier, sortie, etiquette in ((etu, bin_etu, "code soumis"),
+                                       (noteur, bin_not, "harnais")):
+        code, expire = run_proc(["go", "build", "-o", sortie, "."], dossier, env,
+                                COMPILE_TIMEOUT_S, os.path.join(case_dir, "cc.out"),
+                                os.path.join(case_dir, "cc.err"), preexec_compile)
+        if expire or code != 0:
+            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            if etiquette == "harnais":
+                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+            return None, "Échec de compilation :\n" + detail
+
+    return finish_rpc_pair(case_dir, env, timeout_s, case_index,
+                           noteur, bin_not, etu, bin_etu)
 
 
 RUNNERS = {

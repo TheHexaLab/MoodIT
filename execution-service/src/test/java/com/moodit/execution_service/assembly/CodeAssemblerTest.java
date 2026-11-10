@@ -105,9 +105,15 @@ class CodeAssemblerTest {
         var a = assembler.assemble("Bash", "doubler() { echo $(( $1 * 2 )); }",
                 "[ \"$(doubler 5)\" = \"10\" ]", "MOODIT_OK_bash");
         assertThat(a.runtime()).isEqualTo("bash");
+        // Le code soumis est dans un TROISIÈME fichier : le serveur lit l'identifiant de l'appel
+        // avant de le charger, et le charge dans un sous-shell à la sortie capturée.
         assertThat(a.files()).extracting(RunnerExec.File::name)
-                .containsExactly("grader.sh", "student_server.sh");
-        assertRpcIsolation(a, "$(doubler 5)", "doubler() {", "MOODIT_OK_bash");
+                .containsExactly("grader.sh", "student_server.sh", "solution.sh");
+        assertThat(a.files().get(0).content()).contains("$(doubler 5)").contains("MOODIT_OK_bash");
+        assertThat(a.files().get(1).content()).doesNotContain("MOODIT_OK_bash")
+                .doesNotContain("doubler() {");
+        assertThat(a.files().get(2).content()).contains("doubler() {")
+                .doesNotContain("MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
                 .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");
     }

@@ -146,6 +146,14 @@ public class DockerEvaluator {
      * incompréhensible. V7 ne convertit que les gabarits (questions futures) : celles déjà en
      * base doivent être converties à la main, d'où ce diagnostic explicite.
      */
+    /**
+     * Ce harnais est-il un VRAI test du framework ? Faux = harnais booléen, qui prend le chemin
+     * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
+     */
+    static boolean frameworkMarkerFound(String runnerLanguage, String harnessCode) {
+        return harnessCode != null && frameworkMarker(runnerLanguage).matcher(harnessCode).find();
+    }
+
     private static java.util.regex.Pattern frameworkMarker(String runnerLanguage) {
         return switch (runnerLanguage) {
             // Toutes les formes idiomatiques, y compris PARAMÉTRÉES et qualifiées : un contrôle
@@ -175,7 +183,12 @@ public class DockerEvaluator {
 
     /** Détail d'un harnais resté à l'ancien format, ou {@code null} s'il est au bon format. */
     static String legacyHarnessDetail(String runnerLanguage, String harnessCode) {
-        if (harnessCode != null && frameworkMarker(runnerLanguage).matcher(harnessCode).find()) {
+        if (frameworkMarkerFound(runnerLanguage, harnessCode)) {
+            return null;
+        }
+        if ("java".equals(runnerLanguage)) {
+            // Java sait désormais noter un harnais BOOLÉEN sans qu'il soit falsifiable (deux
+            // processus, deux UID) : ce format n'est plus « hérité », c'est le format SÛR.
             return null;
         }
         return "Ce harnais est resté à l'ancien format (un corps qui renvoie un booléen). "

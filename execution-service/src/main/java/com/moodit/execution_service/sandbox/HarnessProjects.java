@@ -100,9 +100,51 @@ public final class HarnessProjects {
 
     // ── disposition par langage ───────────────────────────────────────────────
 
+    /** Extension du fichier portant le harnais booléen marqué, par langage runner. */
+    private static String rpcExtension(String lang) {
+        return switch (lang) {
+            case "java" -> "java";
+            case "csharp" -> "cs";
+            case "go" -> "go";
+            case "rust" -> "rs";
+            case "cpp" -> "cpp";
+            default -> "c";
+        };
+    }
+
+    /**
+     * Nom du fichier du code étudiant sur le chemin RPC. Le superviseur le reconnaît par son
+     * nom : il le compile SEUL, sans jamais lui adjoindre le harnais.
+     */
+    private static String rpcStudentFile(String lang, String studentCode) {
+        return switch (lang) {
+            case "java" -> javaFileName(studentCode, "Solution");
+            case "csharp" -> "solution.cs";
+            case "go" -> "main.go";
+            case "rust" -> "solution.rs";
+            case "cpp" -> "solution.cpp";
+            default -> "solution.c";
+        };
+    }
+
     private static void addCase(Map<String, String> files, String lang, int index,
             String studentCode, String harnessCode) {
         String base = "cases/" + index + "/src/";
+        // HARNAIS BOOLÉEN (la forme d'avant #116) → chemin NON FALSIFIABLE, pour TOUS les
+        // langages compilés : le corps est déposé marqué, et le superviseur le compile dans un
+        // PROCESSUS SÉPARÉ, sous un UID SÉPARÉ, avec le nonce. Il n'entre jamais dans le
+        // processus de l'étudiant, qui ne peut donc ni le lire, ni le modifier, ni forger son
+        // résultat — les attaques in-process (artefact, flux, printf, dup2, /proc/self/mem) n'ont
+        // plus d'objet. Un harnais au format framework garde l'ancien chemin, falsifiable et
+        // documenté comme tel.
+        if (!DockerEvaluator.frameworkMarkerFound(lang, harnessCode)) {
+            files.put(base + rpcStudentFile(lang, studentCode), studentCode);
+            files.put(base + "harnais_rpc." + rpcExtension(lang),
+                    "// Harnais booléen du prof — compilé DANS LE NOTEUR, jamais avec le code de\n"
+                    + "// l'étudiant. Tout ce qui suit le marqueur est son corps.\n"
+                    + "__MOODIT_HARNAIS__\n" + harnessCode);
+            return;
+        }
         switch (lang) {
             case "java" -> {
                 String studentFile = javaFileName(studentCode, "Solution");

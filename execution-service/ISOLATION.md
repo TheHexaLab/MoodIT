@@ -10,7 +10,8 @@ les **dépendances fragiles** à connaître avant une mise à jour, et le **rés
 | Appel de fonction / classe (interprétés) | Python, JavaScript, TypeScript, PHP, Bash | **RPC 2 processus** | nonce émis par le noteur |
 | Vues / composants | JSX, TSX | **RPC + proxy DOM** | nonce émis par le noteur |
 | Données inertes | JSON, HTML | contenu non exécuté | nonce (harnais JS sur `data`/`doc`) |
-| Compilés | Go, Rust, C, C++, C#, Java | **runner Docker isolé** (#116, `docker/runners/`) | fail-closed multi-canaux + **canaris** |
+| Compilés, harnais **booléen** | Go, Rust, C, C++, C#, Java | **runner Docker + RPC 2 processus, 2 UID** | nonce émis par le noteur |
+| Compilés, harnais **framework** (héritage) | Go, Rust, C, C++, C#, Java | **runner Docker isolé** (#116, `docker/runners/`) | fail-closed multi-canaux + **canaris** |
 | Requête / état | SQL | **isolation 2 phases** (dump) | sortie encadrée par sentinelles au nonce |
 
 ### Isolation RPC (interprétés + JSX/TSX)
@@ -47,20 +48,38 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 ### Runner Docker des compilés (#116)
 
 Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-runner-*`
-(réseau coupé, mémoire/PID/CPU bornés) : le harnais du prof est un **vrai test du langage**
-(JUnit, NUnit, go test, cargo test, `moodit_check.h`) et la POO du simple code de test. Dans le
-conteneur, un **superviseur** (root) compile, verrouille les sources en 700, exécute chaque cas
-sous l'**UID `student`** tracé par strace, et rend un verdict **fail-closed** gardé par des
-**canaris randomisés**. Les tentatives (lecture du harnais, rapport forgé) remontent en
-**événements** dans le détail des verdicts.
+(réseau coupé, mémoire/PID/CPU bornés). Dans le conteneur, un **superviseur** (root) compile,
+verrouille les sources en 700 et exécute le code soumis sous un **UID dédié** tracé par strace.
+Deux formes de harnais coexistent, et c'est la forme qui décide du modèle.
 
-**Jusqu'où va cette garantie, langage par langage** — à lire avant de décider d'un examen noté :
-le verdict est tenu pour infalsifiable en pratique en **Java et Go** seulement. En **C, C++, C# et
-Rust**, le code de l'étudiant partage le processus du framework de test sans qu'on puisse l'en
-empêcher (unité de compilation commune, appel natif autorisé par le runtime, harnais dans le même
-fichier) : il y subsiste un **résiduel in-process assumé**, et les canaris ne le rattrapent pas
-systématiquement — un tricheur peut conditionner sa falsification sur « ma fonction a-t-elle été
-appelée », ce que les cas canaris ne font jamais.
+**Harnais booléen (la forme recommandée, et celle des gabarits) — verdict NON FALSIFIABLE.**
+Le harnais du prof est un corps qui renvoie vrai ou faux. Le superviseur le compile dans un
+**programme séparé, lancé sous un UID séparé** (le noteur), et compile le code de l'étudiant
+**seul** dans un autre programme (le serveur). Les deux communiquent par des tubes croisés ; le
+noteur appelle des **bouchons typés** générés à partir des signatures réellement présentes dans le
+code soumis, et il est le seul à détenir le nonce, qu'il émet sur **son** stderr. L'étudiant ne
+peut donc ni lire le harnais, ni le modifier, ni forger son résultat — non parce qu'on le
+détecterait, mais parce que son processus ne contient ni le secret, ni le verdict, ni le harnais.
+Chaque appel porte un **identifiant imprévisible** (le stdout du code noté est le canal de
+réponse : sans cela, il pouvait répondre avant la question). La **POO est proxifiée** : l'objet
+vit chez l'étudiant, le noteur n'en manipule qu'une poignée, et les deux idiomes sont pris en
+charge — constructeur (`new Rectangle(3, 4)`, `Rectangle::new`, `NewRectangle`) et littéral à
+champs nommés en Go et Rust, où le langage n'a pas de constructeur. Les cinq canaux de forge
+démontrés contre l'ancien modèle (lecture de l'artefact compilé, détournement du flux de sortie,
+interposition de `printf`, `dup2`, lecture de sa propre mémoire) n'ont plus de cible.
+
+**Harnais au format framework (héritage #116) — résiduel assumé.** Un harnais déjà écrit comme un
+vrai test du langage (JUnit, NUnit, go test, cargo test, `moodit_check.h`) continue de fonctionner,
+par l'ancien chemin : compilé AVEC le code de l'étudiant, verdict **fail-closed** gardé par des
+**canaris randomisés**. Cette forme est structurellement falsifiable, parce que le code noté
+partage le processus qui détient le secret et calcule le verdict : le verdict n'y est tenu pour
+infalsifiable en pratique qu'en **Java et Go**, et en **C, C++, C# et Rust** il subsiste un
+résiduel in-process que les canaris ne rattrapent pas systématiquement — un tricheur peut
+conditionner sa falsification sur « ma fonction a-t-elle été appelée », ce que les cas canaris ne
+font jamais. **Pour un examen noté, préférer le harnais booléen.**
+
+Les tentatives (lecture du harnais, rapport forgé) remontent en **événements** dans le détail des
+verdicts, dans les deux modes.
 
 Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
 `docker/runners/README.md`. Filet d'intégration (matrice anti-triche) :

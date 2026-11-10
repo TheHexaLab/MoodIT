@@ -198,9 +198,15 @@ public class CodeAssembler {
         String grader = "import os as __moodit_os\n"
                 + "try:\n    __moodit_os.remove('grader.py')\nexcept Exception:\n    pass\n"
                 + "import sys as __moodit_sys, subprocess as __moodit_subprocess, json as __moodit_json\n"
+                + "import secrets as __moodit_secrets\n"
                 + "__moodit_p = __moodit_subprocess.Popen([__moodit_sys.executable, 'student_server.py'],"
                 + " stdin=__moodit_subprocess.PIPE, stdout=__moodit_subprocess.PIPE, text=True)\n"
                 + "def __moodit_rpc(payload):\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse. Sans lui, le code noté
+                // — dont le stdout EST le canal de réponse — n'avait qu'à imprimer une réponse
+                // conforme AVANT d'être appelé : elle était consommée comme réponse au premier
+                // appel, et une réponse FAUSSE passait au vert sans jamais toucher au nonce.
+                + "    payload['id'] = __moodit_secrets.token_hex(8)\n"
                 + "    print(__moodit_json.dumps(payload), file=__moodit_p.stdin, flush=True)\n"
                 + "    while True:\n"
                 + "        line = __moodit_p.stdout.readline()\n"
@@ -208,8 +214,10 @@ public class CodeAssembler {
                 + "        try: r = __moodit_json.loads(line)\n"
                 + "        except Exception: continue\n"
                 // Le code étudiant partage stdout avec les réponses RPC : un print de premier niveau
-                // dont la sortie est du JSON valide (« 5 », « [1, 2] ») n'est pas une réponse.
+                // dont la sortie est du JSON valide (« 5 », « [1, 2] ») n'est pas une réponse, et
+                // une réponse qui ne porte pas l'identifiant DE CET APPEL n'en est pas une non plus.
                 + "        if not isinstance(r, dict) or 'ok' not in r: continue\n"
+                + "        if r.get('id') != payload['id']: continue\n"
                 + "        if not r.get('ok'): raise RuntimeError(str(r.get('error')))\n"
                 + "        return r\n"
                 + proxies
@@ -239,6 +247,8 @@ public class CodeAssembler {
                 + "                r = {'ok': False, 'error': 'op inconnu'}\n"
                 + "        except Exception as e:\n"
                 + "            r = {'ok': False, 'error': str(e)}\n"
+                // L'identifiant reçu est RENVOYÉ : c'est ce qui rattache la réponse à SON appel.
+                + "        r['id'] = m.get('id')\n"
                 + "        print(__moodit_json.dumps(r), flush=True)\n"
                 + "__moodit_serve()\n";
         return new Assembled("python", List.of(
@@ -305,12 +315,28 @@ public class CodeAssembler {
                 + "const __moodit_NL=String.fromCharCode(10);\n"
                 + "const __moodit_child=__moodit_cp.spawn(process.execPath,['student_server.js'],{stdio:['pipe','pipe','inherit']});\n"
                 + "__moodit_child.stdout.pause(); const __moodit_fd=__moodit_child.stdout._handle.fd;\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse. Le stdout du serveur
+                // étudiant EST le canal de réponse : sans identifiant, il suffisait d'y écrire une
+                // réponse conforme AVANT d'être appelé pour la faire consommer comme réponse au
+                // premier appel (muter console.log ne couvre pas process.stdout.write).
+                + "const __moodit_crypto=require('crypto'); let __moodit_buf='';\n"
                 + "function __moodit_rpc(o){\n"
+                + "  o.id=__moodit_crypto.randomBytes(8).toString('hex');\n"
                 + "  __moodit_child.stdin.write(JSON.stringify(o)+__moodit_NL);\n"
-                + "  const b=Buffer.alloc(65536); let s='';\n"
-                + "  while(s.indexOf(__moodit_NL)<0){ let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
-                + "catch(e){ if(e.code==='EAGAIN') continue; throw e; } if(n===0) break; s+=b.toString('utf8',0,n); }\n"
-                + "  const r=JSON.parse(s.split(__moodit_NL)[0]); if(!r.ok) throw new Error(r.error); return r;\n"
+                + "  const b=Buffer.alloc(65536);\n"
+                + "  for(;;){\n"
+                + "    let i;\n"
+                + "    while((i=__moodit_buf.indexOf(__moodit_NL))>=0){\n"
+                + "      const line=__moodit_buf.slice(0,i); __moodit_buf=__moodit_buf.slice(i+1);\n"
+                + "      let r; try{ r=JSON.parse(line); }catch(e){ continue; }\n"
+                + "      if(!r || typeof r!=='object' || r.id!==o.id) continue;\n"
+                + "      if(!r.ok) throw new Error(r.error); return r;\n"
+                + "    }\n"
+                + "    let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
+                + "catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
+                + "    if(n===0) throw new Error('processus etudiant termine');\n"
+                + "    __moodit_buf+=b.toString('utf8',0,n);\n"
+                + "  }\n"
                 + "}\n"
                 + proxies
                 + "function __moodit_harness(){\n" + harnessCode + "\n}\n"
@@ -334,6 +360,8 @@ public class CodeAssembler {
                 + "      else if(m.op==='method') r={ok:true,value: objs[m.handle][m.name](...m.args)};\n"
                 + "      else r={ok:false,error:'op inconnu'};\n"
                 + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
+                // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
+                + "    r.id=m.id;\n"
                 + "    process.stdout.write(JSON.stringify(r)+__moodit_NL);\n"
                 + "  }}); }\n__moodit_serve();\n";
         return new Assembled(runtimeName, List.of(
@@ -374,6 +402,9 @@ public class CodeAssembler {
                 + "$__moodit_proc = proc_open(escapeshellarg(PHP_BINARY).' student_server.php',"
                 + " [0=>['pipe','r'], 1=>['pipe','w'], 2=>STDERR], $__moodit_pipes);\n"
                 + "function __moodit_rpc($o){ global $__moodit_pipes;\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse : sans lui, un echo
+                // conforme imprimé AVANT l'appel était consommé comme réponse (cf. Python).
+                + "  $o['id'] = bin2hex(random_bytes(8));\n"
                 + "  fwrite($__moodit_pipes[0], json_encode($o).\"\\n\");\n"
                 + "  while (true) {\n"
                 + "    $line = fgets($__moodit_pipes[1]);\n"
@@ -382,6 +413,7 @@ public class CodeAssembler {
                 // Le code étudiant partage stdout avec les réponses : un echo de premier niveau
                 // (« 5 », « [1,2] ») n'est pas une réponse (même correctif que pour Python).
                 + "    if (!is_array($r) || !array_key_exists('ok', $r)) continue;\n"
+                + "    if (($r['id'] ?? null) !== $o['id']) continue;\n"
                 + "    if (empty($r['ok'])) throw new Exception($r['error']);\n"
                 + "    return $r;\n"
                 + "  }\n"
@@ -405,6 +437,8 @@ public class CodeAssembler {
                 + "    elseif ($__moodit_op === 'method') $__moodit_r = ['ok'=>true,'value'=>call_user_func_array([$__moodit_objs[$__moodit_m['handle']], $__moodit_m['name']], $__moodit_m['args'])];\n"
                 + "    else $__moodit_r = ['ok'=>false,'error'=>'op inconnu'];\n"
                 + "  } catch (\\Throwable $__moodit_e) { $__moodit_r = ['ok'=>false,'error'=>$__moodit_e->getMessage()]; }\n"
+                // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
+                + "  $__moodit_r['id'] = $__moodit_m['id'] ?? null;\n"
                 // Retour à la ligne AVANT la réponse : un echo sans « \n » ne s'y colle pas.
                 + "  fwrite(STDOUT, \"\\n\".json_encode($__moodit_r).\"\\n\");\n"
                 + "}\n";
@@ -424,6 +458,9 @@ public class CodeAssembler {
      * qui charge le code étudiant, lit « nom args », appelle la fonction et renvoie sa sortie. Les
      * fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas d'objets). Le nonce est émis
      * par le noteur (aucun code étudiant → infalsifiable) ; {@code grader.sh} est auto-supprimé.
+     * Le code soumis vit dans un fichier à part ({@code solution.sh}), chargé par le serveur
+     * APRÈS la lecture de l'identifiant et dans un sous-shell à la sortie capturée : il ne voit
+     * donc ni l'identifiant de l'appel, ni le flux sur lequel la réponse est publiée.
      */
     private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
@@ -431,18 +468,31 @@ public class CodeAssembler {
             if (f.startsWith("__moodit")) continue;
             proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
         }
+        // CADRAGE PAR IDENTIFIANT : la valeur rendue est la ligne « <id>|valeur », et seule
+        // celle-ci est retenue. Un `echo` de premier niveau du code étudiant ne vaut donc plus
+        // réponse — c'était la forge naïve (imprimer l'attendu, ne rien imprimer dans sa
+        // fonction). Le code étudiant ne peut pas davantage CONTREFAIRE cette ligne : le serveur
+        // lit l'identifiant AVANT de charger ce code (la ligne de requête est déjà consommée), et
+        // il charge puis appelle dans un SOUS-SHELL où l'identifiant est retiré de la portée et
+        // dont la sortie est CAPTURÉE. Le code soumis ne connaît donc pas l'identifiant, et rien
+        // de ce qu'il imprime n'atteint le flux où la réponse est publiée.
         String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
-                + "__moodit_rpc() { local __n=\"$1\"; shift; printf '%s\\n' \"$__n $*\""
-                + " | bash student_server.sh 2>/dev/null; }\n"
+                + "__moodit_rpc() { local __n=\"$1\"; shift;"
+                + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
+                + " printf '%s\\n' \"$__id $__n $*\" | bash student_server.sh 2>/dev/null"
+                + " | sed -n \"s/^$__id|//p\" | head -1; }\n"
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
                 + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
-        String server = studentCode
-                + "\nread -r __moodit_name __moodit_rest\n"
-                + "$__moodit_name $__moodit_rest\n";
+        String server = "read -r __moodit_id __moodit_name __moodit_rest\n"
+                + "__moodit_val=$(unset __moodit_id;"
+                + " . ./solution.sh >/dev/null 2>&1;"
+                + " $__moodit_name $__moodit_rest)\n"
+                + "printf '%s|%s\\n' \"$__moodit_id\" \"$__moodit_val\"\n";
         return new Assembled("bash", List.of(
                 new RunnerExec.File("grader.sh", grader),
-                new RunnerExec.File("student_server.sh", server)));
+                new RunnerExec.File("student_server.sh", server),
+                new RunnerExec.File("solution.sh", studentCode)));
     }
 
 

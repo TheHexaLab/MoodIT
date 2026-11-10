@@ -182,12 +182,15 @@ const HARNESS_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
   typescript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
   jsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
   tsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  java: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  c: '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
-  'c++': '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
-  'c#': '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  go: '// Harnais : lève une erreur (ou renvoie false) si la réponse est incorrecte.\n',
-  rust: '// Harnais : panique (ou renvoie false) si la réponse est incorrecte.\n',
+  // Compilés : le harnais est un corps qui RENVOIE UN BOOLÉEN. C'est cette forme que le
+  // superviseur note sans que l'étudiant puisse falsifier son résultat (harnais compilé dans un
+  // processus séparé, sous un UID séparé) — le gabarit du backend, plus détaillé, prime.
+  java: '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  c: '/* Harnais : renvoie vrai si la réponse est correcte, faux sinon. */\n',
+  'c++': '/* Harnais : renvoie vrai si la réponse est correcte, faux sinon. */\n',
+  'c#': '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  go: '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  rust: '// Harnais : une expression booléenne, vraie si la réponse est correcte.\n',
   php: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
   sql: '-- Harnais : requête de vérification renvoyant vrai/faux.\n',
   bash: '# Harnais : sortie 0 si la réponse est correcte, non-zéro sinon.\n',

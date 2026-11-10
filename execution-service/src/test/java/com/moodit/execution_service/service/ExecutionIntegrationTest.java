@@ -101,6 +101,32 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void python_devancer_la_reponse_rpc_echoue() {
+        requireRuntime("python");
+        // DEVANCEMENT : le stdout du serveur étudiant EST le canal de réponse. En imprimant une
+        // réponse conforme AVANT d'être appelé, le code noté la faisait consommer comme réponse
+        // au premier appel — verdict vert sur une réponse fausse, sans jamais toucher au nonce.
+        // Chaque appel porte donc un IDENTIFIANT imprévisible que la réponse doit renvoyer.
+        assertThat(passes("Python",
+                "import sys, json\n"
+                        + "print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
+                        + "def doubler(n):\n"
+                        + "    print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
+                        + "    return 0\n",
+                "return doubler(5) == 10")).isFalse();
+    }
+
+    @Test
+    void javascript_devancer_la_reponse_rpc_echoue() {
+        requireRuntime("javascript");
+        assertThat(passes("JavaScript",
+                "console.log(JSON.stringify({ok: true, value: 10}));\n"
+                        + "function doubler(n){ console.log(JSON.stringify({ok: true, value: 10}));"
+                        + " return 0; }",
+                "return doubler(5) === 10;")).isFalse();
+    }
+
+    @Test
     void javascript_rpc_isolation() {
         requireRuntime("javascript");
         assertThat(passes("JavaScript", "function doubler(n){ return n * 2; }", "return doubler(5) === 10;")).isTrue();
@@ -144,6 +170,13 @@ class ExecutionIntegrationTest {
         assertThat(passes("Bash", "doubler() { echo 0; }", "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
         assertThat(passes("Bash",
                 "doubler() { grep -oE 'MOODIT_OK_[0-9a-f]+' grader.sh 2>/dev/null >&2; echo 0; }",
+                "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
+        // CONTREFAÇON de la ligne de réponse : le code de premier niveau consomme stdin pour y
+        // apprendre l'identifiant de l'appel, puis publie lui-même « <id>|10 ». Il ne le voit
+        // plus (lu avant son chargement) et sa sortie est capturée, pas publiée.
+        assertThat(passes("Bash",
+                "__vol=$(cat); printf '%s|10\\n' \"${__vol%% *}\"\n"
+                        + "doubler() { echo 0; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }
 

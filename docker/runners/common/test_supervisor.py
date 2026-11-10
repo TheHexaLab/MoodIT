@@ -1375,5 +1375,125 @@ class ScanTraceTest(unittest.TestCase):
         self.assertFalse(supervisor.trace_read_ok('readlink("/proc/self/exe", "x", 4096) = 9'))
 
 
+class ApiObjetTest(unittest.TestCase):
+    """Lecture de l'API OBJET du code soumis, pour la notation NON FALSIFIABLE.
+
+    Ce sont des fonctions pures, et c'est là que les erreurs coûtent le plus cher : une API mal
+    lue, et le harnais du prof ne compile pas (ou, pire, un objet n'est pas proxifié)."""
+
+    GO = ("package main\n\n"
+          "type Rectangle struct {\n\tlargeur int\n\thauteur int\n}\n\n"
+          "func NewRectangle(l int, h int) Rectangle {\n"
+          "\treturn Rectangle{largeur: l, hauteur: h}\n}\n\n"
+          "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\n")
+
+    RUST = ("struct Rectangle {\n    largeur: i32,\n    hauteur: i32,\n}\n\n"
+            "impl Rectangle {\n"
+            "    fn new(l: i32, h: i32) -> Rectangle {\n"
+            "        Rectangle { largeur: l, hauteur: h }\n    }\n\n"
+            "    fn aire(&self) -> i32 {\n        self.largeur * self.hauteur\n    }\n}\n")
+
+    CPP = ("class Rectangle {\n    int largeur, hauteur;\npublic:\n"
+           "    Rectangle(int largeur, int hauteur) : largeur(largeur), hauteur(hauteur) {}\n"
+           "    int aire() { return largeur * hauteur; }\nprivate:\n"
+           "    int secret() { return 1; }\n};\n\n"
+           "int doubler(int n) { return n * 2; }\n")
+
+    def test_go_champs_et_api(self):
+        self.assertEqual(supervisor.go_struct_fields(self.GO),
+                         {"Rectangle": [("largeur", "int"), ("hauteur", "int")]})
+        self.assertEqual(supervisor.go_object_api(self.GO),
+                         [("Rectangle", [("NewRectangle", ["int", "int"])],
+                           [("int", "aire", [])])])
+
+    def test_go_type_sans_constructeur_reste_proxifie(self):
+        # L'idiome Go : pas de constructeur, un littéral à champs nommés. Refuser ce cas
+        # écartait la forme que les profs écrivent (et celle du quiz de démo).
+        sans_ctor = self.GO.replace(
+            "func NewRectangle(l int, h int) Rectangle {\n"
+            "\treturn Rectangle{largeur: l, hauteur: h}\n}\n\n", "")
+        self.assertEqual(supervisor.go_object_api(sans_ctor),
+                         [("Rectangle", [], [("int", "aire", [])])])
+
+    def test_go_bouchon_capture_les_champs(self):
+        objets = supervisor.go_object_api(self.GO)
+        champs = supervisor.go_struct_fields(self.GO)
+        bouchon = supervisor.go_object_stub(objets, champs)
+        # Le bouchon MIROITE les champs (le harnais écrit son littéral habituel) et la méthode
+        # construit l'objet CHEZ l'étudiant au moment de l'appel.
+        self.assertIn("type Rectangle struct {\n    largeur int\n    hauteur int\n}", bouchon)
+        self.assertIn('mooditNouvelle("Rectangle", []interface{}{o.largeur, o.hauteur})', bouchon)
+        # La fonction-constructeur reste proxifiée, en relisant les champs du résultat.
+        self.assertIn('mooditChamps("NewRectangle"', bouchon)
+
+    def test_go_aiguillage_couvre_litteral_methode_et_constructeur(self):
+        objets = supervisor.go_object_api(self.GO)
+        champs = supervisor.go_struct_fields(self.GO)
+        cas_new, cas_methode = supervisor.go_object_dispatch(objets, champs)
+        self.assertIn('case "Rectangle":', cas_new)
+        self.assertIn('case "NewRectangle":', cas_new)
+        # La boucle des méthodes ne doit PAS être sautée pour un type à champs capturés : elle
+        # l'était, et tout appel de méthode remontait « methode inconnue ».
+        self.assertIn('case "Rectangle.aire":', cas_methode)
+
+    def test_rust_champs_et_api(self):
+        self.assertEqual(supervisor.rust_struct_fields(self.RUST),
+                         {"Rectangle": [("largeur", "i32"), ("hauteur", "i32")]})
+        self.assertEqual(supervisor.rust_object_api(self.RUST),
+                         [("Rectangle", [("new", ["i32", "i32"])], [("i32", "aire", [])])])
+
+    def test_rust_bouchon_et_aiguillage(self):
+        objets = supervisor.rust_object_api(self.RUST)
+        champs = supervisor.rust_struct_fields(self.RUST)
+        bouchon = supervisor.rust_object_stub(objets, champs)
+        self.assertIn("struct Rectangle {\n    largeur: i32,\n    hauteur: i32,\n}", bouchon)
+        self.assertIn('"|new|Rectangle"', bouchon)
+        piles, cas = supervisor.rust_object_dispatch(objets, champs)
+        self.assertIn("let mut moodit_rectangle: Vec<Rectangle>", piles)
+        self.assertIn('"new|Rectangle" =>', cas)
+        self.assertIn('"new|new" =>', cas)
+        self.assertIn('"method|Rectangle.aire" =>', cas)
+        self.assertNotIn("unsafe", bouchon + piles + cas)
+
+    def test_cpp_plages_de_classe_et_api(self):
+        self.assertEqual(len(supervisor.cpp_class_spans(self.CPP)), 1)
+        self.assertEqual(supervisor.cpp_object_api(self.CPP),
+                         [("Rectangle", [["int", "int"]], [("int", "aire", [])])])
+
+    def test_cpp_methode_privee_ecartee(self):
+        _, _, methodes = supervisor.cpp_object_api(self.CPP)[0]
+        self.assertEqual([n for _, n, _ in methodes], ["aire"])
+
+    def test_cpp_methode_nest_pas_prise_pour_une_fonction_libre(self):
+        # Sans ce filtre, `int aire()` passait pour une fonction de premier niveau et le bouchon
+        # généré appelait `aire()` sans objet : le code soumis ne compilait plus.
+        self.assertEqual(supervisor.c_signatures(self.CPP, cpp=True),
+                         [("int", "doubler", ["int"])])
+        self.assertIn(("int", "aire", []), supervisor.c_signatures(self.CPP))
+
+    def test_cpp_bouchon_et_aiguillage(self):
+        objets = supervisor.cpp_object_api(self.CPP)
+        bouchon = supervisor.cpp_object_stub(objets)
+        self.assertIn("class Rectangle {", bouchon)
+        self.assertIn('"%s|new|Rectangle|%d|%d"', bouchon)
+        piles, cas = supervisor.cpp_object_dispatch(objets)
+        self.assertIn("static std::vector<Rectangle> moodit_objets_Rectangle;", piles)
+        self.assertIn('strcmp(nom, "Rectangle.aire")', cas)
+
+    def test_java_bouchon_quand_la_classe_publique_est_l_objet(self):
+        # Classe publique `Rectangle`, AUCUNE méthode statique : le bouchon de premier niveau
+        # doit porter le constructeur et les méthodes, sinon la question était refusée.
+        source = supervisor.java_stub_source(
+            "Rectangle", [], (), [["int", "int"]], [("int", "aire", [])])
+        self.assertIn("public Rectangle(int a0, int a1) {", source)
+        self.assertIn('MooditRpc.nouvelle("Rectangle"', source)
+        self.assertIn("public int aire() {", source)
+        self.assertNotIn("private Rectangle() {}", source)
+
+    def test_java_bouchon_sans_objet_garde_le_constructeur_prive(self):
+        source = supervisor.java_stub_source("Solution", [("int", "doubler", ["int"])])
+        self.assertIn("private Solution() {}", source)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
