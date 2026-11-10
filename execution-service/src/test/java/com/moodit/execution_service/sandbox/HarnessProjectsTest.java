@@ -90,10 +90,22 @@ class HarnessProjectsTest {
         // Le gabarit __MOODIT_T__ (substitué par le superviseur) doit être émis par le POINT DE
         // SORTIE du framework de chaque langage — c'est lui qui trahit un forgeage déclenché
         // depuis la fonction notée (invisible aux canaris).
-        assertThat(HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null).files()
-                .get("cases/0/src/MooditEnveloppe.java")).contains("jeton=__MOODIT_T__");
-        assertThat(HarnessProjects.build("C#", "CODE", ONE_CASE, null).files()
-                .get("cases/0/src/moodit_runner.cs")).contains("jeton=__MOODIT_T__");
+        // Java et C# : le jeton n'est PLUS dans la source — substitué, il devenait une
+        // constante en clair de classes/*.class et de tests.exe, artefacts que le superviseur
+        // DOIT ouvrir à l'UID étudiant (chargement par la JVM / mono). Le code noté le lisait
+        // et forgeait le verdict complet, sans lecture traçable. Il arrive donc par stdin
+        // (tube), et le verdict part sur le descripteur BRUT.
+        String enveloppeJava = HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null)
+                .files().get("cases/0/src/MooditEnveloppe.java");
+        assertThat(enveloppeJava).doesNotContain("__MOODIT_T__");
+        assertThat(enveloppeJava).contains("System.in").contains("FileDescriptor.out");
+        String enveloppeCs = HarnessProjects.build("C#", "CODE", ONE_CASE, null)
+                .files().get("cases/0/src/moodit_runner.cs");
+        assertThat(enveloppeCs).doesNotContain("__MOODIT_T__");
+        assertThat(enveloppeCs).contains("Console.In.ReadLine")
+                .contains("OpenStandardOutput");
+        // Go garde la substitution : son init() étudiant tourne AVANT toute instruction de
+        // l'enveloppe, donc une livraison par stdin serait lisible par le code noté en premier.
         assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null).files()
                 .get("cases/0/src/moodit_main_test.go")).contains("jeton=__MOODIT_T__");
         assertThat(HarnessProjects.build("Rust", "fn main() {}", ONE_CASE, null).files()
@@ -110,7 +122,7 @@ class HarnessProjectsTest {
         assertThat(project.files().get("cases/0/src/MooditEnveloppe.java"))
                 .isEqualTo("public class MooditEnveloppe { }");
         assertThat(project.files().get("cases/0/src/MooditEnveloppe_moodit.java"))
-                .contains("jeton=__MOODIT_T__");
+                .contains("class MooditMain").contains("[MOODIT] jeton=");
     }
 
     @Test
@@ -247,14 +259,17 @@ class HarnessProjectsTest {
         // Le rapport du framework vit sous work/ (possédé par l'étudiant) et le code de
         // sortie du processus s'écrase après coup : le verdict doit voyager sur la ligne
         // du jeton, qu'une ligne déjà émise rend infalsifiable sans connaître le jeton.
+        // Java/C# : jeton reçu sur stdin, verdict publié sur le descripteur BRUT (fd 1) — un
+        // System.setOut()/Console.SetOut() du code noté voyait sinon passer la ligne et n'avait
+        // qu'à y réécrire « code=1 » en « code=0 », sans même connaître le jeton.
         assertThat(HarnessProjects.build("Java", "class Solution { }", ONE_CASE, null)
                 .files().get("cases/0/src/MooditEnveloppe.java"))
-                .contains("jeton=__MOODIT_T__ code=")
-                .contains("+ code");
+                .contains("brut.println(\"[MOODIT] jeton=\" + jeton + \" code=\" + code)")
+                .contains("new FileOutputStream(FileDescriptor.out)");
         assertThat(HarnessProjects.build("C#", "class Solution { }", ONE_CASE, null)
                 .files().get("cases/0/src/moodit_runner.cs"))
-                .contains("jeton=__MOODIT_T__ code=")
-                .contains("+ code");
+                .contains("brut.WriteLine(\"[MOODIT] jeton=\" + jeton + \" code=\" + code)")
+                .contains("Console.OpenStandardOutput()");
         assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null)
                 .files().get("cases/0/src/moodit_main_test.go"))
                 .contains("jeton=__MOODIT_T__ code=%d");

@@ -10,7 +10,7 @@
  * Chaque MOODIT_TEST est enregistré automatiquement ; le main fourni ici les exécute tous et
  * imprime une ligne par test puis un sommaire machine-lisible, lu par le superviseur :
  *     [MOODIT] ok <nom>            [MOODIT] fail <nom> (fichier:ligne) message
- *     [MOODIT] summary total=N failed=M
+ *     [MOODIT] summary jeton=<jeton> total=N failed=M   (jeton=… seulement si MOODIT_JETON)
  * Un MOODIT_CHECK qui échoue interrompt le test courant (longjmp) et le marque échoué.
  * Code de sortie : 0 si tout passe, 1 sinon. Compatible C (gcc) et C++ (g++).
  */
@@ -82,11 +82,20 @@ int main(void) {
             printf("[MOODIT] ok %s\n", moodit_tests[i].name);
         }
     }
-    printf("[MOODIT] summary total=%d failed=%d\n", moodit_test_count, failed);
 #ifdef MOODIT_JETON
-    /* Jeton de fin d'exécution (substitué au runtime par le superviseur) : n'est imprimé
-     * qu'ici, après tous les tests — un exit(0) forgé depuis le code étudiant le saute. */
+    /* Sommaire PORTEUR DU JETON : le superviseur ne compte que celui-ci. Sans le jeton, le
+     * code noté n'avait qu'à imprimer « [MOODIT] summary total=1 failed=0 » AVANT la fin (le
+     * superviseur retenait le PREMIER sommaire trouvé), puis à poser un atexit() qui sort en 0 :
+     * le vrai sommaire et le vrai jeton étaient bien imprimés ensuite, et le cas passait au vert.
+     * Le jeton vit dans le harnais (illisible, 700 root) et dans ce binaire (dont la lecture est
+     * tracée, lecture_binaire_tentee) — le forger redevient donc bruyant ou impossible. */
+    printf("[MOODIT] summary jeton=%s total=%d failed=%d\n",
+           MOODIT_JETON, moodit_test_count, failed);
+    /* Jeton de fin d'exécution : n'est imprimé qu'ici, après tous les tests — un exit(0) forgé
+     * depuis le code étudiant le saute. */
     printf("[MOODIT] jeton=%s\n", MOODIT_JETON);
+#else
+    printf("[MOODIT] summary total=%d failed=%d\n", moodit_test_count, failed);
 #endif
     fflush(stdout);
     return failed > 0 ? 1 : 0;

@@ -332,6 +332,19 @@ def libtest_listed_tests(listing):
     return names
 
 
+def usable_listing(listing, timed_out):
+    """Listing `--list` exploitable, ou "" s'il ne l'est pas. FONCTION PURE (testée).
+
+    Un listing TRONQUÉ (sortie plafonnée) perd les tests du MILIEU : bâtir un filtre dessus
+    pouvait écarter le harnais sans que personne s'en aperçoive. On renonce alors au filtre —
+    tous les tests tournent, l'équité est perdue mais pas l'intégrité. Isolée ici parce que
+    c'est la SEULE protection contre ce cas, et qu'elle était jusqu'ici noyée dans run_rust,
+    donc couverte par aucun test."""
+    if timed_out or "sortie tronquée au milieu" in listing:
+        return ""
+    return listing
+
+
 def libtest_selection(case_index, listing=""):
     """Canari : son test et celui du jeton. Cas réel : sélection EXACTE de tous les tests qui
     n'appartiennent pas à un module de l'étudiant.
@@ -593,7 +606,8 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
         pass          # tube rompu : le processus est mort, rien de plus à lire
 
 
-def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
+def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None,
+             stdin_data=None):
     """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out).
 
     Les sorties passent par des TUBES que le superviseur (root) recopie dans les fichiers : le
@@ -605,7 +619,22 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
     relecture par chemin reste refusée) ni connaître le jeton. Les droits 0600 root ne
     protégeaient rien : ils ne sont vérifiés qu'au open(2). Les octets déjà consommés par root
     sont, eux, hors d'atteinte par construction."""
+    # stdin_data : charge utile remise au processus par un TUBE (jamais un fichier). Sert à
+    # livrer le JETON de fin à l'enveloppe de Java/C# sans qu'il figure dans un artefact
+    # lisible par l'étudiant. Un tube n'est pas repositionnable : une fois l'enveloppe l'ayant
+    # lu (première instruction de son main, avant tout chargement de classe étudiante), le code
+    # noté qui relit stdin ne voit que l'EOF — il ne peut pas revenir en arrière comme il
+    # l'aurait fait sur un fichier régulier (lseek).
     stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
+    # Descripteur du tube SUIVI À PART : `subprocess.DEVNULL` est un int (-3), donc un
+    # isinstance(stdin, int) le prendrait pour un descripteur à fermer (os.close(-3) → OSError
+    # avalée par le try de run_proc, qui renvoyait alors « code None » pour TOUT appel).
+    token_fd = None
+    if stdin_data is not None:
+        token_fd, write_fd = os.pipe()
+        os.write(write_fd, stdin_data.encode("ascii"))   # quelques octets : jamais bloquant
+        os.close(write_fd)                               # EOF immédiat après la charge utile
+        stdin = token_fd
     # PAS de `with` sur ces deux fichiers : c'est ROOT qui les écrit depuis le passage aux
     # tubes, donc leur tampon peut contenir des octets non écrits. Sur un /box saturé, le
     # close() implicite du `with` RELÈVE l'OSError que le flush vient de laisser (CPython garde
@@ -618,7 +647,9 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
         out, err = open_output(out_path), open_output(err_path)
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, stdin=stdin, preexec_fn=preexec)
-        if stdin is not subprocess.DEVNULL:
+        if token_fd is not None:
+            os.close(token_fd)           # tube du jeton : le parent lâche son extrémité
+        elif stdin is not subprocess.DEVNULL:
             stdin.close()
         pumps = [threading.Thread(target=drain_pipe,
                                   args=(proc.stdout, out, OUTPUT_FILE_CAP,
@@ -734,32 +765,69 @@ def base_env(case_dir):
 
 
 STRACE = shutil.which("strace")
-STRACE_OK = None  # déterminé au premier run
+STRACE_OK = None  # SONDÉ au démarrage (probe_strace), jamais déduit d'un run étudiant
 
 
-def run_student(cmd, case_dir, env, timeout_s, tag):
-    """Exécute `cmd` sous l'UID student (via strace -u si disponible) ; renvoie
-    (exit, timed_out, stdout, stderr, trace_path)."""
+def probe_strace():
+    """Disponibilité de strace, déterminée par une SONDE ROOT indépendante de tout code
+    étudiant (`strace … /bin/true`).
+
+    Elle remplace l'ancienne déduction « premier run tracé → fichier vide ⇒ strace
+    inutilisable », qui était CONTRÔLABLE PAR L'ÉTUDIANT : au timeout, run_proc tue le groupe
+    (killpg), donc strace lui-même, et son tampon de sortie vers -o pouvait n'avoir jamais été
+    écrit → fichier vide → drapeau GLOBAL à False → plus aucune trace pour TOUS les cas
+    suivants, donc plus de détection des lectures de binaire (la seule voie d'extraction du
+    jeton sur les natifs). Il suffisait de faire expirer le premier cas exécuté — sans même
+    connaître l'ordre, une condition sur /proc/uptime (non tracé) y suffit. La sonde ne dépend
+    d'aucun run étudiant, et un cas expiré ne désarme plus rien."""
     global STRACE_OK
+    if not STRACE:
+        STRACE_OK = False
+        event("trace_indisponible", detail="strace absent de l'image")
+        return False
+    trace = os.path.join(BOX, ".strace_probe")
+    try:
+        subprocess.run([STRACE, "-f", "-qq", "-e", "trace=openat,open", "-o", trace,
+                        "/bin/true"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        STRACE_OK = os.path.exists(trace) and os.path.getsize(trace) > 0
+    except (OSError, subprocess.SubprocessError):
+        STRACE_OK = False
+    finally:
+        try:
+            os.unlink(trace)
+        except OSError:
+            pass
+    if not STRACE_OK:
+        # Capacité SYS_PTRACE absente : la notation continue, mais le prof doit savoir que la
+        # détection des lectures est éteinte pour ce job.
+        event("trace_indisponible", detail="strace inutilisable (SYS_PTRACE ?)")
+    return STRACE_OK
+
+
+def run_student(cmd, case_dir, env, timeout_s, tag, stdin_data=None):
+    """Exécute `cmd` sous l'UID student (via strace -u si disponible) ; renvoie
+    (exit, timed_out, stdout, stderr, trace_path).
+
+    `stdin_data` : charge utile livrée par un TUBE (cf. run_proc) — le jeton de fin pour les
+    enveloppes Java/C#, qui n'a ainsi pas à être compilé dans un artefact lisible."""
+    if STRACE_OK is None:
+        probe_strace()      # sonde paresseuse : aucun appelant ne doit tracer « à l'aveugle »
     out_path = os.path.join(case_dir, tag + ".out")
     err_path = os.path.join(case_dir, tag + ".err")
     # HOME/TMP de la phase de RUN : sous work/, possédés par l'étudiant (séparés du build).
     env = dict(env)
     env["HOME"] = student_dir(os.path.join(case_dir, "work"), "home")
     env["TMPDIR"] = student_dir(os.path.join(case_dir, "work"), "tmp")
-    if STRACE and STRACE_OK is not False:
+    if STRACE and STRACE_OK:
         trace_path = os.path.join(case_dir, tag + ".trace")
         wrapped = [STRACE, "-f", "-qq", "-e", "trace=openat,open,readlink,readlinkat",
                    "-o", trace_path, "-u", "student"] + cmd
-        code, timed_out = run_proc(wrapped, case_dir, env, timeout_s, out_path, err_path, preexec_root)
-        if STRACE_OK is None:
-            # strace inutilisable (capacité SYS_PTRACE absente) → échec immédiat sans trace.
-            STRACE_OK = os.path.exists(trace_path) and os.path.getsize(trace_path) > 0
-            if not STRACE_OK:
-                event("trace_indisponible")
-                return run_student(cmd, case_dir, env, timeout_s, tag)
+        code, timed_out = run_proc(wrapped, case_dir, env, timeout_s, out_path, err_path,
+                                   preexec_root, stdin_data=stdin_data)
         return code, timed_out, read_capped(out_path), read_capped(err_path), trace_path
-    code, timed_out = run_proc(cmd, case_dir, env, timeout_s, out_path, err_path, demote_student)
+    code, timed_out = run_proc(cmd, case_dir, env, timeout_s, out_path, err_path,
+                               demote_student, stdin_data=stdin_data)
     return code, timed_out, read_capped(out_path), read_capped(err_path), None
 
 
@@ -773,7 +841,7 @@ def scan_trace(trace_path, locked_dir, case_index, binaries=()):
     for binary in binaries:
         if binary:
             probes += ['"' + binary + '"', '"./' + os.path.basename(binary) + '"',
-                       '"' + os.path.basename(binary) + '"']
+                       '"' + os.path.basename(binary) + '"', '"/proc/self/exe"']
     try:
         with open(trace_path, "r", errors="replace") as f:
             for line in f:
@@ -782,11 +850,32 @@ def scan_trace(trace_path, locked_dir, case_index, binaries=()):
                 if locked_dir in line or '"src/' in line or '"./src/' in line:
                     event("lecture_source_tentee", case=case_index, detail=line.strip()[:300])
                     return
-                if probes and ("/proc/self/exe" in line or any(p in line for p in probes)):
+                # Binaire : n'accuser que sur une LECTURE RÉUSSIE. Le basename est générique
+                # (« tests » pour C/C++/Go), donc une sous-chaîne suffisait à accuser : un
+                # étudiant honnête qui écrivait un fichier nommé `tests` dans son dossier (refusé,
+                # case_dir est root) portait la bannière « Comportement suspect ». Or lire son
+                # binaire RÉUSSIT — c'est tout l'intérêt de l'attaque : exiger le succès retire
+                # les faux positifs sans rien céder. Idem pour readlink(/proc/self/exe), que des
+                # runtimes honnêtes font au démarrage : seule une OUVERTURE réussie compte.
+                if probes and any(p in line for p in probes) and trace_read_ok(line):
                     event("lecture_binaire_tentee", case=case_index, detail=line.strip()[:300])
                     return
     except OSError:
         pass
+
+
+def trace_read_ok(line):
+    """Cette ligne de trace est-elle une OUVERTURE EN LECTURE RÉUSSIE ? FONCTION PURE (testée).
+
+    strace rend « … ) = <fd> » en succès et « … ) = -1 ERRNO (…) » en échec. Une ouverture en
+    écriture/création n'est pas une lecture : un fichier homonyme créé par une soumission
+    honnête ne doit jamais valoir une accusation."""
+    if "open" not in line:
+        return False                       # readlink : ne lit aucun contenu
+    if any(flag in line for flag in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND")):
+        return False
+    resultat = line.rsplit("=", 1)[-1].strip() if "=" in line else ""
+    return bool(re.match(r"^\d+", resultat))
 
 
 def lock_sources(src_dir):
@@ -1000,19 +1089,52 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
     scan_trace(trace, src, case_index, binaries=(tests_bin,))
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    summary = re.search(r"^\[MOODIT\] summary total=(\d+) failed=(\d+)$", stdout, re.M)
-    coherent = summary is not None and int(summary.group(1)) > 0
     # C/C++ : pas d'enveloppe qui tienne le code de sortie du framework (le jeton est imprimé
-    # par moodit_check.h), donc le verdict reste sur exit_code + sommaire. L'interposition de
-    # printf est le résiduel assumé et documenté pour ces deux langages.
-    passed = exit_code == 0 and coherent and int(summary.group(2)) == 0
+    # par moodit_check.h), donc le verdict reste sur exit_code + sommaire — mais un sommaire
+    # PORTEUR DU JETON, et unique (voir c_summary). L'interposition de printf reste le résiduel
+    # assumé et documenté pour ces deux langages.
+    total, failed, forge = c_summary(stdout, TOKENS.get(case_index))
+    coherent = total is not None and total > 0
+    passed = exit_code == 0 and coherent and failed == 0
+    if passed and first_lines(stdout, r"^\[MOODIT\] fail "):
+        # Fil de détente, miroir de celui de Rust : des lignes d'échec alors que le sommaire
+        # authentique annonce zéro échec = mise en forme incohérente, on refuse sans accuser.
+        passed = False
+        event("rapport_incoherent", case=case_index,
+              detail="lignes d'échec malgré un sommaire sans échec")
     if exit_code == 0 and not coherent:
-        event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire moodit_check")
+        event("rapport_incoherent", case=case_index,
+              detail="sommaire forgé (jeton absent)" if forge else "exit 0 sans sommaire moodit_check")
     detail = None if passed else (first_lines(stdout, r"^\[MOODIT\] fail ")
-                                  or first_lines(stderr, r".") or "Échec du harnais")
+                                  or first_lines(stderr, r".")
+                                  or ("Sommaire de test non authentifié : ignoré (le sommaire du "
+                                      "framework n'a pas été produit)" if forge and not coherent
+                                      else "Échec du harnais"))
     passed, detail = enforce_token(passed, detail, stdout, case_index,
                                    ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
+
+
+def c_summary(stdout, token):
+    """Sommaire de moodit_check.h → (total, failed, forge). FONCTION PURE (testée).
+
+    Seul un sommaire PORTEUR DU JETON compte : le code noté ne peut pas en produire sans
+    connaître le jeton (harnais illisible, lecture du binaire tracée). Et il en faut
+    EXACTEMENT UN — sinon on refuse, comme pour la ligne du jeton (jeton_duplique) : retenir
+    le premier match laissait le code noté en imprimer un faux AVANT la fin, puis laisser le
+    framework finir normalement (vrai sommaire, vrai jeton) et sortir en 0 par atexit().
+
+    `forge` : vrai si un sommaire SANS jeton a été vu — signe d'un faux, mais non imputable
+    (une soumission peut imprimer n'importe quoi), donc jamais une accusation.
+    """
+    forge = bool(re.search(r"^\[MOODIT\] summary total=", stdout, re.M))
+    if not token:
+        return None, None, forge
+    matches = re.findall(r"^\[MOODIT\] summary jeton=" + re.escape(token)
+                         + r" total=(\d+) failed=(\d+)$", stdout, re.M)
+    if len(matches) != 1:
+        return None, None, forge or len(matches) > 1
+    return int(matches[0][0]), int(matches[0][1]), forge
 
 
 def run_c(case_dir, env, timeout_s, case_index):
@@ -1044,6 +1166,10 @@ def run_java(case_dir, env, timeout_s, case_index):
         shutil.rmtree(reports, ignore_errors=True)
         return run_student(
             ["java", "-XX:MaxRAMPercentage=50",
+             # Accès natif REFUSÉ (JNI, FFM) : c'est la seule voie, depuis du code Java, pour
+             # dup2() par-dessus le descripteur 1 et intercepter la ligne de verdict que
+             # l'enveloppe y publie. Aucun harnais légitime n'en a besoin.
+             "--illegal-native-access=deny",
              "-Djava.io.tmpdir=" + os.path.join(case_dir, "work", "tmp"),
              # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime
              # le jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
@@ -1051,7 +1177,11 @@ def run_java(case_dir, env, timeout_s, case_index):
              "execute"] + selection + ["--include-classname=.*",
              "--fail-if-no-tests", "--disable-banner", "--details=summary",
              "--reports-dir", reports],
-            case_dir, env, timeout_s, "run")
+            case_dir, env, timeout_s, "run",
+            # Jeton livré par TUBE : l'enveloppe le lit avant de charger la moindre classe
+            # étudiante. Compilé dans classes/*.class (que la JVM doit pouvoir lire sous l'UID
+            # étudiant), il était extractible sans aucune trace possible.
+            stdin_data=(TOKENS.get(case_index) or "") + "\n")
 
     def junit_report():
         tests = failures = 0
@@ -1125,7 +1255,8 @@ def run_csharp(case_dir, env, timeout_s, case_index):
 
     exit_code, t_out, stdout, stderr, trace = run_student(
         ["mono", exe, "--result:" + result_xml] + nunit_selection(case_index),
-        case_dir, env, timeout_s, "run")
+        case_dir, env, timeout_s, "run",
+        stdin_data=(TOKENS.get(case_index) or "") + "\n")   # cf. run_java : jeton hors artefact
     xml_passed, total, containers = (None, 0, []) if t_out else nunit_report()
     scan_trace(trace, src, case_index)
     if t_out:
@@ -1283,8 +1414,7 @@ def run_rust(case_dir, env, timeout_s, case_index):
         # Un listing TRONQUÉ (sortie plafonnée) perdrait les tests du milieu : construire un
         # filtre dessus pouvait écarter le harnais sans qu'on le sache. On renonce alors au
         # filtre — tous les tests tournent, l'équité est perdue mais pas l'intégrité.
-        if listing_timed_out or "sortie tronquée au milieu" in listing:
-            listing = ""
+        listing = usable_listing(listing, listing_timed_out)
     exit_code, t_out, stdout, stderr, trace = run_student(
         [tests_bin, "--test-threads=1", "--nocapture"] + libtest_selection(case_index, listing),
         case_dir, env, timeout_s, "run")

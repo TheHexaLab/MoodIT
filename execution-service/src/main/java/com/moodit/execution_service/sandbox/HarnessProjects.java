@@ -135,17 +135,49 @@ public final class HarnessProjects {
                 if (wrapperFile.equals(studentFile) || wrapperFile.equals(harnessFile)) {
                     wrapperFile = "MooditEnveloppe_moodit.java";
                 }
+                // Le jeton arrive sur STDIN (tube fermé par root après écriture), lu à la
+                // PREMIÈRE instruction du main — donc avant que le ConsoleLauncher ne charge la
+                // moindre classe étudiante. Il n'est PLUS substitué dans la source : compilé, il
+                // devenait une constante de `classes/MooditMain.class`, que le superviseur ouvre
+                // exprès à l'UID étudiant (open_artifacts) pour que la JVM puisse charger ses
+                // classes. Le code noté le lisait donc en trois lignes, publiait lui-même la
+                // ligne de verdict et sortait en 0 : note pleine sur un code faux, sans trace
+                // (tracer ces lectures est impossible — c'est le chargement de classes normal
+                // de la JVM, sous le même UID). Un tube n'est pas repositionnable : après la
+                // lecture de l'enveloppe, le code noté n'y trouve que l'EOF.
                 files.put(base + wrapperFile, """
+                        import java.io.BufferedReader;
+                        import java.io.FileDescriptor;
+                        import java.io.FileOutputStream;
+                        import java.io.InputStreamReader;
+                        import java.io.PrintStream;
                         import java.io.PrintWriter;
+                        import java.nio.charset.StandardCharsets;
 
                         class MooditMain {
-                            public static void main(String[] args) {
+                            public static void main(String[] args) throws Exception {
+                                // Verdict publié sur le DESCRIPTEUR BRUT (fd 1), capturé ici,
+                                // avant tout chargement de classe étudiante. System.out est une
+                                // simple variable de classe : un System.setOut() posé par le code
+                                // noté voyait passer cette ligne — jeton authentique compris — et
+                                // n'avait plus qu'à y remplacer « code=1 » par « code=0 » avant de
+                                // la réémettre. Connaître le jeton n'était même pas nécessaire.
+                                // Écrire sur fd 1 contourne System.setOut ; le détourner demande
+                                // un dup2, donc un accès natif (refusé par --illegal-native-access).
+                                PrintStream brut = new PrintStream(
+                                        new FileOutputStream(FileDescriptor.out), true,
+                                        StandardCharsets.UTF_8);
+                                String jeton;
+                                try (BufferedReader entree = new BufferedReader(
+                                        new InputStreamReader(System.in, StandardCharsets.US_ASCII))) {
+                                    jeton = entree.readLine();
+                                }
                                 int code = org.junit.platform.console.ConsoleLauncher
                                         .run(new PrintWriter(System.out, true),
                                                 new PrintWriter(System.err, true), args)
                                         .getExitCode();
-                                System.out.println(
-                                        "[MOODIT] jeton=__MOODIT_T__ code=" + code);
+                                brut.println("[MOODIT] jeton=" + jeton + " code=" + code);
+                                brut.flush();
                                 System.exit(code);
                             }
                         }
@@ -162,14 +194,24 @@ public final class HarnessProjects {
                 // code de NUnitLite, qui fait le verdict — même raison qu'en Java : le XML de
                 // résultat est sous work/, donc réécrivable, et le code de sortie du processus
                 // est écrasable par un thread de premier plan après le retour d'Execute.
+                // Jeton lu sur STDIN avant tout chargement de type étudiant, comme en Java et
+                // pour la même raison : substitué dans la source, il finissait en clair dans
+                // `tests.exe`, que le superviseur ouvre à l'UID étudiant pour que mono puisse
+                // l'exécuter — le code noté le lisait et forgeait le verdict complet.
                 files.put(base + "moodit_runner.cs", """
                         class MooditRunner
                         {
                             static int Main(string[] args)
                             {
+                                // Flux BRUT de sortie standard, capturé avant tout code étudiant :
+                                // un Console.SetOut() du code noté ne peut donc pas intercepter la
+                                // ligne de verdict pour y réécrire le code (cf. l'enveloppe Java).
+                                var brut = new System.IO.StreamWriter(
+                                    System.Console.OpenStandardOutput()) { AutoFlush = true };
+                                string jeton = System.Console.In.ReadLine();
                                 int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
-                                System.Console.WriteLine(
-                                    "[MOODIT] jeton=__MOODIT_T__ code=" + code);
+                                brut.WriteLine("[MOODIT] jeton=" + jeton + " code=" + code);
+                                brut.Flush();
                                 return code;
                             }
                         }

@@ -295,7 +295,14 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 3 en prod) pendant
   TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
-  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet. **Le débit de correction
+  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet.
+  Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
+  boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
+  plafond que le mur d'un conteneur compilé ; 4 min pour un « Tester » public). Au-delà, les
+  harnais restants ne sont pas lancés et portent un verdict « non évalué », comme les verdicts
+  partiels que le superviseur rend au mur. Cette variable est lue par execution-service **et**
+  par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
+  la changer pour un seul des deux ferait abandonner des corrections encore en cours. **Le débit de correction
   est en réalité plafonné par le pool `quizExecutor` de core-service** (`AsyncConfig`,
   `corePoolSize=2`, file de 100) : un `ThreadPoolTaskExecutor` ne dépasse son cœur qu'une fois
   la file pleine, donc **deux corrections en vol au maximum**, quel que soit

@@ -200,6 +200,23 @@ class ExecutionClientTest {
     }
 
     @Test
+    @DisplayName("Le budget serveur surchargé est suivi par le miroir client (même variable d'environnement)")
+    void readTimeout_suitLeBudgetServeurSurcharge() {
+        // Le budget est lu dans la MÊME variable qu'execution-service (EXEC_INTERPRETED_BUDGET_MS) :
+        // un plafond client figé devenait trop COURT dès qu'on relevait le budget serveur, et core
+        // abandonnait une correction encore en cours — exactement le bug de #216. Ici 30 min.
+        ExecutionClient relache = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, 30 * 60_000);
+        assertThat(relache.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 30 * 60_000 + 145_000);
+        // Et un budget serveur ABAISSÉ raccourcit le miroir d'autant (5 min).
+        ExecutionClient serre = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, 5 * 60_000);
+        assertThat(serre.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 5 * 60_000 + 145_000);
+    }
+
+    @Test
     @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
     void compiled_reconnaitLesLangagesCompiles() {
         assertThat(ExecutionClient.compiled("Java")).isTrue();

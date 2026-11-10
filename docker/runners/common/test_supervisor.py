@@ -288,7 +288,10 @@ class SelectionTest(unittest.TestCase):
             listing = ("moodit_tests::ascii_ok: test\n%s: test\n"
                        "zzzz_moodit_jeton::zzzz_jeton: test\n" % nom)
             self.assertIsNone(supervisor.libtest_listed_tests(listing), nom)
-            supervisor.STUDENT_TYPES[0] = ["tests"]
+            # « moodit_tests » (un module REELLEMENT present dans le listing) et non « tests » :
+            # avec un module absent, keep == names, libtest_selection renvoyait [] par un AUTRE
+            # chemin et l'assertion passait meme si la garantie tout-ou-rien etait cassee.
+            supervisor.STUDENT_TYPES[0] = ["moodit_tests"]
             self.assertEqual(supervisor.libtest_selection(0, listing), [], nom)
 
     def test_rust_listing_tronque_pas_de_filtre(self):
@@ -296,10 +299,17 @@ class SelectionTest(unittest.TestCase):
         # le harnais à l'insu de tous. On renonce au filtre (l'invariant reste le garde-fou).
         tronque = ("harnais::a: test\n… (sortie tronquée au milieu : 99999 octets)\n"
                    "zzz::b: test\n")
+        # La troncature est reperee EN AMONT (usable_listing, appelee par run_rust) : sans elle,
+        # libtest_selection batirait bel et bien un filtre partiel sur ce listing.
+        self.assertEqual(supervisor.usable_listing(tronque, False), "")
+        self.assertEqual(supervisor.usable_listing("harnais::a: test\n", True), "")
+        self.assertEqual(supervisor.usable_listing("harnais::a: test\n", False),
+                         "harnais::a: test\n")
         supervisor.STUDENT_TYPES[0] = ["zzz"]
-        self.assertNotIn("--exact", supervisor.libtest_selection(0, ""))
-        self.assertEqual(supervisor.libtest_listed_tests(tronque),
-                         ["harnais::a", "zzz::b"])   # la troncature est repérée en amont
+        self.assertIn("--exact", supervisor.libtest_selection(0, tronque))   # le risque evite
+        self.assertEqual(supervisor.libtest_selection(
+            0, supervisor.usable_listing(tronque, False)), [])
+        self.assertEqual(supervisor.libtest_listed_tests(tronque), ["harnais::a", "zzz::b"])
 
     def test_rust_listing_illisible_pas_de_filtre(self):
         supervisor.STUDENT_TYPES[0] = ["tests"]
@@ -368,6 +378,52 @@ class TokenExitCodeTest(unittest.TestCase):
         # écrasé à 0 ne suffisent plus — le code publié par l'enveloppe, lui, reste à 1.
         out = "[MOODIT] jeton=4242424242424 code=1\n"
         self.assertNotEqual(supervisor.token_exit_code(out, 0), 0)
+
+
+class CSummaryTest(unittest.TestCase):
+    """C/C++ : seul un sommaire PORTEUR DU JETON compte, et il doit etre UNIQUE.
+
+    Defaut corrige : le superviseur retenait le PREMIER sommaire trouve par re.search. Le code
+    note imprimait donc, depuis la fonction notee (jamais appelee dans un cas canari, donc
+    discrimination parfaite), un faux « summary total=1 failed=0 », posait un atexit() qui sort
+    en 0, et LAISSAIT le framework finir : le vrai sommaire et le VRAI jeton etaient bien
+    imprimes ensuite, enforce_token etait satisfait, et le cas passait au vert sur une reponse
+    fausse, sans aucun evenement."""
+
+    JETON = "7777777777777"
+
+    def test_sommaire_porteur_du_jeton_compte(self):
+        out = "[MOODIT] summary jeton=%s total=3 failed=0\n" % self.JETON
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (3, 0, False))
+
+    def test_sommaire_sans_jeton_ne_compte_pas_et_est_signale(self):
+        # L'exploit exact : faux sommaire d'abord, vrai sommaire ensuite.
+        out = ("[MOODIT] summary total=1 failed=0\n"
+               "[MOODIT] fail aire (harness.c:12) attendu 12\n"
+               "[MOODIT] summary jeton=%s total=1 failed=1\n"
+               "[MOODIT] jeton=%s\n" % (self.JETON, self.JETON))
+        total, failed, forge = supervisor.c_summary(out, self.JETON)
+        # Le sommaire AUTHENTIQUE est celui qui compte : un echec, donc pas de vert.
+        self.assertEqual((total, failed), (1, 1))
+        self.assertTrue(forge)
+
+    def test_faux_sommaire_seul_ne_vaut_aucun_verdict(self):
+        out = "[MOODIT] summary total=5 failed=0\n"
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, True))
+
+    def test_deux_sommaires_authentiques_refuses(self):
+        # Le framework n'en imprime qu'un : deux = le jeton a fuite, on ne choisit pas.
+        out = ("[MOODIT] summary jeton=%s total=1 failed=0\n"
+               "[MOODIT] summary jeton=%s total=1 failed=1\n" % (self.JETON, self.JETON))
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, True))
+
+    def test_jeton_d_un_autre_cas_ne_compte_pas(self):
+        out = "[MOODIT] summary jeton=1111111111111 total=1 failed=0\n"
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, False))
+
+    def test_sans_jeton_connu_aucun_verdict(self):
+        out = "[MOODIT] summary jeton=%s total=1 failed=0\n" % self.JETON
+        self.assertEqual(supervisor.c_summary(out, None), (None, None, False))
 
 
 class DrainPipeTest(unittest.TestCase):
@@ -465,7 +521,10 @@ class DrainPipeTest(unittest.TestCase):
         supervisor.drain_pipe(src, DestinationSaturee(), cap=1024, etat=etat)
         # La perte est ENREGISTREE : c'est elle qui empechera d'accuser le cas.
         self.assertTrue(etat.perdue)
-        self.assertTrue(src.closed is False or True)   # pas d'exception remontee
+        # Le tube reste OUVERT : le fermer tuerait le processus note par SIGPIPE. (L'ancienne
+        # forme, `assertTrue(src.closed is False or True)`, etait une tautologie : elle passait
+        # meme si drain_pipe fermait le tube.)
+        self.assertFalse(src.closed)
         self.assertEqual(src.read(), b"")              # tout a ete lu jusqu'a l'EOF
 
     def test_plafond_respecte_mais_lecture_poursuivie(self):
@@ -570,10 +629,37 @@ class EtatSortieTest(unittest.TestCase):
             def write(self, donnees):
                 raise ValueError("I/O operation on closed file")
 
+        # Le cas 2 est celui EN COURS (global) : c'est lui qui ne doit pas etre desarme.
+        # (Auparavant l'assertion portait sur un objet jamais passe a drain_pipe, donc vraie
+        # par construction, quoi que fasse le code.)
+        supervisor.ETAT_SORTIE = etat_cas_2
         supervisor.drain_pipe(io.BytesIO(b"tardif\n"), DestinationFermee(),
                               cap=1024, etat=etat_cas_1)
         self.assertTrue(etat_cas_1.perdue)
-        self.assertFalse(etat_cas_2.perdue)   # le cas en cours reste armé
+        self.assertFalse(supervisor.ETAT_SORTIE.perdue)   # le cas en cours reste armé
+
+    def test_run_proc_impute_la_perte_au_cas_capture_a_l_entree(self):
+        # run_proc capture ETAT_SORTIE A L'ENTREE : si le cas SUIVANT remplace le global
+        # pendant l'execution, une pompe retardataire doit continuer d'imputer sa perte au cas
+        # qui l'a lancee. Aucun test ne couvrait cette capture.
+        etat_pendant = supervisor.EtatSortie(case_index=1)
+        supervisor.ETAT_SORTIE = etat_pendant
+
+        class Sature(io.BytesIO):
+            def write(self, donnees):
+                # Le cas suivant a deja pris la main dans le global.
+                supervisor.ETAT_SORTIE = supervisor.EtatSortie(case_index=2)
+                raise OSError(28, "No space left on device")
+
+        origine = supervisor.open_output
+        supervisor.open_output = lambda chemin: Sature()
+        try:
+            supervisor.run_proc(["sh", "-c", "echo x"], ".", dict(os.environ), 10,
+                                "o.out", "e.err", None)
+        finally:
+            supervisor.open_output = origine
+        self.assertTrue(etat_pendant.perdue)               # impute au BON cas
+        self.assertFalse(supervisor.ETAT_SORTIE.perdue)    # pas au cas suivant
 
     def test_sans_etat_aucune_erreur(self):
         # drain_pipe reste utilisable sans etat (compilation, mode exec).
@@ -1085,6 +1171,48 @@ class ScanTraceTest(unittest.TestCase):
             self.assertEqual(supervisor.EVENTS, [])
         finally:
             os.unlink(path)
+
+    def test_lecture_par_le_chemin_du_binaire_detectee(self):
+        # La branche « probes batis depuis binaries » n'etait couverte par aucun test (seul
+        # /proc/self/exe l'etait) : c'est pourtant la voie directe.
+        for ligne in ('openat(AT_FDCWD, "/box/cases/0/tests", O_RDONLY) = 3',
+                      'openat(AT_FDCWD, "./tests", O_RDONLY) = 4',
+                      'open("tests", O_RDONLY) = 5'):
+            supervisor.EVENTS.clear()
+            path = self._trace([ligne])
+            try:
+                supervisor.scan_trace(path, "/box/cases/0/src", 0,
+                                      binaries=("/box/cases/0/tests",))
+                self.assertEqual([e["type"] for e in supervisor.EVENTS],
+                                 ["lecture_binaire_tentee"], ligne)
+            finally:
+                os.unlink(path)
+
+    def test_fichier_homonyme_cree_par_une_soumission_honnete_n_accuse_pas(self):
+        # FAUSSE ACCUSATION corrigee : le basename du binaire est generique (« tests »), et
+        # l'accusation se faisait sur une SOUS-CHAINE, sans regarder le resultat de l'appel. Un
+        # etudiant qui ecrit un fichier nomme `tests` (refuse : case_dir est root) portait donc
+        # la banniere « Comportement suspect detecte » et voyait son cas refuse.
+        for ligne in ('openat(AT_FDCWD, "tests", O_WRONLY|O_CREAT|O_TRUNC, 0666) = -1 EACCES '
+                      '(Permission denied)',
+                      'openat(AT_FDCWD, "./tests", O_RDONLY) = -1 ENOENT (No such file)',
+                      'readlink("/proc/self/exe", "/box/cases/0/tests", 4096) = 20'):
+            supervisor.EVENTS.clear()
+            path = self._trace([ligne])
+            try:
+                supervisor.scan_trace(path, "/box/cases/0/src", 0,
+                                      binaries=("/box/cases/0/tests",))
+                self.assertEqual(supervisor.EVENTS, [], ligne)
+            finally:
+                os.unlink(path)
+
+    def test_trace_read_ok_distingue_lecture_reussie(self):
+        self.assertTrue(supervisor.trace_read_ok('openat(AT_FDCWD, "x", O_RDONLY) = 3'))
+        self.assertFalse(supervisor.trace_read_ok(
+            'openat(AT_FDCWD, "x", O_RDONLY) = -1 EACCES (Permission denied)'))
+        self.assertFalse(supervisor.trace_read_ok(
+            'openat(AT_FDCWD, "x", O_WRONLY|O_CREAT, 0666) = 3'))
+        self.assertFalse(supervisor.trace_read_ok('readlink("/proc/self/exe", "x", 4096) = 9'))
 
 
 if __name__ == "__main__":

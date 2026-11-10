@@ -64,6 +64,13 @@ public class ExecutionService {
     @Value("${app.exec.interpreted-budget-ms:900000}")
     long interpretedBudgetMs = 15 * 60_000;
 
+    /**
+     * Plafond du budget configurable (24 h) : au-delà, la conversion en nanosecondes sature et
+     * l'échéance déborde. Très au-dessus de tout réglage sensé — c'est un garde-fou, pas un
+     * réglage ; le délai de lecture de core (ExecutionClient.EXEC_BUDGET_MS) reste la vraie borne.
+     */
+    private static final long MAX_BUDGET_MS = 24L * 60 * 60 * 1000;
+
     /** Sans borne de charge ni runner de notation compilée (tests unitaires de la logique de verdict). */
     public ExecutionService(CodeAssembler assembler, RunnerExec runner) {
         this(assembler, runner, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE), null);
@@ -138,7 +145,12 @@ public class ExecutionService {
         // les compilés (PUBLIC_WALL_MS) — la route accepte jusqu'à 100 cas fournis par l'appelant.
         long budgetMs = limiter.isInternal() ? interpretedBudgetMs
                 : Math.min(interpretedBudgetMs, DockerEvaluator.PUBLIC_WALL_MS);
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budgetMs);
+        // Budget BORNÉ avant conversion : toNanos SATURE à Long.MAX_VALUE au-delà de ~292 ans,
+        // et l'addition déborderait alors silencieusement en une échéance NÉGATIVE — déjà
+        // dépassée, donc un seul harnais évalué sur cent. Une valeur de configuration absurde
+        // doit être ramenée, pas transformée en corruption de note.
+        long clampedBudgetMs = Math.max(0, Math.min(budgetMs, MAX_BUDGET_MS));
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(clampedBudgetMs);
         List<TestResult> results = new ArrayList<>();
         boolean exhausted = false;
         for (TestCaseInput testCase : request.testCases()) {
@@ -147,7 +159,9 @@ public class ExecutionService {
             // consultée AVANT de lancer un harnais — celui qui est déjà parti va au bout, d'où
             // le dépassement d'une unité (deux pour un harnais SQL de modification) que le
             // miroir de budget d'ExecutionClient prévoit.
-            if (!results.isEmpty() && (exhausted || System.nanoTime() >= deadline)) {
+            // Comparaison par DIFFÉRENCE (idiome de nanoTime, comme ExecutionLimiter.remainingMs) :
+            // l'origine de nanoTime est arbitraire, un `>=` direct se trompe au passage par zéro.
+            if (!results.isEmpty() && (exhausted || System.nanoTime() - deadline >= 0)) {
                 if (!exhausted) {
                     log.warn("Budget d'évaluation dépassé ({} ms, {} harnais sur {} évalués) : "
                             + "les harnais restants ne sont pas lancés",

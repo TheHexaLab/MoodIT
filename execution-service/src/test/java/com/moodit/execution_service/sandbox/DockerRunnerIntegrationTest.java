@@ -321,15 +321,20 @@ class DockerRunnerIntegrationTest {
         List<TestResult> results = evaluate("C", cheater,
                 "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("⚠");
+        // Depuis que le sommaire PORTE LE JETON, cette forge n'est même plus comptabilisée :
+        // le cas est refusé en amont, donc les canaris restent cohérents et il n'y a plus de
+        // bandeau « ⚠ » à attendre ici (ils gardent leur rôle pour une forge qui, elle,
+        // RÉUSSIRAIT à produire un sommaire authentifié). Le détail doit dire pourquoi.
+        assertThat(results.get(0).detail()).contains("Sommaire de test non authentifié");
     }
 
     @Test
     void c_forge_depuis_la_fonction_notee_echoue_sans_jeton() {
         require("C");
         // Variante SILENCIEUSE pour les canaris : la forge vit DANS la fonction notée, qui ne
-        // s'exécute jamais dans les cas canaris (leur harnais ne l'appelle pas). Le jeton de fin
-        // d'exécution — imprimé seulement après tous les tests — la trahit : exit(0) le saute.
+        // s'exécute jamais dans les cas canaris (leur harnais ne l'appelle pas). Deux filets
+        // la prennent désormais : le sommaire forgé n'est pas authentifié (pas de jeton), et le
+        // jeton de fin — imprimé seulement après tous les tests — manque de toute façon.
         String cheater = """
                 #include <stdio.h>
                 #include <stdlib.h>
@@ -342,7 +347,8 @@ class DockerRunnerIntegrationTest {
         List<TestResult> results = evaluate("C", cheater,
                 "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("jeton");
+        assertThat(results.get(0).detail())
+                .containsAnyOf("Sommaire de test non authentifié", "jeton");
     }
 
     @Test
@@ -416,7 +422,10 @@ class DockerRunnerIntegrationTest {
         List<TestResult> results = evaluate("C++", cheater,
                 "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
         assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("jeton");
+        // Deux filets possibles (sommaire non authentifié, jeton de fin absent) : on exige que
+        // le détail NOMME sa cause, sans figer lequel a mordu le premier.
+        assertThat(results.get(0).detail())
+                .containsAnyOf("Sommaire de test non authentifié", "jeton");
     }
 
     @Test
@@ -966,6 +975,249 @@ class DockerRunnerIntegrationTest {
         // même le contrôle du jeton. On exige le refus, sans figer quel filet a mordu.
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).isNotBlank();
+    }
+
+    // ───────────────────── EXTRACTION DU JETON par un artefact lisible ─────────────────────
+    // Java et C# compilent l'enveloppe de confiance (qui porte le jeton substitué) dans un
+    // artefact que le superviseur ouvre EXPRÈS à l'UID étudiant (open_artifacts) : le jeton y
+    // est une constante de la table des chaînes. Avec lui, le code noté publie lui-même la
+    // ligne de verdict et sort en 0 — rapport crédible, canaris honnêtes, aucun événement.
+
+    @Test
+    void java_jeton_lu_dans_les_classes_compilees_ne_passe_pas() {
+        require("Java");
+        // L'étudiant lit le jeton dans classes/MooditMain.class, forge un rapport JUnit au nom
+        // de la classe du harnais (lue dans le même dossier), publie la ligne du jeton avec
+        // code=0 puis halt(0) pour que l'enveloppe n'imprime jamais la vraie.
+        String cheater = """
+                import java.io.File;
+                import java.io.PrintWriter;
+                import java.nio.charset.StandardCharsets;
+                import java.nio.file.Files;
+                import java.nio.file.Path;
+                import java.util.regex.Matcher;
+                import java.util.regex.Pattern;
+
+                public class Solution {
+                    public static class Rectangle {
+                        public Rectangle(int l, int h) {}
+                        public int aire() {
+                            try {
+                                byte[] raw = Files.readAllBytes(Path.of("classes/MooditMain.class"));
+                                String dump = new String(raw, StandardCharsets.ISO_8859_1);
+                                Matcher m = Pattern.compile("\\\\[MOODIT\\\\] jeton=([!-~]+) code=").matcher(dump);
+                                if (!m.find()) {
+                                    return 0;
+                                }
+                                String jeton = m.group(1);
+                                String harnais = "Solution";
+                                for (File f : new File("classes").listFiles()) {
+                                    String n = f.getName().replace(".class", "");
+                                    if (!n.startsWith("Solution") && !n.startsWith("MooditMain")) {
+                                        harnais = n;
+                                    }
+                                }
+                                File dir = new File("work/reports");
+                                dir.mkdirs();
+                                try (PrintWriter w = new PrintWriter(new File(dir, "TEST-forge.xml"))) {
+                                    w.println("<testsuite tests=\\"1\\" failures=\\"0\\" errors=\\"0\\">"
+                                            + "<testcase classname=\\"" + harnais + "\\" name=\\"t\\"/></testsuite>");
+                                }
+                                System.out.println("[MOODIT] jeton=" + jeton + " code=0");
+                                System.out.flush();
+                                Runtime.getRuntime().halt(0);
+                            } catch (Exception e) {
+                                // tombe dans la réponse fausse
+                            }
+                            return 0;
+                        }
+                    }
+                    public static void main(String[] args) {}
+                }
+                """;
+        List<TestResult> results = evaluate("Java", cheater, JAVA_HARNESS);
+        // Le cas doit ÉCHOUER : le jeton ne doit pas être extractible d'un artefact ouvert à
+        // l'étudiant. (Avant correctif, ce cas passait au VERT sans aucun événement.)
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void java_detournement_de_system_out_ne_reecrit_pas_le_verdict() {
+        require("Java");
+        // L'étudiant n'a PAS besoin de connaître le jeton : il détourne System.out, voit passer
+        // la ligne de verdict de l'enveloppe (jeton authentique, code=1), la réécrit en code=0
+        // vers la sortie réelle, puis halt(0). Les canaris restent honnêtes (leur harnais
+        // n'appelle pas le code noté, donc le détournement ne s'y installe jamais).
+        String cheater = """
+                import java.io.FileDescriptor;
+                import java.io.FileOutputStream;
+                import java.io.PrintStream;
+                import java.io.PrintWriter;
+                import java.util.regex.Matcher;
+                import java.util.regex.Pattern;
+
+                public class Solution {
+                    public static class Rectangle {
+                        public Rectangle(int l, int h) {}
+                        public int aire() {
+                            try {
+                                final PrintStream reel =
+                                        new PrintStream(new FileOutputStream(FileDescriptor.out), true);
+                                System.setOut(new PrintStream(new java.io.OutputStream() {
+                                    private final StringBuilder tampon = new StringBuilder();
+                                    @Override public void write(int b) {
+                                        tampon.append((char) b);
+                                        if (b == '\\n') {
+                                            String ligne = tampon.toString();
+                                            tampon.setLength(0);
+                                            reel.print(ligne.replace(" code=1", " code=0"));
+                                            reel.flush();
+                                        }
+                                    }
+                                }, true));
+                                // Hook d'arrêt : il tourne APRÈS la ligne de verdict de
+                                // l'enveloppe, donc après que JUnit a écrit son rapport — on le
+                                // réécrit « sans échec », au nom de la classe du harnais lue
+                                // dans le vrai rapport, puis on sort en 0.
+                                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                                    try {
+                                        java.io.File dir = new java.io.File("work/reports");
+                                        String classe = "MooditHarness";
+                                        java.io.File[] rapports = dir.listFiles();
+                                        if (rapports != null) {
+                                            for (java.io.File r : rapports) {
+                                                String texte = new String(
+                                                        java.nio.file.Files.readAllBytes(r.toPath()),
+                                                        java.nio.charset.StandardCharsets.UTF_8);
+                                                Matcher m = Pattern.compile("classname=\\"([^\\"]+)\\"")
+                                                        .matcher(texte);
+                                                if (m.find()) {
+                                                    classe = m.group(1);
+                                                }
+                                                r.delete();
+                                            }
+                                        }
+                                        try (PrintWriter w = new PrintWriter(
+                                                new java.io.File(dir, "TEST-propre.xml"))) {
+                                            w.println("<testsuite tests=\\"1\\" failures=\\"0\\" "
+                                                    + "errors=\\"0\\"><testcase classname=\\""
+                                                    + classe + "\\" name=\\"t\\"/></testsuite>");
+                                        }
+                                    } catch (Exception ignore) {
+                                        // rien : le cas échouera, c'est le comportement attendu
+                                    }
+                                    Runtime.getRuntime().halt(0);
+                                }));
+                            } catch (Exception e) {
+                                // tombe dans la réponse fausse
+                            }
+                            return 0;   /* réponse FAUSSE */
+                        }
+                    }
+                    public static void main(String[] args) {}
+                }
+                """;
+        List<TestResult> results = evaluate("Java", cheater, JAVA_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+    }
+
+    @Test
+    void go_detournement_de_os_stdout_ne_reecrit_pas_le_verdict() {
+        require("Go");
+        // Pendant de l'attaque Java, en Go : `os.Stdout` est une variable de paquet, et le
+        // fichier de l'étudiant partage le paquet de l'enveloppe. Un init() peut donc filtrer
+        // TOUTE la sortie du binaire de test — sommaire de go test ET ligne de verdict — sans
+        // connaître le jeton. Les canaris n'y voient rien : leur harnais n'appelle pas le code
+        // noté, mais l'init() d'un fichier du paquet tourne de toute façon… d'où le drapeau
+        // posé seulement quand la fonction notée est appelée.
+        String cheater = """
+                package main
+
+                import (
+                    "bufio"
+                    "os"
+                    "strings"
+                )
+
+                var appelee = false
+
+                func init() {
+                    reel := os.Stdout
+                    lecture, ecriture, err := os.Pipe()
+                    if err != nil {
+                        return
+                    }
+                    os.Stdout = ecriture
+                    go func() {
+                        scanner := bufio.NewScanner(lecture)
+                        for scanner.Scan() {
+                            ligne := scanner.Text()
+                            if !appelee {
+                                reel.WriteString(ligne + "\\n")
+                                continue
+                            }
+                            // Code noté appelé : on JETTE tout le flux réel (y compris la ligne
+                            // d'erreur indentée du harnais, seul recoupement qui restait) et on
+                            // réémet une transcription entièrement synthétique dès que le jeton
+                            // authentique est passé entre nos mains.
+                            if i := strings.Index(ligne, "[MOODIT] jeton="); i >= 0 {
+                                reste := ligne[i+len("[MOODIT] jeton="):]
+                                jeton := strings.SplitN(reste, " ", 2)[0]
+                                reel.WriteString("=== RUN   TestDoubler\\n")
+                                reel.WriteString("--- PASS: TestDoubler (0.00s)\\n")
+                                reel.WriteString("PASS\\n")
+                                reel.WriteString("[MOODIT] jeton=" + jeton + " code=0\\n")
+                                os.Exit(0)
+                            }
+                        }
+                    }()
+                }
+
+                func doubler(n int) int {
+                    appelee = true
+                    return 0 // réponse FAUSSE
+                }
+
+                func main() {}
+                """;
+        List<TestResult> results = evaluate("Go", cheater, GO_HARNESS);
+        assertThat(results.get(0).passed()).isFalse();
+        // Pourquoi Go résiste là où Java ne résistait pas : `os.Stdout` est un *os.File
+        // CONCRET, pas une interface — on ne peut donc pas y glisser un filtre SYNCHRONE, il
+        // faut passer par un tube lu depuis une goroutine. Or TestMain fait `os.Exit(code)`
+        // immédiatement après son Printf : le processus meurt avant que la goroutine ait pu
+        // relire, transformer et réémettre la ligne, qui meurt dans le tampon du tube. Le cas
+        // est alors refusé pour sortie vide (aucun « PASS », aucun jeton). Ce test fige cette
+        // propriété : si l'enveloppe Go cessait de sortir juste après son impression, la course
+        // deviendrait gagnable.
+    }
+
+    @Test
+    void c_sommaire_forge_avant_la_fin_puis_atexit_ne_passe_pas() {
+        require("C");
+        // Le superviseur retenait le PREMIER « [MOODIT] summary … » : on en imprime un faux
+        // depuis la fonction notée (jamais appelée dans un canari → discrimination parfaite),
+        // on pose un atexit() qui sort en 0, et on LAISSE le framework finir — le vrai sommaire
+        // ET le vrai jeton sont donc imprimés, et l'exigence de jeton était satisfaite.
+        String cheater = """
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <unistd.h>
+
+                static void sortie_zero(void) { _exit(0); }
+
+                int doubler(int n) {
+                    printf("[MOODIT] summary total=1 failed=0\\n");
+                    fflush(stdout);
+                    atexit(sortie_zero);
+                    return 0;   /* réponse FAUSSE */
+                }
+
+                int main(void) { return 0; }
+                """;
+        List<TestResult> results = evaluate("C", cheater,
+                "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
+        assertThat(results.get(0).passed()).isFalse();
     }
 
     // ───────────────────── ISOLATION du conteneur (vraies options) ─────────────────────

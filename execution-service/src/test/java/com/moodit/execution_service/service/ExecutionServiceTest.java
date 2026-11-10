@@ -102,6 +102,25 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void budget_absurde_ne_degrade_pas_la_correction() {
+        // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement)
+        // saturait la conversion en nanosecondes, l'addition débordait en une échéance NÉGATIVE
+        // — donc DÉJÀ dépassée — et un seul harnais sur cent était évalué. Une configuration
+        // absurde doit être ramenée, jamais corrompre une note.
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        service.interpretedBudgetMs = Long.MAX_VALUE;
+
+        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
+                "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 1),
+                        new TestCaseInput("c", "return True", 1))));
+
+        assertThat(results).extracting(TestResult::passed).containsExactly(true, true, true);
+        verify(runner, times(3)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
     void budget_large_tous_les_harnais_sont_evalues() {
         // Contrôle négatif du test ci-dessus : avec le budget par défaut (15 min), l'échéance
         // n'intervient jamais — sinon le test précédent passerait pour la mauvaise raison.

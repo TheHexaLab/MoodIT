@@ -33,20 +33,35 @@ public class ExecutionClient {
     private final long baseReadTimeoutMs;
     private final long perTestReadTimeoutMs;
     private final long internalQueueWaitMs;
+    private final long interpretedBudgetMs;
 
+    /** Budget serveur par défaut (tests et appelants hérités) : 15 min, comme execution-service. */
+    public ExecutionClient(String baseUrl, String internalToken, long connectTimeoutMs,
+            long baseReadTimeoutMs, long perTestReadTimeoutMs, long internalQueueWaitMs) {
+        this(baseUrl, internalToken, connectTimeoutMs, baseReadTimeoutMs, perTestReadTimeoutMs,
+                internalQueueWaitMs, DEFAULT_EXEC_BUDGET_MS);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public ExecutionClient(
             @Value("${app.execution-service.internal-url:http://localhost:8084}") String baseUrl,
             @Value("${app.internal.token}") String internalToken,
             @Value("${app.execution-service.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.execution-service.read-timeout-ms:10000}") long baseReadTimeoutMs,
             @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs,
-            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:120000}}") long internalQueueWaitMs) {
+            @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:120000}}") long internalQueueWaitMs,
+            // MÊME variable d'environnement qu'execution-service (.env commun), comme
+            // internal-queue-wait-ms ci-dessus : le budget serveur et son miroir client ne
+            // peuvent plus diverger par oubli. Un miroir PLUS COURT que le budget réel ferait
+            // abandonner une correction encore en cours (#216) — le piège que ce câblage ferme.
+            @Value("${app.execution-service.interpreted-budget-ms:${EXEC_INTERPRETED_BUDGET_MS:900000}}") long interpretedBudgetMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
         this.baseReadTimeoutMs = baseReadTimeoutMs;
         this.perTestReadTimeoutMs = perTestReadTimeoutMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
+        this.interpretedBudgetMs = interpretedBudgetMs;
     }
 
     /**
@@ -106,7 +121,7 @@ public class ExecutionClient {
         // chemin compile, lui, etait deja borne par EVAL_MAX_WALL_MS.
         long overshootUnits = sqlLanguage(language) ? 2 : 1;
         long serverWork = Math.min((long) Math.max(workUnits, 1) * perUnitWithQueue,
-                EXEC_BUDGET_MS + overshootUnits * perUnitWithQueue);
+                interpretedBudgetMs + overshootUnits * perUnitWithQueue);
         return baseReadTimeoutMs + serverWork;
     }
 
@@ -141,11 +156,12 @@ public class ExecutionClient {
     private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
 
     /**
-     * Budget global de la boucle interpretee/SQL/vues d'execution-service -- miroir de
-     * {@code app.exec.interpreted-budget-ms} (15 min). Surcharger l'un impose la meme valeur a
-     * l'autre, comme {@code internal-queue-wait-ms}.
+     * Budget global de la boucle interpretee/SQL/vues d'execution-service, par defaut : miroir
+     * d'{@code app.exec.interpreted-budget-ms} (15 min). La valeur effective vient de la MEME
+     * variable d'environnement que cote serveur ({@code EXEC_INTERPRETED_BUDGET_MS}), cf. le
+     * constructeur -- les deux ne peuvent donc pas diverger par oubli.
      */
-    private static final long EXEC_BUDGET_MS = 15 * 60_000;
+    static final long DEFAULT_EXEC_BUDGET_MS = 15 * 60_000;
 
     /**
      * Cycle de vie du conteneur HORS mur, par unité de travail : création, copie du job,
