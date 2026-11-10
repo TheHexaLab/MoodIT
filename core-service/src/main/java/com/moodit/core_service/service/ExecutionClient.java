@@ -51,9 +51,11 @@ public class ExecutionClient {
             @Value("${app.execution-service.per-test-timeout-ms:20000}") long perTestReadTimeoutMs,
             @Value("${app.execution-service.internal-queue-wait-ms:${EXEC_INTERNAL_QUEUE_WAIT_MS:120000}}") long internalQueueWaitMs,
             // MÊME variable d'environnement qu'execution-service (.env commun), comme
-            // internal-queue-wait-ms ci-dessus : le budget serveur et son miroir client ne
-            // peuvent plus diverger par oubli. Un miroir PLUS COURT que le budget réel ferait
-            // abandonner une correction encore en cours (#216) — le piège que ce câblage ferme.
+            // internal-queue-wait-ms ci-dessus : un miroir PLUS COURT que le budget réel du
+            // serveur ferait abandonner une correction encore en cours (#216). Ce câblage
+            // supprime la divergence par OUBLI, pas toute divergence possible : la poser dans
+            // le bloc `environment:` d'un seul service, ou surcharger la propriété Spring d'un
+            // seul côté, la rétablit. D'où l'avertissement dans .env.example et le compose.
             @Value("${app.execution-service.interpreted-budget-ms:${EXEC_INTERPRETED_BUDGET_MS:900000}}") long interpretedBudgetMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
@@ -111,14 +113,14 @@ public class ExecutionClient {
         long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS)
                 + EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS;
         long perUnitWithQueue = perUnit + internalQueueWaitMs;
-        // Plafonne par le BUDGET GLOBAL du serveur (app.exec.interpreted-budget-ms) : passe son
-        // echeance, les harnais restants ne sont plus lances. Le budget est consulte AVANT
-        // chaque harnais, donc un harnais deja parti le depasse d'une unite -- de DEUX en SQL
-        // (phases isolees) ; ce depassement est AJOUTE, sans quoi le client renoncerait avant le
+        // Plafonné par le BUDGET GLOBAL du serveur (app.exec.interpreted-budget-ms) : passé son
+        // échéance, les harnais restants ne sont plus lancés. Le budget est consulté AVANT
+        // chaque harnais, donc un harnais déjà parti le dépasse d'une unité — de DEUX en SQL
+        // (phases isolées) ; ce dépassement est AJOUTÉ, sans quoi le client renoncerait avant le
         // serveur et supprimerait une tentative encore en correction (le bug de #216).
-        // Sans ce plafond, 100 harnais Python donnaient pres de 7 h de delai, pendant lesquelles
-        // un fil @Async restait epingle si execution-service pendait sans fermer la socket -- le
-        // chemin compile, lui, etait deja borne par EVAL_MAX_WALL_MS.
+        // Sans ce plafond, 100 harnais Python donnaient près de 7 h de délai, pendant lesquelles
+        // un fil @Async restait épinglé si execution-service pendait sans fermer la socket — le
+        // chemin compilé, lui, était déjà borné par EVAL_MAX_WALL_MS.
         long overshootUnits = sqlLanguage(language) ? 2 : 1;
         long serverWork = Math.min((long) Math.max(workUnits, 1) * perUnitWithQueue,
                 interpretedBudgetMs + overshootUnits * perUnitWithQueue);
@@ -156,10 +158,11 @@ public class ExecutionClient {
     private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
 
     /**
-     * Budget global de la boucle interpretee/SQL/vues d'execution-service, par defaut : miroir
-     * d'{@code app.exec.interpreted-budget-ms} (15 min). La valeur effective vient de la MEME
-     * variable d'environnement que cote serveur ({@code EXEC_INTERPRETED_BUDGET_MS}), cf. le
-     * constructeur -- les deux ne peuvent donc pas diverger par oubli.
+     * Budget global de la boucle interprétée/SQL/vues d'execution-service, par défaut : miroir
+     * d'{@code app.exec.interpreted-budget-ms} (15 min). La valeur effective vient de la MÊME
+     * variable d'environnement que côté serveur ({@code EXEC_INTERPRETED_BUDGET_MS}), cf. le
+     * constructeur, et le {@code .env} commun la porte (cf. {@code .env.example}) — la poser
+     * dans le bloc {@code environment:} d'un seul service la ferait diverger en silence.
      */
     static final long DEFAULT_EXEC_BUDGET_MS = 15 * 60_000;
 

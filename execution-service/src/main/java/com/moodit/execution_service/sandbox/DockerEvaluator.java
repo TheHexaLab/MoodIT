@@ -249,7 +249,19 @@ public class DockerEvaluator {
             String type = event.path("type").asString("");
             String detail = event.path("detail").asString("");
             int caseIndex = event.path("case").asInt(-1);
-            log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
+            if ("trace_indisponible".equals(type)) {
+                // Panne d'INFRASTRUCTURE, pas un fait de notation : strace inutilisable désarme
+                // la détection des lectures (harnais, binaire) pour TOUT le job. On continue de
+                // noter — le jeton, les canaris, le sommaire authentifié et l'invariant
+                // « un test du harnais a tourné » restent armés, et refuser punirait une classe
+                // entière pour une cause qui ne lui est pas imputable — mais l'exploitant doit
+                // le voir et le corriger, d'où le niveau ERREUR. Cf. deploy/DEPLOY.md.
+                log.error("Notation compilée — strace inutilisable : détection des lectures "
+                        + "DÉSARMÉE pour ce job ({}). Vérifier SYS_PTRACE et la présence de "
+                        + "strace dans les images runner.", detail);
+            } else {
+                log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
+            }
             if (isSuspicious(type) && caseIndex >= 0 && caseIndex < cases.size()) {
                 eventByCase.merge(caseIndex, type, (a, b) -> a + ", " + b);
             }

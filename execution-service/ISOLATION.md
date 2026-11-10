@@ -51,10 +51,20 @@ Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-r
 (JUnit, NUnit, go test, cargo test, `moodit_check.h`) et la POO du simple code de test. Dans le
 conteneur, un **superviseur** (root) compile, verrouille les sources en 700, exécute chaque cas
 sous l'**UID `student`** tracé par strace, et rend un verdict **fail-closed** gardé par des
-**canaris randomisés** (forger la sortie du framework est détecté). Les tentatives (lecture du
-harnais, rapport forgé) remontent en **événements** dans le détail des verdicts. Modèle de menace
-complet, limites assumées et protocole : `docker/runners/README.md`. Filet d'intégration (matrice
-anti-triche) : `DockerRunnerIntegrationTest`.
+**canaris randomisés**. Les tentatives (lecture du harnais, rapport forgé) remontent en
+**événements** dans le détail des verdicts.
+
+**Jusqu'où va cette garantie, langage par langage** — à lire avant de décider d'un examen noté :
+le verdict est tenu pour infalsifiable en pratique en **Java et Go** seulement. En **C, C++, C# et
+Rust**, le code de l'étudiant partage le processus du framework de test sans qu'on puisse l'en
+empêcher (unité de compilation commune, appel natif autorisé par le runtime, harnais dans le même
+fichier) : il y subsiste un **résiduel in-process assumé**, et les canaris ne le rattrapent pas
+systématiquement — un tricheur peut conditionner sa falsification sur « ma fonction a-t-elle été
+appelée », ce que les cas canaris ne font jamais.
+
+Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
+`docker/runners/README.md`. Filet d'intégration (matrice anti-triche) :
+`DockerRunnerIntegrationTest`.
 
 ## Limites du bac à sable (#24)
 
@@ -68,8 +78,16 @@ anti-triche) : `DockerRunnerIntegrationTest`.
   d'attente de `EXEC_QUEUE_WAIT_MS`), et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur sur
   `/exec/**`. Au-delà : 429 avec un message en français. L'appel interne (correction des soumissions)
   ne compte que dans la limite globale.
+- **Budget global d'une correction INTERPRÉTÉE/SQL/vues** (`EXEC_INTERPRETED_BUDGET_MS`, 15 min ;
+  4 min pour un « Tester » public) : ce chemin prend une place et un conteneur **par harnais**, son
+  pire cas croissait donc linéairement et sans borne. Passé l'échéance, les harnais restants ne sont
+  pas lancés et reçoivent un verdict « Non évalué » avec leur poids conservé — mêmes verdicts
+  partiels que ceux rendus au mur d'un conteneur compilé. Variable lue par execution-service **et**
+  par core-service (son miroir de délai de lecture, #216) : ne jamais la régler d'un seul côté.
 - **Conteneurs runner** : réseau coupé (`--network none`), écritures de l'UID étudiant **confinées
-  aux tmpfs bornés** `/box` (768 Mo) et `/tmp` (64 Mo), comptés dans la mémoire du conteneur — les
+  aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, **dérivés de la mémoire du conteneur** (60 %,
+  6 % et 2 % de `SANDBOX_MEMORY_MB`, planchers 256/32/16 Mo — cf. `DockerSandbox.boxSizeMb()` ;
+  614/61/20 Mo avec le 1 Go de la prod) et comptés dedans — les
   images verrouillent leurs répertoires monde-inscriptibles (`/var/tmp`, `/go`, cargo…), le disque
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
   minimum du superviseur (chown/droits, setuid étudiant, kill, strace), `no-new-privileges`,

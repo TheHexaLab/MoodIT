@@ -1227,6 +1227,47 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void c_fork_dans_la_fonction_notee_n_accuse_pas_de_falsification() {
+        require("C");
+        // moodit_check.h imprime son sommaire APRÈS la boucle de tests : un fork() dans la
+        // fonction notée dont l'enfant revient normalement fait donc imprimer DEUX sommaires
+        // authentifiés — sans aucune fuite de jeton. Code honnête (exercice sur les appels
+        // système) : le cas peut échouer faute de verdict exploitable, mais il ne doit JAMAIS
+        // porter le bandeau de falsification.
+        String honnete = """
+                #include <stdio.h>
+                #include <sys/types.h>
+                #include <sys/wait.h>
+                #include <unistd.h>
+
+                int doubler(int n) {
+                    pid_t pid = fork();
+                    if (pid == 0) {
+                        return n * 2;   /* l'enfant REVIENT : il poursuivra la boucle de tests */
+                    }
+                    if (pid > 0) {
+                        int etat;
+                        waitpid(pid, &etat, 0);
+                    }
+                    return n * 2;
+                }
+
+                int main(void) { return 0; }
+                """;
+        List<TestResult> results = evaluate("C", honnete,
+                "MOODIT_TEST(doubler_5) { MOODIT_CHECK(doubler(5) == 10); }\n");
+        String detail = results.get(0).detail() == null ? "" : results.get(0).detail();
+        // On exige le DÉTAIL exact du refus, pas seulement l'absence de « ⚠ » : avant le
+        // correctif, l'événement sortait sans numéro de cas, donc le bandeau n'apparaissait
+        // déjà pas — un test qui ne vérifie que « ⚠ » passait AVANT comme APRÈS et ne
+        // verrouillait rien. Le libellé « sommaire forgé », lui, était bien produit.
+        assertThat(detail)
+                .as("le refus doit nommer sa cause réelle, sans qualifier la soumission")
+                .contains("imprimé plusieurs fois")
+                .doesNotContain("⚠").doesNotContain("forgé");
+    }
+
+    @Test
     void c_sommaire_forge_avant_la_fin_puis_atexit_ne_passe_pas() {
         require("C");
         // Le superviseur retenait le PREMIER « [MOODIT] summary … » : on en imprime un faux

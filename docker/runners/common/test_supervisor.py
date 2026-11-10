@@ -462,7 +462,22 @@ class CSummaryTest(unittest.TestCase):
 
     def test_sommaire_porteur_du_jeton_compte(self):
         out = "[MOODIT] summary jeton=%s total=3 failed=0\n" % self.JETON
-        self.assertEqual(supervisor.c_summary(out, self.JETON), (3, 0, False))
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (3, 0, False, [(3, 0)]))
+
+    def test_doublon_distingue_de_rien_trouve(self):
+        # Les deux cas renvoyaient (None, None, True) : indistinguables. c_family traitait donc
+        # un DOUBLON comme un « rien sur stdout » et se rabattait sur stderr — ou le sommaire
+        # authentique vit aussi, puisque moodit_check.h publie sur les deux flux. Dupliquer la
+        # ligne sur stdout suffisait a faire annuler le refus.
+        double = ("[MOODIT] summary jeton=%s total=1 failed=0\n"
+                  "[MOODIT] summary jeton=%s total=1 failed=1\n" % (self.JETON, self.JETON))
+        # `forge` reste FAUX : aucun sommaire sans jeton n'a ete vu, seulement deux
+        # authentifies. Les confondre faisait libeller un refus honnete « sommaire forge ».
+        self.assertEqual(supervisor.c_summary(double, self.JETON),
+                         (None, None, False, [(1, 0), (1, 1)]))
+        vide = supervisor.c_summary("rien", self.JETON)
+        self.assertEqual(vide, (None, None, False, []))
+        self.assertEqual(len(vide[3]), 0)   # « rien trouve » n'est PAS un doublon
 
     def test_sommaire_sans_jeton_ne_compte_pas_et_est_signale(self):
         # L'exploit exact : faux sommaire d'abord, vrai sommaire ensuite.
@@ -470,28 +485,105 @@ class CSummaryTest(unittest.TestCase):
                "[MOODIT] fail aire (harness.c:12) attendu 12\n"
                "[MOODIT] summary jeton=%s total=1 failed=1\n"
                "[MOODIT] jeton=%s\n" % (self.JETON, self.JETON))
-        total, failed, forge = supervisor.c_summary(out, self.JETON)
+        total, failed, forge, sommaires = supervisor.c_summary(out, self.JETON)
         # Le sommaire AUTHENTIQUE est celui qui compte : un echec, donc pas de vert.
         self.assertEqual((total, failed), (1, 1))
         self.assertTrue(forge)
+        self.assertEqual(len(sommaires), 1)
 
     def test_faux_sommaire_seul_ne_vaut_aucun_verdict(self):
         out = "[MOODIT] summary total=5 failed=0\n"
-        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, True))
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, True, []))
 
     def test_deux_sommaires_authentiques_refuses(self):
-        # Le framework n'en imprime qu'un : deux = le jeton a fuite, on ne choisit pas.
+        # Le framework n'en imprime qu'un PAR FLUX : deux = aucun verdict. La liste rendue sert
+        # a distinguer « aucun sommaire → tenter l'autre flux » de « plusieurs → refus SANS
+        # repli », rien d'autre. En particulier la CONCORDANCE des sommaires ne porte aucune
+        # information de securite : l'enfant d'un fork() reprend la boucle avec son propre
+        # etat, donc ses tests restants peuvent donner un autre `failed` que le parent. Ne pas
+        # rebrancher d'accusation sur la divergence (c'etait un faux positif, cf. c_verdict).
         out = ("[MOODIT] summary jeton=%s total=1 failed=0\n"
                "[MOODIT] summary jeton=%s total=1 failed=1\n" % (self.JETON, self.JETON))
-        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, True))
+        self.assertEqual(supervisor.c_summary(out, self.JETON),
+                         (None, None, False, [(1, 0), (1, 1)]))
 
     def test_jeton_d_un_autre_cas_ne_compte_pas(self):
         out = "[MOODIT] summary jeton=1111111111111 total=1 failed=0\n"
-        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, False))
+        self.assertEqual(supervisor.c_summary(out, self.JETON), (None, None, False, []))
 
     def test_sans_jeton_connu_aucun_verdict(self):
         out = "[MOODIT] summary jeton=%s total=1 failed=0\n" % self.JETON
-        self.assertEqual(supervisor.c_summary(out, None), (None, None, False))
+        self.assertEqual(supervisor.c_summary(out, None), (None, None, False, []))
+
+
+class CVerdictTest(unittest.TestCase):
+    """Decision complete du chemin C/C++ : c'est ICI que vit la propriete de securite.
+
+    Sans ces tests, remettre un repli sur stderr apres un doublon — l'exploit meme, puisque
+    moodit_check.h publie le sommaire sur les DEUX flux — laissait toute la suite verte."""
+
+    JETON = "7777777777777"
+
+    def _sommaire(self, total, failed):
+        return "[MOODIT] summary jeton=%s total=%d failed=%d\n" % (self.JETON, total, failed)
+
+    def setUp(self):
+        supervisor.EVENTS.clear()
+
+    def test_sommaire_unique_sur_stdout(self):
+        self.assertEqual(
+            supervisor.c_verdict(self._sommaire(3, 0), "", self.JETON, 0), (3, 0, False, None))
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_repli_sur_stderr_si_stdout_ferme(self):
+        # fclose(stdout) d'un etudiant honnete : le verdict vit encore sur stderr.
+        self.assertEqual(
+            supervisor.c_verdict("", self._sommaire(2, 1), self.JETON, 0), (2, 1, False, None))
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_doublon_divergent_refuse_sans_accuser_et_ne_se_replie_pas(self):
+        # Deux sommaires qui ne disent pas la meme chose : on pourrait croire a une forge, mais
+        # l'enfant d'un fork() reprend la boucle avec son PROPRE etat, donc ses tests restants
+        # peuvent donner un autre `failed` que le parent. La divergence n'est pas une preuve :
+        # refus, pas d'accusation. Et SURTOUT pas de repli sur le sommaire authentique de stderr
+        # (c'etait la faille : dupliquer sur stdout annulait le refus).
+        stdout = self._sommaire(1, 0) + self._sommaire(1, 1)
+        total, failed, _, incident = supervisor.c_verdict(
+            stdout, self._sommaire(1, 1), self.JETON, 2)
+        self.assertEqual((total, failed), (None, None))
+        self.assertEqual(incident, "sommaire_duplique")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["sommaire_duplique"])
+        self.assertEqual(supervisor.EVENTS[0]["case"], 2)
+
+    def test_doublon_concordant_refuse_sans_accuser(self):
+        # FAUX POSITIF a eviter : moodit_check.h imprime le sommaire APRES la boucle de tests,
+        # donc un fork() dans la fonction notee dont l'enfant revient normalement poursuit la
+        # boucle et imprime SON sommaire — identique. Code honnete (exercice sur les appels
+        # systeme) : le cas echoue, mais sans bandeau de falsification.
+        stdout = self._sommaire(2, 0) + self._sommaire(2, 0)
+        total, failed, forge, incident = supervisor.c_verdict(stdout, "", self.JETON, 1)
+        # `forge` garde son sens strict : aucun sommaire SANS jeton n'a ete vu. L'y agreger
+        # faisait libeller ce refus honnete « sommaire forge (jeton absent) » dans les journaux.
+        self.assertFalse(forge)
+        self.assertEqual(incident, "sommaire_duplique")
+        self.assertEqual((total, failed), (None, None))
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["sommaire_duplique"])
+        self.assertEqual(supervisor.EVENTS[0]["case"], 1)   # rattache au cas, sans accuser
+
+    def test_doublon_sur_stderr_aussi_refuse(self):
+        total, failed, _, incident = supervisor.c_verdict(
+            "", self._sommaire(1, 0) + self._sommaire(1, 1), self.JETON, 0)
+        self.assertEqual((total, failed), (None, None))
+        self.assertEqual(incident, "sommaire_duplique")
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["sommaire_duplique"])
+
+    def test_faux_sommaire_sans_jeton_ni_verdict_ni_accusation(self):
+        total, failed, forge, incident = supervisor.c_verdict(
+            "[MOODIT] summary total=1 failed=0\n", "", self.JETON, 0)
+        self.assertEqual((total, failed), (None, None))
+        self.assertTrue(forge)          # un sommaire SANS jeton, lui, est bien un faux
+        self.assertIsNone(incident)
+        self.assertEqual(supervisor.EVENTS, [])
 
 
 class DrainPipeTest(unittest.TestCase):

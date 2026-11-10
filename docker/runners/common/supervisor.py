@@ -811,8 +811,12 @@ def probe_strace():
         except OSError:
             pass
     if not STRACE_OK:
-        # Capacité SYS_PTRACE absente : la notation continue, mais le prof doit savoir que la
-        # détection des lectures est éteinte pour ce job.
+        # Capacité SYS_PTRACE absente : la notation continue, mais lecture_source_tentee et
+        # lecture_binaire_tentee sont DÉSARMÉS pour tout le job. L'événement n'appartient à aucun
+        # cas, donc il n'est annexé à aucun verdict — en revanche DockerEvaluator journalise TOUS
+        # les événements, et celui-ci en ERREUR (c'est une panne d'infrastructure à corriger, pas
+        # un fait de notation). Un log côté superviseur n'y ajouterait rien : son stderr n'est
+        # relu que si le JSON est illisible, et le conteneur est détruit juste après.
         event("trace_indisponible", detail="strace inutilisable (SYS_PTRACE ?)")
     return STRACE_OK
 
@@ -1151,10 +1155,8 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
     # assumé et documenté pour ces deux langages.
     # stdout PUIS stderr (moodit_check.h publie sur les deux) : un `fclose(stdout)` d'un
     # étudiant honnête ne doit pas faire disparaître le verdict ni valoir une accusation.
-    total, failed, forge = c_summary(stdout, TOKENS.get(case_index))
-    if total is None:
-        total, failed, forge_err = c_summary(stderr, TOKENS.get(case_index))
-        forge = forge or forge_err
+    # Toute la décision vit dans c_verdict, testée (dont le refus sans repli après un doublon).
+    total, failed, forge, incident = c_verdict(stdout, stderr, TOKENS.get(case_index), case_index)
     coherent = total is not None and total > 0
     passed = exit_code == 0 and coherent and failed == 0
     if passed and first_lines(stdout, r"^\[MOODIT\] fail "):
@@ -1163,46 +1165,85 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
         passed = False
         event("rapport_incoherent", case=case_index,
               detail="lignes d'échec malgré un sommaire sans échec")
-    if exit_code == 0 and not coherent:
+    if exit_code == 0 and not coherent and incident is None:
+        # `incident` déjà signalé (sommaire dupliqué) : un second événement n'ajouterait rien,
+        # et le libellé « sommaire forgé » qualifierait à tort une soumission honnête.
         event("rapport_incoherent", case=case_index,
               detail="sommaire forgé (jeton absent)" if forge else "exit 0 sans sommaire moodit_check")
-    detail = None if passed else (first_lines(stdout, r"^\[MOODIT\] fail ")
-                                  or first_lines(stderr, r".")
-                                  or ("Sommaire de test non authentifié : ignoré (le sommaire du "
-                                      "framework n'a pas été produit)" if forge and not coherent
-                                      else "Échec du harnais"))
+    detail = None if passed else (
+            "Verdict indisponible : le sommaire du framework a été imprimé plusieurs fois "
+            "(processus dupliqué ?)" if incident is not None
+            else first_lines(stdout, r"^\[MOODIT\] fail ")
+                 or first_lines(stderr, r".")
+                 or ("Sommaire de test non authentifié : ignoré (le sommaire du "
+                     "framework n'a pas été produit)" if forge and not coherent
+                     else "Échec du harnais"))
     passed, detail = enforce_token(passed, detail, stdout + "\n" + stderr, case_index,
                                    ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
 
 def c_summary(stdout, token):
-    """Sommaire de moodit_check.h → (total, failed, forge). FONCTION PURE (testée).
+    """Sommaire de moodit_check.h → (total, failed, forge, sommaires). FONCTION PURE (testée).
 
     Seul un sommaire PORTEUR DU JETON compte : le code noté ne peut pas en produire sans
     connaître le jeton (harnais illisible, lecture du binaire tracée). Et il en faut
-    EXACTEMENT UN — sinon on refuse, comme pour la ligne du jeton (jeton_duplique) : retenir
-    le premier match laissait le code noté en imprimer un faux AVANT la fin, puis laisser le
-    framework finir normalement (vrai sommaire, vrai jeton) et sortir en 0 par atexit().
+    EXACTEMENT UN — sinon le cas est refusé SANS accusation (`sommaire_duplique`, cf.
+    `c_verdict` : un processus dupliqué suffit à en produire deux). Retenir le premier match
+    laissait le code noté en imprimer un faux AVANT la fin, puis laisser le framework finir
+    normalement (vrai sommaire, vrai jeton) et sortir en 0 par atexit().
 
     `forge` : vrai si un sommaire SANS jeton a été vu — signe d'un faux, mais non imputable
     (une soumission peut imprimer n'importe quoi), donc jamais une accusation.
+    Quatrième valeur : la LISTE des sommaires authentifiés trouvés dans ce flux, `[]` si aucun.
+    Rendue telle quelle (et non réduite à un booléen « doublon ») parce que l'appelant doit
+    distinguer trois situations : aucun sommaire → tenter l'autre flux ; un seul → verdict ;
+    plusieurs → REFUS sans se rabattre sur l'autre flux, sans quoi dupliquer la ligne sur stdout
+    suffisait à faire annuler le refus par la relecture de stderr.
     """
     forge = bool(re.search(r"^\[MOODIT\] summary total=", stdout, re.M))
     if not token:
-        return None, None, forge
-    matches = re.findall(r"^\[MOODIT\] summary jeton=" + re.escape(token)
-                         + r" total=(\d+) failed=(\d+)$", stdout, re.M)
-    if len(matches) > 1:
-        # DEUX sommaires authentifiés : le framework n'en imprime qu'un par flux, donc le
-        # jeton a fuité. Ce n'est pas la même chose qu'un faux sommaire sans jeton — on le
-        # dit, comme token_exit_code le fait pour la ligne du jeton.
-        event("jeton_duplique", case=None,
-              detail="plusieurs sommaires authentifiés — jeton probablement extrait")
-        return None, None, True
-    if not matches:
-        return None, None, forge
-    return int(matches[0][0]), int(matches[0][1]), forge
+        return None, None, forge, []
+    matches = [(int(t), int(f)) for t, f in
+               re.findall(r"^\[MOODIT\] summary jeton=" + re.escape(token)
+                          + r" total=(\d+) failed=(\d+)$", stdout, re.M)]
+    if len(matches) != 1:
+        # `forge` garde son sens STRICT : « un sommaire sans jeton a été vu ». Y agréger le
+        # doublon faisait libeller un refus honnête « sommaire forgé (jeton absent) » dans les
+        # journaux — l'accusation même qu'on cherchait à retirer, déplacée du verdict au log.
+        return None, None, forge, matches
+    return matches[0][0], matches[0][1], forge, matches
+
+
+def c_verdict(stdout, stderr, token, case_index):
+    """Décision du chemin C/C++ → (total, failed, forge, incident). Lève l'événement qui convient.
+
+    Isolée de `c_family` (intestable : compilation + run_student) parce que c'est ICI que vit la
+    propriété de sécurité, et qu'elle a besoin d'un filet : remettre un repli sur stderr après un
+    doublon — l'exploit même — laissait toute la suite verte.
+
+    Deux sommaires authentifiés dans un flux = le framework n'en imprime qu'un par flux. Le cas
+    est REFUSÉ, mais JAMAIS accusé — quelle que soit la concordance des deux sommaires :
+    `moodit_check.h` imprime le sommaire APRÈS la boucle de tests, donc un `fork()` dans la
+    fonction notée dont l'enfant revient normalement poursuit la boucle et imprime SON sommaire
+    (code honnête, exercice sur les appels système). Et comme l'enfant reprend la boucle avec son
+    propre état, ses tests restants peuvent donner un autre `failed` : la DIVERGENCE n'est donc
+    pas une preuve de fuite non plus — « deux processus du binaire » et « jeton extrait » ne se
+    départagent pas ici, et refuser suffit dans les deux cas (personne ne gagne rien). D'où
+    `sommaire_duplique`, volontairement absent d'`isSuspicious` côté Java : règle du projet, dans
+    le doute on refuse mais on n'accuse pas. La forge « sommaire imprimé tôt + `atexit(0)` »
+    reste fermée par l'exigence d'UNICITÉ elle-même, et le fil de détente `[MOODIT] fail` reste
+    en place pour les incohérences de mise en forme.
+    """
+    total, failed, forge, sommaires = c_summary(stdout, token)
+    if not sommaires:
+        total, failed, forge_err, sommaires = c_summary(stderr, token)
+        forge = forge or forge_err
+    if len(sommaires) > 1:
+        event("sommaire_duplique", case=case_index,
+              detail="sommaire authentifié imprimé plusieurs fois (processus dupliqué ?)")
+        return None, None, forge, "sommaire_duplique"
+    return total, failed, forge, None
 
 
 def run_c(case_dir, env, timeout_s, case_index):

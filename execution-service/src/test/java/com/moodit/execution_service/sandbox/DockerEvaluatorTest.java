@@ -85,6 +85,32 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void sommaire_duplique_refuse_le_cas_sans_accuser_de_triche() {
+        // CLIQUET contre la régression qui est revenue à chaque tour de revue : un sommaire
+        // authentifié imprimé deux fois (un `fork()` honnête de la fonction notée y suffit, le
+        // sommaire étant imprimé après la boucle de tests) doit REFUSER le cas sans bandeau de
+        // falsification. La propriété n'était verrouillée que par un test d'intégration, qui
+        // s'ignore en silence sans démon Docker : ajouter `sommaire_duplique` à isSuspicious
+        // passait donc inaperçu en local. Ici, ça rougit dès `./gradlew test`.
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":false,"detail":"Verdict indisponible : le sommaire du framework a été imprimé plusieurs fois (processus dupliqué ?)","ms":1},
+                  {"index":1,"passed":true,"detail":null,"ms":1}
+                ],"events":[
+                  {"type":"sommaire_duplique","case":0,"detail":"sommaire authentifié imprimé plusieurs fois (processus dupliqué ?)"}
+                ],"canaries":"ok"}
+                """);
+        List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail())
+                .contains("imprimé plusieurs fois")
+                .doesNotContain("⚠").doesNotContain("suspect").doesNotContain("falsification");
+        // Et le cas voisin n'est pas contaminé : l'événement ne vise que le cas 0.
+        assertThat(results.get(1).passed()).isTrue();
+        assertThat(results.get(1).detail()).isNull();
+    }
+
+    @Test
     void erreur_du_superviseur_leve_sandbox_exception() {
         supervisorReturns("{\"v\":1,\"error\":\"fichiers du job non reçus\"}");
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))

@@ -302,7 +302,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   harnais restants ne sont pas lancés et portent un verdict « non évalué », comme les verdicts
   partiels que le superviseur rend au mur. Cette variable est lue par execution-service **et**
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
-  la changer pour un seul des deux ferait abandonner des corrections encore en cours. **Le débit de correction
+  la changer pour un seul des deux ferait abandonner des corrections encore en cours.
+  **Le débit de correction
   est en réalité plafonné par le pool `quizExecutor` de core-service** (`AsyncConfig`,
   `corePoolSize=2`, file de 100) : un `ThreadPoolTaskExecutor` ne dépasse son cœur qu'une fois
   la file pleine, donc **deux corrections en vol au maximum**, quel que soit
@@ -313,6 +314,16 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   et `EXEC_MAX_CONCURRENT` à la mesure du groupe (`nb_étudiants × durée_correction / places`,
   la RAM suit — voir « coût / dimensionnement »), étaler les soumissions, ou attendre le
   rejouage automatique côté core (suivi ouvert — il n'existe pas encore).
+- **`strace` : alerte d'exploitation à surveiller dans les journaux.** C'est lui qui permet de
+  détecter une tentative de lecture du harnais ou du binaire de test. S'il devient inutilisable
+  (capacité `SYS_PTRACE` absente, `strace` retiré d'une image de base), la notation **continue** —
+  jeton, canaris, sommaire authentifié et invariant « un test du harnais a tourné » restent armés,
+  et refuser punirait une classe entière pour une panne qui ne lui est pas imputable —, mais ces
+  deux détections sont **désarmées pour tout le job**. `execution-service` le journalise alors en
+  **ERREUR** (« strace inutilisable : détection des lectures DÉSARMÉE ») : à traiter comme une
+  alerte, pas comme un avertissement de routine. La matrice anti-triche de la CI couvre le cas
+  avant déploiement (un `strace` cassé y fait tomber les tests de détection de lecture), pas après.
+- **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
   `execution-service` les balaie à son démarrage, et on peut les lister à la main avec

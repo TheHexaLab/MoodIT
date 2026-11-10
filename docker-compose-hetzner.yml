@@ -118,6 +118,10 @@ services:
     env_file:
       - .env.docker
     environment:
+      # Même mise en garde que dans le bloc d'execution-service, dans l'autre sens :
+      # EXEC_INTERNAL_QUEUE_WAIT_MS et EXEC_INTERPRETED_BUDGET_MS sont PARTAGÉES entre les deux
+      # services et vont dans .env.docker (cf. .env.example). Posées ici, core attendrait une
+      # autre valeur que le serveur et abandonnerait des corrections encore en cours (#216).
       JAVA_TOOL_OPTIONS: "-Xmx320m"
     mem_limit: 640m
     networks:
@@ -207,6 +211,11 @@ services:
       # surveiller la RAM du VPS avant de l'augmenter. Une place reste réservée aux
       # corrections internes, il en reste donc DEUX pour « Exécuter »/« Tester » : avec une
       # seule, deux étudiants qui cliquent en même temps recevaient un 429 en routine.
+      # ATTENTION — ne pas ajouter ici EXEC_INTERNAL_QUEUE_WAIT_MS ni EXEC_INTERPRETED_BUDGET_MS :
+      # ces deux-là sont lus AUSSI par core-service (son délai de lecture de la correction, #216).
+      # Posées dans ce bloc, elles ne vaudraient que pour execution-service, et core abandonnerait
+      # des corrections encore en cours — tentatives d'étudiants supprimées. Elles vont dans le
+      # .env.docker commun (cf. .env.example), que les deux services chargent par env_file.
       EXEC_MAX_CONCURRENT: "3"
       # Un appel public tient maintenant un conteneur entier (quelques secondes pour un
       # interprété) au lieu d'une requête HTTP sous-seconde : l'attente d'une place suit.
