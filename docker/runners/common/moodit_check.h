@@ -87,13 +87,24 @@ int main(void) {
      * code noté n'avait qu'à imprimer « [MOODIT] summary total=1 failed=0 » AVANT la fin (le
      * superviseur retenait le PREMIER sommaire trouvé), puis à poser un atexit() qui sort en 0 :
      * le vrai sommaire et le vrai jeton étaient bien imprimés ensuite, et le cas passait au vert.
-     * Le jeton vit dans le harnais (illisible, 700 root) et dans ce binaire (dont la lecture est
-     * tracée, lecture_binaire_tentee) — le forger redevient donc bruyant ou impossible. */
+     *
+     * ATTENTION — ce que cela ne protège PAS : le code étudiant est inclus dans la MÊME unité de
+     * compilation, avant cet en-tête, et ses macros survivent. Un « #define printf … » placé
+     * après son <stdio.h> capture ces deux lignes et reçoit le jeton en argument, sans aucun
+     * open(2) donc sans trace. C'est le résiduel assumé de C/C++ documenté dans
+     * docker/runners/README.md ; le jeton dans le sommaire ne le ferme pas, il ferme seulement
+     * la forge « sommaire imprimé tôt ». Les canaris ne le rattrapent pas non plus : il suffit
+     * d'armer le crochet depuis la fonction notée, que les harnais canaris n'appellent jamais.
+     *
+     * Les deux lignes partent sur stdout ET stderr : un étudiant honnête qui ferme stdout
+     * (fclose(stdout)) ferait sinon disparaître le verdict et écoperait d'une accusation. */
     printf("[MOODIT] summary jeton=%s total=%d failed=%d\n",
            MOODIT_JETON, moodit_test_count, failed);
-    /* Jeton de fin d'exécution : n'est imprimé qu'ici, après tous les tests — un exit(0) forgé
-     * depuis le code étudiant le saute. */
     printf("[MOODIT] jeton=%s\n", MOODIT_JETON);
+    fprintf(stderr, "[MOODIT] summary jeton=%s total=%d failed=%d\n",
+            MOODIT_JETON, moodit_test_count, failed);
+    fprintf(stderr, "[MOODIT] jeton=%s\n", MOODIT_JETON);
+    fflush(stderr);
 #else
     printf("[MOODIT] summary total=%d failed=%d\n", moodit_test_count, failed);
 #endif

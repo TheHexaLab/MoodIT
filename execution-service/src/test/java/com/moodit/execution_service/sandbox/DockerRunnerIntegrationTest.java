@@ -1042,6 +1042,40 @@ class DockerRunnerIntegrationTest {
     }
 
     @Test
+    void java_etudiant_qui_ferme_system_out_n_est_pas_accuse() {
+        require("Java");
+        // RÉPONSE JUSTE, idiome banal : un try-with-resources sur un PrintWriter(System.out).
+        // Sa fermeture ferme System.out, donc FileDescriptor.out, donc le fd 1 du processus —
+        // et avec lui le flux « brut » que l'enveloppe tient sur le MÊME objet FileDescriptor.
+        // La ligne de verdict part alors en silence (PrintStream avale l'IOException) et le
+        // superviseur voit « rapport correct + exit 0 + pas de jeton » = signature d'un
+        // forgeage. Un étudiant honnête ne doit JAMAIS porter cette accusation.
+        String honnete = """
+                import java.io.PrintWriter;
+
+                public class Solution {
+                    public static class Rectangle {
+                        private final int largeur;
+                        private final int hauteur;
+                        public Rectangle(int l, int h) { largeur = l; hauteur = h; }
+                        public int aire() {
+                            try (PrintWriter w = new PrintWriter(System.out)) {
+                                w.println("aire = " + (largeur * hauteur));
+                            }
+                            return largeur * hauteur;
+                        }
+                    }
+                    public static void main(String[] args) {}
+                }
+                """;
+        List<TestResult> results = evaluate("Java", honnete, JAVA_HARNESS);
+        assertThat(results.get(0).detail() == null ? "" : results.get(0).detail())
+                .as("aucune accusation de triche sur une réponse juste")
+                .doesNotContain("⚠").doesNotContain("jeton");
+        assertThat(results.get(0).passed()).isTrue();
+    }
+
+    @Test
     void java_detournement_de_system_out_ne_reecrit_pas_le_verdict() {
         require("Java");
         // L'étudiant n'a PAS besoin de connaître le jeton : il détourne System.out, voit passer

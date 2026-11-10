@@ -649,6 +649,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
                                 stderr=subprocess.PIPE, stdin=stdin, preexec_fn=preexec)
         if token_fd is not None:
             os.close(token_fd)           # tube du jeton : le parent lâche son extrémité
+            token_fd = None              # ne pas refermer dans le finally
         elif stdin is not subprocess.DEVNULL:
             stdin.close()
         pumps = [threading.Thread(target=drain_pipe,
@@ -723,6 +724,13 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
               detail="ouverture des sorties impossible : %r" % e)
         return None, False
     finally:
+        # Tube du jeton : si open_output ou Popen a levé (saturation, fork ENOMEM), le
+        # descripteur n'a jamais été remis à None plus haut — il fuirait, un par cas en échec.
+        if token_fd is not None:
+            try:
+                os.close(token_fd)
+            except OSError:
+                pass
         sature = False
         for flux in (out, err):
             if flux is None:
@@ -787,8 +795,12 @@ def probe_strace():
         return False
     trace = os.path.join(BOX, ".strace_probe")
     try:
+        # EXACTEMENT le chemin réel, « -u student » compris : si c'est la transition setuid qui
+        # échoue (utilisateur absent, setgroups refusé, profil durci), une sonde sans -u
+        # réussirait, STRACE_OK resterait vrai, les traces réelles seraient vides et la
+        # détection s'éteindrait SANS le moindre trace_indisponible.
         subprocess.run([STRACE, "-f", "-qq", "-e", "trace=openat,open", "-o", trace,
-                        "/bin/true"],
+                        "-u", "student", "/bin/true"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         STRACE_OK = os.path.exists(trace) and os.path.getsize(trace) > 0
     except (OSError, subprocess.SubprocessError):
@@ -872,7 +884,11 @@ def trace_read_ok(line):
     honnête ne doit jamais valoir une accusation."""
     if "open" not in line:
         return False                       # readlink : ne lit aucun contenu
-    if any(flag in line for flag in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND")):
+    # O_RDWR LIT aussi : seul O_WRONLY exclut la lecture. (O_CREAT/O_TRUNC/O_APPEND sans
+    # O_WRONLY restent des créations, pas des lectures de contenu existant.)
+    if "O_WRONLY" in line:
+        return False
+    if any(flag in line for flag in ("O_CREAT", "O_TRUNC", "O_APPEND")) and "O_RDWR" not in line:
         return False
     resultat = line.rsplit("=", 1)[-1].strip() if "=" in line else ""
     return bool(re.match(r"^\d+", resultat))
@@ -999,6 +1015,46 @@ def token_exit_code(stdout, case_index):
     return None
 
 
+def redact_tokens(detail):
+    """Retire TOUT jeton du détail renvoyé à l'appelant. FONCTION PURE (testée).
+
+    Le détail est construit à partir des premières lignes de la sortie du cas : quand le
+    verdict échoue tôt, la ligne `[MOODIT] jeton=… code=…` s'y retrouvait telle quelle et
+    repartait vers core (journaux, détail affiché au prof). Un jeton ne vaut que pour SON cas
+    et SON conteneur, donc l'exposition est bornée — mais un secret de notation n'a rien à
+    faire dans un message, et les détails pourraient un jour être montrés à l'étudiant."""
+    if not detail:
+        return detail
+    nettoye = detail
+    for token in TOKENS.values():
+        if token:
+            nettoye = nettoye.replace(token, "…")
+    return nettoye
+
+
+def token_exit_code_either(stdout, stderr, case_index):
+    """Code publié par l'enveloppe, cherché sur STDOUT puis sur STDERR. FONCTION PURE (testée).
+
+    L'enveloppe publie sa ligne de verdict sur les DEUX descripteurs bruts : un étudiant
+    honnête qui ferme System.out (`try (PrintWriter w = new PrintWriter(System.out))`, idiome
+    banal) fermait sinon le fd 1 du processus, la ligne disparaissait, et une RÉPONSE JUSTE
+    recevait « ⚠ jeton_absent » — une accusation de triche pour un idiome de première année.
+    On prend la première source qui donne un code. Un flux qui porte une ligne de jeton SANS
+    en tirer de code (doublon → jeton_duplique, ou forme incomplète) vaut REFUS : on ne se
+    rattrape pas sur l'autre flux, sinon il suffisait de dupliquer la ligne sur stdout pour
+    faire ignorer le refus et se faire noter sur celle de stderr."""
+    token = TOKENS.get(case_index)
+    if not token:
+        return None
+    for flux in (stdout, stderr):
+        code = token_exit_code(flux, case_index)
+        if code is not None:
+            return code
+        if ("[MOODIT] jeton=" + token) in flux:
+            return None
+    return None
+
+
 def wrapper_verdict(framework_code, looked_ok, detail, case_index, exit_code=0,
                     sortie_perdue=False):
     """Verdict d'un langage À ENVELOPPE (Java, C#, Go) → (passed, détail).
@@ -1093,7 +1149,12 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
     # par moodit_check.h), donc le verdict reste sur exit_code + sommaire — mais un sommaire
     # PORTEUR DU JETON, et unique (voir c_summary). L'interposition de printf reste le résiduel
     # assumé et documenté pour ces deux langages.
+    # stdout PUIS stderr (moodit_check.h publie sur les deux) : un `fclose(stdout)` d'un
+    # étudiant honnête ne doit pas faire disparaître le verdict ni valoir une accusation.
     total, failed, forge = c_summary(stdout, TOKENS.get(case_index))
+    if total is None:
+        total, failed, forge_err = c_summary(stderr, TOKENS.get(case_index))
+        forge = forge or forge_err
     coherent = total is not None and total > 0
     passed = exit_code == 0 and coherent and failed == 0
     if passed and first_lines(stdout, r"^\[MOODIT\] fail "):
@@ -1110,7 +1171,7 @@ def c_family(case_dir, env, timeout_s, case_index, compiler, std, ext):
                                   or ("Sommaire de test non authentifié : ignoré (le sommaire du "
                                       "framework n'a pas été produit)" if forge and not coherent
                                       else "Échec du harnais"))
-    passed, detail = enforce_token(passed, detail, stdout, case_index,
+    passed, detail = enforce_token(passed, detail, stdout + "\n" + stderr, case_index,
                                    ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
@@ -1132,8 +1193,15 @@ def c_summary(stdout, token):
         return None, None, forge
     matches = re.findall(r"^\[MOODIT\] summary jeton=" + re.escape(token)
                          + r" total=(\d+) failed=(\d+)$", stdout, re.M)
-    if len(matches) != 1:
-        return None, None, forge or len(matches) > 1
+    if len(matches) > 1:
+        # DEUX sommaires authentifiés : le framework n'en imprime qu'un par flux, donc le
+        # jeton a fuité. Ce n'est pas la même chose qu'un faux sommaire sans jeton — on le
+        # dit, comme token_exit_code le fait pour la ligne du jeton.
+        event("jeton_duplique", case=None,
+              detail="plusieurs sommaires authentifiés — jeton probablement extrait")
+        return None, None, True
+    if not matches:
+        return None, None, forge
     return int(matches[0][0]), int(matches[0][1]), forge
 
 
@@ -1166,10 +1234,14 @@ def run_java(case_dir, env, timeout_s, case_index):
         shutil.rmtree(reports, ignore_errors=True)
         return run_student(
             ["java", "-XX:MaxRAMPercentage=50",
-             # Accès natif REFUSÉ (JNI, FFM) : c'est la seule voie, depuis du code Java, pour
+             # Accès natif REFUSÉ (JNI, FFM) : c'est une voie, depuis du code Java, pour
              # dup2() par-dessus le descripteur 1 et intercepter la ligne de verdict que
              # l'enveloppe y publie. Aucun harnais légitime n'en a besoin.
              "--illegal-native-access=deny",
+             # sun.misc.Unsafe : l'AUTRE voie, que le drapeau ci-dessus ne couvre pas
+             # (jdk.unsupported ouvre sun.misc, et JDK 25 se contente d'un avertissement).
+             # putInt(FileDescriptor.out, offset("fd"), …) suffisait à détourner le fd 1.
+             "--sun-misc-unsafe-memory-access=deny",
              "-Djava.io.tmpdir=" + os.path.join(case_dir, "work", "tmp"),
              # MooditMain (généré par HarnessProjects) enveloppe le ConsoleLauncher : il imprime
              # le jeton de fin APRÈS l'exécution — un System.exit(0) forgé le saute.
@@ -1208,7 +1280,7 @@ def run_java(case_dir, env, timeout_s, case_index):
     # rapport XML : ces deux-là sont forgeables depuis le code étudiant après les tests.
     # Le XML ne sert plus qu'au décompte, au détail et à l'invariant « un test du harnais a
     # tourné » — le forger n'avance à rien si le code publié n'est pas 0.
-    framework_code = token_exit_code(stdout, case_index)
+    framework_code = token_exit_code_either(stdout, stderr, case_index)
     looked_ok = xml_ok and tests > 0 and failures == 0
     if framework_code == 0 and looked_ok \
             and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
@@ -1261,7 +1333,7 @@ def run_csharp(case_dir, env, timeout_s, case_index):
     scan_trace(trace, src, case_index)
     if t_out:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    framework_code = token_exit_code(stdout, case_index)   # cf. run_java : seule voie de confiance
+    framework_code = token_exit_code_either(stdout, stderr, case_index)   # cf. run_java
     looked_ok = xml_passed is True and total > 0
     if framework_code == 0 and looked_ok \
             and not harness_ran(containers, HARNESS_TYPES.get(case_index) or []):
@@ -1301,7 +1373,7 @@ def run_go(case_dir, env, timeout_s, case_index):
     # par le programme de l'étudiant faisait échouer un cas honnête. Un vrai échec donne de
     # toute façon un code de sortie non nul, déjà exigé ci-dessous.
     failed = re.search(r"^--- FAIL: \S", stdout, re.M) is not None
-    framework_code = token_exit_code(stdout, case_index)   # cf. run_java : seule voie de confiance
+    framework_code = token_exit_code_either(stdout, stderr, case_index)   # cf. run_java
     looked_ok = coherent and not failed
     if framework_code == 0 and not coherent:
         event("rapport_incoherent", case=case_index, detail="exit 0 sans sommaire PASS de go test")
@@ -1433,7 +1505,7 @@ def run_rust(case_dir, env, timeout_s, case_index):
     detail = None if passed else (first_lines(stderr, r"panicked at")
                                   or first_lines(stdout, r"panicked at|^failures:|^---- ")
                                   or first_lines(stderr, r".") or "Échec du harnais cargo test")
-    passed, detail = enforce_token(passed, detail, stdout, case_index,
+    passed, detail = enforce_token(passed, detail, stdout + "\n" + stderr, case_index,
                                    ETAT_SORTIE.perdue)
     return CaseOutcome(passed, detail, ran=True), None
 
@@ -1793,7 +1865,8 @@ def main():
             detail = ("⚠ Incohérence détectée pendant la notation (falsification probable). "
                       + (detail or ""))
         results.append({"index": case["index"], "name": case.get("name", ""),
-                        "passed": bool(passed), "detail": detail,
+                        "passed": bool(passed),
+                        "detail": redact_tokens(detail),
                         "ms": timings[case["index"]]})
 
     print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries},

@@ -98,12 +98,18 @@ class HarnessProjectsTest {
         String enveloppeJava = HarnessProjects.build("Java", "class Solution {}", ONE_CASE, null)
                 .files().get("cases/0/src/MooditEnveloppe.java");
         assertThat(enveloppeJava).doesNotContain("__MOODIT_T__");
-        assertThat(enveloppeJava).contains("System.in").contains("FileDescriptor.out");
+        // Jeton par stdin, verdict sur les DEUX descripteurs bruts (fermer un seul des flux
+        // standards ne doit pas faire disparaître le verdict d'une réponse juste).
+        assertThat(enveloppeJava).contains("System.in")
+                .contains("FileDescriptor.out").contains("FileDescriptor.err");
         String enveloppeCs = HarnessProjects.build("C#", "CODE", ONE_CASE, null)
                 .files().get("cases/0/src/moodit_runner.cs");
         assertThat(enveloppeCs).doesNotContain("__MOODIT_T__");
-        assertThat(enveloppeCs).contains("Console.In.ReadLine")
-                .contains("OpenStandardOutput");
+        // Lecture BRUTE de stdin + effacement du tampon : Console.In garderait le jeton dans
+        // ses tampons managés, atteignables par réflexion (mono n'a pas de modules).
+        assertThat(enveloppeCs).doesNotContain("Console.In.ReadLine");
+        assertThat(enveloppeCs).contains("OpenStandardInput").contains("Array.Clear")
+                .contains("OpenStandardOutput").contains("OpenStandardError");
         // Go garde la substitution : son init() étudiant tourne AVANT toute instruction de
         // l'enveloppe, donc une livraison par stdin serait lisible par le code noté en premier.
         assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null).files()
@@ -264,11 +270,13 @@ class HarnessProjectsTest {
         // qu'à y réécrire « code=1 » en « code=0 », sans même connaître le jeton.
         assertThat(HarnessProjects.build("Java", "class Solution { }", ONE_CASE, null)
                 .files().get("cases/0/src/MooditEnveloppe.java"))
-                .contains("brut.println(\"[MOODIT] jeton=\" + jeton + \" code=\" + code)")
+                .contains("String verdict = \"[MOODIT] jeton=\" + jeton + \" code=\" + code")
+                .contains("brut.println(verdict)").contains("brutErr.println(verdict)")
                 .contains("new FileOutputStream(FileDescriptor.out)");
         assertThat(HarnessProjects.build("C#", "class Solution { }", ONE_CASE, null)
                 .files().get("cases/0/src/moodit_runner.cs"))
-                .contains("brut.WriteLine(\"[MOODIT] jeton=\" + jeton + \" code=\" + code)")
+                .contains("string verdict = \"[MOODIT] jeton=\" + jeton + \" code=\" + code")
+                .contains("brut.WriteLine(verdict)").contains("brutErr.WriteLine(verdict)")
                 .contains("Console.OpenStandardOutput()");
         assertThat(HarnessProjects.build("Go", "package main", ONE_CASE, null)
                 .files().get("cases/0/src/moodit_main_test.go"))

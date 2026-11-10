@@ -164,8 +164,19 @@ public final class HarnessProjects {
                                 // la réémettre. Connaître le jeton n'était même pas nécessaire.
                                 // Écrire sur fd 1 contourne System.setOut ; le détourner demande
                                 // un dup2, donc un accès natif (refusé par --illegal-native-access).
+                                // DEUX descripteurs bruts (1 et 2) : la ligne est publiée sur les
+                                // deux, et le superviseur accepte la première qu'il trouve. Un
+                                // étudiant HONNÊTE qui ferme System.out — `try (PrintWriter w =
+                                // new PrintWriter(System.out))`, idiome banal — fermait sinon
+                                // FileDescriptor.out, donc le fd 1 du processus, donc ce flux-ci
+                                // (même objet FileDescriptor) : la ligne disparaissait en silence
+                                // et une RÉPONSE JUSTE écopait de « ⚠ jeton_absent ». Fermer les
+                                // deux flux standards à la fois n'est pas un idiome.
                                 PrintStream brut = new PrintStream(
                                         new FileOutputStream(FileDescriptor.out), true,
+                                        StandardCharsets.UTF_8);
+                                PrintStream brutErr = new PrintStream(
+                                        new FileOutputStream(FileDescriptor.err), true,
                                         StandardCharsets.UTF_8);
                                 String jeton;
                                 try (BufferedReader entree = new BufferedReader(
@@ -176,8 +187,11 @@ public final class HarnessProjects {
                                         .run(new PrintWriter(System.out, true),
                                                 new PrintWriter(System.err, true), args)
                                         .getExitCode();
-                                brut.println("[MOODIT] jeton=" + jeton + " code=" + code);
+                                String verdict = "[MOODIT] jeton=" + jeton + " code=" + code;
+                                brut.println(verdict);
                                 brut.flush();
+                                brutErr.println(verdict);
+                                brutErr.flush();
                                 System.exit(code);
                             }
                         }
@@ -203,15 +217,38 @@ public final class HarnessProjects {
                         {
                             static int Main(string[] args)
                             {
-                                // Flux BRUT de sortie standard, capturé avant tout code étudiant :
-                                // un Console.SetOut() du code noté ne peut donc pas intercepter la
-                                // ligne de verdict pour y réécrire le code (cf. l'enveloppe Java).
+                                // Flux BRUTS (sortie ET erreur), capturés avant tout code étudiant :
+                                // un Console.SetOut() du code noté ne peut pas les intercepter, et
+                                // fermer l'un des deux flux standards ne fait pas disparaître la
+                                // ligne de verdict (cf. l'enveloppe Java).
                                 var brut = new System.IO.StreamWriter(
                                     System.Console.OpenStandardOutput()) { AutoFlush = true };
-                                string jeton = System.Console.In.ReadLine();
+                                var brutErr = new System.IO.StreamWriter(
+                                    System.Console.OpenStandardError()) { AutoFlush = true };
+                                // Lecture BRUTE de stdin, puis effacement du tampon : Console.In
+                                // est un StreamReader mis en cache statique qui garde le jeton
+                                // dans ses tampons managés pendant toute l'exécution — et mono
+                                // n'a pas de système de modules, donc une marche de champs en
+                                // BindingFlags.NonPublic depuis le code noté le retrouvait, sans
+                                // aucun open(2) donc sans aucune trace.
+                                string jeton = "";
+                                var entree = System.Console.OpenStandardInput();
+                                var tampon = new byte[64];
+                                int lus = 0;
+                                int octet;
+                                while (lus < tampon.Length && (octet = entree.ReadByte()) >= 0 && octet != '\\n')
+                                {
+                                    tampon[lus++] = (byte) octet;
+                                }
+                                jeton = System.Text.Encoding.ASCII.GetString(tampon, 0, lus);
+                                System.Array.Clear(tampon, 0, tampon.Length);
+                                entree.Dispose();
                                 int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
-                                brut.WriteLine("[MOODIT] jeton=" + jeton + " code=" + code);
+                                string verdict = "[MOODIT] jeton=" + jeton + " code=" + code;
+                                brut.WriteLine(verdict);
                                 brut.Flush();
+                                brutErr.WriteLine(verdict);
+                                brutErr.Flush();
                                 return code;
                             }
                         }

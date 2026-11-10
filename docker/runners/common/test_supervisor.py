@@ -380,6 +380,74 @@ class TokenExitCodeTest(unittest.TestCase):
         self.assertNotEqual(supervisor.token_exit_code(out, 0), 0)
 
 
+class RedactTokensTest(unittest.TestCase):
+    """Aucun jeton dans le detail renvoye a l'appelant : quand le verdict echoue tot, le detail
+    est bati sur les premieres lignes de sortie, et la ligne « [MOODIT] jeton=… code=… » s'y
+    retrouvait telle quelle (constate en sondant un cas C#)."""
+
+    def setUp(self):
+        supervisor.TOKENS.clear()
+        supervisor.TOKENS[0] = "6121964961777"
+        supervisor.TOKENS[1] = "1234567890123"
+
+    def test_jeton_retire_du_detail(self):
+        self.assertEqual(
+            supervisor.redact_tokens("[MOODIT] jeton=6121964961777 code=1"),
+            "[MOODIT] jeton=… code=1")
+
+    def test_jeton_d_un_autre_cas_retire_aussi(self):
+        # Les cas partagent le meme conteneur : aucun de leurs jetons ne doit sortir.
+        self.assertNotIn("1234567890123", supervisor.redact_tokens("fuite 1234567890123"))
+
+    def test_detail_vide_inchange(self):
+        self.assertIsNone(supervisor.redact_tokens(None))
+        self.assertEqual(supervisor.redact_tokens(""), "")
+
+    def test_detail_sans_jeton_inchange(self):
+        self.assertEqual(supervisor.redact_tokens("expected: <12> but was: <0>"),
+                         "expected: <12> but was: <0>")
+
+
+class TokenExitCodeEitherTest(unittest.TestCase):
+    """L'enveloppe publie son verdict sur les DEUX descripteurs bruts (1 et 2).
+
+    Defaut corrige : un etudiant honnete qui ferme System.out — `try (PrintWriter w = new
+    PrintWriter(System.out))`, idiome de premiere annee — fermait FileDescriptor.out, donc le
+    fd 1 du processus, donc le flux brut de l'enveloppe. La ligne de verdict disparaissait, le
+    rapport XML restait correct, et une REPONSE JUSTE recevait « ⚠ jeton_absent » : une
+    accusation de triche. Mesure faite contre un vrai conteneur avant correctif."""
+
+    JETON = "4242424242424"
+    LIGNE = "[MOODIT] jeton=4242424242424 code=0"
+
+    def setUp(self):
+        supervisor.TOKENS.clear()
+        supervisor.TOKENS[0] = self.JETON
+        supervisor.EVENTS.clear()
+
+    def test_stdout_prioritaire(self):
+        self.assertEqual(supervisor.token_exit_code_either(self.LIGNE, "", 0), 0)
+
+    def test_repli_sur_stderr_si_stdout_est_ferme(self):
+        # Le cas honnete : stdout ferme par le code note, stderr intact.
+        self.assertEqual(supervisor.token_exit_code_either("", self.LIGNE, 0), 0)
+
+    def test_les_deux_flux_ne_valent_pas_un_doublon(self):
+        # Normal : la MEME ligne sur les deux flux. Ce n'est pas une fuite de jeton.
+        self.assertEqual(supervisor.token_exit_code_either(self.LIGNE, self.LIGNE, 0), 0)
+        self.assertEqual(supervisor.EVENTS, [])
+
+    def test_doublon_sur_stdout_ne_se_rattrape_pas_sur_stderr(self):
+        # Sinon il suffisait de dupliquer la ligne sur stdout pour faire ignorer le refus et
+        # se faire noter sur celle de stderr.
+        double = self.LIGNE + "\n" + self.LIGNE + "\n"
+        self.assertIsNone(supervisor.token_exit_code_either(double, self.LIGNE, 0))
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["jeton_duplique"])
+
+    def test_aucune_ligne_aucun_code(self):
+        self.assertIsNone(supervisor.token_exit_code_either("rien", "rien", 0))
+
+
 class CSummaryTest(unittest.TestCase):
     """C/C++ : seul un sommaire PORTEUR DU JETON compte, et il doit etre UNIQUE.
 
