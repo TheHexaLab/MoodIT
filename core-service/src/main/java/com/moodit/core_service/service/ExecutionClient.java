@@ -67,7 +67,7 @@ public class ExecutionClient {
      * {@code per-test-timeout-ms} est désormais un réglage de CORE seul (l'homologue serveur a
      * disparu avec Piston).
      */
-    long readTimeoutMs(String language, int pistonCalls, Integer execTimeoutMs) {
+    long readTimeoutMs(String language, int workUnits, Integer execTimeoutMs) {
         // Invariant anti-#216 : budget client ≥ PIRE CAS serveur, modélisé d'après le vrai
         // contrat du runner (#116) — surestimer est sans danger (correction asynchrone),
         // sous-estimer supprime la tentative d'un étudiant pendant une correction en cours.
@@ -79,7 +79,7 @@ public class ExecutionClient {
             // (run planché VM + 10 s de marge + 90 s de compilation par cas + 5 s d'inventaire).
             // CHAQUE terme du perCase serveur doit avoir son miroir ici : il est multiplié par
             // le nombre de cas, donc en oublier un creuse un écart proportionnel.
-            long cases = (Math.max(pistonCalls, 2) + 2L) / 2;   // unités 2N+2 → N+2
+            long cases = (Math.max(workUnits, 2) + 2L) / 2;   // unités 2N+2 → N+2
             long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
             // Plafonné par le MUR du serveur (DockerEvaluator.MAX_WALL_MS) : au-delà, le
             // conteneur est tué de toute façon. Sans ce miroir, 100 harnais donnaient un délai
@@ -95,8 +95,19 @@ public class ExecutionClient {
         // du conteneur et compilation exec, tsc compris) en plus de son temps limite.
         long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS)
                 + EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS;
-        return baseReadTimeoutMs
-                + (long) Math.max(pistonCalls, 1) * (perUnit + internalQueueWaitMs);
+        long perUnitWithQueue = perUnit + internalQueueWaitMs;
+        // Plafonne par le BUDGET GLOBAL du serveur (app.exec.interpreted-budget-ms) : passe son
+        // echeance, les harnais restants ne sont plus lances. Le budget est consulte AVANT
+        // chaque harnais, donc un harnais deja parti le depasse d'une unite -- de DEUX en SQL
+        // (phases isolees) ; ce depassement est AJOUTE, sans quoi le client renoncerait avant le
+        // serveur et supprimerait une tentative encore en correction (le bug de #216).
+        // Sans ce plafond, 100 harnais Python donnaient pres de 7 h de delai, pendant lesquelles
+        // un fil @Async restait epingle si execution-service pendait sans fermer la socket -- le
+        // chemin compile, lui, etait deja borne par EVAL_MAX_WALL_MS.
+        long overshootUnits = sqlLanguage(language) ? 2 : 1;
+        long serverWork = Math.min((long) Math.max(workUnits, 1) * perUnitWithQueue,
+                EXEC_BUDGET_MS + overshootUnits * perUnitWithQueue);
+        return baseReadTimeoutMs + serverWork;
     }
 
     /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
@@ -128,6 +139,13 @@ public class ExecutionClient {
 
     /** Mur maximal d'un conteneur de notation — miroir de {@code DockerEvaluator.MAX_WALL_MS}. */
     private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
+
+    /**
+     * Budget global de la boucle interpretee/SQL/vues d'execution-service -- miroir de
+     * {@code app.exec.interpreted-budget-ms} (15 min). Surcharger l'un impose la meme valeur a
+     * l'autre, comme {@code internal-queue-wait-ms}.
+     */
+    private static final long EXEC_BUDGET_MS = 15 * 60_000;
 
     /**
      * Cycle de vie du conteneur HORS mur, par unité de travail : création, copie du job,
@@ -164,13 +182,20 @@ public class ExecutionClient {
      *       90 s de budget côté runner) peut dominer le temps d'exécution.</li>
      * </ul>
      */
-    static int pistonCalls(String language, int harnessCount) {
-        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
-        boolean sql = lang.equals("sql") || lang.equals("sqlite") || lang.equals("sqlite3");
-        if (sql) {
+    static int workUnits(String language, int harnessCount) {
+        if (sqlLanguage(language)) {
             return 2 * harnessCount;
         }
         return compiled(language) ? 2 * harnessCount + 2 : harnessCount;
+    }
+
+    /**
+     * Langage SQL : un harnais de MODIFICATION y vaut deux unites (deux phases isolees), donc un
+     * harnais deja lance peut depasser l'echeance du serveur de deux unites, pas d'une.
+     */
+    static boolean sqlLanguage(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return lang.equals("sql") || lang.equals("sqlite") || lang.equals("sqlite3");
     }
 
     /** Langage noté dans le runner compilé (budget de compilation à prévoir côté client). */
@@ -221,7 +246,7 @@ public class ExecutionClient {
                 .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
                 .toList());
         if (timeout != null) body.put("timeoutMs", timeout);
-        long readTimeout = readTimeoutMs(language, pistonCalls(language, harnesses.size()), timeout);
+        long readTimeout = readTimeoutMs(language, workUnits(language, harnesses.size()), timeout);
         try {
             Verdict[] verdicts = restClient(readTimeout).post()
                     .uri(baseUrl + "/internal/exec/evaluate")

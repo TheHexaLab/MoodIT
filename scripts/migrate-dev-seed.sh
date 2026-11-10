@@ -46,13 +46,17 @@ if [ "$count" != "0" ] && [ "${FORCE:-0}" != "1" ]; then
 fi
 
 echo "→ Seed des données de démo dans $CONTAINER/$DB (établissement, programme/cours, comptes, quiz de code)…"
-cat "$DEMO"/V2_1__*.sql \
-    "$DEMO"/V2_2__*.sql \
-    "$DEMO"/V2_3__*.sql \
-    "$DEMO"/V2_4__*.sql \
-    "$DEMO"/V4_1__*.sql \
-    "$DEMO"/V7_1__*.sql \
-  | pg -v ON_ERROR_STOP=1 -1 -q
+# TOUS les fichiers de db/demo, dans l'ordre des VERSIONS (sort -V : V10_1 vient après V9_1,
+# là où l'ordre lexicographique le placerait avant V2_1). Énumérer les fichiers à la main
+# faisait sauter en SILENCE toute démo ajoutée ensuite — et la garde d'idempotence ci-dessus
+# empêchait ensuite de réparer sans FORCE=1.
+FILES=$(find "$DEMO" -maxdepth 1 -name 'V*.sql' | sort -V)
+if [ -z "$FILES" ]; then
+  echo "✗ Aucun fichier de démo trouvé dans $DEMO" >&2
+  exit 1
+fi
+# shellcheck disable=SC2086  # un chemin par ligne, sans espace : le découpage est voulu.
+cat $FILES | pg -v ON_ERROR_STOP=1 -1 -q
 
 echo
 echo "✓ Terminé. Établissements autorisés :"

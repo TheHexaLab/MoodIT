@@ -30,7 +30,6 @@ public class RunnerExec {
     /** Fichier source envoyé au runner (le premier de la liste est exécuté). */
     public record File(String name, String content) {}
 
-    /** Étape (compilation ou exécution) : sorties, code de sortie, signal (SIGKILL = temps dépassé). */
     /**
      * Une étape (compilation ou exécution). {@code message} est un canal de diagnostic
      * OPTIONNEL du contrat : le superviseur actuel ne l'alimente jamais (il met tout dans

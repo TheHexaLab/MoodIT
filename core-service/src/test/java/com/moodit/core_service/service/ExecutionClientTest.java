@@ -175,6 +175,31 @@ class ExecutionClientTest {
     }
 
     @Test
+    @DisplayName("Interprété : le budget est plafonné par celui du serveur, dépassement d'un harnais compris")
+    void readTimeout_plafonneParLeBudgetDuServeur() {
+        ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
+
+        // Symétrique du plafond compilé : le chemin interprété lance un conteneur PAR unité, donc
+        // son budget croissait linéairement (100 harnais Python ≈ 7 h avec les défauts de prod).
+        // execution-service borne désormais la boucle (app.exec.interpreted-budget-ms, 15 min) :
+        // au-delà, les harnais restants ne sont plus lancés. Le client plafonne au même budget,
+        // PLUS une unité — l'échéance est consultée avant chaque harnais, donc celui qui vient de
+        // partir va au bout ; sans ce terme, core renoncerait avant le serveur (#216).
+        long perUnit = 145_000;
+        assertThat(client.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 15 * 60_000 + perUnit);
+        // SQL : deux unités par harnais (phases isolées), donc deux unités de dépassement.
+        assertThat(client.readTimeoutMs("sql", 200, null))
+                .isEqualTo(10_000 + 15 * 60_000 + 2 * perUnit);
+        // Sous le budget, rien ne change : la formule par unité reste la référence.
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * perUnit);
+        // Bascule : le plafond ne mord qu'au-delà de (budget + 1 unité) / unité ≈ 7,2 unités.
+        assertThat(client.readTimeoutMs("Python", 7, null)).isEqualTo(10_000 + 7 * perUnit);
+        assertThat(client.readTimeoutMs("Python", 8, null))
+                .isEqualTo(10_000 + 15 * 60_000 + perUnit);
+    }
+
+    @Test
     @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
     void compiled_reconnaitLesLangagesCompiles() {
         assertThat(ExecutionClient.compiled("Java")).isTrue();
@@ -209,18 +234,18 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
-    void pistonCalls_sqlEnDeuxPhases() {
-        assertThat(ExecutionClient.pistonCalls("Python", 3)).isEqualTo(3);
-        assertThat(ExecutionClient.pistonCalls(null, 3)).isEqualTo(3);
-        assertThat(ExecutionClient.pistonCalls("sql", 3)).isEqualTo(6);
-        assertThat(ExecutionClient.pistonCalls(" SQL ", 1)).isEqualTo(2);
-        assertThat(ExecutionClient.pistonCalls("sqlite", 2)).isEqualTo(4);
-        assertThat(ExecutionClient.pistonCalls("sqlite3", 2)).isEqualTo(4);
-        assertThat(ExecutionClient.pistonCalls("sqlserver", 2)).isEqualTo(2);
+    void workUnits_sqlEnDeuxPhases() {
+        assertThat(ExecutionClient.workUnits("Python", 3)).isEqualTo(3);
+        assertThat(ExecutionClient.workUnits(null, 3)).isEqualTo(3);
+        assertThat(ExecutionClient.workUnits("sql", 3)).isEqualTo(6);
+        assertThat(ExecutionClient.workUnits(" SQL ", 1)).isEqualTo(2);
+        assertThat(ExecutionClient.workUnits("sqlite", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("sqlite3", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("sqlserver", 2)).isEqualTo(2);
         // Compilés (#116) : compilation + exécution par cas, plus deux canaris du runner.
-        assertThat(ExecutionClient.pistonCalls("Java", 3)).isEqualTo(8);
-        assertThat(ExecutionClient.pistonCalls("C++", 1)).isEqualTo(4);
-        assertThat(ExecutionClient.pistonCalls("go", 2)).isEqualTo(6);
+        assertThat(ExecutionClient.workUnits("Java", 3)).isEqualTo(8);
+        assertThat(ExecutionClient.workUnits("C++", 1)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("go", 2)).isEqualTo(6);
     }
 
     @Test

@@ -36,6 +36,9 @@ import java.util.List;
 @Service
 public class ExecutionService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(ExecutionService.class);
+
     private static final SecureRandom RNG = new SecureRandom();
 
     private final CodeAssembler assembler;
@@ -46,6 +49,20 @@ public class ExecutionService {
     /** Taille max du dump d'état transféré phase 1 → phase 2 (borne anti-DoS). Configurable. */
     @Value("${app.sql.max-dump-chars:524288}")
     private int maxSqlDumpChars = 524288;
+
+    /**
+     * Budget GLOBAL de la boucle interprétée/SQL/vues, miroir du mur d'un conteneur de notation
+     * compilée ({@code DockerEvaluator.MAX_WALL_MS}, 15 min). Le chemin compilé lance UN conteneur
+     * borné par son mur ; le chemin interprété lance un conteneur et prend une place PAR HARNAIS
+     * (jusqu'à 100 autorisés par {@code EvaluateRequest}), donc son pire cas croissait LINÉAIREMENT
+     * et sans borne : des heures de conteneurs enchaînés longtemps après que l'appelant a renoncé,
+     * et un délai de lecture du même ordre à budgéter côté core (ExecutionClient, #216). Passé
+     * l'échéance, les harnais restants ne sont plus LANCÉS et reçoivent un verdict explicite —
+     * mêmes verdicts partiels que ceux que le superviseur rend au mur de son conteneur.
+     * Visibilité paquet : les tests l'abaissent pour exercer l'échéance sans attendre.
+     */
+    @Value("${app.exec.interpreted-budget-ms:900000}")
+    long interpretedBudgetMs = 15 * 60_000;
 
     /** Sans borne de charge ni runner de notation compilée (tests unitaires de la logique de verdict). */
     public ExecutionService(CodeAssembler assembler, RunnerExec runner) {
@@ -116,8 +133,32 @@ public class ExecutionService {
                     request.language(), request.code(), request.testCases(), request.timeoutMs(),
                     maxWall));
         }
+        // Budget plafonné selon l'appelant, comme le mur du chemin compilé : une correction
+        // interne a droit au budget complet, un « Tester » public est borné au même plafond que
+        // les compilés (PUBLIC_WALL_MS) — la route accepte jusqu'à 100 cas fournis par l'appelant.
+        long budgetMs = limiter.isInternal() ? interpretedBudgetMs
+                : Math.min(interpretedBudgetMs, DockerEvaluator.PUBLIC_WALL_MS);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budgetMs);
         List<TestResult> results = new ArrayList<>();
+        boolean exhausted = false;
         for (TestCaseInput testCase : request.testCases()) {
+            // Le PREMIER harnais part toujours : un budget mal configuré (0, négatif) doit
+            // dégrader la correction, pas la vider de tout verdict réel. L'échéance est ensuite
+            // consultée AVANT de lancer un harnais — celui qui est déjà parti va au bout, d'où
+            // le dépassement d'une unité (deux pour un harnais SQL de modification) que le
+            // miroir de budget d'ExecutionClient prévoit.
+            if (!results.isEmpty() && (exhausted || System.nanoTime() >= deadline)) {
+                if (!exhausted) {
+                    log.warn("Budget d'évaluation dépassé ({} ms, {} harnais sur {} évalués) : "
+                            + "les harnais restants ne sont pas lancés",
+                            budgetMs, results.size(), request.testCases().size());
+                    exhausted = true;
+                }
+                results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), false,
+                        "Non évalué : budget d'évaluation dépassé (les harnais précédents ont "
+                                + "consommé le temps alloué à cette correction)."));
+                continue;
+            }
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
             results.add(runOne(request.language(), request.code(), testCase, newNonce(),
                     request.timeoutMs()));

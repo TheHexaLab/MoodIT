@@ -70,6 +70,54 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void budget_depasse_les_harnais_restants_ne_sont_pas_lances() {
+        // Le chemin interprété lance un conteneur et prend une place PAR HARNAIS (100 autorisés) :
+        // sans échéance, une correction occupait le sandbox des heures après que l'appelant a
+        // renoncé, et core devait budgéter un délai de lecture du même ordre (#216). Budget à 0 :
+        // le PREMIER harnais part quand même (un budget mal réglé dégrade, il ne vide pas la
+        // correction de tout verdict réel), les suivants reçoivent un verdict explicite.
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        service.interpretedBudgetMs = 0;
+
+        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
+                "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2),
+                        new TestCaseInput("c", "return True", 3))));
+
+        assertThat(results).hasSize(3);
+        // Le premier est réellement évalué…
+        assertThat(results.get(0).name()).isEqualTo("a");
+        assertThat(results.get(0).passed()).isTrue();
+        // …les suivants ne sont pas lancés : verdict NON réussi, poids conservé (la note reste
+        // calculable), détail explicite pour le prof.
+        assertThat(results).extracting(TestResult::name).containsExactly("a", "b", "c");
+        assertThat(results.get(1).passed()).isFalse();
+        assertThat(results.get(1).weight()).isEqualTo(2);
+        assertThat(results.get(1).detail()).contains("budget d'évaluation dépassé");
+        assertThat(results.get(2).weight()).isEqualTo(3);
+        assertThat(results.get(2).detail()).contains("budget d'évaluation dépassé");
+        // Un SEUL passage au runner : c'est la garantie de capacité, pas seulement un libellé.
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void budget_large_tous_les_harnais_sont_evalues() {
+        // Contrôle négatif du test ci-dessus : avec le budget par défaut (15 min), l'échéance
+        // n'intervient jamais — sinon le test précédent passerait pour la mauvaise raison.
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+
+        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
+                "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 1),
+                        new TestCaseInput("c", "return True", 1))));
+
+        assertThat(results).extracting(TestResult::passed).containsExactly(true, true, true);
+        verify(runner, times(3)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
     void passes_when_harness_emits_the_nonce() {
         // Harnais réussi = il a écrit le nonce sur stderr.
         pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));

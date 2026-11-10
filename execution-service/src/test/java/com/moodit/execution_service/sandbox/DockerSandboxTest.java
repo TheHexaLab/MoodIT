@@ -243,6 +243,34 @@ class DockerSandboxTest {
     }
 
     @Test
+    void un_conteneur_created_est_balaye_seulement_passe_le_delai_de_grace() {
+        // « created » = la fenêtre entre createContainerCmd et startContainerCmd. Récente, elle
+        // appartient peut-être à une AUTRE instance en train de démarrer sa notation : la
+        // balayer ferait échouer celle-ci (502, tentative supprimée). Ancienne, personne ne la
+        // démarrera plus, et rien d'autre ne la ramasse (hors projet compose).
+        assertThat(DockerSandbox.removable(container("created", System.currentTimeMillis() / 1000)))
+                .isFalse();
+        long vieux = (System.currentTimeMillis() - DockerSandbox.CREATED_GRACE_MS - 1000) / 1000;
+        assertThat(DockerSandbox.removable(container("created", vieux))).isTrue();
+        // Date absente (champ non rempli par le démon) : on s'abstient plutôt que de risquer
+        // de tuer une notation en vol.
+        assertThat(DockerSandbox.removable(container("created", 0))).isFalse();
+        // Statuts TERMINÉS : balayés sans condition d'âge, quel que soit la casse du statut.
+        assertThat(DockerSandbox.removable(container("exited", System.currentTimeMillis() / 1000)))
+                .isTrue();
+        assertThat(DockerSandbox.removable(container("Created", System.currentTimeMillis() / 1000)))
+                .isFalse();
+        assertThat(DockerSandbox.removable(container(null, 0))).isTrue();
+    }
+
+    private static com.github.dockerjava.api.model.Container container(String state, long createdSeconds) {
+        var container = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(container.getState()).thenReturn(state);
+        org.mockito.Mockito.when(container.getCreated()).thenReturn(createdSeconds);
+        return container;
+    }
+
+    @Test
     void balayage_silencieux_si_le_demon_est_injoignable() {
         // Un démon absent ne doit pas empêcher le service de démarrer.
         assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
