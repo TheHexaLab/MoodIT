@@ -5,7 +5,12 @@ FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8
 # typescript : tarball vérifié par EMPREINTE (#24, comme le jar JUnit et les NuGet) — une
 # version npm peut être republiée, le hash non. Mise à jour : `npm pack typescript@<v>` puis
 # `sha256sum` du .tgz.
-RUN apt-get update \
+# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# une panne DNS passagere du runner (archive.ubuntu.com non resolu) vide la liste des
+# paquets. `Error-Mode=any` est indispensable : sans lui, `apt-get update` rend 0 alors
+# qu'il n'a RIEN telecharge, le repli ne se declenche jamais, et l'echec ressort plus loin
+# en « Unable to locate package » — un message qui accuse le paquet au lieu du reseau.
+RUN (apt-get -o APT::Update::Error-Mode=any update || (sleep 5 && apt-get -o APT::Update::Error-Mode=any update) || (sleep 15 && apt-get -o APT::Update::Error-Mode=any update)) \
  && apt-get install -y --no-install-recommends python3 \
  && rm -rf /var/lib/apt/lists/* \
  && cd /tmp \
