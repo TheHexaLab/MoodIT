@@ -793,6 +793,93 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void le_chemin_du_prof_qui_part_des_valeurs_par_defaut() {
+        // Code de départ de la base (V2), complété par l'étudiant, noté par le GABARIT de harnais
+        // de la base (V9) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
+        // le vérifiait, et le gabarit C# y appelait une méthode qui n'existe pas.
+        record Cas(String langage, String harnais, String code) { }
+        List<Cas> cas = List.of(
+                new Cas("Java", "return Solution.solution() == 42;", """
+                        public class Solution {
+                            public static int solution() {
+                                return 42;
+                            }
+
+                            public static void main(String[] args) {
+                                System.out.println(solution());
+                            }
+                        }
+                        """),
+                new Cas("C#", "return Solution.solution() == 42;", """
+                        using System;
+
+                        class Solution {
+                            public static int solution() {
+                                return 42;
+                            }
+
+                            public static void Main() {
+                                Console.WriteLine(solution());
+                            }
+                        }
+                        """),
+                new Cas("Go", "return solution() == 42", """
+                        package main
+
+                        import "fmt"
+
+                        func solution() int {
+                        \treturn 42
+                        }
+
+                        func main() { fmt.Println(solution()) }
+                        """),
+                new Cas("Rust", "solution() == 42", """
+                        fn solution() -> i32 {
+                            42
+                        }
+
+                        fn main() { println!("{}", solution()); }
+                        """),
+                new Cas("C", "return solution() == 42;", """
+                        #include <stdio.h>
+
+                        int solution(void) {
+                            return 42;
+                        }
+
+                        int main(void) {
+                            printf("%d\\n", solution());
+                            return 0;
+                        }
+                        """),
+                new Cas("C++", "return solution() == 42;", """
+                        #include <iostream>
+
+                        int solution() {
+                            return 42;
+                        }
+
+                        int main() {
+                            std::cout << solution() << std::endl;
+                            return 0;
+                        }
+                        """));
+        for (Cas c : cas) {
+            TestResult bon = note(c.langage(), c.harnais(), c.code());
+            assertThat(bon.passed())
+                    .as("valeurs par défaut en " + c.langage() + " : "
+                            + (bon.detail() == null ? "" : bon.detail()))
+                    .isTrue();
+            // Et une mauvaise réponse échoue : le test mesure bien la notation, pas un « tout
+            // passe ».
+            assertThat(note(c.langage(), c.harnais(), c.code().replace("42", "41")).passed())
+                    .as("mauvaise réponse en " + c.langage())
+                    .isFalse();
+        }
+    }
+
+    @Test
     void chemins_d_erreur_echouent_proprement() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.
