@@ -2135,7 +2135,6 @@ def go_object_api(source):
         # ce constructeur n'était pas reconnu et la question n'était pas proxifiée.
         if (retour or "").lstrip("*") not in structs or nom == "main":
             continue
-        retour_cible = (retour or "").lstrip("*")
         types = _go_param_types(params)
         if types is not None:
             cible = (retour or "").lstrip("*")
@@ -2189,7 +2188,7 @@ type mooditRep struct {
 '''
 
 
-GO_CONV = {"int": "int(mooditNombre(%s))", "int64": "int64(mooditNombre(%s))",
+GO_CONV = {"int": "int(mooditEntier(%s))", "int64": "mooditEntier(%s)",
            "float64": "mooditNombre(%s)", "bool": "%s.(bool)", "string": "%s.(string)"}
 
 
@@ -2252,22 +2251,26 @@ def go_object_stub(objets, champs=None):
         if typ in champs:
             morceaux.append("type %s struct {\n%s\n}"
                             % (typ, "\n".join("    %s %s" % (n, t) for n, t in champs[typ])))
-            for nom, types, _ in ctors:
+            for nom, types, pointeur in ctors:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
                 lectures = ", ".join(
                     "%s: %s" % (n, GO_CONV[t] % ("mooditIndex(champs, %d)" % i))
                     for i, (n, t) in enumerate(champs[typ]))
-                morceaux.append('''func %s(%s) %s {
+                # Le constructeur garde SA signature ici aussi : la branche à poignée le faisait
+                # déjà, pas celle-ci, et un harnais qui rangeait le résultat dans un *T (ou le
+                # comparait à nil) ne compilait que d'un côté.
+                morceaux.append('''func %s(%s) %s%s {
     champs := mooditChamps("%s", []interface{}{%s})
-    return %s{%s}
-}''' % (nom, params, typ, nom, args, typ, lectures))
+    return %s%s{%s}
+}''' % (nom, params, "*" if pointeur else "", typ, nom, args,
+        "&" if pointeur else "", typ, lectures))
             valeurs = ", ".join("o.%s" % n for n, _ in champs[typ])
             for retour, nom, types in methodes:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
                 conv = GO_CONV[retour] % (
-                    'mooditMethode(int(mooditNombre(mooditNouvelle("%s", []interface{}{%s}))), '
+                    'mooditMethode(int(mooditEntier(mooditNouvelle("%s", []interface{}{%s}))), '
                     '"%s.%s", []interface{}{%s})' % (typ, valeurs, typ, nom, args))
                 morceaux.append('''func (o %s) %s(%s) %s {
     return %s
@@ -2280,7 +2283,7 @@ def go_object_stub(objets, champs=None):
             # Le constructeur garde SA signature : `*Rectangle` s'il rend un pointeur, pour que
             # le harnais du prof s'écrive exactement comme avec le code de l'étudiant.
             morceaux.append('''func %s(%s) %s%s {
-    return %s%s{__h: int(mooditNombre(mooditNouvelle("%s", []interface{}{%s})))}
+    return %s%s{__h: int(mooditEntier(mooditNouvelle("%s", []interface{}{%s})))}
 }''' % (nom, params, "*" if pointeur else "", typ,
         "&" if pointeur else "", typ, nom, args))
         for retour, nom, types in methodes:
@@ -2346,7 +2349,7 @@ def go_grader_source(methods, harness_code, nonce, objets=(), champs=None):
     for retour, nom, types in methods:
         params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        conv = {"int": "int(mooditNombre(v))", "int64": "int64(mooditNombre(v))",
+        conv = {"int": "int(mooditEntier(v))", "int64": "mooditEntier(v)",
                 "float64": "mooditNombre(v)", "bool": "v.(bool)",
                 "string": "v.(string)"}[retour]
         bouchons.append("""func %s(%s) %s {
@@ -2362,6 +2365,7 @@ import (
     "encoding/json"
     "fmt"
     "os"
+    "strings"
 )
 %s
 var mooditLecteur = bufio.NewReader(os.Stdin)
@@ -2375,8 +2379,30 @@ func mooditId() string {
 }
 
 func mooditNombre(v interface{}) float64 {
+    if n, ok := v.(json.Number); ok {
+        f, _ := n.Float64()
+        return f
+    }
     f, _ := v.(float64)
     return f
+}
+
+// Entier EXACT. Le JSON décodé dans un interface{} donne un float64, qui perd des unités
+// au-delà de 2^53 : une factorielle ou une somme de grands nombres revenait fausse, et une
+// réponse juste était notée fausse. Les nombres sont donc décodés en json.Number (UseNumber).
+func mooditEntier(v interface{}) int64 {
+    if n, ok := v.(json.Number); ok {
+        i, err := n.Int64()
+        if err == nil {
+            return i
+        }
+        f, _ := n.Float64()
+        return int64(f)
+    }
+    if f, ok := v.(float64); ok {
+        return int64(f)
+    }
+    return 0
 }
 
 func mooditNouvelle(nom string, args []interface{}) interface{} {
@@ -2418,7 +2444,9 @@ func mooditEnvoie(req mooditReq) interface{} {
         var rep mooditRep
         // Le code noté partage ce flux : seule une réponse portant l'identifiant DE CET APPEL
         // compte. Tout le reste est du bruit, ou une tentative de devancer la question.
-        if json.Unmarshal([]byte(ligne), &rep) != nil || rep.Id != id {
+        dec := json.NewDecoder(strings.NewReader(ligne))
+        dec.UseNumber()
+        if dec.Decode(&rep) != nil || rep.Id != id {
             continue
         }
         if !rep.Ok {
@@ -2468,18 +2496,12 @@ def go_server_source(methods, objets=(), champs=None):
     cas_new, cas_methode = go_object_dispatch(objets, champs)
     cas = []
     for retour, nom, types in methods:
-        args = []
-        for i, t in enumerate(types):
-            if t in ("int", "int64"):
-                args.append("%s(mooditNombre(req.Args[%d]))" % (t, i))
-            elif t == "float64":
-                args.append("mooditNombre(req.Args[%d])" % i)
-            elif t == "bool":
-                args.append("req.Args[%d].(bool)" % i)
-            else:
-                args.append("req.Args[%d].(string)" % i)
-        cas.append('        case "%s":\n            valeur = %s(%s)'
-                   % (nom, nom, ", ".join(args)))
+        # UNE seule table de conversion, partagée avec l'aiguillage des objets et les bouchons du
+        # noteur : cette boucle-ci avait la sienne, et elle est restée sur `mooditNombre` quand
+        # les entiers sont passés à la lecture exacte — une somme au-delà de 2^53 revenait fausse
+        # sur le chemin le plus courant, celui de l'appel de fonction.
+        args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+        cas.append('        case "%s":\n            valeur = %s(%s)' % (nom, nom, args))
     return '''package main
 
 import (
@@ -2487,11 +2509,34 @@ import (
     "encoding/json"
     "fmt"
     "os"
+    "strings"
 )
 %s
 func mooditNombre(v interface{}) float64 {
+    if n, ok := v.(json.Number); ok {
+        f, _ := n.Float64()
+        return f
+    }
     f, _ := v.(float64)
     return f
+}
+
+// Entier EXACT. Le JSON décodé dans un interface{} donne un float64, qui perd des unités
+// au-delà de 2^53 : une factorielle ou une somme de grands nombres revenait fausse, et une
+// réponse juste était notée fausse. Les nombres sont donc décodés en json.Number (UseNumber).
+func mooditEntier(v interface{}) int64 {
+    if n, ok := v.(json.Number); ok {
+        i, err := n.Int64()
+        if err == nil {
+            return i
+        }
+        f, _ := n.Float64()
+        return int64(f)
+    }
+    if f, ok := v.(float64); ok {
+        return int64(f)
+    }
+    return 0
 }
 
 var mooditObjets []interface{}
@@ -2504,7 +2549,9 @@ func mooditServe() {
             return
         }
         var req mooditReq
-        if json.Unmarshal([]byte(ligne), &req) != nil {
+        dec := json.NewDecoder(strings.NewReader(ligne))
+        dec.UseNumber()
+        if dec.Decode(&req) != nil {
             continue
         }
         rep := mooditRep{Ok: true, Id: req.Id}
@@ -3040,7 +3087,13 @@ def rust_object_stub(objets, champs=None):
         if typ in champs:
             declaration = "struct %s {\n%s\n}" % (
                 typ, "\n".join("    %s: %s," % (n, t) for n, t in champs[typ]))
-            envoi_champs = "".join(' + "|" + &self.%s.to_string()' % n for n, _ in champs[typ])
+            # Les champs suivent la MÊME sérialisation que les arguments : le lecteur d'en face
+            # déhexe, donc un champ String envoyé en clair revenait mutilé (une valeur commençant
+            # par « H » surtout), et une réponse juste était notée fausse.
+            envoi_champs = "".join(
+                ' + "|" + &moodit_hexe(&self.%s)' % n if t == "String"
+                else ' + "|" + &self.%s.to_string()' % n
+                for n, t in champs[typ])
             corps = []
             # Une fonction associée CONSTRUCTRICE (Rectangle::new) reste proxifiée : elle
             # s'exécute chez l'étudiant et le bouchon relit les champs de son résultat.
@@ -3127,8 +3180,10 @@ def rust_object_dispatch(objets, champs=None):
                     for i, t in enumerate(types))
                 appel = "%s::%s(%s)" % (typ, nom, ", ".join("a%d" % i for i in range(len(types))))
                 retours = "".join(
-                    '                                + "|" + &moodit_cree.%s.to_string()' % n
-                    for n, _ in champs[typ])
+                    '                                + "|" + &moodit_hexe(&moodit_cree.%s)' % n
+                    if t == "String"
+                    else '                                + "|" + &moodit_cree.%s.to_string()' % n
+                    for n, t in champs[typ])
                 cas.append('''            "new|%s" => {
 %s
                 let moodit_cree = %s;
@@ -3383,6 +3438,11 @@ def cs_envoi(types):
     culture INVARIANTE (une concaténation implicite donnait « 3,14 », illisible d'en face)."""
     return "".join(
         ' + "|" + MooditRpc.Hexe(a%d)' % i if t == "string"
+        # « R » (aller-retour) et non le format « G » par défaut : ce dernier n'est pas garanti
+        # exact, et le runner tourne sur mono. Un double arrondi à l'affichage faisait noter
+        # fausse une réponse juste, comme le %g corrigé en C/C++.
+        else ' + "|" + a%d.ToString("R", '
+             'System.Globalization.CultureInfo.InvariantCulture)' % i if t == "double"
         else ' + "|" + Convert.ToString(a%d, '
              'System.Globalization.CultureInfo.InvariantCulture)' % i
         for i, t in enumerate(types))
@@ -3491,9 +3551,11 @@ static class MooditRpc {
 }
 
 public class %s {
+    // Pas de constructeur « à poignée » : personne ne l'appelait, et avec un constructeur du
+    // code soumis prenant un seul int — `new Compteur(0)`, l'idiome le plus courant — les deux
+    // signatures devenaient identiques. C# n'autorise pas la surcharge par accessibilité : le
+    // noteur ne compilait plus et la question rendait 0 sans diagnostic.
     private readonly int __h;
-
-    private %s(int h) { __h = h; }
 %s
 %s
 }
@@ -3519,7 +3581,7 @@ public static class MooditGrader {
         return 1;
     }
 }
-''' % (classe, classe, cs_object_stub(classe, ctors, instance), "\n\n".join(bouchons),
+''' % (classe, cs_object_stub(classe, ctors, instance), "\n\n".join(bouchons),
        "\n".join("        " + l if l.strip() else l
                  for l in (harness_code or "").splitlines()), nonce)
 
@@ -3568,6 +3630,15 @@ public static class MooditServer {
     /** Valeur de retour sur le fil : une chaîne part encodée. */
     static string Sortie(object v) {
         if (v is string) { return Hexe((string) v); }
+        // « R » : aller-retour exact d'un double, que le format « G » par défaut ne garantit pas.
+        if (v is double) {
+            return ((double) v).ToString("R",
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
+        if (v is float) {
+            return ((float) v).ToString("R",
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
         return Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture);
     }
 

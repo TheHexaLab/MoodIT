@@ -113,13 +113,6 @@ public class DockerEvaluator {
     }
 
     /**
-     * Marqueur OBLIGATOIRE d'un harnais au format « vrai test du framework » (#116), par
-     * langage du runner. Un harnais d'avant cette version est un CORPS qui renvoie un booléen :
-     * il ne compile pas dans le runner, et l'étudiant n'y lirait qu'un « Échec de compilation »
-     * incompréhensible. V7 ne convertit que les gabarits (questions futures) : celles déjà en
-     * base doivent être converties à la main, d'où ce diagnostic explicite.
-     */
-    /**
      * Ce harnais est-il un VRAI test du framework ? Faux = harnais booléen, qui prend le chemin
      * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
      */
@@ -143,16 +136,6 @@ public class DockerEvaluator {
         };
     }
 
-    /** Forme ATTENDUE, citée dans le diagnostic (lisible par un prof, contrairement à la regex). */
-    private static String frameworkExample(String runnerLanguage) {
-        return switch (runnerLanguage) {
-            case "java" -> "@Test (ou @ParameterizedTest…)";
-            case "csharp" -> "[Test] (ou [TestCase(…)]…)";
-            case "go" -> "func TestXxx(t *testing.T)";
-            case "rust" -> "#[test]";
-            default -> "MOODIT_TEST(nom)";
-        };
-    }
 
     /** {@code maxWallMs} : plafond du mur du conteneur — {@link #PUBLIC_WALL_MS} hors correction interne. */
     public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,

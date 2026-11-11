@@ -1585,6 +1585,55 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
         self.assertIn("CultureInfo.InvariantCulture", supervisor.cs_envoi(["double"]))
         self.assertEqual(supervisor.CS_LECTURE["string"], "MooditRpc.Dehexe(v)")
 
+    def test_csharp_pas_de_constructeur_a_poignee(self):
+        # Il collisionnait avec un constructeur du code soumis prenant un seul int, et C#
+        # n'autorise pas la surcharge par accessibilité : le noteur ne compilait plus.
+        source = supervisor.cs_grader_source([], "return true;", "N", "Compteur",
+                                             ctors=[["int"]],
+                                             instance=[("int", "Plus", ["int"])])
+        self.assertNotIn("private Compteur(int h)", source)
+        self.assertIn("public Compteur(int a0)", source)
+
+    def test_rust_champ_chaine_capture_part_en_hexadecimal(self):
+        objets = [("Personne", [], [("String", "carte", [])])]
+        champs = {"Personne": [("nom", "String"), ("age", "i32")]}
+        bouchon = supervisor.rust_object_stub(objets, champs)
+        # Le lecteur d'en face déhexe : un champ String envoyé en clair revenait mutilé.
+        self.assertIn("&moodit_hexe(&self.nom)", bouchon)
+        self.assertIn("&self.age.to_string()", bouchon)
+
+    def test_go_entiers_exacts_au_dela_de_deux_puissance_53(self):
+        # Le JSON décodé dans un interface{} donne un float64 : au-delà de 2^53, une somme de
+        # grands nombres revenait fausse, et une réponse juste était notée fausse.
+        self.assertEqual(supervisor.GO_CONV["int64"], "mooditEntier(%s)")
+        self.assertEqual(supervisor.GO_CONV["int"], "int(mooditEntier(%s))")
+        for source in (supervisor.go_grader_source([("int64", "somme", ["int64"])], "true", "N"),
+                       supervisor.go_server_source([("int64", "somme", ["int64"])])):
+            self.assertIn("dec.UseNumber()", source)
+            self.assertIn("func mooditEntier(", source)
+            # Une seule table de conversion : l'aiguillage du serveur avait la sienne, restée sur
+            # la lecture en flottant. Aucun chemin ne doit lire un entier autrement.
+            self.assertNotIn("int64(mooditNombre(", source)
+            self.assertNotIn("int(mooditNombre(", source)
+        self.assertIn("valeur = somme(mooditEntier(req.Args[0]))",
+                      supervisor.go_server_source([("int64", "somme", ["int64"])]))
+
+    def test_go_constructeur_pointeur_en_capture_de_champs(self):
+        # La branche à poignée gardait la signature du constructeur, pas celle-ci : un harnais
+        # rangeant le résultat dans un *T ne compilait que d'un côté.
+        objets = [("Rectangle", [("NewRectangle", ["int", "int"], True)],
+                   [("int", "aire", [])])]
+        champs = {"Rectangle": [("largeur", "int"), ("hauteur", "int")]}
+        bouchon = supervisor.go_object_stub(objets, champs)
+        self.assertIn("func NewRectangle(a0 int, a1 int) *Rectangle {", bouchon)
+        self.assertIn("return &Rectangle{", bouchon)
+
+    def test_csharp_double_en_aller_retour_exact(self):
+        # Le format « G » par défaut n'est pas garanti exact, et le runner tourne sur mono.
+        self.assertIn('a0.ToString("R"', supervisor.cs_envoi(["double"]))
+        self.assertIn('+ "|" + MooditRpc.Hexe(a0)', supervisor.cs_envoi(["string"]))
+        self.assertIn('ToString("R"', supervisor.cs_server_source("Solution"))
+
     def test_verdict_rpc_est_fail_closed(self):
         self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", ""), (True, None))
         # Sans nonce : échec, quoi qu'il arrive — noteur planté, jeton non armé, flux vide.

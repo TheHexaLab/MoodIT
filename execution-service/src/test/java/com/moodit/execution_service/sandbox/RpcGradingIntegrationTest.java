@@ -606,6 +606,42 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void idiomes_et_valeurs_que_la_revue_a_trouves_non_couverts() {
+        // 1. C# : un constructeur prenant UN SEUL int — `new Compteur(0)`, l'idiome le plus
+        //    courant — collisionnait avec le constructeur « à poignée » du bouchon. Le noteur ne
+        //    compilait plus et la question rendait 0 sans diagnostic.
+        assertThat(note("C#", "return new Compteur(10).Plus(5) == 15;", """
+                class Compteur {
+                    int valeur;
+                    public Compteur(int depart) { valeur = depart; }
+                    public int Plus(int n) { return valeur + n; }
+                }
+                """).passed()).isTrue();
+
+        // 2. Rust : un champ String en capture de champs partait en clair alors que l'autre côté
+        //    le décodait — une valeur commençant par « H » revenait mutilée.
+        assertThat(note("Rust", "let p = Personne { nom: String::from(\"Hugo\"), age: 7 };\n"
+                + "p.carte() == \"Hugo:7\"", """
+                struct Personne {
+                    nom: String,
+                    age: i32,
+                }
+
+                impl Personne {
+                    fn carte(&self) -> String {
+                        format!("{}:{}", self.nom, self.age)
+                    }
+                }
+                """).passed()).isTrue();
+
+        // 3. Go : tout entier traversait un float64 (JSON), donc perdait des unités au-delà
+        //    de 2^53. Une somme de grands nombres revenait fausse.
+        assertThat(note("Go", "return somme(9007199254740993, 2) == 9007199254740995",
+                "package main\n\nfunc somme(a int64, b int64) int64 { return a + b }\n")
+                .passed()).isTrue();
+    }
+
+    @Test
     void chemins_d_erreur_echouent_proprement() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.
