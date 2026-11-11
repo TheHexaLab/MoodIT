@@ -240,7 +240,7 @@ class ExecutionIntegrationTest {
     }
 
     // Les langages COMPILÉS ne passent plus par Piston (#116) : leur filet d'intégration vit dans
-    // DockerRunnerIntegrationTest (conteneurs runner + superviseur + matrice anti-triche).
+    // RpcGradingIntegrationTest (notation non falsifiable) et RunnerSandboxIntegrationTest.
 
     /** L'image runner du runtime est-elle construite ? Même politique que {@link #gate}. */
     private static void requireRuntime(String runtime) {

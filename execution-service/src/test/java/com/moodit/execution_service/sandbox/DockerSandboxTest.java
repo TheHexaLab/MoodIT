@@ -97,7 +97,7 @@ class DockerSandboxTest {
     }
 
     // ── Cycle de vie du conteneur, client Docker MOCKÉ (le vrai démon relève de
-    // DockerRunnerIntegrationTest ; ici on vérifie l'orchestration et le nettoyage) ──
+    // RpcGradingIntegrationTest ; ici on vérifie l'orchestration et le nettoyage) ──
 
     private com.github.dockerjava.api.DockerClient dockerMock(
             com.github.dockerjava.api.command.CreateContainerCmd create,
@@ -308,8 +308,12 @@ class DockerSandboxTest {
                 com.github.dockerjava.api.model.Capability.DAC_OVERRIDE,
                 com.github.dockerjava.api.model.Capability.SETUID,
                 com.github.dockerjava.api.model.Capability.SETGID,
-                com.github.dockerjava.api.model.Capability.KILL,
-                com.github.dockerjava.api.model.Capability.SYS_PTRACE);
+                com.github.dockerjava.api.model.Capability.KILL);
+        // SYS_PTRACE n'est PLUS accordée : elle servait à tracer le code soumis pour détecter une
+        // lecture du harnais, et le harnais n'entre plus dans rien qu'il puisse atteindre. Un
+        // conteneur qui n'a pas cette capacité ne peut tracer aucun processus, point.
+        assertThat(hostConfig.getCapAdd())
+                .doesNotContain(com.github.dockerjava.api.model.Capability.SYS_PTRACE);
         // Pas d'élévation de privilège possible depuis l'UID étudiant (setuid, fscaps).
         assertThat(hostConfig.getSecurityOpts()).containsExactly("no-new-privileges");
 

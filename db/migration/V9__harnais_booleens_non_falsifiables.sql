@@ -15,10 +15,11 @@
 -- a plus rien à attaquer chez lui. L'appel de fonction et la POO restent naturels : les objets
 -- sont proxifiés par POIGNÉE (l'instance vit chez l'étudiant).
 --
--- Portée : seuls les GABARITS changent (questions futures). Les harnais déjà écrits au format
--- framework continuent de fonctionner : les deux chemins coexistent, le superviseur choisit
--- d'après la forme du harnais. Aucune conversion automatique n'est possible — une classe de test
--- ne se transforme pas en expression booléenne — et aucune question existante n'est cassée.
+-- Portée : seuls les GABARITS changent (questions futures). Le format framework a ensuite été
+-- RETIRÉ dans cette même PR : il n'avait jamais été déployé (main était à V2), donc aucune
+-- question existante n'en dépendait, et le garder laissait un prof choisir sans le savoir un
+-- chemin dont le verdict était contournable. Un harnais qui en porte le marqueur est désormais
+-- refusé avec un diagnostic, et le corps booléen est la seule forme notée.
 -- V2 et V7 étant fusionnées, on corrige par UPDATE (Flyway forward-only).
 UPDATE Language SET harness_template = ht.tpl
 FROM (VALUES

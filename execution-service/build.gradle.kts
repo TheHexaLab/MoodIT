@@ -88,7 +88,8 @@ pitest {
 	// de démon) — tailles de tmpfs dérivées, mode 0600 du tar et ordre de la sentinelle, statuts
 	// filtrés du balayage des orphelins. Autant de décisions qui portent des propriétés de
 	// sécurité : les exclure rétrécissait le dénominateur du seuil de mutation sur du code neuf.
-	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest", "*DockerRunnerIntegrationTest")
+	excludedTestClasses = setOf("*ApplicationTests", "*ExecutionIntegrationTest",
+		"*RpcGradingIntegrationTest", "*RunnerSandboxIntegrationTest")
 	threads = 4
 	outputFormats = setOf("XML", "HTML")
 	timestampedReports = false

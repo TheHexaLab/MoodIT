@@ -28,8 +28,10 @@ import java.util.concurrent.TimeUnit;
  * Lance le CONTENEUR RUNNER jetable d'une notation compilée (#116) et en rapporte la sortie JSON
  * du superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
  * tmpfs bornés {@code /box} et {@code /tmp}, mémoire/PID/CPU bornés, toutes les capacités
- * retirées sauf le minimum du superviseur, {@code no-new-privileges} ; {@code SYS_PTRACE} gardé
- * pour que le superviseur trace le processus étudiant (détection des lectures du harnais). Les
+ * retirées sauf le minimum du superviseur, {@code no-new-privileges}. {@code SYS_PTRACE} n'est
+ * PLUS accordée : elle servait à tracer le code soumis pour détecter une lecture du harnais, ce
+ * qui n'a plus d'objet depuis que le harnais n'entre dans aucun fichier ni processus qu'il puisse
+ * atteindre (#116). Les
  * fichiers du job sont copiés AVANT le démarrage dans la zone de transit de l'image
  * ({@code /opt/moodit/staging}, 0600 root — {@code docker cp} ne sait pas écrire dans un
  * tmpfs), puis déplacés dans le tmpfs {@code /box} par le superviseur (pas de montage hôte :
@@ -245,12 +247,19 @@ public class DockerSandbox {
                             "/dev/shm", "rw,nosuid,noexec,size=" + shmSizeMb() + "m"))
                     // Capacités : on retire TOUT puis on rend le strict nécessaire au superviseur
                     // root — chown/droits sur les fichiers du job (CHOWN, FOWNER, DAC_OVERRIDE),
-                    // bascule vers l'UID étudiant (SETUID, SETGID), nettoyage des groupes de
-                    // processus (KILL) et traçage strace du processus étudiant (SYS_PTRACE).
+                    // bascule vers les UID du couple noteur/étudiant (SETUID, SETGID) et
+                    // nettoyage des groupes de processus (KILL).
+                    //
+                    // SYS_PTRACE N'EST PLUS ACCORDÉE. Elle servait à tracer le code soumis
+                    // (strace) pour DÉTECTER une lecture du harnais — nécessaire quand le harnais
+                    // vivait dans un fichier que ce code pouvait ouvrir, c'est-à-dire sur le
+                    // chemin « vraie classe de test du framework », retiré de #116. Le harnais
+                    // n'entre plus dans aucun processus ni fichier accessible à l'étudiant : il
+                    // n'y a rien à surveiller, et le conteneur perd donc le droit de tracer quoi
+                    // que ce soit.
                     .withCapDrop(Capability.ALL)
                     .withCapAdd(Capability.CHOWN, Capability.FOWNER, Capability.DAC_OVERRIDE,
-                            Capability.SETUID, Capability.SETGID, Capability.KILL,
-                            Capability.SYS_PTRACE)
+                            Capability.SETUID, Capability.SETGID, Capability.KILL)
                     .withSecurityOpts(List.of("no-new-privileges"))
                     .withAutoRemove(false);
             CreateContainerResponse created = docker.createContainerCmd(image)

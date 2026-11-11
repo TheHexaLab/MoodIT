@@ -10,8 +10,7 @@ les **dépendances fragiles** à connaître avant une mise à jour, et le **rés
 | Appel de fonction / classe (interprétés) | Python, JavaScript, TypeScript, PHP, Bash | **RPC 2 processus** | nonce émis par le noteur |
 | Vues / composants | JSX, TSX | **RPC + proxy DOM** | nonce émis par le noteur |
 | Données inertes | JSON, HTML | contenu non exécuté | nonce (harnais JS sur `data`/`doc`) |
-| Compilés, harnais **booléen** | Go, Rust, C, C++, C#, Java | **runner Docker + RPC 2 processus, 2 UID** | nonce émis par le noteur |
-| Compilés, harnais **framework** (héritage) | Go, Rust, C, C++, C#, Java | **runner Docker isolé** (#116, `docker/runners/`) | fail-closed multi-canaux + **canaris** |
+| Compilés | Go, Rust, C, C++, C#, Java | **runner Docker + RPC 2 processus, 2 UID** | nonce émis par le noteur |
 | Requête / état | SQL | **isolation 2 phases** (dump) | sortie encadrée par sentinelles au nonce |
 
 ### Isolation RPC (interprétés + JSX/TSX)
@@ -49,7 +48,7 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 
 Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-runner-*`
 (réseau coupé, mémoire/PID/CPU bornés). Dans le conteneur, un **superviseur** (root) compile,
-verrouille les sources en 700 et exécute le code soumis sous un **UID dédié** tracé par strace.
+verrouille les sources en 700 et exécute le code soumis sous un **UID dédié**.
 Deux formes de harnais coexistent, et c'est la forme qui décide du modèle.
 
 **Harnais booléen (la forme recommandée, et celle des gabarits) — verdict NON FALSIFIABLE.**
@@ -68,27 +67,23 @@ champs nommés en Go et Rust, où le langage n'a pas de constructeur. Les cinq c
 démontrés contre l'ancien modèle (lecture de l'artefact compilé, détournement du flux de sortie,
 interposition de `printf`, `dup2`, lecture de sa propre mémoire) n'ont plus de cible.
 
-**Harnais au format framework (héritage #116) — résiduel assumé.** Un harnais déjà écrit comme un
-vrai test du langage (JUnit, NUnit, go test, cargo test, `moodit_check.h`) continue de fonctionner,
-par l'ancien chemin : compilé AVEC le code de l'étudiant, verdict **fail-closed** gardé par des
-**canaris randomisés**. Cette forme est structurellement falsifiable, parce que le code noté
-partage le processus qui détient le secret et calcule le verdict : le verdict n'y est tenu pour
-infalsifiable en pratique qu'en **Java et Go**, et en **C, C++, C# et Rust** il subsiste un
-résiduel in-process que les canaris ne rattrapent pas systématiquement — un tricheur peut
-conditionner sa falsification sur « ma fonction a-t-elle été appelée », ce que les cas canaris ne
-font jamais. **Pour un examen noté, préférer le harnais booléen.**
+**Il n'y a plus qu'un modèle.** Le format « vraie classe de test du framework » (JUnit, NUnit,
+`go test`, `cargo test`, `moodit_check.h`) a existé dans une version intermédiaire de #116 : il
+compilait le harnais AVEC le code de l'étudiant, donc le processus qui détenait le secret et
+calculait le verdict était celui que l'étudiant contrôle. Cinq canaux de forge y ont été démontrés
+et fermés l'un après l'autre, et il en restait toujours un. Ce format est **retiré** : un harnais
+qui en porte le marqueur est refusé avec un diagnostic, avant toute prise de place sandbox.
 
-**Détection : seul le mode framework en a besoin, et seul lui en a.** Les tentatives (lecture du
-harnais, rapport forgé) remontent en **événements** dans le détail des verdicts — `strace`,
-canaris, jeton, sommaire authentifié. Le mode booléen, lui, n'exécute **pas** le code soumis sous
-`strace` et ne produit aucun de ces événements : sa garantie est architecturale, pas
-observationnelle. Il n'y a rien à détecter quand il n'y a rien à atteindre, et un `strace`
-indisponible ne relâche donc rien de ce mode (contrairement au mode framework, cf.
-`deploy/DEPLOY.md`).
+**Plus de détection, et c'est le propos.** Le harnais et le nonce n'entrent dans aucun processus ni
+fichier que le code soumis puisse atteindre : il n'y a rien à surveiller. La capacité `SYS_PTRACE`
+n'est plus accordée au conteneur et `strace` a quitté les images — elles ne servaient qu'à repérer
+une lecture du harnais, nécessaire quand il vivait dans un fichier ouvrable. Les événements
+restants portent sur l'infrastructure (`budget_depasse`, `espace_sature`, `erreur_superviseur`) et
+sur les canaris, qui vérifient que la chaîne tranche encore dans les deux sens.
 
 Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
-`docker/runners/README.md`. Filet d'intégration (matrice anti-triche) :
-`DockerRunnerIntegrationTest`.
+`docker/runners/README.md`. Filets d'intégration : `RpcGradingIntegrationTest` (notation) et
+`RunnerSandboxIntegrationTest` (isolation du conteneur).
 
 ## Limites du bac à sable (#24)
 
@@ -134,5 +129,5 @@ calculer la bonne sortie) — c'est le problème classique des **cas de test con
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
   Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une boucle d'allocation
   tuée par la limite mémoire.
-- **Runner des compilés** : `DockerRunnerIntegrationTest` (même job CI ; construit d'abord les
+- **Runner des compilés** : `RpcGradingIntegrationTest` et `RunnerSandboxIntegrationTest` (même job CI ; construit d'abord les
   images `docker/runners/build.sh`). En local : démon Docker + images, sinon les tests s'ignorent.

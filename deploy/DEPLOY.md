@@ -145,7 +145,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 
 > **Déploiement du runner (#116) — rien à convertir.** Les DEUX formes de harnais compilé sont
 > notables, et c'est la forme qui choisit le chemin : un corps qui renvoie un **booléen** passe par
-> le modèle à deux processus et deux UID (verdict non falsifiable), un **vrai test du framework**
+> le modèle à deux processus et deux UID (verdict non falsifiable). Le format **vrai test du framework**
 > (JUnit, NUnit, go test, cargo test, `moodit_check.h`) par l'ancien chemin. Aucune question n'est
 > à retoucher avant un déploiement, dans un sens comme dans l'autre.
 >
@@ -278,7 +278,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
   comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,
   `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
-  `SYS_PTRACE` pour tracer le processus étudiant et détecter les lectures du harnais). Dans le conteneur, le code étudiant
+  aucune capacité au-delà du minimum du superviseur root). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 3 en prod) pendant
@@ -302,18 +302,12 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   et `EXEC_MAX_CONCURRENT` à la mesure du groupe (`nb_étudiants × durée_correction / places`,
   la RAM suit — voir « coût / dimensionnement »), étaler les soumissions, ou attendre le
   rejouage automatique côté core (suivi ouvert — il n'existe pas encore).
-- **`strace` : alerte d'exploitation à surveiller dans les journaux.** C'est lui qui permet de
-  détecter une tentative de lecture du harnais ou du binaire de test. S'il devient inutilisable
-  (capacité `SYS_PTRACE` absente, `strace` retiré d'une image de base), la notation **continue** —
-  jeton, canaris, sommaire authentifié et invariant « un test du harnais a tourné » restent armés,
-  et refuser punirait une classe entière pour une panne qui ne lui est pas imputable —, mais ces
-  deux détections sont **désarmées pour tout le job**. `execution-service` le journalise alors en
-  **ERREUR** (« strace inutilisable : détection des lectures DÉSARMÉE ») : à traiter comme une
-  alerte, pas comme un avertissement de routine. La matrice anti-triche de la CI couvre le cas
-  avant déploiement (un `strace` cassé y fait tomber les tests de détection de lecture), pas après.
-  Avec un **harnais booléen** (la forme des gabarits), ces détections ne portent de toute façon
-  pas le verdict : il repose sur la séparation en deux processus sous deux UID, et un `strace`
-  indisponible ne la relâche pas.
+- **`strace` n'est plus utilisé, et la capacité `SYS_PTRACE` n'est plus accordée.** Elles
+  servaient à tracer le code soumis pour détecter une lecture du harnais — nécessaire quand le
+  harnais vivait dans un fichier qu'il pouvait ouvrir, c'est-à-dire sur le format « vraie classe
+  de test du framework », retiré de #116. Le harnais est maintenant compilé dans un programme
+  séparé, sous un UID séparé : il n'y a rien à surveiller, donc plus d'alerte d'exploitation de
+  ce côté, et le conteneur ne peut plus tracer aucun processus.
 - **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —

@@ -148,12 +148,11 @@ class DockerEvaluatorTest {
     @Test
     void budget_mural_borne_et_image_du_langage_utilisee() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
-        // Harnais au format FRAMEWORK : UNE compilation par cas.
         evaluator.evaluate("C++", "code",
-                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)), 5000);
-        // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + 90 s de compilation PAR
-        // CAS — chaque cas recompile son harnais — + 5 s d'inventaire `--list`) = 360 s.
-        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(360_000L));
+                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)), 5000);
+        // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + DEUX compilations de 90 s
+        // — le noteur et le code soumis sont deux programmes — + 5 s d'inventaire) = 630 s.
+        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(630_000L));
     }
 
     @Test
@@ -162,38 +161,29 @@ class DockerEvaluatorTest {
         // Négatif (valeur stockée aberrante) : borné à 1 ms, puis PLANCHER VM (10 s — miroir
         // du superviseur, JVM froide) — le mur reste positif et couvre le temps réel accordé.
         evaluator.evaluate("Java", "code",
-                List.of(new TestCaseInput("t", "@Test void t() {}", 1)), -100_000);
-        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(375_000L));
+                List.of(new TestCaseInput("t", "return Solution.doubler(5) == 10;", 1)), -100_000);
+        // TROIS compilations en Java : le code soumis seul (pour lire ses signatures), le noteur,
+        // le serveur. 30 s + 3 × (10 s de plancher VM + 10 s + 3 × 90 s + 5 s) = 915 s, donc
+        // PLAFONNÉ au mur maximal de 15 min — trois compilations par cas coûtent cher, et une
+        // question à plusieurs cas lents est notée partiellement plutôt que tuée au mur.
+        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(15 * 60_000L));
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code",
-                List.of(new TestCaseInput("t", "func TestT(t *testing.T) {}", 1)), 999_999);
-        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(525_000L));
+                List.of(new TestCaseInput("t", "return doubler(5) == 10", 1)), 999_999);
+        // 60 s plafonnés + 10 s + 2 × 90 s + 5 s = 255 s par cas, × 3, + 30 s = 795 s.
+        verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(795_000L));
     }
 
     @Test
-    void mur_couvre_les_compilations_reelles_du_chemin_non_falsifiable() {
-        // Le chemin booléen compile DEUX programmes par cas — le noteur et le code soumis — et
-        // TROIS en Java, où les signatures sont lues sur les classes compilées. Le mur n'en
-        // budgétait qu'une : un cas lancé juste avant l'échéance du budget pouvait être tué au
-        // mur, ce qui perdait tous les verdicts du job (502, tentative supprimée : #216).
-        assertThat(DockerEvaluator.compilesPerCase("cpp",
-                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)))).isEqualTo(1);
-        assertThat(DockerEvaluator.compilesPerCase("cpp",
-                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)))).isEqualTo(2);
-        assertThat(DockerEvaluator.compilesPerCase("java",
-                List.of(new TestCaseInput("t", "return Solution.doubler(5) == 10;", 1))))
-                .isEqualTo(3);
-        // Un SEUL cas booléen suffit à payer le pire cas : le superviseur choisit cas par cas.
-        assertThat(DockerEvaluator.compilesPerCase("go", List.of(
-                new TestCaseInput("a", "func TestA(t *testing.T) {}", 1),
-                new TestCaseInput("b", "return doubler(5) == 10", 1)))).isEqualTo(2);
-
-        supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
-        evaluator.evaluate("C++", "code",
-                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)), 5000);
-        // 30 s + 3 × (5 s + 10 s + 2 × 90 s + 5 s) = 630 s, contre 360 s pour le framework.
-        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(630_000L));
+    void mur_couvre_les_compilations_reelles_de_chaque_langage() {
+        // Le chemin non falsifiable compile DEUX programmes par cas — le noteur et le code
+        // soumis — et TROIS en Java, où les signatures sont lues sur les classes compilées. Le
+        // mur n'en budgétait qu'une : un cas lancé juste avant l'échéance du budget se faisait
+        // tuer au mur, ce qui perdait tous les verdicts du job (#216).
+        assertThat(DockerEvaluator.compilesPerCase("cpp", List.of())).isEqualTo(2);
+        assertThat(DockerEvaluator.compilesPerCase("go", List.of())).isEqualTo(2);
+        assertThat(DockerEvaluator.compilesPerCase("java", List.of())).isEqualTo(3);
     }
 
     @Test

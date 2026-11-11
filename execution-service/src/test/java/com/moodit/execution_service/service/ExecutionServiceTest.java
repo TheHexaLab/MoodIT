@@ -310,6 +310,28 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void harnais_au_format_framework_refuse_avec_un_diagnostic() {
+        // Cette forme compilait le harnais AVEC le code de l'étudiant : le processus qui détenait
+        // le secret était celui qu'il contrôle, et cinq canaux de forge y ont été démontrés. Elle
+        // n'a jamais été déployée, donc rien n'en dépend — mais la laisser vivre offrait au prof
+        // un chemin contournable sans qu'il le sache. Refus AVANT toute prise de place, avec la
+        // forme à écrire à la place.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            List<TestResult> results = routed.evaluate(
+                    oneTest(language, "code", frameworkHarness(language)));
+            assertThat(results).as("refus en " + language).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            assertThat(results.get(0).detail())
+                    .contains("classe de test du framework")
+                    .contains("renvoie un booléen");
+        }
+        verifyNoInteractions(docker);
+    }
+
+    @Test
     void harnais_booleen_atteint_le_runner_dans_les_six_langages() {
         // RÉGRESSION : un garde-fou en amont renvoyait 0 à tous les cas d'une question dont le
         // harnais était justement au format SÛR, sans jamais atteindre le runner. Ce test entre
@@ -327,7 +349,12 @@ class ExecutionServiceTest {
         verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
     }
 
-    /** Marqueur de « vrai test du framework » attendu par langage (ancien chemin, conservé). */
+    /**
+     * Harnais au format « vraie classe de test du framework », par langage.
+     *
+     * <p>Cette forme n'est plus notée : elle était compilée AVEC le code de l'étudiant, donc
+     * falsifiable. Elle ne sert plus qu'à vérifier le REFUS.
+     */
     private static String frameworkHarness(String language) {
         return switch (language) {
             case "Java" -> "@Test void t() {}";
@@ -346,7 +373,7 @@ class ExecutionServiceTest {
         when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(expected);
 
         for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            assertThat(routed.evaluate(oneTest(language, "code", frameworkHarness(language))))
+            assertThat(routed.evaluate(oneTest(language, "code", booleanHarness(language))))
                     .isEqualTo(expected);
         }
         verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
@@ -368,7 +395,7 @@ class ExecutionServiceTest {
         ExecutionService limited = new ExecutionService(assembler, runner, limiter, docker);
         limiter.withSandboxSlot(() -> {
             assertThatThrownBy(() -> limited.evaluate(
-                    oneTest("Go", "code", frameworkHarness("Go"))))
+                    oneTest("Go", "code", booleanHarness("Go"))))
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
@@ -396,7 +423,7 @@ class ExecutionServiceTest {
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
         when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(List.of());
         routed.evaluate(new EvaluateRequest("Rust", null, "code",
-                List.of(new TestCaseInput("t", frameworkHarness("Rust"), 1)), 42_000));
+                List.of(new TestCaseInput("t", booleanHarness("Rust"), 1)), 42_000));
         verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000), anyLong());
     }
 
@@ -408,7 +435,7 @@ class ExecutionServiceTest {
 
         // 1. Marqueur réservé dans le code : verdict explicite, aucun conteneur.
         List<TestResult> marker = routed.evaluate(
-                oneTest("Go", "jeton=__MOODIT_T__", frameworkHarness("Go")));
+                oneTest("Go", "jeton=__MOODIT_T__", booleanHarness("Go")));
         assertThat(marker.get(0).passed()).isFalse();
         assertThat(marker.get(0).detail()).contains("Marqueur réservé");
 
@@ -420,11 +447,11 @@ class ExecutionServiceTest {
         // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
         when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong()))
                 .thenReturn(List.of());
-        routed.evaluate(oneTest("Go", "code", frameworkHarness("Go")));
+        routed.evaluate(oneTest("Go", "code", booleanHarness("Go")));
         verify(docker).evaluate(anyString(), anyString(), any(), any(),
                 eq(DockerEvaluator.PUBLIC_WALL_MS));
 
-        limiter.asInternal(() -> routed.evaluate(oneTest("Go", "code", frameworkHarness("Go"))));
+        limiter.asInternal(() -> routed.evaluate(oneTest("Go", "code", booleanHarness("Go"))));
         verify(docker).evaluate(anyString(), anyString(), any(), any(), eq(Long.MAX_VALUE));
     }
 }

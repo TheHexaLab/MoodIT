@@ -127,244 +127,31 @@ public final class HarnessProjects {
         };
     }
 
+    /**
+     * Dépose les fichiers d'un cas : le code soumis, et le harnais du prof MARQUÉ.
+     *
+     * <p>Le harnais est un corps qui renvoie un booléen, et le superviseur le compile dans un
+     * PROCESSUS SÉPARÉ, sous un UID SÉPARÉ, avec le nonce. Il n'entre jamais dans le processus de
+     * l'étudiant, qui ne peut donc ni le lire, ni le modifier, ni forger son résultat : les
+     * attaques in-process (artefact compilé, flux de sortie, interposition de printf, dup2,
+     * lecture de sa propre mémoire) n'ont plus de cible.
+     *
+     * <p>C'est le SEUL chemin. Le format « vraie classe de test du framework » (JUnit, NUnit,
+     * go test, cargo test, moodit_check.h), introduit puis retiré dans #116, compilait le harnais
+     * AVEC le code de l'étudiant : le processus qui détenait le secret était celui que l'étudiant
+     * contrôle, et cinq canaux de forge y ont été démontrés. Il n'a jamais été déployé, donc
+     * aucune question existante n'en dépend ; un harnais qui en porte le marqueur est refusé par
+     * {@link DockerEvaluator#frameworkHarnessRejection} avec un diagnostic, plutôt que noté par
+     * un chemin dont on sait qu'il est contournable.
+     */
     private static void addCase(Map<String, String> files, String lang, int index,
             String studentCode, String harnessCode) {
         String base = "cases/" + index + "/src/";
-        // HARNAIS BOOLÉEN (la forme d'avant #116) → chemin NON FALSIFIABLE, pour TOUS les
-        // langages compilés : le corps est déposé marqué, et le superviseur le compile dans un
-        // PROCESSUS SÉPARÉ, sous un UID SÉPARÉ, avec le nonce. Il n'entre jamais dans le
-        // processus de l'étudiant, qui ne peut donc ni le lire, ni le modifier, ni forger son
-        // résultat — les attaques in-process (artefact, flux, printf, dup2, /proc/self/mem) n'ont
-        // plus d'objet. Un harnais au format framework garde l'ancien chemin, falsifiable et
-        // documenté comme tel.
-        if (!DockerEvaluator.frameworkMarkerFound(lang, harnessCode)) {
-            files.put(base + rpcStudentFile(lang, studentCode), studentCode);
-            files.put(base + "harnais_rpc." + rpcExtension(lang),
-                    "// Harnais booléen du prof — compilé DANS LE NOTEUR, jamais avec le code de\n"
-                    + "// l'étudiant. Tout ce qui suit le marqueur est son corps.\n"
-                    + "__MOODIT_HARNAIS__\n" + harnessCode);
-            return;
-        }
-        switch (lang) {
-            case "java" -> {
-                String studentFile = javaFileName(studentCode, "Solution");
-                String harnessFile = javaFileName(harnessCode, "MooditHarness");
-                if (harnessFile.equals(studentFile)) {
-                    // Même classe publique des deux côtés : garder les DEUX fichiers (sinon le
-                    // second écrase le premier en silence) — javac produira une erreur de
-                    // compilation EXPLICITE (classe dupliquée / mauvais nom de fichier) au lieu
-                    // d'un déroutant « classe introuvable ».
-                    harnessFile = "MooditHarnais_" + harnessFile;
-                }
-                files.put(base + studentFile, studentCode);
-                files.put(base + harnessFile, harnessCode);
-                // Enveloppe du ConsoleLauncher JUnit : le jeton de fin n'est imprimé qu'une
-                // fois l'exécution terminée — un System.exit(0) forgé le saute. Il porte AUSSI
-                // le code de sortie du framework, et c'est LUI qui fait le verdict : le rapport
-                // XML vit sous work/ (inscriptible par l'étudiant) et le code de sortie du
-                // processus est écrasable après coup (halt(0) dans un hook d'arrêt). Les deux
-                // canaux étaient donc forgeables sans jamais extraire le jeton. Une ligne DÉJÀ
-                // CONSOMMÉE PAR ROOT, elle, est hors d'atteinte : le superviseur donne au
-                // processus noté un TUBE, pas le fichier qu'il relira (voir run_proc) — un
-                // fichier régulier en stdout lui laissait un descripteur positionnable.
-                // Clé de fichier NEUTRE (la classe reste MooditMain, non publique) : si
-                // l'étudiant déclare sa propre classe MooditMain, javac signale un doublon
-                // explicite au lieu de laisser un fichier en écraser un autre dans la map.
-                // Et si un fichier étudiant/harnais s'appelle déjà MooditEnveloppe.java (classe
-                // publique de ce nom), la clé est décalée — même parade que la collision du
-                // harnais : rien n'est écrasé en silence.
-                String wrapperFile = "MooditEnveloppe.java";
-                if (wrapperFile.equals(studentFile) || wrapperFile.equals(harnessFile)) {
-                    wrapperFile = "MooditEnveloppe_moodit.java";
-                }
-                // Le jeton arrive sur STDIN (tube fermé par root après écriture), lu à la
-                // PREMIÈRE instruction du main — donc avant que le ConsoleLauncher ne charge la
-                // moindre classe étudiante. Il n'est PLUS substitué dans la source : compilé, il
-                // devenait une constante de `classes/MooditMain.class`, que le superviseur ouvre
-                // exprès à l'UID étudiant (open_artifacts) pour que la JVM puisse charger ses
-                // classes. Le code noté le lisait donc en trois lignes, publiait lui-même la
-                // ligne de verdict et sortait en 0 : note pleine sur un code faux, sans trace
-                // (tracer ces lectures est impossible — c'est le chargement de classes normal
-                // de la JVM, sous le même UID). Un tube n'est pas repositionnable : après la
-                // lecture de l'enveloppe, le code noté n'y trouve que l'EOF.
-                files.put(base + wrapperFile, """
-                        import java.io.BufferedReader;
-                        import java.io.FileDescriptor;
-                        import java.io.FileOutputStream;
-                        import java.io.InputStreamReader;
-                        import java.io.PrintStream;
-                        import java.io.PrintWriter;
-                        import java.nio.charset.StandardCharsets;
-
-                        class MooditMain {
-                            public static void main(String[] args) throws Exception {
-                                // Verdict publié sur le DESCRIPTEUR BRUT (fd 1), capturé ici,
-                                // avant tout chargement de classe étudiante. System.out est une
-                                // simple variable de classe : un System.setOut() posé par le code
-                                // noté voyait passer cette ligne — jeton authentique compris — et
-                                // n'avait plus qu'à y remplacer « code=1 » par « code=0 » avant de
-                                // la réémettre. Connaître le jeton n'était même pas nécessaire.
-                                // Écrire sur fd 1 contourne System.setOut ; le détourner demande
-                                // un dup2, donc un accès natif (refusé par --illegal-native-access).
-                                // DEUX descripteurs bruts (1 et 2) : la ligne est publiée sur les
-                                // deux, et le superviseur accepte la première qu'il trouve. Un
-                                // étudiant HONNÊTE qui ferme System.out — `try (PrintWriter w =
-                                // new PrintWriter(System.out))`, idiome banal — fermait sinon
-                                // FileDescriptor.out, donc le fd 1 du processus, donc ce flux-ci
-                                // (même objet FileDescriptor) : la ligne disparaissait en silence
-                                // et une RÉPONSE JUSTE écopait de « ⚠ jeton_absent ». Fermer les
-                                // deux flux standards à la fois n'est pas un idiome.
-                                PrintStream brut = new PrintStream(
-                                        new FileOutputStream(FileDescriptor.out), true,
-                                        StandardCharsets.UTF_8);
-                                PrintStream brutErr = new PrintStream(
-                                        new FileOutputStream(FileDescriptor.err), true,
-                                        StandardCharsets.UTF_8);
-                                String jeton;
-                                try (BufferedReader entree = new BufferedReader(
-                                        new InputStreamReader(System.in, StandardCharsets.US_ASCII))) {
-                                    jeton = entree.readLine();
-                                }
-                                int code = org.junit.platform.console.ConsoleLauncher
-                                        .run(new PrintWriter(System.out, true),
-                                                new PrintWriter(System.err, true), args)
-                                        .getExitCode();
-                                String verdict = "[MOODIT] jeton=" + jeton + " code=" + code;
-                                brut.println(verdict);
-                                brut.flush();
-                                brutErr.println(verdict);
-                                brutErr.flush();
-                                System.exit(code);
-                            }
-                        }
-                        """);
-            }
-            case "csharp" -> {
-                files.put(base + "solution.cs", studentCode);
-                files.put(base + "harness.cs", harnessCode);
-                // Point d'entrée NUnitLite : exécute tous les [Test] de l'assemblage. Généré ici
-                // (pas à la charge du prof) ; `mcs -main:MooditRunner` l'impose comme entrée même
-                // si le code étudiant a son propre Main.
-                // Le jeton de fin n'est imprimé qu'une fois Execute terminé : un
-                // Environment.Exit(0) forgé dans le code étudiant le saute. Il porte AUSSI le
-                // code de NUnitLite, qui fait le verdict — même raison qu'en Java : le XML de
-                // résultat est sous work/, donc réécrivable, et le code de sortie du processus
-                // est écrasable par un thread de premier plan après le retour d'Execute.
-                // Jeton lu sur STDIN avant tout chargement de type étudiant, comme en Java et
-                // pour la même raison : substitué dans la source, il finissait en clair dans
-                // `tests.exe`, que le superviseur ouvre à l'UID étudiant pour que mono puisse
-                // l'exécuter — le code noté le lisait et forgeait le verdict complet.
-                files.put(base + "moodit_runner.cs", """
-                        class MooditRunner
-                        {
-                            static int Main(string[] args)
-                            {
-                                // Flux BRUTS (sortie ET erreur), capturés avant tout code étudiant :
-                                // un Console.SetOut() du code noté ne peut pas les intercepter, et
-                                // fermer l'un des deux flux standards ne fait pas disparaître la
-                                // ligne de verdict (cf. l'enveloppe Java).
-                                var brut = new System.IO.StreamWriter(
-                                    System.Console.OpenStandardOutput()) { AutoFlush = true };
-                                var brutErr = new System.IO.StreamWriter(
-                                    System.Console.OpenStandardError()) { AutoFlush = true };
-                                // Lecture BRUTE de stdin, puis effacement du tampon : Console.In
-                                // est un StreamReader mis en cache statique qui garde le jeton
-                                // dans ses tampons managés pendant toute l'exécution — et mono
-                                // n'a pas de système de modules, donc une marche de champs en
-                                // BindingFlags.NonPublic depuis le code noté le retrouvait, sans
-                                // aucun open(2) donc sans aucune trace.
-                                string jeton = "";
-                                var entree = System.Console.OpenStandardInput();
-                                var tampon = new byte[64];
-                                int lus = 0;
-                                int octet;
-                                while (lus < tampon.Length && (octet = entree.ReadByte()) >= 0 && octet != '\\n')
-                                {
-                                    tampon[lus++] = (byte) octet;
-                                }
-                                jeton = System.Text.Encoding.ASCII.GetString(tampon, 0, lus);
-                                System.Array.Clear(tampon, 0, tampon.Length);
-                                entree.Dispose();
-                                int code = new NUnitLite.AutoRun(typeof(MooditRunner).Assembly).Execute(args);
-                                string verdict = "[MOODIT] jeton=" + jeton + " code=" + code;
-                                brut.WriteLine(verdict);
-                                brut.Flush();
-                                brutErr.WriteLine(verdict);
-                                brutErr.Flush();
-                                return code;
-                            }
-                        }
-                        """);
-            }
-            case "go" -> {
-                files.put(base + "go.mod", "module moodit\n\ngo 1.23\n");
-                files.put(base + "main.go", studentCode);
-                // Même package que l'étudiant : les identifiants non exportés restent accessibles,
-                // comme dans un vrai test Go.
-                files.put(base + "solution_test.go", harnessCode);
-                // Le jeton de fin n'est imprimé qu'après m.Run() : un os.Exit(0) forgé dans le
-                // code étudiant le saute. Il porte AUSSI le code de m.Run(), qui fait le
-                // verdict — le code de sortie du processus, lui, s'écrase après coup.
-                // (Un harnais qui définirait son propre TestMain ne compile pas — doublon
-                // explicite, cas assumé.) NB : dans le bloc de texte ci-dessous, la fin de
-                // ligne du Printf est écrite en double antislash, sinon Java l'interprète et
-                // coupe la chaîne Go en deux.
-                files.put(base + "moodit_main_test.go", """
-                        package main
-
-                        import (
-                            "fmt"
-                            "os"
-                            "testing"
-                        )
-
-                        func TestMain(m *testing.M) {
-                            code := m.Run()
-                            fmt.Printf("[MOODIT] jeton=__MOODIT_T__ code=%d\\n", code)
-                            os.Exit(code)
-                        }
-                        """);
-            }
-            case "rust" -> {
-                files.put(base + "Cargo.toml", """
-                        [package]
-                        name = "moodit"
-                        version = "0.1.0"
-                        edition = "2021"
-                        """);
-                // Idiome Rust : module de tests DANS le fichier (use super::*) → accès aux items
-                // privés du code étudiant, comme un vrai test unitaire. Le module jeton se nomme
-                // zzzz_* : dernier par ordre alphabétique (libtest trie, --test-threads=1) — un
-                // exit(0) forgé dans un test antérieur le saute (--nocapture côté superviseur).
-                // Un test étudiant trié APRÈS (zzzzz_*) est contré par le fil de détente du
-                // superviseur : sommaire « 0 failed » + ligne « ... FAILED » = forgeage.
-                files.put(base + "src/lib.rs", studentCode + "\n\n" + harnessCode + "\n\n" + """
-                        #[cfg(test)]
-                        mod zzzz_moodit_jeton {
-                            #[test]
-                            fn zzzz_jeton() {
-                                println!("[MOODIT] jeton=__MOODIT_T__");
-                            }
-                        }
-                        """);
-            }
-            // default = C et C++ : lang vient de runnerLanguage(), qui ne renvoie que les six
-            // valeurs canoniques — il ne reste que "c" et "cpp" ici.
-            default -> {
-                String ext = lang.equals("c") ? "c" : "cpp";
-                files.put(base + "solution." + ext, studentCode);
-                // Prélude généré : inclut le code étudiant (main neutralisé) + moodit_check.h ;
-                // le harnais du prof ne contient que des MOODIT_TEST.
-                files.put(base + "harness." + ext,
-                        "/* Prélude MoodIT : code étudiant inclus (son main est renommé), puis le harnais. */\n"
-                        + "#define main __moodit_student_main\n"
-                        + "#include \"solution." + ext + "\"\n"
-                        + "#undef main\n"
-                        + "#define MOODIT_JETON \"__MOODIT_T__\"\n"
-                        + "#include <moodit_check.h>\n\n"
-                        + harnessCode);
-            }
-        }
+        files.put(base + rpcStudentFile(lang, studentCode), studentCode);
+        files.put(base + "harnais_rpc." + rpcExtension(lang),
+                "// Harnais booléen du prof — compilé DANS LE NOTEUR, jamais avec le code de\n"
+                + "// l'étudiant. Tout ce qui suit le marqueur est son corps.\n"
+                + "__MOODIT_HARNAIS__\n" + harnessCode);
     }
 
     // ── canaris par langage — gabarits instanciés au runtime : valeurs __MOODIT_A__/__MOODIT_B__
@@ -372,57 +159,16 @@ public final class HarnessProjects {
     //    printf laisserait passer les canaris à leur nom et ne forgerait que les cas réels) ──
 
     private static String canaryHarness(String lang) {
+        // Forme BOOLÉENNE, comme tous les harnais : une comparaison de deux valeurs tirées au
+        // sort. L'un des deux canaris les reçoit égales (il doit réussir), l'autre différentes
+        // (il doit échouer). Leur rôle n'est plus d'attraper un forgeage — il n'y a plus rien à
+        // forger — mais de vérifier que la chaîne de notation tranche encore dans les deux sens :
+        // si elle rendait tout vert, le canari qui doit échouer le dirait.
         return switch (lang) {
-            case "java" -> """
-                    import org.junit.jupiter.api.Test;
-                    import static org.junit.jupiter.api.Assertions.assertEquals;
-
-                    class __MOODIT_N__ {
-                        @Test
-                        void t__MOODIT_N__() {
-                            assertEquals(__MOODIT_A__, __MOODIT_B__);
-                        }
-                    }
-                    """;
-            case "csharp" -> """
-                    using NUnit.Framework;
-
-                    public class __MOODIT_N__
-                    {
-                        [Test]
-                        public void T__MOODIT_N__()
-                        {
-                            Assert.That(__MOODIT_A__, Is.EqualTo(__MOODIT_B__));
-                        }
-                    }
-                    """;
-            case "go" -> """
-                    package main
-
-                    import "testing"
-
-                    func Test__MOODIT_N__(t *testing.T) {
-                        if __MOODIT_A__ != __MOODIT_B__ {
-                            t.Fatal("canari")
-                        }
-                    }
-                    """;
-            case "rust" -> """
-                    #[cfg(test)]
-                    #[allow(non_snake_case)]
-                    mod m__MOODIT_N__ {
-                        #[test]
-                        fn t__MOODIT_N__() {
-                            assert_eq!(__MOODIT_A__, __MOODIT_B__);
-                        }
-                    }
-                    """;
-            // default = C et C++ (seules valeurs restantes de runnerLanguage()).
-            default -> """
-                    MOODIT_TEST(__MOODIT_N__) {
-                        MOODIT_CHECK(__MOODIT_A__ == __MOODIT_B__);
-                    }
-                    """;
+            case "go" -> "return __MOODIT_A__ == __MOODIT_B__\n";
+            case "rust" -> "__MOODIT_A__ == __MOODIT_B__\n";
+            // Java, C#, C et C++ : même syntaxe.
+            default -> "return __MOODIT_A__ == __MOODIT_B__;\n";
         };
     }
 

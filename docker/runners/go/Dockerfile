@@ -14,7 +14,7 @@ ENV CGO_ENABLED=0
 # qu'il n'a RIEN telecharge, le repli ne se declenche jamais, et l'echec ressort plus loin
 # en « Unable to locate package » — un message qui accuse le paquet au lieu du reseau.
 RUN (apt-get -o APT::Update::Error-Mode=any update || (sleep 5 && apt-get -o APT::Update::Error-Mode=any update) || (sleep 15 && apt-get -o APT::Update::Error-Mode=any update)) \
- && apt-get install -y --no-install-recommends python3 strace \
+ && apt-get install -y --no-install-recommends python3 \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1300 --no-create-home --shell /usr/sbin/nologin student && chmod 755 /var/tmp /run/lock && chmod -R go-w /go
 

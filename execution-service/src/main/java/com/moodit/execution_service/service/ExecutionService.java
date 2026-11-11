@@ -124,11 +124,14 @@ public class ExecutionService {
             if (rejected != null) {
                 return rejected;
             }
-            // Les DEUX formes de harnais sont notables, et c'est la forme qui choisit le chemin
-            // (cf. HarnessProjects.addCase) : un corps qui renvoie un booléen passe par le modèle
-            // à deux processus et deux UID, un vrai test du framework par l'ancien chemin. Il n'y
-            // a donc plus rien à refuser ici — ce garde-fou renvoyait 0 à tous les cas d'une
-            // question dont le harnais était justement au format SÛR.
+            // Un harnais au format framework (une vraie classe de test) n'est plus noté : cette
+            // forme était compilée AVEC le code de l'étudiant, donc falsifiable. Refus explicite
+            // AVANT la prise de place, avec le corps booléen à écrire à la place.
+            List<TestResult> framework = DockerEvaluator.frameworkHarnessRejection(
+                    request.language(), request.testCases());
+            if (framework != null) {
+                return framework;
+            }
             // Mur plafonné selon l'appelant : une correction interne a droit au budget complet,
             // un « Tester » public est borné (route réservée aux éditeurs de quiz, mais
             // jusqu'à 100 cas fournis par l'appelant).

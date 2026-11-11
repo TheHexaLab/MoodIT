@@ -486,8 +486,10 @@ jobs:
 
       # Les 10 images du RUNNER (#116) : notation des compilés (java, csharp, go, rust, c) et
       # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les deux filets
-      # d'intégration (interprétés/SQL/vues ET compilés + matrice anti-triche).
-      # La logique de verdict du superviseur (canaris, jeton, tête+queue, scan de trace) est
+      # d'intégration : interprétés/SQL/vues (ExecutionIntegrationTest), notation NON
+      # FALSIFIABLE des compilés (RpcGradingIntegrationTest) et isolation du conteneur
+      # (RunnerSandboxIntegrationTest — réseau coupé, /tmp noexec, budgets).
+      # La logique de verdict du superviseur (verdict RPC, canaris, tête+queue, lexer) est
       # testée UNITAIREMENT avant de construire quoi que ce soit — elle n'est pas couverte par
       # JaCoCo/PIT (Python), ce lot est son filet.
       - name: Tests unitaires du superviseur
@@ -533,7 +535,8 @@ jobs:
           SANDBOX_REQUIRED: "true"
         run: |
           chmod +x ./gradlew
-          ./gradlew test --tests "*ExecutionIntegrationTest" --tests "*DockerRunnerIntegrationTest" \
+          ./gradlew test --tests "*ExecutionIntegrationTest" \
+            --tests "*RpcGradingIntegrationTest" --tests "*RunnerSandboxIntegrationTest" \
             --no-daemon --console=plain
 
       - name: Publier le rapport

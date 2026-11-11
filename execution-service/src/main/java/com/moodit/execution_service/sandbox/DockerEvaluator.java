@@ -113,6 +113,57 @@ public class DockerEvaluator {
     }
 
     /**
+     * Verdicts explicites si un harnais est une VRAIE CLASSE DE TEST du framework, sinon
+     * {@code null}. Comme {@link #reservedMarkerRejection}, à appeler AVANT de prendre une place
+     * du sandbox : ce format n'est plus noté.
+     *
+     * <p>Il l'a été, dans une version intermédiaire de #116, et c'était un mauvais choix : le
+     * harnais était compilé AVEC le code de l'étudiant, donc le processus qui détenait le secret
+     * et calculait le verdict était celui que l'étudiant contrôle. Cinq canaux de forge y ont été
+     * démontrés et fermés l'un après l'autre, et il en restait toujours un. Ce format n'a jamais
+     * été déployé — aucune question existante n'en dépend — et le laisser vivre revenait à offrir
+     * au prof un chemin dont on sait qu'il est contournable, sans qu'il le sache.
+     */
+    public static List<TestResult> frameworkHarnessRejection(String language,
+            List<TestCaseInput> cases) {
+        String runnerLanguage;
+        try {
+            runnerLanguage = HarnessProjects.runnerLanguage(language);
+        } catch (RuntimeException e) {
+            return null;   // langage non compilé : pas notre affaire
+        }
+        boolean any = cases.stream()
+                .anyMatch(c -> frameworkMarkerFound(runnerLanguage, c.harnessCode()));
+        if (!any) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
+                        frameworkMarkerFound(runnerLanguage, c.harnessCode())
+                                ? "Ce harnais est une classe de test du framework ("
+                                        + frameworkExample(runnerLanguage) + "). Cette forme "
+                                        + "n'est plus notée : elle était compilée avec le code de "
+                                        + "l'étudiant, qui pouvait donc forger son résultat. "
+                                        + "Écrire à la place un CORPS qui renvoie un booléen, par "
+                                        + "exemple « return Solution.solution() == 42; » — c'est "
+                                        + "le gabarit proposé dans l'éditeur."
+                                : "Non évalué : un autre harnais de cette question est une classe "
+                                        + "de test du framework."))
+                .toList();
+    }
+
+    /** Forme ATTENDUE, citée dans le diagnostic (lisible par un prof, contrairement à la regex). */
+    private static String frameworkExample(String runnerLanguage) {
+        return switch (runnerLanguage) {
+            case "java" -> "@Test";
+            case "csharp" -> "[Test]";
+            case "go" -> "func TestXxx(t *testing.T)";
+            case "rust" -> "#[test]";
+            default -> "MOODIT_TEST(nom)";
+        };
+    }
+
+    /**
      * Nombre de COMPILATIONS que le superviseur fera pour UN cas, selon le chemin retenu.
      *
      * <p>Le chemin framework compile un seul projet. Le chemin NON FALSIFIABLE en compile deux —
@@ -124,11 +175,11 @@ public class DockerEvaluator {
      * booléen suffit à payer le pire cas, puisque le superviseur choisit cas par cas.
      */
     static long compilesPerCase(String runnerLanguage, List<TestCaseInput> cases) {
-        boolean anyBoolean = cases.stream()
-                .anyMatch(c -> !frameworkMarkerFound(runnerLanguage, c.harnessCode()));
-        if (!anyBoolean) {
-            return 1;
-        }
+        // Le chemin non falsifiable compile DEUX programmes par cas — le noteur et le code
+        // soumis sont séparés — et TROIS en Java, où le code soumis est d'abord compilé seul pour
+        // que ses signatures soient lues sur ses classes. Le mur du conteneur n'en budgétait
+        // qu'une : un cas lancé juste avant l'échéance du budget se faisait tuer au mur, ce qui
+        // perdait tous les verdicts du job (#216).
         return "java".equals(runnerLanguage) ? 3 : 2;
     }
 
