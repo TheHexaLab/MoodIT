@@ -1713,29 +1713,48 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
         self.assertIn("errReq != nil", noteur)
         self.assertIn("errRep != nil", supervisor.go_server_source([("float64", "moyenne", [])]))
 
-    def test_reponse_auto_cadree_dans_les_six_langages(self):
+    # Liste UNIQUE des répartiteurs. Ajouter un langage sans tenir l'invariant fait échouer la
+    # CI : c'est le seul garde-fou qui ferme vraiment le motif « invariant tenu presque partout »,
+    # celui qui a produit quatre des cinq tours de correctifs de cette série.
+    REPARTITEURS = (
+        ("java", lambda: supervisor.java_server_source("Solution")),
+        ("go", lambda: supervisor.go_server_source([("int", "f", [])])),
+        ("go objets", lambda: supervisor.go_server_source(
+            [], [("R", [], [("int", "m", [])])], {"R": [("c", "int")]})),
+        ("rust", lambda: supervisor.rust_server_source([("i32", "f", [])], "fn f() {}")),
+        ("rust objets", lambda: supervisor.rust_server_source(
+            [], "struct R { c: i32 }", [("R", [], [("i32", "m", [])])], {"R": [("c", "i32")]})),
+        ("csharp", lambda: supervisor.cs_server_source("Solution")),
+        ("c", lambda: supervisor.c_server_source([("int", "f", [])], "int f(void){return 1;}")),
+        ("cpp", lambda: supervisor.c_server_source(
+            [("int", "f", [])], "int f(void){return 1;}", cpp=True)),
+        ("cpp objets", lambda: supervisor.c_server_source(
+            [], "class R { public: R(int a){} int m(){return 1;} };", cpp=True,
+            objets=[("R", [["int"]], [("int", "m", [])])])),
+    )
+
+    def test_toute_reponse_est_auto_cadree(self):
         """Le stdout du code noté EST le canal de réponse, et il partage son tampon.
 
         Une dernière écriture non terminée par un saut de ligne (`print(…, end="")`, `print!`,
         `System.out.print`) se collait au DÉBUT de la ligne de réponse, qui n'était alors plus
         reconnue : le couple s'attendait jusqu'au temps limite, et une réponse JUSTE était notée
         « Interrompu ». Un saut de ligne AVANT la réponse referme la ligne partielle, qui devient
-        du bruit à part entière. L'invariant doit valoir dans les six langages — il ne valait,
-        côté interprété, qu'en PHP."""
-        attendus = (
-            ("java", supervisor.java_server_source("Solution"),
-             r'System.out.print("\n" + reponse + "\n");'),
-            ("go", supervisor.go_server_source([("int", "f", [])]),
-             r'fmt.Print("\n" + string(brut) + "\n")'),
-            ("rust", supervisor.rust_server_source([("i32", "f", [])], "fn f() {}"),
-             r'print!("\n{}\n", reponse);'),
-            ("csharp", supervisor.cs_server_source("Solution"),
-             r'Console.Out.Write("\n" + reponse + "\n");'),
-            ("c", supervisor.c_server_source([("int", "f", [])], "int f(void){return 1;}"),
-             r'printf("\n%s|ok|'),
-        )
-        for langue, source, attendu in attendus:
-            self.assertIn(attendu, source, langue)
+        du bruit à part entière. L'invariant est vérifié sur CHAQUE site de réponse de CHAQUE
+        répartiteur : il ne valait, au départ, que sur un seul des neuf."""
+        import re as _re
+        # Les écritures sur l'ERREUR standard ne sont pas des réponses : ce sont des diagnostics,
+        # et le noteur ne les lit pas comme telles.
+        emission = _re.compile(
+            r"(?:System[.]out[.]print|fmt[.]Print|\bprint!|Console[.]Out[.]Write|\bprintf)[(]")
+        for nom, fabrique in self.REPARTITEURS:
+            source = fabrique()
+            sites = [l.strip() for l in source.splitlines()
+                     if emission.search(l) and "stderr" not in l]
+            self.assertTrue(sites, "aucun site de réponse trouvé en " + nom)
+            for site in sites:
+                self.assertIn(chr(92) + "n", site.split("(", 1)[1][:24],
+                              "réponse non cadrée en %s : %s" % (nom, site))
 
     def test_profondeur_ignore_litteraux_et_commentaires(self):
         # Un comptage naïf se faisait déséquilibrer par une accolade en littéral, et toutes les
@@ -1761,6 +1780,15 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
         imbrique = ("impl Rect {\n    fn associee(x: i32) -> i32 { x }\n}\n"
                     "fn doubler(n: i32) -> i32 { n * 2 }\n")
         self.assertEqual([n for _, n, _ in supervisor.rust_signatures(imbrique)], ["doubler"])
+
+    def test_separateur_de_chiffres_cpp(self):
+        # `1'000` : l'apostrophe n'ouvre pas de littéral. Elle faisait avaler la fin du
+        # fichier par la plage de classe, et la fonction libre suivante disparaissait.
+        source = ("class Grand {\npublic:\n    Grand() {}\n"
+                  "    int mille() { return 1'000; }\n};\n\n"
+                  "int doubler(int n) { return n * 2; }\n")
+        self.assertEqual(supervisor.c_signatures(source, cpp=True),
+                         [("int", "doubler", ["int"])])
 
     def test_appariement_daccolades_partage(self):
         # Le même balayage sert aux quatre endroits qui appariaient des accolades à la main.

@@ -1946,8 +1946,9 @@ public final class MooditServer {
                 reponse = "{\\"ok\\":false,\\"id\\":\\"" + entre(ligne, "\\"id\\":\\"", "\\"")
                         + "\\",\\"error\\":\\"" + String.valueOf(t).replace('"', '\\'') + "\\"}";
             }
-            // Voir « réponse AUTO-CADRÉE » : referme une éventuelle ligne partielle
-            // écrite par le code soumis, qui sinon se collait à la réponse.
+            // « Contrat du canal de réponse » (docker/runners/README.md) : referme une
+            // éventuelle ligne partielle écrite par le code soumis, qui sinon se collait à
+            // la réponse et la rendait méconnaissable.
             System.out.print("\\n" + reponse + "\\n");
             System.out.flush();
         }
@@ -2643,6 +2644,13 @@ C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
 C_LECTURE = {"int": "atoi", "long": "atol", "double": "atof"}
 
 
+# Un littéral de caractère, et RIEN d'autre : 'x', '\n', '\u{1F600}'. Tout le reste —
+# durée de vie Rust, étiquette de boucle, séparateur de chiffres C++ — est une apostrophe
+# ordinaire, qui n'ouvre aucun littéral : la prendre pour une ouverture faisait ignorer les
+# accolades jusqu'à la fin de la ligne et décalait le compteur pour tout le reste du fichier.
+CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
+
+
 def code_depths(source):
     """Profondeur d'accolades à chaque position, HORS chaînes et commentaires. PURE (testée).
 
@@ -2711,6 +2719,16 @@ def code_depths(source):
                 profondeurs[j] = niveau
             i = fin
             continue
+        if c == "'" and not CHAR_LITERAL.match(texte, i):
+            # L'apostrophe n'ouvre PAS toujours un littéral de caractère : durée de vie Rust
+            # (`&'static str`), étiquette de boucle (`'ext: loop`), séparateur de chiffres C++
+            # (`1'000`). La prendre pour une ouverture faisait ignorer les accolades jusqu'à la
+            # fin de la ligne, décalait le compteur pour tout le reste du fichier, et les
+            # fonctions suivantes disparaissaient : un code CORRECT rendait « aucune fonction
+            # exploitable ». On ne la traite comme un littéral que si elle en a la FORME.
+            profondeurs[i] = niveau
+            i += 1
+            continue
         if c in "\"'":
             profondeurs[i] = niveau
             j = i + 1
@@ -2725,8 +2743,8 @@ def code_depths(source):
                 if texte[j] == c:
                     j += 1
                     break
-                if texte[j] == "\n" and c == "'":
-                    break        # pas un littéral : apostrophe isolée (durée de vie Rust)
+                if texte[j] == "\n":
+                    break        # chaîne non fermée : on ne mange pas le reste du fichier
                 j += 1
             i = j
             continue

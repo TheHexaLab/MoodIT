@@ -32,7 +32,7 @@ $hc$),
 // SÉPARÉ sous un UID séparé : ni lisible, ni modifiable, ni falsifiable par le code noté.
 // Les objets sont proxifiés : new Solution(3, 4).Aire() appelle l'instance CHEZ l'étudiant.
 // Sandbox : Mono (aucun réseau). Types échangeables : int, long, double, bool, string.
-return Solution.resoudre() == ATTENDU;
+return Solution.solution() == ATTENDU;
 $hc$),
     ('Go', $hc$// HARNAIS (Go) — un corps qui RENVOIE UN BOOLÉEN, compilé dans un BINAIRE
 // SÉPARÉ sous un UID séparé : ni lisible, ni modifiable, ni falsifiable par le code noté.

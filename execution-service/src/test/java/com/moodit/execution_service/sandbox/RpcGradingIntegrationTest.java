@@ -585,8 +585,8 @@ class RpcGradingIntegrationTest {
 
     @Test
     void code_honnete_bavard_passe_quand_meme() {
-        // Un étudiant qui imprime, ferme ses flux, ou appelle sa propre fonction depuis son main
-        // ne doit pas être pénalisé : sa sortie n'est plus un canal de verdict.
+        // Un étudiant qui imprime beaucoup, sur la sortie comme sur l'erreur, ne doit pas être
+        // pénalisé : sa sortie n'est pas le canal de verdict (le nonce part du NOTEUR).
         TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
                 public class Solution {
                     public static int doubler(int n) {
@@ -603,6 +603,31 @@ class RpcGradingIntegrationTest {
                 """);
         assertThat(r.passed()).isTrue();
         assertThat(r.detail() == null ? "" : r.detail()).doesNotContain("⚠");
+    }
+
+    @Test
+    void fermer_sa_sortie_dans_la_fonction_notee_echoue_nettement() {
+        // LIMITE ASSUMÉE, documentée dans docker/runners/README.md (« Contrat du canal de
+        // réponse »). Fermer sa sortie standard DANS LA FONCTION NOTÉE détruit le canal sur
+        // lequel le processus de l'étudiant répond : le cas ne peut pas être noté. Ce qui compte,
+        // c'est que l'échec soit NET et explicite — pas un temps limite consommé en silence, et
+        // pas une accusation de triche.
+        //
+        // Le test voisin fermait le flux dans `main`, qui n'est JAMAIS appelé sur ce chemin
+        // (c'est le serveur généré qui tourne et invoque la méthode) : il donnait l'illusion de
+        // couvrir cet idiome sans jamais l'exercer.
+        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+                public class Solution {
+                    public static int doubler(int n) {
+                        System.out.close();
+                        return n * 2;
+                    }
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).isNotNull()
+                .doesNotContain("temps limite")
+                .doesNotContain("⚠");
     }
 
     @Test
