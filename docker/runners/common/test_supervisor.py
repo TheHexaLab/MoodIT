@@ -1686,27 +1686,92 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
 
     def test_une_seule_table_de_conversion_par_langage(self):
         # Cause racine de trois tours de correctifs : une table dupliquée reste en arrière au
-        # changement d'invariant suivant. Chaque générateur doit consommer LA table.
+        # changement d'invariant suivant. Le garde-fou utile n'est pas « ce générateur-là utilise
+        # la table » mais « il n'existe AUCUNE table littérale hors des constantes ».
         for t in supervisor.GO_CONV:
-            attendu = supervisor.GO_CONV[t] % "v"
-            self.assertIn(attendu,
+            self.assertIn(supervisor.GO_CONV[t] % "v",
                           supervisor.go_grader_source([(t, "f", [])], "true", "N"))
+            self.assertIn(supervisor.GO_CONV[t] % "req.Args[0]",
+                          supervisor.go_server_source([("int", "f", [t])]))
         for t in supervisor.RUST_CONV:
             attendu = supervisor.RUST_CONV[t] % 'args.next().unwrap_or("")'
             self.assertIn(attendu,
                           supervisor.rust_server_source([("i32", "f", [t])], "fn f() {}"))
-        self.assertEqual(supervisor.C_LECTURE, {"int": "atoi", "long": "atol", "double": "atof"})
+        for t, lecture in supervisor.C_LECTURE.items():
+            self.assertIn("%s(moodit_valeur(id))" % lecture,
+                          supervisor.c_grader_source([(t, "f", [])], "return 1;", "N"))
         with open(supervisor.__file__, encoding="utf-8") as f:
             source = f.read()
-        self.assertEqual(source.count('"long": "atol"'), 1)
+        # Une seule DÉFINITION par table, et aucune copie littérale ailleurs.
+        for empreinte in ('"long": "atol"', '"int64": "mooditEntier', '"bool": "%s.parse::<bool>'):
+            self.assertEqual(source.count(empreinte), 1, empreinte)
 
     def test_go_valeur_non_representable_ne_bloque_pas_le_couple(self):
         # json.Marshal échoue sur NaN et ±Inf : l'erreur ignorée donnait une ligne vide, que le
         # décodeur d'en face rejette — les deux processus s'attendaient jusqu'au temps limite.
-        noteur = supervisor.go_grader_source([("float64", "moyenne", ["f64"])], "true", "N") \
-            if False else supervisor.go_grader_source([("float64", "moyenne", [])], "true", "N")
+        noteur = supervisor.go_grader_source([("float64", "moyenne", [])], "true", "N")
         self.assertIn("errReq != nil", noteur)
         self.assertIn("errRep != nil", supervisor.go_server_source([("float64", "moyenne", [])]))
+
+    def test_reponse_auto_cadree_dans_les_six_langages(self):
+        """Le stdout du code noté EST le canal de réponse, et il partage son tampon.
+
+        Une dernière écriture non terminée par un saut de ligne (`print(…, end="")`, `print!`,
+        `System.out.print`) se collait au DÉBUT de la ligne de réponse, qui n'était alors plus
+        reconnue : le couple s'attendait jusqu'au temps limite, et une réponse JUSTE était notée
+        « Interrompu ». Un saut de ligne AVANT la réponse referme la ligne partielle, qui devient
+        du bruit à part entière. L'invariant doit valoir dans les six langages — il ne valait,
+        côté interprété, qu'en PHP."""
+        attendus = (
+            ("java", supervisor.java_server_source("Solution"),
+             r'System.out.print("\n" + reponse + "\n");'),
+            ("go", supervisor.go_server_source([("int", "f", [])]),
+             r'fmt.Print("\n" + string(brut) + "\n")'),
+            ("rust", supervisor.rust_server_source([("i32", "f", [])], "fn f() {}"),
+             r'print!("\n{}\n", reponse);'),
+            ("csharp", supervisor.cs_server_source("Solution"),
+             r'Console.Out.Write("\n" + reponse + "\n");'),
+            ("c", supervisor.c_server_source([("int", "f", [])], "int f(void){return 1;}"),
+             r'printf("\n%s|ok|'),
+        )
+        for langue, source, attendu in attendus:
+            self.assertIn(attendu, source, langue)
+
+    def test_profondeur_ignore_litteraux_et_commentaires(self):
+        # Un comptage naïf se faisait déséquilibrer par une accolade en littéral, et toutes les
+        # fonctions suivantes passaient pour imbriquées : un code CORRECT rendait « aucune
+        # fonction exploitable ». C'était une régression du correctif précédent.
+        cas = [
+            ("littéral de caractère", "fn ouvrante(c: char) -> bool { c == '{' }\n"
+                                      "fn doubler(n: i32) -> i32 { n * 2 }\n"),
+            ("littéral fermant", "fn fermante(c: char) -> bool { c == '}' }\n"
+                                 "fn doubler(n: i32) -> i32 { n * 2 }\n"),
+            ("chaîne", 'fn motif() -> String { String::from("{x}") }\n'
+                       "fn doubler(n: i32) -> i32 { n * 2 }\n"),
+            ("commentaire ligne", "// un { dans un commentaire\n"
+                                  "fn doubler(n: i32) -> i32 { n * 2 }\n"),
+            ("commentaire bloc", "/* { et } */\nfn doubler(n: i32) -> i32 { n * 2 }\n"),
+            ("chaîne brute", 'fn brut() -> String { String::from(r#"{"a": 1}"#) }\n'
+                             "fn doubler(n: i32) -> i32 { n * 2 }\n"),
+        ]
+        for nom, source in cas:
+            noms = [n for _, n, _ in supervisor.rust_signatures(source)]
+            self.assertIn("doubler", noms, nom)
+        # Et le filtre de premier niveau tient toujours.
+        imbrique = ("impl Rect {\n    fn associee(x: i32) -> i32 { x }\n}\n"
+                    "fn doubler(n: i32) -> i32 { n * 2 }\n")
+        self.assertEqual([n for _, n, _ in supervisor.rust_signatures(imbrique)], ["doubler"])
+
+    def test_appariement_daccolades_partage(self):
+        # Le même balayage sert aux quatre endroits qui appariaient des accolades à la main.
+        source = ("class Rectangle {\n    int largeur, hauteur;\npublic:\n"
+                  "    Rectangle(int l, int h) : largeur(l), hauteur(h) {}\n"
+                  "    int aire() { return largeur * hauteur; }\n"
+                  "    char ouvrante() { return '{'; }\n};\n\n"
+                  "int doubler(int n) { return n * 2; }\n")
+        self.assertEqual(supervisor.c_signatures(source, cpp=True),
+                         [("int", "doubler", ["int"])])
+        self.assertEqual([c for c, _, _ in supervisor.cpp_object_api(source)], ["Rectangle"])
 
     def test_verdict_rpc_est_fail_closed(self):
         self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", ""), (True, None))

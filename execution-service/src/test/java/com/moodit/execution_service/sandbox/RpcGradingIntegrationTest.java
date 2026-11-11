@@ -701,6 +701,73 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void sortie_non_terminee_par_un_saut_de_ligne_ne_bloque_pas_le_couple() {
+        // Le stdout du code noté EST le canal de réponse et il partage son tampon : une dernière
+        // écriture sans saut de ligne se collait au début de la ligne de réponse, qui n'était
+        // alors plus reconnue. Le couple s'attendait, et une réponse JUSTE était notée
+        // « Interrompu (temps limite dépassé) » après avoir brûlé tout son temps.
+        record Cas(String langage, String harnais, String code) { }
+        List<Cas> cas = List.of(
+                new Cas("Java", "return Solution.doubler(5) == 10;", """
+                        public class Solution {
+                            public static int doubler(int n) {
+                                System.out.print("sans saut de ligne");
+                                return n * 2;
+                            }
+                        }
+                        """),
+                new Cas("Rust", "doubler(5) == 10", """
+                        fn doubler(n: i32) -> i32 {
+                            print!("sans saut de ligne");
+                            n * 2
+                        }
+                        """),
+                new Cas("Go", "return doubler(5) == 10", """
+                        package main
+
+                        import "fmt"
+
+                        func doubler(n int) int {
+                        \tfmt.Print("sans saut de ligne")
+                        \treturn n * 2
+                        }
+                        """),
+                new Cas("C", "return doubler(5) == 10;", """
+                        #include <stdio.h>
+
+                        int doubler(int n) {
+                            printf("sans saut de ligne");
+                            return n * 2;
+                        }
+                        """),
+                new Cas("C++", "return doubler(5) == 10;", """
+                        #include <iostream>
+
+                        int doubler(int n) {
+                            std::cout << "sans saut de ligne";
+                            return n * 2;
+                        }
+                        """),
+                new Cas("C#", "return Solution.doubler(5) == 10;", """
+                        using System;
+
+                        class Solution {
+                            public static int doubler(int n) {
+                                Console.Write("sans saut de ligne");
+                                return n * 2;
+                            }
+                        }
+                        """));
+        for (Cas c : cas) {
+            TestResult r = note(c.langage(), c.harnais(), c.code());
+            assertThat(r.passed())
+                    .as("sortie non terminée en " + c.langage() + " : "
+                            + (r.detail() == null ? "" : r.detail()))
+                    .isTrue();
+        }
+    }
+
+    @Test
     void chemins_d_erreur_echouent_proprement() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.

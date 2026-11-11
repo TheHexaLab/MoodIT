@@ -108,7 +108,11 @@ public class ExecutionClient {
             // regarder la forme des harnais : surestimer fait attendre core un peu plus que le
             // serveur, sous-estimer le ferait renoncer AVANT lui et supprimer une tentative
             // encore en correction — le bug de #216. Le plafond EVAL_MAX_WALL_MS borne les deux.
-            long compiles = "Java".equalsIgnoreCase(language) ? 3 : 2;
+            // Normalisé comme compiled()/vmLanguage()/sqlLanguage() : un nom stocké avec une
+            // espace ou une casse inhabituelle restait reconnu comme compilé mais retombait à 2
+            // compilations, donc à un miroir plus court que le mur — la régression #216.
+            long compiles = "java".equals(language == null ? ""
+                    : language.trim().toLowerCase(java.util.Locale.ROOT)) ? 3 : 2;
             long serverWall = Math.min(EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS
                     + compiles * COMPILE_SLACK_MS + LIST_SLACK_MS), EVAL_MAX_WALL_MS);
             return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS

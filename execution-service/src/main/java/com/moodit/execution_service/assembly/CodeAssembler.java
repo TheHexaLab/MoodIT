@@ -249,7 +249,11 @@ public class CodeAssembler {
                 + "            r = {'ok': False, 'error': str(e)}\n"
                 // L'identifiant reçu est RENVOYÉ : c'est ce qui rattache la réponse à SON appel.
                 + "        r['id'] = m.get('id')\n"
-                + "        print(__moodit_json.dumps(r), flush=True)\n"
+                // Retour à la ligne AVANT la réponse (comme en PHP) : un `print(…, end="")` du
+                // code soumis partage ce tampon et se collait au début de la ligne de réponse,
+                // qui n'était alors plus reconnue — le couple s'attendait jusqu'au temps limite,
+                // et une réponse JUSTE était notée « Interrompu ».
+                + "        print('\\n' + __moodit_json.dumps(r), flush=True)\n"
                 + "__moodit_serve()\n";
         return new Assembled("python", List.of(
                 new RunnerExec.File("grader.py", grader),
@@ -362,7 +366,9 @@ public class CodeAssembler {
                 + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
                 // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
                 + "    r.id=m.id;\n"
-                + "    process.stdout.write(JSON.stringify(r)+__moodit_NL);\n"
+                // Retour à la ligne AVANT la réponse : même motif qu'en Python et en PHP — un
+                // `process.stdout.write("x")` sans saut de ligne la contaminait.
+                + "    process.stdout.write(__moodit_NL+JSON.stringify(r)+__moodit_NL);\n"
                 + "  }}); }\n__moodit_serve();\n";
         return new Assembled(runtimeName, List.of(
                 new RunnerExec.File(graderName, grader),

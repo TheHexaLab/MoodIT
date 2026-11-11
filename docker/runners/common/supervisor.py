@@ -1946,7 +1946,9 @@ public final class MooditServer {
                 reponse = "{\\"ok\\":false,\\"id\\":\\"" + entre(ligne, "\\"id\\":\\"", "\\"")
                         + "\\",\\"error\\":\\"" + String.valueOf(t).replace('"', '\\'') + "\\"}";
             }
-            System.out.println(reponse);
+            // Voir « réponse AUTO-CADRÉE » : referme une éventuelle ligne partielle
+            // écrite par le code soumis, qui sinon se collait à la réponse.
+            System.out.print("\\n" + reponse + "\\n");
             System.out.flush();
         }
     }
@@ -2603,7 +2605,7 @@ func mooditServe() {
             brut, _ = json.Marshal(mooditRep{Ok: false, Id: req.Id,
                 Error: "valeur non representable en JSON"})
         }
-        fmt.Println(string(brut))
+        fmt.Print("\\n" + string(brut) + "\\n")
     }
 }
 
@@ -2641,6 +2643,115 @@ C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
 C_LECTURE = {"int": "atoi", "long": "atol", "double": "atof"}
 
 
+def code_depths(source):
+    """Profondeur d'accolades à chaque position, HORS chaînes et commentaires. PURE (testée).
+
+    Sert à distinguer le PREMIER NIVEAU du reste : une `fn` indentée est une fonction associée
+    d'un `impl` ou un helper imbriqué, pas une fonction libre. L'aiguillage généré l'appelait au
+    niveau module, où le nom n'existe pas, et le programme de l'étudiant ne compilait plus.
+
+    Un comptage naïf se faisait déséquilibrer par une accolade en LITTÉRAL (`c == '{'`, une
+    chaîne de mise en forme, du JSON dans un commentaire) : toutes les fonctions suivantes
+    passaient alors pour imbriquées et disparaissaient — un code correct rendait « aucune
+    fonction exploitable ». Ce balayage est donc l'UNIQUE appariement d'accolades du fichier,
+    partagé par les chemins Rust et C/C++, qui en avaient chacun une copie naïve.
+
+    Règles couvertes : `//` jusqu'à la fin de ligne, `/* */` (imbriqués, comme en Rust), chaînes
+    `"…"` et littéraux de caractère `'…'` avec échappements, chaînes brutes `r"…"` et `r#"…"#`
+    (Rust) ou `R"(…)"` (C++)."""
+    texte = source or ""
+    profondeurs = [0] * len(texte)
+    niveau = 0
+    i = 0
+    n = len(texte)
+    bloc = 0            # profondeur des /* */
+    while i < n:
+        c = texte[i]
+        if bloc:
+            if texte.startswith("/*", i):
+                bloc += 1
+                profondeurs[i] = niveau
+                profondeurs[i + 1] = niveau
+                i += 2
+                continue
+            if texte.startswith("*/", i):
+                bloc -= 1
+                profondeurs[i] = niveau
+                profondeurs[i + 1] = niveau
+                i += 2
+                continue
+            profondeurs[i] = niveau
+            i += 1
+            continue
+        if texte.startswith("//", i):
+            fin = texte.find("\n", i)
+            fin = n if fin < 0 else fin
+            for j in range(i, fin):
+                profondeurs[j] = niveau
+            i = fin
+            continue
+        if texte.startswith("/*", i):
+            bloc = 1
+            profondeurs[i] = niveau
+            profondeurs[i + 1] = niveau
+            i += 2
+            continue
+        brut = re.match(r'r(#*)"', texte[i:]) or re.match(r'R"\(', texte[i:])
+        if brut and (c in "rR"):
+            if c == "r":
+                dieses = brut.group(1)
+                ferme = '"' + dieses
+                debut = i + 1 + len(dieses) + 1
+            else:
+                ferme = ')"'
+                debut = i + 3
+            fin = texte.find(ferme, debut)
+            fin = n if fin < 0 else fin + len(ferme)
+            for j in range(i, fin):
+                profondeurs[j] = niveau
+            i = fin
+            continue
+        if c in "\"'":
+            profondeurs[i] = niveau
+            j = i + 1
+            while j < n:
+                if texte[j] == "\\":
+                    profondeurs[j] = niveau
+                    if j + 1 < n:
+                        profondeurs[j + 1] = niveau
+                    j += 2
+                    continue
+                profondeurs[j] = niveau
+                if texte[j] == c:
+                    j += 1
+                    break
+                if texte[j] == "\n" and c == "'":
+                    break        # pas un littéral : apostrophe isolée (durée de vie Rust)
+                j += 1
+            i = j
+            continue
+        if c == "}":
+            niveau -= 1
+        profondeurs[i] = niveau
+        if c == "{":
+            niveau += 1
+        i += 1
+    return profondeurs
+
+
+def block_end(texte, debut):
+    """Fin du bloc ouvert à `debut` (index de son `{`), par appariement LEXICAL. PURE (testée).
+
+    Même balayage que `code_depths` — une accolade en littéral ou en commentaire ne compte pas —
+    au lieu des trois copies naïves qu'en avaient les chemins Rust et C++."""
+    profondeurs = code_depths(texte)
+    niveau = profondeurs[debut]
+    for i in range(debut + 1, len(texte)):
+        if texte[i] == "}" and profondeurs[i] == niveau:
+            return i
+    return len(texte)
+
+
 def cpp_class_spans(source):
     """Plages (début, fin) des corps de classe/structure C++. FONCTION PURE (testée).
 
@@ -2653,15 +2764,7 @@ def cpp_class_spans(source):
             debut = texte.index("{", classe.start())
         except ValueError:
             continue
-        profondeur = 0
-        for i in range(debut, len(texte)):
-            if texte[i] == "{":
-                profondeur += 1
-            elif texte[i] == "}":
-                profondeur -= 1
-                if profondeur == 0:
-                    plages.append((debut, i))
-                    break
+        plages.append((debut, block_end(texte, debut)))
     return plages
 
 
@@ -2711,15 +2814,7 @@ def cpp_object_api(source):
             debut = texte.index("{", classe.start())
         except ValueError:
             continue
-        profondeur, fin = 0, debut
-        for i in range(debut, len(texte)):
-            if texte[i] == "{":
-                profondeur += 1
-            elif texte[i] == "}":
-                profondeur -= 1
-                if profondeur == 0:
-                    fin = i
-                    break
+        fin = block_end(texte, debut)
         corps = texte[debut + 1:fin]
         public = texte[classe.start():debut].lstrip().startswith("struct")
         ctors, methodes = [], []
@@ -2809,7 +2904,7 @@ def cpp_object_dispatch(objets):
             cas.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
 %s
         moodit_objets_%s.push_back(%s(%s));
-        printf("%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
+        printf("\\n%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
         fflush(stdout);
         return;
     }''' % (classe, lectures, classe, classe, args, classe))
@@ -2822,7 +2917,7 @@ def cpp_object_dispatch(objets):
             cas.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
         int h = atoi(moodit_jeton());
 %s
-        printf("%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
+        printf("\\n%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
         fflush(stdout);
         return;
     }''' % (classe, nom, lectures, C_TYPES[retour], classe, nom, args))
@@ -2928,7 +3023,7 @@ def c_server_source(methods, student_source, cpp=False, objets=()):
         args = ", ".join("a%d" % i for i in range(len(types)))
         cas.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
 %s
-        printf("%%s|ok|%s\\n", id, %s(%s));
+        printf("\\n%%s|ok|%s\\n", id, %s(%s));
         fflush(stdout);
         return;
     }""" % (nom, "\n".join(lectures), C_TYPES[retour], nom, args))
@@ -2952,7 +3047,7 @@ static const char *moodit_jeton(void) {
 /* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
 static void moodit_traite(const char *id, const char *op, const char *nom) {
 ''' + "\n".join(cas) + "\n\n" + cas_objets + r'''
-    printf("%s|err|fonction inconnue\n", id);
+    printf("\n%s|err|fonction inconnue\n", id);
     fflush(stdout);
 }
 
@@ -2978,28 +3073,9 @@ RUST_FN = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)",
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
 
-def rust_depths(source):
-    """Profondeur d'accolades à chaque position du code. FONCTION PURE (testée).
-
-    Sert à distinguer le PREMIER NIVEAU du reste : une `fn` indentée est une fonction associée
-    d'un `impl` ou un helper imbriqué, pas une fonction libre. L'aiguillage généré l'appelait au
-    niveau module, où le nom n'existe pas, et le programme de l'étudiant ne compilait plus — le
-    même défaut qu'en C++, où `cpp_class_spans` le ferme déjà."""
-    texte = source or ""
-    profondeurs = []
-    niveau = 0
-    for c in texte:
-        if c == "}":
-            niveau -= 1
-        profondeurs.append(niveau)
-        if c == "{":
-            niveau += 1
-    return profondeurs
-
-
 def rust_signatures(source):
     """Fonctions de PREMIER NIVEAU du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
-    profondeurs = rust_depths(source)
+    profondeurs = code_depths(source)
     trouvees = []
     for trouve in RUST_FN.finditer(source or ""):
         nom, params, retour = trouve.group(1), trouve.group(2), trouve.group(3)
@@ -3058,15 +3134,7 @@ def rust_object_api(source):
         if typ not in structs:
             continue
         debut = texte.index("{", impl.start())
-        profondeur, fin = 0, debut
-        for i in range(debut, len(texte)):
-            if texte[i] == "{":
-                profondeur += 1
-            elif texte[i] == "}":
-                profondeur -= 1
-                if profondeur == 0:
-                    fin = i
-                    break
+        fin = block_end(texte, debut)
         corps = texte[debut:fin]
         ctors, methodes = [], []
         for nom, params, retour in RUST_FN_IN_IMPL.findall(corps):
@@ -3134,15 +3202,7 @@ def rust_mut_receivers(source):
             debut = texte.index("{", impl.start())
         except ValueError:
             continue
-        profondeur, fin = 0, len(texte)
-        for i in range(debut, len(texte)):
-            if texte[i] == "{":
-                profondeur += 1
-            elif texte[i] == "}":
-                profondeur -= 1
-                if profondeur == 0:
-                    fin = i
-                    break
+        fin = block_end(texte, debut)
         for _, params, _ in RUST_FN_IN_IMPL.findall(texte[debut:fin]):
             premier = (params.split(",")[0] if params else "").strip()
             if premier.replace(" ", "").startswith("&mutself"):
@@ -3467,7 +3527,7 @@ fn moodit_serve() {
 %s
             _ => format!("{}|err|fonction inconnue", id),
         };
-        println!("{}", reponse);
+        print!("\\n{}\\n", reponse);
         std::io::stdout().flush().unwrap();
     }
 }
@@ -3746,7 +3806,7 @@ public static class MooditServer {
                     // rendait la poignée d'un objet précédent (ou -1), et le harnais notait
                     // ensuite un objet qui n'était pas celui qu'il avait demandé.
                     if (!construit) { throw new MissingMethodException(cible2.Name); }
-                    Console.Out.WriteLine(id + "|ok|" + (OBJETS.Count - 1));
+                    Console.Out.Write("\\n" + id + "|ok|" + (OBJETS.Count - 1) + "\\n");
                     Console.Out.Flush();
                     continue;
                 }
@@ -3762,7 +3822,7 @@ public static class MooditServer {
                     }
                     if (cible3 == null) { throw new MissingMethodException(nomMethode); }
                     object v = cible3.Invoke(instance, Convertis(cible3.GetParameters(), parts, 4));
-                    Console.Out.WriteLine(id + "|ok|" + Sortie(v));
+                    Console.Out.Write("\\n" + id + "|ok|" + Sortie(v) + "\\n");
                     Console.Out.Flush();
                     continue;
                 }
@@ -3784,7 +3844,7 @@ public static class MooditServer {
             } catch (Exception e) {
                 reponse = id + "|err|" + e.Message.Replace('|', ' ');
             }
-            Console.Out.WriteLine(reponse);
+            Console.Out.Write("\\n" + reponse + "\\n");
             Console.Out.Flush();
         }
         return 0;
