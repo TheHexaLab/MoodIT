@@ -800,6 +800,7 @@ class RpcGradingIntegrationTest {
         record Cas(String langage, String harnais, String code) { }
         List<Cas> cas = List.of(
                 new Cas("Java", "return Solution.solution() == 42;", """
+                        // Sandbox : bibliothèque standard Java (JDK, aucun réseau).
                         public class Solution {
                             public static int solution() {
                                 return 42;
@@ -811,6 +812,7 @@ class RpcGradingIntegrationTest {
                         }
                         """),
                 new Cas("C#", "return Solution.solution() == 42;", """
+                        // Sandbox : bibliothèque standard .NET/Mono (aucun réseau).
                         using System;
 
                         class Solution {
@@ -824,6 +826,7 @@ class RpcGradingIntegrationTest {
                         }
                         """),
                 new Cas("Go", "return solution() == 42", """
+                        // Sandbox : bibliothèque standard Go (aucun réseau).
                         package main
 
                         import "fmt"
@@ -835,6 +838,7 @@ class RpcGradingIntegrationTest {
                         func main() { fmt.Println(solution()) }
                         """),
                 new Cas("Rust", "solution() == 42", """
+                        // Sandbox : bibliothèque standard Rust (aucun réseau, pas de crate externe).
                         fn solution() -> i32 {
                             42
                         }
@@ -842,6 +846,7 @@ class RpcGradingIntegrationTest {
                         fn main() { println!("{}", solution()); }
                         """),
                 new Cas("C", "return solution() == 42;", """
+                        // Sandbox : bibliothèque standard C (libc, aucun réseau).
                         #include <stdio.h>
 
                         int solution(void) {
@@ -854,6 +859,7 @@ class RpcGradingIntegrationTest {
                         }
                         """),
                 new Cas("C++", "return solution() == 42;", """
+                        // Sandbox : bibliothèque standard C++ (STL, aucun réseau).
                         #include <iostream>
 
                         int solution() {
