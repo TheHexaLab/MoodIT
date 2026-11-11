@@ -102,8 +102,15 @@ public class ExecutionClient {
             // conteneur est tué de toute façon. Sans ce miroir, 100 harnais donnaient un délai
             // de ~3 h pendant lesquelles un fil @Async serait resté épinglé si le démon se
             // bloquait sans fermer la socket.
+            // Nombre de COMPILATIONS par cas : le chemin NON FALSIFIABLE (#116, harnais booléen)
+            // compile le noteur ET le code soumis séparément, et trois fois en Java, où les
+            // signatures sont lues sur les classes compilées. On prend ici le PIRE CAS sans
+            // regarder la forme des harnais : surestimer fait attendre core un peu plus que le
+            // serveur, sous-estimer le ferait renoncer AVANT lui et supprimer une tentative
+            // encore en correction — le bug de #216. Le plafond EVAL_MAX_WALL_MS borne les deux.
+            long compiles = "Java".equalsIgnoreCase(language) ? 3 : 2;
             long serverWall = Math.min(EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS
-                    + COMPILE_SLACK_MS + LIST_SLACK_MS), EVAL_MAX_WALL_MS);
+                    + compiles * COMPILE_SLACK_MS + LIST_SLACK_MS), EVAL_MAX_WALL_MS);
             return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS
                     + CONTAINER_LIFECYCLE_MS;
         }

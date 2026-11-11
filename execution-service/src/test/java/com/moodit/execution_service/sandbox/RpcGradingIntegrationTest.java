@@ -642,6 +642,65 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void rust_fonction_associee_ou_imbriquee_ne_casse_pas_la_compilation() {
+        // Une `fn` dans un `impl`, ou imbriquée dans une autre fonction, n'est pas appelable au
+        // niveau module : l'aiguillage généré la citait quand même et le programme de l'étudiant
+        // ne compilait plus. Il recevait 0 avec une erreur de compilation qui n'était pas la
+        // sienne — le même défaut qu'en C++ avec les méthodes de classe.
+        TestResult r = note("Rust", "doubler(5) == 10", """
+                struct Aide {
+                    facteur: i32,
+                }
+
+                impl Aide {
+                    fn facteur_par_defaut() -> i32 { 2 }
+                }
+
+                fn doubler(n: i32) -> i32 {
+                    fn multiplie(a: i32, b: i32) -> i32 { a * b }
+                    multiplie(n, Aide::facteur_par_defaut())
+                }
+                """);
+        assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
+    }
+
+    @Test
+    void rust_methode_mutante_nest_pas_notee_a_tort() {
+        // En capture de champs, l'objet est reconstruit à chaque appel : une méthode `&mut self`
+        // verrait sa modification perdue EN SILENCE. Le type n'est donc pas proxifié de cette
+        // façon — le harnais ne compile pas et le prof le voit, plutôt qu'un faux verdict.
+        TestResult r = note("Rust", "let mut c = Compteur { valeur: 0 };\nc.ajoute(5) == 5", """
+                struct Compteur {
+                    valeur: i32,
+                }
+
+                impl Compteur {
+                    fn ajoute(&mut self, n: i32) -> i32 {
+                        self.valeur += n;
+                        self.valeur
+                    }
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        // Et le motif désigne le bon fautif : le harnais, pas une accusation de triche.
+        assertThat(r.detail() == null ? "" : r.detail()).doesNotContain("⚠");
+    }
+
+    @Test
+    void java_exception_du_code_soumis_donne_son_motif_et_pas_un_timeout() {
+        // La réponse d'erreur du serveur ne portait pas l'identifiant de l'appel : le noteur ne
+        // la consommait jamais, les deux processus s'attendaient, et le cas rendait « Interrompu
+        // (temps limite dépassé) » au bout de son mur au lieu du vrai motif.
+        TestResult r = note("Java", "return Solution.divise(1, 0) == 0;",
+                "public class Solution { public static int divise(int a, int b)"
+                        + " { return a / b; } }");
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).isNotNull()
+                .doesNotContain("temps limite")
+                .contains("harnais");
+    }
+
+    @Test
     void chemins_d_erreur_echouent_proprement() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.

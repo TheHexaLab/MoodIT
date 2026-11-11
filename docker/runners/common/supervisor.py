@@ -1937,7 +1937,14 @@ public final class MooditServer {
             try {
                 reponse = traite(ligne);
             } catch (Throwable t) {
-                reponse = "{\\"ok\\":false,\\"error\\":\\"" + String.valueOf(t) .replace('"', '\\'') + "\\"}";
+                // L'IDENTIFIANT DE L'APPEL doit figurer dans la réponse d'erreur comme dans la
+                // réponse normale : le noteur n'accepte qu'une ligne portant celui de SON appel.
+                // Sans lui, une exception du code soumis (division par zéro, NPE…) n'était jamais
+                // consommée, les deux processus s'attendaient, et le cas consommait tout son temps
+                // limite pour rendre « Interrompu » au lieu du vrai motif. Les cinq autres
+                // langages tenaient déjà cet invariant.
+                reponse = "{\\"ok\\":false,\\"id\\":\\"" + entre(ligne, "\\"id\\":\\"", "\\"")
+                        + "\\",\\"error\\":\\"" + String.valueOf(t).replace('"', '\\'') + "\\"}";
             }
             System.out.println(reponse);
             System.out.flush();
@@ -2349,9 +2356,9 @@ def go_grader_source(methods, harness_code, nonce, objets=(), champs=None):
     for retour, nom, types in methods:
         params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        conv = {"int": "int(mooditEntier(v))", "int64": "mooditEntier(v)",
-                "float64": "mooditNombre(v)", "bool": "v.(bool)",
-                "string": "v.(string)"}[retour]
+        # MÊME table que l'aiguillage et que les bouchons objets : trois copies divergentes ont
+        # déjà produit trois défauts (deux contournements de l'encodage, une lecture en flottant).
+        conv = GO_CONV[retour] % "v"
         bouchons.append("""func %s(%s) %s {
     v := mooditAppel("%s", []interface{}{%s})
     return %s
@@ -2434,7 +2441,13 @@ func mooditAppel(nom string, args []interface{}) interface{} {
 func mooditEnvoie(req mooditReq) interface{} {
     id := mooditId()
     req.Id = id
-    requete, _ := json.Marshal(req)
+    // json.Marshal ECHOUE sur NaN et sur +/-Inf. L'erreur ignoree donnait une ligne VIDE, que
+    // le decodeur d'en face rejette : les deux processus s'attendaient et le cas consommait tout
+    // son temps limite pour rendre « Interrompu » au lieu d'un verdict.
+    requete, errReq := json.Marshal(req)
+    if errReq != nil {
+        panic("valeur non representable transmise au code soumis")
+    }
     fmt.Println(string(requete))
     for {
         ligne, err := mooditLecteur.ReadString('\\n')
@@ -2583,7 +2596,13 @@ func mooditServe() {
             }
             rep.Value = valeur
         }()
-        brut, _ := json.Marshal(rep)
+        brut, errRep := json.Marshal(rep)
+        if errRep != nil {
+            // Meme motif que cote noteur : une valeur non representable (NaN, Inf) rendue par le
+            // code soumis ne doit pas bloquer le couple, mais etre refusee explicitement.
+            brut, _ = json.Marshal(mooditRep{Ok: false, Id: req.Id,
+                Error: "valeur non representable en JSON"})
+        }
         fmt.Println(string(brut))
     }
 }
@@ -2618,6 +2637,8 @@ C_FUNC = re.compile(r"^\s*(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
 # 17 chiffres suffisent à garantir l'aller-retour exact d'un double IEEE 754.
 C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
+# Lecture d'un champ texte, UNE seule fois pour les cinq sites qui en avaient une copie.
+C_LECTURE = {"int": "atoi", "long": "atol", "double": "atof"}
 
 
 def cpp_class_spans(source):
@@ -2760,7 +2781,7 @@ def cpp_object_stub(objets):
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             fmt = "".join("|" + C_TYPES[t] for t in types)
             args = "".join(", a%d" % i for i in range(len(types)))
-            lecture = {"int": "atoi", "long": "atol", "double": "atof"}[retour]
+            lecture = C_LECTURE[retour]
             corps += ["    %s %s(%s) {" % (retour, nom, params),
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
@@ -2782,7 +2803,7 @@ def cpp_object_dispatch(objets):
         for types in ctors:
             lectures = "\n".join(
                 "        %s a%d = %s(moodit_jeton());"
-                % (t, i, {"int": "atoi", "long": "atol", "double": "atof"}[t])
+                % (t, i, C_LECTURE[t])
                 for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
             cas.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
@@ -2795,7 +2816,7 @@ def cpp_object_dispatch(objets):
         for retour, nom, types in methodes:
             lectures = "\n".join(
                 "        %s a%d = %s(moodit_jeton());"
-                % (t, i, {"int": "atoi", "long": "atol", "double": "atof"}[t])
+                % (t, i, C_LECTURE[t])
                 for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
             cas.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
@@ -2854,7 +2875,7 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, objets=()):
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         fmt = "".join("|" + C_TYPES[t] for t in types)
         args = "".join(", a%d" % i for i in range(len(types)))
-        lecture = {"int": "atoi", "long": "atol", "double": "atof"}[retour]
+        lecture = C_LECTURE[retour]
         bouchons.append("""static %s %s(%s) {
     char id[40], requete[4096];
     moodit_identifiant(id);
@@ -2902,7 +2923,7 @@ def c_server_source(methods, student_source, cpp=False, objets=()):
     for retour, nom, types in methods:
         lectures = []
         for i, t in enumerate(types):
-            conv = {"int": "atoi", "long": "atol", "double": "atof"}[t]
+            conv = C_LECTURE[t]
             lectures.append("        %s a%d = %s(moodit_jeton());" % (t, i, conv))
         args = ", ".join("a%d" % i for i in range(len(types)))
         cas.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
@@ -2957,10 +2978,33 @@ RUST_FN = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)",
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
 
+def rust_depths(source):
+    """Profondeur d'accolades à chaque position du code. FONCTION PURE (testée).
+
+    Sert à distinguer le PREMIER NIVEAU du reste : une `fn` indentée est une fonction associée
+    d'un `impl` ou un helper imbriqué, pas une fonction libre. L'aiguillage généré l'appelait au
+    niveau module, où le nom n'existe pas, et le programme de l'étudiant ne compilait plus — le
+    même défaut qu'en C++, où `cpp_class_spans` le ferme déjà."""
+    texte = source or ""
+    profondeurs = []
+    niveau = 0
+    for c in texte:
+        if c == "}":
+            niveau -= 1
+        profondeurs.append(niveau)
+        if c == "{":
+            niveau += 1
+    return profondeurs
+
+
 def rust_signatures(source):
-    """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
+    """Fonctions de PREMIER NIVEAU du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
+    profondeurs = rust_depths(source)
     trouvees = []
-    for nom, params, retour in RUST_FN.findall(source or ""):
+    for trouve in RUST_FN.finditer(source or ""):
+        nom, params, retour = trouve.group(1), trouve.group(2), trouve.group(3)
+        if profondeurs[trouve.start(1)] != 0:
+            continue    # fonction associée (impl) ou imbriquée : pas appelable au niveau module
         if nom == "main" or retour not in RUST_TYPES:
             continue
         types = []
@@ -3042,7 +3086,7 @@ def rust_object_api(source):
                 ctors.append((nom, types))
             elif prend_self and retour in RUST_TYPES:
                 methodes.append((retour, nom, types))
-        if methodes and (ctors or typ in rust_struct_fields(texte)):
+        if methodes and (ctors or typ in rust_capture_fields(texte)):
             resultat.append((typ, ctors, methodes))
     return resultat
 
@@ -3074,6 +3118,45 @@ def rust_struct_fields(source):
         if liste:
             champs[typ] = liste
     return champs
+
+
+def rust_mut_receivers(source):
+    """Types dont au moins une méthode prend `&mut self`. FONCTION PURE (testée).
+
+    Pendant exact de `go_pointer_receivers` : une telle méthode peut modifier l'objet, et la
+    capture de champs le reconstruit à chaque appel — la modification serait perdue EN SILENCE,
+    donc un verdict faux sans diagnostic. Ces types passent par la poignée d'un constructeur."""
+    texte = source or ""
+    mutants = set()
+    for impl in RUST_IMPL.finditer(texte):
+        typ = impl.group(1)
+        try:
+            debut = texte.index("{", impl.start())
+        except ValueError:
+            continue
+        profondeur, fin = 0, len(texte)
+        for i in range(debut, len(texte)):
+            if texte[i] == "{":
+                profondeur += 1
+            elif texte[i] == "}":
+                profondeur -= 1
+                if profondeur == 0:
+                    fin = i
+                    break
+        for _, params, _ in RUST_FN_IN_IMPL.findall(texte[debut:fin]):
+            premier = (params.split(",")[0] if params else "").strip()
+            if premier.replace(" ", "").startswith("&mutself"):
+                mutants.add(typ)
+    return mutants
+
+
+def rust_capture_fields(source):
+    """Champs CAPTURABLES : ceux des structures sans méthode `&mut self`. PURE (testée).
+
+    Décision prise ICI et nulle part ailleurs, comme `go_capture_fields` : bouchon, aiguillage et
+    lecture d'API doivent s'accorder."""
+    mutants = rust_mut_receivers(source)
+    return {t: f for t, f in rust_struct_fields(source).items() if t not in mutants}
 
 
 def rust_object_stub(objets, champs=None):
@@ -3326,13 +3409,11 @@ def rust_server_source(methods, student_source, objets=(), champs=None):
     piles, cas_objets = rust_object_dispatch(objets, champs)
     cas = []
     for retour, nom, types in methods:
-        lectures = []
-        for i, t in enumerate(types):
-            if t == "String":
-                lectures.append('            let a%d = moodit_dehexe(args.next().unwrap_or(""));' % i)
-            else:
-                lectures.append('            let a%d = args.next().unwrap_or("0").parse::<%s>().unwrap_or_default();'
-                                % (i, t))
+        # MÊME table que les bouchons et l'aiguillage des objets (RUST_CONV) : une copie à part
+        # est restée en arrière à chaque changement d'invariant, et c'est ainsi que l'encodage
+        # des chaînes a été oublié une première fois.
+        lectures = ['            let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                    for i, t in enumerate(types)]
         appel = "%s(%s)" % (nom, ", ".join("a%d" % i for i in range(len(types))))
         if retour == "String":
             appel = "moodit_hexe(&%s)" % appel
@@ -3438,10 +3519,11 @@ def cs_envoi(types):
     culture INVARIANTE (une concaténation implicite donnait « 3,14 », illisible d'en face)."""
     return "".join(
         ' + "|" + MooditRpc.Hexe(a%d)' % i if t == "string"
-        # « R » (aller-retour) et non le format « G » par défaut : ce dernier n'est pas garanti
-        # exact, et le runner tourne sur mono. Un double arrondi à l'affichage faisait noter
-        # fausse une réponse juste, comme le %g corrigé en C/C++.
-        else ' + "|" + a%d.ToString("R", '
+        # « G17 » et non le format « G » par défaut : ce dernier n'est pas garanti exact, et un
+        # double arrondi à l'affichage faisait noter fausse une réponse juste (comme le %g
+        # corrigé en C/C++). C'est bien G17 et non « R » : la documentation .NET déconseille R
+        # pour l'aller-retour d'un double, et le runner tourne sur mono.
+        else ' + "|" + a%d.ToString("G17", '
              'System.Globalization.CultureInfo.InvariantCulture)' % i if t == "double"
         else ' + "|" + Convert.ToString(a%d, '
              'System.Globalization.CultureInfo.InvariantCulture)' % i
@@ -3630,13 +3712,14 @@ public static class MooditServer {
     /** Valeur de retour sur le fil : une chaîne part encodée. */
     static string Sortie(object v) {
         if (v is string) { return Hexe((string) v); }
-        // « R » : aller-retour exact d'un double, que le format « G » par défaut ne garantit pas.
+        // « G17 » (et « G9 » pour un float) : aller-retour exact, que le format « G » par
+        // défaut ne garantit pas. La documentation .NET déconseille « R » pour un double.
         if (v is double) {
-            return ((double) v).ToString("R",
+            return ((double) v).ToString("G17",
                     System.Globalization.CultureInfo.InvariantCulture);
         }
         if (v is float) {
-            return ((float) v).ToString("R",
+            return ((float) v).ToString("G9",
                     System.Globalization.CultureInfo.InvariantCulture);
         }
         return Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture);
@@ -4044,7 +4127,7 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
                 student_source = f.read()
     methodes = rust_signatures(student_source)
     objets = rust_object_api(student_source)
-    champs = rust_struct_fields(student_source)
+    champs = rust_capture_fields(student_source)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : i32, "
                       "i64, f64, bool, String).")

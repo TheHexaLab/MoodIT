@@ -155,17 +155,27 @@ class ExecutionClientTest {
         // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
         assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 145_000);
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
-        // (N + 2 canaris) × (run + 10 s de marge + 90 s de compilation + 5 s d'inventaire
+        // (N + 2 canaris) × (run + 10 s de marge + les COMPILATIONS du cas + 5 s d'inventaire
         // `--list`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
         // terme ajouté au perCase serveur doit apparaître ici, sinon le miroir est plus court
         // que le mur réel et le read timeout expire pendant une notation en cours (#216).
+        // TROIS compilations par cas en Java (chemin non falsifiable : code soumis seul pour
+        // lire ses signatures, puis noteur, puis serveur), DEUX ailleurs ; le pire cas est pris
+        // sans regarder la forme des harnais — surestimer fait attendre, sous-estimer casse.
+        // 30 s + 3 × (60 + 10 + 3 × 90 + 5) = 1065 s : au-delà du mur du serveur (15 min), donc
+        // PLAFONNÉ — comme le mur lui-même. Trois compilations par cas coûtent cher, et une
+        // question Java à plusieurs cas lents sera notée partiellement (verdicts « Non évalué »,
+        // comportement dégradé documenté), jamais tuée au mur.
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 15_000 + 30_000
-                        + 3 * (60_000 + 10_000 + 90_000 + 5_000) + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
         // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
+        // 30 s + 3 × (10 + 10 + 270 + 5) = 915 s : plafonné de justesse.
         assertThat(client.readTimeoutMs("Java", 4, 1_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+        // Go : DEUX compilations par cas, et non trois — 795 s, sous le plafond.
+        assertThat(client.readTimeoutMs("Go", 4, 60_000))
                 .isEqualTo(10_000 + 15_000 + 30_000
-                        + 3 * (10_000 + 10_000 + 90_000 + 5_000) + 5_000 + 35_000);
+                        + 3 * (60_000 + 10_000 + 2 * 90_000 + 5_000) + 5_000 + 35_000);
         // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
         assertThat(client.readTimeoutMs("Java", 202, 60_000))
                 .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);

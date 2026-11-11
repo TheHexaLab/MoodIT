@@ -113,6 +113,26 @@ public class DockerEvaluator {
     }
 
     /**
+     * Nombre de COMPILATIONS que le superviseur fera pour UN cas, selon le chemin retenu.
+     *
+     * <p>Le chemin framework compile un seul projet. Le chemin NON FALSIFIABLE en compile deux —
+     * le noteur et le code soumis sont deux programmes séparés — et trois en Java, où le code
+     * soumis est d'abord compilé seul pour que ses signatures soient lues sur les classes. Le mur
+     * du conteneur n'en budgétait qu'une : un cas lancé juste avant l'échéance du budget, dont
+     * les compilations approchent leur propre plafond, se faisait tuer au mur — tous les verdicts
+     * du job perdus, 502, tentative supprimée (la régression #216). Un seul cas au format
+     * booléen suffit à payer le pire cas, puisque le superviseur choisit cas par cas.
+     */
+    static long compilesPerCase(String runnerLanguage, List<TestCaseInput> cases) {
+        boolean anyBoolean = cases.stream()
+                .anyMatch(c -> !frameworkMarkerFound(runnerLanguage, c.harnessCode()));
+        if (!anyBoolean) {
+            return 1;
+        }
+        return "java".equals(runnerLanguage) ? 3 : 2;
+    }
+
+    /**
      * Ce harnais est-il un VRAI test du framework ? Faux = harnais booléen, qui prend le chemin
      * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
      */
@@ -160,7 +180,8 @@ public class DockerEvaluator {
         // avant l'échéance doit pouvoir aller jusqu'au bout (compilation + run) ET laisser le
         // temps d'imprimer le JSON. Une marge fixe plus courte qu'un cas laissait une fenêtre
         // où le conteneur était tué au mur — tout le travail perdu, 502, tentative supprimée.
-        long perCase = perRun + PER_CASE_OVERHEAD_MS + COMPILE_BUDGET_MS + LIST_BUDGET_MS;
+        long perCase = perRun + PER_CASE_OVERHEAD_MS
+                + compilesPerCase(runnerLanguage, cases) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
         long wallCandidate = BASE_OVERHEAD_MS + (cases.size() + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
         long wall = Math.min(cap, wallCandidate);

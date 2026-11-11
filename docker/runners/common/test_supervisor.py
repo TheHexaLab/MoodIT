@@ -1629,10 +1629,84 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
         self.assertIn("return &Rectangle{", bouchon)
 
     def test_csharp_double_en_aller_retour_exact(self):
-        # Le format « G » par défaut n'est pas garanti exact, et le runner tourne sur mono.
-        self.assertIn('a0.ToString("R"', supervisor.cs_envoi(["double"]))
+        # Le format « G » par défaut n'est pas garanti exact. Et c'est « G17 », pas « R » : la
+        # documentation .NET déconseille R pour l'aller-retour d'un double, et le runner tourne
+        # sur mono, le runtime le plus ancien du parc.
+        self.assertIn('a0.ToString("G17"', supervisor.cs_envoi(["double"]))
         self.assertIn('+ "|" + MooditRpc.Hexe(a0)', supervisor.cs_envoi(["string"]))
-        self.assertIn('ToString("R"', supervisor.cs_server_source("Solution"))
+        serveur = supervisor.cs_server_source("Solution")
+        self.assertIn('ToString("G17"', serveur)
+        self.assertIn('ToString("G9"', serveur)
+
+    def test_rust_fonction_associee_ou_imbriquee_nest_pas_libre(self):
+        # Une `fn` indentée vit dans un `impl` ou dans une autre fonction : l'aiguillage généré
+        # l'appelait au niveau module, où le nom n'existe pas, et le programme de l'étudiant ne
+        # compilait plus. Même défaut qu'en C++, où cpp_class_spans le ferme déjà.
+        source = ("struct Rect { c: i32 }\n\n"
+                  "impl Rect {\n"
+                  "    fn double(x: i32) -> i32 { x * 2 }\n"
+                  "}\n\n"
+                  "fn calcule(n: i32) -> i32 {\n"
+                  "    fn aide(k: i32) -> i32 { k + 1 }\n"
+                  "    aide(n)\n"
+                  "}\n")
+        self.assertEqual(supervisor.rust_signatures(source), [("i32", "calcule", ["i32"])])
+        serveur = supervisor.rust_server_source(supervisor.rust_signatures(source), source)
+        for absent in ('"double" =>', '"aide" =>'):
+            self.assertNotIn(absent, serveur)
+
+    def test_rust_recepteur_mutable_ecarte_la_capture_de_champs(self):
+        # Pendant du filtre Go : l'objet reconstruit à chaque appel perdrait la modification EN
+        # SILENCE, donc une réponse juste serait notée fausse sans diagnostic.
+        source = ("struct Compteur { valeur: i32 }\n\n"
+                  "impl Compteur {\n"
+                  "    fn ajoute(&mut self, n: i32) -> i32 { self.valeur += n; self.valeur }\n"
+                  "}\n")
+        self.assertEqual(supervisor.rust_mut_receivers(source), {"Compteur"})
+        self.assertEqual(supervisor.rust_capture_fields(source), {})
+        # Sans constructeur ET avec méthode mutante : pas proxifié du tout, plutôt qu'un faux
+        # verdict. Le harnais ne compile pas, et le prof le voit.
+        self.assertEqual(supervisor.rust_object_api(source), [])
+
+    def test_rust_recepteur_immuable_garde_la_capture_de_champs(self):
+        source = ("struct Rectangle { largeur: i32, hauteur: i32 }\n\n"
+                  "impl Rectangle {\n"
+                  "    fn aire(&self) -> i32 { self.largeur * self.hauteur }\n"
+                  "}\n")
+        self.assertEqual(supervisor.rust_mut_receivers(source), set())
+        self.assertIn("Rectangle", supervisor.rust_capture_fields(source))
+
+    def test_java_reponse_d_erreur_porte_l_identifiant(self):
+        # Le noteur n'accepte qu'une ligne portant l'identifiant de SON appel : sans lui, une
+        # exception du code soumis n'était jamais consommée et le couple s'attendait jusqu'au
+        # temps limite. Les cinq autres langages tenaient déjà cet invariant.
+        serveur = supervisor.java_server_source("Solution")
+        self.assertIn('"{\\"ok\\":false,\\"id\\":\\""', serveur)
+        self.assertIn('entre(ligne, "\\"id\\":\\"", "\\"")', serveur)
+
+    def test_une_seule_table_de_conversion_par_langage(self):
+        # Cause racine de trois tours de correctifs : une table dupliquée reste en arrière au
+        # changement d'invariant suivant. Chaque générateur doit consommer LA table.
+        for t in supervisor.GO_CONV:
+            attendu = supervisor.GO_CONV[t] % "v"
+            self.assertIn(attendu,
+                          supervisor.go_grader_source([(t, "f", [])], "true", "N"))
+        for t in supervisor.RUST_CONV:
+            attendu = supervisor.RUST_CONV[t] % 'args.next().unwrap_or("")'
+            self.assertIn(attendu,
+                          supervisor.rust_server_source([("i32", "f", [t])], "fn f() {}"))
+        self.assertEqual(supervisor.C_LECTURE, {"int": "atoi", "long": "atol", "double": "atof"})
+        with open(supervisor.__file__, encoding="utf-8") as f:
+            source = f.read()
+        self.assertEqual(source.count('"long": "atol"'), 1)
+
+    def test_go_valeur_non_representable_ne_bloque_pas_le_couple(self):
+        # json.Marshal échoue sur NaN et ±Inf : l'erreur ignorée donnait une ligne vide, que le
+        # décodeur d'en face rejette — les deux processus s'attendaient jusqu'au temps limite.
+        noteur = supervisor.go_grader_source([("float64", "moyenne", ["f64"])], "true", "N") \
+            if False else supervisor.go_grader_source([("float64", "moyenne", [])], "true", "N")
+        self.assertIn("errReq != nil", noteur)
+        self.assertIn("errRep != nil", supervisor.go_server_source([("float64", "moyenne", [])]))
 
     def test_verdict_rpc_est_fail_closed(self):
         self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", ""), (True, None))
