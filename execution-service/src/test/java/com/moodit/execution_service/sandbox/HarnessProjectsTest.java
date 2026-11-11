@@ -303,4 +303,59 @@ class HarnessProjectsTest {
                 .files().get("cases/0/src/moodit_main_test.go"))
                 .contains("jeton=__MOODIT_T__ code=%d");
     }
+
+    /**
+     * Le gabarit de harnais de la base doit appeler un point d'entrée que le code de départ de la
+     * base DÉCLARE, pour les six langages compilés.
+     *
+     * <p>Ce lien était vérifié à la main, et c'est par là qu'un gabarit C# appelant
+     * {@code Solution.resoudre()} — absent du code de départ, qui déclare {@code solution()} — est
+     * passé inaperçu : un prof partant des valeurs par défaut de l'éditeur obtenait un noteur qui
+     * ne compile pas. Le test lit les DEUX migrations, donc une retouche de l'une qui désaccorde
+     * l'autre le fait échouer.
+     */
+    @Test
+    void chaque_gabarit_de_harnais_appelle_une_entree_que_le_code_de_depart_declare()
+            throws java.io.IOException {
+        String reference = java.nio.file.Files.readString(
+                java.nio.file.Path.of("..", "db", "migration", "V2__donnees_reference.sql"));
+        String booleens = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "..", "db", "migration", "V9__harnais_booleens_non_falsifiables.sql"));
+
+        for (String langue : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            String gabarit = bloc(booleens, "('" + langue + "', $hc$", "$hc$");
+            assertThat(gabarit).as("gabarit de harnais de " + langue).isNotEmpty();
+            String appel = gabarit.lines()
+                    .map(String::strip)
+                    .filter(l -> !l.isEmpty() && !l.startsWith("//") && !l.startsWith("/*")
+                            && !l.startsWith("*"))
+                    .reduce((a, b) -> b)
+                    .orElseThrow();
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(\\w+)\\s*\\(").matcher(appel.replace("return ", ""));
+            assertThat(m.find()).as("appel lisible dans le gabarit de " + langue).isTrue();
+            String entree = m.group(1);
+
+            String depart = bloc(reference, "('" + langue + "',", "$sc$");
+            assertThat(depart).as("code de départ de " + langue).isNotEmpty();
+            assertThat(depart)
+                    .as("le gabarit de " + langue + " appelle " + entree
+                            + "(), que le code de départ doit déclarer")
+                    .contains(entree);
+        }
+    }
+
+    /** Contenu entre le premier {@code $…$} qui suit {@code debut}. */
+    private static String bloc(String texte, String debut, String delimiteur) {
+        int i = texte.indexOf(debut);
+        if (i < 0) {
+            return "";
+        }
+        int j = texte.indexOf(delimiteur, i + debut.length() - delimiteur.length());
+        if (j < 0) {
+            return "";
+        }
+        int k = texte.indexOf(delimiteur, j + delimiteur.length());
+        return k < 0 ? "" : texte.substring(j + delimiteur.length(), k);
+    }
 }
