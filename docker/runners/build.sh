@@ -15,7 +15,14 @@ cd "$(dirname "$0")"
 # si l'un change, changer l'autre.
 TAG="${MOODIT_RUNNER_TAG:-latest}"
 
-for lang in java csharp go rust c python node php bash sqlite; do
+# Sans argument : les dix images. Avec : seulement celles demandees — la CI s en sert pour
+# construire une image par job, sans dupliquer ici la facon de les construire.
+LANGS=("$@")
+if [ ${#LANGS[@]} -eq 0 ]; then
+  LANGS=(java csharp go rust c python node php bash sqlite)
+fi
+
+for lang in "${LANGS[@]}"; do
   echo "── moodit-runner-${lang}:${TAG}"
   docker build -t "moodit-runner-${lang}:${TAG}" -f "${lang}/Dockerfile" .
 done

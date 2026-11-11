@@ -12,10 +12,15 @@ ADD --checksum=sha256:b016ef6b1c3454d6d7c2c88ce081dabf289699686af6622d6e4e2e1b54
 # apt verifie la signature de l'archive, pas le miroir. Les deux formats de sources sont
 # couverts (sources.list hérité, et ubuntu.sources en deb822 depuis Ubuntu 24.04).
 RUN sed -i 's|//archive.ubuntu.com|//azure.archive.ubuntu.com|g; s|//security.ubuntu.com|//azure.archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true; \
-    # L'invariant est VERIFIE : sans ce controle, une disposition de sources differente dans
-    # une base future (bump de digest, image arm64 ou l'URI est ports.ubuntu.com) ferait
-    # revenir le miroir a grosse reponse DNS en silence, et la panne avec lui.
-    grep -rq azure.archive.ubuntu.com /etc/apt/sources.list /etc/apt/sources.list.d/ && ! grep -rq '//archive.ubuntu.com' /etc/apt/sources.list /etc/apt/sources.list.d/
+    # L'invariant est VERIFIE, sur les DEUX hotes substitues et sur le MEME perimetre que le
+    # sed : sans cela, une base future qui deplace la seule strophe security hors de ces
+    # fichiers ferait revenir en silence le miroir a grosse reponse DNS, et la panne avec
+    # lui. L'echec dit ce qui est attendu, au lieu d'un code 1 sur une commande de 400
+    # caracteres : il se produira sur un bump de base ou une construction non amd64.
+    { grep -q azure.archive.ubuntu.com /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null \
+      && ! grep -q '//archive.ubuntu.com\|//security.ubuntu.com' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null; } \
+    || { echo "ERREUR: la bascule vers azure.archive.ubuntu.com n'a pas porte sur TOUTES" >&2; \
+         echo "       les sources (disposition inattendue, ou base non amd64)." >&2; exit 1; }
 
 # Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
 # une panne DNS passagere du runner (archive.ubuntu.com non resolu) vide la liste des

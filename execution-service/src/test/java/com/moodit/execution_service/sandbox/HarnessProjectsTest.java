@@ -311,38 +311,89 @@ class HarnessProjectsTest {
      * <p>Ce lien était vérifié à la main, et c'est par là qu'un gabarit C# appelant
      * {@code Solution.resoudre()} — absent du code de départ, qui déclare {@code solution()} — est
      * passé inaperçu : un prof partant des valeurs par défaut de l'éditeur obtenait un noteur qui
-     * ne compile pas. Le test lit les DEUX migrations, donc une retouche de l'une qui désaccorde
-     * l'autre le fait échouer.
+     * ne compile pas.
+     *
+     * <p>Les migrations sont cherchées par leur CONTENU, pas par leur nom : la DERNIÈRE qui écrit
+     * chaque colonne fait foi. Désigner {@code V9} en dur laisserait ce test vert sur un contenu
+     * périmé dès qu'une migration ultérieure retoucherait un gabarit — le défaut repasserait.
      */
     @Test
     void chaque_gabarit_de_harnais_appelle_une_entree_que_le_code_de_depart_declare()
             throws java.io.IOException {
-        String reference = java.nio.file.Files.readString(
-                java.nio.file.Path.of("..", "db", "migration", "V2__donnees_reference.sql"));
-        String booleens = java.nio.file.Files.readString(java.nio.file.Path.of(
-                "..", "db", "migration", "V9__harnais_booleens_non_falsifiables.sql"));
+        java.util.List<String> migrations = migrationsParVersion();
 
         for (String langue : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            String gabarit = bloc(booleens, "('" + langue + "', $hc$", "$hc$");
+            String gabarit = valeurEffective(migrations, "('" + langue + "', $hc$", "$hc$");
             assertThat(gabarit).as("gabarit de harnais de " + langue).isNotEmpty();
-            String appel = gabarit.lines()
+            // Ancré sur « == ATTENDU » : le point d'entrée est le dernier identifiant suivi de
+            // « ( » AVANT cette comparaison. Prendre le premier de la ligne désignerait `abs`
+            // dans un `Math.abs(solution(3) - 7.0) < 1e-9`.
+            String expression = gabarit.lines()
                     .map(String::strip)
-                    .filter(l -> !l.isEmpty() && !l.startsWith("//") && !l.startsWith("/*")
-                            && !l.startsWith("*"))
-                    .reduce((a, b) -> b)
-                    .orElseThrow();
-            java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("(\\w+)\\s*\\(").matcher(appel.replace("return ", ""));
-            assertThat(m.find()).as("appel lisible dans le gabarit de " + langue).isTrue();
-            String entree = m.group(1);
+                    .filter(l -> l.contains("== ATTENDU"))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "le gabarit de " + langue + " ne compare plus à ATTENDU : "
+                                    + "ancrer ce test autrement"));
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\w+)\\s*\\(")
+                    .matcher(expression.substring(0, expression.indexOf("== ATTENDU")));
+            String entree = null;
+            while (m.find()) {
+                entree = m.group(1);
+            }
+            assertThat(entree).as("appel lisible dans le gabarit de " + langue).isNotNull();
 
-            String depart = bloc(reference, "('" + langue + "',", "$sc$");
+            String depart = valeurEffective(migrations, "('" + langue + "',", "$sc$");
             assertThat(depart).as("code de départ de " + langue).isNotEmpty();
-            assertThat(depart)
+            // Hors commentaires : un commentaire qui contiendrait le mot ne vaut pas déclaration.
+            String code = depart.lines()
+                    .filter(l -> !l.strip().startsWith("//") && !l.strip().startsWith("#"))
+                    .reduce("", (a, b) -> a + "\n" + b);
+            assertThat(code)
                     .as("le gabarit de " + langue + " appelle " + entree
                             + "(), que le code de départ doit déclarer")
                     .contains(entree);
         }
+    }
+
+    /** Contenu des migrations {@code db/migration/V*.sql}, par numéro de version croissant. */
+    private static java.util.List<String> migrationsParVersion() throws java.io.IOException {
+        java.util.TreeMap<Integer, String> parVersion = new java.util.TreeMap<>();
+        try (var fichiers = java.nio.file.Files.list(
+                java.nio.file.Path.of("..", "db", "migration"))) {
+            for (java.nio.file.Path p : fichiers.toList()) {
+                String nom = p.getFileName().toString();
+                java.util.regex.Matcher v = java.util.regex.Pattern.compile("^V(\\d+)__")
+                        .matcher(nom);
+                if (nom.endsWith(".sql") && v.find()) {
+                    parVersion.put(Integer.parseInt(v.group(1)),
+                            java.nio.file.Files.readString(p));
+                }
+            }
+        }
+        assertThat(parVersion).as("migrations trouvées").isNotEmpty();
+        return List.copyOf(parVersion.values());
+    }
+
+    /**
+     * Valeur EFFECTIVE d'un gabarit : les migrations sont rejouées dans l'ordre et le dernier bloc
+     * non vide gagne.
+     *
+     * <p>Une migration met à jour un SOUS-ENSEMBLE de langages — {@code V8} ne retouche que
+     * JavaScript. Prendre « la dernière migration qui écrit la colonne » désignerait donc un
+     * fichier où le langage cherché est absent : c'est ce que faisait la première version de ce
+     * test, et elle échouait sur Java.
+     */
+    private static String valeurEffective(java.util.List<String> migrations, String debut,
+            String delimiteur) {
+        String valeur = "";
+        for (String migration : migrations) {
+            String trouve = bloc(migration, debut, delimiteur);
+            if (!trouve.isEmpty()) {
+                valeur = trouve;
+            }
+        }
+        return valeur;
     }
 
     /** Contenu entre le premier {@code $…$} qui suit {@code debut}. */
