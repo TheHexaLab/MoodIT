@@ -1402,8 +1402,10 @@ class ApiObjetTest(unittest.TestCase):
     def test_go_champs_et_api(self):
         self.assertEqual(supervisor.go_struct_fields(self.GO),
                          {"Rectangle": [("largeur", "int"), ("hauteur", "int")]})
+        # Le dernier membre dit si le constructeur rend un POINTEUR : l'aiguillage doit le savoir
+        # pour ne pas prendre l'adresse d'une adresse.
         self.assertEqual(supervisor.go_object_api(self.GO),
-                         [("Rectangle", [("NewRectangle", ["int", "int"])],
+                         [("Rectangle", [("NewRectangle", ["int", "int"], False)],
                            [("int", "aire", [])])])
 
     def test_go_type_sans_constructeur_reste_proxifie(self):
@@ -1493,6 +1495,109 @@ class ApiObjetTest(unittest.TestCase):
     def test_java_bouchon_sans_objet_garde_le_constructeur_prive(self):
         source = supervisor.java_stub_source("Solution", [("int", "doubler", ["int"])])
         self.assertIn("private Solution() {}", source)
+
+
+class GenerationTypesEtIdiomesTest(unittest.TestCase):
+    """Types de retour et idiomes que la première version du générateur ne savait pas produire.
+
+    Chacun rendait « Échec de compilation » à un étudiant dont le code était juste : ce sont les
+    régressions les plus coûteuses du chemin non falsifiable, et aucune n'était mesurée."""
+
+    def test_java_types_de_retour_sans_mot_reserve(self):
+        # `long`, `double` et `boolean` sont des mots réservés : le nom de la méthode RPC ne peut
+        # pas être dérivé du type. `MooditRpc.double(…)` ne compilait pas.
+        for retour, attendu in (("int", "MooditRpc.integer("), ("long", "MooditRpc.long_("),
+                                ("double", "MooditRpc.double_("),
+                                ("boolean", "MooditRpc.boolean_("),
+                                ("java.lang.String", "MooditRpc.string(")):
+            source = supervisor.java_stub_source("Solution", [(retour, "f", ["int"])])
+            self.assertIn(attendu, source, retour)
+            for reserve in ("MooditRpc.double(", "MooditRpc.long(", "MooditRpc.boolean("):
+                self.assertNotIn(reserve, source)
+
+    def test_rust_methode_transmet_ses_arguments(self):
+        objets = [("Compteur", [], [("i32", "plus", ["i32"])])]
+        champs = {"Compteur": [("valeur", "i32")]}
+        _, cas = supervisor.rust_object_dispatch(objets, champs)
+        self.assertIn("let a0 =", cas)
+        self.assertIn(".plus(a0)", cas)
+
+    def test_rust_un_seul_bras_new_par_cle(self):
+        # Un type à champs capturés ET doté d'un constructeur recevait deux bras identiques ;
+        # le second, inatteignable, valait un avertissement `unreachable_patterns`.
+        objets = [("Rectangle", [("new", ["i32", "i32"])], [("i32", "aire", [])])]
+        champs = {"Rectangle": [("largeur", "i32"), ("hauteur", "i32")]}
+        _, cas = supervisor.rust_object_dispatch(objets, champs)
+        self.assertEqual(cas.count('"new|new" =>'), 1)
+        self.assertEqual(cas.count('"new|Rectangle" =>'), 1)
+
+    def test_go_recepteur_pointeur(self):
+        source = ("package main\n\n"
+                  "type Compteur struct {\n\tvaleur int\n}\n\n"
+                  "func NewCompteur(v int) *Compteur {\n\treturn &Compteur{valeur: v}\n}\n\n"
+                  "func (c *Compteur) Plus(n int) int { return c.valeur + n }\n")
+        # Le constructeur rendant *T était ignoré, donc le type n'était pas proxifié du tout.
+        objets = supervisor.go_object_api(source)
+        self.assertEqual(objets, [("Compteur", [("NewCompteur", ["int"], True)],
+                                   [("int", "Plus", ["int"])])])
+        # Un récepteur pointeur écarte la capture de champs : l'objet reconstruit à chaque appel
+        # perdrait la modification EN SILENCE.
+        self.assertEqual(supervisor.go_capture_fields(source), {})
+        self.assertEqual(supervisor.go_pointer_receivers(source), {"Compteur"})
+        # Et l'objet est stocké par POINTEUR : une méthode à récepteur pointeur ne peut pas être
+        # appelée sur le résultat d'une assertion de type, qui n'est pas adressable.
+        cas_new, cas_methode = supervisor.go_object_dispatch(objets, {})
+        self.assertIn("mooditObjets = append(mooditObjets, moodit_cree)", cas_new)
+        self.assertIn(".(*Compteur).Plus(", cas_methode)
+        self.assertIn("func NewCompteur(a0 int) *Compteur {",
+                      supervisor.go_object_stub(objets, {}))
+
+    def test_go_recepteur_valeur_garde_la_capture_de_champs(self):
+        source = ("package main\n\n"
+                  "type Rectangle struct {\n\tlargeur int\n\thauteur int\n}\n\n"
+                  "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\n")
+        self.assertEqual(supervisor.go_pointer_receivers(source), set())
+        self.assertIn("Rectangle", supervisor.go_capture_fields(source))
+
+    def test_double_garde_sa_precision(self):
+        # `%g` s'arrête à 6 chiffres significatifs, pour les arguments COMME pour les retours :
+        # 3.14159265 arrivait tronqué et une réponse juste était notée fausse.
+        self.assertEqual(supervisor.C_TYPES["double"], "%.17g")
+        bouchon = supervisor.c_grader_source([("double", "moyenne", ["double", "double"])],
+                                             "return 1;", "N")
+        self.assertIn("%.17g", bouchon)
+        self.assertNotIn('"%s|call|moyenne|%g', bouchon)
+
+    def test_rust_chaine_part_en_hexadecimal(self):
+        # Le fil est à champs séparés par « | », une ligne par message : un « | » dans la valeur
+        # décalait tout l'appel.
+        self.assertEqual(supervisor.rust_envoi(["String"]), ' + "|" + &moodit_hexe(&a0)')
+        self.assertEqual(supervisor.rust_envoi(["i32"]), ' + "|" + &a0.to_string()')
+        noteur = supervisor.rust_grader_source([("String", "copie", ["String"])], "true", "N")
+        self.assertIn("moodit_hexe(&a0)", noteur)
+        self.assertIn("moodit_dehexe(&brut)", noteur)
+        serveur = supervisor.rust_server_source([("String", "copie", ["String"])], "fn copie() {}")
+        self.assertIn("moodit_dehexe(args.next()", serveur)
+        self.assertIn("moodit_hexe(&copie(a0))", serveur)
+
+    def test_csharp_chaine_et_culture(self):
+        self.assertIn("MooditRpc.Hexe(a0)", supervisor.cs_envoi(["string"]))
+        self.assertIn("CultureInfo.InvariantCulture", supervisor.cs_envoi(["double"]))
+        self.assertEqual(supervisor.CS_LECTURE["string"], "MooditRpc.Dehexe(v)")
+
+    def test_verdict_rpc_est_fail_closed(self):
+        self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", ""), (True, None))
+        # Sans nonce : échec, quoi qu'il arrive — noteur planté, jeton non armé, flux vide.
+        passed, detail = supervisor.rpc_verdict("N", "", "")
+        self.assertFalse(passed)
+        self.assertEqual(detail, "Le harnais a renvoyé faux")
+        self.assertEqual(supervisor.rpc_verdict("", "N", "")[0], False)
+        # Le motif vient du NOTEUR en priorité : présenter le stderr de l'étudiant désignait le
+        # mauvais fautif, et c'est lui qui en choisissait le texte.
+        self.assertEqual(
+            supervisor.rpc_verdict("N", "[MOODIT] harnais: oups\n", "mon message")[1],
+            "[MOODIT] harnais: oups")
+        self.assertEqual(supervisor.rpc_verdict("N", "", "trace etudiant")[1], "trace etudiant")
 
 
 if __name__ == "__main__":

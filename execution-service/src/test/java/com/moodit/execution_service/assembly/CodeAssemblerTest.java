@@ -105,14 +105,13 @@ class CodeAssemblerTest {
         var a = assembler.assemble("Bash", "doubler() { echo $(( $1 * 2 )); }",
                 "[ \"$(doubler 5)\" = \"10\" ]", "MOODIT_OK_bash");
         assertThat(a.runtime()).isEqualTo("bash");
-        // Le code soumis est dans un TROISIÈME fichier : le serveur lit l'identifiant de l'appel
-        // avant de le charger, et le charge dans un sous-shell à la sortie capturée.
+        // Le code soumis est dans son PROPRE fichier : le répartiteur lit l'identifiant de
+        // l'appel avant de le charger, et le charge dans un sous-shell à la sortie capturée. Le
+        // répartiteur, lui, n'est pas un fichier — le code soumis pourrait le réécrire.
         assertThat(a.files()).extracting(RunnerExec.File::name)
-                .containsExactly("grader.sh", "student_server.sh", "solution.sh");
+                .containsExactly("grader.sh", "solution.sh");
         assertThat(a.files().get(0).content()).contains("$(doubler 5)").contains("MOODIT_OK_bash");
-        assertThat(a.files().get(1).content()).doesNotContain("MOODIT_OK_bash")
-                .doesNotContain("doubler() {");
-        assertThat(a.files().get(2).content()).contains("doubler() {")
+        assertThat(a.files().get(1).content()).contains("doubler() {")
                 .doesNotContain("MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
                 .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");

@@ -1610,6 +1610,13 @@ JAVAP_SIGNATURE = re.compile(
 JSON_TYPES = {"int": "Integer", "long": "Long", "double": "Double", "boolean": "Boolean",
               "java.lang.String": "String"}
 
+# Nom de la méthode RPC du noteur par type de retour. `long`, `double` et `boolean` sont des MOTS
+# RÉSERVÉS Java : dériver le nom du type (`JSON_TYPES[t].lower()`) produisait `MooditRpc.double(…)`,
+# que javac refuse — seuls `int` et `String` compilaient. Le runtime les nomme donc avec un
+# souligné final, et cette table est la seule source de vérité (statique et méthode d'instance).
+JAVA_RPC_FN = {"Integer": "integer", "Long": "long_", "Double": "double_",
+               "Boolean": "boolean_", "String": "string"}
+
 
 JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.$]+)", re.M)
 JAVAP_CTOR = re.compile(r"^\s+public\s+([\w.$]+)\(([^)]*)\);", re.M)
@@ -1729,7 +1736,7 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
         args = ", ".join("a%d" % i for i in range(len(types)))
         lignes += ["    public static %s %s(%s) {" % (retour, nom, params),
                    "        return MooditRpc.%s(\"%s\", new Object[]{%s});"
-                   % (JSON_TYPES[retour].lower(), nom, args),
+                   % (JAVA_RPC_FN[JSON_TYPES[retour]], nom, args),
                    "    }"]
     lignes.append("}")
     return "\n".join(lignes) + "\n"
@@ -1796,7 +1803,9 @@ final class MooditRpc {
 
     private static String litteral(Object o) {
         if (o instanceof String) {
-            return "\\"" + ((String) o).replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"") + "\\"";
+            // Hexadécimal : un ], un " ou une barre oblique inverse dans la valeur cassait
+            // l'analyse côté serveur, et une réponse JUSTE était notée fausse.
+            return "\\"" + hexe((String) o) + "\\"";
         }
         return String.valueOf(o);
     }
@@ -1852,8 +1861,28 @@ final class MooditRpc {
 
     private static String dechaine(String v) {
         if (v.length() >= 2 && v.startsWith("\\"")) { v = v.substring(1, v.length() - 1); }
-        return v.replace("\\\\\\"", "\\"").replace("\\\\\\\\", "\\\\");
+        return dehexe(v);
     }
+
+    /** Mêmes codecs que le serveur : la chaîne ne voyage qu'en hexadécimal. */
+    private static String hexe(String s) {
+        StringBuilder sb = new StringBuilder("H");
+        for (byte x : s.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            sb.append(String.format("%02x", x));
+        }
+        return sb.toString();
+    }
+
+    private static String dehexe(String v) {
+        v = v.trim();
+        if (!v.startsWith("H")) { return v; }
+        byte[] out = new byte[(v.length() - 1) / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(v.substring(1 + i * 2, 3 + i * 2), 16);
+        }
+        return new String(out, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
 }
 
 public final class MooditGrader {
@@ -1985,12 +2014,31 @@ public final class MooditServer {
         if (type == double.class || type == Double.class) { return Double.valueOf(v); }
         if (type == boolean.class || type == Boolean.class) { return Boolean.valueOf(v); }
         if (v.length() >= 2 && v.startsWith("\\"")) { v = v.substring(1, v.length() - 1); }
-        return v;
+        return dehexe(v);
+    }
+
+    /** Chaîne → HEXADÉCIMAL sur le fil. Un ] ou un " dans la valeur cassait l'analyse. */
+    private static String hexe(String s) {
+        StringBuilder sb = new StringBuilder("H");
+        for (byte x : s.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            sb.append(String.format("%02x", x));
+        }
+        return sb.toString();
+    }
+
+    private static String dehexe(String v) {
+        v = v.trim();
+        if (!v.startsWith("H")) { return v; }
+        byte[] out = new byte[(v.length() - 1) / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(v.substring(1 + i * 2, 3 + i * 2), 16);
+        }
+        return new String(out, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static String encode(Object valeur) {
         if (valeur instanceof String) {
-            return "\\"" + ((String) valeur).replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"") + "\\"";
+            return "\\"" + hexe((String) valeur) + "\\"";
         }
         return String.valueOf(valeur);
     }
@@ -2066,7 +2114,7 @@ def go_signatures(source):
 
 GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
 GO_METHOD = re.compile(
-    r"^func\s+\(\s*\w+\s+\*?(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
 
 
 def go_object_api(source):
@@ -2077,19 +2125,25 @@ def go_object_api(source):
     littéral à champs nommés (`Rectangle{largeur: 3, hauteur: 4}`), pris en charge par capture de
     champs (cf. go_object_stub). Un type sans méthode marshalable n'est pas proxifié : le harnais
     qui l'appelle ne compilera pas — message au prof, jamais un faux verdict."""
-    champs = go_struct_fields(source)
+    champs = go_capture_fields(source)
     structs = set(GO_STRUCT.findall(source or ""))
     if not structs:
         return []
     par_type = {s: ([], []) for s in structs}
     for nom, params, retour in GO_FUNC.findall(source or ""):
-        if retour not in structs or nom == "main":
+        # `func NewRectangle(…) *Rectangle` est la forme la plus répandue : sans retirer l'étoile,
+        # ce constructeur n'était pas reconnu et la question n'était pas proxifiée.
+        if (retour or "").lstrip("*") not in structs or nom == "main":
             continue
+        retour_cible = (retour or "").lstrip("*")
         types = _go_param_types(params)
         if types is not None:
-            par_type[retour][0].append((nom, types))
-    for recepteur, nom, params, retour in GO_METHOD.findall(source or ""):
-        if recepteur not in structs or (retour or "") not in GO_TYPES:
+            cible = (retour or "").lstrip("*")
+            par_type[cible][0].append((nom, types, (retour or "").startswith("*")))
+    for _, recepteur, nom, params, retour in GO_METHOD.findall(source or ""):
+        if recepteur not in structs:
+            continue
+        if (retour or "") not in GO_TYPES:
             continue
         types = _go_param_types(params)
         if types is not None:
@@ -2166,6 +2220,24 @@ def go_struct_fields(source):
     return champs
 
 
+def go_pointer_receivers(source):
+    """Types dont au moins une méthode a un RÉCEPTEUR POINTEUR. FONCTION PURE (testée).
+
+    Une telle méthode peut modifier l'objet. La capture de champs reconstruisant l'objet à chaque
+    appel, la modification serait perdue EN SILENCE (verdict faux sans diagnostic) : ces types
+    passent donc par la poignée d'un constructeur, ou ne sont pas proxifiés du tout."""
+    return {recepteur for etoile, recepteur, _, _, _ in GO_METHOD.findall(source or "") if etoile}
+
+
+def go_capture_fields(source):
+    """Champs CAPTURABLES : ceux des structures sans méthode à récepteur pointeur. PURE (testée).
+
+    Décision prise ICI et nulle part ailleurs : bouchon, aiguillage et lecture d'API doivent
+    s'accorder, sinon un type est miroité d'un côté et traité par poignée de l'autre."""
+    mutants = go_pointer_receivers(source)
+    return {t: f for t, f in go_struct_fields(source).items() if t not in mutants}
+
+
 def go_object_stub(objets, champs=None):
     """Bouchons OBJET Go : littéral à champs capturés ou poignée, et méthodes relayées.
 
@@ -2180,7 +2252,7 @@ def go_object_stub(objets, champs=None):
         if typ in champs:
             morceaux.append("type %s struct {\n%s\n}"
                             % (typ, "\n".join("    %s %s" % (n, t) for n, t in champs[typ])))
-            for nom, types in ctors:
+            for nom, types, _ in ctors:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
                 lectures = ", ".join(
@@ -2202,12 +2274,15 @@ def go_object_stub(objets, champs=None):
 }''' % (typ, nom, params, retour, conv))
             continue
         morceaux.append("type %s struct {\n    __h int\n}" % typ)
-        for nom, types in ctors:
+        for nom, types, pointeur in ctors:
             params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            morceaux.append('''func %s(%s) %s {
-    return %s{__h: int(mooditNombre(mooditNouvelle("%s", []interface{}{%s})))}
-}''' % (nom, params, typ, typ, nom, args))
+            # Le constructeur garde SA signature : `*Rectangle` s'il rend un pointeur, pour que
+            # le harnais du prof s'écrive exactement comme avec le code de l'étudiant.
+            morceaux.append('''func %s(%s) %s%s {
+    return %s%s{__h: int(mooditNombre(mooditNouvelle("%s", []interface{}{%s})))}
+}''' % (nom, params, "*" if pointeur else "", typ,
+        "&" if pointeur else "", typ, nom, args))
         for retour, nom, types in methodes:
             params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
@@ -2231,12 +2306,12 @@ def go_object_dispatch(objets, champs=None):
                 "%s: %s" % (n, GO_CONV[t] % ("req.Args[%d]" % i))
                 for i, (n, t) in enumerate(champs[typ]))
             cas_new.append('        case "%s":\n'
-                           '            mooditObjets = append(mooditObjets, %s{%s})\n'
+                           '            mooditObjets = append(mooditObjets, &%s{%s})\n'
                            '            valeur = len(mooditObjets) - 1'
                            % (typ, typ, affectations))
             # Une fonction-constructeur renvoie les CHAMPS du résultat, pas une poignée : le
             # bouchon reconstruit alors une valeur simple, utilisable comme un littéral.
-            for nom, types in ctors:
+            for nom, types, _ in ctors:
                 args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
                 champs_retour = ", ".join("moodit_cree.%s" % n for n, _ in champs[typ])
                 cas_new.append('        case "%s":\n'
@@ -2244,16 +2319,23 @@ def go_object_dispatch(objets, champs=None):
                                '            valeur = []interface{}{%s}'
                                % (nom, nom, args, champs_retour))
         else:
-            for nom, types in ctors:
+            # On garde un POINTEUR vers l'objet : une méthode à récepteur pointeur — l'idiome le
+            # plus répandu — ne peut pas être appelée sur le résultat d'une assertion de type,
+            # qui n'est pas adressable. Le programme de l'étudiant ne compilait pas, et il lisait
+            # « Échec de compilation » pour du code qu'il n'avait pas écrit.
+            for nom, types, pointeur in ctors:
                 args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
                 cas_new.append('        case "%s":\n'
-                               '            mooditObjets = append(mooditObjets, %s(%s))\n'
+                               '            moodit_cree := %s(%s)\n'
+                               '            mooditObjets = append(mooditObjets, %smoodit_cree)\n'
                                '            valeur = len(mooditObjets) - 1'
-                               % (nom, nom, args))
+                               % (nom, nom, args, "" if pointeur else "&"))
         for retour, nom, types in methodes:
             args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+            # `(*T)` : un récepteur valeur s'appelle aussi sur un pointeur (déréférencement
+            # automatique), donc une seule forme suffit pour les deux.
             cas_methode.append('        case "%s.%s":\n'
-                               '            valeur = mooditObjets[req.Handle].(%s).%s(%s)'
+                               '            valeur = mooditObjets[req.Handle].(*%s).%s(%s)'
                                % (typ, nom, typ, nom, args))
     return "\n".join(cas_new), "\n".join(cas_methode)
 
@@ -2484,7 +2566,11 @@ def go_student_without_main(source):
 # binaire de l'étudiant, qui tourne sous un autre UID.
 
 C_FUNC = re.compile(r"^\s*(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.M)
-C_TYPES = {"int": "%d", "long": "%ld", "double": "%g"}
+# `%.17g` et non `%g` : ce format est celui des ARGUMENTS comme des RETOURS, relus par atof.
+# `%g` s'arrête à 6 chiffres significatifs — 3.14159265 arrivait tronqué chez l'étudiant et
+# 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
+# 17 chiffres suffisent à garantir l'aller-retour exact d'un double IEEE 754.
+C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
 
 
 def cpp_class_spans(source):
@@ -2850,11 +2936,22 @@ RUST_STRUCT = re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)", re.M)
 RUST_IMPL = re.compile(r"^\s*impl\s+(\w+)\s*\{", re.M)
 RUST_FN_IN_IMPL = re.compile(
     r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)", re.M)
+def rust_envoi(types):
+    """Serialisation des arguments Rust sur le fil. FONCTION PURE (testee).
+
+    Une chaine part en HEXADECIMAL : le protocole est a champs separes par « | » et a une ligne
+    par message, donc un « | » ou un saut de ligne dans la valeur decalait tout l'appel, et une
+    reponse JUSTE etait notee fausse."""
+    return "".join(
+        ' + "|" + &moodit_hexe(&a%d)' % i if t == "String" else ' + "|" + &a%d.to_string()' % i
+        for i, t in enumerate(types))
+
+
 RUST_CONV = {"i32": "%s.parse::<i32>().unwrap_or_default()",
              "i64": "%s.parse::<i64>().unwrap_or_default()",
              "f64": "%s.parse::<f64>().unwrap_or_default()",
              "bool": "%s.parse::<bool>().unwrap_or_default()",
-             "String": "String::from(%s)"}
+             "String": "moodit_dehexe(%s)"}
 
 
 def rust_object_api(source):
@@ -2949,7 +3046,7 @@ def rust_object_stub(objets, champs=None):
             # s'exécute chez l'étudiant et le bouchon relit les champs de son résultat.
             for nom, types in ctors:
                 params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
-                envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+                envoi = rust_envoi(types)
                 lectures = "\n".join(
                     "        let %s = %s;" % (n, RUST_CONV[t] % 'parts.next().unwrap_or("")')
                     for n, t in champs[typ])
@@ -2963,8 +3060,8 @@ def rust_object_stub(objets, champs=None):
     }''' % (nom, params, typ, nom, envoi, lectures, typ, litteral))
             for retour, nom, types in methodes:
                 params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
-                envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
-                parse = ("String::from(brut.as_str())" if retour == "String"
+                envoi = rust_envoi(types)
+                parse = ("moodit_dehexe(brut.as_str())" if retour == "String"
                          else "brut.parse::<%s>().unwrap_or_default()" % retour)
                 corps.append('''    fn %s(%s) -> %s {
         let cid = moodit_id();
@@ -2980,7 +3077,7 @@ def rust_object_stub(objets, champs=None):
         corps = []
         for nom, types in ctors:
             params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
-            envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
+            envoi = rust_envoi(types)
             corps.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
         let requete = id.clone() + "|new|%s"%s;
@@ -2988,8 +3085,8 @@ def rust_object_stub(objets, champs=None):
     }''' % (nom, params, typ, nom, envoi, typ))
         for retour, nom, types in methodes:
             params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
-            envoi = "".join(' + "|" + &a%d.to_string()' % i for i in range(len(types)))
-            parse = ("String::from(brut.as_str())" if retour == "String"
+            envoi = rust_envoi(types)
+            parse = ("moodit_dehexe(brut.as_str())" if retour == "String"
                      else "brut.parse::<%s>().unwrap_or_default()" % retour)
             # Ordre du protocole, commun à tous les langages à protocole texte :
             #   id|op|nom|poignée|args…   (la poignée ne vaut que pour `method`)
@@ -3038,21 +3135,38 @@ def rust_object_dispatch(objets, champs=None):
                 format!("{}|ok", id)
 %s
             }''' % (nom, lectures_args, appel, retours))
-        for nom, types in ctors:
-            lectures = "\n".join(
-                '                let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
-                for i, t in enumerate(types))
-            appel = "%s::%s(%s)" % (typ, nom, ", ".join("a%d" % i for i in range(len(types))))
-            cas.append('''            "new|%s" => {
+        else:
+            # Sans capture de champs, le constructeur rend une POIGNÉE. Les deux formes étaient
+            # émises pour un type à champs capturés : le second bras, inatteignable, valait un
+            # avertissement `unreachable_patterns` à la compilation.
+            for nom, types in ctors:
+                lectures = "\n".join(
+                    '                let a%d = %s;'
+                    % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                    for i, t in enumerate(types))
+                appel = "%s::%s(%s)" % (typ, nom,
+                                        ", ".join("a%d" % i for i in range(len(types))))
+                cas.append('''            "new|%s" => {
 %s
                 moodit_%s.push(%s);
                 format!("{}|ok|{}", id, moodit_%s.len() - 1)
             }''' % (nom, lectures, typ.lower(), appel, typ.lower()))
         for retour, nom, types in methodes:
+            # Les arguments de la méthode doivent être LUS et TRANSMIS : sans cela, le bouchon du
+            # noteur les envoyait, l'appel généré ici était à vide, et rustc refusait le programme
+            # de l'étudiant — « Échec de compilation » sur du code qu'il n'avait pas écrit.
+            lectures_m = "\n".join(
+                '                let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                for i, t in enumerate(types))
+            passage = ", ".join("a%d" % i for i in range(len(types)))
+            appel_m = "moodit_%s[h].%s(%s)" % (typ.lower(), nom, passage)
+            if retour == "String":
+                appel_m = "moodit_hexe(&%s)" % appel_m
             cas.append('''            "method|%s.%s" => {
                 let h = args.next().unwrap_or("0").parse::<usize>().unwrap_or(0);
-                format!("{}|ok|{}", id, moodit_%s[h].%s())
-            }''' % (typ, nom, typ.lower(), nom))
+%s
+                format!("{}|ok|{}", id, %s)
+            }''' % (typ, nom, lectures_m, appel_m))
     return "\n".join(piles), "\n".join(cas)
 
 
@@ -3061,9 +3175,10 @@ def rust_grader_source(methods, harness_code, nonce, objets=(), champs=None):
     bouchons = []
     for retour, nom, types in methods:
         params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
-        envoi = " + \"|\" + ".join(["&a%d.to_string()" % i for i in range(len(types))]) or '""'
-        corps = ("&a0.to_string()" if len(types) == 1 else envoi)
-        parse = "String::from(brut)" if retour == "String" else "brut.parse::<%s>().unwrap()" % retour
+        # Un raccourci « un seul argument » court-circuitait la sérialisation typée, donc
+        # l'encodage des chaînes : `copie("a|b")` partait brut et décalait tout l'appel.
+        corps = rust_envoi(types).replace(' + "|" + ', "", 1) or '""'
+        parse = "moodit_dehexe(&brut)" if retour == "String" else "brut.parse::<%s>().unwrap()" % retour
         args = (" + \"|\" + " + corps) if types else ""
         bouchons.append('''fn %s(%s) -> %s {
     let id = moodit_id();
@@ -3072,6 +3187,31 @@ def rust_grader_source(methods, harness_code, nonce, objets=(), champs=None):
     %s
 }''' % (nom, params, retour, nom, args, parse))
     return '''use std::io::{BufRead, Write};
+
+fn moodit_hexe(s: &str) -> String {
+    // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
+    let mut sortie = String::from("H");
+    for octet in s.as_bytes() {
+        sortie.push_str(&format!("{:02x}", octet));
+    }
+    sortie
+}
+
+fn moodit_dehexe(v: &str) -> String {
+    let v = v.trim();
+    if !v.starts_with('H') {
+        return v.to_string();
+    }
+    let mut octets = Vec::new();
+    let chiffres: Vec<char> = v.chars().skip(1).collect();
+    let mut i = 0;
+    while i + 1 < chiffres.len() {
+        let paire: String = chiffres[i..i + 2].iter().collect();
+        octets.push(u8::from_str_radix(&paire, 16).unwrap_or(0));
+        i += 2;
+    }
+    String::from_utf8_lossy(&octets).to_string()
+}
 
 fn moodit_id() -> String {
     // Identifiant IMPRÉVISIBLE par appel, tiré de /dev/urandom : sans lui, le code noté — dont
@@ -3134,16 +3274,43 @@ def rust_server_source(methods, student_source, objets=(), champs=None):
         lectures = []
         for i, t in enumerate(types):
             if t == "String":
-                lectures.append('            let a%d = String::from(args.next().unwrap_or(""));' % i)
+                lectures.append('            let a%d = moodit_dehexe(args.next().unwrap_or(""));' % i)
             else:
                 lectures.append('            let a%d = args.next().unwrap_or("0").parse::<%s>().unwrap_or_default();'
                                 % (i, t))
         appel = "%s(%s)" % (nom, ", ".join("a%d" % i for i in range(len(types))))
+        if retour == "String":
+            appel = "moodit_hexe(&%s)" % appel
         cas.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
                    % (nom, "\n".join(lectures), appel))
     return '''%s
 
 use std::io::{BufRead, Write};
+
+fn moodit_hexe(s: &str) -> String {
+    // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
+    let mut sortie = String::from("H");
+    for octet in s.as_bytes() {
+        sortie.push_str(&format!("{:02x}", octet));
+    }
+    sortie
+}
+
+fn moodit_dehexe(v: &str) -> String {
+    let v = v.trim();
+    if !v.starts_with('H') {
+        return v.to_string();
+    }
+    let mut octets = Vec::new();
+    let chiffres: Vec<char> = v.chars().skip(1).collect();
+    let mut i = 0;
+    while i + 1 < chiffres.len() {
+        let paire: String = chiffres[i..i + 2].iter().collect();
+        octets.push(u8::from_str_radix(&paire, 16).unwrap_or(0));
+        i += 2;
+    }
+    String::from_utf8_lossy(&octets).to_string()
+}
 
 fn moodit_serve() {
 %s
@@ -3211,9 +3378,19 @@ def cs_signatures(source):
     return trouvees
 
 
+def cs_envoi(types):
+    """Sérialisation des arguments C#. FONCTION PURE (testée) — chaîne en hexadécimal, nombre en
+    culture INVARIANTE (une concaténation implicite donnait « 3,14 », illisible d'en face)."""
+    return "".join(
+        ' + "|" + MooditRpc.Hexe(a%d)' % i if t == "string"
+        else ' + "|" + Convert.ToString(a%d, '
+             'System.Globalization.CultureInfo.InvariantCulture)' % i
+        for i, t in enumerate(types))
+
+
 CS_LECTURE = {"int": "int.Parse(v)", "long": "long.Parse(v)",
               "double": "double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)",
-              "bool": "bool.Parse(v)", "string": "v"}
+              "bool": "bool.Parse(v)", "string": "MooditRpc.Dehexe(v)"}
 
 
 def cs_object_stub(classe, ctors, methodes):
@@ -3224,14 +3401,20 @@ def cs_object_stub(classe, ctors, methodes):
     morceaux = []
     for types in ctors:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
-        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
+        # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
+        # invariant d'en face, donc une réponse juste notée fausse.
+        args = cs_envoi(types)
         morceaux.append('''    public %s(%s) {
         string id = MooditRpc.Id();
         __h = int.Parse(MooditRpc.Appel(id, id + "|new|%s"%s));
     }''' % (classe, params, classe, args))
     for retour, nom, types in methodes:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
-        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
+        # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
+        # invariant d'en face, donc une réponse juste notée fausse.
+        args = cs_envoi(types)
         lecture = CS_LECTURE[retour].replace("v", "brut")
         morceaux.append('''    public %s %s(%s) {
         string id = MooditRpc.Id();
@@ -3246,7 +3429,10 @@ def cs_grader_source(methods, harness_code, nonce, classe, ctors=(), instance=()
     bouchons = []
     for retour, nom, types in methods:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
-        args = "".join(' + "|" + a%d' % i for i in range(len(types)))
+        # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
+        # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
+        # invariant d'en face, donc une réponse juste notée fausse.
+        args = cs_envoi(types)
         lecture = CS_LECTURE[retour].replace("v", "brut")
         bouchons.append('''    public static %s %s(%s) {
         string id = MooditRpc.Id();
@@ -3262,6 +3448,23 @@ static class MooditRpc {
 
     // Identifiant IMPRÉVISIBLE par appel : sans lui, le code noté — dont le stdout EST le canal
     // de réponse — pouvait imprimer la réponse attendue avant même la question.
+    // Mêmes codecs que le serveur : une chaîne ne voyage qu'en hexadécimal, le fil étant à
+    // champs séparés par « | » et à une ligne par message.
+    public static string Hexe(string s) {
+        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+        return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
+    }
+
+    public static string Dehexe(string v) {
+        v = (v ?? "").Trim();
+        if (!v.StartsWith("H")) { return v; }
+        byte[] octets = new byte[(v.Length - 1) / 2];
+        for (int i = 0; i < octets.Length; i++) {
+            octets[i] = Convert.ToByte(v.Substring(1 + i * 2, 2), 16);
+        }
+        return System.Text.Encoding.UTF8.GetString(octets);
+    }
+
     public static string Id() {
         byte[] brut = new byte[8];
         ALEA.GetBytes(brut);
@@ -3331,13 +3534,41 @@ public static class MooditServer {
     static readonly System.Collections.Generic.List<object> OBJETS =
         new System.Collections.Generic.List<object>();
 
+    // Chaîne → HEXADÉCIMAL sur le fil : le protocole est à champs séparés par « | » et à une
+    // ligne par message, donc un « | » ou un saut de ligne dans la valeur décalait tout l'appel.
+    public static string Hexe(string s) {
+        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+        return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
+    }
+
+    public static string Dehexe(string v) {
+        v = (v ?? "").Trim();
+        if (!v.StartsWith("H")) { return v; }
+        byte[] octets = new byte[(v.Length - 1) / 2];
+        for (int i = 0; i < octets.Length; i++) {
+            octets[i] = Convert.ToByte(v.Substring(1 + i * 2, 2), 16);
+        }
+        return System.Text.Encoding.UTF8.GetString(octets);
+    }
+
     static object[] Convertis(ParameterInfo[] attendus, string[] parts, int depart) {
         object[] donnes = new object[attendus.Length];
         for (int i = 0; i < attendus.Length; i++) {
-            donnes[i] = Convert.ChangeType(parts[i + depart], attendus[i].ParameterType,
+            string brut = parts[i + depart];
+            if (attendus[i].ParameterType == typeof(string)) {
+                donnes[i] = Dehexe(brut);
+                continue;
+            }
+            donnes[i] = Convert.ChangeType(brut, attendus[i].ParameterType,
                     System.Globalization.CultureInfo.InvariantCulture);
         }
         return donnes;
+    }
+
+    /** Valeur de retour sur le fil : une chaîne part encodée. */
+    static string Sortie(object v) {
+        if (v is string) { return Hexe((string) v); }
+        return Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public static int Main(string[] args) {
@@ -3350,11 +3581,17 @@ public static class MooditServer {
             try {
                 if (nom == "new") {
                     Type cible2 = typeof(%s);
+                    bool construit = false;
                     foreach (var c in cible2.GetConstructors()) {
                         if (c.GetParameters().Length != parts.Length - 3) { continue; }
                         OBJETS.Add(c.Invoke(Convertis(c.GetParameters(), parts, 3)));
+                        construit = true;
                         break;
                     }
+                    // Aucun constructeur de cette arité : il faut le DIRE. Sans ce refus, on
+                    // rendait la poignée d'un objet précédent (ou -1), et le harnais notait
+                    // ensuite un objet qui n'était pas celui qu'il avait demandé.
+                    if (!construit) { throw new MissingMethodException(cible2.Name); }
                     Console.Out.WriteLine(id + "|ok|" + (OBJETS.Count - 1));
                     Console.Out.Flush();
                     continue;
@@ -3371,8 +3608,7 @@ public static class MooditServer {
                     }
                     if (cible3 == null) { throw new MissingMethodException(nomMethode); }
                     object v = cible3.Invoke(instance, Convertis(cible3.GetParameters(), parts, 4));
-                    Console.Out.WriteLine(id + "|ok|" + Convert.ToString(v,
-                            System.Globalization.CultureInfo.InvariantCulture));
+                    Console.Out.WriteLine(id + "|ok|" + Sortie(v));
                     Console.Out.Flush();
                     continue;
                 }
@@ -3385,15 +3621,12 @@ public static class MooditServer {
                     }
                 }
                 if (cible == null) { throw new MissingMethodException(nom); }
-                ParameterInfo[] attendus = cible.GetParameters();
-                object[] donnes = new object[attendus.Length];
-                for (int i = 0; i < attendus.Length; i++) {
-                    donnes[i] = Convert.ChangeType(parts[i + 2], attendus[i].ParameterType,
-                            System.Globalization.CultureInfo.InvariantCulture);
-                }
-                object valeur = cible.Invoke(null, donnes);
-                reponse = id + "|ok|" + Convert.ToString(valeur,
-                        System.Globalization.CultureInfo.InvariantCulture);
+                // UNE seule conversion pour les trois chemins (fonction, constructeur, méthode) :
+                // cette boucle-ci était écrite à part et ne décodait pas les chaînes, donc un
+                // argument contenant « | » arrivait mutilé et une réponse juste était notée
+                // fausse — sur le chemin le plus courant, celui de l'appel de fonction.
+                object valeur = cible.Invoke(null, Convertis(cible.GetParameters(), parts, 2));
+                reponse = id + "|ok|" + Sortie(valeur);
             } catch (Exception e) {
                 reponse = id + "|err|" + e.Message.Replace('|', ' ');
             }
@@ -3668,9 +3901,9 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     if expire:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
 
-    jeton = TOKENS.get(case_index) or ""
-    passed = bool(jeton) and jeton in g_err
-    detail = None if passed else (first_lines(s_err, r".") or "Le harnais a renvoyé faux")
+    # Même verdict que le chemin commun : le message du NOTEUR d'abord — c'est le harnais du
+    # prof qui a échoué, et présenter le stderr de l'étudiant désignait le mauvais fautif.
+    passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -3769,6 +4002,23 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
                            not_src, bin_not, etu_src, bin_etu)
 
 
+def rpc_verdict(jeton, g_err, s_err):
+    """Verdict d'un cas noté par le COUPLE noteur/étudiant. FONCTION PURE (testée).
+
+    Le nonce du cas n'est détenu que par le noteur, qui ne l'émet sur SON stderr que si le harnais
+    du prof a renvoyé vrai : sans nonce, échec (fail-closed), y compris si le noteur a planté ou
+    si aucun jeton n'a été armé. Le détail privilégie le message du NOTEUR — c'est lui qui sait
+    pourquoi le harnais a échoué ; le stderr de l'étudiant ne vient qu'ensuite, et il est choisi
+    par lui, donc jamais présenté comme la cause."""
+    passed = bool(jeton) and jeton in (g_err or "")
+    if passed:
+        return True, None
+    detail = (first_lines(g_err or "", r"^\[MOODIT\]")
+              or first_lines(s_err or "", r".")
+              or "Le harnais a renvoyé faux")
+    return False, detail
+
+
 def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_src, bin_etu,
                     grader_cmd=None, student_cmd=None):
     """Cloisonne les deux programmes, les lance en couple, rend le verdict.
@@ -3805,10 +4055,7 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_
         timeout_s, os.path.join(case_dir, "grader.err"), os.path.join(case_dir, "student.err"))
     if expire:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
-    jeton = TOKENS.get(case_index) or ""
-    passed = bool(jeton) and jeton in g_err
-    detail = None if passed else (first_lines(g_err, r"^\[MOODIT\]")
-                                  or first_lines(s_err, r".") or "Le harnais a renvoyé faux")
+    passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
     return CaseOutcome(passed, detail, ran=True), None
 
 
@@ -3873,7 +4120,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
                 student_source = contenu
     methodes = go_signatures(student_source)
     objets = go_object_api(student_source)
-    champs = go_struct_fields(student_source)
+    champs = go_capture_fields(student_source)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
                       "int64, float64, bool, string).")

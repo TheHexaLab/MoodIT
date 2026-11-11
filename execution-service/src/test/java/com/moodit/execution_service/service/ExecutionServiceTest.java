@@ -300,7 +300,34 @@ class ExecutionServiceTest {
 
     // ── Routage des langages COMPILÉS vers le runner Docker (#116) ────────────────
 
-    /** Marqueur de « vrai test du framework » attendu par langage (cf. legacyHarnessRejection). */
+    /** Harnais BOOLÉEN par langage : la forme des gabarits, notée sans falsification possible. */
+    private static String booleanHarness(String language) {
+        return switch (language) {
+            case "Rust" -> "doubler(5) == 10";
+            case "Go" -> "return doubler(5) == 10";
+            default -> "return doubler(5) == 10;";    // Java, C#, C, C++
+        };
+    }
+
+    @Test
+    void harnais_booleen_atteint_le_runner_dans_les_six_langages() {
+        // RÉGRESSION : un garde-fou en amont renvoyait 0 à tous les cas d'une question dont le
+        // harnais était justement au format SÛR, sans jamais atteindre le runner. Ce test entre
+        // par la porte de PRODUCTION (ExecutionService.evaluate), pas par DockerEvaluator.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(expected);
+
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            assertThat(routed.evaluate(oneTest(language, "code", booleanHarness(language))))
+                    .as("harnais booléen en " + language)
+                    .isEqualTo(expected);
+        }
+        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
+    }
+
+    /** Marqueur de « vrai test du framework » attendu par langage (ancien chemin, conservé). */
     private static String frameworkHarness(String language) {
         return switch (language) {
             case "Java" -> "@Test void t() {}";
@@ -385,12 +412,12 @@ class ExecutionServiceTest {
         assertThat(marker.get(0).passed()).isFalse();
         assertThat(marker.get(0).detail()).contains("Marqueur réservé");
 
-        // 2. Harnais resté à l'ancien format : diagnostic explicite, aucun conteneur.
-        List<TestResult> legacy = routed.evaluate(oneTest("Go", "code", "return vrai;"));
-        assertThat(legacy.get(0).detail()).contains("ancien format");
+        // Le marqueur réservé est le SEUL refus en amont : un harnais booléen n'en est plus un,
+        // c'est le format sûr, et il doit atteindre le runner (cf.
+        // harnais_booleen_atteint_le_runner_dans_les_six_langages).
         verifyNoInteractions(docker);
 
-        // 3. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
+        // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
         when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong()))
                 .thenReturn(List.of());
         routed.evaluate(oneTest("Go", "code", frameworkHarness("Go")));

@@ -78,8 +78,13 @@ résiduel in-process que les canaris ne rattrapent pas systématiquement — un 
 conditionner sa falsification sur « ma fonction a-t-elle été appelée », ce que les cas canaris ne
 font jamais. **Pour un examen noté, préférer le harnais booléen.**
 
-Les tentatives (lecture du harnais, rapport forgé) remontent en **événements** dans le détail des
-verdicts, dans les deux modes.
+**Détection : seul le mode framework en a besoin, et seul lui en a.** Les tentatives (lecture du
+harnais, rapport forgé) remontent en **événements** dans le détail des verdicts — `strace`,
+canaris, jeton, sommaire authentifié. Le mode booléen, lui, n'exécute **pas** le code soumis sous
+`strace` et ne produit aucun de ces événements : sa garantie est architecturale, pas
+observationnelle. Il n'y a rien à détecter quand il n'y a rien à atteindre, et un `strace`
+indisponible ne relâche donc rien de ce mode (contrairement au mode framework, cf.
+`deploy/DEPLOY.md`).
 
 Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
 `docker/runners/README.md`. Filet d'intégration (matrice anti-triche) :

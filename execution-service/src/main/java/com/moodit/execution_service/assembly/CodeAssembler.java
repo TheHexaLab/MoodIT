@@ -457,10 +457,18 @@ public class CodeAssembler {
      * chaque appel de fonction est délégué à un SOUS-PROCESSUS FRAIS ({@code bash student_server.sh})
      * qui charge le code étudiant, lit « nom args », appelle la fonction et renvoie sa sortie. Les
      * fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas d'objets). Le nonce est émis
-     * par le noteur (aucun code étudiant → infalsifiable) ; {@code grader.sh} est auto-supprimé.
-     * Le code soumis vit dans un fichier à part ({@code solution.sh}), chargé par le serveur
-     * APRÈS la lecture de l'identifiant et dans un sous-shell à la sortie capturée : il ne voit
-     * donc ni l'identifiant de l'appel, ni le flux sur lequel la réponse est publiée.
+     * par le noteur, où aucun code étudiant ne tourne ; {@code grader.sh} est auto-supprimé.
+     * Le code soumis vit dans un fichier à part ({@code solution.sh}), chargé par le répartiteur
+     * APRÈS la lecture de l'identifiant et dans un sous-shell à la sortie capturée.
+     *
+     * <p><b>Portée de la garantie.</b> Le cadrage par identifiant ferme la forge par la sortie, et
+     * le code soumis ne reçoit pas l'identifiant. Il subsiste un <b>résiduel assumé</b>, de même
+     * nature que celui du harnais au format framework : le mode « exec » du runner exécute noteur
+     * et code soumis <b>sous le même UID</b> (contrairement au chemin des harnais booléens
+     * compilés, qui sépare les UID), donc un étudiant déterminé peut encore inspecter les
+     * processus voisins selon la politique {@code ptrace} de l'hôte. Pour un examen noté, la
+     * propriété « verdict non falsifiable » ne vaut que pour les six langages compilés avec un
+     * harnais booléen.
      */
     private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
@@ -471,28 +479,42 @@ public class CodeAssembler {
         // CADRAGE PAR IDENTIFIANT : la valeur rendue est la ligne « <id>|valeur », et seule
         // celle-ci est retenue. Un `echo` de premier niveau du code étudiant ne vaut donc plus
         // réponse — c'était la forge naïve (imprimer l'attendu, ne rien imprimer dans sa
-        // fonction). Le code étudiant ne peut pas davantage CONTREFAIRE cette ligne : le serveur
-        // lit l'identifiant AVANT de charger ce code (la ligne de requête est déjà consommée), et
-        // il charge puis appelle dans un SOUS-SHELL où l'identifiant est retiré de la portée et
-        // dont la sortie est CAPTURÉE. Le code soumis ne connaît donc pas l'identifiant, et rien
-        // de ce qu'il imprime n'atteint le flux où la réponse est publiée.
-        String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
-                + "__moodit_rpc() { local __n=\"$1\"; shift;"
-                + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
-                + " printf '%s\\n' \"$__id $__n $*\" | bash student_server.sh 2>/dev/null"
-                + " | sed -n \"s/^$__id|//p\" | head -1; }\n"
-                + proxies
-                + "__moodit_harness() {\n" + harnessCode + "\n}\n"
-                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
-        String server = "read -r __moodit_id __moodit_name __moodit_rest\n"
+        // fonction). Le code étudiant ne peut pas davantage CONTREFAIRE cette ligne : le
+        // répartiteur lit l'identifiant AVANT de charger ce code (la ligne de requête est déjà
+        // consommée), et il charge puis appelle dans un SOUS-SHELL où l'identifiant est retiré de
+        // la portée et dont la sortie est CAPTURÉE.
+        //
+        // Deux détails qui comptent, parce que noteur et code soumis partagent l'UID :
+        //   — le répartiteur n'est PAS un fichier : il est passé à `bash -c`. Dans un fichier, le
+        //     code soumis pouvait le réécrire, et c'est lui qui détient l'identifiant à l'appel
+        //     suivant. Son texte ne contient aucun secret, le voir sur une ligne de commande ne
+        //     donne donc rien ;
+        //   — le filtrage de la réponse se fait DANS le shell du noteur (`case`), et non par un
+        //     `sed "s/^$__id|//p"` : l'identifiant passait alors en argument d'un processus, donc
+        //     lisible par tout voisin du même UID.
+        String dispatcher = "read -r __moodit_id __moodit_name __moodit_rest\n"
                 + "__moodit_val=$(unset __moodit_id;"
                 + " . ./solution.sh >/dev/null 2>&1;"
                 + " $__moodit_name $__moodit_rest)\n"
                 + "printf '%s|%s\\n' \"$__moodit_id\" \"$__moodit_val\"\n";
+        String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
+                + "__moodit_srv=" + shellSingleQuote(dispatcher) + "\n"
+                + "__moodit_rpc() { local __n=\"$1\"; shift;"
+                + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
+                + " printf '%s\\n' \"$__id $__n $*\" | bash -c \"$__moodit_srv\" 2>/dev/null"
+                + " | while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
+                + " printf '%s\\n' \"${__l#*|}\"; break;; esac; done; }\n"
+                + proxies
+                + "__moodit_harness() {\n" + harnessCode + "\n}\n"
+                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
         return new Assembled("bash", List.of(
                 new RunnerExec.File("grader.sh", grader),
-                new RunnerExec.File("student_server.sh", server),
                 new RunnerExec.File("solution.sh", studentCode)));
+    }
+
+    /** Littéral shell à guillemets simples, sûr pour un texte quelconque. */
+    private static String shellSingleQuote(String texte) {
+        return "'" + texte.replace("'", "'\\''") + "'";
     }
 
 

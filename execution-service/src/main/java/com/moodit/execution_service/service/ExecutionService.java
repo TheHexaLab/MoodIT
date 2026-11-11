@@ -124,13 +124,11 @@ public class ExecutionService {
             if (rejected != null) {
                 return rejected;
             }
-            // Harnais d'avant #116 (corps renvoyant un booléen) : diagnostic explicite plutôt
-            // qu'un « Échec de compilation » incompréhensible — V7 n'a converti que les gabarits.
-            List<TestResult> legacy = DockerEvaluator.legacyHarnessRejection(
-                    request.language(), request.testCases());
-            if (legacy != null) {
-                return legacy;
-            }
+            // Les DEUX formes de harnais sont notables, et c'est la forme qui choisit le chemin
+            // (cf. HarnessProjects.addCase) : un corps qui renvoie un booléen passe par le modèle
+            // à deux processus et deux UID, un vrai test du framework par l'ancien chemin. Il n'y
+            // a donc plus rien à refuser ici — ce garde-fou renvoyait 0 à tous les cas d'une
+            // question dont le harnais était justement au format SÛR.
             // Mur plafonné selon l'appelant : une correction interne a droit au budget complet,
             // un « Tester » public est borné (route réservée aux éditeurs de quiz, mais
             // jusqu'à 100 cas fournis par l'appelant).

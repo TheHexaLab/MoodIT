@@ -143,30 +143,18 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 
 ### Changement de schéma : migrations Flyway
 
-> **Déploiement du runner (#116) — contrôle unique avant la mise à jour** : `V7` ne convertit
-> que les GABARITS de harnais compilés (les questions futures) ; une question Go/Rust/C/C++/C#/Java
-> créée AVANT cette version garde un harnais ancien format, qui ne compile plus dans le runner
-> (tous ses cas échoueraient). Vérifier qu'il n'en existe aucune :
+> **Déploiement du runner (#116) — rien à convertir.** Les DEUX formes de harnais compilé sont
+> notables, et c'est la forme qui choisit le chemin : un corps qui renvoie un **booléen** passe par
+> le modèle à deux processus et deux UID (verdict non falsifiable), un **vrai test du framework**
+> (JUnit, NUnit, go test, cargo test, `moodit_check.h`) par l'ancien chemin. Aucune question n'est
+> à retoucher avant un déploiement, dans un sens comme dans l'autre.
 >
-> La requête ne compte QUE les harnais dépourvus du marqueur de framework de leur langage, avec
-> les MÊMES expressions régulières que `DockerEvaluator.frameworkMarker` (formes paramétrées et
-> qualifiées comprises : `[TestCase(…)]`, `@ParameterizedTest`, `#[cfg(test)]`…) :
->
-> ```bash
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
->   "SELECT l.name, count(*) FROM Test_Case tc JOIN Question q ON q.id = tc.question_id \
->    JOIN Language l ON l.id = q.language_id \
->    WHERE (l.name = 'Java' AND tc.harness_code !~ '@\s*(\w+\s*\.\s*)*(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\y') \
->       OR (l.name = 'C#'   AND tc.harness_code !~ '\[\s*(\w+\s*\.\s*)*(Test|TestCase|TestCaseSource|Theory|TestFixture)\y') \
->       OR (l.name = 'Go'   AND tc.harness_code !~ 'func\s+Test\w*\s*\(') \
->       OR (l.name = 'Rust' AND tc.harness_code !~ '#\s*\[\s*(\w+\s*::\s*)*test\s*\]|#\s*\[\s*cfg\s*\(\s*test\s*\)') \
->       OR (l.name IN ('C','C++') AND tc.harness_code !~ 'MOODIT_TEST\s*\(') \
->    GROUP BY l.name"
-> ```
->
-> Résultat vide → rien à faire. Sinon, convertir ces harnais au format framework (cf. les
-> exemples de `db/demo/V7_1__demo_harnais_frameworks.sql`) avant d'ouvrir l'app aux étudiants ;
-> sans conversion, l'étudiant reçoit 0 avec le message « harnais resté à l'ancien format ».
+> Une version antérieure de ce document demandait ici de convertir au format framework tout
+> harnais qui n'en portait pas le marqueur. **Ne pas le faire** : ce serait remplacer la forme
+> sûre par celle dont le verdict est contournable par un adversaire in-process (cf.
+> `docker/runners/README.md`). Pour un examen noté, c'est l'inverse qu'il faut viser — les
+> gabarits de `V9` installent le harnais booléen, et les questions déjà écrites au format
+> framework continuent de fonctionner telles quelles.
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :

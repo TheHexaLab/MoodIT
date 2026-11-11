@@ -93,33 +93,6 @@ public class DockerEvaluator {
     private static final String RESERVED_MARKER = "__MOODIT_";
 
     /**
-     * Verdicts explicites si au moins un harnais est resté à l'ancien format, sinon
-     * {@code null}. Comme {@link #reservedMarkerRejection}, à appeler AVANT de prendre une
-     * place du sandbox : aucun conteneur ne peut rien en faire.
-     */
-    public static List<TestResult> legacyHarnessRejection(String language, List<TestCaseInput> cases) {
-        String runnerLanguage;
-        try {
-            runnerLanguage = HarnessProjects.runnerLanguage(language);
-        } catch (RuntimeException e) {
-            return null;   // langage non compilé : pas notre affaire
-        }
-        boolean anyLegacy = cases.stream()
-                .anyMatch(c -> legacyHarnessDetail(runnerLanguage, c.harnessCode()) != null);
-        if (!anyLegacy) {
-            return null;
-        }
-        return cases.stream()
-                .map(c -> {
-                    String detail = legacyHarnessDetail(runnerLanguage, c.harnessCode());
-                    return new TestResult(c.name(), c.effectiveWeight(), false,
-                            detail != null ? detail : "Non évalué : un autre harnais de cette "
-                                    + "question est resté à l'ancien format.");
-                })
-                .toList();
-    }
-
-    /**
      * Verdicts de rejet si {@code code} contient le marqueur réservé, sinon {@code null}.
      * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
      * sous saturation, le rejet explicite vaut mieux qu'un 429).
@@ -179,22 +152,6 @@ public class DockerEvaluator {
             case "rust" -> "#[test]";
             default -> "MOODIT_TEST(nom)";
         };
-    }
-
-    /** Détail d'un harnais resté à l'ancien format, ou {@code null} s'il est au bon format. */
-    static String legacyHarnessDetail(String runnerLanguage, String harnessCode) {
-        if (frameworkMarkerFound(runnerLanguage, harnessCode)) {
-            return null;
-        }
-        if ("java".equals(runnerLanguage)) {
-            // Java sait désormais noter un harnais BOOLÉEN sans qu'il soit falsifiable (deux
-            // processus, deux UID) : ce format n'est plus « hérité », c'est le format SÛR.
-            return null;
-        }
-        return "Ce harnais est resté à l'ancien format (un corps qui renvoie un booléen). "
-                + "Depuis #116, un harnais de langage compilé est un VRAI test du framework : "
-                + "il doit déclarer un test (" + frameworkExample(runnerLanguage) + "). "
-                + "À convertir dans l'éditeur de quiz.";
     }
 
     /** {@code maxWallMs} : plafond du mur du conteneur — {@link #PUBLIC_WALL_MS} hors correction interne. */

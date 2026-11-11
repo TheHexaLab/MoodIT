@@ -307,6 +307,93 @@ class RpcGradingIntegrationTest {
                 .passed()).isFalse();
     }
 
+    // ── Types de retour et idiomes que la première version ne savait pas générer. Chacun de ces
+    //    cas rendait « Échec de compilation » à un étudiant dont le code était juste.
+
+    @Test
+    void java_tous_les_types_de_retour_marshalables() {
+        // `long`, `double` et `boolean` sont des MOTS RÉSERVÉS : le nom de la méthode RPC ne peut
+        // pas être dérivé du type. Seuls int et String compilaient.
+        assertThat(note("Java", "return Solution.moitie(7) == 3L;",
+                "public class Solution { public static long moitie(int n) { return n / 2; } }")
+                .passed()).isTrue();
+        assertThat(note("Java", "return Math.abs(Solution.aire(3, 4) - 12.0) < 1e-9;",
+                "public class Solution { public static double aire(int l, int h)"
+                        + " { return l * (double) h; } }").passed()).isTrue();
+        assertThat(note("Java", "return Solution.pair(4);",
+                "public class Solution { public static boolean pair(int n)"
+                        + " { return n % 2 == 0; } }").passed()).isTrue();
+        assertThat(note("Java", "return Solution.crie(\"bon\").equals(\"BON\");",
+                "public class Solution { public static String crie(String s)"
+                        + " { return s.toUpperCase(); } }").passed()).isTrue();
+    }
+
+    @Test
+    void java_chaine_contenant_un_separateur_du_protocole() {
+        // Un `]`, un `\"` ou une barre oblique inverse dans la valeur cassait l'analyse : la
+        // réponse juste était notée FAUSSE. Les chaînes voyagent donc en hexadécimal.
+        String code = "public class Solution { public static String copie(String s)"
+                + " { return s; } }";
+        assertThat(note("Java", "return Solution.copie(\"ab]cd\").equals(\"ab]cd\");", code)
+                .passed()).isTrue();
+        assertThat(note("Java", "return Solution.copie(\"a\\\"b\\\\c|d\").equals(\"a\\\"b\\\\c|d\");",
+                code).passed()).isTrue();
+    }
+
+    @Test
+    void rust_methode_avec_parametres() {
+        // Les arguments n'étaient ni lus ni transmis côté étudiant : rustc refusait son programme.
+        String h = "let c = Compteur { valeur: 10 };\nc.plus(5) == 15";
+        String poo = """
+                struct Compteur {
+                    valeur: i32,
+                }
+
+                impl Compteur {
+                    fn plus(&self, n: i32) -> i32 {
+                        self.valeur + n
+                    }
+                }
+                """;
+        assertThat(note("Rust", h, poo).passed()).isTrue();
+        assertThat(note("Rust", h, poo.replace("self.valeur + n", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void go_methode_a_recepteur_pointeur() {
+        // L'idiome le plus répandu. L'aiguillage appelait la méthode sur le résultat d'une
+        // assertion de type, qui n'est pas adressable : le programme ne compilait pas.
+        String h = "c := NewCompteur(10)\nreturn c.Plus(5) == 15";
+        String poo = """
+                package main
+
+                type Compteur struct {
+                \tvaleur int
+                }
+
+                func NewCompteur(v int) *Compteur {
+                \treturn &Compteur{valeur: v}
+                }
+
+                func (c *Compteur) Plus(n int) int { return c.valeur + n }
+                """;
+        assertThat(note("Go", h, poo).passed()).isTrue();
+        assertThat(note("Go", h, poo.replace("c.valeur + n", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void chaines_et_flottants_sur_les_protocoles_texte() {
+        // `%g` tronquait un double à 6 chiffres significatifs, dans les deux sens, et une chaîne
+        // contenant « | » décalait tout l'appel : réponse juste notée fausse.
+        assertThat(note("C", "return doubler(3.14159265) > 6.2831852;",
+                "double doubler(double x) { return x * 2; }").passed()).isTrue();
+        assertThat(note("C#", "return Solution.Copie(\"a|b\") == \"a|b\";",
+                "class Solution { public static string Copie(string s) { return s; } }")
+                .passed()).isTrue();
+        assertThat(note("Rust", "copie(String::from(\"a|b\")) == \"a|b\"",
+                "fn copie(s: String) -> String { s }").passed()).isTrue();
+    }
+
     // ──────────────────── 2. Forger le résultat : plus aucun canal ────────────────────
 
     @Test
@@ -350,6 +437,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
+        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
+        assertThat(r.detail() == null ? "" : r.detail())
+                .doesNotContain("Échec de compilation");
     }
 
     @Test
@@ -373,6 +464,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
+        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
+        assertThat(r.detail() == null ? "" : r.detail())
+                .doesNotContain("Échec de compilation");
     }
 
     @Test
@@ -394,6 +489,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
+        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
+        assertThat(r.detail() == null ? "" : r.detail())
+                .doesNotContain("Échec de compilation");
     }
 
     @Test
@@ -421,6 +520,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
+        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
+        assertThat(r.detail() == null ? "" : r.detail())
+                .doesNotContain("Échec de compilation");
     }
 
     // ────────────── 3. Le harnais du prof : ni lisible, ni modifiable ──────────────
@@ -500,5 +603,101 @@ class RpcGradingIntegrationTest {
                 """);
         assertThat(r.passed()).isTrue();
         assertThat(r.detail() == null ? "" : r.detail()).doesNotContain("⚠");
+    }
+
+    @Test
+    void chemins_d_erreur_echouent_proprement() {
+        // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
+        // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.
+        TestResult harnaisFaux = note("Java", "return Solution.inexistante(3) == 1;",
+                "public class Solution { public static int doubler(int n) { return n * 2; } }");
+        assertThat(harnaisFaux.passed()).isFalse();
+        assertThat(harnaisFaux.detail()).contains("harnais");
+
+        TestResult sansApi = note("Java", "return true;",
+                "public class Solution { private static int cache = 1; }");
+        assertThat(sansApi.passed()).isFalse();
+        assertThat(sansApi.detail()).isNotEmpty();
+
+        TestResult codeCasse = note("Rust", "doubler(5) == 10", "fn doubler(n: i32) -> i32 { n *");
+        assertThat(codeCasse.passed()).isFalse();
+        assertThat(codeCasse.detail()).contains("compilation");
+
+        TestResult harnaisQuiLeve = note("Java",
+                "throw new IllegalStateException(\"le prof s'est trompé\");",
+                "public class Solution { public static int doubler(int n) { return n * 2; } }");
+        assertThat(harnaisQuiLeve.passed()).isFalse();
+        assertThat(harnaisQuiLeve.detail()).contains("harnais");
+    }
+
+    @Test
+    void code_honnete_bavard_passe_dans_les_cinq_autres_langages() {
+        // « Ne pas accuser un étudiant honnête » a déjà demandé trois correctifs : la propriété
+        // doit être mesurée dans CHAQUE langage, pas seulement en Java.
+        record Cas(String langage, String harnais, String code) { }
+        List<Cas> cas = List.of(
+                new Cas("Go", "return doubler(5) == 10", """
+                        package main
+
+                        import "fmt"
+
+                        func doubler(n int) int {
+                        \tfmt.Println("je calcule", n)
+                        \treturn n * 2
+                        }
+
+                        func main() { fmt.Println(doubler(21)) }
+                        """),
+                new Cas("Rust", "doubler(5) == 10", """
+                        fn doubler(n: i32) -> i32 {
+                            println!("je calcule {}", n);
+                            eprintln!("trace");
+                            n * 2
+                        }
+
+                        fn main() { println!("{}", doubler(21)); }
+                        """),
+                new Cas("C", "return doubler(5) == 10;", """
+                        #include <stdio.h>
+
+                        int doubler(int n) {
+                            printf("je calcule %d\\n", n);
+                            fflush(stdout);
+                            return n * 2;
+                        }
+
+                        int main(void) { printf("%d\\n", doubler(21)); return 0; }
+                        """),
+                new Cas("C++", "return doubler(5) == 10;", """
+                        #include <iostream>
+
+                        int doubler(int n) {
+                            std::cout << "je calcule " << n << std::endl;
+                            return n * 2;
+                        }
+
+                        int main() { std::cout << doubler(21) << std::endl; return 0; }
+                        """),
+                new Cas("C#", "return Solution.doubler(5) == 10;", """
+                        using System;
+
+                        class Solution {
+                            public static int doubler(int n) {
+                                Console.WriteLine("je calcule " + n);
+                                Console.Error.WriteLine("trace");
+                                return n * 2;
+                            }
+
+                            public static void Main() { Console.WriteLine(doubler(21)); }
+                        }
+                        """));
+        for (Cas c : cas) {
+            TestResult r = note(c.langage(), c.harnais(), c.code());
+            assertThat(r.passed())
+                    .as("code honnête mais bavard en " + c.langage() + " : "
+                            + (r.detail() == null ? "" : r.detail()))
+                    .isTrue();
+            assertThat(r.detail() == null ? "" : r.detail()).doesNotContain("⚠");
+        }
     }
 }

@@ -186,79 +186,47 @@ class DockerEvaluatorTest {
         org.mockito.Mockito.verifyNoInteractions(sandbox);
     }
 
-    // ── Harnais restés à l'ancien format (#116) ──────────────────────────────────
+    // ── Aiguillage selon la FORME du harnais (#116) ──────────────────────────────
 
     @Test
-    void harnais_ancien_format_rejete_avec_un_message_explicite() {
-        // Un harnais qui renvoie un BOOLÉEN n'est plus « ancien » en Java : c'est le format SÛR,
-        // noté dans deux processus sous deux UID (non falsifiable). Il reste refusé là où ce
-        // chemin n'existe pas encore — ici Rust, dont le harnais doit déclarer #[test].
-        assertThat(DockerEvaluator.legacyHarnessRejection("java",
-                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)))).isNull();
-        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("rust",
-                List.of(new TestCaseInput("t", "doubler(5) == 10", 1)));
-        assertThat(results).hasSize(1);
-        assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("ancien format").contains("#[test]");
+    void la_forme_du_harnais_choisit_le_chemin_dans_les_six_langages() {
+        // Les deux formes sont notables : un corps qui renvoie un booléen passe par le modèle à
+        // deux processus et deux UID (non falsifiable), un vrai test du framework par l'ancien
+        // chemin. `frameworkMarkerFound` est le SEUL aiguillage — rien n'est refusé en amont.
+        record Cas(String langage, String booleen, String framework) { }
+        List<Cas> cas = List.of(
+                new Cas("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
+                new Cas("csharp", "return Solution.Doubler(5) == 10;", "[Test] public void T() {}"),
+                new Cas("go", "return doubler(5) == 10", "func TestT(t *testing.T) {}"),
+                new Cas("rust", "doubler(5) == 10", "#[test] fn t() {}"),
+                new Cas("c", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"),
+                new Cas("cpp", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"));
+        for (Cas c : cas) {
+            assertThat(DockerEvaluator.frameworkMarkerFound(c.langage(), c.booleen()))
+                    .as("harnais booléen en " + c.langage() + " → chemin non falsifiable")
+                    .isFalse();
+            assertThat(DockerEvaluator.frameworkMarkerFound(c.langage(), c.framework()))
+                    .as("harnais framework en " + c.langage() + " → ancien chemin")
+                    .isTrue();
+        }
     }
 
     @Test
-    void harnais_au_format_framework_accepte_dans_les_six_langages() {
-        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
-                List.of(new TestCaseInput("t", "@Test void t() {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
-                List.of(new TestCaseInput("t", "[Test] public void T() {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Go",
-                List.of(new TestCaseInput("t", "func TestT(t *testing.T) {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Rust",
-                List.of(new TestCaseInput("t", "#[test] fn t() {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("C",
-                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("C++",
-                List.of(new TestCaseInput("t", "MOODIT_TEST(t) { }", 1)))).isNull();
-    }
-
-    @Test
-    void formes_parametrees_et_qualifiees_acceptees() {
-        // Formes IDIOMATIQUES que le contrôle littéral rejetait à tort : l'étudiant recevait 0
-        // avec « harnais resté à l'ancien format » alors que le harnais était valide.
-        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
-                List.of(new TestCaseInput("t", "[TestCase(3, 4, 12)] public void Aire(…) {}", 1))))
-                .isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("C#",
-                List.of(new TestCaseInput("t", "[ TestCaseSource(nameof(Cas)) ] void T() {}", 1))))
-                .isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
-                List.of(new TestCaseInput("t", "@ParameterizedTest @ValueSource(ints = {1}) void t(int n) {}", 1))))
-                .isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
-                List.of(new TestCaseInput("t", "@org.junit.jupiter.api.Test void t() {}", 1))))
-                .isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Java",
-                List.of(new TestCaseInput("t", "@RepeatedTest(3) void t() {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Go",
-                List.of(new TestCaseInput("t", "func TestAire(t *testing.T) {}", 1)))).isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("Rust",
-                List.of(new TestCaseInput("t", "#[cfg(test)] mod m { #[test] fn t() {} }", 1))))
-                .isNull();
-        assertThat(DockerEvaluator.legacyHarnessRejection("C++",
-                List.of(new TestCaseInput("t", "MOODIT_TEST (aire) { }", 1)))).isNull();
-    }
-
-    @Test
-    void un_seul_harnais_ancien_format_arrete_toute_la_question() {
-        List<TestResult> results = DockerEvaluator.legacyHarnessRejection("Go", List.of(
-                new TestCaseInput("bon", "func TestA(t *testing.T) {}", 1),
-                new TestCaseInput("vieux", "return doubler(5) == 10", 1)));
-        assertThat(results).hasSize(2);
-        assertThat(results.get(0).detail()).contains("un autre harnais");
-        assertThat(results.get(1).detail()).contains("ancien format");
-    }
-
-    @Test
-    void langage_non_compile_n_est_pas_concerne() {
-        assertThat(DockerEvaluator.legacyHarnessRejection("Python",
-                List.of(new TestCaseInput("t", "return True", 1)))).isNull();
+    void formes_parametrees_et_qualifiees_reconnues_comme_framework() {
+        // Formes IDIOMATIQUES qu'un contrôle littéral prenait pour des harnais booléens.
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[TestCase(3, 4, 12)] public void Aire(…) {}")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[ TestCaseSource(nameof(Cas)) ] void T() {}")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "@ParameterizedTest @ValueSource(ints = {1}) void t(int n) {}")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "@org.junit.jupiter.api.Test void t() {}")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("java", "@RepeatedTest(3) void t() {}"))
+                .isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("rust",
+                "#[cfg(test)] mod m { #[test] fn t() {} }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("cpp", "MOODIT_TEST (aire) { }")).isTrue();
     }
 
     @Test
