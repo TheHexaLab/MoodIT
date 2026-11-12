@@ -20,7 +20,7 @@
 -- question existante n'en dépendait, et le garder laissait un prof choisir sans le savoir un
 -- chemin dont le verdict était contournable. Un harnais qui en porte le marqueur est désormais
 -- refusé avec un diagnostic, et le corps booléen est la seule forme notée.
--- V2 et V7 étant fusionnées, on corrige par UPDATE (Flyway forward-only).
+-- V7 étant ajoutée par cette même PR, on corrige par UPDATE (Flyway forward-only).
 UPDATE Language SET harness_template = ht.tpl
 FROM (VALUES
     ('Java', $hc$// HARNAIS (Java) — un corps qui RENVOIE UN BOOLÉEN. Il est compilé dans un

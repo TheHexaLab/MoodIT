@@ -29,7 +29,7 @@ RUN sed -i 's|//archive.ubuntu.com|//azure.archive.ubuntu.com|g; s|//security.ub
 RUN (apt-get -o APT::Update::Error-Mode=any update || (sleep 5 && apt-get -o APT::Update::Error-Mode=any update) || (sleep 15 && apt-get -o APT::Update::Error-Mode=any update)) \
  && apt-get install -y --no-install-recommends mono-devel python3 \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --uid 1300 --no-create-home --shell /usr/sbin/nologin student && chmod 755 /var/tmp /run/lock \
+ && useradd --uid 1300 --no-create-home --shell /usr/sbin/nologin student && chmod 755 /var/tmp /run/lock
 
 COPY common/supervisor.py /opt/moodit/supervisor.py
 

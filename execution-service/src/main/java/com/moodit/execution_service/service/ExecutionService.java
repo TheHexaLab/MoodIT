@@ -24,9 +24,12 @@ import java.util.List;
  * <ul>
  *   <li><b>Langages COMPILÉS</b> → {@link DockerEvaluator} : conteneur runner jetable par
  *       soumission (réseau coupé), SUPERVISEUR de confiance (root) qui compile, verrouille les
- *       sources en 700, exécute chaque cas sous un UID étudiant dédié tracé par strace, et rend
- *       un verdict FAIL-CLOSED multi-canaux gardé par des CANARIS randomisés. Le harnais du prof
- *       est un VRAI test du langage (JUnit, NUnit, go test, cargo test, moodit_check.h).</li>
+ *       sources en 700, et compile le harnais du prof dans un programme SÉPARÉ (le noteur,
+ *       sous son propre UID) tandis que le code soumis est compilé seul dans un autre. Un cas
+ *       est réussi si, et seulement si, le NONCE du cas paraît sur le stderr du noteur
+ *       (FAIL-CLOSED), ce que le code soumis ne peut pas produire : il ne détient ni le nonce,
+ *       ni le harnais. Le harnais du prof est un CORPS qui renvoie un booléen — un harnais au
+ *       format framework est refusé en amont, avec un diagnostic.</li>
  *   <li><b>Interprétés / SQL / vues</b> → mode « exec » du runner (ex-Piston), verdict par NONCE ALÉATOIRE : il ne dépend PAS
  *       de l'exit code (falsifiable par un {@code exit(0)} anticipé), mais de la présence d'un
  *       nonce secret que SEUL le harnais émet en cas de succès ; le code étudiant vit dans un

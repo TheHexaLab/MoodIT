@@ -109,7 +109,7 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   614/61/20 Mo avec le 1 Go de la prod) et comptés dedans — les
   images verrouillent leurs répertoires monde-inscriptibles (`/var/tmp`, `/go`, cargo…), le disque
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
-  minimum du superviseur (chown/droits, setuid étudiant, kill, strace), `no-new-privileges`,
+  minimum du superviseur (chown/droits, setuid étudiant, kill), `no-new-privileges`,
   UID étudiant dédié ; détails dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
 
 ## Résiduel connu

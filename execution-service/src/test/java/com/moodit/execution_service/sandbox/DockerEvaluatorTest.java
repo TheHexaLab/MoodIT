@@ -78,36 +78,10 @@ class DockerEvaluatorTest {
     void evenement_non_suspect_avec_cas_ne_marque_pas_le_verdict() {
         supervisorReturns("""
                 {"v":1,"results":[{"index":0,"passed":true,"ms":1},{"index":1,"passed":true,"ms":1}],
-                 "events":[{"type":"trace_indisponible","case":0}],"canaries":"ok"}
+                 "events":[{"type":"espace_sature","case":0}],"canaries":"ok"}
                 """);
         List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
         assertThat(results.get(0).detail()).isNull();
-    }
-
-    @Test
-    void sommaire_duplique_refuse_le_cas_sans_accuser_de_triche() {
-        // CLIQUET contre la régression qui est revenue à chaque tour de revue : un sommaire
-        // authentifié imprimé deux fois (un `fork()` honnête de la fonction notée y suffit, le
-        // sommaire étant imprimé après la boucle de tests) doit REFUSER le cas sans bandeau de
-        // falsification. La propriété n'était verrouillée que par un test d'intégration, qui
-        // s'ignore en silence sans démon Docker : ajouter `sommaire_duplique` à isSuspicious
-        // passait donc inaperçu en local. Ici, ça rougit dès `./gradlew test`.
-        supervisorReturns("""
-                {"v":1,"results":[
-                  {"index":0,"passed":false,"detail":"Verdict indisponible : le sommaire du framework a été imprimé plusieurs fois (processus dupliqué ?)","ms":1},
-                  {"index":1,"passed":true,"detail":null,"ms":1}
-                ],"events":[
-                  {"type":"sommaire_duplique","case":0,"detail":"sommaire authentifié imprimé plusieurs fois (processus dupliqué ?)"}
-                ],"canaries":"ok"}
-                """);
-        List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
-        assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail())
-                .contains("imprimé plusieurs fois")
-                .doesNotContain("⚠").doesNotContain("suspect").doesNotContain("falsification");
-        // Et le cas voisin n'est pas contaminé : l'événement ne vise que le cas 0.
-        assertThat(results.get(1).passed()).isTrue();
-        assertThat(results.get(1).detail()).isNull();
     }
 
     @Test
@@ -125,17 +99,18 @@ class DockerEvaluatorTest {
                   {"index":0,"passed":true,"detail":null,"ms":1},
                   {"index":1,"passed":false,"detail":"échec","ms":1}
                 ],"events":[
-                  {"type":"lecture_source_tentee","case":0,"detail":"openat(src/harness.c)"},
-                  {"type":"trace_indisponible"}
+                  {"type":"canari_incoherent","case":0,"detail":"canari « pass » en échec"},
+                  {"type":"budget_depasse"}
                 ],"canaries":"ok"}
                 """);
         List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
-        // Une lecture détectée FAIT ÉCHOUER le cas, même « réussi » côté framework : lire son
-        // binaire de test peut réussir (extraction du jeton) — annoter ne suffisait pas.
+        // Un canari incohérent FAIT ÉCHOUER le cas, même rendu « réussi » par le superviseur :
+        // si la chaîne ne tranche plus dans les deux sens, aucun verdict de ce job ne vaut rien,
+        // et annoter sans refuser laissait passer une note qu'on ne sait pas justifier.
         assertThat(results.get(0).passed()).isFalse();
         assertThat(results.get(0).detail()).contains("⚠ Comportement suspect")
-                .contains("cas refusé").contains("lecture_source_tentee");
-        // trace_indisponible (événement d'environnement, pas de triche) n'alerte pas le cas 1.
+                .contains("cas refusé").contains("canari_incoherent");
+        // budget_depasse (événement d'infrastructure, sans cas visé) n'alerte pas le cas 1.
         assertThat(results.get(1).detail()).isEqualTo("échec");
     }
 
@@ -181,9 +156,9 @@ class DockerEvaluatorTest {
         // soumis — et TROIS en Java, où les signatures sont lues sur les classes compilées. Le
         // mur n'en budgétait qu'une : un cas lancé juste avant l'échéance du budget se faisait
         // tuer au mur, ce qui perdait tous les verdicts du job (#216).
-        assertThat(DockerEvaluator.compilesPerCase("cpp", List.of())).isEqualTo(2);
-        assertThat(DockerEvaluator.compilesPerCase("go", List.of())).isEqualTo(2);
-        assertThat(DockerEvaluator.compilesPerCase("java", List.of())).isEqualTo(3);
+        assertThat(DockerEvaluator.compilesPerCase("cpp")).isEqualTo(2);
+        assertThat(DockerEvaluator.compilesPerCase("go")).isEqualTo(2);
+        assertThat(DockerEvaluator.compilesPerCase("java")).isEqualTo(3);
     }
 
     @Test
@@ -274,4 +249,38 @@ class DockerEvaluatorTest {
             assertThat(r.detail()).contains("Incohérence détectée");
         });
     }
+
+    @Test
+    void aucun_dockerfile_ne_laisse_de_continuation_pendante() throws java.io.IOException {
+        // Un `\` en fin de ligne suivi d'une ligne VIDE fait avaler l'instruction suivante par
+        // le RUN en cours. L'image ne se construit plus, et le message d'erreur accuse la
+        // commande du RUN — pas la continuation. C'est arrivé en retirant les téléchargements
+        // du format framework (#116) : le `COPY` du superviseur s'est retrouvé dans le RUN, et
+        // seule une construction réelle, donc la CI, pouvait le dire. Ce test le dit en 2 ms.
+        java.util.List<String> fautifs = new java.util.ArrayList<>();
+        java.nio.file.Path racine = java.nio.file.Path.of("..", "docker", "runners");
+        try (var dossiers = java.nio.file.Files.list(racine)) {
+            for (java.nio.file.Path d : dossiers.sorted().toList()) {
+                java.nio.file.Path df = d.resolve("Dockerfile");
+                if (!java.nio.file.Files.isRegularFile(df)) {
+                    continue;
+                }
+                java.util.List<String> lignes = java.nio.file.Files.readAllLines(df);
+                for (int i = 0; i < lignes.size(); i++) {
+                    if (!lignes.get(i).stripTrailing().endsWith("\\")) {
+                        continue;
+                    }
+                    boolean derniere = i == lignes.size() - 1;
+                    if (derniere || lignes.get(i + 1).isBlank()) {
+                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1));
+                    }
+                }
+            }
+        }
+        assertThat(fautifs)
+                .withFailMessage("continuation pendante (l'instruction suivante serait avalée "
+                        + "par le RUN, et l'image ne construirait plus) : %s", fautifs)
+                .isEmpty();
+    }
+
 }

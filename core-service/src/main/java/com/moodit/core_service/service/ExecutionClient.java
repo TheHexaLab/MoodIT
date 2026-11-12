@@ -138,7 +138,7 @@ public class ExecutionClient {
         return baseReadTimeoutMs + serverWork;
     }
 
-    /** Marge par unité au-delà du temps limite du prof (collecte, strace, va-et-vient). */
+    /** Marge par unité au-delà du temps limite du prof (collecte, va-et-vient). */
     private static final long RUN_MARGIN_MS = 5_000;
 
     /** Temps limite par défaut quand la question n'en fixe pas (défaut du superviseur). */

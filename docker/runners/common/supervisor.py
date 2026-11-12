@@ -7,16 +7,18 @@ Le code étudiant, lui, ne tourne JAMAIS en root : chaque cas est exécuté sous
 sans toolchain (binaires de test autonomes), sources verrouillées en 700 root.
 
 Modèle de confiance :
-  - INTÉGRITÉ  : verdict fail-closed multi-canaux (exit code + marqueurs du framework + rapport
-    cohérent). Deux CANARIS par soumission (un qui doit réussir, un qui doit échouer, valeurs
-    tirées au sort à l'exécution, position mélangée) : un rapport forgé qui ne les reproduit pas
-    exactement est détecté → toute la soumission échoue et l'événement est remonté.
-  - CONFIDENTIALITÉ : les sources (harnais compris) appartiennent à root en 700 dès leur
-    extraction ; le processus étudiant reçoit EACCES s'il tente de les lire. Limite assumée :
-    les constantes compilées dans les artefacts restent extractibles par un étudiant déterminé.
-  - DÉTECTION  : inutile sur ce chemin — le harnais et le nonce n'entrent jamais dans un
-    est disponible ; toute ouverture d'une source verrouillée devient un événement
-    processus ou un fichier que le code soumis puisse atteindre : il n'y a rien à surveiller.
+  - INTÉGRITÉ  : un cas est RÉUSSI si, et seulement si, le NONCE du cas paraît sur le stderr du
+    NOTEUR — un programme séparé, sous un UID séparé, dans lequel aucun code soumis ne tourne.
+    Tout le reste vaut échec (fail-closed). Deux CANARIS par soumission (un qui doit réussir, un
+    qui doit échouer, valeurs tirées au sort à l'exécution, position mélangée) vérifient que la
+    chaîne tranche encore dans les deux sens.
+  - CONFIDENTIALITÉ : le harnais et le nonce ne sont PAS dans le processus du code soumis. Les
+    sources appartiennent de plus à root en 700 dès leur extraction, et le processus étudiant
+    reçoit EACCES s'il tente de les lire.
+  - DÉTECTION  : il n'y en a pas, et c'est le propos. Le harnais et le nonce n'entrent dans
+    aucun processus ni fichier que le code soumis puisse atteindre : il n'y a rien à
+    surveiller. Les événements restants portent sur l'INFRASTRUCTURE (budget_depasse,
+    espace_sature, erreur_superviseur) et sur les canaris.
 
 Deux MODES (job.json) :
   - « evaluate » (défaut) : notation des langages COMPILÉS décrite ci-dessus
@@ -229,18 +231,6 @@ def demote_student():
 # exige que le caractère suivant « Test » ne soit pas une minuscule (cmd/go isTest) — sinon la
 # fonction n'est pas enregistrée comme test et `go vet` la refuse. Une initiale minuscule
 # faisait échouer le canari d'une soumission Go HONNÊTE, donc l'accusait de falsification.
-IDENT_FIRST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-IDENT_REST = IDENT_FIRST + "abcdefghijklmnopqrstuvwxyz0123456789_"
-
-
-def random_identifier(rng, min_len=5, max_len=16):
-    """Identifiant valide dans les six langages, de longueur variable. Majuscule en tête
-    (contrainte Go « TestXxx ») ; la suite mélange casses, chiffres et _."""
-    length = rng.randrange(min_len, max_len + 1)
-    return rng.choice(IDENT_FIRST) + "".join(rng.choice(IDENT_REST) for _ in range(length - 1))
-
-
-JETON_MODULE = "zzzz_moodit_jeton"
 
 
 RUST_TEST_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -677,35 +667,8 @@ def inconclusive(outcome):
 
 
 # Nom du test canari tiré au sort, par index de cas (vide pour un cas réel). Sert à
-# N'EXÉCUTER QUE LUI dans un cas canari : le code étudiant y est compilé, donc SES PROPRES
-# tests unitaires (idiome courant en Rust/Java/C#) étaient découverts et exécutés — un test
-# d'étudiant simplement FAUX faisait échouer le canari « pass », et toute la soumission était
-# refusée pour « falsification probable ». Les init/constructeurs du code étudiant tournent
-# toujours au chargement : le forgeage qu'il s'agit d'attraper reste détecté.
-CANARY_NAMES = {}
-
-# Conteneurs de tests déclarés par le CODE ÉTUDIANT, par index de cas (Java/C#/Rust) : ils
-# sont EXCLUS de l'exécution. Le code étudiant est compilé dans la même unité que le harnais,
-# donc ses PROPRES tests unitaires étaient comptés dans le verdict — un test d'étudiant
-# simplement faux mettait la question à 0. Exclure plutôt que sélectionner est un choix de
-# SÛRETÉ : une extraction incomplète ne peut que réintroduire ce défaut d'équité, jamais
-# n'exécuter aucun test du prof et offrir la note. Liste vide = comportement d'origine.
-STUDENT_TYPES = {}
-
-# Conteneurs de tests déclarés par le HARNAIS, par index de cas. Ils portent l'invariant de
-# sûreté : pour qu'un cas soit RÉUSSI, au moins un test exécuté doit leur appartenir.
-#
-# Un comptage anonyme (« au moins un test a tourné ») ne suffisait pas : l'exclusion est
-# construite à partir d'un texte que l'ÉTUDIANT contrôle, et dès qu'elle emportait le harnais,
-# un seul test personnel survivant au filtre suffisait à faire noter le cas « réussi » sur un
-# code arbitrairement faux. Vérifier l'appartenance rend l'extraction non critique : elle
-# n'optimise que l'ÉQUITÉ, elle ne décide plus de l'intégrité de la note.
-#
-# Liste vide = harnais non identifié : aucune exclusion n'est appliquée (tous ses tests
-# tournent donc) et l'invariant n'a rien à vérifier.
-HARNESS_TYPES = {}
-
-# Jeton de fin d'exécution par cas (substitué dans les sources, imprimé après tous les tests).
+# NONCE du verdict, un par cas : le noteur l'imprime sur SON stderr quand le harnais du prof
+# renvoie vrai, et lui seul le connaît. `redact_tokens` l'efface des sorties rendues.
 TOKENS = {}
 
 
@@ -755,8 +718,8 @@ def run_cpp(case_dir, env, timeout_s, case_index):
 def harness_rpc_body(case_dir):
     """Corps du harnais BOOLÉEN d'un cas, ou None si aucun fichier marqué n'est présent.
 
-    Le marqueur est posé par HarnessProjects : un harnais qui renvoie un booléen prend le chemin
-    NON FALSIFIABLE (deux processus, deux UID), un vrai test de framework garde l'ancien."""
+    Le marqueur est posé par HarnessProjects. C'est la SEULE forme notée : un harnais au format
+    framework est refusé en amont, par ExecutionService, et n'arrive jamais ici."""
     src = os.path.join(case_dir, "src")
     if not os.path.isdir(src):
         return None
@@ -841,8 +804,16 @@ JAVA_RPC_FN = {"Integer": "integer", "Long": "long_", "Double": "double_",
 
 
 JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.$]+)", re.M)
-JAVAP_CTOR = re.compile(r"^\s+public\s+([\w.$]+)\(([^)]*)\);", re.M)
-JAVAP_METHOD = re.compile(r"^\s+public\s+([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
+# La visibilite n est PAS exigee, ici non plus : `class Rectangle { Rectangle(int,int){} }`
+# est l ecriture la plus courante d un exercice a un seul fichier, et le serveur sait deja
+# l invoquer (getDeclaredConstructors/getDeclaredMethods + setAccessible). Une methode
+# STATIQUE ne peut pas etre prise pour une methode d instance : son `static` ajoute un
+# jeton, donc le nom ne colle plus a la parenthese.
+JAVAP_CTOR = re.compile(
+    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^)]*)\);", re.M)
+JAVAP_METHOD = re.compile(
+    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);",
+    re.M)
 
 
 def java_class_api(javap_output):
@@ -3039,7 +3010,9 @@ public static class MooditServer {
                 if (nom == "new") {
                     Type cible2 = typeof(%s);
                     bool construit = false;
-                    foreach (var c in cible2.GetConstructors()) {
+                    foreach (var c in cible2.GetConstructors(
+                            BindingFlags.Public | BindingFlags.NonPublic
+                            | BindingFlags.Instance)) {
                         if (c.GetParameters().Length != parts.Length - 3) { continue; }
                         OBJETS.Add(c.Invoke(Convertis(c.GetParameters(), parts, 3)));
                         construit = true;
@@ -3057,7 +3030,9 @@ public static class MooditServer {
                     object instance = OBJETS[int.Parse(parts[2])];
                     string nomMethode = parts[3];
                     MethodInfo cible3 = null;
-                    foreach (MethodInfo m in instance.GetType().GetMethods()) {
+                    foreach (MethodInfo m in instance.GetType().GetMethods(
+                            BindingFlags.Public | BindingFlags.NonPublic
+                            | BindingFlags.Instance)) {
                         if (m.Name == nomMethode && m.GetParameters().Length == parts.Length - 4) {
                             cible3 = m;
                             break;
@@ -3071,7 +3046,7 @@ public static class MooditServer {
                 }
                 MethodInfo cible = null;
                 foreach (MethodInfo m in typeof(%s).GetMethods(
-                        BindingFlags.Public | BindingFlags.Static)) {
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
                     if (m.Name == nom && m.GetParameters().Length == parts.Length - 2) {
                         cible = m;
                         break;
@@ -3096,9 +3071,13 @@ public static class MooditServer {
 ''' % (classe, classe)
 
 
-CS_CTOR_TPL = r"public\s+%s\s*\(([^)]*)\)"
+# Meme relaxation qu en Java, et pour la meme raison : en C# un membre est prive PAR DEFAUT.
+# ANCREES EN DEBUT DE LIGNE : sans cela, `public` devenu facultatif, un `new Rectangle(3, 4)`
+# au milieu d une expression serait pris pour une declaration de constructeur.
+CS_CTOR_TPL = r"^\s*(?:public\s+|internal\s+|protected\s+|private\s+)?%s\s*\(([^)]*)\)"
 CS_INSTANCE = re.compile(
-    r"public\s+(?!static)(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
+    r"^\s*(?:public\s+|internal\s+|protected\s+|private\s+)?(?!static)"
+    r"(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
 
 
 def cs_object_api(source, classe):
@@ -3116,7 +3095,10 @@ def cs_object_api(source, classe):
         return resultat
 
     ctors = []
-    for params in re.findall(CS_CTOR_TPL % re.escape(classe), source or ""):
+    # re.M est INDISPENSABLE : le gabarit est ancre en debut de LIGNE (sans quoi un
+    # `new Rectangle(3, 4)` passerait pour une declaration), et sans ce drapeau `^` ne
+    # vaudrait que pour le debut du fichier — aucun constructeur ne serait trouve.
+    for params in re.findall(CS_CTOR_TPL % re.escape(classe), source or "", re.M):
         types = types_de(params)
         if types is not None:
             ctors.append(types)
@@ -3624,8 +3606,8 @@ RUNNERS = {
 
 
 def substitute_placeholders(case_dir, mapping):
-    """Remplace les gabarits (__MOODIT_A__/__MOODIT_B__ des canaris, __MOODIT_T__ du jeton)
-    dans les sources du cas par les valeurs tirées au sort."""
+    """Remplace les gabarits des canaris (__MOODIT_A__/__MOODIT_B__) dans les sources du cas
+    par les valeurs tirées au sort. Le NONCE, lui, ne passe jamais par une source."""
     for root, _, files in os.walk(os.path.join(case_dir, "src")):
         for name in files:
             path = os.path.join(root, name)
@@ -3855,24 +3837,15 @@ def main():
         timeout_s = max(timeout_s, 10)
 
     cases = job["cases"]
-    # Canaris et JETONS : valeurs tirées MAINTENANT (imprévisibles), ordre d'exécution mélangé.
-    # Le jeton de fin d'exécution (un par cas, gabarit __MOODIT_T__) est imprimé par le POINT DE
-    # SORTIE du framework, après tous les tests : un code étudiant qui forge un rapport puis
-    # exit(0) depuis la FONCTION NOTÉE saute cette impression → verdict échoué (jeton_absent).
-    # L'obtenir exige de lire la source verrouillée (EACCES + tracé) ou son propre binaire
-    # (tracé aussi, lecture_binaire_tentee) — l'attaque redevient bruyante.
+    # Canaris et NONCES : valeurs tirées MAINTENANT (imprévisibles), ordre d'exécution mélangé.
+    # Le nonce ne va JAMAIS dans une source : il est passé au générateur du noteur, qui le
+    # compile dans SON programme — celui où aucun code soumis ne tourne. Un code soumis ne peut
+    # donc pas le lire, et ne peut pas produire la seule chose qui vaut réussite.
     rng = random.SystemRandom()
     for case in cases:
         case_dir = os.path.join(BOX, "cases", str(case["index"]))
         TOKENS[case["index"]] = str(rng.randrange(10**12, 10**13))
-        STUDENT_TYPES[case["index"]] = case.get("student_types") or []
-        HARNESS_TYPES[case["index"]] = case.get("harness_types") or []
-        subst = {"__MOODIT_T__": TOKENS[case["index"]]}
-        if case.get("canary"):
-            # Nom du test canari randomisé (identifiant valide, majuscule en tête pour
-            # l'export Go) : un nom FIXE serait reconnaissable par le code étudiant.
-            subst["__MOODIT_N__"] = random_identifier(rng)
-            CANARY_NAMES[case["index"]] = subst["__MOODIT_N__"]
+        subst = {}
         if case.get("canary") == "pass":
             a = rng.randrange(100000, 999999)
             subst.update({"__MOODIT_A__": str(a), "__MOODIT_B__": str(a)})

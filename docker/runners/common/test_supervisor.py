@@ -507,27 +507,6 @@ class CanaryReserveTest(unittest.TestCase):
         self.assertEqual(supervisor.canary_reserve_seconds(3000, 10), 200.0)
 
 
-class RandomIdentifierTest(unittest.TestCase):
-    """Nom des canaris : une forme FIXE (« 1 majuscule + 9 minuscules ») restait
-    reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les
-    fonctions de sortie — il relayait alors honnêtement les tests à cette forme."""
-
-    def test_identifiant_valide_et_de_longueur_variable(self):
-        import random
-        rng = random.Random(12345)
-        noms = {supervisor.random_identifier(rng) for _ in range(300)}
-        self.assertGreater(len({len(n) for n in noms}), 3)       # longueurs variées
-        for nom in noms:
-            # MAJUSCULE en tête, impérativement : le canari Go s'appelle « Test<N> » et Go
-            # exige une non-minuscule après « Test » (sinon la fonction n'est pas un test et
-            # `go vet` la refuse) — une soumission Go honnête serait accusée de falsification.
-            self.assertRegex(nom, r"^[A-Z][A-Za-z0-9_]*$")
-            self.assertGreaterEqual(len(nom), 5)
-        # L'alphabet dépasse la casse unique : chiffres et _ apparaissent.
-        self.assertTrue(any(c.isdigit() or c == "_" for n in noms for c in n))
-        self.assertTrue(any(c.isupper() for n in noms for c in n[1:]))
-
-
 class BoxExhaustedTest(unittest.TestCase):
     """Saturation du tmpfs /box : un code honnête mais bogué (fichiers temporaires jamais
     supprimés) faisait échouer les cas SUIVANTS, canaris compris → « falsification probable ».
@@ -1026,6 +1005,85 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
             supervisor.rpc_verdict("N", "[MOODIT] harnais: oups\n", "mon message")[1],
             "[MOODIT] harnais: oups")
         self.assertEqual(supervisor.rpc_verdict("N", "", "trace etudiant")[1], "trace etudiant")
+
+
+class VisibiliteNonExigeeTest(unittest.TestCase):
+    """Un membre sans modificateur est l'ecriture la plus COURANTE d'un exercice.
+
+    En C# un membre de classe est prive par defaut, en Java il a la visibilite du paquet :
+    exiger `public` mettait en echec une soumission JUSTE. Le serveur sait invoquer ces
+    membres des deux cotes (reflexion `NonPublic` en C#, `getDeclared*` + `setAccessible`
+    en Java), donc l'extraction ne doit pas etre plus severe que lui — c'est cet ECART qui
+    est teste ici, et il avait deja ete introduit une fois : la relaxation des statiques
+    avait oublie le serveur C# et tout le chemin objet."""
+
+    CS = ("class Rectangle {\n"
+          "    int largeur;\n"
+          "    int hauteur;\n"
+          "    Rectangle(int largeur, int hauteur) {\n"
+          "        this.largeur = largeur; this.hauteur = hauteur;\n"
+          "    }\n"
+          "    int Aire() { return largeur * hauteur; }\n"
+          "    public int Perimetre() { return 2 * (largeur + hauteur); }\n"
+          "    static int Zero() { return 0; }\n"
+          "}\n"
+          "class Prog {\n"
+          "    static void Main() {\n"
+          "        var r = new Rectangle(3, 4);\n"
+          "    }\n"
+          "}\n")
+
+    JAVAP = ("Compiled from \"Rectangle.java\"\n"
+             "class Rectangle {\n"
+             "  int largeur;\n"
+             "  int hauteur;\n"
+             "  Rectangle(int, int);\n"
+             "  int aire();\n"
+             "  private int secret();\n"
+             "  public int perimetre();\n"
+             "  static int doubler(int);\n"
+             "}\n")
+
+    def test_cs_statique_sans_modificateur_est_extraite(self):
+        # Le cas nomme dans le message de commit : `static int Doubler(int n)` sans `public`.
+        code = ("class Solution {\n"
+                "    static int Doubler(int n) { return n * 2; }\n"
+                "}")
+        self.assertEqual(supervisor.cs_signatures(code), [("int", "Doubler", ["int"])])
+
+    def test_cs_api_objet_sans_modificateur(self):
+        ctors, methodes = supervisor.cs_object_api(self.CS, "Rectangle")
+        # Le constructeur a visibilite de paquet est vu UNE fois : `new Rectangle(3, 4)`,
+        # au milieu d'une expression, ne doit pas passer pour une declaration. L'ancrage en
+        # debut de ligne est la pour ca — sans lui, la relaxation inventait un second
+        # constructeur, et le harnais du prof ne compilait plus.
+        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual(sorted(n for _, n, _ in methodes), ["Aire", "Perimetre"])
+        # Une STATIQUE n'est pas une methode d'instance : elle appartient a l'autre chemin.
+        self.assertNotIn("Zero", [n for _, n, _ in methodes])
+
+    def test_java_statique_sans_modificateur_est_extraite(self):
+        self.assertEqual(supervisor.java_signatures(self.JAVAP),
+                         [("int", "doubler", ["int"])])
+
+    def test_java_api_objet_sans_modificateur(self):
+        classe, ctors, methodes = supervisor.java_class_api(self.JAVAP)
+        self.assertEqual(classe, "Rectangle")
+        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual(sorted(n for _, n, _ in methodes),
+                         ["aire", "perimetre", "secret"])
+        # Un CHAMP (`int largeur;`) n'a pas de parenthese : il ne doit pas devenir une methode.
+        self.assertNotIn("largeur", [n for _, n, _ in methodes])
+        self.assertNotIn("doubler", [n for _, n, _ in methodes])
+
+    def test_le_serveur_cs_invoque_les_membres_non_publics(self):
+        # L'ECART extraction/serveur, verifie sur le texte genere : les TROIS resolutions du
+        # serveur C# (statique, constructeur, methode d'instance) doivent accepter
+        # NonPublic. Sinon le bouchon est genere, le noteur compile, puis l'appel echoue a
+        # l'execution : une reponse JUSTE notee 0, avec un diagnostic qui accuse le code
+        # de l'etudiant.
+        serveur = supervisor.cs_server_source("Solution")
+        self.assertEqual(serveur.count("BindingFlags.NonPublic"), 3)
 
 
 if __name__ == "__main__":

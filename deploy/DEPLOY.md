@@ -143,18 +143,16 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 
 ### Changement de schéma : migrations Flyway
 
-> **Déploiement du runner (#116) — rien à convertir.** Les DEUX formes de harnais compilé sont
-> notables, et c'est la forme qui choisit le chemin : un corps qui renvoie un **booléen** passe par
-> le modèle à deux processus et deux UID (verdict non falsifiable). Le format **vrai test du framework**
-> (JUnit, NUnit, go test, cargo test, `moodit_check.h`) par l'ancien chemin. Aucune question n'est
-> à retoucher avant un déploiement, dans un sens comme dans l'autre.
+> **Déploiement du runner (#116) — une seule forme de harnais.** Le harnais d'un langage compilé
+> est un CORPS qui renvoie un **booléen**, noté par le modèle à deux processus et deux UID
+> (verdict non falsifiable). C'est la forme des gabarits installés par `V9`, et la seule notée.
 >
-> Une version antérieure de ce document demandait ici de convertir au format framework tout
-> harnais qui n'en portait pas le marqueur. **Ne pas le faire** : ce serait remplacer la forme
-> sûre par celle dont le verdict est contournable par un adversaire in-process (cf.
-> `docker/runners/README.md`). Pour un examen noté, c'est l'inverse qu'il faut viser — les
-> gabarits de `V9` installent le harnais booléen, et les questions déjà écrites au format
-> framework continuent de fonctionner telles quelles.
+> Le format **vrai test du framework** (JUnit, NUnit, go test, cargo test, `moodit_check.h`) a
+> existé dans une version intermédiaire de #116 et il est **retiré** : il compilait le harnais
+> AVEC le code de l'étudiant, donc le processus qui détenait le secret était celui que l'étudiant
+> contrôle. Un harnais qui en porte le marqueur est désormais refusé avec un diagnostic, avant
+> toute prise de place sandbox. Rien à convertir pour autant : ce format n'a jamais été déployé
+> (la production était à `V2`), donc aucune question existante n'en dépend.
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :

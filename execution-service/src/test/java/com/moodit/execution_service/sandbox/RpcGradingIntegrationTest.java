@@ -114,6 +114,57 @@ class RpcGradingIntegrationTest {
                 """).passed()).isFalse();
     }
 
+    @Test
+    void csharp_statique_sans_modificateur_est_notee() {
+        // En C# un membre de classe est PRIVÉ par défaut : c'est l'écriture la plus naturelle
+        // d'un exercice, et elle doit être notée. Avant le correctif, l'extraction acceptait la
+        // signature mais le serveur la résolvait en `BindingFlags.Public` : le bouchon était
+        // généré, le noteur compilait, puis l'appel échouait à l'exécution. Une réponse JUSTE
+        // était notée 0, avec un diagnostic qui accusait le code de l'étudiant.
+        String h = "return Solution.Doubler(5) == 10;";
+        assertThat(note("C#", h, """
+                class Solution {
+                    static int Doubler(int n) { return n * 2; }
+                }
+                """).passed()).isTrue();
+        // Et la mauvaise réponse reste fausse : le chemin n'est pas devenu permissif.
+        assertThat(note("C#", h, """
+                class Solution {
+                    static int Doubler(int n) { return 0; }
+                }
+                """).passed()).isFalse();
+    }
+
+    @Test
+    void java_objet_sans_modificateur_est_note() {
+        // Visibilité de PAQUET sur la classe, le constructeur et la méthode : un exercice POO
+        // écrit sans cérémonie. Le serveur sait déjà l'invoquer (getDeclared* +
+        // setAccessible) ; seule l'extraction exigeait `public`, et refusait donc une
+        // soumission correcte avec « aucune méthode statique ni objet exploitable ».
+        String h = "return new Solution.Rectangle(3, 4).aire() == 12;";
+        assertThat(note("Java", h, """
+                public class Solution {
+                    static class Rectangle {
+                        private final int largeur;
+                        private final int hauteur;
+                        Rectangle(int largeur, int hauteur) {
+                            this.largeur = largeur;
+                            this.hauteur = hauteur;
+                        }
+                        int aire() { return largeur * hauteur; }
+                    }
+                }
+                """).passed()).isTrue();
+        assertThat(note("Java", h, """
+                public class Solution {
+                    static class Rectangle {
+                        Rectangle(int largeur, int hauteur) { }
+                        int aire() { return 0; }
+                    }
+                }
+                """).passed()).isFalse();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

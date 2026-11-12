@@ -12,23 +12,24 @@ import java.util.regex.Pattern;
 
 /**
  * Construit l'ARBORESCENCE DE PROJET envoyée au conteneur runner d'un langage compilé (#116) :
- * un dossier {@code cases/<i>/src/} par harnais, dans la disposition NATIVE du framework de test
- * du langage — le harnais du prof est un VRAI test (JUnit, NUnit, go test, cargo test,
- * moodit_check.h), le code étudiant un vrai fichier source à côté. Aucune génération de code :
- * la POO, les champs privés, les génériques… sont du simple code de test.
+ * un dossier {@code cases/<i>/src/} par harnais, contenant le code soumis dans son fichier et le
+ * harnais du prof dans un autre, précédé du marqueur {@code __MOODIT_HARNAIS__}.
  *
- * Deux CANARIS sont ajoutés en fin de liste (indices N et N+1) : des cas dont le harnais est un
- * gabarit {@code __MOODIT_A__ == __MOODIT_B__} que le SUPERVISEUR instancie à l'exécution avec
- * des valeurs tirées au sort — l'un doit réussir, l'autre échouer. Ils embarquent aussi le code
- * étudiant : un code qui détourne le framework depuis un init/constructeur (exécuté partout)
- * casse leurs résultats et se fait détecter.
+ * <p>Le harnais est un CORPS qui renvoie un booléen, et c'est la seule forme notée. Le
+ * superviseur le compile dans un programme séparé — le NOTEUR, sous un UID séparé — et le code
+ * soumis seul dans un autre, le SERVEUR. Le noteur appelle des bouchons typés générés d'après
+ * les signatures réellement présentes dans le code soumis, et il est le seul à détenir le nonce
+ * du verdict. Un harnais au format framework (JUnit, NUnit, {@code go test}, {@code cargo
+ * test}) est refusé en amont par {@code ExecutionService} : il était compilé AVEC le code de
+ * l'étudiant, donc forgeable, et il n'arrive jamais jusqu'ici.
  *
- * Chaque cas porte de plus un JETON DE FIN D'EXÉCUTION (gabarit {@code __MOODIT_T__}, substitué
- * par le superviseur) imprimé par le POINT DE SORTIE du framework, après tous les tests : un
- * forgeage déclenché depuis la fonction notée elle-même (qui ne s'exécute pas dans les canaris)
- * produit un rapport sans jeton → verdict échoué ({@code jeton_absent}).
+ * <p>Deux CANARIS sont ajoutés en fin de liste (indices N et N+1) : des cas dont le harnais est
+ * un gabarit {@code __MOODIT_A__ == __MOODIT_B__} que le superviseur instancie à l'exécution
+ * avec des valeurs tirées au sort — l'un doit réussir, l'autre échouer. Ils ne détectent plus
+ * une falsification (il n'y a plus rien à falsifier) : ils vérifient que la chaîne de notation
+ * tranche encore dans les DEUX sens, et qu'un cas ne peut pas réussir par accident.
  *
- * Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.
+ * <p>Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.
  */
 public final class HarnessProjects {
 
@@ -76,10 +77,6 @@ public final class HarnessProjects {
             caseList.append(index > 0 ? "," : "")
                     .append("{\"index\":").append(index)
                     .append(",\"name\":").append(jsonString(testCase.name()))
-                    .append(",\"harness_types\":")
-                    .append(jsonArray(harnessTypes(lang, testCase.harnessCode())))
-                    .append(",\"student_types\":")
-                    .append(jsonArray(safeStudentTypes(lang, code, testCase.harnessCode())))
                     .append("}");
             index++;
         }
@@ -172,129 +169,6 @@ public final class HarnessProjects {
         };
     }
 
-    // ── conteneurs de tests déclarés par le HARNAIS ───────────────────────────
-
-    // Types de NIVEAU RACINE uniquement (ancrés en colonne 0) : un type imbriqué ou annoté
-    // @Nested n'est pas sélectionnable par son nom simple, et une sélection invalide fait
-    // échouer TOUTE la découverte (JUnit) ou n'exécute rien (NUnit).
-    private static final Pattern JAVA_TYPE = Pattern.compile(
-            "(?m)^(?:public\\s+|final\\s+|abstract\\s+|sealed\\s+|non-sealed\\s+|strictfp\\s+)*"
-            + "(?:class|record|enum|interface)\\s+(\\w+)");
-    private static final Pattern CSHARP_TYPE = Pattern.compile(
-            "(?m)^\\s{0,4}(?:public\\s+|internal\\s+|sealed\\s+|static\\s+|partial\\s+|abstract\\s+)*"
-            + "class\\s+(\\w+)");
-    private static final Pattern RUST_MOD = Pattern.compile("(?m)^\\s{0,4}(?:pub\\s+)?mod\\s+(\\w+)");
-    /** {@code package a.b;} (Java) ou {@code namespace a.b} / {@code namespace a.b;} (C#). */
-    private static final Pattern JAVA_PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
-    private static final Pattern CSHARP_NAMESPACE = Pattern.compile("(?m)^\\s*namespace\\s+([\\w.]+)");
-
-    /**
-     * Noms PLEINEMENT QUALIFIÉS des classes (Java, C#) ou modules (Rust) déclarés par le CODE
-     * ÉTUDIANT. Le superviseur les EXCLUT de l'exécution : le code étudiant est compilé dans
-     * la même unité que le harnais (c'est ce qui donne l'accès aux membres privés), donc ses
-     * PROPRES tests unitaires — idiome courant, souvent copié d'un tutoriel — étaient
-     * découverts et comptés dans le verdict. Un test d'étudiant simplement faux mettait alors
-     * toute la question à 0.
-     *
-     * <p>EXCLURE plutôt que SÉLECTIONNER est un choix de sûreté : si l'extraction manque une
-     * forme, les tests de l'étudiant comptent à nouveau (le défaut d'équité d'origine, visible
-     * et corrigeable), là où une sélection incomplète pouvait n'exécuter AUCUN test du prof et
-     * accorder la note pleine. Une liste vide revient donc au comportement d'avant ce filtre.
-     *
-     * <p>Go et C/C++ ne sont pas concernés : un {@code TestXxx} de l'étudiant dans
-     * {@code main.go} n'est pas un test de {@code go test}, et {@code MOODIT_TEST} n'est pas
-     * défini quand son fichier est compilé.
-     */
-    static List<String> studentTypes(String runnerLanguage, String studentCode) {
-        String code = studentCode == null ? "" : studentCode;
-        Pattern pattern;
-        String prefix = "";
-        switch (runnerLanguage) {
-            case "java" -> {
-                pattern = JAVA_TYPE;
-                Matcher pkg = JAVA_PACKAGE.matcher(code);
-                prefix = pkg.find() ? pkg.group(1) + "." : "";
-            }
-            case "csharp" -> {
-                pattern = CSHARP_TYPE;
-                Matcher ns = CSHARP_NAMESPACE.matcher(code);
-                prefix = ns.find() ? ns.group(1) + "." : "";
-            }
-            case "rust" -> pattern = RUST_MOD;
-            default -> pattern = null;
-        }
-        if (pattern == null) {
-            return List.of();
-        }
-        List<String> names = new java.util.ArrayList<>();
-        Matcher matcher = pattern.matcher(code);
-        while (matcher.find()) {
-            names.add(prefix + matcher.group(1));
-        }
-        return List.copyOf(names);
-    }
-
-    /** Un {@code #[test]} Rust déclaré au niveau RACINE du harnais (hors de tout module). */
-    private static final Pattern RUST_ROOT_TEST = Pattern.compile("(?m)^#\\[test\\]");
-
-    /**
-     * Conteneurs de tests du HARNAIS, tels que le superviseur les verra dans les rapports.
-     * Ils portent l'invariant « au moins un test du harnais a tourné ».
-     *
-     * <p>En Rust, un test est identifié par son MODULE. Si le harnais place des
-     * {@code #[test]} au niveau racine, ils seront rapportés sous le nom de leur fonction, qui
-     * n'est pas un module : l'invariant ne les reconnaîtrait pas et noterait 0 un code
-     * pourtant correct. Dans ce cas on renvoie une liste VIDE — aucune exclusion n'est alors
-     * appliquée, tous les tests tournent, et l'invariant est satisfait par construction. On
-     * perd l'équité sur cette forme de harnais, jamais la justesse de la note.
-     */
-    static List<String> harnessTypes(String runnerLanguage, String harnessCode) {
-        if ("rust".equals(runnerLanguage) && harnessCode != null
-                && RUST_ROOT_TEST.matcher(harnessCode).find()) {
-            return List.of();
-        }
-        return studentTypes(runnerLanguage, harnessCode);
-    }
-
-    /**
-     * Types de l'étudiant qu'on peut exclure SANS RISQUE d'écarter aussi un conteneur du
-     * harnais. L'extraction est purement textuelle sur un texte que l'étudiant contrôle : un
-     * commentaire {@code /* class Harnais *}{@code /} suffirait sinon à faire exclure les
-     * tests du prof. Et en Rust, {@code --skip} filtre par SOUS-CHAÎNE : un module nommé
-     * {@code s} écarterait {@code harnais::…}.
-     *
-     * <p>Un nom écarté ici revient simplement au défaut d'équité (les tests de l'étudiant
-     * comptent), jamais à une note offerte — qui reste par ailleurs impossible grâce à
-     * l'invariant « au moins un test du harnais a tourné » côté superviseur.
-     */
-    static List<String> safeStudentTypes(String runnerLanguage, String studentCode,
-            String harnessCode) {
-        List<String> harness = harnessTypes(runnerLanguage, harnessCode);
-        // Harnais NON identifié : aucune exclusion. Sans ses conteneurs, le superviseur ne
-        // peut pas vérifier qu'un de ses tests a tourné ; on exécute donc tout, ce qui le
-        // garantit par construction (au prix de l'équité, jamais de l'intégrité de la note).
-        if (harness.isEmpty()) {
-            return List.of();
-        }
-        List<String> safe = new java.util.ArrayList<>();
-        for (String candidate : studentTypes(runnerLanguage, studentCode)) {
-            // Le filtrage compare des noms EXACTS des deux côtés (regex ancrée en Java,
-            // égalité en C#, premier segment en Rust) : seule une coïncidence stricte avec un
-            // conteneur du harnais est dangereuse.
-            if (harness.stream().noneMatch(candidate::equals)) {
-                safe.add(candidate);
-            }
-        }
-        return List.copyOf(safe);
-    }
-
-    private static String jsonArray(List<String> values) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < values.size(); i++) {
-            sb.append(i > 0 ? "," : "").append(jsonString(values.get(i)));
-        }
-        return sb.append(']').toString();
-    }
 
     // ── utilitaires ───────────────────────────────────────────────────────────
 

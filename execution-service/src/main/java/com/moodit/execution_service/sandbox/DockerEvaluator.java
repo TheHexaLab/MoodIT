@@ -30,7 +30,7 @@ public class DockerEvaluator {
     private static final Logger log = LoggerFactory.getLogger(DockerEvaluator.class);
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
-    /** Marge par cas pour le va-et-vient du superviseur (strace, collecte, kill), ms. */
+    /** Marge par cas pour le va-et-vient du superviseur (collecte, kill du groupe), ms. */
     private static final long PER_CASE_OVERHEAD_MS = 10_000;
     private static final long BASE_OVERHEAD_MS = 30_000;
     /**
@@ -164,22 +164,17 @@ public class DockerEvaluator {
     }
 
     /**
-     * Nombre de COMPILATIONS que le superviseur fera pour UN cas, selon le chemin retenu.
+     * Nombre de COMPILATIONS que le superviseur fera pour UN cas.
      *
-     * <p>Le chemin framework compile un seul projet. Le chemin NON FALSIFIABLE en compile deux —
-     * le noteur et le code soumis sont deux programmes séparés — et trois en Java, où le code
-     * soumis est d'abord compilé seul pour que ses signatures soient lues sur les classes. Le mur
-     * du conteneur n'en budgétait qu'une : un cas lancé juste avant l'échéance du budget, dont
-     * les compilations approchent leur propre plafond, se faisait tuer au mur — tous les verdicts
-     * du job perdus, 502, tentative supprimée (la régression #216). Un seul cas au format
-     * booléen suffit à payer le pire cas, puisque le superviseur choisit cas par cas.
+     * <p>DEUX par cas — le noteur et le code soumis sont deux programmes séparés — et TROIS en
+     * Java, où le code soumis est d'abord compilé seul pour que ses signatures soient lues sur
+     * ses classes. Le mur du conteneur n'en budgétait qu'une : un cas lancé juste avant
+     * l'échéance du budget, dont les compilations approchent leur propre plafond, se faisait
+     * tuer au mur — tous les verdicts du job perdus, 502, tentative supprimée (la régression
+     * #216). Ne dépend plus du contenu des cas : le format framework, seul à compiler un unique
+     * projet, est retiré.
      */
-    static long compilesPerCase(String runnerLanguage, List<TestCaseInput> cases) {
-        // Le chemin non falsifiable compile DEUX programmes par cas — le noteur et le code
-        // soumis sont séparés — et TROIS en Java, où le code soumis est d'abord compilé seul pour
-        // que ses signatures soient lues sur ses classes. Le mur du conteneur n'en budgétait
-        // qu'une : un cas lancé juste avant l'échéance du budget se faisait tuer au mur, ce qui
-        // perdait tous les verdicts du job (#216).
+    static long compilesPerCase(String runnerLanguage) {
         return "java".equals(runnerLanguage) ? 3 : 2;
     }
 
@@ -232,7 +227,7 @@ public class DockerEvaluator {
         // temps d'imprimer le JSON. Une marge fixe plus courte qu'un cas laissait une fenêtre
         // où le conteneur était tué au mur — tout le travail perdu, 502, tentative supprimée.
         long perCase = perRun + PER_CASE_OVERHEAD_MS
-                + compilesPerCase(runnerLanguage, cases) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
+                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
         long wallCandidate = BASE_OVERHEAD_MS + (cases.size() + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
         long wall = Math.min(cap, wallCandidate);
@@ -274,19 +269,7 @@ public class DockerEvaluator {
             String type = event.path("type").asString("");
             String detail = event.path("detail").asString("");
             int caseIndex = event.path("case").asInt(-1);
-            if ("trace_indisponible".equals(type)) {
-                // Panne d'INFRASTRUCTURE, pas un fait de notation : strace inutilisable désarme
-                // la détection des lectures (harnais, binaire) pour TOUT le job. On continue de
-                // noter — le jeton, les canaris, le sommaire authentifié et l'invariant
-                // « un test du harnais a tourné » restent armés, et refuser punirait une classe
-                // entière pour une cause qui ne lui est pas imputable — mais l'exploitant doit
-                // le voir et le corriger, d'où le niveau ERREUR. Cf. deploy/DEPLOY.md.
-                log.error("Notation compilée — strace inutilisable : détection des lectures "
-                        + "DÉSARMÉE pour ce job ({}). Vérifier SYS_PTRACE et la présence de "
-                        + "strace dans les images runner.", detail);
-            } else {
-                log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
-            }
+            log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
             if (isSuspicious(type) && caseIndex >= 0 && caseIndex < cases.size()) {
                 eventByCase.merge(caseIndex, type, (a, b) -> a + ", " + b);
             }
@@ -319,16 +302,15 @@ public class DockerEvaluator {
         return results;
     }
 
+    /**
+     * Événements à annexer au détail du cas visé. Il n'en reste qu'UN : les lectures tracées,
+     * les jetons manquants ou dupliqués et les rapports incohérents appartenaient au format
+     * framework, retiré de #116 — le superviseur ne peut plus les émettre. Un canari incohérent,
+     * lui, n'accuse pas l'étudiant : il dit que la chaîne de notation ne tranche plus dans les
+     * deux sens, ce qui est un défaut de l'infrastructure.
+     */
     private static boolean isSuspicious(String type) {
-        return switch (type) {
-            // « rapport_incoherent » N'ACCUSE PAS : il se déclenche sur des recoupements qui
-            // lisent la sortie LIBRE de l'étudiant (un programme Rust qui imprime « FAILED »,
-            // une sortie tronquée…). Le cas reste refusé par le superviseur, mais sans
-            // bandeau de falsification — une soumission honnête ne doit jamais en porter un.
-            case "lecture_source_tentee", "lecture_binaire_tentee",
-                 "canari_incoherent", "jeton_absent", "jeton_duplique" -> true;
-            default -> false;
-        };
+        return "canari_incoherent".equals(type);
     }
 
     private static String truncate(String value) {
