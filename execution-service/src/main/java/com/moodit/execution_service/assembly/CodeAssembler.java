@@ -503,14 +503,22 @@ public class CodeAssembler {
                 + "__moodit_val=$(unset __moodit_id;"
                 + " . ./solution.sh >/dev/null 2>&1;"
                 + " $__moodit_name $__moodit_rest)\n"
-                + "printf '%s|%s\\n' \"$__moodit_id\" \"$__moodit_val\"\n";
+                // La valeur part en HEXADÉCIMAL sur UNE ligne : le noteur ne retient que la ligne
+                // « id|… », une valeur multi-ligne perdait donc tout sauf sa première — réponse
+                // juste notée fausse. `-v` est OBLIGATOIRE : sans lui, od compresse les répétitions
+                // en « * » et la valeur décodée serait fausse.
+                + "printf '%s|%s\\n' \"$__moodit_id\" "
+                + "\"$(printf '%s' \"$__moodit_val\" | od -An -vtx1 | tr -d ' \n')\"\n";
         String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
                 + "__moodit_srv=" + shellSingleQuote(dispatcher) + "\n"
                 + "__moodit_rpc() { local __n=\"$1\"; shift;"
                 + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
                 + " printf '%s\\n' \"$__id $__n $*\" | bash -c \"$__moodit_srv\" 2>/dev/null"
                 + " | while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
-                + " printf '%s\\n' \"${__l#*|}\"; break;; esac; done; }\n"
+                + " __moodit_dec \"${__l#*|}\"; break;; esac; done; }\n"
+                // Décodage en bash pur (pas de xxd dans l'image) : deux hexas → un octet,
+                // puis le saut de ligne que la ligne unique du protocole avait absorbé.
+                + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
                 + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";

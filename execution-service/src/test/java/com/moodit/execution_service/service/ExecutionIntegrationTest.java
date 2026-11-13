@@ -168,6 +168,13 @@ class ExecutionIntegrationTest {
         requireRuntime("bash");
         assertThat(passes("Bash", "doubler() { echo $(( $1 * 2 )); }", "[ \"$(doubler 5)\" = \"10\" ]")).isTrue();
         assertThat(passes("Bash", "doubler() { echo 0; }", "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
+        // Valeur MULTI-LIGNE : l'ancien protocole ne gardait que la premiere ligne de la
+        // reponse (le noteur filtre « id|... » ligne a ligne), et une reponse juste etait
+        // notee fausse. La valeur voyage desormais en hex sur une ligne, decodee cote noteur.
+        assertThat(passes("Bash", "lister() { printf 'a\\nb'; }",
+                "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isTrue();
+        assertThat(passes("Bash", "lister() { printf 'a'; }",
+                "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isFalse();
         assertThat(passes("Bash",
                 "doubler() { grep -oE 'MOODIT_OK_[0-9a-f]+' grader.sh 2>/dev/null >&2; echo 0; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();

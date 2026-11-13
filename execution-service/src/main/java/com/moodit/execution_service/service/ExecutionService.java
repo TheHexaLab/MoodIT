@@ -136,6 +136,14 @@ public class ExecutionService {
             if (framework != null) {
                 return framework;
             }
+            // Même logique pour un NOM DE CLASSE RÉSERVÉ (Java) : sans ce refus, le code soumis
+            // était écrasé ou sauté côté superviseur, et le 0 arrivait avec un message qui
+            // n'explique pas la cause (« Aucun fichier de code soumis »).
+            List<TestResult> reserved = DockerEvaluator.reservedNameRejection(
+                    request.language(), request.code(), request.testCases());
+            if (reserved != null) {
+                return reserved;
+            }
             // Mur plafonné selon l'appelant : une correction interne a droit au budget complet,
             // un « Tester » public est borné (route réservée aux éditeurs de quiz, mais
             // jusqu'à 100 cas fournis par l'appelant).

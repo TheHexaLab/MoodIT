@@ -115,6 +115,11 @@ class CodeAssemblerTest {
                 .doesNotContain("MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
                 .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");
+        // La valeur voyage en HEX sur UNE ligne (od -v : sans lui, les répétitions se
+        // compressent en « * ») et le noteur la décode : une valeur multi-ligne perdait tout
+        // sauf sa première ligne — réponse juste notée fausse.
+        assertThat(a.files().get(0).content())
+                .contains("od -An -vtx1").contains("__moodit_dec");
     }
 
     @Test

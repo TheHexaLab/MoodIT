@@ -154,6 +154,41 @@ public class DockerEvaluator {
                 .toList();
     }
 
+    /**
+     * Refus amont d'un NOM DE CLASSE RÉSERVÉ (Java) : {@code harnais_rpc} porte la même clé de
+     * fichier que le harnais du prof — qui écrasait alors le code soumis — et le préfixe
+     * {@code Moodit} est celui des fichiers du superviseur, sautés à la copie. Dans les deux
+     * cas, le verdict était « Aucun fichier de code soumis » : un 0 avec un message qui
+     * n'explique pas la cause. Légal mais réservé → refus AVANT toute prise de place, avec le
+     * nom fautif, comme pour le marqueur {@code __MOODIT_} et le format framework.
+     *
+     * <p>Java seulement : c'est le seul langage où le nom du fichier déposé vient de la classe
+     * publique du code soumis — ailleurs, les noms de fichiers sont fixes.
+     */
+    public static List<TestResult> reservedNameRejection(String language, String code,
+            List<TestCaseInput> cases) {
+        String runnerLanguage;
+        try {
+            runnerLanguage = HarnessProjects.runnerLanguage(language);
+        } catch (RuntimeException e) {
+            return null;   // langage non compilé : pas notre affaire
+        }
+        if (!"java".equals(runnerLanguage)) {
+            return null;
+        }
+        String fichier = HarnessProjects.javaFileName(code == null ? "" : code, "Solution");
+        String classe = fichier.substring(0, fichier.length() - ".java".length());
+        if (!classe.startsWith("Moodit") && !"harnais_rpc".equals(classe)) {
+            return null;
+        }
+        String detail = "Le nom de classe « " + classe + " » est réservé par la notation "
+                + "(« harnais_rpc » et le préfixe « Moodit » appartiennent aux fichiers du "
+                + "superviseur). Renommer la classe — par exemple « Solution » — et resoumettre.";
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, detail))
+                .toList();
+    }
+
     /** Forme ATTENDUE, citée dans le diagnostic (lisible par un prof, contrairement à la regex). */
     private static String frameworkExample(String runnerLanguage) {
         return switch (runnerLanguage) {

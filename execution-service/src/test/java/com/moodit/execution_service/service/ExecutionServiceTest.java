@@ -310,6 +310,29 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void nom_de_classe_java_reserve_refuse_avec_un_diagnostic() {
+        // `public class harnais_rpc` portait la même clé de fichier que le harnais du prof (le
+        // code soumis était écrasé) et `MooditX` est sauté à la copie par le superviseur : dans
+        // les deux cas, « Aucun fichier de code soumis » — un 0 qui n'explique pas la cause.
+        // Refus AVANT toute prise de place, avec le nom fautif dans le diagnostic.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+
+        for (String classe : List.of("MooditPiege", "harnais_rpc")) {
+            List<TestResult> results = routed.evaluate(oneTest("Java",
+                    "public class " + classe + " { static int f() { return 1; } }",
+                    "return " + classe + ".f() == 1;"));
+            assertThat(results).as("refus de " + classe).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            assertThat(results.get(0).detail()).contains(classe).contains("réservé");
+        }
+        verifyNoInteractions(docker);
+        // Et un nom NORMAL ne déclenche rien : le refus est chirurgical.
+        assertThat(DockerEvaluator.reservedNameRejection("Java",
+                "public class Solution { }", List.of())).isNull();
+    }
+
+    @Test
     void harnais_au_format_framework_refuse_avec_un_diagnostic() {
         // Cette forme compilait le harnais AVEC le code de l'étudiant : le processus qui détenait
         // le secret était celui qu'il contrôle, et cinq canaux de forge y ont été démontrés. Elle
