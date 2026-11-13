@@ -1198,5 +1198,47 @@ class ClassesSecondairesTest(unittest.TestCase):
         self.assertNotIn("__CLASSES__", serveur)
 
 
+class SansCommentairesTest(unittest.TestCase):
+    """Un `class X` en commentaire ou dans une chaine ne doit leurrer NI le choix de la
+    classe principale, NI la liste des typeof du serveur, NI les bouchons. Un etudiant
+    qui garde une ancienne version en commentaire — reflexe courant — voyait sa
+    soumission correcte echouer sur un type qu il n a pas ecrit."""
+
+    def test_commentaires_et_chaines_blanchis(self):
+        source = ("// class ligne" + chr(10) +
+                  "/* class bloc */ class Solution {" + chr(10) +
+                  "    static string S() { return " + chr(34) + "class chaine" + chr(34) + "; }" + chr(10) +
+                  "}" + chr(10))
+        nettoye = supervisor.cs_sans_commentaires(source)
+        self.assertNotIn("ligne", nettoye)
+        self.assertNotIn("bloc", nettoye)
+        self.assertNotIn("chaine", nettoye)
+        self.assertIn("class Solution {", nettoye)
+        # Les LIGNES sont preservees : les regex ancrees en debut de ligne comptent dessus.
+        self.assertEqual(nettoye.count(chr(10)), source.count(chr(10)))
+
+    def test_verbatim_et_interpolee(self):
+        # @"..." : "" echappe un guillemet, l antislash est LITTERAL (ne proteje rien).
+        source = ("class Solution {" + chr(10) +
+                  "    static string A() { return @" + chr(34) + "class P1 " + chr(34) + chr(34) + " suite " + chr(92) + chr(34) + "; }" + chr(10) +
+                  "    static string B() { return $" + chr(34) + "class P2" + chr(34) + "; }" + chr(10) +
+                  "}" + chr(10))
+        nettoye = supervisor.cs_sans_commentaires(source)
+        self.assertNotIn("P1", nettoye)
+        self.assertNotIn("P2", nettoye)
+        self.assertEqual(supervisor.cs_student_classes(nettoye), ["Solution"])
+
+    def test_le_leurre_du_constat(self):
+        leurre = ("// class principale" + chr(10) +
+                  "class Solution { static int F(int n) { return n; } }" + chr(10))
+        nettoye = supervisor.cs_sans_commentaires(leurre)
+        self.assertEqual(supervisor.cs_student_class(nettoye), "Solution")
+        # Et une methode COMMENTEE ne produit pas de bouchon fantome.
+        avec_morte = nettoye + "// static int Morte(int n) { return 0; }" + chr(10)
+        noms = [n for _, n, _ in supervisor.cs_signatures(
+            supervisor.cs_sans_commentaires(avec_morte))]
+        self.assertEqual(noms, ["F"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -178,8 +178,76 @@ public final class HarnessProjects {
     private static final Pattern JAVA_ANY_CLASS =
             Pattern.compile("(?m)^\\s*(?:class|interface|record|enum)\\s+(\\w+)");
 
+    /**
+     * Source SANS commentaires ni littéraux (remplacés par des espaces, lignes préservées) :
+     * un {@code class X} dans un commentaire ou une chaîne leurrait le choix de la classe
+     * principale — un étudiant qui garde une ancienne version en commentaire voyait le fichier
+     * déposé nommé d'après la classe COMMENTÉE, et sa soumission correcte échouait à la
+     * compilation avec un diagnostic qui ne désigne pas la cause. Blocs de texte Java
+     * ({@code \"\"\"}) compris.
+     */
+    static String sansCommentairesNiChaines(String source) {
+        StringBuilder res = new StringBuilder(source.length());
+        int i = 0;
+        int n = source.length();
+        while (i < n) {
+            char c = source.charAt(i);
+            if (c == '/' && i + 1 < n && source.charAt(i + 1) == '/') {
+                while (i < n && source.charAt(i) != '\n') {
+                    res.append(' ');
+                    i++;
+                }
+            } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '*') {
+                res.append("  ");
+                i += 2;
+                while (i < n && !(source.charAt(i) == '*'
+                        && i + 1 < n && source.charAt(i + 1) == '/')) {
+                    res.append(source.charAt(i) == '\n' ? '\n' : ' ');
+                    i++;
+                }
+                if (i < n) {
+                    res.append("  ");
+                    i += 2;
+                }
+            } else if (c == '"' && i + 2 < n
+                    && source.charAt(i + 1) == '"' && source.charAt(i + 2) == '"') {
+                res.append("   ");
+                i += 3;
+                while (i + 2 < n && !(source.charAt(i) == '"'
+                        && source.charAt(i + 1) == '"' && source.charAt(i + 2) == '"')) {
+                    res.append(source.charAt(i) == '\n' ? '\n' : ' ');
+                    i++;
+                }
+                i = i + 2 < n ? i + 3 : n;
+                res.append("   ");
+            } else if (c == '"' || c == '\'') {
+                char quote = c;
+                res.append(' ');
+                i++;
+                while (i < n && source.charAt(i) != quote) {
+                    if (source.charAt(i) == '\\' && i + 1 < n) {
+                        res.append("  ");
+                        i += 2;
+                    } else {
+                        res.append(source.charAt(i) == '\n' ? '\n' : ' ');
+                        i++;
+                    }
+                }
+                if (i < n) {
+                    res.append(' ');
+                    i++;
+                }
+            } else {
+                res.append(c);
+                i++;
+            }
+        }
+        return res.toString();
+    }
+
     /** Nom de fichier imposé par javac : celui de la classe publique, sinon la première classe. */
     static String javaFileName(String source, String fallback) {
+        source = sansCommentairesNiChaines(source == null ? "" : source);
         Matcher pub = JAVA_PUBLIC_CLASS.matcher(source);
         if (pub.find()) {
             return pub.group(1) + ".java";

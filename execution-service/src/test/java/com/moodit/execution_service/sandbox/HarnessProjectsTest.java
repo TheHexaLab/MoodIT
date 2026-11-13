@@ -221,4 +221,31 @@ class HarnessProjectsTest {
         int k = texte.indexOf(delimiteur, j + delimiteur.length());
         return k < 0 ? "" : texte.substring(j + delimiteur.length(), k);
     }
+
+    @Test
+    void un_class_en_commentaire_ne_leurre_pas_le_nom_du_fichier() {
+        // Un étudiant qui garde une ancienne version en commentaire voyait le fichier déposé
+        // nommé d'après la classe COMMENTÉE : javac refusait alors sa vraie classe publique
+        // (le nom du fichier fait foi), et une soumission correcte échouait avec un diagnostic
+        // qui ne désigne pas la cause.
+        assertThat(HarnessProjects.javaFileName("""
+                /* Ancienne version :
+                public class Brouillon { }
+                */
+                public class Solution { static int f() { return 1; } }
+                """, "Solution")).isEqualTo("Solution.java");
+        assertThat(HarnessProjects.javaFileName("""
+                // class Essai1 { }
+                class Reponse { }
+                """, "Solution")).isEqualTo("Reponse.java");
+        // Un « class » dans un BLOC DE TEXTE n'est pas une déclaration non plus.
+        assertThat(HarnessProjects.javaFileName("""
+                public class Solution {
+                    static String aide() { return \"\"\"
+                        class Piege { }
+                        \"\"\"; }
+                }
+                """, "Solution")).isEqualTo("Solution.java");
+    }
+
 }

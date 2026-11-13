@@ -198,6 +198,30 @@ class RpcGradingIntegrationTest {
         assertThat(note("C#", h, deuxClasses.replace("n * 2", "0")).passed()).isFalse();
     }
 
+    @Test
+    void version_commentee_au_dessus_de_la_vraie_classe_est_notee() {
+        // Le réflexe courant : garder l'ancienne version en commentaire. Le choix de la classe
+        // principale se fait sur la source DÉPOUILLÉE — sans cela, le fichier déposé (Java) et
+        // les typeof du serveur (C#) étaient nommés d'après la classe commentée, et la
+        // soumission correcte échouait sur un type que l'étudiant n'a pas écrit.
+        assertThat(note("Java", "return Solution.doubler(5) == 10;", """
+                /* Premier essai :
+                public class Brouillon {
+                    static int doubler(int n) { return n + n; }
+                }
+                */
+                public class Solution {
+                    static int doubler(int n) { return n * 2; }
+                }
+                """).passed()).isTrue();
+        assertThat(note("C#", "return Solution.Doubler(5) == 10;", """
+                // class Principale { }
+                class Solution {
+                    static int Doubler(int n) { return n * 2; }
+                }
+                """).passed()).isTrue();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

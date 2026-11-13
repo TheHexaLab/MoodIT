@@ -3131,6 +3131,68 @@ def cs_object_api(source, classe):
 CS_CLASS = re.compile(r"(?:public\s+|static\s+)*class\s+(\w+)")
 
 
+def cs_sans_commentaires(texte):
+    """Source C# sans commentaires ni litteraux (remplaces par des espaces, lignes preservees).
+
+    Un `class X` dans un commentaire ou une chaine leurrait le choix de la classe principale et
+    la liste des `typeof` du serveur : un etudiant qui gardait une ancienne version en
+    commentaire voyait sa soumission correcte echouer sur un type qu'il n'a pas ecrit. PURE
+    (testee). Verbatim `@"..."` (ou `""` echappe un guillemet et `\\` est litteral) et
+    interpolees `$"..."` comprises."""
+    res = []
+    i = 0
+    n = len(texte or "")
+    texte = texte or ""
+    while i < n:
+        deux = texte[i:i + 2]
+        if deux == "//":
+            while i < n and texte[i] != chr(10):
+                res.append(" ")
+                i += 1
+        elif deux == "/*":
+            res.append("  ")
+            i += 2
+            while i < n and texte[i:i + 2] != "*/":
+                res.append(texte[i] if texte[i] == chr(10) else " ")
+                i += 1
+            if i < n:
+                res.append("  ")
+                i += 2
+        elif deux == '@"' or texte[i:i + 3] in ('$@"', '@$"'):
+            saut = 3 if texte[i:i + 3] in ('$@"', '@$"') else 2
+            res.append(" " * saut)
+            i += saut
+            while i < n:
+                if texte[i] == '"':
+                    if texte[i + 1:i + 2] == '"':
+                        res.append("  ")
+                        i += 2
+                        continue
+                    res.append(" ")
+                    i += 1
+                    break
+                res.append(texte[i] if texte[i] == chr(10) else " ")
+                i += 1
+        elif texte[i] in ('"', chr(39)):
+            quote = texte[i]
+            res.append(" ")
+            i += 1
+            while i < n and texte[i] != quote:
+                if texte[i] == chr(92) and i + 1 < n:
+                    res.append("  ")
+                    i += 2
+                else:
+                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    i += 1
+            if i < n:
+                res.append(" ")
+                i += 1
+        else:
+            res.append(texte[i])
+            i += 1
+    return "".join(res)
+
+
 def cs_student_class(source):
     """Première classe déclarée par l'étudiant : celle que le harnais appellera. PURE (testée)."""
     trouve = CS_CLASS.search(source or "")
@@ -3389,9 +3451,13 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
         if nom == "solution.cs":
             with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    methodes = cs_signatures(student_source)
-    classe = cs_student_class(student_source)
-    ctors, instance = cs_object_api(student_source, classe)
+    # L extraction lit la source DEPOUILLEE (commentaires et chaines blanchis) : un `class X`
+    # ou une methode en commentaire leurrait le choix de la classe principale, la liste des
+    # typeof du serveur et les bouchons. Le fichier depose, lui, reste l original.
+    extraction = cs_sans_commentaires(student_source)
+    methodes = cs_signatures(extraction)
+    classe = cs_student_class(extraction)
+    ctors, instance = cs_object_api(extraction, classe)
     # Une question POO n'a AUCUNE méthode statique : son API, c'est le constructeur et les
     # méthodes d'instance. Exiger une statique refusait ces questions (dont celles de la démo).
     if not (methodes or (ctors and instance)):
@@ -3406,7 +3472,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     with open(etu_copie, "w", encoding="utf-8") as f:
         f.write(student_source)
     with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(cs_server_source(cs_student_classes(student_source)))
+        f.write(cs_server_source(cs_student_classes(extraction)))
     with open(not_src, "w", encoding="utf-8") as f:
         f.write(cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "", classe,
                                  ctors, instance))
