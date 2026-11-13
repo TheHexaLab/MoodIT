@@ -158,8 +158,9 @@ public class ExecutionClient {
     private static final long COMPILE_SLACK_MS = 90_000;
 
     /**
-     * Inventaire {@code --list} PAR CAS (Rust) — miroir de {@code LIST_BUDGET_MS} de
-     * DockerEvaluator et de {@code LIST_TIMEOUT_S} du superviseur. Ce terme est PROPORTIONNEL
+     * Lecture des signatures PAR CAS ({@code javap -p}, chemin Java) — miroir de
+     * {@code LIST_BUDGET_MS} de DockerEvaluator et de {@code LIST_TIMEOUT_S} du superviseur.
+     * Ce terme est PROPORTIONNEL
      * au nombre de cas : l'omettre rendait le miroir plus court que le mur réel, et le read
      * timeout expirait pendant une notation encore en cours — le bug de #216.
      */

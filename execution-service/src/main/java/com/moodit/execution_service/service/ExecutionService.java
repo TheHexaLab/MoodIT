@@ -114,8 +114,9 @@ public class ExecutionService {
 
     public List<TestResult> evaluate(EvaluateRequest request) {
         // Langages COMPILÉS (#116) : notés dans un CONTENEUR RUNNER jetable (superviseur root,
-        // code étudiant sous un UID dédié, harnais = vrai framework de test, canaris anti-
-        // falsification). Un conteneur = une place de la limite globale, comme toute exécution.
+        // harnais du prof compilé dans un programme SÉPARÉ sous son propre UID, code soumis seul
+        // dans un autre, verdict = le nonce du cas sur le stderr du noteur). Un conteneur = une
+        // place de la limite globale, comme toute exécution.
         if (CodeAssembler.isCompiled(request.language())) {
             if (dockerEvaluator == null) {
                 throw new SandboxException("Runner Docker non configuré pour les langages compilés");

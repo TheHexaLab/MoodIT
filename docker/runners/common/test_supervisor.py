@@ -559,11 +559,11 @@ class SubstitutePlaceholdersTest(unittest.TestCase):
             src = os.path.join(case_dir, "src")
             os.makedirs(src)
             with open(os.path.join(src, "h.c"), "w", encoding="utf-8") as f:
-                f.write("a=__MOODIT_A__; t=\"__MOODIT_T__\";")
+                f.write("a=__MOODIT_A__; b=__MOODIT_B__;")
             supervisor.substitute_placeholders(case_dir, {"__MOODIT_A__": "7",
-                                                          "__MOODIT_T__": "jeton"})
+                                                          "__MOODIT_B__": "7"})
             with open(os.path.join(src, "h.c"), encoding="utf-8") as f:
-                self.assertEqual(f.read(), 'a=7; t="jeton";')
+                self.assertEqual(f.read(), "a=7; b=7;")
 
 
 class ApiObjetTest(unittest.TestCase):
@@ -1084,6 +1084,83 @@ class VisibiliteNonExigeeTest(unittest.TestCase):
         # de l'etudiant.
         serveur = supervisor.cs_server_source("Solution")
         self.assertEqual(serveur.count("BindingFlags.NonPublic"), 3)
+
+
+class ModificateursNonSignificatifsTest(unittest.TestCase):
+    """`final`, `synchronized`, `override`, `protected internal` : du code LEGAL.
+
+    Les enumerer de travers refusait une soumission CORRECTE — aucun bouchon genere, donc
+    « aucune fonction exploitable » ou un harnais qui ne compile pas, et 0 avec un message qui
+    ne designe pas la cause. Ces tests fixent les formes acceptees ET les deux pieges de la
+    relaxation : `static` doit continuer de choisir le chemin (fonction ou objet), et un APPEL
+    ne doit jamais passer pour une declaration."""
+
+    def test_java_statique_avec_final(self):
+        javap = ("class Solution {\n"
+                 "  static final int doubler(int);\n"
+                 "  public static final int tripler(int);\n"
+                 "}\n")
+        self.assertEqual(sorted(n for _, n, _ in supervisor.java_signatures(javap)),
+                         ["doubler", "tripler"])
+
+    def test_java_instance_avec_final_et_synchronized(self):
+        javap = ("class Rectangle {\n"
+                 "  Rectangle(int, int);\n"
+                 "  final int aire();\n"
+                 "  synchronized int perimetre();\n"
+                 "  static int zero();\n"
+                 "}\n")
+        _, ctors, methodes = supervisor.java_class_api(javap)
+        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual(sorted(n for _, n, _ in methodes), ["aire", "perimetre"])
+        # `static` reste DECISIF : une statique proxifiee comme methode d'instance ferait
+        # appeler une poignee qui n'existe pas.
+        self.assertNotIn("zero", [n for _, n, _ in methodes])
+
+    def test_cs_statique_avec_modificateur_en_deux_mots(self):
+        code = ("class Solution {\n"
+                "    protected internal static int Mix(int a) { return a; }\n"
+                "    static extern int Ext(int a);\n"
+                "}\n")
+        self.assertEqual(sorted(n for _, n, _ in supervisor.cs_signatures(code)),
+                         ["Ext", "Mix"])
+
+    def test_cs_instance_avec_override(self):
+        code = ("class Rectangle {\n"
+                "    public override int Aire() { return 12; }\n"
+                "    private protected int Secret() { return 1; }\n"
+                "    public static int Zero() { return 0; }\n"
+                "}\n")
+        _, methodes = supervisor.cs_object_api(code, "Rectangle")
+        self.assertEqual(sorted(n for _, n, _ in methodes), ["Aire", "Secret"])
+        self.assertNotIn("Zero", [n for _, n, _ in methodes])
+
+    def test_classe_ecrite_sur_une_seule_ligne(self):
+        # La forme la plus compacte, et celle qu'un prof ecrit dans un enonce. Un ancrage en
+        # debut de LIGNE la refusait : la methode n'etait plus extraite et une reponse JUSTE
+        # retombait a 0. La frontiere est donc un debut de BLOC (`^`, `{`, `}` ou `;`), pas un
+        # debut de ligne. Ce cas n'etait verrouille que par un test d'integration, qui exige
+        # Docker et les images.
+        une_ligne = ("class Solution { public static string Copie(string s) "
+                     "{ return s; } }")
+        self.assertEqual(supervisor.cs_signatures(une_ligne),
+                         [("string", "Copie", ["string"])])
+        poo = ("class Rectangle { int l; int h; Rectangle(int l, int h) "
+               "{ this.l = l; this.h = h; } int Aire() { return l * h; } }")
+        ctors, methodes = supervisor.cs_object_api(poo, "Rectangle")
+        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual([n for _, n, _ in methodes], ["Aire"])
+
+    def test_un_appel_ne_passe_pas_pour_une_declaration(self):
+        # LE piege de la relaxation : avec « n'importe quel mot » en modificateur, `return` et
+        # `new` en seraient, et cette ligne aurait invente un constructeur a un argument.
+        code = ("class Prog {\n"
+                "    static int Faire() {\n"
+                "        return new Rectangle(3, 4).Aire();\n"
+                "    }\n"
+                "}\n")
+        ctors, _ = supervisor.cs_object_api(code, "Rectangle")
+        self.assertEqual(ctors, [])
 
 
 if __name__ == "__main__":

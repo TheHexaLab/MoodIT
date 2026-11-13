@@ -40,10 +40,11 @@ public class DockerEvaluator {
      */
     private static final long COMPILE_BUDGET_MS = 90_000;
     /**
-     * Budget de l'inventaire `--list` du superviseur (Rust) — miroir de son LIST_TIMEOUT_S.
-     * C'est un run étudiant de plus dans le même cas : sans ce terme, le pire cas d'un cas
-     * Rust dépassait ce que l'invariant ci-dessous budgète, et un cas lancé juste avant
-     * l'échéance se faisait tuer au mur — tous les verdicts du job perdus.
+     * Budget de la LECTURE DES SIGNATURES du superviseur — miroir de son LIST_TIMEOUT_S.
+     * C'est un processus de plus dans le même cas ({@code javap -p} sur les classes du code
+     * soumis, pour générer les bouchons typés) : sans ce terme, le pire cas dépassait ce que
+     * l'invariant ci-dessous budgète, et un cas lancé juste avant l'échéance se faisait tuer au
+     * mur — tous les verdicts du job perdus.
      */
     private static final long LIST_BUDGET_MS = 5_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
@@ -84,8 +85,9 @@ public class DockerEvaluator {
     }
 
     /**
-     * Marqueur réservé des gabarits runtime (canaris {@code __MOODIT_A__}/{@code __MOODIT_B__},
-     * jeton {@code __MOODIT_T__}) : le superviseur substitue ces gabarits dans TOUS les fichiers
+     * Marqueur réservé des gabarits runtime (canaris {@code __MOODIT_A__}/{@code __MOODIT_B__})
+     * et du marqueur de harnais {@code __MOODIT_HARNAIS__} : le superviseur les substitue ou les
+     * lit dans TOUS les fichiers
      * du cas — code étudiant compris (en Rust il partage même le fichier du harnais). Un code
      * soumis qui contient ce préfixe recevrait donc les vraies valeurs : rejet immédiat, verdict
      * explicite, sans lancer de conteneur.
@@ -263,16 +265,17 @@ public class DockerEvaluator {
             byIndex.put(result.path("index").asInt(-1), result);
         }
 
-        // Événements de détection : journalisés, et annexés au détail du cas concerné.
-        Map<Integer, String> eventByCase = new HashMap<>();
+        // Événements du superviseur : JOURNALISÉS, et rien de plus. Ils portent tous sur
+        // l'INFRASTRUCTURE (espace_sature, budget_depasse, erreur_superviseur) ou sur la chaîne
+        // de notation elle-même (canari_incoherent) ; le verdict du cas, lui, vient du
+        // superviseur, et une incohérence de canaris est traitée plus bas pour TOUS les cas.
+        // Il n'y a plus d'événement qui accuse un cas en particulier : les lectures tracées,
+        // les jetons manquants et les rapports incohérents appartenaient au format framework,
+        // retiré de #116.
         for (JsonNode event : root.path("events")) {
-            String type = event.path("type").asString("");
-            String detail = event.path("detail").asString("");
-            int caseIndex = event.path("case").asInt(-1);
-            log.warn("Notation compilée — événement {} (cas {}) : {}", type, caseIndex, detail);
-            if (isSuspicious(type) && caseIndex >= 0 && caseIndex < cases.size()) {
-                eventByCase.merge(caseIndex, type, (a, b) -> a + ", " + b);
-            }
+            log.warn("Notation compilée — événement {} (cas {}) : {}",
+                    event.path("type").asString(""), event.path("case").asInt(-1),
+                    event.path("detail").asString(""));
         }
 
         List<TestResult> results = new ArrayList<>();
@@ -287,30 +290,9 @@ public class DockerEvaluator {
                 detail = "⚠ Incohérence détectée pendant la notation (falsification probable)."
                         + (detail == null || detail.isBlank() ? "" : "\n" + detail);
             }
-            String suspicious = eventByCase.get(i);
-            if (suspicious != null) {
-                // Une tentative de lecture détectée FAIT ÉCHOUER le cas — pas une simple
-                // annotation : lire son propre binaire de test (seule voie d'extraction du
-                // jeton sur les natifs) peut RÉUSSIR, et aucun code honnête ne le fait ;
-                // toute ouverture de src/ au run est suspecte par construction (verrouillé).
-                passed = false;
-                detail = "⚠ Comportement suspect détecté (" + suspicious + ") — cas refusé."
-                        + (detail == null || detail.isBlank() ? "" : "\n" + detail);
-            }
             results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), passed, detail));
         }
         return results;
-    }
-
-    /**
-     * Événements à annexer au détail du cas visé. Il n'en reste qu'UN : les lectures tracées,
-     * les jetons manquants ou dupliqués et les rapports incohérents appartenaient au format
-     * framework, retiré de #116 — le superviseur ne peut plus les émettre. Un canari incohérent,
-     * lui, n'accuse pas l'étudiant : il dit que la chaîne de notation ne tranche plus dans les
-     * deux sens, ce qui est un défaut de l'infrastructure.
-     */
-    private static boolean isSuspicious(String type) {
-        return "canari_incoherent".equals(type);
     }
 
     private static String truncate(String value) {

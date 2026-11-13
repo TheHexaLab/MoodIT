@@ -51,7 +51,7 @@ refusé avec un diagnostic plutôt que noté par un chemin contournable.
 | **CVE des images elles-mêmes** | Les dix images sont scannées par Trivy (`security.yml`, job `trivy-runners`), résultats CRITICAL remontés dans Code scanning. Bases épinglées par digest, téléchargements vérifiés par SHA-256 | **NON bloquant pour ces images**, contrairement aux sept images de service : au crible CRITICAL corrigeables, sept d'entre elles sont à zéro, mais `go` en compte une quarantaine, `c` (gcc) 205 et `rust` 208 — toutes venant des images officielles de chaînes de compilation, qu'une PR ne peut pas corriger. Bloquer dessus arrêterait le dépôt sur de l'amont ; réduire ces chiffres (bases plus minces pour c/go/rust) se décide à froid. Le job ne tourne pas sur les PR : dix constructions d'images par proposition pour un résultat informatif |
 | **Pas de fuite réseau** | `--network none` | — |
 | **Notation bornée dans le temps** | budget GLOBAL transmis au superviseur (mur du conteneur moins une marge, plafonné à **15 min**) : au-delà il CLÔT et renvoie les verdicts obtenus, les cas restants comptant « non exécuté » (`budget_depasse`) — le conteneur n'est plus tué au mur, ce qui perdait tout le travail et supprimait la tentative | une question à beaucoup de cas dont les compilations sont réellement lentes peut donc être notée partiellement ; le budget par cas (90 s de compilation) est très pessimiste par rapport au réel (quelques secondes) |
-| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, comptés dans la mémoire et **dérivés de `SANDBOX_MEMORY_MB`** (60 % / 6 % / 2 %, planchers 256 / 32 / 16 Mo — `DockerSandbox.boxSizeMb/tmpSizeMb/shmSizeMb` ; en dur, ils pouvaient dépasser la mémoire allouée au conteneur) (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile — posés sur le processus étudiant | — |
+| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, comptés dans la mémoire et **dérivés de `SANDBOX_MEMORY_MB`** (60 % / 6 % / 2 %, planchers 256 / 32 / 16 Mo — `DockerSandbox.boxSizeMb/tmpSizeMb/shmSizeMb` ; en dur, ils pouvaient dépasser la mémoire allouée au conteneur) (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile sur le processus ÉTUDIANT ; fichiers et nofile sur le NOTEUR — `demote_student`/`demote_grader` ; l'UID étudiant est **tiré au sort par conteneur**, sans quoi RLIMIT_NPROC — compté par UID réel sur l'hôte — aurait été un budget COMMUN : un étudiant qui fork en boucle faisait échouer la notation d'un autre) + temps limite par cas (prof, max 60 s) + budget mural du conteneur | — |
 | **Isolation entre cas** | dossier par cas, groupe de processus tué au timeout, et **balayage des survivants UID étudiant après CHAQUE phase** — compilation, inventaire, notation — et pas seulement entre deux cas (un `fork` + `setsid` échappe au kill de groupe ; balayer tôt libère aussi les tubes de sortie, qu'un descendant survivant tenait ouverts, ce qui coûtait sinon dix secondes d'attente par phase) | pendant UN cas, les processus étudiants du même cas partagent l'UID (ptrace entre eux possible selon le `ptrace_scope` de l'hôte) — sans portée inter-cas grâce au balayage |
 | **Détection** | Il n'y en a plus, et c'est le propos : le harnais et le nonce n'entrent dans aucun processus ni fichier que le code soumis puisse atteindre, donc il n'y a rien à surveiller. Les événements restants portent sur l'INFRASTRUCTURE (`budget_depasse`, `espace_sature`, `erreur_superviseur`) et sur les canaris, qui vérifient que la chaîne tranche encore dans les deux sens | la capacité `SYS_PTRACE` n'est plus accordée au conteneur et `strace` a quitté les images : elles ne servaient qu'à détecter une lecture du harnais, nécessaire quand il vivait dans un fichier ouvrable. Le code soumis ne peut donc plus tracer aucun processus |
 
@@ -63,22 +63,14 @@ est pédagogique (varier les cas).
 
 - `execution-service` construit l'arborescence (`HarnessProjects`) : `cases/<i>/src/…` par cas,
   `job.json` (`{language, timeout_ms, budget_ms,
-  cases:[{index, name, harness_types, student_types} | {index, canary:"pass"|"fail"}]}`).
+  cases:[{index, name} | {index, canary:"pass"|"fail"}]}`).
   - `budget_ms` : temps total que le superviseur s'accorde pour l'ensemble des cas. Il le teste
     AVANT de démarrer un cas ; au-delà, les cas restants sont rendus « non exécuté ».
-  - `harness_types` : conteneurs de tests déclarés par le HARNAIS (classes Java/C#, modules
-    Rust), en nom pleinement qualifié. Ils portent l'INVARIANT DE NOTATION : un cas n'est
-    « réussi » que si au moins un test exécuté leur appartient. Liste vide = harnais non
-    identifié : aucune exclusion n'est appliquée, donc tous ses tests tournent et l'invariant
-    est satisfait par construction.
-  - `student_types` : conteneurs déclarés par le CODE ÉTUDIANT, EXCLUS de l'exécution — son
-    code est compilé dans la même unité que le harnais, donc ses propres tests unitaires
-    étaient comptés dans son verdict. L'extraction est textuelle sur un texte qu'il contrôle :
-    elle ne joue que sur l'ÉQUITÉ, jamais sur l'intégrité de la note, que garde l'invariant
-    ci-dessus. En Rust, l'exclusion passe par une sélection `--exact` bâtie sur un inventaire
-    `--list` préalable (un run étudiant de plus, borné à `LIST_TIMEOUT_S` = 5 s et budgété en
-    miroir par `DockerEvaluator.LIST_BUDGET_MS` et `ExecutionClient.LIST_SLACK_MS`) ; un
-    inventaire tronqué ou mal formé fait renoncer au filtre.
+  - Un cas ne porte que son index et son nom. Les champs `harness_types`/`student_types`
+    appartenaient au format framework : le code soumis y était compilé dans la même unité que
+    le harnais, donc ses PROPRES tests unitaires étaient découverts et comptés dans son
+    verdict, et il fallait les exclure. Les deux programmes séparés ont supprimé la cause, et
+    ces champs avec elle.
 - Les harnais canaris contiennent `__MOODIT_A__`/`__MOODIT_B__`, substitués par le superviseur
   avec des valeurs aléatoires AU RUNTIME (introuvables dans l'archive).
 - Réponse (stdout) : `{"v":1, "results":[{index, name, passed, detail, ms}], "events":[…],

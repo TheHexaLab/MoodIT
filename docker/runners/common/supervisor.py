@@ -222,20 +222,6 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
 
 
-# Alphabets d'un identifiant tiré au sort : première lettre, puis lettres/chiffres/_ — et
-# LONGUEUR variable. Un nom de forme fixe (« 1 majuscule + 9 minuscules ») restait
-# reconnaissable à l'exécution sur les langages où le code étudiant peut interposer les
-# fonctions de sortie : il suffisait de relayer honnêtement les tests dont le nom a cette
-# forme (les canaris) et de ne forger que les autres.
-# PREMIÈRE lettre en MAJUSCULE, impérativement : le canari Go s'appelle « Test<N> », et Go
-# exige que le caractère suivant « Test » ne soit pas une minuscule (cmd/go isTest) — sinon la
-# fonction n'est pas enregistrée comme test et `go vet` la refuse. Une initiale minuscule
-# faisait échouer le canari d'une soumission Go HONNÊTE, donc l'accusait de falsification.
-
-
-RUST_TEST_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
-
-
 def canary_reserve_seconds(budget_s, timeout_s):
     """Part du budget global gardée pour les deux canaris — FONCTION PURE (testée).
 
@@ -785,9 +771,16 @@ def run_rust(case_dir, env, timeout_s, case_index):
 # est du Java normal, surtout dans un exercice a une seule classe, et le refuser mettait en echec
 # une soumission correcte. Le serveur invoque par reflexion (setAccessible), et le bouchon du
 # noteur est une classe separee qui declare la methode publique de son cote.
+# Modificateurs Java d une methode, ENUMERES et non significatifs (ordre quelconque) :
+# `static final int f(int)` et `synchronized int g()` sont du code legal, et les refuser
+# mettait en echec une soumission correcte. Enumeres, et non `\w+` : n importe quel mot
+# aurait laisse un appel passer pour une declaration.
+JAVA_MODS = (r"(?:public|protected|private|static|final|synchronized|native|strictfp"
+             r"|abstract|default)")
+# `static` present : chemin FONCTION.
 JAVAP_SIGNATURE = re.compile(
-    r"^\s+(?:public\s+|protected\s+|private\s+)?static\s+([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);",
-    re.M)
+    r"^\s+(?=(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
+    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
 
 # Types marshalables par le protocole de ce premier jalon. Une méthode qui en sort n'est PAS
 # proxifiée : le harnais qui l'appelle échoue alors à la compilation — message clair pour le
@@ -811,9 +804,11 @@ JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.
 # jeton, donc le nom ne colle plus a la parenthese.
 JAVAP_CTOR = re.compile(
     r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^)]*)\);", re.M)
+# `static` ABSENT : chemin OBJET. Sans cette anticipation, une statique serait proxifiee
+# comme une methode d instance et le bouchon appellerait une poignee inexistante.
 JAVAP_METHOD = re.compile(
-    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);",
-    re.M)
+    r"^\s+(?!(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
+    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
 
 
 def java_class_api(javap_output):
@@ -2763,8 +2758,12 @@ def rust_without_main(source):
 
 # Visibilite indifferente, comme en Java : en C# une methode de classe est privee PAR DEFAUT,
 # donc exiger `public` refusait l ecriture la plus naturelle d un exercice.
+# Memes modificateurs qu en Java, cote C#, y compris les deux formes EN DEUX MOTS
+# (`protected internal`, `private protected`) : elles sont couvertes par la repetition.
+CS_MODS = (r"(?:public|internal|protected|private|static|new|virtual|override|sealed"
+           r"|abstract|extern|unsafe|partial)")
 CS_METHOD = re.compile(
-    r"(?:public\s+|internal\s+|protected\s+|private\s+)?static\s+"
+    r"(?:^|[{};])\s*(?=(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
     r"(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
 CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "string": "string"}
 
@@ -3074,9 +3073,10 @@ public static class MooditServer {
 # Meme relaxation qu en Java, et pour la meme raison : en C# un membre est prive PAR DEFAUT.
 # ANCREES EN DEBUT DE LIGNE : sans cela, `public` devenu facultatif, un `new Rectangle(3, 4)`
 # au milieu d une expression serait pris pour une declaration de constructeur.
-CS_CTOR_TPL = r"^\s*(?:public\s+|internal\s+|protected\s+|private\s+)?%s\s*\(([^)]*)\)"
+CS_CTOR_TPL = (r"(?:^|[{};])\s*(?:(?:public|internal|protected|private|static|extern)\s+)*"
+               r"%s\s*\(([^)]*)\)")
 CS_INSTANCE = re.compile(
-    r"^\s*(?:public\s+|internal\s+|protected\s+|private\s+)?(?!static)"
+    r"(?:^|[{};])\s*(?!(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
     r"(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
 
 

@@ -151,9 +151,10 @@ public final class HarnessProjects {
                 + "__MOODIT_HARNAIS__\n" + harnessCode);
     }
 
-    // ── canaris par langage — gabarits instanciés au runtime : valeurs __MOODIT_A__/__MOODIT_B__
-    //    ET NOM __MOODIT_N__ (un nom fixe serait reconnaissable : un code C/C++ qui interpose
-    //    printf laisserait passer les canaris à leur nom et ne forgerait que les cas réels) ──
+    // ── canaris par langage — un corps booléen dont les deux valeurs (__MOODIT_A__ et
+    //    __MOODIT_B__) sont tirées au sort par le superviseur à l'exécution : l'un doit réussir,
+    //    l'autre échouer. Ils ne détectent plus une falsification, il n'y a plus rien à
+    //    falsifier : ils vérifient que la chaîne tranche encore dans les DEUX sens ──
 
     private static String canaryHarness(String lang) {
         // Forme BOOLÉENNE, comme tous les harnais : une comparaison de deux valeurs tirées au

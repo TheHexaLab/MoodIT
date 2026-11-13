@@ -75,43 +75,11 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void evenement_non_suspect_avec_cas_ne_marque_pas_le_verdict() {
-        supervisorReturns("""
-                {"v":1,"results":[{"index":0,"passed":true,"ms":1},{"index":1,"passed":true,"ms":1}],
-                 "events":[{"type":"espace_sature","case":0}],"canaries":"ok"}
-                """);
-        List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
-        assertThat(results.get(0).detail()).isNull();
-    }
-
-    @Test
     void erreur_du_superviseur_leve_sandbox_exception() {
         supervisorReturns("{\"v\":1,\"error\":\"fichiers du job non reçus\"}");
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(SandboxException.class)
                 .hasMessageContaining("fichiers du job non reçus");
-    }
-
-    @Test
-    void evenement_suspect_annexe_au_detail_du_cas_vise() {
-        supervisorReturns("""
-                {"v":1,"results":[
-                  {"index":0,"passed":true,"detail":null,"ms":1},
-                  {"index":1,"passed":false,"detail":"échec","ms":1}
-                ],"events":[
-                  {"type":"canari_incoherent","case":0,"detail":"canari « pass » en échec"},
-                  {"type":"budget_depasse"}
-                ],"canaries":"ok"}
-                """);
-        List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
-        // Un canari incohérent FAIT ÉCHOUER le cas, même rendu « réussi » par le superviseur :
-        // si la chaîne ne tranche plus dans les deux sens, aucun verdict de ce job ne vaut rien,
-        // et annoter sans refuser laissait passer une note qu'on ne sait pas justifier.
-        assertThat(results.get(0).passed()).isFalse();
-        assertThat(results.get(0).detail()).contains("⚠ Comportement suspect")
-                .contains("cas refusé").contains("canari_incoherent");
-        // budget_depasse (événement d'infrastructure, sans cas visé) n'alerte pas le cas 1.
-        assertThat(results.get(1).detail()).isEqualTo("échec");
     }
 
     @Test
@@ -257,7 +225,14 @@ class DockerEvaluatorTest {
         // commande du RUN — pas la continuation. C'est arrivé en retirant les téléchargements
         // du format framework (#116) : le `COPY` du superviseur s'est retrouvé dans le RUN, et
         // seule une construction réelle, donc la CI, pouvait le dire. Ce test le dit en 2 ms.
+        // Les instructions Dockerfile : une continuation suivie de l'une d'elles l'avale, SANS
+        // qu'il y ait de ligne vide — la variante que la première version de ce test laissait
+        // passer.
+        java.util.Set<String> instructions = java.util.Set.of("FROM", "RUN", "COPY", "ADD",
+                "USER", "WORKDIR", "ENV", "ARG", "ENTRYPOINT", "CMD", "EXPOSE", "VOLUME",
+                "LABEL", "SHELL", "HEALTHCHECK", "STOPSIGNAL", "ONBUILD");
         java.util.List<String> fautifs = new java.util.ArrayList<>();
+        int lus = 0;
         java.nio.file.Path racine = java.nio.file.Path.of("..", "docker", "runners");
         try (var dossiers = java.nio.file.Files.list(racine)) {
             for (java.nio.file.Path d : dossiers.sorted().toList()) {
@@ -265,14 +240,23 @@ class DockerEvaluatorTest {
                 if (!java.nio.file.Files.isRegularFile(df)) {
                     continue;
                 }
+                lus++;
                 java.util.List<String> lignes = java.nio.file.Files.readAllLines(df);
                 for (int i = 0; i < lignes.size(); i++) {
                     if (!lignes.get(i).stripTrailing().endsWith("\\")) {
                         continue;
                     }
-                    boolean derniere = i == lignes.size() - 1;
-                    if (derniere || lignes.get(i + 1).isBlank()) {
-                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1));
+                    if (i == lignes.size() - 1) {
+                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (fin de fichier)");
+                        continue;
+                    }
+                    String suivante = lignes.get(i + 1).strip();
+                    String motCle = suivante.split("\\s+", 2)[0].toUpperCase(java.util.Locale.ROOT);
+                    if (suivante.isEmpty()) {
+                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (ligne vide)");
+                    } else if (instructions.contains(motCle)) {
+                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1)
+                                + " (instruction " + motCle + " avalée)");
                     }
                 }
             }
@@ -281,6 +265,12 @@ class DockerEvaluatorTest {
                 .withFailMessage("continuation pendante (l'instruction suivante serait avalée "
                         + "par le RUN, et l'image ne construirait plus) : %s", fautifs)
                 .isEmpty();
+        // Exhaustif par construction : si la racine changeait de forme, le test verdirait sans
+        // rien avoir lu.
+        assertThat(lus)
+                .withFailMessage("10 Dockerfiles runner attendus, %d lus — le test ne vérifie "
+                        + "plus ce qu'il annonce", lus)
+                .isEqualTo(10);
     }
 
 }
