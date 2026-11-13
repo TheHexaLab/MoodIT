@@ -50,13 +50,15 @@ echo "→ Seed des données de démo dans $CONTAINER/$DB (établissement, progra
 # là où l'ordre lexicographique le placerait avant V2_1). Énumérer les fichiers à la main
 # faisait sauter en SILENCE toute démo ajoutée ensuite — et la garde d'idempotence ci-dessus
 # empêchait ensuite de réparer sans FORCE=1.
-FILES=$(find "$DEMO" -maxdepth 1 -name 'V*.sql' | sort -V)
-if [ -z "$FILES" ]; then
+# NUL-safe : la liste n'est jamais découpée par mots. L'ancienne version (`cat $FILES`) éclatait
+# sur un chemin de clone contenant une ESPACE — OneDrive d'organisation, « Mes Documents »… —
+# avec des « cat: …: No such file or directory » qui ne désignaient pas la cause.
+NB=$(find "$DEMO" -maxdepth 1 -name 'V*.sql' | wc -l)
+if [ "$NB" -eq 0 ]; then
   echo "✗ Aucun fichier de démo trouvé dans $DEMO" >&2
   exit 1
 fi
-# shellcheck disable=SC2086  # un chemin par ligne, sans espace : le découpage est voulu.
-cat $FILES | pg -v ON_ERROR_STOP=1 -1 -q
+find "$DEMO" -maxdepth 1 -name 'V*.sql' -print0 | sort -zV | xargs -0 cat | pg -v ON_ERROR_STOP=1 -1 -q
 
 echo
 echo "✓ Terminé. Établissements autorisés :"
