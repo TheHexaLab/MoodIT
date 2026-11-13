@@ -1111,7 +1111,7 @@ def indent_java(corps):
     return "\n".join("        " + l if l.strip() else l for l in (corps or "").splitlines())
 
 
-def java_server_source(class_name):
+def java_server_source(class_names):
     """Programme ÉTUDIANT : son code, plus une boucle qui répond aux appels par RÉFLEXION.
 
     FONCTION PURE (testée). Aucun nonce, aucun harnais, aucun attendu : ce processus ne peut
@@ -1160,8 +1160,15 @@ public final class MooditServer {
         String brut = entre(ligne, "\\"args\\":[", "]");
         Object[] args = decoupe(brut);
         Method cible = null;
-        for (Method m : Class.forName("__CLASSE__").getDeclaredMethods()) {
-            if (m.getName().equals(nom) && m.getParameterCount() == args.length) { cible = m; break; }
+        // TOUTES les classes du code soumis, principale d'abord : le bouchon aplatit les
+        // statiques de toutes les classes dans la classe principale, la recherche doit couvrir
+        // le meme perimetre — sinon une statique d'une classe secondaire etait declaree par le
+        // bouchon puis introuvable ici, et une reponse juste etait notee 0.
+        for (String __c : new String[] {__CLASSES__}) {
+            for (Method m : Class.forName(__c).getDeclaredMethods()) {
+                if (m.getName().equals(nom) && m.getParameterCount() == args.length) { cible = m; break; }
+            }
+            if (cible != null) { break; }
         }
         if (cible == null) { throw new NoSuchMethodException(nom); }
         cible.setAccessible(true);
@@ -1269,7 +1276,7 @@ public final class MooditServer {
         return parts.toArray();
     }
 }
-""".replace("__CLASSE__", class_name)
+""".replace("__CLASSES__", ", ".join(chr(34) + n + chr(34) for n in class_names))
 
 
 # ─────────────────────────── Go : bouchon et aiguillage TYPÉS ───────────────────────────
@@ -2947,7 +2954,7 @@ public static class MooditGrader {
                  for l in (harness_code or "").splitlines()), nonce)
 
 
-def cs_server_source(classe):
+def cs_server_source(classes):
     """Programme ÉTUDIANT C# : son code (compilé à côté) + aiguillage par réflexion. PURE."""
     return '''using System;
 using System.Reflection;
@@ -3050,12 +3057,17 @@ public static class MooditServer {
                     continue;
                 }
                 MethodInfo cible = null;
-                foreach (MethodInfo m in typeof(%s).GetMethods(
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
-                    if (m.Name == nom && m.GetParameters().Length == parts.Length - 2) {
-                        cible = m;
-                        break;
+                // Toutes les classes du code soumis, principale d'abord : meme perimetre
+                // que l'extraction et que le bouchon, qui aplatit leurs statiques.
+                foreach (Type __t in new Type[] { %s }) {
+                    foreach (MethodInfo m in __t.GetMethods(
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
+                        if (m.Name == nom && m.GetParameters().Length == parts.Length - 2) {
+                            cible = m;
+                            break;
+                        }
                     }
+                    if (cible != null) { break; }
                 }
                 if (cible == null) { throw new MissingMethodException(nom); }
                 // UNE seule conversion pour les trois chemins (fonction, constructeur, méthode) :
@@ -3073,7 +3085,7 @@ public static class MooditServer {
         return 0;
     }
 }
-''' % (classe, classe)
+''' % (classes[0], ", ".join("typeof(" + c + ")" for c in classes))
 
 
 # Meme relaxation qu en Java, et pour la meme raison : en C# un membre est prive PAR DEFAUT.
@@ -3123,6 +3135,20 @@ def cs_student_class(source):
     """Première classe déclarée par l'étudiant : celle que le harnais appellera. PURE (testée)."""
     trouve = CS_CLASS.search(source or "")
     return trouve.group(1) if trouve else "Solution"
+
+
+def cs_student_classes(source):
+    """TOUTES les classes du code soumis, la principale d'abord, sans doublon. PURE (testée).
+
+    Le serveur doit chercher une statique dans le même périmètre que l'extraction
+    (`cs_signatures`, toute la source) et que le bouchon, qui aplatit ces statiques dans la
+    classe principale."""
+    principale = cs_student_class(source)
+    noms = [principale]
+    for nom in CS_CLASS.findall(source or ""):
+        if nom not in noms:
+            noms.append(nom)
+    return noms
 
 
 def grader_uid():
@@ -3287,7 +3313,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
 
     # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
     with open(os.path.join(etu_src, "MooditServer.java"), "w", encoding="utf-8") as f:
-        f.write(java_server_source(classe))
+        f.write(java_server_source([classe] + [b for b in binaires if b != classe]))
     code, expire = run_proc(["javac", "-encoding", "UTF-8", "-cp", etu_classes, "-d", etu_classes,
                              os.path.join(etu_src, "MooditServer.java")],
                             case_dir, env, COMPILE_TIMEOUT_S,
@@ -3380,7 +3406,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     with open(etu_copie, "w", encoding="utf-8") as f:
         f.write(student_source)
     with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(cs_server_source(classe))
+        f.write(cs_server_source(cs_student_classes(student_source)))
     with open(not_src, "w", encoding="utf-8") as f:
         f.write(cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "", classe,
                                  ctors, instance))

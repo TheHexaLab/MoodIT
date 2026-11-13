@@ -1167,5 +1167,36 @@ class ModificateursNonSignificatifsTest(unittest.TestCase):
         self.assertEqual(ctors, [])
 
 
+class ClassesSecondairesTest(unittest.TestCase):
+    """Le serveur cherche dans le MEME perimetre que l'extraction et que le bouchon.
+
+    L'extraction balaie toutes les classes du code soumis et le bouchon APLATIT leurs statiques
+    dans la classe principale : `Solution.doubler(5)` compile donc meme si `doubler` vit dans
+    `class Outils`. Un serveur qui ne cherchait que dans la principale levait alors a
+    l'execution, et une reponse JUSTE etait notee 0 — l'invariant viole par le perimetre,
+    apres l'avoir ete par la visibilite."""
+
+    def test_cs_student_classes_toutes_principale_d_abord(self):
+        source = ("class Solution {\n"
+                  "    static int Entree(int n) { return Outils.Doubler(n); }\n"
+                  "}\n"
+                  "class Outils {\n"
+                  "    static int Doubler(int n) { return n * 2; }\n"
+                  "}\n")
+        self.assertEqual(supervisor.cs_student_classes(source), ["Solution", "Outils"])
+        # Sans doublon, et la principale reste en tete meme re-declaree plus bas.
+        self.assertEqual(supervisor.cs_student_classes(source + "class Solution2 {}"),
+                         ["Solution", "Outils", "Solution2"])
+
+    def test_le_serveur_cs_couvre_toutes_les_classes(self):
+        serveur = supervisor.cs_server_source(["Solution", "Outils"])
+        self.assertIn("typeof(Solution), typeof(Outils)", serveur)
+
+    def test_le_serveur_java_couvre_toutes_les_classes(self):
+        serveur = supervisor.java_server_source(["Solution", "Outils", "Solution$Interne"])
+        self.assertIn('new String[] {"Solution", "Outils", "Solution$Interne"}', serveur)
+        self.assertNotIn("__CLASSES__", serveur)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

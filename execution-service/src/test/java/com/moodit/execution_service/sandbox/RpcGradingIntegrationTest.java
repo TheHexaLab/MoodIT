@@ -165,6 +165,39 @@ class RpcGradingIntegrationTest {
                 """).passed()).isFalse();
     }
 
+    @Test
+    void java_statique_dans_une_classe_secondaire_est_notee() {
+        // Le bouchon aplatit les statiques de TOUTES les classes dans la principale : le
+        // harnais « Solution.doubler(5) » compile même si l'étudiant a mis la fonction dans
+        // une classe à côté. Le serveur doit donc chercher dans le même périmètre — sinon
+        // l'appel levait à l'exécution et une réponse JUSTE était notée 0.
+        String h = "return Solution.doubler(5) == 10;";
+        String deuxClasses = """
+                public class Solution {
+                }
+
+                class Outils {
+                    static int doubler(int n) { return n * 2; }
+                }
+                """;
+        assertThat(note("Java", h, deuxClasses).passed()).isTrue();
+        assertThat(note("Java", h, deuxClasses.replace("n * 2", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_statique_dans_une_classe_secondaire_est_notee() {
+        String h = "return Solution.Doubler(5) == 10;";
+        String deuxClasses = """
+                class Solution {
+                }
+                class Outils {
+                    static int Doubler(int n) { return n * 2; }
+                }
+                """;
+        assertThat(note("C#", h, deuxClasses).passed()).isTrue();
+        assertThat(note("C#", h, deuxClasses.replace("n * 2", "0")).passed()).isFalse();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test
