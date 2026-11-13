@@ -106,6 +106,13 @@ class RunnerExecTest {
 
     @Test
     void reponse_illisible_ou_erreur_du_superviseur_fail_closed() {
+        // Une sortie VIDE ne lève pas chez Jackson 3 (MissingNode) : sans garde, elle rendait
+        // Result(null, null) → « Aucune sortie d'exécution », au lieu du 502 d'une panne.
+        supervisorReturns("");
+        assertThatThrownBy(() -> runner.execute("python",
+                List.of(new RunnerExec.File("main.py", "x")), null, null))
+                .isInstanceOf(SandboxException.class);
+
         supervisorReturns("pas du json");
         assertThatThrownBy(() -> runner.execute("python",
                 List.of(new RunnerExec.File("main.py", "x")), null, null))

@@ -5,9 +5,10 @@ TOUTE exécution de code étudiant passe par un **conteneur jetable** `moodit-ru
 compilés **Go, Rust, C, C++, C#, Java**, décrite ci-dessous) et « exec » (exécution générique :
 programmes RPC à nonce des interprétés/SQL/vues, et bouton « Exécuter » de tous les langages —
 tout y tourne sous l'UID étudiant, sorties à la Piston). Le harnais du prof y est un
-**vrai test du langage** — classe JUnit 5 (Java), classe NUnit (C#), fichier `_test.go` (Go), module
-un CORPS qui renvoie un booléen, compilé dans un programme séparé sous un UID séparé — et la POO
-test (`new Rectangle(3, 4).aire()`), sans génération de code.
+**CORPS qui renvoie un booléen**, compilé dans un programme séparé sous un UID séparé (le
+noteur) — c'est la SEULE forme notée, un harnais au format framework (JUnit, NUnit, `go test`,
+`cargo test`) étant refusé avec un diagnostic — et la POO est du simple code de
+test (`new Rectangle(3, 4).aire()`), sans génération de code côté prof.
 
 ## Architecture
 

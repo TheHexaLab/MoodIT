@@ -204,6 +204,8 @@ class EtatSortieTest(unittest.TestCase):
         self.assertTrue(etat_cas_1.perdue)
         self.assertFalse(supervisor.ETAT_SORTIE.perdue)   # le cas en cours reste armé
 
+    @unittest.skipUnless(os.name == "posix",
+                         "run_proc pilote des groupes de processus POSIX ; couvert en CI (Linux)")
     def test_run_proc_impute_la_perte_au_cas_capture_a_l_entree(self):
         # run_proc capture ETAT_SORTIE A L'ENTREE : si le cas SUIVANT remplace le global
         # pendant l'execution, une pompe retardataire doit continuer d'imputer sa perte au cas
@@ -532,8 +534,10 @@ class BoxExhaustedTest(unittest.TestCase):
 
 class ReadCappedTest(unittest.TestCase):
     def test_petit_fichier_entier(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".out", delete=False) as f:
-            f.write("début\nfin\n")
+        # En binaire : en mode texte, Windows ecrirait CRLF et le test comparerait
+        # d'autres octets que ceux que le superviseur lit reellement (fichiers LF).
+        with tempfile.NamedTemporaryFile("wb", suffix=".out", delete=False) as f:
+            f.write("début\nfin\n".encode("utf-8"))
         try:
             self.assertEqual(supervisor.read_capped(f.name, cap=1024), "début\nfin\n")
         finally:

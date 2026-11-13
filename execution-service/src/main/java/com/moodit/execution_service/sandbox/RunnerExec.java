@@ -129,6 +129,13 @@ public class RunnerExec {
         } catch (RuntimeException e) {
             throw new SandboxException("Réponse du runner illisible (exit " + run.exitCode() + ")");
         }
+        // Jackson 3 rend un MissingNode sur une sortie vide, sans lever : un runner mort sans
+        // JSON donnait Result(null, null) → « Aucune sortie d'exécution », au lieu du 502
+        // d'une panne d'infrastructure.
+        if (!root.isObject()) {
+            throw new SandboxException("Le runner n'a rendu aucune réponse (exit "
+                    + run.exitCode() + ")");
+        }
         if (root.has("error")) {
             throw new SandboxException("Runner : " + root.get("error").asString());
         }

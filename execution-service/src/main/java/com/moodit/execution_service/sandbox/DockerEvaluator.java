@@ -275,6 +275,19 @@ public class DockerEvaluator {
                     truncate(run.stderr()));
             throw new SandboxException("Réponse du superviseur de notation illisible");
         }
+        // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode (et
+        // « null » un NullNode). Sans cette garde, `results` était simplement vide, chaque cas
+        // recevait « Notation incomplète » passed=false — une liste de verdicts VALIDE aux yeux
+        // de core, qui persistait un 0 sur une tentative UNIQUE. Un superviseur mort sans JSON
+        // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée, collecte des
+        // logs expirée) est une PANNE : 502, tentative supprimée, l'étudiant resoumet.
+        if (!root.isObject()) {
+            log.warn("Superviseur de notation muet (exit {}) : {}", run.exitCode(),
+                    truncate(run.stderr()));
+            throw new SandboxException(
+                    "Le superviseur de notation n'a rendu aucun verdict (exit "
+                            + run.exitCode() + ")");
+        }
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
         }

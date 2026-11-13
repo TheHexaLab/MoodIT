@@ -42,7 +42,13 @@ import json
 import os
 import random
 import re
-import resource
+# `resource` est POSIX : absent sous Windows, l environnement de dev du projet. Les
+# fonctions qui posent des rlimits ne tournent que DANS le conteneur (Linux) ; proteger
+# l import permet de rejouer les 93 tests unitaires du superviseur en local, sans Docker.
+try:
+    import resource
+except ImportError:  # Windows : les preexec_fn ne sont jamais appeles hors conteneur
+    resource = None
 import shutil
 import signal
 import subprocess

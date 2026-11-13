@@ -81,10 +81,11 @@ function WeightInput({
 /**
  * Corps « Harnais de test » : édition des harnais cachés d'une question Code.
  * Chaque harnais = nom (retour à l'étudiant) + poids (crédit partiel) + code de TEST
- * exécutable. Interprétés/SQL/vues : code qui renvoie vrai/faux, dans le langage configuré
- * (Language.harness_language_id). Compilés (#116) : un VRAI test du langage (JUnit, NUnit,
- * go test, cargo test, moodit_check.h), exécuté par le runner Docker isolé d'execution-service
- * — le gabarit du langage montre la forme attendue. Rendu dans la coquille commune
+ * exécutable. TOUS les langages : un CORPS qui renvoie vrai/faux — le gabarit du langage montre
+ * la forme attendue. Les compilés (#116) sont notés par le runner Docker isolé
+ * d'execution-service, qui compile ce corps dans un programme séparé sous un UID séparé ; un
+ * harnais au format framework (JUnit, NUnit, go test…) y est refusé avec un diagnostic qui
+ * explique la forme attendue. Rendu dans la coquille commune
  * (`EditorShell`) par `QuizEditor` : page empilée, pas un nouveau popup.
  */
 export function HarnessBody({

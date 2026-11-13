@@ -49,9 +49,10 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-runner-*`
 (réseau coupé, mémoire/PID/CPU bornés). Dans le conteneur, un **superviseur** (root) compile,
 verrouille les sources en 700 et exécute le code soumis sous un **UID dédié**.
-Deux formes de harnais coexistent, et c'est la forme qui décide du modèle.
+Le harnais est un CORPS qui renvoie un booléen — la seule forme notée (le format framework
+est refusé en amont, voir plus bas).
 
-**Harnais booléen (la forme recommandée, et celle des gabarits) — verdict NON FALSIFIABLE.**
+**Harnais booléen — verdict NON FALSIFIABLE.**
 Le harnais du prof est un corps qui renvoie vrai ou faux. Le superviseur le compile dans un
 **programme séparé, lancé sous un UID séparé** (le noteur), et compile le code de l'étudiant
 **seul** dans un autre programme (le serveur). Les deux communiquent par des tubes croisés ; le

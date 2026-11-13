@@ -61,6 +61,23 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void conteneur_mort_sans_json_leve_au_lieu_de_noter_zero() {
+        // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode. Sans
+        // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »
+        // passed=false — une liste de verdicts VALIDE aux yeux de core, qui persistait un 0
+        // sur une tentative UNIQUE. Un superviseur tué (OOM du cgroup, image cassée, collecte
+        // des logs expirée) est une panne d'INFRASTRUCTURE : SandboxException → 502 →
+        // tentative supprimée → l'étudiant resoumet. Jamais un 0.
+        for (String stdout : new String[] {"", "   \n", "null"}) {
+            when(sandbox.run(any(), anyMap(), anyLong()))
+                    .thenReturn(new DockerSandbox.ContainerRun(stdout, "tué (OOM ?)", 137));
+            assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                    .as("stdout %s doit lever, pas noter 0", "«" + stdout + "»")
+                    .isInstanceOf(SandboxException.class);
+        }
+    }
+
+    @Test
     void json_illisible_leve_sandbox_exception() {
         // stderr volumineux : tronqué dans le journal, jamais dans l'exception.
         when(sandbox.run(any(), anyMap(), anyLong()))
