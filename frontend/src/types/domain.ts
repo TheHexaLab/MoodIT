@@ -245,9 +245,10 @@ export interface DragItem {
 
 /**
  * Cas de test d'une question `coding` (table Test_Case) : un TEST exécutable contre la
- * soumission. Interprétés/SQL/vues : code qui renvoie un booléen ; compilés : vrai test du
- * langage (JUnit, NUnit, go test…), exécuté par le runner isolé (#116). `weight` donne le
- * crédit partiel. Données cachées à l'étudiant.
+ * soumission. Tous les langages : un CORPS qui renvoie un booléen ; les compilés sont notés
+ * par le runner isolé, où le harnais est compilé dans un programme séparé sous un UID séparé
+ * (#116) — un harnais au format framework (JUnit, NUnit…) est refusé avec un diagnostic.
+ * `weight` donne le crédit partiel. Données cachées à l'étudiant.
  */
 export interface TestCase {
   id: number;

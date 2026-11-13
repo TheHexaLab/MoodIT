@@ -9,9 +9,9 @@
 # souci de conversion de chemin sous Git Bash/Windows. Idempotent : ne
 # fait rien si des établissements existent déjà (FORCE=1 pour re-seeder malgré tout). Donne
 # l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code
-# multi-langages (harnais convertis au format runner par V7_1 : vrais tests pour les compilés).
+# multi-langages (harnais des compilés au format booléen non falsifiable depuis V9_1).
 #
-# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V8). Ce script ne
+# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V9). Ce script ne
 # migre PAS — il SÈME. Usage dev uniquement ; la prod réelle reste volontairement vierge.
 #
 # Usage :
@@ -37,7 +37,7 @@ fi
 # Garde d'idempotence : la table establishment existe-t-elle, et est-elle vide ?
 count="$(pg -tAc 'SELECT count(*) FROM establishment' 2>/dev/null | tr -d '[:space:]')" || count=""
 if [ -z "$count" ]; then
-  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (V1→V8) ? Lance la pile." >&2
+  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (V1→V9) ? Lance la pile." >&2
   exit 1
 fi
 if [ "$count" != "0" ] && [ "${FORCE:-0}" != "1" ]; then

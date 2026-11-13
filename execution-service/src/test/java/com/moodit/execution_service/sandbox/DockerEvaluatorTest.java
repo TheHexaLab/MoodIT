@@ -148,13 +148,15 @@ class DockerEvaluatorTest {
         org.mockito.Mockito.verifyNoInteractions(sandbox);
     }
 
-    // ── Aiguillage selon la FORME du harnais (#116) ──────────────────────────────
+    // ── Reconnaissance de la FORME du harnais (#116) ─────────────────────────────
 
     @Test
     void la_forme_du_harnais_choisit_le_chemin_dans_les_six_langages() {
-        // Les deux formes sont notables : un corps qui renvoie un booléen passe par le modèle à
-        // deux processus et deux UID (non falsifiable), un vrai test du framework par l'ancien
-        // chemin. `frameworkMarkerFound` est le SEUL aiguillage — rien n'est refusé en amont.
+        // Il n'y a plus qu'une forme notée : le corps booléen. `frameworkMarkerFound` est le
+        // DÉTECTEUR du format retiré — ExecutionService s'en sert pour REFUSER un harnais au
+        // format framework avec un diagnostic, avant toute prise de place sandbox. Un booléen
+        // ne doit jamais le déclencher (refus à tort), un vrai test toujours (notation par un
+        // chemin qui n'existe plus).
         record Cas(String langage, String booleen, String framework) { }
         List<Cas> cas = List.of(
                 new Cas("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
@@ -271,6 +273,42 @@ class DockerEvaluatorTest {
                 .withFailMessage("10 Dockerfiles runner attendus, %d lus — le test ne vérifie "
                         + "plus ce qu'il annonce", lus)
                 .isEqualTo(10);
+    }
+
+
+    @Test
+    void budget_du_tester_public_reste_proportionnel_au_mur() {
+        // Le pire cas THÉORIQUE d'un cas (compilations à 90 s) dépasse le plafond public de
+        // 4 min : dérivé de lui seul, le budget tombait à 1 s et le « Tester » du prof ne
+        // notait qu'un cas — voire aucun, un canari pouvant passer en premier. Aucun test
+        // n'assertait cette valeur : la CI était verte sur un chemin inopérant.
+        long mur = DockerEvaluator.PUBLIC_WALL_MS;
+        // Java, 2 cas, timeout par défaut (plancher VM 10 s) : pireCas = 295 s > mur entier.
+        DockerEvaluator.Walls java = DockerEvaluator.walls("java", 2, 10_000, mur);
+        assertThat(java.wallMs()).isEqualTo(mur);
+        assertThat(java.budgetMs()).isEqualTo(mur * 3 / 5);
+        // Go à 60 s — la valeur maximale de l'éditeur : pireCas = 255 s > mur.
+        DockerEvaluator.Walls go = DockerEvaluator.walls("go", 2, 60_000, mur);
+        assertThat(go.budgetMs()).isEqualTo(mur * 3 / 5);
+    }
+
+    @Test
+    void budget_interne_garde_la_formule_stricte_et_son_invariant() {
+        // Chemin INTERNE (soumission d'un étudiant) : mur à 15 min, la formule stricte domine
+        // et l'invariant « budget + pireCas + marge ≤ mur » doit tenir — c'est lui qui protège
+        // la tentative d'une suppression au mur (#216).
+        DockerEvaluator.Walls java = DockerEvaluator.walls("java", 3, 10_000, Long.MAX_VALUE);
+        assertThat(java.wallMs()).isEqualTo(15 * 60_000);
+        assertThat(java.budgetMs()).isEqualTo(585_000);
+        long pireCasJava = 10_000 + 10_000 + 3 * 90_000 + 5_000;
+        assertThat(java.budgetMs() + pireCasJava + 20_000).isLessThanOrEqualTo(java.wallMs());
+        // Et même au plancher proportionnel, l'invariant tient sur tout mur NON plafonné :
+        // mur candidat = 30 s + (N+2) × pireCas ≥ 3 × pireCas, donc la marge de 40 % couvre
+        // toujours un cas entier. Vérifié sur le plus petit job possible.
+        DockerEvaluator.Walls go = DockerEvaluator.walls("go", 1, 10_000, Long.MAX_VALUE);
+        long pireCasGo = 10_000 + 10_000 + 2 * 90_000 + 5_000;
+        assertThat(go.budgetMs() + pireCasGo).isLessThanOrEqualTo(go.wallMs());
+        assertThat(go.budgetMs()).isEqualTo(go.wallMs() - pireCasGo - 20_000);
     }
 
 }

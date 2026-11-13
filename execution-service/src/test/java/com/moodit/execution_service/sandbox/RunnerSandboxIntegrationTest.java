@@ -160,13 +160,17 @@ class RunnerSandboxIntegrationTest {
     @Test
     void tester_public_note_vraiment_les_cas() {
         require("Go");
-        // Chemin PUBLIC (« Tester » du prof) : mur plafonné à PUBLIC_WALL_MS. Aucun test ne
-        // l'empruntait, et une réserve de budget mal bornée y faisait répondre « Non exécuté :
-        // budget de notation dépassé » sur TOUS les cas des six langages compilés.
+        // Chemin PUBLIC (« Tester » du prof), DEUX cas, temps limite 60 s — la valeur maximale
+        // de l'éditeur. Avec un budget dérivé du pire cas théorique, il tombait à 1 s : seul le
+        // premier élément de la liste mélangée partait (parfois un canari), et tout le reste
+        // répondait « Non exécuté : budget de notation dépassé ». Un seul cas au timeout par
+        // défaut passait encore — c'est pour ça que la première version de ce test était verte.
         List<TestResult> r = evaluator.evaluate("Go", GO_OK,
-                List.of(new TestCaseInput("doubler", GO_HARNESS, 1)), null,
-                DockerEvaluator.PUBLIC_WALL_MS);
-        assertThat(r.get(0).passed()).isTrue();
+                List.of(new TestCaseInput("doubler", GO_HARNESS, 1),
+                        new TestCaseInput("doubler zéro", "return doubler(0) == 0", 1)),
+                60_000, DockerEvaluator.PUBLIC_WALL_MS);
+        assertThat(r.get(0).passed()).withFailMessage("cas 1 : %s", r.get(0)).isTrue();
+        assertThat(r.get(1).passed()).withFailMessage("cas 2 : %s", r.get(1)).isTrue();
         assertThat(r.get(0).detail()).isNull();
     }
 

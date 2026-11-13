@@ -516,8 +516,9 @@ public class QuizService {
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
             // Harnais-code pour TOUS les langages, côté execution-service : conteneur runner de
-            // notation pour les compilés (vrai framework de test, canaris, jeton — #116), mode
-            // exec (programmes RPC à nonce) pour les interprétés/SQL/vues.
+            // notation pour les compilés (harnais booléen, deux programmes sous deux UID,
+            // verdict au nonce — #116), mode exec (programmes RPC à nonce) pour les
+            // interprétés/SQL/vues.
             List<ExecutionClient.Harness> inputs = harnesses.stream()
                     .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
                     .toList();

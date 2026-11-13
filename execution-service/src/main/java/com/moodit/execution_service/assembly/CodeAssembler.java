@@ -34,7 +34,8 @@ import java.util.stream.Collectors;
  *
  * <p>Les langages COMPILÉS (Go, Rust, C, C++, C#, Java) ne passent PLUS par ici pour l'évaluation
  * (#116) : ils sont notés par le RUNNER DOCKER ({@code sandbox/DockerEvaluator} + superviseur),
- * où le harnais est un vrai test du langage. Leur mode « run » (bouton play) passe par le mode exec des mêmes images.
+ * où le harnais booléen est compilé dans un programme séparé sous un UID séparé. Leur mode
+ * « run » (bouton play) passe par le mode exec des mêmes images.
  */
 @Component
 public class CodeAssembler {
@@ -117,7 +118,7 @@ public class CodeAssembler {
     /**
      * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Ces langages ne passent PAS
      * par l'assemblage : leur notation vit dans le runner dédié ({@code sandbox/DockerEvaluator}
-     * + {@code HarnessProjects}, harnais = vrai test du framework, canaris, jeton de fin) —
+     * + {@code HarnessProjects}, harnais booléen noté par deux programmes sous deux UID) —
      * ce prédicat sert au ROUTAGE dans {@code ExecutionService}.
      */
     public static boolean isCompiled(String language) {

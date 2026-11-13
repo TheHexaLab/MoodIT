@@ -222,24 +222,48 @@ public class DockerEvaluator {
             // temps réellement accordé par cas, pas le temps limite court du prof.
             perRun = Math.max(perRun, 10_000);
         }
-        // Mur du conteneur, et budget du superviseur. INVARIANT :
-        //     budget + pire cas d'UN cas + marge de clôture ≤ mur
-        // Le superviseur ne teste son budget qu'AVANT de démarrer un cas : un cas lancé juste
-        // avant l'échéance doit pouvoir aller jusqu'au bout (compilation + run) ET laisser le
-        // temps d'imprimer le JSON. Une marge fixe plus courte qu'un cas laissait une fenêtre
-        // où le conteneur était tué au mur — tout le travail perdu, 502, tentative supprimée.
-        long perCase = perRun + PER_CASE_OVERHEAD_MS
-                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
-        long wallCandidate = BASE_OVERHEAD_MS + (cases.size() + 2L) * perCase;
-        long cap = Math.min(maxWallMs, MAX_WALL_MS);
-        long wall = Math.min(cap, wallCandidate);
-        long budget = Math.max(1_000, wall - perCase - CLOSING_MARGIN_MS);
+        Walls walls = walls(runnerLanguage, cases.size(), perRun, maxWallMs);
         HarnessProjects.Project project =
-                HarnessProjects.build(language, code, cases, (int) perRun, budget);
+                HarnessProjects.build(language, code, cases, (int) perRun, walls.budgetMs());
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
-                project.files(), wall);
+                project.files(), walls.wallMs());
         return toResults(run, cases);
+    }
+
+    /** Mur du conteneur et budget du superviseur d'un job de notation. */
+    record Walls(long wallMs, long budgetMs) { }
+
+    /**
+     * Mur du conteneur, et budget du superviseur. INVARIANT :
+     *     budget + pire cas d'UN cas + marge de clôture ≤ mur
+     * Le superviseur ne teste son budget qu'AVANT de démarrer un cas : un cas lancé juste avant
+     * l'échéance doit pouvoir aller jusqu'au bout (compilations + run) ET laisser le temps
+     * d'imprimer le JSON — sans quoi le conteneur était tué au mur, tout le travail perdu, 502,
+     * tentative supprimée.
+     *
+     * <p>Le budget porte un plancher PROPORTIONNEL (60 % du mur), en plus de la formule
+     * stricte. Dériver le budget du seul pire cas THÉORIQUE (compilations au plafond de 90 s)
+     * le faisait tomber à 1 s sous le plafond public de 4 min — le pire cas d'un SEUL cas y
+     * dépasse le mur entier (295 s en Java) : le « Tester » du prof ne notait qu'un cas, voire
+     * aucun quand un canari passait en premier, sur les six langages compilés.
+     *
+     * <p>Ce plancher ne relâche l'invariant QUE là où il était déjà insatisfiable. Dès que
+     * {@code mur ≥ 2,5 × pireCas} — tous les murs non plafonnés, puisque le mur candidat vaut
+     * {@code 30 s + (N+2) × pireCas ≥ 3 × pireCas} — la marge de 40 % couvre le pire cas et
+     * l'invariant tient. Sous le plafond public, il cédait déjà (marge réelle 239 s < 295 s,
+     * pour un budget de 1 s) ; la conséquence d'un mur atteint y est un 502 sur le « Tester »
+     * du prof, sans tentative supprimée — le chemin interne, lui, garde la formule stricte.
+     */
+    static Walls walls(String runnerLanguage, int caseCount, long perRunMs, long maxWallMs) {
+        long perCase = perRunMs + PER_CASE_OVERHEAD_MS
+                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
+        long wallCandidate = BASE_OVERHEAD_MS + (caseCount + 2L) * perCase;
+        long cap = Math.min(maxWallMs, MAX_WALL_MS);
+        long wall = Math.min(cap, wallCandidate);
+        long budget = Math.max(1_000,
+                Math.max(wall - perCase - CLOSING_MARGIN_MS, wall * 3 / 5));
+        return new Walls(wall, budget);
     }
 
     private List<TestResult> toResults(DockerSandbox.ContainerRun run, List<TestCaseInput> cases) {
