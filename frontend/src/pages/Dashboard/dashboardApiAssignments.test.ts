@@ -47,7 +47,13 @@ describe('devoirs : données fictives', () => {
   });
 
   it('une remise s’ajoute au devoir et le remplace au besoin', async () => {
-    const [assignment] = (await fetchAssignments(3)).filter((a) => !a.submission);
+    // Le devoir à l’échéance la plus LOINTAINE : les échéances fictives sont relatives à
+    // « maintenant » en heure LOCALE, et le premier devoir de la liste peut échoir le jour
+    // même — déjà passé en CI (UTC) mais pas en local (UTC−5), donc « late » basculait
+    // selon le fuseau et l’heure du run. Celui de la semaine prochaine ne bascule jamais.
+    const candidats = (await fetchAssignments(3)).filter((a) => !a.submission && a.dueAt);
+    const assignment = candidats.reduce((x, y) =>
+      new Date(x.dueAt!) > new Date(y.dueAt!) ? x : y);
 
     const updated = await submitAssignment(3, assignment.id, ['mon.zip']);
     expect(updated.submission?.fileNames).toEqual(['mon.zip']);
