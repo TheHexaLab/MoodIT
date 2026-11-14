@@ -893,6 +893,21 @@ class PermissionServiceTest {
   }
 
   @Test
+  void execEvaluate_adminProgramme_allowed() {
+    // Un admin de programme édite des quiz (canManageQuizContent), donc son « Tester » doit
+    // passer. Cette branche de la règle n'était couverte par aucun test : retirer le
+    // `hasRoleInAnyProgram(ADMIN)` ne faisait rougir personne, et une régression lui aurait
+    // retiré le bouton en silence (403), PIT ne tournant que la nuit et sur main.
+    loggedIn(user(5));
+    // TEACHER est stubbe EXPLICITEMENT a false : en STRICT_STUBS, un appel non couvert sur
+    // une methode qui porte d'autres stubs leve PotentialStubbingProblem, que isAllowed
+    // avale en fail-closed — le test echouait alors sans jamais evaluer la branche ADMIN.
+    when(membershipService.hasRoleInAnyProgram(5L, RoleNames.TEACHER)).thenReturn(false);
+    when(membershipService.hasRoleInAnyProgram(5L, RoleNames.ADMIN)).thenReturn(true);
+    assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isTrue();
+  }
+
+  @Test
   void execEvaluate_etudiant_denied() {
     // Un étudiant passe par « Exécuter » (/exec/run) et par la soumission de quiz, jamais ici.
     loggedIn(user(5));
