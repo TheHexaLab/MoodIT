@@ -190,9 +190,13 @@ describe('ManageTeamsPopup', () => {
   it('le dernier étudiant placé envoie le focus sur le précédent, puis sur « Ajouter une équipe »', async () => {
     popup({ onFetch: vi.fn().mockResolvedValue({ teams: [OPEN], unassigned: ['E', 'F'] }) });
     fireEvent.change(await screen.findByLabelText('Équipe de F'), { target: { value: '2' } });
-    expect(document.activeElement).toBe(screen.getByLabelText('Équipe de E'));
+    // waitFor : le composant pose le focus APRES son rendu — une lecture synchrone de
+    // document.activeElement perdait la course sur un runner CI chargé (vert en local,
+    // rouge intermittent en CI). La sémantique testée ne change pas : le focus FINIT là.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Équipe de E')));
     fireEvent.change(screen.getByLabelText('Équipe de E'), { target: { value: '2' } });
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' })));
   });
 
   it('ajoute une équipe vide, au premier numéro libre', async () => {
