@@ -341,9 +341,9 @@ def free_bytes_under(blocks_available, block_size, threshold):
     return blocks_available * block_size < threshold
 
 
-def kill_student_survivors():
-    """Balaye les processus UID étudiant restés en vie (fork + setsid échappe au killpg du
-    timeout) : isolation entre les cas d'une même évaluation. Appelé entre deux cas."""
+def _une_passe_survivants():
+    """UNE passe sur /proc : tue tout processus de l'UID etudiant, rend le nombre atteint."""
+    atteints = 0
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
@@ -353,9 +353,116 @@ def kill_student_survivors():
                     if line.startswith("Uid:"):
                         if int(line.split()[1]) == STUDENT_UID:
                             os.kill(int(pid), signal.SIGKILL)
+                            atteints += 1
                         break
         except (OSError, ValueError):
             continue
+    return atteints
+
+
+def kill_student_survivors():
+    """Balaye les processus UID etudiant restes en vie (fork + setsid echappe au killpg du
+    timeout) : isolation entre les cas d'une meme evaluation. Appele entre deux cas.
+
+    EN BOUCLE, jusqu'a une passe BLANCHE : une passe unique se faisait esquiver par une chaine
+    de fork plus rapide qu'elle — chaque passe tue ce qu'elle voit, et on ne s'arrete que
+    quand une passe complete n'a plus rien vu (borne a 25 passes : la limite de PID du
+    conteneur empeche la chaine de durer, et on ne reste pas coince ici)."""
+    for _ in range(25):
+        if _une_passe_survivants() == 0:
+            return
+        time.sleep(0.05)
+
+
+def purge_partages():
+    """Vide /tmp et /dev/shm entre deux cas : ces tmpfs survivent d'un cas a l'autre, et un
+    fichier depose au cas N (un nonce exfiltre, un relais) etait lisible au cas N+1."""
+    for dossier in ("/tmp", "/dev/shm"):
+        try:
+            for nom in os.listdir(dossier):
+                chemin = os.path.join(dossier, nom)
+                try:
+                    if os.path.isdir(chemin) and not os.path.islink(chemin):
+                        shutil.rmtree(chemin, ignore_errors=True)
+                    else:
+                        os.unlink(chemin)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+
+
+
+def preexec_student_compile():
+    """Compilation du CODE SOUMIS : sous l'UID ETUDIANT, jamais root.
+
+    Le compilateur obeit a un texte choisi par l'etudiant — include_str! (Rust), .incbin via
+    asm (C/C++), preambule cgo (Go) — et peut donc EMBARQUER dans le binaire tout fichier
+    lisible par son processus. Compile par root, « tout fichier » incluait le noteur, nonce
+    compris, deja sur disque a cote. Sous l'UID etudiant, ces inclusions recoivent EACCES
+    comme n'importe quelle autre lecture : la garantie ne depend plus d'une liste d'idiomes
+    d'inclusion a connaitre, mais des droits."""
+    os.setsid()
+    os.setgroups([])
+    os.setgid(STUDENT_GID)
+    os.setuid(STUDENT_UID)
+
+
+def etu_build_env(build_dir):
+    """Environnement de la compilation ETUDIANTE : tout ce qui s'ecrit lui appartient.
+
+    CGO_ENABLED=0 est pose ICI et dans base_env : l'ENV du Dockerfile go ne survit pas au
+    env= de Popen, qui REMPLACE l'environnement — la parade de l'image etait perdue en
+    silence."""
+    return {
+        "PATH": os.environ.get("PATH",
+                               "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
+        "HOME": os.path.join(build_dir, "home"),
+        "LANG": "C.UTF-8",
+        "TMPDIR": os.path.join(build_dir, "tmp"),
+        "GOCACHE": os.path.join(BOX, "gocache_etu"),
+        "GOPATH": os.path.join(BOX, "gopath_etu"),
+        "GOFLAGS": "-mod=mod",
+        "CGO_ENABLED": "0",
+        "RUSTUP_HOME": "/usr/local/rustup",
+    }
+
+
+def chown_arbre(racine, uid, gid):
+    """chown recursif, racine comprise."""
+    for r, ds, fs in os.walk(racine):
+        for nom in ds + fs:
+            os.chown(os.path.join(r, nom), uid, gid)
+    os.chown(racine, uid, gid)
+
+
+def chantier_etudiant(case_dir):
+    """Chantier de compilation ETUDIANT : ne contient que son code, et lui appartient."""
+    d = os.path.join(case_dir, "etu_build")
+    os.makedirs(os.path.join(d, "home"), exist_ok=True)
+    os.makedirs(os.path.join(d, "tmp"), exist_ok=True)
+    chown_arbre(d, STUDENT_UID, STUDENT_GID)
+    os.chmod(d, 0o700)
+    return d
+
+
+def ecrire_prive(chemin, texte):
+    """Fichier SECRET (noteur : harnais + nonce) en 0600 root DES SA CREATION.
+
+    Ouvert puis ecrit en 0644 par defaut, il restait lisible de tous pendant toute la fenetre
+    des compilations — le chmod d'apres-coup fermait la porte apres le passage."""
+    fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(texte)
+
+
+def verrouille_src(case_dir):
+    """Bloque la TRAVERSEE de src/ (harnais marque compris) avant toute compilation etudiante.
+    root, lui, lit a travers ; le processus etudiant recoit EACCES."""
+    src = os.path.join(case_dir, "src")
+    if os.path.isdir(src):
+        os.chown(src, 0, 0)
+        os.chmod(src, 0o700)
 
 
 def preexec_compile():
@@ -536,6 +643,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
         except OSError:
             pass
         kill_student_survivors()
+        purge_partages()
         echeance = time.monotonic() + PUMP_SWEEP_JOIN_S
         for pump in pumps:
             pump.join(timeout=max(0, echeance - time.monotonic()))
@@ -610,6 +718,7 @@ def base_env(case_dir):
         "GOPATH": os.path.join(BOX, "gopath"),
         "GOFLAGS": "-mod=mod",
         "CARGO_HOME": os.path.join(BOX, "cargo"),
+        "CGO_ENABLED": "0",
         "CARGO_TARGET_DIR": os.path.join(case_dir, "target"),
         "MONO_PATH": "/opt/moodit",
         "RUSTUP_HOME": "/usr/local/rustup",
@@ -699,7 +808,9 @@ def prep_run(case_dir, src):
 
 def run_c(case_dir, env, timeout_s, case_index):
     """Notation d'un cas C : harnais booleen, deux programmes, deux UID."""
-    return run_c_rpc(case_dir, env, timeout_s, case_index, "gcc", "-std=c17", "c")
+    # gnu17, comme le mode « Executer » : en ISO strict (-std=c17), M_PI ou strdup passaient
+    # au bouton « Executer » et echouaient a la notation — meme code, deux verdicts.
+    return run_c_rpc(case_dir, env, timeout_s, case_index, "gcc", "-std=gnu17", "c")
 
 
 def run_cpp(case_dir, env, timeout_s, case_index):
@@ -786,7 +897,7 @@ JAVA_MODS = (r"(?:public|protected|private|static|final|synchronized|native|stri
 # `static` present : chemin FONCTION.
 JAVAP_SIGNATURE = re.compile(
     r"^\s+(?=(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
-    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
+    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 
 # Types marshalables par le protocole de ce premier jalon. Une méthode qui en sort n'est PAS
 # proxifiée : le harnais qui l'appelle échoue alors à la compilation — message clair pour le
@@ -809,12 +920,12 @@ JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.
 # STATIQUE ne peut pas etre prise pour une methode d instance : son `static` ajoute un
 # jeton, donc le nom ne colle plus a la parenthese.
 JAVAP_CTOR = re.compile(
-    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^)]*)\);", re.M)
+    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 # `static` ABSENT : chemin OBJET. Sans cette anticipation, une statique serait proxifiee
 # comme une methode d instance et le bouchon appellerait une poignee inexistante.
 JAVAP_METHOD = re.compile(
     r"^\s+(?!(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
-    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\);", re.M)
+    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 
 
 def java_class_api(javap_output):
@@ -1051,7 +1162,14 @@ final class MooditRpc {
     static long long_(String nom, Object[] args) { return Long.parseLong(valeur(echange(nom, args))); }
     static double double_(String nom, Object[] args) { return Double.parseDouble(valeur(echange(nom, args))); }
     static boolean boolean_(String nom, Object[] args) { return Boolean.parseBoolean(valeur(echange(nom, args))); }
-    static String string(String nom, Object[] args) { return dechaine(valeur(echange(nom, args))); }
+    static String string(String nom, Object[] args) {
+        String v = valeur(echange(nom, args));
+        // JSON null (sans guillemets) = la fonction a rendu null. Livre comme le TEXTE
+        // « null », `== null` etait note faux et `"null".equals(...)` vrai — un faux verdict
+        // SILENCIEUX. Une vraie chaine "null" voyage, elle, entre guillemets (puis en hexa).
+        if (v.equals("null")) { return null; }
+        return dechaine(v);
+    }
 
     private static String dechaine(String v) {
         if (v.length() >= 2 && v.startsWith("\\"")) { v = v.substring(1, v.length() - 1); }
@@ -1092,12 +1210,16 @@ __CORPS__
             // fail-closed, mais JAMAIS en silence : un harnais qui lève doit le dire au prof
             // (c'est son code, pas celui de l'étudiant). Aucun secret ne transite par là.
             ok = false;
-            System.err.println("[MOODIT] harnais: " + t);
+            // Texte relaye SANS saut de ligne : il contient des octets choisis par
+            // l etudiant, et une ligne fabriquee est la matiere premiere d une forge.
+            System.err.println("[MOODIT] harnais: "
+                    + String.valueOf(t).replace((char) 10, ' ').replace((char) 13, ' '));
         }
         if (ok) {
             // Nonce sur STDERR : stdout est le tube vers l'étudiant, et l'étudiant ne tient
             // aucun descripteur sur ce flux-ci.
-            System.err.print("__NONCE__");
+            System.err.println();
+            System.err.println("__NONCE__");
             System.err.flush();
         }
         System.exit(ok ? 0 : 1);
@@ -1424,7 +1546,14 @@ def go_struct_fields(source):
                 liste = None
                 break
             for nom in morceaux[:-1]:
+                # Seul chemin ou du texte etudiant LIBRE entrait dans la source du NOTEUR :
+                # contraint a un identifiant strict, tout le reste ecarte la structure.
+                if not re.fullmatch(r"[A-Za-z_]\w*", nom):
+                    liste = None
+                    break
                 liste.append((nom, morceaux[-1]))
+            if liste is None:
+                break
         if liste:
             champs[typ] = liste
     return champs
@@ -1687,14 +1816,23 @@ func main() {
         defer func() {
             if r := recover(); r != nil {
                 // fail-closed, mais jamais en silence : c'est le code du PROF qui a levé.
-                fmt.Fprintln(os.Stderr, "[MOODIT] harnais:", r)
+                // Texte relaye SANS saut de ligne : rep.Error est DECODE du JSON,
+                // il peut donc contenir ce que le wire une-ligne ne portait pas.
+                moodit_msg := []rune(fmt.Sprint(r))
+                for i, c := range moodit_msg {
+                    if c == 10 || c == 13 {
+                        moodit_msg[i] = 32
+                    }
+                }
+                fmt.Fprintln(os.Stderr, "[MOODIT] harnais:", string(moodit_msg))
                 ok = false
             }
         }()
         ok = mooditHarnais()
     }()
     if ok {
-        fmt.Fprint(os.Stderr, "%s")
+        fmt.Fprintln(os.Stderr)
+        fmt.Fprintln(os.Stderr, "%s")
     }
     if ok {
         os.Exit(0)
@@ -2006,7 +2144,14 @@ def c_signatures(source, cpp=False):
         types = []
         valide = True
         for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-            morceaux = groupe.replace("*", " ").split()
+            # Pointeur, tableau ou reference : type NON marshalable -> la fonction est ecartee
+            # (pas de bouchon), au lieu d etre prise pour un scalaire — `int *tab` devenait
+            # `int tab` dans le bouchon, et un simple HELPER a pointeurs faisait echouer la
+            # compilation de toute la question sur du code valide.
+            if any(c in groupe for c in "*[&"):
+                valide = False
+                break
+            morceaux = groupe.split()
             if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
                 valide = False
                 break
@@ -2222,7 +2367,9 @@ static int moodit_harnais(void) {
 
 int main(void) {
     if (moodit_harnais()) {
+        fputc(10, stderr);
         fputs("''' + nonce + r'''", stderr);
+        fputc(10, stderr);
         fflush(stderr);
         return 0;
     }
@@ -2603,7 +2750,10 @@ def rust_grader_source(methods, harness_code, nonce, objets=(), champs=None):
     let brut = moodit_appel(&id, &requete);
     %s
 }''' % (nom, params, retour, nom, args, parse))
-    return '''use std::io::{BufRead, Write};
+    return '''// Imports ALIASES : le serveur partage le fichier du code soumis, et un `use` identique
+// chez l etudiant levait E0252 (import en double) sur du code valide. Les methodes de
+// trait marchent des que le trait est en portee, quel que soit son nom.
+use std::io::{BufRead as MooditBufRead, Write as MooditWrite};
 
 fn moodit_hexe(s: &str) -> String {
     // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
@@ -2672,7 +2822,8 @@ fn moodit_harnais() -> bool {
 fn main() {
     let ok = std::panic::catch_unwind(moodit_harnais).unwrap_or(false);
     if ok {
-        eprint!("%s");
+        eprintln!();
+        eprintln!("%s");
         std::io::stderr().flush().unwrap();
         std::process::exit(0);
     }
@@ -2942,7 +3093,8 @@ public static class MooditGrader {
             ok = false;
         }
         if (ok) {
-            Console.Error.Write("%s");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("%s");
             Console.Error.Flush();
             return 0;
         }
@@ -3131,6 +3283,88 @@ def cs_object_api(source, classe):
 CS_CLASS = re.compile(r"(?:public\s+|static\s+)*class\s+(\w+)")
 
 
+def code_blanchi(texte, backticks=False, rust=False):
+    """Source sans commentaires ni litteraux, pour l EXTRACTION seulement (lignes preservees).
+
+    Une fonction gardee en commentaire de bloc etait extraite comme une vraie signature :
+    bouchon en double, echec de compilation, 0 sur une reponse juste. Porte du correctif C#
+    aux quatre autres langages. `backticks` couvre les chaines brutes Go ; `rust` masque
+    d abord les litteraux de caractere via CHAR_LITERAL (une apostrophe de lifetime n ouvre
+    pas une chaine) et gere les chaines brutes r"..."/r#"..."#."""
+    texte = texte or ""
+    if rust:
+        texte = CHAR_LITERAL.sub(lambda m: " " * len(m.group(0)), texte)
+    res = []
+    i = 0
+    n = len(texte)
+    while i < n:
+        c = texte[i]
+        deux = texte[i:i + 2]
+        if deux == "//":
+            while i < n and texte[i] != chr(10):
+                res.append(" ")
+                i += 1
+        elif deux == "/*":
+            res.append("  ")
+            i += 2
+            profondeur = 1
+            while i < n and profondeur:
+                if rust and texte[i:i + 2] == "/*":
+                    profondeur += 1
+                    res.append("  ")
+                    i += 2
+                elif texte[i:i + 2] == "*/":
+                    profondeur -= 1
+                    res.append("  ")
+                    i += 2
+                else:
+                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    i += 1
+        elif rust and c == "r" and texte[i + 1:i + 2] in ('"', "#"):
+            j = i + 1
+            dieses = 0
+            while texte[j:j + 1] == "#":
+                dieses += 1
+                j += 1
+            if texte[j:j + 1] != '"':
+                res.append(c)
+                i += 1
+                continue
+            fin = '"' + "#" * dieses
+            k = texte.find(fin, j + 1)
+            k = n if k < 0 else k + len(fin)
+            for x in texte[i:k]:
+                res.append(x if x == chr(10) else " ")
+            i = k
+        elif backticks and c == "`":
+            res.append(" ")
+            i += 1
+            while i < n and texte[i] != "`":
+                res.append(texte[i] if texte[i] == chr(10) else " ")
+                i += 1
+            if i < n:
+                res.append(" ")
+                i += 1
+        elif c == '"' or (not rust and c == chr(39)):
+            quote = c
+            res.append(" ")
+            i += 1
+            while i < n and texte[i] != quote:
+                if texte[i] == chr(92) and i + 1 < n:
+                    res.append("  ")
+                    i += 2
+                else:
+                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    i += 1
+            if i < n:
+                res.append(" ")
+                i += 1
+        else:
+            res.append(c)
+            i += 1
+    return "".join(res)
+
+
 def cs_sans_commentaires(texte):
     """Source C# sans commentaires ni litteraux (remplaces par des espaces, lignes preservees).
 
@@ -3267,6 +3501,7 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
             except subprocess.TimeoutExpired:
                 pass
         kill_student_survivors()
+        purge_partages()
         return code, expire, read_capped(g_err_path), read_capped(s_err_path)
     except OSError as e:
         for fd in (req_r, req_w, rep_r, rep_w):
@@ -3300,6 +3535,16 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     not_classes = os.path.join(case_dir, "not_classes")
     for d in (etu_src, etu_classes, not_src, not_classes):
         os.makedirs(d, exist_ok=True)
+    # Le dossier du NOTEUR est ferme des sa naissance, et la compilation ETUDIANTE tourne sous
+    # l'UID etudiant dans des dossiers a lui — meme regime que les quatre langages a inclusion
+    # textuelle, pour un seul invariant au lieu de six.
+    os.chmod(not_src, 0o700)
+    os.chmod(not_classes, 0o700)
+    verrouille_src(case_dir)
+    chantier = chantier_etudiant(case_dir)
+    for d in (etu_src, etu_classes):
+        os.chown(d, STUDENT_UID, STUDENT_GID)
+        os.chmod(d, 0o700)
 
     # 1. Le code étudiant, SEUL. Son fichier harnais n'est même pas copié ici.
     student_file = None
@@ -3313,12 +3558,13 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         student_file = os.path.join(etu_src, nom)
         with open(student_file, "w", encoding="utf-8") as f:
             f.write(contenu)
+        os.chown(student_file, STUDENT_UID, STUDENT_GID)
     if student_file is None:
         return None, "Aucun fichier de code soumis"
     code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", etu_classes, student_file],
-                            case_dir, env, COMPILE_TIMEOUT_S,
+                            case_dir, etu_build_env(chantier), COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                            preexec_compile)
+                            preexec_student_compile)
     if expire or code != 0:
         return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
 
@@ -3359,10 +3605,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                 contenu = f.read()
             if "__MOODIT_HARNAIS__" in contenu:
                 harnais = contenu.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
-    with open(os.path.join(not_src, classe + ".java"), "w", encoding="utf-8") as f:
-        f.write(java_stub_source(classe, methodes, objets, soi_ctors, soi_instance))
-    with open(os.path.join(not_src, "MooditGrader.java"), "w", encoding="utf-8") as f:
-        f.write(java_grader_source(harnais, TOKENS.get(case_index) or ""))
+    ecrire_prive(os.path.join(not_src, classe + ".java"),
+                 java_stub_source(classe, methodes, objets, soi_ctors, soi_instance))
+    ecrire_prive(os.path.join(not_src, "MooditGrader.java"),
+                 java_grader_source(harnais, TOKENS.get(case_index) or ""))
     code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", not_classes,
                              os.path.join(not_src, classe + ".java"),
                              os.path.join(not_src, "MooditGrader.java")],
@@ -3466,24 +3712,31 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
                       "double, bool, string).")
     harnais = harness_rpc_body(case_dir) or ""
 
-    etu_src = os.path.join(case_dir, "serveur.cs")
+    verrouille_src(case_dir)
+    chantier = chantier_etudiant(case_dir)
+    etu_src = os.path.join(chantier, "serveur.cs")
     not_src = os.path.join(case_dir, "noteur.cs")
-    etu_copie = os.path.join(case_dir, "solution_etu.cs")
+    etu_copie = os.path.join(chantier, "solution_etu.cs")
     with open(etu_copie, "w", encoding="utf-8") as f:
         f.write(student_source)
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(cs_server_source(cs_student_classes(extraction)))
-    with open(not_src, "w", encoding="utf-8") as f:
-        f.write(cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "", classe,
-                                 ctors, instance))
-    bin_etu = os.path.join(case_dir, "etu.exe")
+    for chemin in (etu_copie, etu_src):
+        os.chown(chemin, STUDENT_UID, STUDENT_GID)
+    ecrire_prive(not_src, cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
+                                           classe, ctors, instance))
+    bin_etu = os.path.join(chantier, "etu.exe")
     bin_not = os.path.join(case_dir, "noteur.exe")
-    for cmd, etiquette in (
-            (["mcs", "-main:MooditServer", "-out:" + bin_etu, etu_src, etu_copie], "code soumis"),
-            (["mcs", "-main:MooditGrader", "-out:" + bin_not, not_src], "harnais")):
-        code, expire = run_proc(cmd, case_dir, env, COMPILE_TIMEOUT_S,
+    # C# n'a pas d'inclusion textuelle a la compilation, mais le serveur est compile AVEC le
+    # code soumis : meme regime que les autres — sous l'UID etudiant, dans son chantier.
+    for cmd, etiquette, cwd_c, env_c, prex in (
+            (["mcs", "-main:MooditServer", "-out:" + bin_etu, etu_src, etu_copie],
+             "code soumis", chantier, etu_build_env(chantier), preexec_student_compile),
+            (["mcs", "-main:MooditGrader", "-out:" + bin_not, not_src],
+             "harnais", case_dir, env, preexec_compile)):
+        code, expire = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_compile)
+                                prex)
         if expire or code != 0:
             detail = (read_capped(os.path.join(case_dir, "cc.err"))
                       or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
@@ -3508,28 +3761,36 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
         if nom == "solution.rs":
             with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    methodes = rust_signatures(student_source)
-    objets = rust_object_api(student_source)
+    extraction = code_blanchi(student_source, rust=True)
+    methodes = rust_signatures(extraction)
+    objets = rust_object_api(extraction)
     champs = rust_capture_fields(student_source)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : i32, "
                       "i64, f64, bool, String).")
     harnais = harness_rpc_body(case_dir) or ""
 
-    etu_src = os.path.join(case_dir, "etu.rs")
+    verrouille_src(case_dir)
+    chantier = chantier_etudiant(case_dir)
+    etu_src = os.path.join(chantier, "etu.rs")
     not_src = os.path.join(case_dir, "noteur.rs")
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(rust_server_source(methodes, student_source, objets, champs))
-    with open(not_src, "w", encoding="utf-8") as f:
-        f.write(rust_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
-    bin_etu = os.path.join(case_dir, "etu_bin")
+    os.chown(etu_src, STUDENT_UID, STUDENT_GID)
+    ecrire_prive(not_src,
+                 rust_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
+    bin_etu = os.path.join(chantier, "etu_bin")
     bin_not = os.path.join(case_dir, "noteur_bin")
-    for source, sortie, etiquette in ((etu_src, bin_etu, "code soumis"),
-                                      (not_src, bin_not, "harnais")):
+    # Compilation etudiante sous SON UID, dans SON chantier : `include_str!("noteur.rs")`
+    # embarquait harnais et nonce quand rustc tournait en root a cote du noteur.
+    for source, sortie, etiquette, cwd_c, env_c, prex in (
+            (etu_src, bin_etu, "code soumis", chantier, etu_build_env(chantier),
+             preexec_student_compile),
+            (not_src, bin_not, "harnais", case_dir, env, preexec_compile)):
         code, expire = run_proc(["rustc", "-O", "--edition", "2021", source, "-o", sortie],
-                                case_dir, env, COMPILE_TIMEOUT_S,
+                                cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_compile)
+                                prex)
         if expire or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if etiquette == "harnais":
@@ -3547,7 +3808,12 @@ def rpc_verdict(jeton, g_err, s_err):
     si aucun jeton n'a été armé. Le détail privilégie le message du NOTEUR — c'est lui qui sait
     pourquoi le harnais a échoué ; le stderr de l'étudiant ne vient qu'ensuite, et il est choisi
     par lui, donc jamais présenté comme la cause."""
-    passed = bool(jeton) and jeton in (g_err or "")
+    # LIGNE EXACTE, pas une sous-chaine : les noteurs relaient des messages d erreur dont le
+    # texte vient de l etudiant — en sous-chaine, toute fuite du nonce devenait un « reussi »
+    # des que ce texte le contenait. Le noteur emet le nonce encadre de sauts de ligne, et les
+    # relais remplacent \n/\r par des espaces : un texte relaye ne peut pas fabriquer de ligne.
+    passed = bool(jeton) and any(
+        ligne.rstrip(chr(13)) == jeton for ligne in (g_err or "").split(chr(10)))
     if passed:
         return True, None
     detail = (first_lines(g_err or "", r"^\[MOODIT\]")
@@ -3608,28 +3874,37 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         if nom.startswith("solution.") :
             with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    objets = cpp_object_api(student_source) if ext == "cpp" else []
-    methodes = c_signatures(student_source, cpp=(ext == "cpp"))
+    extraction = code_blanchi(student_source)
+    objets = cpp_object_api(extraction) if ext == "cpp" else []
+    methodes = c_signatures(extraction, cpp=(ext == "cpp"))
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
     harnais = harness_rpc_body(case_dir) or ""
 
-    etu_src = os.path.join(case_dir, "etu." + ext)
+    verrouille_src(case_dir)
+    chantier = chantier_etudiant(case_dir)
+    etu_src = os.path.join(chantier, "etu." + ext)
     not_src = os.path.join(case_dir, "noteur." + ext)
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(c_server_source(methodes, student_source, cpp=(ext == "cpp"), objets=objets))
-    with open(not_src, "w", encoding="utf-8") as f:
-        f.write(c_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
-                                cpp=(ext == "cpp"), objets=objets))
-    bin_etu = os.path.join(case_dir, "etu_bin")
+    os.chown(etu_src, STUDENT_UID, STUDENT_GID)
+    ecrire_prive(not_src, c_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
+                                          cpp=(ext == "cpp"), objets=objets))
+    bin_etu = os.path.join(chantier, "etu_bin")
     bin_not = os.path.join(case_dir, "noteur_bin")
-    for source, sortie, etiquette in ((etu_src, bin_etu, "code soumis"),
-                                      (not_src, bin_not, "harnais")):
+    # Le code soumis est compile SOUS L'UID ETUDIANT, dans un chantier qui ne contient que
+    # lui : compile par root a cote du noteur, un `.incbin`/`#include` embarquait harnais et
+    # nonce dans le binaire note. Le noteur, lui, reste compile par root — aucune ligne
+    # etudiante n'y entre.
+    for source, sortie, etiquette, cwd_c, env_c, prex in (
+            (etu_src, bin_etu, "code soumis", chantier, etu_build_env(chantier),
+             preexec_student_compile),
+            (not_src, bin_not, "harnais", case_dir, env, preexec_compile)):
         code, expire = run_proc([compiler, std, "-O1", source, "-o", sortie, "-lm"],
-                                case_dir, env, COMPILE_TIMEOUT_S,
+                                cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_compile)
+                                prex)
         if expire or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if etiquette == "harnais":
@@ -3655,8 +3930,9 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
                 contenu = f.read()
             if "__MOODIT_HARNAIS__" not in contenu and "_test.go" not in nom:
                 student_source = contenu
-    methodes = go_signatures(student_source)
-    objets = go_object_api(student_source)
+    extraction = code_blanchi(student_source, backticks=True)
+    methodes = go_signatures(extraction)
+    objets = go_object_api(extraction)
     champs = go_capture_fields(student_source)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
@@ -3671,18 +3947,26 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         f.write(go_student_without_main(student_source))
     with open(os.path.join(etu, "serveur.go"), "w", encoding="utf-8") as f:
         f.write(go_server_source(methodes, objets, champs))
-    with open(os.path.join(noteur, "go.mod"), "w", encoding="utf-8") as f:
-        f.write("module moodit_noteur\n\ngo 1.23\n")
-    with open(os.path.join(noteur, "noteur.go"), "w", encoding="utf-8") as f:
-        f.write(go_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
+    ecrire_prive(os.path.join(noteur, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
+    ecrire_prive(os.path.join(noteur, "noteur.go"),
+                 go_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
+    os.chmod(noteur, 0o700)
 
-    bin_etu = os.path.join(case_dir, "etu_bin")
+    # Le module ETUDIANT lui appartient, et son build tourne sous SON UID avec CGO coupe : en
+    # root avec cgo actif (la parade du Dockerfile etait perdue par le env= de Popen), un
+    # preambule cgo embarquait ../noteur/noteur.go — harnais et nonce — dans le binaire note.
+    verrouille_src(case_dir)
+    chantier = chantier_etudiant(case_dir)
+    chown_arbre(etu, STUDENT_UID, STUDENT_GID)
+    os.chmod(etu, 0o700)
+    bin_etu = os.path.join(etu, "etu_bin")
     bin_not = os.path.join(case_dir, "noteur_bin")
-    for dossier, sortie, etiquette in ((etu, bin_etu, "code soumis"),
-                                       (noteur, bin_not, "harnais")):
-        code, expire = run_proc(["go", "build", "-o", sortie, "."], dossier, env,
+    for dossier, sortie, etiquette, env_c, prex in (
+            (etu, bin_etu, "code soumis", etu_build_env(chantier), preexec_student_compile),
+            (noteur, bin_not, "harnais", env, preexec_compile)):
+        code, expire = run_proc(["go", "build", "-o", sortie, "."], dossier, env_c,
                                 COMPILE_TIMEOUT_S, os.path.join(case_dir, "cc.out"),
-                                os.path.join(case_dir, "cc.err"), preexec_compile)
+                                os.path.join(case_dir, "cc.err"), prex)
         if expire or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if etiquette == "harnais":
@@ -3914,11 +4198,27 @@ def wait_for_files():
 def main():
     # AVANT tout chown/setuid : l'UID étudiant de ce conteneur est tiré au sort.
     randomize_student_uid()
+    # Caches de build ETUDIANTS : a lui, puisque le compilateur du code soumis tourne sous son
+    # UID. (job.json n'existe pas encore ici — il est DEPLACE dans /box par wait_for_files ;
+    # son verrouillage se fait donc apres, une fois charge.)
+    for _d in ("gocache_etu", "gopath_etu"):
+        _chemin = os.path.join(BOX, _d)
+        os.makedirs(_chemin, exist_ok=True)
+        os.chown(_chemin, STUDENT_UID, STUDENT_GID)
+        os.chmod(_chemin, 0o700)
     if not wait_for_files():
         print(json.dumps({"v": 1, "error": "fichiers du job non reçus"}))
         return
     with open(os.path.join(BOX, "job.json"), "r", encoding="utf-8") as f:
         job = json.load(f)
+    # job.json porte le code de TOUS les harnais (cas caches compris) : il est DEPLACE ici par
+    # wait_for_files avec les perms du tar, donc potentiellement lisible. On le ferme MAINTENANT,
+    # root l'ayant deja lu. Meme chose pour l'arbre des cas, par securite.
+    try:
+        os.chown(os.path.join(BOX, "job.json"), 0, 0)
+        os.chmod(os.path.join(BOX, "job.json"), 0o600)
+    except OSError:
+        pass
     if job.get("mode") == "exec":
         exec_main(job)
         return
@@ -3952,6 +4252,12 @@ def main():
             subst.update({"__MOODIT_A__": str(a),
                           "__MOODIT_B__": str(a + 1 + rng.randrange(1000))})
         substitute_placeholders(case_dir, subst)
+    # Verrou de TOUS les src/ AVANT le premier cas : chaque cas ne verrouillait que le sien a
+    # son tour, donc un cas en cours pouvait lire le harnais des AUTRES cas — cas caches
+    # compris. root lit toujours a travers (il construit chaque noteur), le processus etudiant
+    # recoit EACCES. Le verrou par cas reste, en defense en profondeur.
+    for case in cases:
+        verrouille_src(os.path.join(BOX, "cases", str(case["index"])))
     order = list(cases)
     rng.shuffle(order)
 
@@ -4013,6 +4319,7 @@ def main():
         # groupe tué au timeout — il survivrait au cas et pourrait peser sur (voire tracer,
         # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
         kill_student_survivors()
+        purge_partages()
         # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
         # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
         # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en

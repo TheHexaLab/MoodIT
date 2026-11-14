@@ -24,7 +24,10 @@ Dans la console Hetzner → **Add Server** :
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images Docker du projet (services et runners) se buildent sur place ;
+> ARM (CAX) : les images des SERVICES se buildent sur place, mais **pas celles des runners**
+> depuis #116 : les Dockerfile java et csharp refusent volontairement une base non amd64
+> (invariant du miroir apt), et `python/requirements.txt` ne porte que des empreintes
+> amd64. Pour un hôte d'exécution, prendre du x86 ;
 > la prod actuelle tourne sur **x86** (CX32).
 
 ## 2. Pointer le domaine
@@ -141,6 +144,13 @@ Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
 docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 ```
 
+> **Premier déploiement de #116 — l'ancien `update.sh` s'exécute.** Le script qui tire cette
+> version est celui d'AVANT elle : il ne lance pas `docker/runners/build.sh`, ne passe pas
+> `--remove-orphans`, et surveille encore `moodit_piston`. Jusqu'à correction, toute exécution
+> rend 502 et les tentatives sont supprimées. Marche à suivre : construire les dix images runner
+> À LA MAIN (`bash docker/runners/build.sh`) avant de basculer, puis relancer `update.sh --force`
+> une fois la nouvelle version en place.
+
 ### Changement de schéma : migrations Flyway
 
 > **Déploiement du runner (#116) — une seule forme de harnais.** Le harnais d'un langage compilé
@@ -151,8 +161,14 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > existé dans une version intermédiaire de #116 et il est **retiré** : il compilait le harnais
 > AVEC le code de l'étudiant, donc le processus qui détenait le secret était celui que l'étudiant
 > contrôle. Un harnais qui en porte le marqueur est désormais refusé avec un diagnostic, avant
-> toute prise de place sandbox. Rien à convertir pour autant : ce format n'a jamais été déployé
-> (la production était à `V2`), donc aucune question existante n'en dépend.
+> toute prise de place sandbox. Le format framework n'a jamais été déployé (la production était
+> à `V2`), donc aucune question n'est à convertir DE ce format. **Mais attention aux questions
+> compilées antérieures à #116** : écrites pour l'époque où le harnais était compilé avec le code
+> de l'étudiant, elles pouvaient échanger n'importe quel type. Le chemin booléen ne transporte
+> que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
+> un harnais existant qui passe un tableau, une structure ou une collection ne compilera plus —
+> `passed=false` pour chaque étudiant, sans panne visible. **Avant le déploiement : inventorier
+> les Test_Case des six langages compilés et rejouer chacun avec « Tester ».**
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :

@@ -502,6 +502,35 @@ class RpcGradingIntegrationTest {
                 "fn copie(s: String) -> String { s }").passed()).isTrue();
     }
 
+    @Test
+    void inclusion_du_noteur_a_la_compilation_refusee() {
+        // Le compilateur OBEIT au texte soumis : il sait embarquer un fichier dans le binaire
+        // (include_str! en Rust, .incbin via asm en C). Compile par root a cote du noteur,
+        // c'etait le harnais ET le nonce dans le binaire note. La compilation etudiante tourne
+        // sous SON UID dans un chantier qui ne contient que son code : l'inclusion echoue, le
+        // cas est refuse, rien ne fuit.
+        assertThat(note("Rust", "copie(1) == 1", """
+                const G: &str = include_str!("noteur.rs");
+                fn copie(n: i32) -> i32 { if G.is_empty() { n } else { n } }
+                """).passed()).isFalse();
+        assertThat(note("C", "return doubler(2) == 4;", """
+                __asm__(".section .rodata\\n g: .incbin \\\"noteur.c\\\"\\n .previous");
+                int doubler(int n) { return n * 2; }
+                """).passed()).isFalse();
+    }
+
+    @Test
+    void cgo_reste_coupe_pour_le_build_etudiant() {
+        // CGO_ENABLED=0 du Dockerfile ne survivait PAS au env= de Popen : cgo redevenait actif
+        // et son preambule C savait inclure ../noteur/noteur.go. La variable est posee dans
+        // l'environnement de build lui-meme ; un import "C" doit donc echouer a compiler.
+        assertThat(note("Go", "return doubler(2) == 4", """
+                import "C"
+
+                func doubler(n int) int { return n * 2 }
+                """).passed()).isFalse();
+    }
+
     // ──────────────────── 2. Forger le résultat : plus aucun canal ────────────────────
 
     @Test
@@ -670,13 +699,19 @@ class RpcGradingIntegrationTest {
 
     @Test
     void c_harnais_introuvable() {
+        // La sonde cherche le texte du harnais parmi les fichiers APPARTENANT A ROOT (le harnais,
+        // le noteur, job.json) : c'est ce qu'une lecture de harnais vise reellement. Restreindre
+        // a `-user root` evite que la sonde ne se matche ELLE-MEME — la chaine recherchee figure
+        // dans son propre fichier source et son binaire, qui appartiennent a l'etudiant. Sous
+        // -std=gnu17 (desormais aligne sur « Executer »), popen compile : si le harnais etait
+        // lisible, ceci le trouverait. Il ne l'est pas.
         TestResult r = note("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 #include <string.h>
 
                 int doubler(int n) {
-                    /* Balayage du dossier du cas a la recherche du texte du harnais. */
-                    FILE *p = popen("grep -rl 'doubler(5)' /box 2>/dev/null | head -1", "r");
+                    FILE *p = popen("find /box -user root -type f -exec grep -l 'doubler(5)' {} + "
+                                    "2>/dev/null | head -1", "r");
                     char ligne[512];
                     int vu = 0;
                     if (p) {

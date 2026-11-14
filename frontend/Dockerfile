@@ -71,6 +71,10 @@ server {
         proxy_pass http://gateway:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # « Tester » est SYNCHRONE et borne a 4 min cote serveur (PUBLIC_WALL_MS) : le defaut
+        # nginx de 60 s coupait l'appel en plein vol — 504 au prof pendant que l'evaluation
+        # continuait, puis 429 au nouvel essai (EXEC_MAX_PER_USER). Marge au-dessus du mur.
+        proxy_read_timeout 300s;
     }
 
     location /auth/ {

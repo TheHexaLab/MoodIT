@@ -997,7 +997,20 @@ class GenerationTypesEtIdiomesTest(unittest.TestCase):
         self.assertEqual([c for c, _, _ in supervisor.cpp_object_api(source)], ["Rectangle"])
 
     def test_verdict_rpc_est_fail_closed(self):
-        self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", ""), (True, None))
+        # Le nonce ne vaut verdict que s'il occupe UNE LIGNE ENTIERE du stderr du noteur : en
+        # sous-chaine, le relais d'un message d'erreur choisi par l'etudiant suffisait a
+        # transformer toute fuite du nonce en « reussi ». La sonde exacte de la revue :
+        self.assertEqual(supervisor.rpc_verdict(
+            "1234567890123",
+            "[MOODIT] harnais: appel refuse par le code soumis : 1234567890123" + chr(10),
+            "")[0], False)
+        self.assertEqual(supervisor.rpc_verdict("N", "bruit N bruit", "")[0], False)
+        # La forme EMISE par les noteurs — le nonce encadre de sauts de ligne — passe, avec ou
+        # sans retour chariot de fin (tubes Windows ou non).
+        self.assertEqual(supervisor.rpc_verdict(
+            "N", "contexte" + chr(10) + "N" + chr(10), ""), (True, None))
+        self.assertEqual(supervisor.rpc_verdict(
+            "N", "N" + chr(13) + chr(10), ""), (True, None))
         # Sans nonce : échec, quoi qu'il arrive — noteur planté, jeton non armé, flux vide.
         passed, detail = supervisor.rpc_verdict("N", "", "")
         self.assertFalse(passed)

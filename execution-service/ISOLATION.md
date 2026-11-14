@@ -47,8 +47,12 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 ### Runner Docker des compilés (#116)
 
 Go, Rust, C, C++, C# et Java sont notés dans un **conteneur jetable** `moodit-runner-*`
-(réseau coupé, mémoire/PID/CPU bornés). Dans le conteneur, un **superviseur** (root) compile,
-verrouille les sources en 700 et exécute le code soumis sous un **UID dédié**.
+(réseau coupé, mémoire/PID/CPU bornés). Dans le conteneur, un **superviseur** (root) pilote la
+notation ; le code soumis est **compilé ET exécuté sous l'UID étudiant** — le compilateur obéit à
+un texte choisi par l'étudiant (`include_str!`, `.incbin`, cgo) et pouvait embarquer dans le
+binaire tout fichier lisible par son processus : compilé par root, cela incluait le noteur, nonce
+compris. Les sources du noteur naissent en 0600 root, et `src/` est verrouillé avant toute
+compilation étudiante.
 Le harnais est un CORPS qui renvoie un booléen — la seule forme notée (le format framework
 est refusé en amont, voir plus bas).
 
