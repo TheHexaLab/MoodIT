@@ -40,7 +40,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  *   1. exécution indisponible → la tentative pending est SUPPRIMÉE (rien ne subsiste, l'étudiant
  *      peut renvoyer sans consommer sa tentative) ;
  *   2. exécution réussie → verdicts persistés, tentative {@code "done"}, question Code notée.
- * {@link ExecutionClient} est mocké (pas de sandbox Piston dans un test).
+ * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
  */
 @DataJpaTest
 @Import({QuizService.class, AuditLogService.class, QuizItemObfuscator.class})
@@ -124,7 +124,7 @@ class QuizServiceSubmitIT {
   @DisplayName("Correction indisponible → tentative pending SUPPRIMÉE (rien ne subsiste, renvoi possible)")
   void grade_whenExecutionUnavailable_deletesAttempt() {
     // Sandbox injoignable → l'ExecutionClient renvoie null.
-    when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
+    when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
 
     // Soumission : persiste la tentative 'pending' + la réponse (async, rend l'id).
     Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
@@ -150,7 +150,7 @@ class QuizServiceSubmitIT {
   @DisplayName("Correction réussie → verdicts persistés, tentative 'done' et question Code notée")
   void grade_whenExecutionSucceeds_persistsVerdictsAndGrades() {
     // Le harnais unique passe.
-    when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true));
+    when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
 
     Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
     // Contexte frais : le job async relit la tentative dans une nouvelle transaction.

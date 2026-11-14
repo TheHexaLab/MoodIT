@@ -4,10 +4,13 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 /**
- * Harnais de test d'une question Code (table test_case). `harnessCode` est le code exécuté
- * contre la soumission de l'étudiant (écrit dans le langage {@code Language.harness_language_id}
- * de la question, ou son propre langage si null). `weight` = crédit partiel. DONNÉES CACHÉES :
- * jamais exposées au répondant.
+ * Harnais de test d'une question Code (table test_case) : {@code harnessCode} est un TEST
+ * exécutable contre la soumission. Interprétés/SQL/vues : code qui renvoie vrai/faux, dans le
+ * langage {@code Language.harness_language_id} ou celui de la question. Langages COMPILÉS (#116) :
+ * un CORPS qui renvoie un booléen, noté dans un programme séparé sous un UID séparé, noté par le runner
+ * Docker isolé d'execution-service (code étudiant sous UID dédié, harnais verrouillé, canaris
+ * anti-falsification). {@code weight} = crédit partiel. DONNÉES CACHÉES : jamais exposées au
+ * répondant.
  */
 @Entity
 @Data
@@ -21,6 +24,8 @@ public class TestCase {
     @Column(nullable = false, length = 128)
     private String name;
 
+    /** Code du harnais exécuté contre la soumission (renvoie vrai/faux). */
+    // NOT NULL rétabli en base par V6 (chaque harnais porte son code) : l'entité suit.
     @Column(name = "harness_code", nullable = false, columnDefinition = "TEXT")
     private String harnessCode;
 

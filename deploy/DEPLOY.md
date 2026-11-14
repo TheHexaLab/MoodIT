@@ -1,7 +1,7 @@
 # Déploiement MoodIT sur un VPS Hetzner (~8 €/mois)
 
 Guide de bout en bout : d'un compte Hetzner vide à l'app en HTTPS.
-LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
+LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **conteneurs runner Docker** (#116 — nécessite un VPS avec Docker, pas un PaaS).
 
 ---
 
@@ -24,9 +24,8 @@ Dans la console Hetzner → **Add Server** :
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images Docker du projet se buildent sur place, **sauf Piston** : son image
-> amont (`ghcr.io/engineer-man/piston`, épinglée par digest dans `piston/Dockerfile`) n'existe
-> qu'en linux/amd64. Pour Piston, prendre un serveur **x86** (CX32), comme la prod actuelle.
+> ARM (CAX) : les images Docker du projet (services et runners) se buildent sur place ;
+> la prod actuelle tourne sur **x86** (CX32).
 
 ## 2. Pointer le domaine
 
@@ -86,12 +85,16 @@ sed -i 's/moodit.example.com/TON_DOMAINE/' deploy/Caddyfile
 Depuis la **racine** du repo :
 
 ```bash
+# Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
+# Conteneurs jetables lancés par execution-service pour noter Go/Rust/C/C++/C#/Java
+# (les 10 images, ~8,5 Go au total ; à relancer quand docker/runners/ change).
+./docker/runners/build.sh
+
 docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
-Le premier build prend quelques minutes (6 services Java + frontend + Piston).
-`piston-init` installe les 12 langages puis s'arrête (normal), de même que `db-migrate`, qui crée
-le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
+Le premier build prend quelques minutes (6 services Java + frontend + les 10 images runner).
+`db-migrate` s'arrête après avoir créé le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
 
 Suivre les logs :
 
@@ -103,7 +106,7 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 
 - Ouvre **https://moodit.example.com** → l'app se charge en HTTPS (cadenas OK).
 - Crée un compte → tu reçois le **code par email** → connexion.
-- Ouvre un quiz de code, soumets → correction via Piston (WebSocket met à jour le score).
+- Ouvre un quiz de code, soumets → correction via les conteneurs runner (WebSocket met à jour le score).
 - (Admin) lance une **analyse MCP** → résultat via Groq, ou repli déterministe si la clé est absente.
 
 ---
@@ -139,6 +142,29 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 ```
 
 ### Changement de schéma : migrations Flyway
+
+> **Déploiement du runner (#116) — une seule forme de harnais.** Le harnais d'un langage compilé
+> est un CORPS qui renvoie un **booléen**, noté par le modèle à deux processus et deux UID
+> (verdict non falsifiable). C'est la forme des gabarits installés par `V9`, et la seule notée.
+>
+> Le format **vrai test du framework** (JUnit, NUnit, go test, cargo test, `moodit_check.h`) a
+> existé dans une version intermédiaire de #116 et il est **retiré** : il compilait le harnais
+> AVEC le code de l'étudiant, donc le processus qui détenait le secret était celui que l'étudiant
+> contrôle. Un harnais qui en porte le marqueur est désormais refusé avec un diagnostic, avant
+> toute prise de place sandbox. Rien à convertir pour autant : ce format n'a jamais été déployé
+> (la production était à `V2`), donc aucune question existante n'en dépend.
+>
+> Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
+> survivent au retrait du compose et gardent le volume occupé :
+>
+> ```bash
+> docker rm -f moodit_piston moodit_piston_init 2>/dev/null
+> docker volume rm moodit_piston_data
+> docker network rm moodit_sandbox 2>/dev/null   # réseau « sandbox » du compose, s'il reste
+> # L'image Piston (~1,5 Go) est TAGUÉE : `prune` ne la retire pas — la nommer explicitement
+> # (son nom exact : `docker images | grep -i piston`).
+> docker image rm $(docker images --filter "reference=*piston*" -q)
+> ```
 
 Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
 service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de
@@ -217,7 +243,13 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 ## Notes de coût / dimensionnement
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
-  dans le compose). Total observé ≈ 3,5-4 Go → marge confortable.
+  dans le compose). Total observé ≈ 3,5-4 Go au repos. **Pointes de notation (#116)** : chaque
+  conteneur runner s'ajoute à ce total pendant qu'il tourne : la pointe vaut
+  `SANDBOX_MEMORY_MB` × `EXEC_MAX_CONCURRENT` et autant de vCPU que `SANDBOX_CPUS` ×
+  `EXEC_MAX_CONCURRENT`. **Valeurs effectives de ce VPS** (`docker-compose-hetzner.yml`) :
+  1 Go et 1 vCPU par conteneur, 3 places → **3 Go et 3 vCPU en pointe** (les défauts 1,5 Go /
+  2 vCPU visent le dev). Sur ~3,5-4 Go au repos, la marge restante est donc d'environ 1 Go :
+  c'est le poste à surveiller avant d'augmenter l'une de ces bornes.
 - **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
@@ -229,21 +261,66 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Seuls les ports **80/443** sont exposés (Caddy). Tous les services applicatifs et la base
   restent sur le réseau Docker `internal`, injoignables depuis Internet.
 - Le TLS est géré et renouvelé automatiquement par Caddy.
-- Piston est seul sur le réseau `sandbox`, partagé uniquement avec `execution-service` (et
-  `piston-init`) : ni le gateway, ni core-service, ni Postgres ne peuvent le joindre. Le code
-  exécuté n'a aucun accès réseau (espace de noms réseau vide d'isolate).
-- Piston ne tourne **plus** en `privileged` : capacités limitées à ce qu'isolate utilise
-  (`SYS_ADMIN`, `NET_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`,
-  `FOWNER`, `KILL`), seccomp par défaut de Docker actif, cgroup privé. AppArmor est levé pour ce
-  seul conteneur (le profil `docker-default` interdit de remonter `/sys/fs/cgroup` en écriture).
-  Si Piston ne démarre pas (« remontage de /sys/fs/cgroup impossible »), vérifier que l'hôte est
-  en cgroup v2 et que `cap_add` / `cgroup: private` sont bien appliqués.
-- Limites par exécution : 3 s d'exécution, 10 s de compilation, 256 Mo de mémoire à l'exécution
-  et 512 Mo à la compilation, 1 Mio de sortie par flux. Côté execution-service : 2 exécutions
-  simultanées au plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par
-  utilisateur (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
-  Le conteneur Piston est plafonné à 1,5 Go (`mem_limit`) : 2 compilations de 512 Mo, plus une
-  marge pour l'API Piston. Relever `EXEC_MAX_CONCURRENT` impose de relever ce plafond d'autant.
-- Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
-  `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
-  puis vérifier le job CI `integration` (vrai Piston) avant de déployer.
+- Le code étudiant ne s'exécute QUE dans les conteneurs runner jetables (voir ci-dessous) :
+  réseau coupé, limites mémoire/PID/CPU, UID dédié. Aucun service n'exécute de code non fiable
+  dans son propre processus.
+- Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
+  notation, configurable par question jusqu'à 60 s), mémoire par conteneur
+  (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
+  `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod, dont **une place réservée
+  aux corrections** : il en reste deux pour « Exécuter »/« Tester »), file d'attente publique
+  `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
+  au-delà, l'interface affiche « Trop d'exécutions en cours ».
+- **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
+  des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
+  tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
+  comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,
+  `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
+  aucune capacité au-delà du minimum du superviseur root). Dans le conteneur, le code étudiant
+  tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
+  fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
+  Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 3 en prod) pendant
+  TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
+  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet.
+  Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
+  boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
+  plafond que le mur d'un conteneur compilé ; 4 min pour un « Tester » public). Au-delà, les
+  harnais restants ne sont pas lancés et portent un verdict « non évalué », comme les verdicts
+  partiels que le superviseur rend au mur. Cette variable est lue par execution-service **et**
+  par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
+  la changer pour un seul des deux ferait abandonner des corrections encore en cours.
+  **Le débit de correction
+  est en réalité plafonné par le pool `quizExecutor` de core-service** (`AsyncConfig`,
+  `corePoolSize=2`, file de 100) : un `ThreadPoolTaskExecutor` ne dépasse son cœur qu'une fois
+  la file pleine, donc **deux corrections en vol au maximum**, quel que soit
+  `EXEC_MAX_CONCURRENT` — relever l'un sans l'autre ne change rien. Le bouton « Tester » d'un
+  prof sur une question compilée pèse autant qu'une correction (même conteneur, même place).
+  Une CLASSE ENTIÈRE qui soumet un quiz compilé dans la même minute (fin de créneau, examen)
+  dépassera cette capacité : avant ce scénario, relever **ensemble** `quizExecutor.corePoolSize`
+  et `EXEC_MAX_CONCURRENT` à la mesure du groupe (`nb_étudiants × durée_correction / places`,
+  la RAM suit — voir « coût / dimensionnement »), étaler les soumissions, ou attendre le
+  rejouage automatique côté core (suivi ouvert — il n'existe pas encore).
+- **`strace` n'est plus utilisé, et la capacité `SYS_PTRACE` n'est plus accordée.** Elles
+  servaient à tracer le code soumis pour détecter une lecture du harnais — nécessaire quand le
+  harnais vivait dans un fichier qu'il pouvait ouvrir, c'est-à-dire sur le format « vraie classe
+  de test du framework », retiré de #116. Le harnais est maintenant compilé dans un programme
+  séparé, sous un UID séparé : il n'y a rien à surveiller, donc plus d'alerte d'exploitation de
+  ce côté, et le conteneur ne peut plus tracer aucun processus.
+- **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
+  Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
+  notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
+  `execution-service` les balaie à son démarrage, et on peut les lister à la main avec
+  `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
+  `/var/run/docker.sock` : c'est un accès
+  **root-équivalent au démon de l'hôte**, et il faut en mesurer la portée — contrairement à
+  l'ancien Piston (isolé sur son réseau dédié), `execution-service` est routé depuis Internet
+  (`/exec/**` via le gateway) et c'est lui qui analyse le code étudiant, les harnais et la sortie
+  des conteneurs. Un défaut d'exécution de code dans ce service ne se paierait donc plus par un
+  conteneur sandbox compromis, mais par l'hôte entier (Postgres et Caddy compris). Les appels
+  restent authentifiés (gateway, `X-Internal-Token`), `/exec/evaluate` est réservé aux éditeurs
+  de quiz et le service n'expose aucune route d'administration — mais **le durcissement attendu
+  est un proxy de socket restreint** (du type `tecnativa/docker-socket-proxy`, n'autorisant que
+  `containers/create|start|wait|logs|delete` et `images/inspect`) : c'est le suivi ouvert avant
+  tout usage à plus grande échelle. Les images sont construites par
+  `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
+  fait automatiquement).

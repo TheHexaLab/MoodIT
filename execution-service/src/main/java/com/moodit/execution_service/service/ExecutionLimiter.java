@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 /**
  * Bornes de charge du sandbox (#24), à deux niveaux :
  * <ul>
- *   <li><b>Globale</b> : au plus {@code maxConcurrent} exécutions Piston simultanées, tous appelants
+ *   <li><b>Globale</b> : au plus {@code maxConcurrent} conteneurs runner simultanés, tous appelants
  *       confondus (« Tester », « play », correction interne). Une exécution en trop attend une place
  *       au plus {@code queueWaitMs} (file d'attente courte), puis est refusée. La correction
  *       interne des soumissions ({@link #asInternal}) attend plus longtemps
@@ -28,7 +28,19 @@ import java.util.function.Supplier;
 @Component
 public class ExecutionLimiter {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(ExecutionLimiter.class);
+
     private final Semaphore global;
+    /**
+     * Places accessibles aux appels PUBLICS (« Tester », « play ») : {@code maxConcurrent - 1}
+     * dès que possible — une place reste RÉSERVÉE aux corrections internes. Depuis le runner
+     * (#116), une évaluation compilée tient sa place pendant toute la vie de son conteneur
+     * (minutes) : sans réserve, deux « Tester » publics suffisaient à affamer les corrections
+     * (tentatives d'étudiants supprimées en rafale). À {@code maxConcurrent = 1}, pas de
+     * réserve possible : tout le monde partage l'unique place.
+     */
+    private final Semaphore publicCap;
     private final long queueWaitMs;
     private final long internalQueueWaitMs;
     private final int maxPerUser;
@@ -53,29 +65,71 @@ public class ExecutionLimiter {
         }
         // Équitable : les exécutions en attente passent dans leur ordre d'arrivée.
         this.global = new Semaphore(maxConcurrent, true);
+        int publicSlots = Math.max(1, maxConcurrent - 1);
+        this.publicCap = new Semaphore(publicSlots, true);
+        if (maxPerUser >= publicSlots) {
+            // Sinon la borne par utilisateur ne borne plus rien : UN compte peut occuper
+            // toutes les places publiques (un appel public tient un conteneur entier, pas
+            // une requête HTTP) et refuser « Exécuter »/« Tester » à toute l'instance.
+            LOG.warn("app.exec.max-per-user ({}) ≥ places publiques ({}) : un seul utilisateur "
+                    + "peut saturer le sandbox public — abaisser max-per-user ou relever "
+                    + "max-concurrent", maxPerUser, publicSlots);
+        }
         this.queueWaitMs = queueWaitMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
         this.maxPerUser = maxPerUser;
     }
 
-    /** Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus). */
+    /**
+     * Sommes-nous dans un appel INTERNE (correction d'une soumission par core-service) ?
+     * Les appels publics (« Tester », « play ») sont plus sévèrement bornés : la route
+     * {@code /exec/run} est ouverte à tout authentifié (bouton « Exécuter » de l'étudiant).
+     */
+    public boolean isInternal() {
+        return internalCall.get();
+    }
+
+    /**
+     * Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus).
+     * Les appels publics passent d'abord par {@link #publicCap} : une place reste réservée
+     * aux corrections internes.
+     */
     public <T> T withSandboxSlot(Supplier<T> action) {
-        boolean acquired;
+        boolean internal = internalCall.get();
+        long waitMs = internal ? internalQueueWaitMs : queueWaitMs;
+        // ÉCHÉANCE unique pour les DEUX acquisitions : les attendre l'une après l'autre avec
+        // le délai complet chacune laissait un appel public patienter 2 × queue-wait-ms avant
+        // son 429 — le double de ce qu'annoncent la configuration et DEPLOY.md.
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
+        boolean publicAcquired = false;
         try {
-            long waitMs = internalCall.get() ? internalQueueWaitMs : queueWaitMs;
-            acquired = global.tryAcquire(waitMs, TimeUnit.MILLISECONDS);
+            if (!internal) {
+                publicAcquired = publicCap.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS);
+                if (!publicAcquired) {
+                    throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+                }
+            }
+            if (!global.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS)) {
+                throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+            }
+            try {
+                return action.get();
+            } finally {
+                global.release();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        if (!acquired) {
-            throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        try {
-            return action.get();
         } finally {
-            global.release();
+            if (publicAcquired) {
+                publicCap.release();
+            }
         }
+    }
+
+    /** Millisecondes restantes avant l'échéance (jamais négatif : 0 = plus d'attente). */
+    private static long remainingMs(long deadlineNanos) {
+        return Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
     }
 
     /**

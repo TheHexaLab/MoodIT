@@ -411,7 +411,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
-      # Même script qu'en local : construction, BD, attente, Python dans Piston, comptes à rôles.
+      # Même script qu'en local : construction, BD, attente, image runner Python, comptes à rôles.
       - name: Démarrer et préparer la pile
         run: sh frontend/e2e/core/start-stack.sh
 
@@ -458,13 +458,13 @@ jobs:
             frontend/e2e/results/
           if-no-files-found: ignore
 
-  # ── Intégration : execution-service contre un VRAI Piston ──────────────────────
+  # ── Intégration : execution-service contre de VRAIS conteneurs runner ──────────
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
-  # exécute le VRAI code (assemblage + verdict) contre un Piston réel — c'est le filet qui prouve
+  # exécute le VRAI code (assemblage + verdict) contre les images runner réelles — le filet qui prouve
   # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
   # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
   integration:
-    name: execution-service — intégration (Piston réel)
+    name: execution-service — intégration (runner Docker réel)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -476,23 +476,6 @@ jobs:
           java-version: '25'
           cache: gradle
 
-      - name: Démarrer Piston + installer les runtimes
-        # docker compose interpole et VALIDE tout le fichier prod même si on ne démarre que piston : les
-        # ports des autres services (${GATEWAY_PORT}, ${FRONTEND_PORT}) doivent résoudre vers une valeur,
-        # sinon « no port specified: :<empty> ». L'interpolation ${VAR} lit l'ENVIRONNEMENT DU SHELL (pas
-        # le fichier `env_file:` des services, qui n'injecte que dans les conteneurs) → on les met ici.
-        # Valeurs bidons : ces services ne démarrent pas dans ce job.
-        env:
-          FRONTEND_PORT: "5173"
-          GATEWAY_PORT: "8080"
-          POSTGRES_USER: postgres
-          POSTGRES_DB: moodit_db
-        run: |
-          touch .env.docker   # requis : des services le déclarent en `env_file:` (vide suffit ici)
-          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml up -d --build piston
-          # piston-init attend Piston puis installe les runtimes (langages) et s'arrête.
-          docker compose -f docker-compose-prod.yml -f docker-compose-ci.yml run --rm piston-init
-
       - name: Bundle react-runtime.js (nécessaire aux cas JSX/TSX)
         run: |
           docker build --target jsvendor -t moodit-jsvendor execution-service
@@ -501,18 +484,60 @@ jobs:
           docker cp "$cid:/out/." vendor-ci/
           docker rm "$cid"
 
+      # Les 10 images du RUNNER (#116) : notation des compilés (java, csharp, go, rust, c) et
+      # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les deux filets
+      # d'intégration : interprétés/SQL/vues (ExecutionIntegrationTest), notation NON
+      # FALSIFIABLE des compilés (RpcGradingIntegrationTest) et isolation du conteneur
+      # (RunnerSandboxIntegrationTest — réseau coupé, /tmp noexec, budgets).
+      # La logique de verdict du superviseur (verdict RPC, canaris, tête+queue, lexer) est
+      # testée UNITAIREMENT avant de construire quoi que ce soit — elle n'est pas couverte par
+      # JaCoCo/PIT (Python), ce lot est son filet.
+      - name: Tests unitaires du superviseur
+        run: python3 docker/runners/common/test_supervisor.py
+
+      - name: Construire les images runner
+        run: bash docker/runners/build.sh
+
+      # Filet de régression du confinement : la propriété « écritures étudiantes confinées aux
+      # tmpfs » repose sur le verrouillage des répertoires monde-inscriptibles des images — une
+      # mise à jour de digest pourrait en réintroduire un sans aucun signal.
+      - name: Aucun répertoire monde-inscriptible dans les images (hors tmpfs bornés)
+        run: |
+          for lang in java csharp go rust c python node php bash sqlite; do
+            # -xdev ne traverse pas les autres montages : /dev (donc /dev/shm, tmpfs 1777 monté
+            # d'office par Docker et borné par withTmpFs) doit être inspecté explicitement.
+            all=$(docker run --rm --entrypoint sh "moodit-runner-$lang:latest" \
+              -c "find / /dev -xdev -type d -perm -0002 2>/dev/null | sort -u")
+            # ASSERTION DE VIVACITÉ : /tmp est 1777 dans toutes ces images, donc un inventaire
+            # VIDE ne veut pas dire « rien à signaler », il veut dire que rien n'a été
+            # inspecté (image absente, langage mal orthographié ci-dessus, démon en erreur).
+            # Sans ce contrôle, le `grep` ne trouvait rien, `|| true` absorbait l'échec, et ce
+            # filet passait au vert sans avoir rien vérifié.
+            if [ -z "$all" ]; then
+              echo "::error::Inventaire vide pour moodit-runner-$lang : image absente ou find en échec"
+              exit 1
+            fi
+            extra=$(printf '%s\n' "$all" | grep -vE '^(/tmp|/dev/shm|/dev/mqueue)$' || true)
+            if [ -n "$extra" ]; then
+              echo "::error::Répertoires monde-inscriptibles dans moodit-runner-$lang : $extra"
+              exit 1
+            fi
+          done
+
       - name: Tests d'intégration
         working-directory: execution-service
         env:
-          PISTON_URL: http://localhost:2000
           APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
-          # En CI, une précondition manquante (Piston injoignable, bundle vendor absent) doit FAIRE
-          # ÉCHOUER le job, pas l'ignorer : sinon un Piston qui ne démarre pas laisserait ce gate de
-          # sécurité passer au vert sans avoir rien exécuté. (En local, drapeau absent → tests ignorés.)
-          PISTON_REQUIRED: "true"
+          # En CI, une précondition manquante (bundle vendor absent, démon Docker ou images runner
+          # absents) doit FAIRE ÉCHOUER le job, pas l'ignorer : sinon un runner qui ne construit pas
+          # laisserait ce gate de sécurité passer au vert sans avoir rien exécuté. (En local,
+          # drapeau absent → tests ignorés.)
+          SANDBOX_REQUIRED: "true"
         run: |
           chmod +x ./gradlew
-          ./gradlew test --tests "*ExecutionIntegrationTest" --no-daemon --console=plain
+          ./gradlew test --tests "*ExecutionIntegrationTest" \
+            --tests "*RpcGradingIntegrationTest" --tests "*RunnerSandboxIntegrationTest" \
+            --no-daemon --console=plain
 
       - name: Publier le rapport
         if: always()

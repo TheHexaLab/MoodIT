@@ -24,7 +24,8 @@ export interface HarnessLabels {
 /** Textes par défaut (FR) de l'éditeur de harnais. */
 export const defaultHarnessLabels: HarnessLabels = {
   infoBanner:
-    "Cachés à l'étudiant · chaque harnais renvoie vrai/faux · note = part des poids réussis",
+    "Cachés à l'étudiant · chaque harnais est un test exécutable (voir le gabarit du langage) · "
+    + 'note = part des poids réussis',
   namePlaceholder: 'Nom du cas (ex. Cas nominal)',
   weightLabel: 'Poids',
   deleteAria: 'Supprimer le harnais',

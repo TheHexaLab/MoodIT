@@ -6,7 +6,6 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonException;
 import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionBusyException;
 import com.moodit.execution_service.service.ExecutionLimiter;
@@ -106,8 +105,9 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void piston_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
-        when(service.evaluate(any())).thenThrow(new PistonException("Appel Piston échoué : http://piston:2000 refusé"));
+    void runner_docker_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
+        when(service.evaluate(any())).thenThrow(
+                new com.moodit.execution_service.sandbox.SandboxException("Démon Docker injoignable (npipe)"));
 
         mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isBadGateway())

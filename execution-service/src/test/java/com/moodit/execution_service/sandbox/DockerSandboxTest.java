@@ -1,0 +1,351 @@
+package com.moodit.execution_service.sandbox;
+
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.junit.jupiter.api.Test;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Archive tar du job runner (#116) : chemins sous /box, fichiers 0600, sentinelle en dernier. */
+class DockerSandboxTest {
+
+    @Test
+    void tar_place_les_fichiers_sous_box_en_0600_et_ready_en_dernier() throws IOException {
+        Map<String, String> files = new LinkedHashMap<>();
+        files.put("job.json", "{}");
+        files.put("cases/0/src/main.go", "package main");
+
+        List<TarArchiveEntry> entries = new ArrayList<>();
+        List<String> contents = new ArrayList<>();
+        try (TarArchiveInputStream tar =
+                new TarArchiveInputStream(new ByteArrayInputStream(DockerSandbox.tarOf(files)))) {
+            TarArchiveEntry entry;
+            while ((entry = tar.getNextEntry()) != null) {
+                entries.add(entry);
+                contents.add(new String(tar.readAllBytes(), StandardCharsets.UTF_8));
+            }
+        }
+        // Sous staging/ (extrait dans /opt/moodit, déplacé vers /box par le superviseur) ; .ready en dernier.
+        assertThat(entries).extracting(TarArchiveEntry::getName)
+                .containsExactly("staging/job.json", "staging/cases/0/src/main.go", "staging/.ready");
+        // 0600 : illisible par l'UID étudiant dès l'extraction (le superviseur relâche les artefacts).
+        assertThat(entries).allSatisfy(e -> assertThat(e.getMode() & 0777).isEqualTo(0600));
+        assertThat(contents.get(1)).isEqualTo("package main");
+    }
+
+    @Test
+    void hote_docker_par_defaut_selon_l_os() {
+        String host = DockerSandbox.defaultDockerHost();
+        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+            assertThat(host).startsWith("npipe://");
+        } else {
+            assertThat(host).startsWith("unix://");
+        }
+    }
+
+    // ── Démon injoignable : échec PROPRE (SandboxException / false), jamais un faux verdict ──
+    // tcp vers un port fermé de localhost : refus immédiat, aucun démon requis par ces tests.
+
+    private final DockerSandbox unreachable = new DockerSandbox("tcp://127.0.0.1:1", 512, 64, 1.0);
+
+    @Test
+    void demon_injoignable_available_et_image_present_repondent_false() {
+        assertThat(unreachable.available()).isFalse();
+        // Second appel : le client déjà initialisé est réutilisé (chemin rapide).
+        assertThat(unreachable.available()).isFalse();
+        assertThat(unreachable.imagePresent("moodit-runner-go:latest")).isFalse();
+    }
+
+    @Test
+    void demon_injoignable_run_leve_sandbox_exception() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> unreachable.run("moodit-runner-go:latest", Map.of("job.json", "{}"), 1000))
+                .isInstanceOf(SandboxException.class);
+    }
+
+    @Test
+    void hote_docker_invalide_echoue_en_sandbox_exception_au_premier_run() {
+        // L'initialisation paresseuse du client échoue (URI invalide) → message « injoignable ».
+        DockerSandbox invalid = new DockerSandbox("::pas-une-uri::", 512, 64, 1.0);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> invalid.run("img", Map.of(), 1000))
+                .isInstanceOf(SandboxException.class)
+                .hasMessageContaining("injoignable");
+    }
+
+    @Test
+    void image_present_distingue_absente_de_demon_en_erreur() {
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var inspect = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectImageCmd.class);
+        org.mockito.Mockito.when(docker.inspectImageCmd("absente")).thenReturn(inspect);
+        org.mockito.Mockito.when(inspect.exec())
+                .thenThrow(new com.github.dockerjava.api.exception.NotFoundException("no such image"));
+        var present = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectImageCmd.class);
+        org.mockito.Mockito.when(docker.inspectImageCmd("presente")).thenReturn(present);
+
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+        assertThat(sandbox.imagePresent("absente")).isFalse();
+        assertThat(sandbox.imagePresent("presente")).isTrue();
+    }
+
+    // ── Cycle de vie du conteneur, client Docker MOCKÉ (le vrai démon relève de
+    // RpcGradingIntegrationTest ; ici on vérifie l'orchestration et le nettoyage) ──
+
+    private com.github.dockerjava.api.DockerClient dockerMock(
+            com.github.dockerjava.api.command.CreateContainerCmd create,
+            com.github.dockerjava.api.command.RemoveContainerCmd remove,
+            Integer waitStatus) {
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        org.mockito.Mockito.when(docker.createContainerCmd("img")).thenReturn(create);
+        org.mockito.Mockito.when(create.withHostConfig(org.mockito.ArgumentMatchers.any())).thenReturn(create);
+        org.mockito.Mockito.when(create.withLabels(org.mockito.ArgumentMatchers.<java.util.Map<String, String>>any())).thenReturn(create);
+
+        var copy = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CopyArchiveToContainerCmd.class);
+        org.mockito.Mockito.when(docker.copyArchiveToContainerCmd("cid")).thenReturn(copy);
+        org.mockito.Mockito.when(copy.withTarInputStream(org.mockito.ArgumentMatchers.any())).thenReturn(copy);
+        org.mockito.Mockito.when(copy.withRemotePath("/opt/moodit")).thenReturn(copy);
+
+        var start = org.mockito.Mockito.mock(com.github.dockerjava.api.command.StartContainerCmd.class);
+        org.mockito.Mockito.when(docker.startContainerCmd("cid")).thenReturn(start);
+
+        var wait = org.mockito.Mockito.mock(com.github.dockerjava.api.command.WaitContainerCmd.class);
+        org.mockito.Mockito.when(docker.waitContainerCmd("cid")).thenReturn(wait);
+        var waitCb = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.WaitContainerResultCallback.class);
+        org.mockito.Mockito.when(wait.start()).thenReturn(waitCb);
+        if (waitStatus != null) {
+            org.mockito.Mockito.when(waitCb.awaitStatusCode(
+                    org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(waitStatus);
+        } else {
+            org.mockito.Mockito.when(waitCb.awaitStatusCode(
+                    org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+                    .thenThrow(new com.github.dockerjava.api.exception.DockerClientException("timeout"));
+        }
+
+        var logs = org.mockito.Mockito.mock(com.github.dockerjava.api.command.LogContainerCmd.class);
+        org.mockito.Mockito.when(docker.logContainerCmd("cid")).thenReturn(logs);
+        org.mockito.Mockito.when(logs.withStdOut(true)).thenReturn(logs);
+        org.mockito.Mockito.when(logs.withStdErr(true)).thenReturn(logs);
+        org.mockito.Mockito.when(logs.exec(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> {
+            com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame> cb =
+                    inv.getArgument(0);
+            cb.onStart(() -> { });
+            cb.onNext(new com.github.dockerjava.api.model.Frame(
+                    com.github.dockerjava.api.model.StreamType.STDOUT,
+                    "{\"v\":1}".getBytes(StandardCharsets.UTF_8)));
+            cb.onNext(new com.github.dockerjava.api.model.Frame(
+                    com.github.dockerjava.api.model.StreamType.STDERR,
+                    "journal".getBytes(StandardCharsets.UTF_8)));
+            cb.onComplete();
+            return cb;
+        });
+
+        org.mockito.Mockito.when(docker.removeContainerCmd("cid")).thenReturn(remove);
+        org.mockito.Mockito.when(remove.withForce(true)).thenReturn(remove);
+        return docker;
+    }
+
+    private static com.github.dockerjava.api.command.CreateContainerCmd createCmdReturning(String id) {
+        var create = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CreateContainerCmd.class);
+        var response = new com.github.dockerjava.api.command.CreateContainerResponse();
+        response.setId(id);
+        org.mockito.Mockito.when(create.exec()).thenReturn(response);
+        return create;
+    }
+
+    @Test
+    void cycle_complet_retourne_sorties_et_exit_puis_detruit_le_conteneur() {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 512, 64, 1.0);
+
+        DockerSandbox.ContainerRun run = sandbox.run("img", Map.of("job.json", "{}"), 5000);
+
+        assertThat(run.stdout()).isEqualTo("{\"v\":1}");
+        assertThat(run.stderr()).isEqualTo("journal");
+        assertThat(run.exitCode()).isZero();
+        org.mockito.Mockito.verify(remove).exec(); // conteneur détruit, succès ou non
+    }
+
+    @Test
+    void image_absente_message_actionnable() {
+        var create = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CreateContainerCmd.class);
+        org.mockito.Mockito.when(create.withHostConfig(org.mockito.ArgumentMatchers.any())).thenReturn(create);
+        org.mockito.Mockito.when(create.withLabels(org.mockito.ArgumentMatchers.<java.util.Map<String, String>>any())).thenReturn(create);
+        org.mockito.Mockito.when(create.exec())
+                .thenThrow(new com.github.dockerjava.api.exception.NotFoundException("no such image"));
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        org.mockito.Mockito.when(docker.createContainerCmd("img")).thenReturn(create);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> new DockerSandbox(docker, 512, 64, 1.0).run("img", Map.of(), 1000))
+                .isInstanceOf(SandboxException.class)
+                .hasMessageContaining("Image runner absente");
+    }
+
+    @Test
+    void budget_de_temps_depasse_leve_sandbox_exception_et_detruit_le_conteneur() {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, null), 512, 64, 1.0);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 1000))
+                .isInstanceOf(SandboxException.class);
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
+    void echec_du_nettoyage_n_avale_pas_le_resultat() {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        org.mockito.Mockito.when(remove.exec()).thenThrow(new RuntimeException("démon occupé"));
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 512, 64, 1.0);
+
+        assertThat(sandbox.run("img", Map.of("job.json", "{}"), 5000).exitCode()).isZero();
+    }
+
+    @Test
+    void balayage_des_conteneurs_orphelins_au_demarrage() {
+        // Si la JVM meurt pendant une notation, le nettoyage du finally n'a pas lieu : les
+        // conteneurs survivants portent l'étiquette moodit.runner et sont balayés au démarrage.
+        com.github.dockerjava.api.DockerClient docker =
+                org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var list = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.ListContainersCmd.class);
+        var remove = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var orphan = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(orphan.getId()).thenReturn("vieux");
+        org.mockito.Mockito.when(docker.listContainersCmd()).thenReturn(list);
+        org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
+        org.mockito.Mockito.when(list.withLabelFilter(
+                org.mockito.ArgumentMatchers.<Map<String, String>>any())).thenReturn(list);
+        // Seuls les conteneurs TERMINÉS sont balayés : une notation en vol (autre instance
+        // sur le même démon) ne doit pas être tuée.
+        org.mockito.Mockito.when(list.withStatusFilter(
+                org.mockito.ArgumentMatchers.<java.util.Collection<String>>any())).thenReturn(list);
+        org.mockito.Mockito.when(list.exec()).thenReturn(java.util.List.of(orphan));
+        org.mockito.Mockito.when(docker.removeContainerCmd("vieux")).thenReturn(remove);
+        org.mockito.Mockito.when(remove.withForce(true)).thenReturn(remove);
+
+        assertThat(new DockerSandbox(docker, 512, 64, 1.0).removeOrphans()).isEqualTo(1);
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
+    void un_conteneur_created_est_balaye_seulement_passe_le_delai_de_grace() {
+        // « created » = la fenêtre entre createContainerCmd et startContainerCmd. Récente, elle
+        // appartient peut-être à une AUTRE instance en train de démarrer sa notation : la
+        // balayer ferait échouer celle-ci (502, tentative supprimée). Ancienne, personne ne la
+        // démarrera plus, et rien d'autre ne la ramasse (hors projet compose).
+        assertThat(DockerSandbox.removable(container("created", System.currentTimeMillis() / 1000)))
+                .isFalse();
+        long vieux = (System.currentTimeMillis() - DockerSandbox.CREATED_GRACE_MS - 1000) / 1000;
+        assertThat(DockerSandbox.removable(container("created", vieux))).isTrue();
+        // Date absente (champ non rempli par le démon) : on s'abstient plutôt que de risquer
+        // de tuer une notation en vol.
+        assertThat(DockerSandbox.removable(container("created", 0))).isFalse();
+        // Statuts TERMINÉS : balayés sans condition d'âge, quel que soit la casse du statut.
+        assertThat(DockerSandbox.removable(container("exited", System.currentTimeMillis() / 1000)))
+                .isTrue();
+        assertThat(DockerSandbox.removable(container("Created", System.currentTimeMillis() / 1000)))
+                .isFalse();
+        assertThat(DockerSandbox.removable(container(null, 0))).isTrue();
+    }
+
+    private static com.github.dockerjava.api.model.Container container(String state, long createdSeconds) {
+        var container = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(container.getState()).thenReturn(state);
+        org.mockito.Mockito.when(container.getCreated()).thenReturn(createdSeconds);
+        return container;
+    }
+
+    @Test
+    void balayage_silencieux_si_le_demon_est_injoignable() {
+        // Un démon absent ne doit pas empêcher le service de démarrer.
+        assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
+    }
+
+    @Test
+    void host_config_pose_toutes_les_garanties_d_isolation() {
+        // Le bloc HostConfig PORTE le modèle de menace de #116 : une ligne retirée par un
+        // refactoring ou une résolution de conflit ne casse AUCUN autre test (la matrice
+        // anti-triche note juste, elle ne tente pas de sortir du conteneur). D'où ces
+        // assertions ligne par ligne : réseau, capacités, privilèges, bornes, tmpfs, montages.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 1024, 512, 2.0);
+
+        // Assertion de VIVACITÉ : sans un run complet, les assertions ci-dessous porteraient
+        // sur un HostConfig jamais construit et passeraient toutes.
+        assertThat(sandbox.run("img", Map.of("job.json", "{}"), 5000).exitCode()).isZero();
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.github.dockerjava.api.model.HostConfig.class);
+        org.mockito.Mockito.verify(create).withHostConfig(captor.capture());
+        com.github.dockerjava.api.model.HostConfig hostConfig = captor.getValue();
+
+        // Réseau COUPÉ : la propriété centrale (ni exfiltration du harnais, ni requête sortante
+        // depuis le VPS). Doublée par un cas d'intégration (sortie TCP refusée).
+        assertThat(hostConfig.getNetworkMode()).isEqualTo("none");
+        // Aucun montage hôte : les fichiers du job arrivent par docker cp (docker-outside-of-docker).
+        assertThat(hostConfig.getBinds()).isNullOrEmpty();
+
+        // Capacités : tout retiré, puis le strict nécessaire au superviseur root.
+        assertThat(hostConfig.getCapDrop()).containsExactly(com.github.dockerjava.api.model.Capability.ALL);
+        assertThat(hostConfig.getCapAdd()).containsExactlyInAnyOrder(
+                com.github.dockerjava.api.model.Capability.CHOWN,
+                com.github.dockerjava.api.model.Capability.FOWNER,
+                com.github.dockerjava.api.model.Capability.DAC_OVERRIDE,
+                com.github.dockerjava.api.model.Capability.SETUID,
+                com.github.dockerjava.api.model.Capability.SETGID,
+                com.github.dockerjava.api.model.Capability.KILL);
+        // SYS_PTRACE n'est PLUS accordée : elle servait à tracer le code soumis pour détecter une
+        // lecture du harnais, et le harnais n'entre plus dans rien qu'il puisse atteindre. Un
+        // conteneur qui n'a pas cette capacité ne peut tracer aucun processus, point.
+        assertThat(hostConfig.getCapAdd())
+                .doesNotContain(com.github.dockerjava.api.model.Capability.SYS_PTRACE);
+        // Pas d'élévation de privilège possible depuis l'UID étudiant (setuid, fscaps).
+        assertThat(hostConfig.getSecurityOpts()).containsExactly("no-new-privileges");
+
+        // Bornes : mémoire SANS swap (sinon la limite mémoire ne borne plus rien), PID, CPU.
+        assertThat(hostConfig.getMemory()).isEqualTo(1024L * 1024 * 1024);
+        assertThat(hostConfig.getMemorySwap()).isEqualTo(hostConfig.getMemory());
+        assertThat(hostConfig.getPidsLimit()).isEqualTo(512L);
+        assertThat(hostConfig.getNanoCPUs()).isEqualTo(2_000_000_000L);
+
+        // Les trois SEULS points d'écriture de l'UID étudiant : bornés, nosuid, et noexec
+        // partout sauf /box (qui porte les binaires de test compilés).
+        assertThat(hostConfig.getTmpFs())
+                .containsOnlyKeys("/box", "/tmp", "/dev/shm")
+                .containsEntry("/box", "rw,nosuid,exec,size=614m")
+                .containsEntry("/tmp", "rw,nosuid,noexec,size=61m")
+                .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m");
+    }
+
+    @Test
+    void tailles_des_tmpfs_derivees_de_la_memoire_du_conteneur() {
+        // Un tmpfs est compté dans le cgroup : codées en dur, les trois tailles occupaient
+        // jusqu'à 83 % de la mémoire quand SANDBOX_MEMORY_MB est abaissé (1 Go en prod).
+        DockerSandbox prod = new DockerSandbox("tcp://localhost:1", 1024, 512, 1.0);
+        assertThat(prod.boxSizeMb()).isEqualTo(614);
+        assertThat(prod.tmpSizeMb()).isEqualTo(61);
+        assertThat(prod.shmSizeMb()).isEqualTo(20);
+        assertThat(prod.boxSizeMb() + prod.tmpSizeMb() + prod.shmSizeMb()).isLessThan(1024);
+
+        // Planchers : une mémoire minuscule garde des tmpfs utilisables.
+        DockerSandbox minuscule = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
+        assertThat(minuscule.boxSizeMb()).isEqualTo(256);
+        assertThat(minuscule.tmpSizeMb()).isEqualTo(32);
+        assertThat(minuscule.shmSizeMb()).isEqualTo(16);
+    }
+}

@@ -1,29 +1,25 @@
 # Tests d'intégration manuels — exécution SQL
 
-Les tests unitaires (`./gradlew test`) **mockent** Piston. Ces deux scripts valident la chaîne
-**réelle** (vrais appels Piston), qu'un CI sans Piston ne peut pas couvrir. À lancer manuellement
-avant un déploiement qui touche à l'assemblage/exécution SQL, ou après un changement d'image Piston.
+Les tests unitaires (`./gradlew test`) **mockent** l'exécution. Ces scripts valident la chaîne
+**réelle**. Depuis le retrait de Piston (#116), `ExecutionIntegrationTest` (job CI `integration`)
+couvre la même chose contre les vraies images runner — ces scripts restent utiles pour déboguer
+à la main un binaire déployé.
 
-Prérequis : Node ≥ 12, l'accès réseau au conteneur Piston / à l'execution-service (les ports ne sont
-pas exposés en prod → on partage la pile réseau d'un conteneur, cf. commandes ci-dessous).
+## 1. `sql-isolation-e2e.js` — valide le DESIGN contre un sqlite3 réel
 
-## 1. `sql-isolation-e2e.js` — valide le DESIGN contre Piston réel
-
-Rejoue la logique 2 phases (setup → code étudiant → `.dump` → filtre → verdict) directement contre
-Piston, sans passer par l'execution-service. Utile pour vérifier que le paquet `sqlite3` honore
-`.dump`/les dot-commands (dépendance implicite), et que l'isolation tient (triche, DDL).
+Rejoue la logique 2 phases (setup → code étudiant → `.dump` → filtre → verdict) directement
+contre sqlite3. Utile pour vérifier que sqlite3 honore `.dump`/les dot-commands (dépendance
+implicite), et que l'isolation tient (triche, DDL). Nécessite un conteneur avec node ET sqlite3 :
 
 ```sh
-# <PISTON> = nom du conteneur Piston (ex. moodit_piston)
-docker cp sql-isolation-e2e.js <PISTON>:/tmp/e2e.js
-docker exec <PISTON> node /tmp/e2e.js
+docker run --rm -v "$PWD":/s -w /s moodit-runner-node:latest sh -c   'apt-get update -qq && apt-get install -y -qq sqlite3 >/dev/null && node sql-isolation-e2e.js'
 ```
 Attendu : les 4 cas affichent `OK` (dont 2 tentatives de triche qui échouent).
 
 ## 2. `sql-deployed-e2e.js` — valide le BINAIRE DÉPLOYÉ
 
 Frappe le vrai endpoint interne `POST /internal/exec/evaluate` de l'execution-service **déployé**
-(donc le code Java réel, `runSqlIsolated` + 2 appels Piston). Couvre les deux modes (lecture seule
+(donc le code Java réel, `runSqlIsolated` + 2 conteneurs runner). Couvre les deux modes (lecture seule
 `solution#` et modification isolée).
 
 ```sh

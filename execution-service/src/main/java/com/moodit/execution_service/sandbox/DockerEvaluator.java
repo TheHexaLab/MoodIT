@@ -1,0 +1,376 @@
+package com.moodit.execution_service.sandbox;
+
+import com.moodit.execution_service.dto.TestCaseInput;
+import com.moodit.execution_service.dto.TestResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Notation des langages COMPILÉS (#116) : construit le projet de test
+ * ({@link HarnessProjects}), l'exécute dans un conteneur runner jetable ({@link DockerSandbox})
+ * et traduit le JSON du superviseur en verdicts. FAIL-CLOSED : un cas absent de la réponse, un
+ * JSON illisible ou des canaris incohérents ne deviennent JAMAIS un « réussi ».
+ *
+ * Les ÉVÉNEMENTS de détection du superviseur (lecture du harnais tentée, rapport forgé,
+ * canaris incohérents) sont journalisés côté serveur et annexés au détail du cas concerné —
+ * visibles du prof dans l'éditeur ; leur acheminement vers le journal d'audit est un suivi (#116).
+ */
+@Component
+public class DockerEvaluator {
+
+    private static final Logger log = LoggerFactory.getLogger(DockerEvaluator.class);
+    private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+    /** Marge par cas pour le va-et-vient du superviseur (collecte, kill du groupe), ms. */
+    private static final long PER_CASE_OVERHEAD_MS = 10_000;
+    private static final long BASE_OVERHEAD_MS = 30_000;
+    /**
+     * Budget de COMPILATION PAR CAS — miroir de COMPILE_TIMEOUT_S du superviseur (90 s) :
+     * chaque cas (harnais différent) recompile son projet. Beaucoup de cas lents peuvent
+     * atteindre le plafond MAX_WALL_MS (15 min) — limite assumée, documentée dans le README.
+     */
+    private static final long COMPILE_BUDGET_MS = 90_000;
+    /**
+     * Budget de la LECTURE DES SIGNATURES du superviseur — miroir de son LIST_TIMEOUT_S.
+     * C'est un processus de plus dans le même cas ({@code javap -p} sur les classes du code
+     * soumis, pour générer les bouchons typés) : sans ce terme, le pire cas dépassait ce que
+     * l'invariant ci-dessous budgète, et un cas lancé juste avant l'échéance se faisait tuer au
+     * mur — tous les verdicts du job perdus.
+     */
+    private static final long LIST_BUDGET_MS = 5_000;
+    private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
+    private static final long MAX_WALL_MS = 15 * 60_000;
+    /**
+     * Plafond du mur pour un appel PUBLIC (« Tester » d'un prof). La route
+     * {@code /exec/evaluate} est réservée aux ÉDITEURS DE QUIZ (enseignant/admin/gardien,
+     * cf. PermissionService) mais accepte jusqu'à 100 cas fournis par l'appelant : sans
+     * ce plafond, une seule requête tenait la place publique un quart d'heure, et un étudiant
+     * pouvait refuser le sandbox à tout le monde en boucle. Au-delà, le superviseur rend des
+     * verdicts partiels (« non exécuté : budget dépassé »), ce qui reste lisible pour le prof.
+     */
+    public static final long PUBLIC_WALL_MS = 4 * 60_000;
+    /** Marge laissée au superviseur pour clore et imprimer son JSON avant le mur. */
+    private static final long CLOSING_MARGIN_MS = 20_000;
+
+    private final DockerSandbox sandbox;
+    private final String imagePrefix;
+    private final String imageTag;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DockerEvaluator(DockerSandbox sandbox,
+            @Value("${app.sandbox.image-prefix:moodit-runner-}") String imagePrefix,
+            @Value("${app.sandbox.image-tag:latest}") String imageTag) {
+        this.sandbox = sandbox;
+        this.imagePrefix = imagePrefix;
+        this.imageTag = imageTag;
+    }
+
+    public DockerSandbox sandbox() {
+        return sandbox;
+    }
+
+    /** Image runner d'un langage canonique (C++ partage l'image C — même toolchain). */
+    public String imageFor(String runnerLanguage) {
+        String name = "cpp".equals(runnerLanguage) ? "c" : runnerLanguage;
+        return imagePrefix + name + ":" + imageTag;
+    }
+
+    /**
+     * Marqueur réservé des gabarits runtime (canaris {@code __MOODIT_A__}/{@code __MOODIT_B__})
+     * et du marqueur de harnais {@code __MOODIT_HARNAIS__} : le superviseur les substitue ou les
+     * lit dans TOUS les fichiers
+     * du cas — code étudiant compris (en Rust il partage même le fichier du harnais). Un code
+     * soumis qui contient ce préfixe recevrait donc les vraies valeurs : rejet immédiat, verdict
+     * explicite, sans lancer de conteneur.
+     */
+    private static final String RESERVED_MARKER = "__MOODIT_";
+
+    /**
+     * Verdicts de rejet si {@code code} contient le marqueur réservé, sinon {@code null}.
+     * À appeler AVANT de prendre une place du sandbox (aucun conteneur n'est nécessaire —
+     * sous saturation, le rejet explicite vaut mieux qu'un 429).
+     */
+    public static List<TestResult> reservedMarkerRejection(String code, List<TestCaseInput> cases) {
+        if (code == null || !code.contains(RESERVED_MARKER)) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
+                        "Marqueur réservé « __MOODIT_ » dans le code soumis — retire-le pour être corrigé."))
+                .toList();
+    }
+
+    public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
+            Integer timeoutMs) {
+        return evaluate(language, code, cases, timeoutMs, MAX_WALL_MS);
+    }
+
+    /**
+     * Verdicts explicites si un harnais est une VRAIE CLASSE DE TEST du framework, sinon
+     * {@code null}. Comme {@link #reservedMarkerRejection}, à appeler AVANT de prendre une place
+     * du sandbox : ce format n'est plus noté.
+     *
+     * <p>Il l'a été, dans une version intermédiaire de #116, et c'était un mauvais choix : le
+     * harnais était compilé AVEC le code de l'étudiant, donc le processus qui détenait le secret
+     * et calculait le verdict était celui que l'étudiant contrôle. Cinq canaux de forge y ont été
+     * démontrés et fermés l'un après l'autre, et il en restait toujours un. Ce format n'a jamais
+     * été déployé — aucune question existante n'en dépend — et le laisser vivre revenait à offrir
+     * au prof un chemin dont on sait qu'il est contournable, sans qu'il le sache.
+     */
+    public static List<TestResult> frameworkHarnessRejection(String language,
+            List<TestCaseInput> cases) {
+        String runnerLanguage;
+        try {
+            runnerLanguage = HarnessProjects.runnerLanguage(language);
+        } catch (RuntimeException e) {
+            return null;   // langage non compilé : pas notre affaire
+        }
+        boolean any = cases.stream()
+                .anyMatch(c -> frameworkMarkerFound(runnerLanguage, c.harnessCode()));
+        if (!any) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
+                        frameworkMarkerFound(runnerLanguage, c.harnessCode())
+                                ? "Ce harnais est une classe de test du framework ("
+                                        + frameworkExample(runnerLanguage) + "). Cette forme "
+                                        + "n'est plus notée : elle était compilée avec le code de "
+                                        + "l'étudiant, qui pouvait donc forger son résultat. "
+                                        + "Écrire à la place un CORPS qui renvoie un booléen, par "
+                                        + "exemple « return Solution.solution() == 42; » — c'est "
+                                        + "le gabarit proposé dans l'éditeur."
+                                : "Non évalué : un autre harnais de cette question est une classe "
+                                        + "de test du framework."))
+                .toList();
+    }
+
+    /**
+     * Refus amont d'un NOM DE CLASSE RÉSERVÉ (Java) : {@code harnais_rpc} porte la même clé de
+     * fichier que le harnais du prof — qui écrasait alors le code soumis — et le préfixe
+     * {@code Moodit} est celui des fichiers du superviseur, sautés à la copie. Dans les deux
+     * cas, le verdict était « Aucun fichier de code soumis » : un 0 avec un message qui
+     * n'explique pas la cause. Légal mais réservé → refus AVANT toute prise de place, avec le
+     * nom fautif, comme pour le marqueur {@code __MOODIT_} et le format framework.
+     *
+     * <p>Java seulement : c'est le seul langage où le nom du fichier déposé vient de la classe
+     * publique du code soumis — ailleurs, les noms de fichiers sont fixes.
+     */
+    public static List<TestResult> reservedNameRejection(String language, String code,
+            List<TestCaseInput> cases) {
+        String runnerLanguage;
+        try {
+            runnerLanguage = HarnessProjects.runnerLanguage(language);
+        } catch (RuntimeException e) {
+            return null;   // langage non compilé : pas notre affaire
+        }
+        if (!"java".equals(runnerLanguage)) {
+            return null;
+        }
+        String fichier = HarnessProjects.javaFileName(code == null ? "" : code, "Solution");
+        String classe = fichier.substring(0, fichier.length() - ".java".length());
+        if (!classe.startsWith("Moodit") && !"harnais_rpc".equals(classe)) {
+            return null;
+        }
+        String detail = "Le nom de classe « " + classe + " » est réservé par la notation "
+                + "(« harnais_rpc » et le préfixe « Moodit » appartiennent aux fichiers du "
+                + "superviseur). Renommer la classe — par exemple « Solution » — et resoumettre.";
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, detail))
+                .toList();
+    }
+
+    /** Forme ATTENDUE, citée dans le diagnostic (lisible par un prof, contrairement à la regex). */
+    private static String frameworkExample(String runnerLanguage) {
+        return switch (runnerLanguage) {
+            case "java" -> "@Test";
+            case "csharp" -> "[Test]";
+            case "go" -> "func TestXxx(t *testing.T)";
+            case "rust" -> "#[test]";
+            default -> "MOODIT_TEST(nom)";
+        };
+    }
+
+    /**
+     * Nombre de COMPILATIONS que le superviseur fera pour UN cas.
+     *
+     * <p>DEUX par cas — le noteur et le code soumis sont deux programmes séparés — et TROIS en
+     * Java, où le code soumis est d'abord compilé seul pour que ses signatures soient lues sur
+     * ses classes. Le mur du conteneur n'en budgétait qu'une : un cas lancé juste avant
+     * l'échéance du budget, dont les compilations approchent leur propre plafond, se faisait
+     * tuer au mur — tous les verdicts du job perdus, 502, tentative supprimée (la régression
+     * #216). Ne dépend plus du contenu des cas : le format framework, seul à compiler un unique
+     * projet, est retiré.
+     */
+    static long compilesPerCase(String runnerLanguage) {
+        return "java".equals(runnerLanguage) ? 3 : 2;
+    }
+
+    /**
+     * Ce harnais est-il un VRAI test du framework ? Faux = harnais booléen, qui prend le chemin
+     * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
+     */
+    static boolean frameworkMarkerFound(String runnerLanguage, String harnessCode) {
+        return harnessCode != null && frameworkMarker(runnerLanguage).matcher(harnessCode).find();
+    }
+
+    private static java.util.regex.Pattern frameworkMarker(String runnerLanguage) {
+        return switch (runnerLanguage) {
+            // Toutes les formes idiomatiques, y compris PARAMÉTRÉES et qualifiées : un contrôle
+            // littéral rejetait « [TestCase(3, 4)] » (NUnit) et « @ParameterizedTest » (JUnit 5),
+            // pourtant parfaitement valides — l'étudiant recevait alors 0 avec un diagnostic faux.
+            case "java" -> java.util.regex.Pattern.compile(
+                    "@\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
+            case "csharp" -> java.util.regex.Pattern.compile(
+                    "\\[\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+            case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
+            case "rust" -> java.util.regex.Pattern.compile(
+                    "#\\s*\\[\\s*(?:\\w+\\s*::\\s*)*test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");
+            default -> java.util.regex.Pattern.compile("MOODIT_TEST\\s*\\(");   // c / cpp
+        };
+    }
+
+
+    /** {@code maxWallMs} : plafond du mur du conteneur — {@link #PUBLIC_WALL_MS} hors correction interne. */
+    public List<TestResult> evaluate(String language, String code, List<TestCaseInput> cases,
+            Integer timeoutMs, long maxWallMs) {
+        List<TestResult> rejected = reservedMarkerRejection(code, cases);
+        if (rejected != null) {
+            return rejected;
+        }
+        // Borné des DEUX côtés : une valeur stockée aberrante (négative, nulle, > 60 s) ne doit
+        // jamais produire un mur négatif (SandboxException systématique) ni un job sans fin.
+        long perRun = Math.min(Math.max(timeoutMs == null ? DEFAULT_RUN_TIMEOUT_MS : timeoutMs, 1),
+                RunnerExec.MAX_RUN_TIMEOUT_MS);
+        String runnerLanguage = HarnessProjects.runnerLanguage(language);
+        if ("java".equals(runnerLanguage) || "csharp".equals(runnerLanguage)) {
+            // Miroir du plancher VM du superviseur (JVM/mono froids) : le MUR doit couvrir le
+            // temps réellement accordé par cas, pas le temps limite court du prof.
+            perRun = Math.max(perRun, 10_000);
+        }
+        Walls walls = walls(runnerLanguage, cases.size(), perRun, maxWallMs);
+        HarnessProjects.Project project =
+                HarnessProjects.build(language, code, cases, (int) perRun, walls.budgetMs());
+
+        DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
+                project.files(), walls.wallMs());
+        return toResults(run, cases);
+    }
+
+    /** Mur du conteneur et budget du superviseur d'un job de notation. */
+    record Walls(long wallMs, long budgetMs) { }
+
+    /**
+     * Mur du conteneur, et budget du superviseur. INVARIANT :
+     *     budget + pire cas d'UN cas + marge de clôture ≤ mur
+     * Le superviseur ne teste son budget qu'AVANT de démarrer un cas : un cas lancé juste avant
+     * l'échéance doit pouvoir aller jusqu'au bout (compilations + run) ET laisser le temps
+     * d'imprimer le JSON — sans quoi le conteneur était tué au mur, tout le travail perdu, 502,
+     * tentative supprimée.
+     *
+     * <p>Le budget porte un plancher PROPORTIONNEL (60 % du mur), en plus de la formule
+     * stricte. Dériver le budget du seul pire cas THÉORIQUE (compilations au plafond de 90 s)
+     * le faisait tomber à 1 s sous le plafond public de 4 min — le pire cas d'un SEUL cas y
+     * dépasse le mur entier (295 s en Java) : le « Tester » du prof ne notait qu'un cas, voire
+     * aucun quand un canari passait en premier, sur les six langages compilés.
+     *
+     * <p>Ce plancher ne relâche l'invariant QUE là où il était déjà insatisfiable. Dès que
+     * {@code mur ≥ 2,5 × pireCas} — tous les murs non plafonnés, puisque le mur candidat vaut
+     * {@code 30 s + (N+2) × pireCas ≥ 3 × pireCas} — la marge de 40 % couvre le pire cas et
+     * l'invariant tient. Sous le plafond public, il cédait déjà (marge réelle 239 s < 295 s,
+     * pour un budget de 1 s) ; la conséquence d'un mur atteint y est un 502 sur le « Tester »
+     * du prof, sans tentative supprimée — le chemin interne, lui, garde la formule stricte.
+     */
+    static Walls walls(String runnerLanguage, int caseCount, long perRunMs, long maxWallMs) {
+        long perCase = perRunMs + PER_CASE_OVERHEAD_MS
+                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
+        long wallCandidate = BASE_OVERHEAD_MS + (caseCount + 2L) * perCase;
+        long cap = Math.min(maxWallMs, MAX_WALL_MS);
+        long wall = Math.min(cap, wallCandidate);
+        long budget = Math.max(1_000,
+                Math.max(wall - perCase - CLOSING_MARGIN_MS, wall * 3 / 5));
+        return new Walls(wall, budget);
+    }
+
+    private List<TestResult> toResults(DockerSandbox.ContainerRun run, List<TestCaseInput> cases) {
+        JsonNode root;
+        try {
+            root = MAPPER.readTree(run.stdout());
+        } catch (RuntimeException e) {
+            log.warn("Sortie du superviseur illisible (exit {}) : {}", run.exitCode(),
+                    truncate(run.stderr()));
+            throw new SandboxException("Réponse du superviseur de notation illisible");
+        }
+        // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode (et
+        // « null » un NullNode). Sans cette garde, `results` était simplement vide, chaque cas
+        // recevait « Notation incomplète » passed=false — une liste de verdicts VALIDE aux yeux
+        // de core, qui persistait un 0 sur une tentative UNIQUE. Un superviseur mort sans JSON
+        // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée, collecte des
+        // logs expirée) est une PANNE : 502, tentative supprimée, l'étudiant resoumet.
+        if (!root.isObject()) {
+            log.warn("Superviseur de notation muet (exit {}) : {}", run.exitCode(),
+                    truncate(run.stderr()));
+            throw new SandboxException(
+                    "Le superviseur de notation n'a rendu aucun verdict (exit "
+                            + run.exitCode() + ")");
+        }
+        if (root.has("error")) {
+            throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
+        }
+
+        // Défense en PROFONDEUR : le superviseur neutralise déjà les verdicts quand les canaris
+        // sont incohérents, mais Java ne doit pas lui faire confiance aveuglément — une
+        // régression côté superviseur ne doit pas pouvoir produire un « réussi ».
+        boolean canariesIncoherents = "incoherents".equals(root.path("canaries").asString(""));
+
+        Map<Integer, JsonNode> byIndex = new HashMap<>();
+        for (JsonNode result : root.path("results")) {
+            byIndex.put(result.path("index").asInt(-1), result);
+        }
+
+        // Événements du superviseur : JOURNALISÉS, et rien de plus. Ils portent tous sur
+        // l'INFRASTRUCTURE (espace_sature, budget_depasse, erreur_superviseur) ou sur la chaîne
+        // de notation elle-même (canari_incoherent) ; le verdict du cas, lui, vient du
+        // superviseur, et une incohérence de canaris est traitée plus bas pour TOUS les cas.
+        // Il n'y a plus d'événement qui accuse un cas en particulier : les lectures tracées,
+        // les jetons manquants et les rapports incohérents appartenaient au format framework,
+        // retiré de #116.
+        for (JsonNode event : root.path("events")) {
+            log.warn("Notation compilée — événement {} (cas {}) : {}",
+                    event.path("type").asString(""), event.path("case").asInt(-1),
+                    event.path("detail").asString(""));
+        }
+
+        List<TestResult> results = new ArrayList<>();
+        for (int i = 0; i < cases.size(); i++) {
+            TestCaseInput testCase = cases.get(i);
+            JsonNode node = byIndex.get(i);
+            boolean passed = node != null && node.path("passed").asBoolean(false);
+            String detail = node == null ? "Notation incomplète (cas sans verdict)"
+                    : (node.path("detail").isString() ? node.path("detail").asString() : null);
+            if (canariesIncoherents && passed) {
+                passed = false;
+                detail = "⚠ Incohérence détectée pendant la notation (falsification probable)."
+                        + (detail == null || detail.isBlank() ? "" : "\n" + detail);
+            }
+            results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), passed, detail));
+        }
+        return results;
+    }
+
+    private static String truncate(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() > 1000 ? value.substring(0, 1000) + "…" : value;
+    }
+}

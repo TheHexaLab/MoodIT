@@ -29,6 +29,7 @@ class ExecutionClientTest {
     private HttpServer server;
     private final AtomicReference<String> receivedToken = new AtomicReference<>();
     private final AtomicReference<String> receivedPath = new AtomicReference<>();
+    private final AtomicReference<String> receivedBody = new AtomicReference<>();
 
     @AfterEach
     void stopServer() {
@@ -41,7 +42,7 @@ class ExecutionClientTest {
         server.createContext("/internal/exec", exchange -> {
             receivedPath.set(exchange.getRequestURI().getPath());
             receivedToken.set(exchange.getRequestHeaders().getFirst("X-Internal-Token"));
-            exchange.getRequestBody().readAllBytes();
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             try {
                 Thread.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -104,12 +105,17 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Réponse plus lente que le délai calculé → null")
-    void evaluate_reponseTropLente_null() throws Exception {
-        String url = startStub(200, "[]", 1_500);
-
-        // 2 harnais : 100 + 2 × 100 = 300 ms < 1,5 s.
-        assertThat(client(url, 100, 100).evaluate("Python", "code", TWO_HARNESSES)).isNull();
+    @DisplayName("Même avec des réglages minuscules, le budget couvre le mur du runner")
+    void readTimeout_plancherDuMurDuRunner() {
+        // Depuis le runner (#116), chaque unité exec peut légitimement durer jusqu'à son mur
+        // (75 s) : des réglages trop bas ne doivent plus pouvoir produire un budget qui
+        // abandonne une correction en cours (#216). Un stub « plus lent que le budget » est
+        // donc devenu inconstructible à l'échelle d'un test unitaire — le chemin « échec
+        // d'appel → null » reste couvert par le test du sandbox injoignable.
+        ExecutionClient client = client("http://localhost:1", 1, 1, 1);
+        assertThat(client.readTimeoutMs("Python", 1, null)).isGreaterThanOrEqualTo(75_000);
+        assertThat(client.readTimeoutMs("Java", 4, null))
+                .isGreaterThanOrEqualTo(30_000 + 3 * 100_000);
     }
 
     @Test
@@ -125,27 +131,148 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + appel Piston), au moins un")
+    @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + exécution), au moins un")
     void readTimeout_couvreAttenteEtAppelParHarnais() {
-        // Valeurs par défaut : 10 s de base, PISTON_HTTP_TIMEOUT_MS = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
+        // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
-        assertThat(client.readTimeoutMs(1)).isEqualTo(45_000);
-        assertThat(client.readTimeoutMs(5)).isEqualTo(185_000);
-        assertThat(client.readTimeoutMs(100)).isEqualTo(3_510_000);
-        assertThat(client.readTimeoutMs(0)).isEqualTo(45_000);
+        // Par unité : attente de file (15 s) + max(20 s, temps limite + 5 s) + 75 s de mur
+        // du runner (miroir de WALL_OVERHEAD_MS) + 35 s de cycle de vie du conteneur
+        // (création, copie, démarrage, collecte des logs — hors mur côté serveur).
+        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + 145_000);
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * 145_000);
+        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + 145_000);
+    }
+
+    @Test
+    @DisplayName("Le temps limite de la question entre dans le budget par unité dès qu'il dépasse le défaut")
+    void readTimeout_integreLeTempsLimiteDeLaQuestion() {
+        ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
+
+        // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
+        assertThat(client.readTimeoutMs("Python", 1, 60_000))
+                .isEqualTo(10_000 + (65_000 + 75_000 + 35_000 + 15_000));
+        // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
+        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 145_000);
+        // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
+        // (N + 2 canaris) × (run + 10 s de marge + les COMPILATIONS du cas + 5 s d'inventaire
+        // `--list`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
+        // terme ajouté au perCase serveur doit apparaître ici, sinon le miroir est plus court
+        // que le mur réel et le read timeout expire pendant une notation en cours (#216).
+        // TROIS compilations par cas en Java (chemin non falsifiable : code soumis seul pour
+        // lire ses signatures, puis noteur, puis serveur), DEUX ailleurs ; le pire cas est pris
+        // sans regarder la forme des harnais — surestimer fait attendre, sous-estimer casse.
+        // 30 s + 3 × (60 + 10 + 3 × 90 + 5) = 1065 s : au-delà du mur du serveur (15 min), donc
+        // PLAFONNÉ — comme le mur lui-même. Trois compilations par cas coûtent cher, et une
+        // question Java à plusieurs cas lents sera notée partiellement (verdicts « Non évalué »,
+        // comportement dégradé documenté), jamais tuée au mur.
+        assertThat(client.readTimeoutMs("Java", 4, 60_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+        // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
+        // 30 s + 3 × (10 + 10 + 270 + 5) = 915 s : plafonné de justesse.
+        assertThat(client.readTimeoutMs("Java", 4, 1_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+        // Go : DEUX compilations par cas, et non trois — 795 s, sous le plafond.
+        assertThat(client.readTimeoutMs("Go", 4, 60_000))
+                .isEqualTo(10_000 + 15_000 + 30_000
+                        + 3 * (60_000 + 10_000 + 2 * 90_000 + 5_000) + 5_000 + 35_000);
+        // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
+        assertThat(client.readTimeoutMs("Java", 202, 60_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+        // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
+        assertThat(client.readTimeoutMs("TypeScript", 2, null))
+                .isEqualTo(10_000 + 2 * 145_000);
+    }
+
+    @Test
+    @DisplayName("Interprété : le budget est plafonné par celui du serveur, dépassement d'un harnais compris")
+    void readTimeout_plafonneParLeBudgetDuServeur() {
+        ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
+
+        // Symétrique du plafond compilé : le chemin interprété lance un conteneur PAR unité, donc
+        // son budget croissait linéairement (100 harnais Python ≈ 7 h avec les défauts de prod).
+        // execution-service borne désormais la boucle (app.exec.interpreted-budget-ms, 15 min) :
+        // au-delà, les harnais restants ne sont plus lancés. Le client plafonne au même budget,
+        // PLUS une unité — l'échéance est consultée avant chaque harnais, donc celui qui vient de
+        // partir va au bout ; sans ce terme, core renoncerait avant le serveur (#216).
+        long perUnit = 145_000;
+        assertThat(client.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 15 * 60_000 + perUnit);
+        // SQL : deux unités par harnais (phases isolées), donc deux unités de dépassement.
+        assertThat(client.readTimeoutMs("sql", 200, null))
+                .isEqualTo(10_000 + 15 * 60_000 + 2 * perUnit);
+        // Sous le budget, rien ne change : la formule par unité reste la référence.
+        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * perUnit);
+        // Bascule : le plafond ne mord qu'au-delà de (budget + 1 unité) / unité ≈ 7,2 unités.
+        assertThat(client.readTimeoutMs("Python", 7, null)).isEqualTo(10_000 + 7 * perUnit);
+        assertThat(client.readTimeoutMs("Python", 8, null))
+                .isEqualTo(10_000 + 15 * 60_000 + perUnit);
+    }
+
+    @Test
+    @DisplayName("Le budget serveur surchargé est suivi par le miroir client (même variable d'environnement)")
+    void readTimeout_suitLeBudgetServeurSurcharge() {
+        // Le budget est lu dans la MÊME variable qu'execution-service (EXEC_INTERPRETED_BUDGET_MS) :
+        // un plafond client figé devenait trop COURT dès qu'on relevait le budget serveur, et core
+        // abandonnait une correction encore en cours — exactement le bug de #216. Ici 30 min.
+        ExecutionClient relache = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, 30 * 60_000);
+        assertThat(relache.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 30 * 60_000 + 145_000);
+        // Et un budget serveur ABAISSÉ raccourcit le miroir d'autant (5 min).
+        ExecutionClient serre = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, 5 * 60_000);
+        assertThat(serre.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 5 * 60_000 + 145_000);
+    }
+
+    @Test
+    @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
+    void compiled_reconnaitLesLangagesCompiles() {
+        assertThat(ExecutionClient.compiled("Java")).isTrue();
+        assertThat(ExecutionClient.compiled(" c++ ")).isTrue();
+        assertThat(ExecutionClient.compiled("go")).isTrue();
+        assertThat(ExecutionClient.compiled("Python")).isFalse();
+        assertThat(ExecutionClient.compiled("sql")).isFalse();
+        assertThat(ExecutionClient.compiled(null)).isFalse();
+        assertThat(ExecutionClient.vmLanguage("Java")).isTrue();
+        assertThat(ExecutionClient.vmLanguage("C#")).isTrue();
+        assertThat(ExecutionClient.vmLanguage("go")).isFalse();
+        assertThat(ExecutionClient.vmLanguage(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Le temps limite de la question part dans le corps HTTP (timeoutMs), replafonné")
+    void evaluate_envoieLeTimeoutDansLeCorps() throws IOException {
+        String url = startStub(200,
+                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 0);
+        ExecutionClient client = client(url, 10_000, 20_000, 15_000);
+
+        client.evaluate("Python", "code", TWO_HARNESSES, 30_000);
+        assertThat(receivedBody.get()).contains("\"timeoutMs\":30000");
+
+        client.evaluate("Python", "code", TWO_HARNESSES, 999_999);
+        assertThat(receivedBody.get()).contains("\"timeoutMs\":60000");
+
+        client.evaluate("Python", "code", TWO_HARNESSES, -5);
+        assertThat(receivedBody.get()).doesNotContain("timeoutMs");
     }
 
     @Test
     @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
-    void pistonCalls_sqlEnDeuxPhases() {
-        assertThat(ExecutionClient.pistonCalls("Python", 3)).isEqualTo(3);
-        assertThat(ExecutionClient.pistonCalls(null, 3)).isEqualTo(3);
-        assertThat(ExecutionClient.pistonCalls("sql", 3)).isEqualTo(6);
-        assertThat(ExecutionClient.pistonCalls(" SQL ", 1)).isEqualTo(2);
-        assertThat(ExecutionClient.pistonCalls("sqlite", 2)).isEqualTo(4);
-        assertThat(ExecutionClient.pistonCalls("sqlite3", 2)).isEqualTo(4);
-        assertThat(ExecutionClient.pistonCalls("sqlserver", 2)).isEqualTo(2);
+    void workUnits_sqlEnDeuxPhases() {
+        assertThat(ExecutionClient.workUnits("Python", 3)).isEqualTo(3);
+        assertThat(ExecutionClient.workUnits(null, 3)).isEqualTo(3);
+        assertThat(ExecutionClient.workUnits("sql", 3)).isEqualTo(6);
+        assertThat(ExecutionClient.workUnits(" SQL ", 1)).isEqualTo(2);
+        assertThat(ExecutionClient.workUnits("sqlite", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("sqlite3", 2)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("sqlserver", 2)).isEqualTo(2);
+        // Compilés (#116) : compilation + exécution par cas, plus deux canaris du runner.
+        assertThat(ExecutionClient.workUnits("Java", 3)).isEqualTo(8);
+        assertThat(ExecutionClient.workUnits("C++", 1)).isEqualTo(4);
+        assertThat(ExecutionClient.workUnits("go", 2)).isEqualTo(6);
     }
 
     @Test

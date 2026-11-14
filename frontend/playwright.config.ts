@@ -31,6 +31,10 @@ export default defineConfig({
   outputDir: 'e2e/results',
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
+    // Sans plafond, une action non actionnable (ex. option d'un menu refermé par une course)
+    // attend les 90 s du test au lieu d'échouer — et les boucles toPass() ne réessaient jamais.
+    // 15 s (aligné sur `expect`) rend ces boucles auto-réparatrices.
+    actionTimeout: 15_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

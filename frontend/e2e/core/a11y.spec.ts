@@ -211,7 +211,7 @@ for (const theme of THEMES) {
       if (i < SIX_TYPES.length - 1) await main.getByRole('button', { name: 'Suivant' }).click();
     }
 
-    // Soumission (202) puis correction asynchrone (Piston pour la question de code).
+    // Soumission (202) puis correction asynchrone (conteneur runner pour la question de code).
     await main.getByRole('button', { name: 'Soumettre' }).click();
     await expect(main.getByRole('heading', { name: `${quizTitle} — terminé !` })).toBeVisible({
       timeout: 60_000,

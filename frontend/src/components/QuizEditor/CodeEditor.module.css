@@ -12,6 +12,7 @@
     border-color: var(--brand-teal);
 }
 
+
 /* Barre d'outils : bouton « play » (à gauche) + langage du code (à droite).
    `min-height` = hauteur du bouton « play » (1.5rem, cible tactile minimale) :
    la barre garde la MÊME hauteur pour les langages sans bouton (SQL/HTML/JSX/TSX), où
