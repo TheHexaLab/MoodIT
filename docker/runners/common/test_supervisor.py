@@ -238,6 +238,15 @@ class ErreurInterneTest(unittest.TestCase):
     """Une defaillance du NOTEUR (tmpfs sature, fork impossible) ne doit jamais accuser :
     le cas echoue, mais marque skipped, donc non imputable."""
 
+    def setUp(self):
+        # Etat GLOBAL vide avant chaque test : ces classes affirment sur supervisor.EVENTS,
+        # et un test d'une autre classe (canary_verdict emet sans nettoyer) laissait un
+        # evenement derriere lui. Sous unittest l'ordre alphabetique des classes masquait le
+        # conflit ; sous pytest (ordre du fichier), test_cas_saute_pour_saturation rougissait
+        # — et un simple renommage de classe aurait inverse la CI. On ne fait pas confiance a
+        # un etat global qu'on n'a pas pose.
+        supervisor.EVENTS.clear()
+
     def test_mort_par_signal_au_chargement_n_accuse_pas(self):
         # Un code qui PLANTE ou sature la memoire au CHARGEMENT fait echouer les canaris sans
         # les faire expirer : en Go et C/C++ le code etudiant partage leur unite de
@@ -513,6 +522,15 @@ class BoxExhaustedTest(unittest.TestCase):
     """Saturation du tmpfs /box : un code honnête mais bogué (fichiers temporaires jamais
     supprimés) faisait échouer les cas SUIVANTS, canaris compris → « falsification probable ».
     Le cas est désormais sauté avec un verdict honnête."""
+
+    def setUp(self):
+        # Etat GLOBAL vide avant chaque test : ces classes affirment sur supervisor.EVENTS,
+        # et un test d'une autre classe (canary_verdict emet sans nettoyer) laissait un
+        # evenement derriere lui. Sous unittest l'ordre alphabetique des classes masquait le
+        # conflit ; sous pytest (ordre du fichier), test_cas_saute_pour_saturation rougissait
+        # — et un simple renommage de classe aurait inverse la CI. On ne fait pas confiance a
+        # un etat global qu'on n'a pas pose.
+        supervisor.EVENTS.clear()
 
     def test_sous_le_seuil_est_sature(self):
         # 100 blocs de 4 Kio = 400 Kio, bien en dessous du seuil de 48 Mio.

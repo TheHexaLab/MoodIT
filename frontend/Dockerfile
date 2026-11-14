@@ -71,10 +71,14 @@ server {
         proxy_pass http://gateway:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        # « Tester » est SYNCHRONE et borne a 4 min cote serveur (PUBLIC_WALL_MS) : le defaut
-        # nginx de 60 s coupait l'appel en plein vol — 504 au prof pendant que l'evaluation
-        # continuait, puis 429 au nouvel essai (EXEC_MAX_PER_USER). Marge au-dessus du mur.
-        proxy_read_timeout 300s;
+        # « Tester » est SYNCHRONE : le defaut nginx de 60 s coupait l'appel en plein vol —
+        # 504 au prof pendant que l'evaluation continuait, puis 429 au nouvel essai
+        # (EXEC_MAX_PER_USER). Le pire cas public n'est PAS le mur compile (240 s + collecte) :
+        # c'est le chemin INTERPRETE, dont le budget de 240 s n'est consulte qu'AVANT chaque
+        # harnais — celui deja parti va au bout (attente de place + mur 75 s + temps limite
+        # 60 s + collecte, et DEUX unites pour un SQL de modification) : ~580 s au pire. 300 s
+        # recreait exactement le 504→429 que cette ligne voulait fermer.
+        proxy_read_timeout 600s;
     }
 
     location /auth/ {
