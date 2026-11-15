@@ -1474,5 +1474,28 @@ class Passe25Test(unittest.TestCase):
             self.assertEqual(os.stat(fichier).st_mode & 0o777, 0o644)
 
 
+class Passe26Test(unittest.TestCase):
+    """Correctifs qu'aucun test ne faisait rougir (trouves par mutation) : priorite des canaris
+    sur « incomplet », noteur tue non concluant."""
+
+    def _err(self):
+        return supervisor.CaseOutcome(False, skipped=True, cause="erreur")
+
+    def test_une_falsification_ne_devient_jamais_une_tentative_a_reprendre(self):
+        self.assertFalse(supervisor.job_incomplet("incoherents", [self._err()]))
+        # Sans falsification, l'erreur de logique rend bien le job incomplet...
+        self.assertTrue(supervisor.job_incomplet("ok", [self._err()]))
+        # ...et un job ordinaire ne l'est pas.
+        self.assertFalse(supervisor.job_incomplet("ok", [supervisor.CaseOutcome(True, ran=True)]))
+
+    def test_noteur_tue_par_signal_est_non_concluant(self):
+        self.assertTrue(supervisor.noteur_tue(-9, False))
+        # Un verdict obtenu, une sortie normale, ou pas de code : pas « tue ».
+        self.assertFalse(supervisor.noteur_tue(-9, True))
+        self.assertFalse(supervisor.noteur_tue(0, False))
+        self.assertFalse(supervisor.noteur_tue(1, False))
+        self.assertFalse(supervisor.noteur_tue(None, False))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

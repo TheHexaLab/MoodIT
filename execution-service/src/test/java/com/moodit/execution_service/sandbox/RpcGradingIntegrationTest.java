@@ -345,6 +345,22 @@ class RpcGradingIntegrationTest {
                 "static int doubler(const int n) { return n * 2; }").passed()).isTrue();
     }
 
+    @Test
+    void box_n_est_pas_inscriptible_par_le_code_soumis() {
+        // /box est un tmpfs monte en 1777 : le code soumis pouvait y poser ce qu'il voulait, a
+        // l'endroit que root parcourt entre deux cas. Le superviseur le passe en 0755 en mode
+        // notation. Sonde directe, sans dependre d'aucune protection du noyau : la creation
+        // doit echouer, et seule alors la reponse est juste.
+        assertThat(note("C", "return doubler(5) == 10;", """
+                #include <stdio.h>
+                int doubler(int n) {
+                    FILE *f = fopen("/box/sonde", "w");
+                    if (f) { fclose(f); return 0; }
+                    return n * 2;
+                }
+                """).passed()).isTrue();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

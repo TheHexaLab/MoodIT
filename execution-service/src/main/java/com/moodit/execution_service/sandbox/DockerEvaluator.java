@@ -338,7 +338,11 @@ public class DockerEvaluator {
         // note (502, tentative a reprendre). Un budget epuise, lui, reste une note partielle :
         // dans le conteneur l'attente de place a deja eu lieu, le budget ne mesure que le
         // travail, et son epuisement est reproductible. Le « Tester » garde ses verdicts.
-        if (internal && root.path("incomplet").asBoolean(false)) {
+        // Les canaris sont lus AVANT : un verdict de falsification ne doit jamais devenir une
+        // tentative a reprendre. Le superviseur le garantit deja ; Java ne lui fait pas confiance
+        // aveuglement (defense en profondeur, comme pour les verdicts ci-dessous).
+        boolean canariesIncoherents = "incoherents".equals(root.path("canaries").asString(""));
+        if (internal && !canariesIncoherents && root.path("incomplet").asBoolean(false)) {
             log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
             throw new SandboxException(
                     "Notation incomplète (panne du noteur) : la tentative est à reprendre");
@@ -347,7 +351,6 @@ public class DockerEvaluator {
         // Défense en PROFONDEUR : le superviseur neutralise déjà les verdicts quand les canaris
         // sont incohérents, mais Java ne doit pas lui faire confiance aveuglément — une
         // régression côté superviseur ne doit pas pouvoir produire un « réussi ».
-        boolean canariesIncoherents = "incoherents".equals(root.path("canaries").asString(""));
 
         Map<Integer, JsonNode> byIndex = new HashMap<>();
         for (JsonNode result : root.path("results")) {

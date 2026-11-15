@@ -83,6 +83,22 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void une_falsification_l_emporte_sur_incomplet_meme_cote_java() {
+        // Le superviseur ne signale jamais « incomplet » avec des canaris incoherents, mais Java
+        // ne lui fait pas confiance aveuglement : une regression cote superviseur ne doit pas
+        // transformer une falsification en tentative a reprendre (502).
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":true,"detail":null,"ms":1},
+                  {"index":1,"passed":false,"detail":"Erreur interne du noteur","ms":0}
+                ],"events":[],"canaries":"incoherents","incomplet":true}
+                """);
+        List<TestResult> r = evaluator.evaluate("Go", "code", TWO_CASES, null);
+        assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(0).detail()).contains("falsification");
+    }
+
+    @Test
     void conteneur_mort_sans_json_leve_au_lieu_de_noter_zero() {
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode. Sans
         // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »

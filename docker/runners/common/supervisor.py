@@ -794,6 +794,23 @@ def cause_exception(e):
     return "environnement" if isinstance(e, OSError) else "erreur"
 
 
+def job_incomplet(canaries, reels):
+    """Le JOB est-il « incomplet » (502 sur le chemin interne) ? PURE (testee).
+
+    Un verdict de FALSIFICATION l'emporte toujours : des canaris incoherents ne deviennent jamais
+    une tentative a reprendre, meme si un cas a aussi subi une erreur interne."""
+    return canaries != "incoherents" and notation_incomplete(reels)
+
+
+def noteur_tue(code, passed):
+    """Le NOTEUR est-il mort par signal (OOM...) sans verdict ? PURE (testee).
+
+    Cause NON CONCLUANTE : un canari « pass » tue par manque de memoire passait sinon pour un
+    canari en echec, et faisait accuser de falsification une soumission dont un vrai cas avait
+    reussi."""
+    return code is not None and code < 0 and not passed
+
+
 def notation_incomplete(reels):
     """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
 
@@ -3784,7 +3801,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
     # accuser de falsification une soumission dont un vrai cas avait reussi.
-    tue = code is not None and code < 0 and not passed
+    tue = noteur_tue(code, passed)
     return CaseOutcome(passed, detail, ran=True, killed=tue), None
 
 
@@ -3967,7 +3984,7 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_
     # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
     # accuser de falsification une soumission dont un vrai cas avait reussi.
-    tue = code is not None and code < 0 and not passed
+    tue = noteur_tue(code, passed)
     return CaseOutcome(passed, detail, ran=True, killed=tue), None
 
 
@@ -4478,8 +4495,8 @@ def main():
 
     # Un verdict de FALSIFICATION l'emporte : des canaris incoherents ne doivent jamais devenir
     # une tentative a reprendre, meme si un cas a aussi subi une erreur interne.
-    incomplet = canaries != "incoherents" and notation_incomplete(
-        outcomes[c["index"]] for c in cases if not c.get("canary"))
+    incomplet = job_incomplet(
+        canaries, (outcomes[c["index"]] for c in cases if not c.get("canary")))
     print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries,
                       "incomplet": incomplet},
                      ensure_ascii=False))

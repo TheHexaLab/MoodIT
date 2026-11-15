@@ -301,8 +301,15 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
   boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
   plafond que le mur d'un conteneur compilé ; 4 min pour un « Tester » public). Au-delà, les
-  harnais restants ne sont pas lancés et portent un verdict « non évalué », comme les verdicts
-  partiels que le superviseur rend au mur. Cette variable est lue par execution-service **et**
+  harnais restants ne sont pas lancés. Ce qui suit dépend de la CAUSE, sur une soumission
+  d'étudiant (le « Tester » public garde toujours ses verdicts « non évalué ») :
+  - **note partielle** (harnais restants « non évalué ») quand la cause est imputable au code
+    soumis : solution lente qui épuise le budget par son propre travail, harnais interrompu
+    (timeout, `SIGKILL`), panne d'environnement (`OSError` : disque, processus) ;
+  - **502, tentative supprimée, l'étudiant resoumet** quand elle ne l'est pas : budget épuisé
+    surtout par l'ATTENTE d'une place (surcharge — le temps d'attente est mesuré et retiré du
+    travail), ou erreur de logique du superviseur (« notation incomplète »). Des canaris
+    incohérents (falsification) l'emportent toujours : jamais de 502 dans ce cas. Cette variable est lue par execution-service **et**
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
   la changer pour un seul des deux ferait abandonner des corrections encore en cours.
   **Le débit de correction
