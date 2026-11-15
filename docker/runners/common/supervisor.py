@@ -1164,7 +1164,23 @@ def java_signatures(javap_output):
         if retour not in JSON_TYPES or any(t not in JSON_TYPES for t in types):
             continue
         trouvees.append((retour, nom, types))
-    return trouvees
+    return sans_doublon(trouvees)
+
+
+def sans_doublon(signatures):
+    """Une signature (nom, types) une seule fois, la PREMIERE vue. PURE (testee).
+
+    Java et C# aplatissent dans UNE classe de bouchons les statiques de toutes les classes du
+    code soumis : `Solution.calcul(int)` et une classe d'aide `Aide.calcul(int)` donnaient deux
+    bouchons identiques, que le compilateur refusait — une reponse juste notee 0, avec un
+    message qui accusait le harnais du prof."""
+    vues, resultat = set(), []
+    for retour, nom, types in signatures:
+        cle = (nom, tuple(types))
+        if cle not in vues:
+            vues.add(cle)
+            resultat.append((retour, nom, types))
+    return resultat
 
 
 def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instance=()):
@@ -3180,7 +3196,7 @@ def cs_signatures(source):
         types = _cs_param_types(params)
         if types is not None:
             trouvees.append((retour, nom, types))
-    return trouvees
+    return sans_doublon(trouvees)
 
 
 def cs_envoi(types):

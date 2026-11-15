@@ -236,7 +236,18 @@ ok "Code aligné sur origin/$BRANCH (${REMOTE:0:8})"
 # Images runner taguées par COMMIT, lues par execution-service via SANDBOX_IMAGE_TAG (compose) :
 # le service et le superviseur ne se parlent sans version de format que s'ils viennent du même
 # commit. Construire les nouvelles images ne touche donc plus celles du service encore en place.
-export MOODIT_RUNNER_TAG="${REMOTE:0:12}"
+# Le commit retenu est le DERNIER qui touche l'un des deux : le commit déployé changeait à chaque
+# mise à jour, et compose recréait execution-service — corrections en cours coupées — même pour
+# un déploiement du seul frontend.
+runner_tag() {
+  local c
+  c="$(git log -1 --format=%H "$1" -- docker/runners execution-service 2>/dev/null)"
+  c="${c:-$1}"
+  printf '%s' "${c:0:12}"
+}
+TAG_NOUVEAU="$(runner_tag "$REMOTE")"
+TAG_ANCIEN="$(runner_tag "$LOCAL")"
+export MOODIT_RUNNER_TAG="$TAG_NOUVEAU"
 log "Résumé des changements :"
 git --no-pager log --oneline --no-decorate "${LOCAL}..${REMOTE}" 2>/dev/null | head -n 15 | sed 's/^/     /' || true
 
@@ -263,7 +274,7 @@ rollback() {
   git reset --hard "$LOCAL" >/dev/null 2>&1 || true
   # Images runner de l'ANCIENNE version : sans elles, l'ancien service tournerait avec celles
   # du commit refusé. `latest` d'abord (un ancien compose ne lit que lui), puis le tag du commit.
-  export MOODIT_RUNNER_TAG="${LOCAL:0:12}"
+  export MOODIT_RUNNER_TAG="$TAG_ANCIEN"
   MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
     || warn "Rollback : images runner (latest) non reconstruites."
   bash docker/runners/build.sh >>"$LOG" 2>&1 \
@@ -305,7 +316,7 @@ docker image prune -f >/dev/null 2>&1 || true
 # (rollback à la main). Une image encore utilisée par un conteneur n'est pas supprimée.
 docker images --format '{{.Repository}}:{{.Tag}}' | grep '^moodit-runner-' | while read -r image; do
   case "${image##*:}" in
-    latest|"${REMOTE:0:12}"|"${LOCAL:0:12}") ;;
+    latest|"$TAG_NOUVEAU"|"$TAG_ANCIEN") ;;
     *) docker rmi "$image" >/dev/null 2>&1 || true ;;
   esac
 done

@@ -1713,5 +1713,33 @@ class Passe28Test(unittest.TestCase):
         self.assertLess(time.perf_counter() - debut, 10.0)
 
 
+class Passe30Test(unittest.TestCase):
+    """Une statique homonyme dans deux classes ne donne qu'UN bouchon (Java et C#)."""
+
+    NL = chr(10)
+
+    def test_java_statique_homonyme_dans_une_classe_imbriquee(self):
+        javap = self.NL.join([
+            "Compiled from \"Solution.java\"",
+            "public class Solution {",
+            "  public static int calcul(int);",
+            "}",
+            "Compiled from \"Solution.java\"",
+            "class Solution$Aide {",
+            "  static int calcul(int);",
+            "  static int autre(int);",
+            "}", ""])
+        self.assertEqual(supervisor.java_signatures(javap),
+                         [("int", "calcul", ["int"]), ("int", "autre", ["int"])])
+
+    def test_cs_statique_homonyme_dans_deux_classes(self):
+        src = self.NL.join(["class Solution {", "    public static int Calcul(int n) { return n; }",
+                            "}", "class Aide {", "    public static int Calcul(int n) { return 0; }",
+                            "    public static int Calcul(int a, int b) { return 0; }", "}", ""])
+        # La surcharge d'une AUTRE signature reste : seul le doublon exact part.
+        self.assertEqual(supervisor.cs_signatures(src),
+                         [("int", "Calcul", ["int"]), ("int", "Calcul", ["int", "int"])])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

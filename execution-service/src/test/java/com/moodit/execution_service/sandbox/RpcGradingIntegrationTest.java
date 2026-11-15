@@ -466,6 +466,37 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void java_statique_homonyme_dans_une_classe_imbriquee() {
+        // Deux bouchons `calcul(int)` dans la meme classe : le noteur ne compilait plus.
+        String h = "return Solution.calcul(3) == 7;";
+        String code = """
+                public class Solution {
+                    static class Aide {
+                        static int calcul(int n) { return n * 2; }
+                    }
+                    public static int calcul(int n) { return Aide.calcul(n) + 1; }
+                }
+                """;
+        assertThat(note("Java", h, code).passed()).isTrue();
+        assertThat(note("Java", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_statique_homonyme_dans_une_classe_d_aide() {
+        String h = "return Solution.Calcul(3) == 7;";
+        String code = """
+                class Solution {
+                    public static int Calcul(int n) { return Aide.Calcul(n) + 1; }
+                }
+                class Aide {
+                    public static int Calcul(int n) { return n * 2; }
+                }
+                """;
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
+    }
+
+    @Test
     void aucun_processus_du_code_soumis_ne_survit_au_cas_suivant() {
         require("C");
         // Isolation entre les cas : chaque appel laisse derriere lui un processus detache dont le
