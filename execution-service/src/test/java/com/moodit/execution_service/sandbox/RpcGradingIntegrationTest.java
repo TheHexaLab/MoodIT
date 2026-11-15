@@ -222,6 +222,23 @@ class RpcGradingIntegrationTest {
                 """).passed()).isTrue();
     }
 
+    @Test
+    void java_package_rejete_avec_un_diagnostic_clair() {
+        // Un `package ...;` colle depuis un IDE faisait compiler la classe dans un sous-dossier :
+        // la decouverte plate la manquait, et le cas tombait dans « aucune methode exploitable »
+        // — un 0 avec un message qui ne designe pas la cause. Desormais : un diagnostic qui dit
+        // de retirer la ligne. Code par ailleurs CORRECT.
+        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+                package exo1;
+
+                public class Solution {
+                    static int doubler(int n) { return n * 2; }
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("package");
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

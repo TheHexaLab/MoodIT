@@ -1271,5 +1271,22 @@ class SansCommentairesTest(unittest.TestCase):
         self.assertEqual(noms, ["F"])
 
 
+class PackageJavaTest(unittest.TestCase):
+    """Un `package ...;` colle depuis un IDE est reconnu sur la source BLANCHIE : la notation
+    le rejette avec un diagnostic clair plutot que de donner 0 sur « aucune methode
+    exploitable ». Un `package` en commentaire ou en chaine ne declenche rien."""
+
+    def test_declaration_reconnue(self):
+        for src in ('package exo1;' + chr(10) + 'class Solution {}',
+                    'package com.exo.tp1 ;' + chr(10) + 'class S {}'):
+            self.assertTrue(supervisor.PACKAGE_JAVA.search(supervisor.code_blanchi(src)), src)
+
+    def test_package_inerte_ne_declenche_pas(self):
+        for src in ('// package exo1;' + chr(10) + 'class Solution {}',
+                    'class S { String p = ' + chr(34) + 'package x;' + chr(34) + '; }',
+                    'class Solution { static int f(){ return 1; } }'):
+            self.assertFalse(supervisor.PACKAGE_JAVA.search(supervisor.code_blanchi(src)), src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

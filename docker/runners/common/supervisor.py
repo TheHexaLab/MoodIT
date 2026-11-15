@@ -895,6 +895,9 @@ def run_rust(case_dir, env, timeout_s, case_index):
 JAVA_MODS = (r"(?:public|protected|private|static|final|synchronized|native|strictfp"
              r"|abstract|default)")
 # `static` present : chemin FONCTION.
+PACKAGE_JAVA = re.compile(r"^\s*package\s+[\w.]+\s*;", re.M)
+
+
 JAVAP_SIGNATURE = re.compile(
     r"^\s+(?=(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
     r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
@@ -3559,8 +3562,18 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         with open(student_file, "w", encoding="utf-8") as f:
             f.write(contenu)
         os.chown(student_file, STUDENT_UID, STUDENT_GID)
+        student_contenu = contenu
     if student_file is None:
         return None, "Aucun fichier de code soumis"
+    # Un `package ...;` fait compiler la classe dans un SOUS-DOSSIER : la decouverte plate des
+    # .class la manquait, javap tournait sans classe, et le cas tombait dans « aucune methode
+    # exploitable » — un 0 avec un message qui ne designe pas la cause. On le DIT, au lieu de
+    # rethreader le nom qualifie dans tout le pipeline (risque de recreer le defaut qu on ferme).
+    # Source BLANCHIE : un `package` en commentaire ou chaine ne declenche rien.
+    if PACKAGE_JAVA.search(code_blanchi(student_contenu)):
+        return None, ("Retire la ligne « package ... ; » en tete du fichier : la notation "
+                      "attend la classe dans le paquet par defaut. (Le bouton « Executer » "
+                      "l accepte, pas la notation.)")
     code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", etu_classes, student_file],
                             case_dir, etu_build_env(chantier), COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
