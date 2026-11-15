@@ -173,10 +173,22 @@ public final class HarnessProjects {
 
     // ── utilitaires ───────────────────────────────────────────────────────────
 
-    private static final Pattern JAVA_PUBLIC_CLASS =
-            Pattern.compile("(?m)^\\s*public\\s+(?:final\\s+|abstract\\s+)?(?:class|interface|record|enum)\\s+(\\w+)");
-    private static final Pattern JAVA_ANY_CLASS =
-            Pattern.compile("(?m)^\\s*(?:class|interface|record|enum)\\s+(\\w+)");
+    /**
+     * Déclaration de TYPE : modificateurs (groupe 1) et nom (groupe 2). Identifiant Java complet,
+     * Unicode compris — {@code \w} ne reconnaît que l'ASCII, et {@code public class Réponse}
+     * devenait {@code R.java}. Toute suite de modificateurs et d'annotations, {@code sealed},
+     * {@code non-sealed} et {@code strictfp} compris. Tête en {@code [ \t]*} et non
+     * {@code \s*} : un {@code \s*} en début de motif multiligne avale les sauts de ligne, et
+     * le moteur repartait de chaque ligne jusqu'au bout de la source (temps quadratique).
+     * Modificateurs bornes a dix : le moteur Java repete un groupe par RECURSION, et une
+     * ligne de milliers de {@code static} faisait deborder la pile (StackOverflowError).
+     */
+    private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
+            "(?m)^[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+|public|protected|private|static"
+            + "|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
+            + "(?:class|interface|record|enum|@interface)\\s+"
+            + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");
+    private static final Pattern PUBLIC_MOD = Pattern.compile("(?<![\\w-])public\\s");
 
     /**
      * Source SANS commentaires ni littéraux (remplacés par des espaces, lignes préservées) :
@@ -245,18 +257,39 @@ public final class HarnessProjects {
         return res.toString();
     }
 
-    /** Nom de fichier imposé par javac : celui de la classe publique, sinon la première classe. */
-    static String javaFileName(String source, String fallback) {
+    /**
+     * Nom de fichier imposé par javac : celui du type PUBLIC DE PREMIER NIVEAU, sinon le premier
+     * type de premier niveau, sinon {@code fallback}. Seul un type de premier niveau impose son
+     * nom : une classe imbriquée publique, rencontrée avant, ne compte pas (profondeur
+     * d'accolades lue sur la source sans commentaires ni littéraux). SEUL lecteur du nom de
+     * fichier Java : la notation et le bouton « Exécuter » ({@code CodeAssembler}) l'appellent.
+     */
+    public static String javaFileName(String source, String fallback) {
         source = sansCommentairesNiChaines(source == null ? "" : source);
-        Matcher pub = JAVA_PUBLIC_CLASS.matcher(source);
-        if (pub.find()) {
-            return pub.group(1) + ".java";
+        Matcher m = JAVA_TYPE_DECL.matcher(source);
+        String premier = null;
+        int profondeur = 0;
+        int lu = 0;
+        while (m.find()) {
+            for (; lu < m.start(); lu++) {
+                char c = source.charAt(lu);
+                if (c == '{') {
+                    profondeur++;
+                } else if (c == '}' && profondeur > 0) {
+                    profondeur--;
+                }
+            }
+            if (profondeur != 0) {
+                continue;
+            }
+            if (PUBLIC_MOD.matcher(m.group(1)).find()) {
+                return m.group(2) + ".java";
+            }
+            if (premier == null) {
+                premier = m.group(2);
+            }
         }
-        Matcher any = JAVA_ANY_CLASS.matcher(source);
-        if (any.find()) {
-            return any.group(1) + ".java";
-        }
-        return fallback + ".java";
+        return (premier != null ? premier : fallback) + ".java";
     }
 
     private static String jsonString(String value) {

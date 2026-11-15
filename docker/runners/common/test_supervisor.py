@@ -7,7 +7,11 @@ exécutables localement dans n'importe quelle image runner (le module importe `r
 indisponible sous Windows).
 """
 
+import json
 import os
+import subprocess
+import time
+import re
 import shutil
 import sys
 import tempfile
@@ -1388,14 +1392,20 @@ class Passe24Test(unittest.TestCase):
         self.assertIn("public static final class Carre", stub)
         self.assertLess(stub.index("class Carre"), fin_solution)
 
-    def test_un_zombie_n_est_pas_un_survivant(self):
-        def status(etat, uid):
-            return self.NL.join(["Name:" + self.TAB + "x",
-                                 "State:" + self.TAB + etat,
-                                 "Uid:" + self.TAB + uid + self.TAB + uid, ""])
-        self.assertTrue(supervisor.survivant_etudiant(status("S (sleeping)", "1300"), 1300))
-        self.assertFalse(supervisor.survivant_etudiant(status("Z (zombie)", "1300"), 1300))
-        self.assertFalse(supervisor.survivant_etudiant(status("S (sleeping)", "0"), 1300))
+    def test_un_zombie_aux_fils_vivants_est_un_survivant(self):
+        # Le fil PRINCIPAL sorti affiche le processus en Z alors que ses autres fils tournent :
+        # le juger mort le laissait survivre au cas suivant (regression de la 24e passe).
+        self.assertTrue(supervisor.taches_vivantes(["Z", "S"]))
+        self.assertTrue(supervisor.taches_vivantes(["R"]))
+        # Mort pour de bon : rien a tuer, seulement a recolter.
+        self.assertFalse(supervisor.taches_vivantes(["Z"]))
+        self.assertFalse(supervisor.taches_vivantes(["Z", "X"]))
+        statut = self.NL.join(["Name:" + self.TAB + "x", "State:" + self.TAB + "Z (zombie)",
+                               "Uid:" + self.TAB + "1300" + self.TAB + "1300", ""])
+        self.assertEqual(supervisor.uid_reel(statut), "1300")
+        self.assertIsNone(supervisor.uid_reel("Name:" + self.TAB + "x"))
+        # Le nom du programme peut contenir « ) S » : on lit apres la DERNIERE parenthese.
+        self.assertEqual(supervisor.etat_tache("42 (a) S (b) R 1 2 3"), "R")
 
 
 class Passe25Test(unittest.TestCase):
@@ -1495,6 +1505,101 @@ class Passe26Test(unittest.TestCase):
         self.assertFalse(supervisor.noteur_tue(0, False))
         self.assertFalse(supervisor.noteur_tue(1, False))
         self.assertFalse(supervisor.noteur_tue(None, False))
+
+
+class Passe27Test(unittest.TestCase):
+    """root ne suit aucun lien ; le noteur nait prive ; l'analyse des sources est lineaire."""
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ; couvert en CI (Linux)")
+    def test_les_droits_ne_suivent_pas_un_lien(self):
+        with tempfile.TemporaryDirectory() as d:
+            cible = os.path.join(d, "cible")
+            with open(cible, "w") as f:
+                f.write("x")
+            os.chmod(cible, 0o644)
+            lien = os.path.join(d, "lien")
+            os.symlink(cible, lien)
+            with self.assertRaises(OSError):
+                supervisor.fixe_droits(lien, os.getuid(), os.getgid(), 0o600)
+            self.assertEqual(os.stat(cible).st_mode & 0o777, 0o644)
+            # Un fichier ordinaire, lui, recoit bien ses droits.
+            supervisor.fixe_droits(cible, os.getuid(), os.getgid(), 0o600)
+            self.assertEqual(os.stat(cible).st_mode & 0o777, 0o600)
+            # Arbre : le lien est ignore, le reste est change.
+            os.chmod(cible, 0o644)
+            sous = os.path.join(d, "arbre")
+            os.makedirs(sous)
+            os.symlink(cible, os.path.join(sous, "l"))
+            with open(os.path.join(sous, "f"), "w") as f:
+                f.write("y")
+            supervisor.fixe_droits_arbre(sous, os.getuid(), os.getgid(), 0o600, 0o700)
+            self.assertEqual(os.stat(cible).st_mode & 0o777, 0o644)
+            self.assertEqual(os.stat(os.path.join(sous, "f")).st_mode & 0o777, 0o600)
+            self.assertEqual(os.stat(sous).st_mode & 0o777, 0o700)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ; couvert en CI (Linux)")
+    def test_la_relecture_ne_suit_ni_lien_ni_fifo(self):
+        with tempfile.TemporaryDirectory() as d:
+            secret = os.path.join(d, "secret")
+            with open(secret, "w") as f:
+                f.write("contenu")
+            lien = os.path.join(d, "run.out")
+            os.symlink(secret, lien)
+            self.assertEqual(supervisor.read_capped(lien), "")
+            fifo = os.path.join(d, "fifo")
+            os.mkfifo(fifo)
+            # Sans O_NONBLOCK, cette lecture bloquait jusqu'au mur du conteneur.
+            self.assertEqual(supervisor.read_capped(fifo), "")
+            # Et une FIFO garnie n'est pas relue non plus : seul un fichier ORDINAIRE l'est.
+            bout = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+            try:
+                os.write(bout, b"donnees")
+                self.assertEqual(supervisor.read_capped(fifo), "")
+            finally:
+                os.close(bout)
+            self.assertEqual(supervisor.read_capped(secret), "contenu")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ; couvert en CI (Linux)")
+    def test_le_compilateur_root_cree_des_fichiers_prives(self):
+        r = subprocess.run(["sh", "-c", "umask"], capture_output=True, text=True,
+                           preexec_fn=supervisor.preexec_compile)
+        self.assertEqual(r.stdout.strip(), "0077")
+
+    def test_une_sortie_de_controle_reste_bornee_une_fois_echappee(self):
+        cap = supervisor.EXEC_OUTPUT_CAP
+        pleine = chr(1) * cap + "VERDICT"
+        bornee = supervisor.borne_json(pleine)
+        self.assertLessEqual(len(json.dumps(bornee, ensure_ascii=False)), supervisor.EXEC_JSON_CAP)
+        self.assertTrue(bornee.endswith("VERDICT"))      # la queue, qui porte le verdict, reste
+        # Le PIRE texte ordinaire au plafond de read_capped (que des sauts de ligne et des
+        # guillemets, deux octets chacun une fois echappes) passe INTACT : un dump SQL en depend.
+        pire = (chr(10) + chr(34)) * (cap // 2)
+        self.assertEqual(supervisor.borne_json(pire), pire)
+
+    def test_l_analyse_des_sources_est_lineaire(self):
+        # Une tete en \s* multiligne, ou des parametres jamais fermes, faisaient repartir le
+        # moteur de chaque ligne jusqu'au bout : 100 000 caracteres prenaient des minutes, a
+        # chaque cas, hors de tout delai de compilation. Lineaire, chaque motif repond en
+        # millisecondes ; le seuil laisse une marge large a une machine de CI lente.
+        n = 200_000
+        entrees = ["\t\n" * (n // 2), "\n" * n, " " * n, "static " * (n // 7),
+                   "int a(" * (n // 6), "fn a(" * (n // 5), "{static int a(" * (n // 14),
+                   "\n  static int a(" * (n // 16), "struct a {" * (n // 10),
+                   "class a " * (n // 8), "package a" * (n // 9), "impl a " * (n // 7),
+                   # Une ancre ^ par LIGNE : sur une seule ligne, aucun motif ancre ne repart.
+                   "\nint a(" * (n // 7), "\nfn a(" * (n // 6), "\nstruct a {" * (n // 11)]
+        motifs = [(nom, m) for nom, m in vars(supervisor).items() if isinstance(m, re.Pattern)]
+        motifs.append(("CS_CTOR_TPL", re.compile(supervisor.CS_CTOR_TPL % "R", re.M)))
+        lents = []
+        for nom, motif in motifs:
+            for texte in entrees:
+                debut = time.perf_counter()
+                for _ in motif.finditer(texte):
+                    pass
+                if time.perf_counter() - debut > 1.0:
+                    lents.append(nom)
+                    break
+        self.assertEqual(lents, [])
 
 
 if __name__ == "__main__":

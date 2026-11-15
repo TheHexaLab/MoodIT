@@ -226,6 +226,8 @@ class DockerSandboxTest {
                 com.github.dockerjava.api.command.RemoveContainerCmd.class);
         var orphan = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
         org.mockito.Mockito.when(orphan.getId()).thenReturn("vieux");
+        org.mockito.Mockito.when(orphan.getCreated()).thenReturn(
+                (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 60_000) / 1000);
         org.mockito.Mockito.when(docker.listContainersCmd()).thenReturn(list);
         org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
         org.mockito.Mockito.when(list.withLabelFilter(
@@ -243,24 +245,20 @@ class DockerSandboxTest {
     }
 
     @Test
-    void un_conteneur_created_est_balaye_seulement_passe_le_delai_de_grace() {
-        // « created » = la fenêtre entre createContainerCmd et startContainerCmd. Récente, elle
-        // appartient peut-être à une AUTRE instance en train de démarrer sa notation : la
-        // balayer ferait échouer celle-ci (502, tentative supprimée). Ancienne, personne ne la
-        // démarrera plus, et rien d'autre ne la ramasse (hors projet compose).
-        assertThat(DockerSandbox.removable(container("created", System.currentTimeMillis() / 1000)))
-                .isFalse();
-        long vieux = (System.currentTimeMillis() - DockerSandbox.CREATED_GRACE_MS - 1000) / 1000;
-        assertThat(DockerSandbox.removable(container("created", vieux))).isTrue();
-        // Date absente (champ non rempli par le démon) : on s'abstient plutôt que de risquer
-        // de tuer une notation en vol.
-        assertThat(DockerSandbox.removable(container("created", 0))).isFalse();
-        // Statuts TERMINÉS : balayés sans condition d'âge, quel que soit la casse du statut.
-        assertThat(DockerSandbox.removable(container("exited", System.currentTimeMillis() / 1000)))
-                .isTrue();
-        assertThat(DockerSandbox.removable(container("Created", System.currentTimeMillis() / 1000)))
-                .isFalse();
-        assertThat(DockerSandbox.removable(container(null, 0))).isTrue();
+    void un_conteneur_runner_est_balaye_seulement_passe_le_delai_de_grace() {
+        // Récent, il appartient peut-être à une notation en cours : « created » (fenêtre
+        // create → start d'une autre instance) comme TERMINÉ (fenêtre fin → lecture des
+        // journaux). Le balayer faisait échouer cette notation : 502, tentative supprimée.
+        long maintenant = System.currentTimeMillis() / 1000;
+        long vieux = (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 1000) / 1000;
+        for (String statut : new String[] {"created", "Created", "exited", "dead", null}) {
+            assertThat(DockerSandbox.removable(container(statut, maintenant))).as(statut).isFalse();
+            assertThat(DockerSandbox.removable(container(statut, vieux))).as(statut).isTrue();
+        }
+        // Date absente (champ non rempli par le démon) : on s'abstient.
+        assertThat(DockerSandbox.removable(container("exited", 0))).isFalse();
+        // Le délai couvre le plus long mur possible, journaux compris.
+        assertThat(DockerSandbox.ORPHAN_GRACE_MS).isGreaterThan(15 * 60_000L + 30_000L);
     }
 
     private static com.github.dockerjava.api.model.Container container(String state, long createdSeconds) {

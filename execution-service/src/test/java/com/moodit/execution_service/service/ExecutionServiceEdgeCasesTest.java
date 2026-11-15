@@ -129,6 +129,31 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
+    void run_compilation_tuee_est_signalee_comme_interrompue() {
+        // Le superviseur rend une compilation tuée SANS code, avec un signal, et sans étape run.
+        piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
+
+        RunResult r = service.run(new RunRequest("TypeScript", null, "let x = 1"));
+
+        assertThat(r.stderr()).startsWith("Interrompu à la compilation (signal SIGKILL)");
+        assertThat(r.signal()).isEqualTo("SIGKILL");
+        assertThat(r.timedOut()).isTrue();
+    }
+
+    @Test
+    void evaluate_compilation_tuee_echoue_le_cas_avec_un_detail_interrompu() {
+        piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
+
+        List<TestResult> r = service.evaluate(new EvaluateRequest("TypeScript", null, "let x = 1",
+                List.of(new TestCaseInput("cas", "return true;", 1))));
+
+        assertThat(r).singleElement().satisfies(t -> {
+            assertThat(t.passed()).isFalse();
+            assertThat(t.detail()).startsWith("Interrompu à la compilation");
+        });
+    }
+
+    @Test
     void run_compilation_reussie_transmet_sa_sortie_avec_celle_du_programme() {
         piston(f -> new RunnerExec.Result(stage("", "warning: unused", 0, null, null),
                 stage("42", "", 0, null, null), null));

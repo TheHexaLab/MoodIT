@@ -51,6 +51,7 @@ except ImportError:  # Windows : les preexec_fn ne sont jamais appeles hors cont
     resource = None
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -123,6 +124,13 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+# Ouverture par root SANS suivre de lien et sans bloquer sur une FIFO. Drapeaux POSIX lus par
+# getattr : le superviseur ne tourne que sous Linux, mais ses tests unitaires tournent aussi
+# sous Windows (O_BINARY : pas de traduction des fins de ligne).
+O_SANS_LIEN = (getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+               | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+
+
 def read_capped(path, cap=OUTPUT_CAP):
     """Relit une sortie capturée en bornant la mémoire : TÊTE + QUEUE du fichier quand il
     dépasse le plafond. La queue est indispensable aux canaux de VERDICT — jeton de fin,
@@ -130,8 +138,15 @@ def read_capped(path, cap=OUTPUT_CAP):
     sortie : tronquer seulement la tête transformait une copie honnête mais bavarde
     (> 64 Kio de print de débogage) en « jeton absent », fausse accusation de triche."""
     try:
-        size = os.path.getsize(path)
-        with open(path, "rb") as f:
+        # Sans suivre de lien et sans bloquer : root relit des fichiers poses dans des dossiers
+        # que le code soumis peut atteindre. Un lien lui faisait relire un fichier root du
+        # conteneur, une FIFO le bloquait jusqu'au mur. Seul un fichier ORDINAIRE est relu.
+        fd = os.open(path, os.O_RDONLY | O_SANS_LIEN)
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                return ""
+            size = st.st_size
             if size <= cap:
                 return f.read().decode("utf-8", errors="replace")
             head = f.read(cap // 2)
@@ -341,49 +356,87 @@ def free_bytes_under(blocks_available, block_size, threshold):
     return blocks_available * block_size < threshold
 
 
-def survivant_etudiant(status, uid):
-    """Ce /proc/<pid>/status est-il un processus VIVANT de l'UID etudiant ? PURE (testee).
-
-    Un ZOMBIE (etat Z) est deja mort : il attend seulement d'etre recolte, et le superviseur, en
-    PID 1, ne recolte pas les orphelins. Le compter comme survivant faisait tourner le balayage
-    ses 25 passes a chaque cas (~1,3 s), au detriment du budget de notation."""
-    uid_ok = False
-    zombie = False
+def uid_reel(status):
+    """UID reel lu dans un /proc/<pid>/status, ou None. PURE (testee)."""
     for line in status.splitlines():
-        if line.startswith("State:"):
-            zombie = line.split()[1:2] == ["Z"]
-        elif line.startswith("Uid:"):
+        if line.startswith("Uid:"):
             parts = line.split()
-            uid_ok = len(parts) > 1 and parts[1] == str(uid)
-    return uid_ok and not zombie
+            return parts[1] if len(parts) > 1 else None
+    return None
+
+
+def etat_tache(stat_ligne):
+    """Etat d'une tache lu dans /proc/<pid>/task/<tid>/stat. PURE (testee). Le nom du programme,
+    entre parentheses, peut contenir espaces et parentheses : on lit apres la DERNIERE."""
+    reste = stat_ligne[stat_ligne.rfind(")") + 1:].split()
+    return reste[0] if reste else "X"
+
+
+def taches_vivantes(etats):
+    """Un processus est-il encore VIVANT ? PURE (testee).
+
+    Juger sur l'etat du seul processus ne suffit pas : un programme multithread dont le fil
+    PRINCIPAL est sorti est affiche Z (zombie) alors que ses autres fils tournent encore. On
+    regarde donc chaque tache : vivant tant qu'une n'est ni Z ni X."""
+    return any(e not in ("Z", "X") for e in etats)
+
+
+def tuer_uid_etudiant():
+    """SIGKILL a TOUS les processus de l'UID etudiant, en un appel : kill(-1) lance SOUS cet
+    UID atteint tout ce qu'il peut signaler, quel que soit l'etat, le groupe ou la session
+    (setsid ne protege de rien), et le noyau le fait sans laisser de fork s'intercaler."""
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setgroups([])
+            os.setgid(STUDENT_GID)
+            os.setuid(STUDENT_UID)
+            os.kill(-1, signal.SIGKILL)
+        except BaseException:
+            pass
+        finally:
+            os._exit(0)
+    os.waitpid(pid, 0)
 
 
 def _une_passe_survivants():
-    """UNE passe sur /proc : tue tout processus de l'UID etudiant, rend le nombre atteint."""
-    atteints = 0
+    """Compte les processus de l'UID etudiant encore vivants ; recolte les zombies VRAIMENT
+    morts. Le superviseur est PID 1 : les orphelins lui reviennent, et sans recolte ils
+    occupaient pour toujours une entree de la table des processus (512 par conteneur)."""
+    vivants = 0
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open("/proc/" + pid + "/status", "r") as f:
-                status = f.read()
-            if survivant_etudiant(status, STUDENT_UID):
-                os.kill(int(pid), signal.SIGKILL)
-                atteints += 1
+                if uid_reel(f.read()) != str(STUDENT_UID):
+                    continue
+            etats = []
+            for tid in os.listdir("/proc/" + pid + "/task"):
+                with open("/proc/" + pid + "/task/" + tid + "/stat", "r") as f:
+                    etats.append(etat_tache(f.read()))
         except (OSError, ValueError):
             continue
-    return atteints
+        if taches_vivantes(etats):
+            vivants += 1
+            continue
+        try:
+            # Recolte CIBLEE (ce pid, jamais -1) : un waitpid(-1) volerait le statut des
+            # sous-processus du superviseur lui-meme (compilations, noteurs).
+            os.waitpid(int(pid), os.WNOHANG)
+        except ChildProcessError:
+            pass
+    return vivants
 
 
 def kill_student_survivors():
-    """Balaye les processus UID etudiant restes en vie (fork + setsid echappe au killpg du
-    timeout) : isolation entre les cas d'une meme evaluation. Appele entre deux cas.
+    """Isolation entre les cas d'une meme evaluation : plus AUCUN processus de l'UID etudiant
+    ne survit au cas qui l'a lance. Appele entre deux cas.
 
-    EN BOUCLE, jusqu'a une passe BLANCHE : une passe unique se faisait esquiver par une chaine
-    de fork plus rapide qu'elle — chaque passe tue ce qu'elle voit, et on ne s'arrete que
-    quand une passe complete n'a plus rien vu (borne a 25 passes : la limite de PID du
-    conteneur empeche la chaine de durer, et on ne reste pas coince ici)."""
+    On tue par l'UID (tuer_uid_etudiant), puis on verifie : la mort d'un processus tue n'est
+    pas instantanee. Borne a 25 passes pour ne jamais rester coince ici."""
     for _ in range(25):
+        tuer_uid_etudiant()
         if _une_passe_survivants() == 0:
             return
         time.sleep(0.05)
@@ -443,6 +496,35 @@ def etu_build_env(build_dir):
     }
 
 
+def fixe_droits(chemin, uid, gid, mode, mode_dossier=None):
+    """chown + chmod par DESCRIPTEUR, ouvert sans suivre de lien et sans bloquer.
+
+    root pose ces droits dans des dossiers que le code soumis a pu toucher : par chemin, un
+    lien pose a la place d'un fichier lui faisait changer la CIBLE. Ici un lien echoue (ELOOP,
+    une OSError : panne d'environnement imputable, donc une note), et ce qui est change est
+    exactement ce qui a ete ouvert. `mode_dossier` s'applique si c'est un dossier."""
+    fd = os.open(chemin, os.O_RDONLY | O_SANS_LIEN)
+    try:
+        st = os.fstat(fd)
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, mode_dossier if (mode_dossier is not None
+                                       and stat.S_ISDIR(st.st_mode)) else mode)
+    finally:
+        os.close(fd)
+
+
+def fixe_droits_arbre(racine, uid, gid, mode_fichier, mode_dossier):
+    """fixe_droits sur un arbre, racine comprise. Un lien n'est ni suivi ni modifie."""
+    if os.path.islink(racine):
+        return
+    for r, ds, fs in os.walk(racine):
+        for nom in ds + fs:
+            chemin = os.path.join(r, nom)
+            if not os.path.islink(chemin):
+                fixe_droits(chemin, uid, gid, mode_fichier, mode_dossier)
+    fixe_droits(racine, uid, gid, mode_dossier, mode_dossier)
+
+
 def chown_arbre(racine, uid, gid):
     """chown recursif, racine comprise — sans suivre aucun lien (cf. lock_sources)."""
     if os.path.islink(racine):
@@ -487,8 +569,12 @@ def preexec_compile():
     sans setsid, killpg au timeout échouait (le compilateur partage le pgid du superviseur)
     et proc.wait() bloquait jusqu'au budget mural du conteneur (502 au lieu d'un verdict
     « Échec de compilation »). Pas de rlimits : un binaire de test (debug) peut dépasser
-    la borne FSIZE des processus étudiants."""
+    la borne FSIZE des processus étudiants.
+
+    umask 077 : le compilateur cree le binaire du NOTEUR (harnais et nonce) ; avec l'umask par
+    defaut, il naissait en 0755 et restait lisible de tous jusqu'au chmod 0500."""
     os.setsid()
+    os.umask(0o077)
 
 
 def open_output(path):
@@ -965,12 +1051,12 @@ def run_rust(case_dir, env, timeout_s, case_index):
 JAVA_MODS = (r"(?:public|protected|private|static|final|synchronized|native|strictfp"
              r"|abstract|default)")
 # `static` present : chemin FONCTION.
-PACKAGE_JAVA = re.compile(r"^\s*package\s+[\w.]+\s*;", re.M)
+PACKAGE_JAVA = re.compile(r"^[ \t]*package\s+[\w.]+\s*;", re.M)
 
 
 JAVAP_SIGNATURE = re.compile(
-    r"^\s+(?=(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
-    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
+    r"^[ \t]+(?=(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
+    r"([\w.$\[\]]+)\s+(\w+)\(([^()]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 
 # Types marshalables par le protocole de ce premier jalon. Une méthode qui en sort n'est PAS
 # proxifiée : le harnais qui l'appelle échoue alors à la compilation — message clair pour le
@@ -993,12 +1079,12 @@ JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.
 # STATIQUE ne peut pas etre prise pour une methode d instance : son `static` ajoute un
 # jeton, donc le nom ne colle plus a la parenthese.
 JAVAP_CTOR = re.compile(
-    r"^\s+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
+    r"^[ \t]+(?:public\s+|protected\s+|private\s+)?([\w.$]+)\(([^()]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 # `static` ABSENT : chemin OBJET. Sans cette anticipation, une statique serait proxifiee
 # comme une methode d instance et le bouchon appellerait une poignee inexistante.
 JAVAP_METHOD = re.compile(
-    r"^\s+(?!(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
-    r"([\w.$\[\]]+)\s+(\w+)\(([^)]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
+    r"^[ \t]+(?!(?:" + JAVA_MODS + r"\s+)*static\s)(?:" + JAVA_MODS + r"\s+)*"
+    r"([\w.$\[\]]+)\s+(\w+)\(([^()]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
 
 
 def java_class_api(javap_output):
@@ -1489,7 +1575,7 @@ public final class MooditServer {
 # lues dans la source de l'étudiant. Le code noté part dans un BINAIRE séparé (le harnais n'est
 # ni compilé avec lui, ni présent dans son système de fichiers).
 
-GO_FUNC = re.compile(r"^func\s+(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+GO_FUNC = re.compile(r"^func\s+(\w+)\s*\(([^()]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
 GO_TYPES = {"int": "int", "int64": "int64", "float64": "float64", "bool": "bool",
             "string": "string"}
 
@@ -1530,7 +1616,7 @@ def go_signatures(source):
 
 GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
 GO_METHOD = re.compile(
-    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^()]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
 
 
 def go_object_api(source):
@@ -2065,8 +2151,8 @@ def go_student_without_main(source):
 # Qualificatifs NON significatifs avant le type de retour (`static int f`, `inline`,
 # `extern`, `const`) : sans eux, l ancre de debut de ligne ratait la signature, aucun
 # bouchon n etait genere, et une reponse juste etait notee 0.
-C_FUNC = re.compile(r"^\s*(?:(?:static|inline|extern|const)\s+)*"
-                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.M)
+C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+)*"
+                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)\s*\{", re.M)
 # `%.17g` et non `%g` : ce format est celui des ARGUMENTS comme des RETOURS, relus par atof.
 # `%g` s'arrête à 6 chiffres significatifs — 3.14159265 arrivait tronqué chez l'étudiant et
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
@@ -2242,7 +2328,7 @@ def c_signatures(source, cpp=False):
     return trouvees
 
 
-CPP_CLASS = re.compile(r"^\s*(?:class|struct)\s+(\w+)", re.M)
+CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
 
 
 def cpp_object_api(source):
@@ -2272,13 +2358,13 @@ def cpp_object_api(source):
                 continue
             if not public or not nue:
                 continue
-            ctor = re.match(re.escape(nom_classe) + r"\s*\(([^)]*)\)", nue)
+            ctor = re.match(re.escape(nom_classe) + r"\s*\(([^()]*)\)", nue)
             if ctor:
                 types = _c_param_types(ctor.group(1))
                 if types is not None:
                     ctors.append(types)
                 continue
-            methode = re.match(r"(int|long|double)\s+(\w+)\s*\(([^)]*)\)", nue)
+            methode = re.match(r"(int|long|double)\s+(\w+)\s*\(([^()]*)\)", nue)
             if methode:
                 types = _c_param_types(methode.group(3))
                 if types is not None:
@@ -2522,7 +2608,7 @@ int main(void) {
 # ─────────────────── Rust : bouchon et aiguillage TYPÉS, protocole texte ───────────────────
 # Pas de serde dans l'image (aucun réseau à la compilation) : même protocole texte que C.
 
-RUST_FN = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)", re.M)
+RUST_FN = re.compile(r"^[ \t]*(?:pub\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)", re.M)
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
 
@@ -2552,10 +2638,10 @@ def rust_signatures(source):
     return trouvees
 
 
-RUST_STRUCT = re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)", re.M)
-RUST_IMPL = re.compile(r"^\s*impl\s+(\w+)\s*\{", re.M)
+RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
+RUST_IMPL = re.compile(r"^[ \t]*impl\s+(\w+)\s*\{", re.M)
 RUST_FN_IN_IMPL = re.compile(
-    r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*->\s*([\w:]+)", re.M)
+    r"^[ \t]*(?:pub\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)", re.M)
 def rust_envoi(types):
     """Serialisation des arguments Rust sur le fil. FONCTION PURE (testee).
 
@@ -2612,7 +2698,7 @@ def rust_object_api(source):
     return resultat
 
 
-RUST_STRUCT_BODY = re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)\s*\{([^}]*)\}", re.M | re.S)
+RUST_STRUCT_BODY = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*\{([^{}]*)\}", re.M | re.S)
 
 
 def rust_struct_fields(source):
@@ -3001,7 +3087,7 @@ fn main() {
 ''' % (rust_without_main(student_source), piles, "\n".join(cas), cas_objets)
 
 
-RUST_MAIN = re.compile(r"^\s*fn\s+main\s*\(\s*\)", re.M)
+RUST_MAIN = re.compile(r"^[ \t]*fn\s+main\s*\(\s*\)", re.M)
 
 
 def rust_without_main(source):
@@ -3020,8 +3106,8 @@ def rust_without_main(source):
 CS_MODS = (r"(?:public|internal|protected|private|static|new|virtual|override|sealed"
            r"|abstract|extern|unsafe|partial)")
 CS_METHOD = re.compile(
-    r"(?:^|[{};])\s*(?=(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
-    r"(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
+    r"(?:^|[{};])[ \t]*(?=(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
+    r"(int|long|double|bool|string)\s+(\w+)\s*\(([^()]*)\)", re.M)
 CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "string": "string"}
 
 
@@ -3355,11 +3441,11 @@ public static class MooditServer {
 # Meme relaxation qu en Java, et pour la meme raison : en C# un membre est prive PAR DEFAUT.
 # ANCREES EN DEBUT DE LIGNE : sans cela, `public` devenu facultatif, un `new Rectangle(3, 4)`
 # au milieu d une expression serait pris pour une declaration de constructeur.
-CS_CTOR_TPL = (r"(?:^|[{};])\s*(?:(?:public|internal|protected|private|static|extern)\s+)*"
-               r"%s\s*\(([^)]*)\)")
+CS_CTOR_TPL = (r"(?:^|[{};])[ \t]*(?:(?:public|internal|protected|private|static|extern)\s+)*"
+               r"%s\s*\(([^()]*)\)")
 CS_INSTANCE = re.compile(
-    r"(?:^|[{};])\s*(?!(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
-    r"(int|long|double|bool|string)\s+(\w+)\s*\(([^)]*)\)", re.M)
+    r"(?:^|[{};])[ \t]*(?!(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
+    r"(int|long|double|bool|string)\s+(\w+)\s*\(([^()]*)\)", re.M)
 
 
 def cs_object_api(source, classe):
@@ -3385,7 +3471,7 @@ def cs_object_api(source, classe):
     return ctors, methodes
 
 
-CS_CLASS = re.compile(r"(?:public\s+|static\s+)*class\s+(\w+)")
+CS_CLASS = re.compile(r"\bclass\s+(\w+)")
 
 
 def code_blanchi(texte, backticks=False, rust=False):
@@ -3663,7 +3749,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         student_file = os.path.join(etu_src, nom)
         with open(student_file, "w", encoding="utf-8") as f:
             f.write(contenu)
-        os.chown(student_file, STUDENT_UID, STUDENT_GID)
+        fixe_droits(student_file, STUDENT_UID, STUDENT_GID, 0o600)
         student_contenu = contenu
     if student_file is None:
         return None, "Aucun fichier de code soumis"
@@ -3750,19 +3836,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     #    d'atteinte par construction.
     lock_sources(src)
     for chemin in (not_src, not_classes):
-        for racine, dossiers, fichiers in os.walk(chemin):
-            for nom in dossiers + fichiers:
-                os.chown(os.path.join(racine, nom), grader_uid(), grader_uid())
-                os.chmod(os.path.join(racine, nom), 0o700)
-        os.chown(chemin, grader_uid(), grader_uid())
-        os.chmod(chemin, 0o700)
+        fixe_droits_arbre(chemin, grader_uid(), grader_uid(), 0o700, 0o700)
+    # etu_classes a ete rempli par la compilation ETUDIANTE : aucun lien n'y est suivi.
     for chemin in (etu_src, etu_classes):
-        for racine, dossiers, fichiers in os.walk(chemin):
-            for nom in dossiers + fichiers:
-                os.chown(os.path.join(racine, nom), STUDENT_UID, STUDENT_GID)
-                os.chmod(os.path.join(racine, nom), 0o700)
-        os.chown(chemin, STUDENT_UID, STUDENT_GID)
-        os.chmod(chemin, 0o700)
+        fixe_droits_arbre(chemin, STUDENT_UID, STUDENT_GID, 0o700, 0o700)
     prep_run(case_dir, src)
 
     # 6. Un HOME et un tmp PAR PROCESSUS, du bon propriétaire : une JVM sans tmpdir inscriptible
@@ -3841,7 +3918,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(cs_server_source(cs_student_classes(extraction)))
     for chemin in (etu_copie, etu_src):
-        os.chown(chemin, STUDENT_UID, STUDENT_GID)
+        fixe_droits(chemin, STUDENT_UID, STUDENT_GID, 0o600)
     ecrire_prive(not_src, cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
                                            classe, ctors, instance))
     bin_etu = os.path.join(chantier, "etu.exe")
@@ -3862,8 +3939,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
             if etiquette == "harnais":
                 return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
-    os.chown(etu_copie, STUDENT_UID, STUDENT_GID)
-    os.chmod(etu_copie, 0o600)
+    fixe_droits(etu_copie, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            not_src, bin_not, etu_src, bin_etu,
                            grader_cmd=["mono", bin_not], student_cmd=["mono", bin_etu])
@@ -3898,7 +3974,7 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
     not_src = os.path.join(case_dir, "noteur.rs")
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(rust_server_source(methodes, student_source, objets, champs))
-    os.chown(etu_src, STUDENT_UID, STUDENT_GID)
+    fixe_droits(etu_src, STUDENT_UID, STUDENT_GID, 0o600)
     ecrire_prive(not_src,
                  rust_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
     bin_etu = os.path.join(chantier, "etu_bin")
@@ -3953,18 +4029,12 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_
     lock_sources(os.path.join(case_dir, "src"))
     for chemin, uid, mode in ((not_src, grader_uid(), 0o600), (bin_not, grader_uid(), 0o500),
                               (etu_src, STUDENT_UID, 0o600), (bin_etu, STUDENT_UID, 0o500)):
-        if os.path.isdir(chemin):
+        if os.path.isdir(chemin) and not os.path.islink(chemin):
             # Go travaille par MODULE : on cloisonne le dossier entier, récursivement.
-            for racine, dossiers, fichiers in os.walk(chemin):
-                for nom in dossiers + fichiers:
-                    cible = os.path.join(racine, nom)
-                    os.chown(cible, uid, uid)
-                    os.chmod(cible, 0o700 if os.path.isdir(cible) else 0o600)
-            os.chown(chemin, uid, uid)
-            os.chmod(chemin, 0o700)
+            fixe_droits_arbre(chemin, uid, uid, 0o600, 0o700)
             continue
-        os.chown(chemin, uid, uid)
-        os.chmod(chemin, mode)
+        # Sans suivre de lien : etu_src et bin_etu vivent dans le chantier de l'etudiant.
+        fixe_droits(chemin, uid, uid, mode)
     prep_run(case_dir, os.path.join(case_dir, "src"))
     work = os.path.join(case_dir, "work")
     os.makedirs(work, exist_ok=True)
@@ -4014,7 +4084,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     not_src = os.path.join(case_dir, "noteur." + ext)
     with open(etu_src, "w", encoding="utf-8") as f:
         f.write(c_server_source(methodes, student_source, cpp=(ext == "cpp"), objets=objets))
-    os.chown(etu_src, STUDENT_UID, STUDENT_GID)
+    fixe_droits(etu_src, STUDENT_UID, STUDENT_GID, 0o600)
     ecrire_prive(not_src, c_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
                                           cpp=(ext == "cpp"), objets=objets))
     bin_etu = os.path.join(chantier, "etu_bin")
@@ -4223,6 +4293,27 @@ def exec_commands(runtime, entry):
     return None, None
 
 
+# Taille ECHAPPEE maximale d'une sortie : le double du plafond en caracteres, car un texte
+# ordinaire s'echappe au plus en double (saut de ligne, guillemet, barre oblique inverse) et doit
+# passer INTACT — un dump SQL de la phase 1 en depend. Seuls les caracteres de controle
+# (6 octets chacun) peuvent depasser.
+EXEC_JSON_CAP = 2 * EXEC_OUTPUT_CAP + 1024
+
+
+def borne_json(texte, plafond=EXEC_JSON_CAP):
+    """Borne la taille ECHAPPEE d'une sortie, telle qu'elle partira dans le JSON. PURE (testee).
+
+    read_capped borne les CARACTERES ; mais un caractere de controle s'echappe en six octets
+    (\\u0001) : une sortie qui en est pleine faisait six fois le plafond, deux sorties par
+    etape, et execution-service (256 Mo de tas en prod) relisait le tout en memoire. Au-dela du
+    plafond, on garde la TETE et la QUEUE, comme read_capped : la queue porte les verdicts."""
+    if len(json.dumps(texte, ensure_ascii=False)) <= plafond:
+        return texte
+    garde = max(plafond // 12 - 64, 0)   # pire cas : 6 octets par caractere, tete + queue
+    return (texte[:garde] + "\n… (sortie tronquée au milieu : trop de caractères de contrôle)\n"
+            + (texte[-garde:] if garde else ""))
+
+
 def exec_stage(code, timed_out, out_path, err_path):
     # Processus tué par un signal (OOM du cgroup, limite mémoire…) : returncode négatif →
     # rapporté comme SIGNAL, à la Piston (code null + signal), comme un temps dépassé.
@@ -4235,8 +4326,8 @@ def exec_stage(code, timed_out, out_path, err_path):
         except ValueError:
             signal_name = "SIG" + str(-code)
         code = None
-    return {"stdout": read_capped(out_path, EXEC_OUTPUT_CAP),
-            "stderr": read_capped(err_path, EXEC_OUTPUT_CAP),
+    return {"stdout": borne_json(read_capped(out_path, EXEC_OUTPUT_CAP)),
+            "stderr": borne_json(read_capped(err_path, EXEC_OUTPUT_CAP)),
             "code": code, "signal": signal_name}
 
 

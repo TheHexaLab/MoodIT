@@ -228,13 +228,14 @@ public class DockerEvaluator {
             // Toutes les formes idiomatiques, y compris PARAMÉTRÉES et qualifiées : un contrôle
             // littéral rejetait « [TestCase(3, 4)] » (NUnit) et « @ParameterizedTest » (JUnit 5),
             // pourtant parfaitement valides — l'étudiant recevait alors 0 avec un diagnostic faux.
+            // Qualification bornee a huit segments : le moteur Java repete un groupe par recursion.
             case "java" -> java.util.regex.Pattern.compile(
-                    "@\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
+                    "@\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
             case "csharp" -> java.util.regex.Pattern.compile(
-                    "\\[\\s*(?:\\w+\\s*\\.\\s*)*(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+                    "\\[\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
             case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
             case "rust" -> java.util.regex.Pattern.compile(
-                    "#\\s*\\[\\s*(?:\\w+\\s*::\\s*)*test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");
+                    "#\\s*\\[\\s*(?:\\w+\\s*::\\s*){0,8}test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");
             default -> java.util.regex.Pattern.compile("MOODIT_TEST\\s*\\(");   // c / cpp
         };
     }

@@ -346,6 +346,67 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void aucun_processus_du_code_soumis_ne_survit_au_cas_suivant() {
+        // Isolation entre les cas : chaque appel laisse derriere lui un processus detache dont le
+        // fil PRINCIPAL est sorti (affiche « zombie », mais un autre fil tourne encore), et
+        // compte d'abord les processus de son propre UID. Le balayage entre deux cas jugeait ce
+        // processus mort sur l'etat de son seul fil principal, et le laissait vivre au cas
+        // suivant. Trois cas reels : quel que soit l'ordre tire, deux d'entre eux en suivent un
+        // autre. Une reponse juste n'est notee juste que si chaque cas demarre seul.
+        String code = """
+                #include <dirent.h>
+                #include <pthread.h>
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <unistd.h>
+
+                static void *dort(void *x) { (void) x; sleep(60); return 0; }
+
+                static int autres_processus(void) {
+                    DIR *d = opendir("/proc");
+                    struct dirent *e;
+                    char chemin[64], ligne[256];
+                    int n = 0;
+                    if (!d) return 0;
+                    while ((e = readdir(d))) {
+                        int pid = atoi(e->d_name);
+                        if (pid <= 0 || pid == getpid()) continue;
+                        snprintf(chemin, sizeof chemin, "/proc/%d/status", pid);
+                        FILE *f = fopen(chemin, "r");
+                        if (!f) continue;
+                        while (fgets(ligne, sizeof ligne, f)) {
+                            unsigned u;
+                            if (sscanf(ligne, "Uid: %u", &u) == 1) {
+                                if (u == getuid()) n++;
+                                break;
+                            }
+                        }
+                        fclose(f);
+                    }
+                    closedir(d);
+                    return n;
+                }
+
+                int doubler(int n) {
+                    int deja = autres_processus();
+                    if (fork() == 0) {
+                        for (int fd = 0; fd < 256; fd++) close(fd);
+                        setsid();
+                        pthread_t t;
+                        pthread_create(&t, 0, dort, 0);
+                        pthread_exit(0);
+                    }
+                    return deja ? 0 : n * 2;
+                }
+                """;
+        List<TestResult> r = evaluator.evaluate("C", code, List.of(
+                new TestCaseInput("un", "return doubler(1) == 2;", 1),
+                new TestCaseInput("deux", "return doubler(2) == 4;", 1),
+                new TestCaseInput("trois", "return doubler(3) == 6;", 1)), null);
+        assertThat(r).extracting(TestResult::passed).containsExactly(true, true, true);
+    }
+
+    @Test
     void box_n_est_pas_inscriptible_par_le_code_soumis() {
         // /box est un tmpfs monte en 1777 : le code soumis pouvait y poser ce qu'il voulait, a
         // l'endroit que root parcourt entre deux cas. Le superviseur le passe en 0755 en mode

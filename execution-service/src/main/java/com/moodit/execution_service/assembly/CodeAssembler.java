@@ -537,10 +537,9 @@ public class CodeAssembler {
      * Nom de fichier pour un « run » Java : la classe publique doit correspondre au fichier
      * ({@code Solution} → {@code Solution.java}). À défaut, {@code Main.java}.
      */
+    /** Même règle que la notation : un seul lecteur du nom de fichier Java. */
     private static String javaFileName(String studentCode) {
-        var matcher = java.util.regex.Pattern
-                .compile("public\\s+class\\s+(\\w+)").matcher(studentCode);
-        return matcher.find() ? matcher.group(1) + ".java" : "Main.java";
+        return com.moodit.execution_service.sandbox.HarnessProjects.javaFileName(studentCode, "Main");
     }
 
     // ── JSON ─────────────────────────────────────────────────────────────────────

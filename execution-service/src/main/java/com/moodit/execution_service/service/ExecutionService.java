@@ -240,10 +240,9 @@ public class ExecutionService {
         RunnerExec.Stage compile = result.compile();
         String compileOutput = compile == null ? null : firstNonBlank(compile.stderr(), compile.stdout());
         // Échec de compilation (langages compilés) : pas d'étape run, on remonte la sortie de compil.
-        if (compile != null && compile.code() != null && compile.code() != 0) {
-            return new RunResult("",
-                    firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation"),
-                    compile.code(), compile.signal(), compileOutput, false);
+        if (compileFailed(compile)) {
+            return new RunResult("", compileFailureDetail(compile),
+                    compile.code(), compile.signal(), compileOutput, compileKilled(compile));
         }
 
         RunnerExec.Stage run = result.run();
@@ -270,9 +269,8 @@ public class ExecutionService {
 
         // Échec de compilation (ex. TypeScript) → test échoué, message = stderr de compilation.
         RunnerExec.Stage compile = result.compile();
-        if (compile != null && compile.code() != null && compile.code() != 0) {
-            return new TestResult(testCase.name(), weight, false,
-                    firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation"));
+        if (compileFailed(compile)) {
+            return new TestResult(testCase.name(), weight, false, compileFailureDetail(compile));
         }
 
         RunnerExec.Stage run = result.run();
@@ -425,6 +423,29 @@ public class ExecutionService {
     }
 
     /** Message d'échec exploitable pour le prof (signal = timeout/OOM, sinon stderr). */
+    /**
+     * Compilation TUÉE (temps ou mémoire) : le superviseur la rend sans code, avec un signal.
+     * Seul le code était lu : elle passait pour réussie, l'étape run manquait, et l'interface
+     * affichait « Aucune sortie d'exécution » sans dire que la compilation avait été interrompue.
+     */
+    private static boolean compileKilled(RunnerExec.Stage compile) {
+        return compile != null && compile.code() == null && compile.signal() != null;
+    }
+
+    private static boolean compileFailed(RunnerExec.Stage compile) {
+        return compile != null
+                && ((compile.code() != null && compile.code() != 0) || compileKilled(compile));
+    }
+
+    /** Commence par « Interrompu », comme une exécution tuée : même règle de budget (imputable). */
+    private static String compileFailureDetail(RunnerExec.Stage compile) {
+        if (compileKilled(compile)) {
+            return "Interrompu à la compilation (signal " + compile.signal()
+                    + ") — dépassement de temps ou de mémoire probable";
+        }
+        return firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation");
+    }
+
     private static String runFailureDetail(RunnerExec.Stage run) {
         if (run == null) {
             return "Aucune sortie d'exécution";

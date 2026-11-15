@@ -139,10 +139,9 @@ public class DockerSandbox {
             List<com.github.dockerjava.api.model.Container> orphans = client().listContainersCmd()
                     .withShowAll(true)
                     .withLabelFilter(Map.of(RUNNER_LABEL, "1"))
-                    // « created » INCLUS, mais filtré PAR ÂGE plus bas : c'est aussi la fenêtre
-                    // entre createContainerCmd et startContainerCmd d'une autre instance — la
-                    // balayer tout de suite ferait échouer son démarrage (502, tentative
-                    // supprimée). Un conteneur resté « created » (JVM tuée dans cette fenêtre)
+                    // Filtrés PAR ÂGE plus bas (removable) : terminé ou « created », un conteneur
+                    // récent appartient peut-être encore à une notation en cours. Un conteneur
+                    // resté « created » (JVM tuée entre create et start)
                     // n'est en revanche ramassé par personne : il n'appartient pas au projet
                     // compose, donc ni `compose up --remove-orphans` ni `docker image prune`
                     // (deploy/update.sh) ne le voient — il s'accumulerait indéfiniment.
@@ -169,28 +168,27 @@ public class DockerSandbox {
     }
 
     /**
-     * Âge minimal d'un conteneur « created » avant de le balayer : au-delà, plus personne ne
-     * peut être en train de le démarrer (la fenêtre create → start d'une autre instance dure le
-     * temps d'un {@code docker cp}, quelques secondes même pour les bundles JSX/TSX).
+     * Âge minimal d'un conteneur runner avant de le balayer, QUEL QUE SOIT son statut : au-delà,
+     * plus aucune notation ne peut le posséder. Un mur ne dépasse jamais
+     * {@code DockerEvaluator.MAX_WALL_MS} (15 min), plus la lecture des journaux (30 s) : 20 min
+     * laissent de la marge.
      */
-    static final long CREATED_GRACE_MS = 10 * 60_000;
+    static final long ORPHAN_GRACE_MS = 20 * 60_000;
 
     /**
-     * Ce conteneur orphelin peut-il être supprimé maintenant ? Les statuts TERMINÉS, oui ; un
-     * « created » seulement s'il a dépassé {@link #CREATED_GRACE_MS} — sinon c'est peut-être la
-     * fenêtre create → start d'une AUTRE instance, et le supprimer ferait échouer sa notation.
-     * {@code getCreated()} est en SECONDES epoch ; absent (0 ou null), on s'abstient.
+     * Ce conteneur orphelin peut-il être supprimé maintenant ? Seulement s'il a dépassé
+     * {@link #ORPHAN_GRACE_MS}, même TERMINÉ : entre la fin du conteneur et la lecture de ses
+     * journaux, la notation qui le possède en a encore besoin. Le balayer à cet instant (une
+     * autre instance qui démarre, un {@code ./gradlew test} pendant que la pile e2e corrige)
+     * rendait « image absente », donc un 502 et une tentative supprimée. « created », lui, est
+     * aussi la fenêtre create → start d'une autre instance. Date inconnue : on s'abstient.
      */
     static boolean removable(com.github.dockerjava.api.model.Container container) {
-        String state = container.getState();
-        if (state == null || !state.equalsIgnoreCase("created")) {
-            return true;
-        }
         Long createdSeconds = container.getCreated();
         if (createdSeconds == null || createdSeconds <= 0) {
             return false;
         }
-        return System.currentTimeMillis() - createdSeconds * 1000L >= CREATED_GRACE_MS;
+        return System.currentTimeMillis() - createdSeconds * 1000L >= ORPHAN_GRACE_MS;
     }
 
     public boolean imagePresent(String image) {

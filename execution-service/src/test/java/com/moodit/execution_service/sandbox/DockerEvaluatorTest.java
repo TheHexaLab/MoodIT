@@ -83,6 +83,19 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void le_marqueur_de_framework_ne_fait_pas_deborder_la_pile() {
+        // Le moteur Java repete un groupe par recursion : une qualification sans fin
+        // (`@a.a.a.…`) faisait deborder la pile au lieu de repondre « pas un framework ».
+        assertThat(DockerEvaluator.frameworkMarkerFound("java", "@" + "a.".repeat(50_000))).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp", "[" + "a.".repeat(50_000))).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("rust", "#[" + "a::".repeat(50_000))).isFalse();
+        // Les formes reelles, qualifiees, restent reconnues.
+        assertThat(DockerEvaluator.frameworkMarkerFound("java", "@org.junit.jupiter.api.Test")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp", "[NUnit.Framework.TestCase(1)]")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("rust", "#[tokio::test]")).isTrue();
+    }
+
+    @Test
     void une_falsification_l_emporte_sur_incomplet_meme_cote_java() {
         // Le superviseur ne signale jamais « incomplet » avec des canaris incoherents, mais Java
         // ne lui fait pas confiance aveuglement : une regression cote superviseur ne doit pas

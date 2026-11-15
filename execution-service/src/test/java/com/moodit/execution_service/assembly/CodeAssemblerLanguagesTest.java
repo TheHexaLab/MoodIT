@@ -248,6 +248,19 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void run_java_lit_le_nom_du_fichier_comme_la_notation() {
+        // « Exécuter » avait son propre lecteur (public class \w+) : Unicode, sealed et classe
+        // commentee y donnaient un autre fichier que celui de la notation.
+        var a = assembler.assembleRun("Java", """
+                // public class Ancienne { }
+                public sealed interface Réponse permits Oui { }
+                record Oui() implements Réponse { }
+                """);
+
+        assertThat(a.files()).singleElement().satisfies(f -> assertThat(f.name()).isEqualTo("Réponse.java"));
+    }
+
+    @Test
     void run_json_valide_et_reindente_sans_harnais() {
         var a = assembler.assembleRun("JSON", "{\"a\":1}");
 

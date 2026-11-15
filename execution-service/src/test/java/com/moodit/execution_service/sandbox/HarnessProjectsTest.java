@@ -3,10 +3,12 @@ package com.moodit.execution_service.sandbox;
 import com.moodit.execution_service.assembly.UnsupportedLanguageException;
 import com.moodit.execution_service.dto.TestCaseInput;
 import org.junit.jupiter.api.Test;
+import java.time.Duration;
 
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -220,6 +222,55 @@ class HarnessProjectsTest {
         }
         int k = texte.indexOf(delimiteur, j + delimiteur.length());
         return k < 0 ? "" : texte.substring(j + delimiteur.length(), k);
+    }
+
+    @Test
+    void le_nom_du_fichier_suit_le_type_public_de_premier_niveau_quelle_que_soit_sa_forme() {
+        // Chaque forme etait notee 0 : fichier mal nomme, javac refusait la classe publique.
+        // Identifiant Unicode (\w ne reconnait que l'ASCII : « Réponse » donnait R.java).
+        assertThat(HarnessProjects.javaFileName("public class Réponse { }", "Solution"))
+                .isEqualTo("Réponse.java");
+        // Modificateurs hors de final/abstract : sealed, non-sealed, strictfp, ordre libre.
+        assertThat(HarnessProjects.javaFileName("""
+                public sealed interface Forme permits Carre { }
+                record Carre(int c) implements Forme { }
+                """, "Solution")).isEqualTo("Forme.java");
+        assertThat(HarnessProjects.javaFileName("public non-sealed class Libre { }", "Solution"))
+                .isEqualTo("Libre.java");
+        assertThat(HarnessProjects.javaFileName("strictfp public class Calcul { }", "Solution"))
+                .isEqualTo("Calcul.java");
+        assertThat(HarnessProjects.javaFileName("final public class Fin { }", "Solution"))
+                .isEqualTo("Fin.java");
+        // Annotation sur la meme ligne.
+        assertThat(HarnessProjects.javaFileName("@SuppressWarnings public class Annotee { }", "S"))
+                .isEqualTo("Annotee.java");
+        // Une classe IMBRIQUEE publique, rencontree avant, n'impose pas son nom.
+        assertThat(HarnessProjects.javaFileName("""
+                class Aide {
+                    public static class Interne { }
+                }
+                public class Solution { }
+                """, "X")).isEqualTo("Solution.java");
+        // La forme qui marchait deja marche toujours ; sans type public, le premier de premier
+        // niveau ; sans type du tout, le nom de repli.
+        assertThat(HarnessProjects.javaFileName("public class Solution { }", "X"))
+                .isEqualTo("Solution.java");
+        assertThat(HarnessProjects.javaFileName("""
+                enum Couleur { ROUGE }
+                class Autre { }
+                """, "X")).isEqualTo("Couleur.java");
+        assertThat(HarnessProjects.javaFileName("int x;", "Solution")).isEqualTo("Solution.java");
+    }
+
+    @Test
+    void le_nom_du_fichier_se_lit_en_temps_lineaire() {
+        // Une tete en \s* multiligne faisait repartir le moteur de chaque ligne jusqu'au bout
+        // de la source : temps quadratique, sur une source choisie par l'etudiant.
+        for (String source : List.of("\t\n".repeat(100_000), "\n".repeat(200_000),
+                "static ".repeat(30_000), "public ".repeat(30_000), "@a ".repeat(60_000))) {
+            assertTimeoutPreemptively(Duration.ofSeconds(2),
+                    () -> HarnessProjects.javaFileName(source, "Solution"));
+        }
     }
 
     @Test

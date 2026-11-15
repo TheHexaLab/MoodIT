@@ -10,8 +10,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Le CONTEXTE Spring complet démarre (câblage réel des beans). Filet contre les erreurs de
  * construction qui ne se voient qu'au démarrage du service — ex. un bean à plusieurs
- * constructeurs sans {@code @Autowired} (a fait tomber la pile e2e, cf. PR #246). Ne touche ni
- * Piston ni Docker : les clients sont paresseux.
+ * constructeurs sans {@code @Autowired} (a fait tomber la pile e2e, cf. PR #246). Si un démon
+ * Docker répond, le démarrage balaie les conteneurs runner ORPHELINS (removeOrphans) : seulement
+ * ceux qui ont dépassé le délai de grâce, jamais une notation en cours d'une autre instance.
  */
 @SpringBootTest
 class ExecutionServiceApplicationTests {
