@@ -580,16 +580,20 @@ class ReadCappedTest(unittest.TestCase):
 
 
 class SubstitutePlaceholdersTest(unittest.TestCase):
-    def test_substitue_dans_tous_les_fichiers_du_src(self):
+    def test_substitue_dans_le_harnais_seulement(self):
+        # Le fichier ETUDIANT n'est jamais reecrit (defense en profondeur).
         with tempfile.TemporaryDirectory() as case_dir:
             src = os.path.join(case_dir, "src")
             os.makedirs(src)
-            with open(os.path.join(src, "h.c"), "w", encoding="utf-8") as f:
-                f.write("a=__MOODIT_A__; b=__MOODIT_B__;")
+            for nom in ("harnais_rpc.c", "solution.c"):
+                with open(os.path.join(src, nom), "w", encoding="utf-8") as f:
+                    f.write("a=__MOODIT_A__; b=__MOODIT_B__;")
             supervisor.substitute_placeholders(case_dir, {"__MOODIT_A__": "7",
                                                           "__MOODIT_B__": "7"})
-            with open(os.path.join(src, "h.c"), encoding="utf-8") as f:
+            with open(os.path.join(src, "harnais_rpc.c"), encoding="utf-8") as f:
                 self.assertEqual(f.read(), "a=7; b=7;")
+            with open(os.path.join(src, "solution.c"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "a=__MOODIT_A__; b=__MOODIT_B__;")
 
 
 class ApiObjetTest(unittest.TestCase):
@@ -694,10 +698,10 @@ class ApiObjetTest(unittest.TestCase):
         objets = supervisor.cpp_object_api(self.CPP)
         bouchon = supervisor.cpp_object_stub(objets)
         self.assertIn("class Rectangle {", bouchon)
-        self.assertIn('"%s|new|Rectangle|%d|%d"', bouchon)
+        self.assertIn('"%s|new|Rectangle(int,int)|%d|%d"', bouchon)
         piles, cas = supervisor.cpp_object_dispatch(objets)
         self.assertIn("static std::vector<Rectangle> moodit_objets_Rectangle;", piles)
-        self.assertIn('strcmp(nom, "Rectangle.aire")', cas)
+        self.assertIn('strcmp(nom, "Rectangle.aire()")', cas)
 
     def test_java_bouchon_quand_la_classe_publique_est_l_objet(self):
         # Classe publique `Rectangle`, AUCUNE méthode statique : le bouchon de premier niveau
@@ -1600,6 +1604,113 @@ class Passe27Test(unittest.TestCase):
                     lents.append(nom)
                     break
         self.assertEqual(lents, [])
+
+
+class Passe28Test(unittest.TestCase):
+    """Reponses justes notees 0 en C#, Rust et C/C++ ; analyse lineaire."""
+
+    NL = chr(10)
+
+    def test_cs_un_retour_double_garde_InvariantCulture(self):
+        stub = supervisor.cs_object_stub("R", [["int"]], [("double", "Aire", []),
+                                                         ("int", "Cote", [])])
+        self.assertNotIn("Inbrutariant", stub)
+        self.assertIn("InvariantCulture", stub)
+        self.assertIn("(brut", stub)
+
+    def test_rust_constructeur_en_self(self):
+        src = self.NL.join(["pub struct Rect { l: i64, h: i64 }",
+                            "impl Rect {",
+                            "    pub fn new(l: i64, h: i64) -> Self { Rect { l, h } }",
+                            "    pub fn aire(&self) -> i64 { self.l * self.h }",
+                            "}", ""])
+        (typ, ctors, methodes), = supervisor.rust_object_api(src)
+        self.assertEqual(ctors, [("new", ["i64", "i64"])])
+        # La forme `-> Rect` marche toujours.
+        (_, ctors2, _), = supervisor.rust_object_api(src.replace("-> Self", "-> Rect"))
+        self.assertEqual(ctors2, [("new", ["i64", "i64"])])
+
+    def test_c_surcharges_departagees_par_la_signature(self):
+        src = self.NL.join(["class Rect {", "public:", "    Rect() { }",
+                            "    Rect(int l, int h) { }", "    int aire() { return 0; }",
+                            "};", ""])
+        objets = supervisor.cpp_object_api(src)
+        stub = supervisor.cpp_object_stub(objets)
+        _, cas = supervisor.cpp_object_dispatch(objets)
+        # Chaque surcharge porte SA cle, des deux cotes du fil.
+        for cle in ("Rect()", "Rect(int,int)"):
+            self.assertIn("|new|" + cle, stub)
+            self.assertIn('strcmp(nom, "%s")' % cle, cas)
+        serveur = supervisor.c_server_source([("int", "f", ["int"]), ("int", "f", ["double"])],
+                                             "", cpp=True)
+        self.assertIn('strcmp(nom, "f(int)")', serveur)
+        self.assertIn('strcmp(nom, "f(double)")', serveur)
+
+    def test_c_bouchon_non_static(self):
+        noteur = supervisor.c_grader_source([("int", "abs", ["int"])], "return abs(-1) == 1;", "1")
+        self.assertIn("int abs(int a0) {", noteur)
+        self.assertNotIn("static int abs(", noteur)
+
+    def test_cpp_explicit_et_virtual(self):
+        src = self.NL.join(["class Rect {", "public:", "    explicit Rect(int c) { }",
+                            "    virtual int aire() { return 0; }", "};", ""])
+        self.assertEqual(supervisor.cpp_object_api(src), [("Rect", [["int"]], [("int", "aire", [])])])
+
+    def test_cs_methode_nommee_Double(self):
+        src = "class Solution { public static int Double(int n) { return 2 * n; } }"
+        canon = supervisor.cs_types_canoniques(src)
+        self.assertEqual(supervisor.cs_signatures(canon), [("int", "Double", ["int"])])
+        # En position de type, le nom long est toujours ramene au mot-cle.
+        self.assertEqual(supervisor.cs_signatures(supervisor.cs_types_canoniques(
+            "class S { public static Double Moitie(Double x) { return x / 2; } }")),
+            [("double", "Moitie", ["double"])])
+
+    def test_cs_classes_namespace_imbrication_et_aide(self):
+        src = self.NL.join(["namespace Quiz {", "    class Aide { }",
+                            "    class Solution {", "        class Interne { }",
+                            "        public static int F(int n) { return n; }", "    }",
+                            "}", ""])
+        self.assertEqual(supervisor.cs_classes_premier_niveau(src), ["Aide", "Solution"])
+        self.assertEqual(supervisor.cs_namespaces(src), ["Quiz"])
+        # Le harnais nomme Solution : c'est elle, pas la premiere classe.
+        self.assertEqual(supervisor.cs_student_class(src, "return Solution.F(2) == 2;"),
+                         "Solution")
+        self.assertEqual(supervisor.cs_student_classes(src, "return Solution.F(2) == 2;"),
+                         ["Solution", "Aide"])
+        self.assertTrue(supervisor.cs_server_source(["Solution"], ["Quiz"])
+                        .startswith("using Quiz;"))
+        # Sans indice dans le harnais : Solution, sinon la premiere.
+        self.assertEqual(supervisor.cs_student_class("class A { } class Solution { }"), "Solution")
+        self.assertEqual(supervisor.cs_student_class("class A { } class B { }"), "A")
+
+    def test_cs_constructeur_implicite(self):
+        src = "class Rect { public int Aire() { return 1; } }"
+        self.assertEqual(supervisor.cs_object_api(src, "Rect"), ([[]], [("int", "Aire", [])]))
+        # Un constructeur declare remplace l'implicite.
+        self.assertEqual(supervisor.cs_object_api(
+            "class Rect { public Rect(int c) { } public int Aire() { return 1; } }", "Rect")[0],
+            [["int"]])
+
+    def test_l_extraction_complete_est_lineaire(self):
+        # block_end recalculait les profondeurs a chaque classe, et rust_capture_fields etait
+        # relu a chaque impl : 400 classes C++ prenaient 44 s par cas, hors de tout budget.
+        n = 1500
+        NL = self.NL
+        cpp = NL.join("class C%d {%spublic:%s    C%d(int a) { }%s    int f(int x) { return x; }%s};"
+                      % (i, NL, NL, i, NL, NL) for i in range(n))
+        rust = NL.join("pub struct S%d { pub a: i64 }%simpl S%d {%s    pub fn new(a: i64) -> Self "
+                       "{ S%d { a } }%s    pub fn f(&self, x: i64) -> i64 { x }%s}"
+                       % (i, NL, i, NL, i, NL, NL) for i in range(n))
+        cs = NL.join("class C%d {%s    public C%d(int a) { }%s    public int F(int x) { return x; }%s}"
+                     % (i, NL, i, NL, NL) for i in range(n))
+        debut = time.perf_counter()
+        supervisor.cpp_object_api(supervisor.code_blanchi(cpp))
+        ext = supervisor.code_blanchi(rust, rust=True)
+        supervisor.rust_object_api(ext)
+        supervisor.rust_capture_fields(ext)
+        supervisor.cs_student_classes(cs)
+        supervisor.cs_object_api(cs, "C0")
+        self.assertLess(time.perf_counter() - debut, 10.0)
 
 
 if __name__ == "__main__":

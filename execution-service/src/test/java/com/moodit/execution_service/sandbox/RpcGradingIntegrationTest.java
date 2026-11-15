@@ -345,8 +345,129 @@ class RpcGradingIntegrationTest {
                 "static int doubler(const int n) { return n * 2; }").passed()).isTrue();
     }
 
+    // ───────── Formes courantes qui valaient 0 (28e passe) : la juste passe, la fausse non ─────────
+
+    @Test
+    void csharp_retours_double_statique_et_objet() {
+        // `InvariantCulture` devenait `InbrutariantCulture` dans la lecture d'un double : le
+        // harnais ne compilait plus des qu'une methode rendait un double.
+        // Une classe de bouchons par question : chemin statique et chemin objet, chacun le sien.
+        String statique = """
+                class Solution {
+                    public static double Moitie(int n) { return n / 2.0; }
+                }
+                """;
+        String hs = "return Solution.Moitie(3) == 1.5;";
+        assertThat(note("C#", hs, statique).passed()).isTrue();
+        assertThat(note("C#", hs, statique.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        String objet = """
+                class Rect {
+                    int l, h;
+                    public Rect(int l, int h) { this.l = l; this.h = h; }
+                    public double Aire() { return l * h / 2.0; }
+                }
+                """;
+        String ho = "return System.Math.Abs(new Rect(3, 4).Aire() - 6.0) < 1e-9;";
+        assertThat(note("C#", ho, objet).passed()).isTrue();
+        assertThat(note("C#", ho, objet.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
+    }
+
+    @Test
+    void rust_constructeur_qui_rend_self() {
+        String h = "Rect::new(3, 4).aire() == 12";
+        String code = """
+                pub struct Rect { l: i64, h: i64 }
+                impl Rect {
+                    pub fn new(l: i64, h: i64) -> Self { Rect { l, h } }
+                    pub fn aire(&self) -> i64 { self.l * self.h }
+                }
+                """;
+        assertThat(note("Rust", h, code).passed()).isTrue();
+        assertThat(note("Rust", h, code.replace("self.l * self.h", "self.l + self.h")).passed()).isFalse();
+    }
+
+    @Test
+    void cpp_la_surcharge_appelee_est_celle_du_harnais() {
+        // `Rect()` declare AVANT `Rect(int, int)` : l'aiguillage par nom construisait `Rect()`.
+        String h = "return Rect(3, 4).aire() == 12;";
+        String code = """
+                class Rect {
+                    int l, h;
+                public:
+                    Rect() { l = 0; h = 0; }
+                    Rect(int a, int b) { l = a; h = b; }
+                    int aire() { return l * h; }
+                };
+                """;
+        assertThat(note("C++", h, code).passed()).isTrue();
+        assertThat(note("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
+    }
+
+    @Test
+    void cpp_explicit_et_virtual() {
+        String h = "return Carre(3).aire() == 9;";
+        String code = """
+                class Carre {
+                    int c;
+                public:
+                    explicit Carre(int x) { c = x; }
+                    virtual int aire() { return c * c; }
+                };
+                """;
+        assertThat(note("C++", h, code).passed()).isTrue();
+        assertThat(note("C++", h, code.replace("c * c", "c + c")).passed()).isFalse();
+    }
+
+    @Test
+    void c_fonction_notee_au_nom_de_la_libc() {
+        // Le bouchon `static int abs(int)` suivait <stdlib.h> : redeclaration refusee. Le cas
+        // faux prouve que le harnais appelle bien la fonction de l'etudiant, pas celle de la libc.
+        String h = "return abs(-5) == 5;";
+        assertThat(note("C", h, "int abs(int n) { return n < 0 ? -n : n; }").passed()).isTrue();
+        assertThat(note("C", h, "int abs(int n) { return n; }").passed()).isFalse();
+    }
+
+    @Test
+    void csharp_namespace_classe_d_aide_imbriquee_et_methode_nommee_Double() {
+        String h = "return Solution.Double(4) == 8;";
+        String code = """
+                using System;
+                namespace Quiz {
+                    class Aide { public static int Un() { return 1; } }
+                    class Solution {
+                        class Interne { }
+                        public static int Double(int n) { return 2 * n; }
+                    }
+                }
+                """;
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("return 2 * n;", "return n;")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_classe_sans_constructeur_declare() {
+        String h = "return new Compteur().Trois() == 3;";
+        String code = "class Compteur { public int Trois() { return 3; } }";
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("return 3;", "return 2;")).passed()).isFalse();
+    }
+
+    @Test
+    void java_annotation_a_arguments_sur_la_ligne_de_la_classe() {
+        String h = "return Solution.doubler(5) == 10;";
+        String code = """
+                class Aide { }
+                @SuppressWarnings("unchecked") public class Solution {
+                    public static int doubler(int n) { return n * 2; }
+                }
+                """;
+        assertThat(note("Java", h, code).passed()).isTrue();
+        assertThat(note("Java", h, code.replace("n * 2", "n")).passed()).isFalse();
+    }
+
     @Test
     void aucun_processus_du_code_soumis_ne_survit_au_cas_suivant() {
+        require("C");
         // Isolation entre les cas : chaque appel laisse derriere lui un processus detache dont le
         // fil PRINCIPAL est sorti (affiche « zombie », mais un autre fil tourne encore), et
         // compte d'abord les processus de son propre UID. Le balayage entre deux cas jugeait ce

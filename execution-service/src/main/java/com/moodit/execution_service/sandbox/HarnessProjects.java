@@ -177,14 +177,15 @@ public final class HarnessProjects {
      * Déclaration de TYPE : modificateurs (groupe 1) et nom (groupe 2). Identifiant Java complet,
      * Unicode compris — {@code \w} ne reconnaît que l'ASCII, et {@code public class Réponse}
      * devenait {@code R.java}. Toute suite de modificateurs et d'annotations, {@code sealed},
-     * {@code non-sealed} et {@code strictfp} compris. Tête en {@code [ \t]*} et non
+     * {@code non-sealed} et {@code strictfp} compris ; une annotation peut porter des arguments
+     * ({@code @SuppressWarnings("unchecked") public class Solution}, littéral déjà blanchi). Tête en {@code [ \t]*} et non
      * {@code \s*} : un {@code \s*} en début de motif multiligne avale les sauts de ligne, et
      * le moteur repartait de chaque ligne jusqu'au bout de la source (temps quadratique).
      * Modificateurs bornes a dix : le moteur Java repete un groupe par RECURSION, et une
      * ligne de milliers de {@code static} faisait deborder la pile (StackOverflowError).
      */
     private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
-            "(?m)^[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+|public|protected|private|static"
+            "(?m)^[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\([^()\\n]*\\))?|public|protected|private|static"
             + "|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
             + "(?:class|interface|record|enum|@interface)\\s+"
             + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");

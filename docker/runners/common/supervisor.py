@@ -36,7 +36,9 @@ Sortie  : UN objet JSON sur stdout.
 Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les deux en phase.
 """
 
+import bisect
 import collections
+import functools
 import glob
 import json
 import os
@@ -2279,13 +2281,26 @@ def block_end(texte, debut):
     """Fin du bloc ouvert à `debut` (index de son `{`), par appariement LEXICAL. PURE (testée).
 
     Même balayage que `code_depths` — une accolade en littéral ou en commentaire ne compte pas —
-    au lieu des trois copies naïves qu'en avaient les chemins Rust et C++."""
+    au lieu des trois copies naïves qu'en avaient les chemins Rust et C++.
+
+    Les profondeurs sont calculées UNE fois par texte (_fermetures) : recalculées à chaque
+    classe, 400 classes C++ prenaient 44 s par cas, hors de tout budget. Même résultat : la
+    première accolade fermante après `debut` à la même profondeur, trouvée par dichotomie."""
+    profondeurs, par_niveau = _fermetures(texte)
+    liste = par_niveau.get(profondeurs[debut], [])
+    k = bisect.bisect_right(liste, debut)
+    return liste[k] if k < len(liste) else len(texte)
+
+
+@functools.lru_cache(maxsize=8)
+def _fermetures(texte):
+    """Profondeurs du texte et, par profondeur, positions de ses `}` de CODE. Mémoïsé."""
     profondeurs = code_depths(texte)
-    niveau = profondeurs[debut]
-    for i in range(debut + 1, len(texte)):
-        if texte[i] == "}" and profondeurs[i] == niveau:
-            return i
-    return len(texte)
+    par_niveau = {}
+    for i, c in enumerate(texte):
+        if c == "}":
+            par_niveau.setdefault(profondeurs[i], []).append(i)
+    return profondeurs, par_niveau
 
 
 def cpp_class_spans(source):
@@ -2328,6 +2343,7 @@ def c_signatures(source, cpp=False):
     return trouvees
 
 
+CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
 CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
 
 
@@ -2358,6 +2374,8 @@ def cpp_object_api(source):
                 continue
             if not public or not nue:
                 continue
+            # Qualificatifs sans effet sur la signature vue de l'appelant.
+            nue = CPP_QUALIF.sub("", nue)
             ctor = re.match(re.escape(nom_classe) + r"\s*\(([^()]*)\)", nue)
             if ctor:
                 types = _c_param_types(ctor.group(1))
@@ -2405,7 +2423,7 @@ def cpp_object_stub(objets):
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
                       '        snprintf(requete, sizeof requete, "%%s|new|%s%s", id%s);'
-                      % (classe, fmt, args),
+                      % (c_cle(classe, types), fmt, args),
                       "        moodit_envoie(requete);",
                       "        __h = atoi(moodit_valeur(id));",
                       "    }"]
@@ -2418,13 +2436,22 @@ def cpp_object_stub(objets):
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
                       '        snprintf(requete, sizeof requete, "%%s|method|%s.%s|%%d%s", id, __h%s);'
-                      % (classe, nom, fmt, args),
+                      % (classe, c_cle(nom, types), fmt, args),
                       "        moodit_envoie(requete);",
                       "        return %s(moodit_valeur(id));" % lecture,
                       "    }"]
         corps.append("};")
         morceaux.append("\n".join(corps))
     return "\n\n".join(morceaux)
+
+
+def c_cle(nom, types):
+    """Cle d'aiguillage C/C++ : NOM ET TYPES, `Rect(int,int)`. PURE (testee).
+
+    Le seul nom ne choisit pas une surcharge : avec `Rect()` declare avant `Rect(int, int)`,
+    c'est `Rect()` qui etait construit, et une reponse juste etait notee fausse. L'arite seule
+    ne departagerait pas `f(int)` de `f(double)`."""
+    return "%s(%s)" % (nom, ",".join(types))
 
 
 def cpp_object_dispatch(objets):
@@ -2444,7 +2471,7 @@ def cpp_object_dispatch(objets):
         printf("\\n%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
         fflush(stdout);
         return;
-    }''' % (classe, lectures, classe, classe, args, classe))
+    }''' % (c_cle(classe, types), lectures, classe, classe, args, classe))
         for retour, nom, types in methodes:
             lectures = "\n".join(
                 "        %s a%d = %s(moodit_jeton());"
@@ -2457,7 +2484,7 @@ def cpp_object_dispatch(objets):
         printf("\\n%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
         fflush(stdout);
         return;
-    }''' % (classe, nom, lectures, C_TYPES[retour], classe, nom, args))
+    }''' % (classe, c_cle(nom, types), lectures, C_TYPES[retour], classe, nom, args))
     return "\n".join(piles), "\n\n".join(cas)
 
 
@@ -2508,13 +2535,15 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, objets=()):
         fmt = "".join("|" + C_TYPES[t] for t in types)
         args = "".join(", a%d" % i for i in range(len(types)))
         lecture = C_LECTURE[retour]
-        bouchons.append("""static %s %s(%s) {
+        # PAS static : apres <stdlib.h>, un `static int abs(int)` est une redeclaration
+        # refusee par gcc et g++ ; la definition ordinaire, elle, remplace celle de la libc.
+        bouchons.append("""%s %s(%s) {
     char id[40], requete[4096];
     moodit_identifiant(id);
     snprintf(requete, sizeof requete, "%%s|call|%s%s", id%s);
     moodit_envoie(requete);
     return %s(moodit_valeur(id));
-}""" % (retour, nom, params or "void", nom, fmt, args, lecture))
+}""" % (retour, nom, params or "void", c_cle(nom, types), fmt, args, lecture))
     entete = "" if cpp else ""
     return entete + C_RUNTIME + r'''
 /* Identifiant IMPREVISIBLE par appel, tire de /dev/urandom : sans lui, le code note pouvait
@@ -2565,7 +2594,7 @@ def c_server_source(methods, student_source, cpp=False, objets=()):
         printf("\\n%%s|ok|%s\\n", id, %s(%s));
         fflush(stdout);
         return;
-    }""" % (nom, "\n".join(lectures), C_TYPES[retour], nom, args))
+    }""" % (c_cle(nom, types), "\n".join(lectures), C_TYPES[retour], nom, args))
     piles, cas_objets = cpp_object_dispatch(objets)
     return ("#define main __moodit_student_main\n"
             + (student_source or "")
@@ -2668,6 +2697,7 @@ def rust_object_api(source):
     texte = source or ""
     structs = set(RUST_STRUCT.findall(texte))
     resultat = []
+    captures = rust_capture_fields(texte)   # UNE fois : relu dans la boucle, c'etait quadratique
     for impl in RUST_IMPL.finditer(texte):
         typ = impl.group(1)
         if typ not in structs:
@@ -2689,11 +2719,12 @@ def rust_object_api(source):
                 types.append(groupe.split(":", 1)[1].strip())
             if not valide:
                 continue
-            if not prend_self and retour == typ:
+            # `-> Self` est la forme du Rust Book : c'est le meme constructeur que `-> Type`.
+            if not prend_self and retour in (typ, "Self"):
                 ctors.append((nom, types))
             elif prend_self and retour in RUST_TYPES:
                 methodes.append((retour, nom, types))
-        if methodes and (ctors or typ in rust_capture_fields(texte)):
+        if methodes and (ctors or typ in captures):
             resultat.append((typ, ctors, methodes))
     return resultat
 
@@ -3115,7 +3146,10 @@ CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "s
 # `int`. Applique a la source d'EXTRACTION seulement — le code compile reste celui de l'etudiant.
 CS_ALIAS = {"String": "string", "Int32": "int", "Int64": "long", "Double": "double",
             "Boolean": "bool"}
-CS_ALIAS_RE = re.compile(r"\b(?:System\.)?(String|Int32|Int64|Double|Boolean)\b")
+# Seulement en position de TYPE (suivi d'un identifiant puis de `(`, `,`, `)`, `=` ou `;`) :
+# une methode NOMMEE `Double` devenait `double`, mot-cle, et le bouchon ne compilait plus.
+CS_ALIAS_RE = re.compile(r"\b(?:System\.)?(String|Int32|Int64|Double|Boolean)\b"
+                         r"(?=\s+[A-Za-z_]\w*\s*[(,)=;])")
 
 
 def cs_types_canoniques(texte):
@@ -3165,6 +3199,9 @@ def cs_envoi(types):
         for i, t in enumerate(types))
 
 
+# Gabarits de lecture : `v` est le NOM DE L'ARGUMENT, a remplacer par « (v » seulement — un
+# remplacement de « v » nu changeait InvariantCulture en InbrutariantCulture (le harnais ne
+# compilait plus des qu'une methode rendait un double).
 CS_LECTURE = {"int": "int.Parse(v)", "long": "long.Parse(v)",
               "double": "double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)",
               "bool": "bool.Parse(v)", "string": "MooditRpc.Dehexe(v)"}
@@ -3192,7 +3229,7 @@ def cs_object_stub(classe, ctors, methodes):
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
         # invariant d'en face, donc une réponse juste notée fausse.
         args = cs_envoi(types)
-        lecture = CS_LECTURE[retour].replace("v", "brut")
+        lecture = CS_LECTURE[retour].replace("(v", "(brut")
         morceaux.append('''    public %s %s(%s) {
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|method|" + __h + "|%s"%s);
@@ -3210,7 +3247,7 @@ def cs_grader_source(methods, harness_code, nonce, classe, ctors=(), instance=()
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
         # invariant d'en face, donc une réponse juste notée fausse.
         args = cs_envoi(types)
-        lecture = CS_LECTURE[retour].replace("v", "brut")
+        lecture = CS_LECTURE[retour].replace("(v", "(brut")
         bouchons.append('''    public static %s %s(%s) {
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|%s"%s);
@@ -3304,9 +3341,12 @@ public static class MooditGrader {
                  for l in (harness_code or "").splitlines()), nonce)
 
 
-def cs_server_source(classes):
-    """Programme ÉTUDIANT C# : son code (compilé à côté) + aiguillage par réflexion. PURE."""
-    return '''using System;
+def cs_server_source(classes, namespaces=()):
+    """Programme ÉTUDIANT C# : son code (compilé à côté) + aiguillage par réflexion. PURE.
+
+    Les espaces de noms du code soumis sont importés : sans cela, `typeof(Solution)` ne
+    trouvait pas une classe écrite dans `namespace Quiz { … }`."""
+    return "".join("using %s;\n" % n for n in namespaces) + '''using System;
 using System.Reflection;
 
 public static class MooditServer {
@@ -3463,6 +3503,11 @@ def cs_object_api(source, classe):
         types = types_de(params)
         if types is not None:
             ctors.append(types)
+    # AUCUN constructeur declare : C# fournit le constructeur par defaut, comme Java.
+    # Seulement pour une classe DECLAREE dans le code soumis.
+    declares = re.findall(CS_CTOR_TPL % re.escape(classe), source or "", re.M)
+    if not declares and re.search(r"\bclass\s+%s\b" % re.escape(classe), source or ""):
+        ctors = [[]]
     methodes = []
     for retour, nom, params in CS_INSTANCE.findall(source or ""):
         types = types_de(params)
@@ -3618,24 +3663,64 @@ def cs_sans_commentaires(texte):
     return "".join(res)
 
 
-def cs_student_class(source):
-    """Première classe déclarée par l'étudiant : celle que le harnais appellera. PURE (testée)."""
-    trouve = CS_CLASS.search(source or "")
-    return trouve.group(1) if trouve else "Solution"
+CS_JETONS = re.compile(r"[{};]|\bclass\s+(\w+)")
+CS_NAMESPACE = re.compile(r"\bnamespace\s+([\w.]+)")
 
 
-def cs_student_classes(source):
-    """TOUTES les classes du code soumis, la principale d'abord, sans doublon. PURE (testée).
+def cs_classes_premier_niveau(source):
+    """Classes de PREMIER NIVEAU du code soumis, dans l'ordre, sans doublon. PURE (testee).
+
+    Premier niveau = enfermee seulement dans des `namespace`. Une classe IMBRIQUEE n'est pas
+    visible sous son nom depuis le serveur (`typeof(Rect)` ne compilait pas), et le code
+    soumis ne compilait plus."""
+    texte = source or ""
+    noms, pile, segment = [], [], 0
+    for m in CS_JETONS.finditer(texte):
+        if m.group(1):
+            if all(pile) and m.group(1) not in noms:
+                noms.append(m.group(1))
+            continue
+        if m.group(0) == "{":
+            pile.append(bool(re.match(r"\s*namespace\s+[\w.]+\s*$", texte[segment:m.start()])))
+        elif m.group(0) == "}" and pile:
+            pile.pop()
+        segment = m.end()
+    return noms
+
+
+def cs_namespaces(source):
+    """Espaces de noms declares (bloc ou fichier) : le serveur les importe. PURE (testee)."""
+    vus = []
+    for nom in CS_NAMESPACE.findall(source or ""):
+        if nom not in vus:
+            vus.append(nom)
+    return vus
+
+
+def cs_student_class(source, harnais=""):
+    """Classe que le harnais appellera. PURE (testee).
+
+    La PREMIERE classe ne l'est pas forcement : une classe d'aide declaree avant Solution
+    recevait les bouchons, et `Solution.F()` du harnais ne compilait plus. On prend la premiere
+    classe de premier niveau que le harnais NOMME, sinon Solution, sinon la premiere."""
+    classes = cs_classes_premier_niveau(source)
+    nu = cs_sans_commentaires(harnais or "")
+    for nom in classes:
+        if re.search(r"\b%s\b" % re.escape(nom), nu):
+            return nom
+    if "Solution" in classes:
+        return "Solution"
+    return classes[0] if classes else "Solution"
+
+
+def cs_student_classes(source, harnais=""):
+    """Classes de PREMIER NIVEAU, la principale d'abord. PURE (testee).
 
     Le serveur doit chercher une statique dans le même périmètre que l'extraction
     (`cs_signatures`, toute la source) et que le bouchon, qui aplatit ces statiques dans la
     classe principale."""
-    principale = cs_student_class(source)
-    noms = [principale]
-    for nom in CS_CLASS.findall(source or ""):
-        if nom not in noms:
-            noms.append(nom)
-    return noms
+    principale = cs_student_class(source, harnais)
+    return [principale] + [n for n in cs_classes_premier_niveau(source) if n != principale]
 
 
 def grader_uid():
@@ -3898,7 +3983,8 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     # typeof du serveur et les bouchons. Le fichier depose, lui, reste l original.
     extraction = cs_types_canoniques(cs_sans_commentaires(student_source))
     methodes = cs_signatures(extraction)
-    classe = cs_student_class(extraction)
+    harnais = harness_rpc_body(case_dir) or ""
+    classe = cs_student_class(extraction, harnais)
     ctors, instance = cs_object_api(extraction, classe)
     # Une question POO n'a AUCUNE méthode statique : son API, c'est le constructeur et les
     # méthodes d'instance. Exiger une statique refusait ces questions (dont celles de la démo).
@@ -3916,7 +4002,8 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     with open(etu_copie, "w", encoding="utf-8") as f:
         f.write(student_source)
     with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(cs_server_source(cs_student_classes(extraction)))
+        f.write(cs_server_source(cs_student_classes(extraction, harnais),
+                                 cs_namespaces(extraction)))
     for chemin in (etu_copie, etu_src):
         fixe_droits(chemin, STUDENT_UID, STUDENT_GID, 0o600)
     ecrire_prive(not_src, cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
@@ -4097,7 +4184,10 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
             (etu_src, bin_etu, "code soumis", chantier, etu_build_env(chantier),
              preexec_student_compile),
             (not_src, bin_not, "harnais", case_dir, env, preexec_compile)):
-        code, expire = run_proc([compiler, std, "-O1", source, "-o", sortie, "-lm"],
+        # -fno-builtin : `abs`, `sqrt`… sont des fonctions INTEGREES de gcc, calculees a la
+        # compilation (abs(-5) devient 5) sans appeler la fonction notee du meme nom — une
+        # reponse fausse passait. Les deux programmes, pour que chacun appelle la vraie.
+        code, expire = run_proc([compiler, std, "-O1", "-fno-builtin", source, "-o", sortie, "-lm"],
                                 cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
                                 prex)
@@ -4190,6 +4280,10 @@ def substitute_placeholders(case_dir, mapping):
     par les valeurs tirées au sort. Le NONCE, lui, ne passe jamais par une source."""
     for root, _, files in os.walk(os.path.join(case_dir, "src")):
         for name in files:
+            # Le HARNAIS seulement : le fichier etudiant n'est jamais reecrit (defense en
+            # profondeur — un code contenant __MOODIT_ est deja refuse en amont).
+            if not name.startswith("harnais_rpc."):
+                continue
             path = os.path.join(root, name)
             try:
                 with open(path, "r", encoding="utf-8") as f:

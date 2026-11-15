@@ -244,6 +244,11 @@ class HarnessProjectsTest {
         // Annotation sur la meme ligne.
         assertThat(HarnessProjects.javaFileName("@SuppressWarnings public class Annotee { }", "S"))
                 .isEqualTo("Annotee.java");
+        // Annotation A ARGUMENTS sur la ligne de la classe (fonctionnait sur main).
+        assertThat(HarnessProjects.javaFileName("""
+                class Aide { }
+                @SuppressWarnings("unchecked") public class Solution { }
+                """, "Main")).isEqualTo("Solution.java");
         // Une classe IMBRIQUEE publique, rencontree avant, n'impose pas son nom.
         assertThat(HarnessProjects.javaFileName("""
                 class Aide {
