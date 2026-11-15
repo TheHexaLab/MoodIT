@@ -1398,5 +1398,81 @@ class Passe24Test(unittest.TestCase):
         self.assertFalse(supervisor.survivant_etudiant(status("S (sleeping)", "0"), 1300))
 
 
+class Passe25Test(unittest.TestCase):
+    """Lecteurs de parametres uniques (C, C#), alias C#, qualificatifs C, cause d'une exception,
+    liens jamais suivis."""
+
+    NL = chr(10)
+
+    def test_c_qualificatifs_et_const(self):
+        for src in ("static int doubler(int n) { return n * 2; }",
+                    "inline int doubler(int n) { return n * 2; }",
+                    "int doubler(const int n) { return n * 2; }"):
+            self.assertEqual(supervisor.c_signatures(src), [("int", "doubler", ["int"])], src)
+        # La forme nue marche toujours, et un pointeur reste ecarte.
+        self.assertEqual(supervisor.c_signatures("int doubler(int n) { return n * 2; }"),
+                         [("int", "doubler", ["int"])])
+        self.assertEqual(supervisor.c_signatures("int somme(int *t, int n) { return 0; }"), [])
+
+    def test_cpp_objet_lit_les_parametres_comme_les_fonctions_libres(self):
+        # Le chemin OBJET avait sa propre copie du lecteur, qui prenait `int *t` pour `int` :
+        # le meme code etait ecarte en fonction libre et mal bouchonne en constructeur.
+        src = self.NL.join(["class R {", "public:",
+                            "    R(int *t) { }",
+                            "    R(const int l, int h) { }",
+                            "    int aire() { return 0; }",
+                            "};", ""])
+        (classe, ctors, methodes), = supervisor.cpp_object_api(src)
+        self.assertEqual(classe, "R")
+        self.assertEqual(ctors, [["int", "int"]])
+
+    def test_cs_noms_longs_ramenes_au_mot_cle(self):
+        src = self.NL.join(["class Solution {",
+                            "    public static String Inverse(String s) { return s; }",
+                            "    static System.Int32 Doubler(System.Int32 n) { return n * 2; }",
+                            "}", ""])
+        canon = supervisor.cs_types_canoniques(src)
+        self.assertEqual(sorted(supervisor.cs_signatures(canon)),
+                         [("int", "Doubler", ["int"]), ("string", "Inverse", ["string"])])
+        # Un identifiant qui CONTIENT un nom long n'est pas touche.
+        self.assertIn("MyString", supervisor.cs_types_canoniques("class MyString {}"))
+
+    def test_cs_valeur_par_defaut_et_in_mais_pas_ref(self):
+        self.assertEqual(supervisor._cs_param_types("int n = 5, in int m"), ["int", "int"])
+        self.assertIsNone(supervisor._cs_param_types("ref int n"))
+        self.assertEqual(supervisor._cs_param_types("int n"), ["int"])
+        # Le chemin objet utilise le MEME lecteur.
+        ctors, _ = supervisor.cs_object_api(
+            "class R {" + self.NL + "    public R(int l, int h = 1) { }" + self.NL + "}", "R")
+        self.assertEqual(ctors, [["int", "int"]])
+
+    def test_une_erreur_d_environnement_n_est_pas_un_bogue(self):
+        # OSError (disque, lien, processus) : l'etudiant peut la provoquer -> une note, pas un
+        # 502 qui lui offrirait un reessai.
+        self.assertEqual(supervisor.cause_exception(OSError(28, "No space left")), "environnement")
+        self.assertEqual(supervisor.cause_exception(PermissionError()), "environnement")
+        # Bogue de logique du superviseur : seul cas non imputable.
+        self.assertEqual(supervisor.cause_exception(KeyError("x")), "erreur")
+        self.assertFalse(supervisor.notation_incomplete(
+            [supervisor.CaseOutcome(False, skipped=True, cause="environnement")]))
+
+    @unittest.skipUnless(os.name == "posix", "liens symboliques POSIX ; couvert en CI (Linux)")
+    def test_un_lien_n_est_jamais_suivi_par_root(self):
+        # `/box/cargo -> /` : root suivait le lien et verrouillait la cible entiere. Une racine
+        # qui est un lien est ignoree, sans meme tenter de la changer.
+        with tempfile.TemporaryDirectory() as d:
+            cible = os.path.join(d, "cible")
+            os.makedirs(cible)
+            fichier = os.path.join(cible, "f")
+            with open(fichier, "w") as f:
+                f.write("x")
+            os.chmod(fichier, 0o644)
+            lien = os.path.join(d, "lien")
+            os.symlink(cible, lien)
+            supervisor.lock_sources(lien)
+            supervisor.chown_arbre(lien, os.getuid(), os.getgid())
+            self.assertEqual(os.stat(fichier).st_mode & 0o777, 0o644)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

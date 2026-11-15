@@ -322,6 +322,29 @@ class RpcGradingIntegrationTest {
                 """).passed()).isTrue();
     }
 
+    @Test
+    void csharp_noms_longs_de_types_notes_juste() {
+        // `String` EST `string`, `Int32` EST `int` : aucun bouchon n'etait genere et une reponse
+        // juste etait notee 0. Garde l'APPEL : l'extraction C# passe par cs_types_canoniques.
+        assertThat(note("C#", "return Solution.Inverse(\"ab\") == \"ba\";", """
+                using System;
+
+                class Solution {
+                    public static String Inverse(String s) {
+                        char[] c = s.ToCharArray();
+                        Array.Reverse(c);
+                        return new String(c);
+                    }
+                }
+                """).passed()).isTrue();
+    }
+
+    @Test
+    void c_fonction_static_et_parametre_const_notes_juste() {
+        assertThat(note("C", "return doubler(5) == 10;",
+                "static int doubler(const int n) { return n * 2; }").passed()).isTrue();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

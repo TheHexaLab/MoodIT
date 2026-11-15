@@ -444,10 +444,12 @@ def etu_build_env(build_dir):
 
 
 def chown_arbre(racine, uid, gid):
-    """chown recursif, racine comprise."""
+    """chown recursif, racine comprise — sans suivre aucun lien (cf. lock_sources)."""
+    if os.path.islink(racine):
+        return
     for r, ds, fs in os.walk(racine):
         for nom in ds + fs:
-            os.chown(os.path.join(r, nom), uid, gid)
+            os.chown(os.path.join(r, nom), uid, gid, follow_symlinks=False)
     os.chown(racine, uid, gid)
 
 
@@ -742,12 +744,19 @@ def base_env(case_dir):
 
 
 def lock_sources(src_dir):
-    """Sources (harnais compris) illisibles par l'étudiant — root, 700."""
+    """Sources (harnais compris) illisibles par l'etudiant — root, 700.
+
+    Ne SUIT AUCUN lien : root qui parcourt un lien pose par l'etudiant verrouillait la cible —
+    tout le systeme de fichiers du conteneur pour un lien vers /. Une racine qui est un lien
+    est ignoree ; un lien rencontre est change sans etre suivi (lchown), jamais chmode."""
+    if os.path.islink(src_dir):
+        return
     for root, dirs, files in os.walk(src_dir):
         for name in dirs + files:
             path = os.path.join(root, name)
-            os.chown(path, 0, 0)
-            os.chmod(path, 0o700)
+            os.chown(path, 0, 0, follow_symlinks=False)
+            if not os.path.islink(path):
+                os.chmod(path, 0o700)
     os.chown(src_dir, 0, 0)
     os.chmod(src_dir, 0o700)
 
@@ -773,6 +782,16 @@ class CaseOutcome:
         self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
         self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
         self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
+
+
+def cause_exception(e):
+    """Cause d'une exception attrapee pendant un cas : "environnement" ou "erreur". PURE (testee).
+
+    Une OSError vient de l'ENVIRONNEMENT — disque plein, lien pose dans /box, table des processus
+    saturee — que l'etudiant partage et peut provoquer : elle reste une note. Toute autre
+    exception est un bogue de LOGIQUE du superviseur, que le code soumis ne peut pas choisir de
+    declencher : seule celle-la rend la notation incomplete (502, tentative a reprendre)."""
+    return "environnement" if isinstance(e, OSError) else "erreur"
 
 
 def notation_incomplete(reels):
@@ -833,7 +852,7 @@ def prep_run(case_dir, src):
     for cache in (os.path.join(BOX, "gocache"), os.path.join(BOX, "cargo"),
                   os.path.join(case_dir, "target"), os.path.join(case_dir, "home_build"),
                   os.path.join(case_dir, "tmp_build")):
-        if os.path.isdir(cache):
+        if os.path.isdir(cache) and not os.path.islink(cache):
             lock_sources(cache)
     os.chmod(case_dir, 0o755)
     os.chmod(os.path.join(BOX, "cases"), 0o755)
@@ -2026,7 +2045,11 @@ def go_student_without_main(source):
 # avoir son protocole — seule compte la propriété : le harnais et le nonce ne sont PAS dans le
 # binaire de l'étudiant, qui tourne sous un autre UID.
 
-C_FUNC = re.compile(r"^\s*(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.M)
+# Qualificatifs NON significatifs avant le type de retour (`static int f`, `inline`,
+# `extern`, `const`) : sans eux, l ancre de debut de ligne ratait la signature, aucun
+# bouchon n etait genere, et une reponse juste etait notee 0.
+C_FUNC = re.compile(r"^\s*(?:(?:static|inline|extern|const)\s+)*"
+                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.M)
 # `%.17g` et non `%g` : ce format est celui des ARGUMENTS comme des RETOURS, relus par atof.
 # `%g` s'arrête à 6 chiffres significatifs — 3.14159265 arrivait tronqué chez l'étudiant et
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
@@ -2194,22 +2217,9 @@ def c_signatures(source, cpp=False):
         retour = retour.replace(" ", "")
         if nom == "main" or retour not in C_TYPES:
             continue
-        types = []
-        valide = True
-        for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-            # Pointeur, tableau ou reference : type NON marshalable -> la fonction est ecartee
-            # (pas de bouchon), au lieu d etre prise pour un scalaire — `int *tab` devenait
-            # `int tab` dans le bouchon, et un simple HELPER a pointeurs faisait echouer la
-            # compilation de toute la question sur du code valide.
-            if any(c in groupe for c in "*[&"):
-                valide = False
-                break
-            morceaux = groupe.split()
-            if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
-                valide = False
-                break
-            types.append(morceaux[0])
-        if not valide:
+        # Le MEME lecteur que le chemin objet C++ (_c_param_types) : deux copies divergeaient.
+        types = _c_param_types(params)
+        if types is None:
             continue
         trouvees.append((retour, nom, types))
     return trouvees
@@ -2262,10 +2272,17 @@ def cpp_object_api(source):
 
 
 def _c_param_types(params):
-    """Types des paramètres d'une signature C/C++, ou None si l'un n'est pas marshalable. PURE."""
+    """Types des parametres d'une signature C/C++, ou None si l'un n'est pas marshalable. PURE.
+
+    SEUL lecteur de parametres C/C++, pour les fonctions libres comme pour le chemin objet : deux
+    copies divergeaient (les pointeurs etaient ecartes dans l'une, pris pour un scalaire dans
+    l'autre). Pointeur, tableau ou reference -> None (pas de bouchon : `int *tab` n'est pas
+    `int`). `const` est ignore : `const int n` est un `int` pour l'appelant."""
     types = []
     for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-        morceaux = groupe.replace("*", " ").split()
+        if any(c in groupe for c in "*[&"):
+            return None
+        morceaux = [m for m in groupe.split() if m != "const"]
         if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
             return None
         types.append(morceaux[0])
@@ -2991,21 +3008,40 @@ CS_METHOD = re.compile(
 CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "string": "string"}
 
 
+# Noms longs d'un type de base, ramenes a leur mot-cle : `String` EST `string`, `Int32` EST
+# `int`. Applique a la source d'EXTRACTION seulement — le code compile reste celui de l'etudiant.
+CS_ALIAS = {"String": "string", "Int32": "int", "Int64": "long", "Double": "double",
+            "Boolean": "bool"}
+CS_ALIAS_RE = re.compile(r"\b(?:System\.)?(String|Int32|Int64|Double|Boolean)\b")
+
+
+def cs_types_canoniques(texte):
+    """Source C# dont les noms longs de types de base sont ramenes au mot-cle. PURE (testee)."""
+    return CS_ALIAS_RE.sub(lambda m: CS_ALIAS[m.group(1)], texte or "")
+
+
+def _cs_param_types(params):
+    """SEUL lecteur de parametres C#, pour les statiques comme pour le chemin objet. PURE.
+
+    La valeur par defaut (`int n = 5`) et le modificateur `in` ne changent pas le type vu par
+    l'appelant ; `ref`/`out` le changent (passage par reference) : refuses."""
+    types = []
+    for groupe in [p.strip() for p in params.split(",") if p.strip()]:
+        morceaux = [m for m in groupe.split("=")[0].split() if m != "in"]
+        if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
+            return None
+        types.append(morceaux[0])
+    return types
+
+
 def cs_signatures(source):
     """Méthodes STATIQUES du code étudiant → [(retour, nom, [types])], visibilité indifférente. PURE (testée)."""
     trouvees = []
     for retour, nom, params in CS_METHOD.findall(source or ""):
         if nom == "Main":
             continue
-        types = []
-        valide = True
-        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-            morceaux = groupe.split()
-            if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
-                valide = False
-                break
-            types.append(morceaux[0])
-        if valide:
+        types = _cs_param_types(params)
+        if types is not None:
             trouvees.append((retour, nom, types))
     return trouvees
 
@@ -3314,14 +3350,7 @@ def cs_object_api(source, classe):
 
     Lue à la REGEX comme le reste du chemin C# : le prof n'a rien à déclarer, et une signature
     hors types marshalables est simplement écartée (le harnais qui l'appelle ne compilera pas)."""
-    def types_de(params):
-        resultat = []
-        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-            morceaux = groupe.split()
-            if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
-                return None
-            resultat.append(morceaux[0])
-        return resultat
+    types_de = _cs_param_types   # le MEME lecteur que les statiques
 
     ctors = []
     # re.M est INDISPENSABLE : le gabarit est ancre en debut de LIGNE (sans quoi un
@@ -3773,7 +3802,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     # L extraction lit la source DEPOUILLEE (commentaires et chaines blanchis) : un `class X`
     # ou une methode en commentaire leurrait le choix de la classe principale, la liste des
     # typeof du serveur et les bouchons. Le fichier depose, lui, reste l original.
-    extraction = cs_sans_commentaires(student_source)
+    extraction = cs_types_canoniques(cs_sans_commentaires(student_source))
     methodes = cs_signatures(extraction)
     classe = cs_student_class(extraction)
     ctors, instance = cs_object_api(extraction, classe)
@@ -4304,6 +4333,12 @@ def main():
     if job.get("mode") == "exec":
         exec_main(job)
         return
+    # Mode NOTATION seulement (le mode exec donne /box a l'etudiant, et root n'y repasse pas).
+    # /box est un tmpfs monte en 1777 : l'etudiant pouvait y poser `/box/cargo -> /`, et root le
+    # suivait au cas suivant. Rien n'y a besoin d'ecrire a la racine hors root (les dossiers
+    # etudiants sont crees puis donnes par root) : 0755.
+    os.chown(BOX, 0, 0)
+    os.chmod(BOX, 0o755)
     language = job["language"]
     if language not in RUNNERS:
         print(json.dumps({"v": 1, "error": "langage non pris en charge : " + language}))
@@ -4392,8 +4427,17 @@ def main():
             # sur une erreur interne — un /box saturé, par exemple — passait sinon par la porte
             # « incoherents » de canary_verdict, donc par « falsification probable » et la mise
             # à zéro de toute la soumission. Une défaillance du noteur ne doit jamais accuser.
-            outcome, ms = CaseOutcome(False, "Erreur interne du noteur",
-                                      ran=False, skipped=True, cause="erreur"), 0
+            # Seule une exception de LOGIQUE est « non imputable » (-> 502, tentative a
+            # reprendre). Une OSError vient de l'ENVIRONNEMENT — disque, liens, processus — que
+            # l'etudiant partage et peut provoquer : en faire un 502 lui offrait un reessai a
+            # volonte. Elle reste skipped (aucune accusation de falsification), mais elle note.
+            environnement = cause_exception(e) == "environnement"
+            outcome, ms = CaseOutcome(
+                False,
+                ("Notation impossible : espace de travail épuisé ou modifié par le code soumis"
+                 if environnement else "Erreur interne du noteur"),
+                ran=False, skipped=True,
+                cause="environnement" if environnement else "erreur"), 0
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms
