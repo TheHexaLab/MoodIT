@@ -1301,10 +1301,12 @@ class NotationIncompleteTest(unittest.TestCase):
             self._o(skipped=True, cause="erreur"),
             self._o(ran=True, timed_out=True)]))
 
-    def test_budget_epuise_par_la_charge_rend_la_notation_incomplete(self):
-        # Le scenario de prod : serveur charge, aucun cas n'a atteint son delai, le budget a
-        # quand meme saute la fin — la note serait perdue a cause de la charge.
-        self.assertTrue(supervisor.notation_incomplete([
+    def test_budget_epuise_reste_une_note_partielle(self):
+        # Une solution correcte mais LENTE, sous le delai de chaque cas, epuise le budget de facon
+        # reproductible : dans le conteneur, l'attente d'une place a deja eu lieu, le budget ne
+        # mesure que le travail. En faire un 502 rendait la question impossible a noter (502 a
+        # chaque renvoi) et bloquait une place a chaque essai : c'est une note PARTIELLE.
+        self.assertFalse(supervisor.notation_incomplete([
             supervisor.CaseOutcome(True, ran=True),
             self._o(skipped=True, cause="budget")]))
 

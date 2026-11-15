@@ -62,12 +62,12 @@ class DockerEvaluatorTest {
 
     @Test
     void notation_incomplete_est_une_panne_en_interne_mais_reste_visible_au_tester() {
-        // Le superviseur signale une notation INCOMPLETE pour cause non imputable (erreur
-        // interne, ou budget epuise par la charge sans qu'aucun cas ait atteint son delai).
+        // Le superviseur signale une notation INCOMPLETE pour cause non imputable : une erreur
+        // interne de son propre code, seule cause qui ne vient jamais de l'etudiant.
         supervisorReturns("""
                 {"v":1,"results":[
                   {"index":0,"passed":true,"detail":null,"ms":1},
-                  {"index":1,"passed":false,"detail":"Non exécuté : budget de notation dépassé","ms":0}
+                  {"index":1,"passed":false,"detail":"Erreur interne du noteur","ms":0}
                 ],"events":[],"canaries":"ok","incomplet":true}
                 """);
         // Chemin INTERNE (la correction d'une soumission) : ce n'est pas une note. Avant, le cas
@@ -75,12 +75,11 @@ class DockerEvaluatorTest {
         // cause de la charge.
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(SandboxException.class);
-        // Chemin PUBLIC (« Tester ») : les verdicts restent rendus, le prof doit voir que sa
-        // question a trop de cas pour le budget.
+        // Chemin PUBLIC (« Tester ») : les verdicts restent rendus, detail compris.
         List<TestResult> r = evaluator.evaluate("Go", "code", TWO_CASES, null,
                 DockerEvaluator.PUBLIC_WALL_MS);
         assertThat(r.get(0).passed()).isTrue();
-        assertThat(r.get(1).detail()).contains("budget");
+        assertThat(r.get(1).detail()).contains("Erreur interne");
     }
 
     @Test
@@ -345,6 +344,13 @@ class DockerEvaluatorTest {
         // Et même au plancher proportionnel, l'invariant tient sur tout mur NON plafonné :
         // mur candidat = 30 s + (N+2) × pireCas ≥ 3 × pireCas, donc la marge de 40 % couvre
         // toujours un cas entier. Vérifié sur le plus petit job possible.
+        // Et au temps limite MAXIMAL (60 s, Java, 3 compilations) : le plancher proportionnel
+        // l'emportait des 56 s sous le plafond interne et rompait l'invariant de quelques
+        // secondes. Il est reserve au chemin public : ici la formule stricte, l'invariant exact.
+        DockerEvaluator.Walls javaLong = DockerEvaluator.walls("java", 3, 60_000, Long.MAX_VALUE);
+        long pireCasJavaLong = 60_000 + 10_000 + 3 * 90_000 + 5_000;
+        assertThat(javaLong.budgetMs() + pireCasJavaLong + 20_000)
+                .isLessThanOrEqualTo(javaLong.wallMs());
         DockerEvaluator.Walls go = DockerEvaluator.walls("go", 1, 10_000, Long.MAX_VALUE);
         long pireCasGo = 10_000 + 10_000 + 2 * 90_000 + 5_000;
         assertThat(go.budgetMs() + pireCasGo).isLessThanOrEqualTo(go.wallMs());

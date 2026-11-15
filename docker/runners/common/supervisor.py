@@ -763,20 +763,17 @@ class CaseOutcome:
 def notation_incomplete(reels):
     """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
 
-    Vrai si un cas a subi une erreur interne du superviseur, ou si le budget global a saute
-    des cas SANS qu'aucun cas reel ait atteint son delai. Execution-service en fait alors un
-    502 sur le chemin INTERNE : la tentative est supprimee et l'etudiant resoumet, au lieu
-    d'une note perdue a cause de la charge ou d'une panne.
+    Vrai SEULEMENT si un cas a subi une erreur interne du superviseur : notre code a leve, ce
+    n'est jamais la faute de l'etudiant. Execution-service en fait un 502 sur le chemin
+    INTERNE — la tentative est supprimee, l'etudiant resoumet.
 
-    Le garde-fou « aucun delai atteint » est ce qui empeche le reessai gratuit : sans lui, un
-    etudiant qui sait sa reponse fausse ferait tourner chaque cas jusqu'au delai pour epuiser
-    le budget, et la panne qu'il aurait provoquee lui rendrait sa tentative. Un disque sature
-    (cause « espace ») reste imputable pour la meme raison : c'est le code soumis qui ecrit."""
-    reels = list(reels)
-    if any(o.cause == "erreur" for o in reels):
-        return True
-    return (any(o.cause == "budget" for o in reels)
-            and not any(o.timed_out for o in reels))
+    Un budget global epuise reste IMPUTABLE (note partielle), sans exception : dans le conteneur,
+    l'attente d'une place a deja eu lieu avant le demarrage, et le budget ne mesure que les
+    compilations et les executions. Une solution correcte mais lente, ou une question a
+    beaucoup de cas, l'epuise donc de facon REPRODUCTIBLE — en faire un 502 rendait la question
+    impossible a noter et bloquait une place a chaque renvoi. Un disque sature (cause « espace »)
+    reste imputable aussi : c'est le code soumis qui ecrit."""
+    return any(o.cause == "erreur" for o in reels)
 
 
 def inconclusive(outcome):
@@ -4399,7 +4396,9 @@ def main():
                         "detail": redact_tokens(detail),
                         "ms": timings[case["index"]]})
 
-    incomplet = notation_incomplete(
+    # Un verdict de FALSIFICATION l'emporte : des canaris incoherents ne doivent jamais devenir
+    # une tentative a reprendre, meme si un cas a aussi subi une erreur interne.
+    incomplet = canaries != "incoherents" and notation_incomplete(
         outcomes[c["index"]] for c in cases if not c.get("canary"))
     print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries,
                       "incomplet": incomplet},

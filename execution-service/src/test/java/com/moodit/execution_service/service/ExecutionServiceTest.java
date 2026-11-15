@@ -102,20 +102,63 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_epuise_par_la_charge_en_interne_est_une_panne_pas_une_note() {
-        // Le scenario de prod : une classe soumet d'un coup, l'attente de place COMPTE dans le
-        // budget, et les derniers harnais ne sont pas lances alors qu'aucun n'a depasse son
-        // delai. Sur le chemin INTERNE, ce n'est pas une note : 502, tentative a reprendre.
-        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+    void budget_epuise_par_l_attente_de_place_en_interne_est_une_panne_pas_une_note()
+            throws Exception {
+        // VRAIE charge : la place unique du sandbox est occupee par une autre correction pendant
+        // 600 ms. L'evaluation attend, et c'est cette attente — creee par les autres — qui epuise
+        // le budget de 200 ms ; le travail lui-meme (harnais instantanes) tenait dedans. Sur le
+        // chemin interne, ce n'est pas une note : 502, la tentative est a reprendre.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
         ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
-        svc.interpretedBudgetMs = 0;
+        svc.interpretedBudgetMs = 200;
         pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        java.util.concurrent.CountDownLatch prise = new java.util.concurrent.CountDownLatch(1);
+        Thread autre = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            prise.countDown();
+            try {
+                Thread.sleep(600);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        })));
+        autre.start();
+        prise.await();
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
 
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(req)))
                 .isInstanceOf(com.moodit.execution_service.sandbox.SandboxException.class);
+        autre.join();
+    }
+
+    @Test
+    void solution_lente_sous_le_delai_sans_attente_recoit_une_note_partielle() {
+        // Le scenario de la revue : une solution CORRECTE mais lente, chaque harnais sous son
+        // delai, aucune attente de place. Le budget s'epuise de facon REPRODUCTIBLE — en faire un
+        // 502 rendait la question impossible a noter (502 a chaque renvoi) et bloquait une place a
+        // chaque essai. C'est une note PARTIELLE, comme avant.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        pistonRun(files -> {
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return new RunnerExec.Stage("", nonceIn(files), 0, null, null);
+        });
+        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isTrue();
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
     }
 
     @Test

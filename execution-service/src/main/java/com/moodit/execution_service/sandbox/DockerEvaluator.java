@@ -298,8 +298,12 @@ public class DockerEvaluator {
         long wallCandidate = BASE_OVERHEAD_MS + (caseCount + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
         long wall = Math.min(cap, wallCandidate);
+        long strict = wall - perCase - CLOSING_MARGIN_MS;
+        // Plancher proportionnel au seul chemin PUBLIC, comme le dit le javadoc : applique aussi
+        // en interne, il l'emportait des 56 s de temps limite en Java (mur plafonne a 15 min) et
+        // rompait l'invariant de quelques secondes — sur le seul chemin qui enregistre une note.
         long budget = Math.max(1_000,
-                Math.max(wall - perCase - CLOSING_MARGIN_MS, wall * 3 / 5));
+                maxWallMs <= PUBLIC_WALL_MS ? Math.max(strict, wall * 3 / 5) : strict);
         return new Walls(wall, budget);
     }
 
@@ -329,16 +333,15 @@ public class DockerEvaluator {
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
         }
-        // Notation INCOMPLETE pour une cause NON IMPUTABLE (erreur interne du superviseur, ou
-        // budget global epuise par la charge sans qu'aucun cas ait atteint son delai — le
-        // superviseur tranche, il connait les delais) : sur le chemin interne, ce n'est pas une
-        // note. Les verdicts sautes arrivaient en passed=false, core les enregistrait, et une
-        // panne ou une classe entiere soumettant d'un coup coutait sa tentative UNIQUE a
-        // l'etudiant. Le « Tester » public garde ses verdicts : le prof doit les voir.
+        // Notation INCOMPLETE pour une cause NON IMPUTABLE — une erreur interne du superviseur,
+        // seule cause qui ne vient jamais de l'etudiant : sur le chemin interne, ce n'est pas une
+        // note (502, tentative a reprendre). Un budget epuise, lui, reste une note partielle :
+        // dans le conteneur l'attente de place a deja eu lieu, le budget ne mesure que le
+        // travail, et son epuisement est reproductible. Le « Tester » garde ses verdicts.
         if (internal && root.path("incomplet").asBoolean(false)) {
             log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
             throw new SandboxException(
-                    "Notation incomplète (charge du serveur ou panne) : la tentative est à reprendre");
+                    "Notation incomplète (panne du noteur) : la tentative est à reprendre");
         }
 
         // Défense en PROFONDEUR : le superviseur neutralise déjà les verdicts quand les canaris

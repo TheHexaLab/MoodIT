@@ -102,8 +102,18 @@ public class ExecutionService {
     /** Variante complète : {@code timeoutMs} = temps limite demandé par le prof ({@code null} → défaut). */
     private RunnerExec.Result execute(String runtime, List<RunnerExec.File> files,
             String stdin, Integer timeoutMs) {
-        return limiter.withSandboxSlot(() -> runner.execute(runtime, files, stdin, timeoutMs));
+        // Temps passe a ATTENDRE une place (de la demande a l'obtention) : la seule part du budget
+        // interprete qui vient de la charge du serveur, donc des autres. Cumule par fil, et lu par
+        // la boucle d'evaluation pour distinguer une panne de charge d'une solution lente.
+        long demande = System.nanoTime();
+        return limiter.withSandboxSlot(() -> {
+            ATTENTE_NS.get()[0] += System.nanoTime() - demande;
+            return runner.execute(runtime, files, stdin, timeoutMs);
+        });
     }
+
+    /** Attente de place cumulee pendant l'evaluation en cours sur ce fil (ns). */
+    private static final ThreadLocal<long[]> ATTENTE_NS = ThreadLocal.withInitial(() -> new long[1]);
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
     private static String newNonce() {
@@ -163,14 +173,12 @@ public class ExecutionService {
         // dépassée, donc un seul harnais évalué sur cent. Une valeur de configuration absurde
         // doit être ramenée, pas transformée en corruption de note.
         long clampedBudgetMs = Math.max(0, Math.min(budgetMs, MAX_BUDGET_MS));
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(clampedBudgetMs);
+        long budgetNs = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(clampedBudgetMs);
+        long debut = System.nanoTime();
+        long deadline = debut + budgetNs;
+        ATTENTE_NS.get()[0] = 0;
         List<TestResult> results = new ArrayList<>();
         boolean exhausted = false;
-        // Un harnais INTERROMPU (delai ou memoire) signe que l'etudiant a lui-meme consomme du
-        // budget : son epuisement lui est alors imputable. Sans ce garde-fou, faire tourner
-        // chaque harnais jusqu'au delai epuisait le budget et transformait la panne provoquee en
-        // reessai gratuit.
-        boolean interrompu = false;
         for (TestCaseInput testCase : request.testCases()) {
             // Le PREMIER harnais part toujours : un budget mal configuré (0, négatif) doit
             // dégrader la correction, pas la vider de tout verdict réel. L'échéance est ensuite
@@ -185,11 +193,14 @@ public class ExecutionService {
                             + "les harnais restants ne sont pas lancés",
                             budgetMs, results.size(), request.testCases().size());
                     exhausted = true;
-                    // Chemin INTERNE et budget epuise par la CHARGE (l'attente de place compte
-                    // dans le budget, et aucun harnais n'a atteint son delai) : ce n'est pas une
-                    // note. 502 -> la tentative est supprimee, l'etudiant resoumet — au lieu d'un
-                    // « Non évalué » enregistre comme un echec definitif.
-                    if (limiter.isInternal() && !interrompu) {
+                    // Chemin INTERNE : si le TRAVAIL seul (ecoule moins l'attente de place) tenait
+                    // dans le budget, c'est l'attente — la charge creee par les autres — qui l'a
+                    // fait deborder. Ce n'est pas une note : 502, la tentative est supprimee et
+                    // l'etudiant resoumet. Sinon (solution lente, question a beaucoup de
+                    // harnais), c'est reproductible : note PARTIELLE, jamais un 502 a chaque
+                    // renvoi qui rendrait la question impossible a noter.
+                    long travail = (System.nanoTime() - debut) - ATTENTE_NS.get()[0];
+                    if (limiter.isInternal() && travail < budgetNs) {
                         throw new SandboxException("Notation incomplète (charge du serveur) : "
                                 + "la tentative est à reprendre");
                     }
@@ -200,12 +211,8 @@ public class ExecutionService {
                 continue;
             }
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
-            TestResult r = runOne(request.language(), request.code(), testCase, newNonce(),
-                    request.timeoutMs());
-            if (r.detail() != null && r.detail().startsWith("Interrompu")) {
-                interrompu = true;
-            }
-            results.add(r);
+            results.add(runOne(request.language(), request.code(), testCase, newNonce(),
+                    request.timeoutMs()));
         }
         return results;
     }
