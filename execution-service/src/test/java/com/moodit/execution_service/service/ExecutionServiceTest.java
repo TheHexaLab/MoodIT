@@ -162,19 +162,34 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_epuise_par_un_harnais_interrompu_reste_une_note() {
-        // LE garde-fou anti-reessai : un harnais qui atteint son delai signe que l'etudiant a
-        // lui-meme consomme le budget. Sans ce garde-fou, faire tourner chaque harnais jusqu'au
-        // delai epuisait le budget et offrait une tentative de plus a chaque fois.
-        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+    void budget_epuise_par_un_harnais_interrompu_reste_une_note() throws Exception {
+        // VRAIE contention (la place unique est occupee 600 ms par une autre correction, budget
+        // 200 ms), donc le travail mesure tient dans le budget — MAIS le harnais atteint son
+        // delai. Sans le garde-fou, une solution qui boucle dans une file chargee partait en 502 :
+        // un essai de plus. Avec, c'est une note. (L'ancienne version tournait avec un budget nul :
+        // la condition etait toujours fausse et le test ne pouvait pas rougir.)
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
         ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
-        svc.interpretedBudgetMs = 0;
+        svc.interpretedBudgetMs = 200;
         pistonRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
+        java.util.concurrent.CountDownLatch prise = new java.util.concurrent.CountDownLatch(1);
+        Thread autre = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            prise.countDown();
+            try {
+                Thread.sleep(600);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        })));
+        autre.start();
+        prise.await();
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
 
         List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
+        autre.join();
         assertThat(r).hasSize(2);
         assertThat(r.get(0).detail()).startsWith("Interrompu");
         assertThat(r.get(1).passed()).isFalse();

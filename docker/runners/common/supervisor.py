@@ -341,6 +341,23 @@ def free_bytes_under(blocks_available, block_size, threshold):
     return blocks_available * block_size < threshold
 
 
+def survivant_etudiant(status, uid):
+    """Ce /proc/<pid>/status est-il un processus VIVANT de l'UID etudiant ? PURE (testee).
+
+    Un ZOMBIE (etat Z) est deja mort : il attend seulement d'etre recolte, et le superviseur, en
+    PID 1, ne recolte pas les orphelins. Le compter comme survivant faisait tourner le balayage
+    ses 25 passes a chaque cas (~1,3 s), au detriment du budget de notation."""
+    uid_ok = False
+    zombie = False
+    for line in status.splitlines():
+        if line.startswith("State:"):
+            zombie = line.split()[1:2] == ["Z"]
+        elif line.startswith("Uid:"):
+            parts = line.split()
+            uid_ok = len(parts) > 1 and parts[1] == str(uid)
+    return uid_ok and not zombie
+
+
 def _une_passe_survivants():
     """UNE passe sur /proc : tue tout processus de l'UID etudiant, rend le nombre atteint."""
     atteints = 0
@@ -349,12 +366,10 @@ def _une_passe_survivants():
             continue
         try:
             with open("/proc/" + pid + "/status", "r") as f:
-                for line in f:
-                    if line.startswith("Uid:"):
-                        if int(line.split()[1]) == STUDENT_UID:
-                            os.kill(int(pid), signal.SIGKILL)
-                            atteints += 1
-                        break
+                status = f.read()
+            if survivant_etudiant(status, STUDENT_UID):
+                os.kill(int(pid), signal.SIGKILL)
+                atteints += 1
         except (OSError, ValueError):
             continue
     return atteints
@@ -1056,8 +1071,13 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
                        "    }"]
     else:
         lignes.append("    private " + class_name + "() {}")
+    premier_niveau = []
     for nom_source, ctors, instance in objects:
-        lignes.append(java_object_stub(nom_source, ctors, instance))
+        if "." in nom_source:
+            # Classe IMBRIQUEE (Solution.Rectangle) : dans sa coquille, comme l'etudiant l'a ecrite.
+            lignes.append(java_object_stub(nom_source, ctors, instance))
+        else:
+            premier_niveau.append(java_object_stub(nom_source, ctors, instance))
     for retour, nom, types in methods:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
@@ -1066,6 +1086,11 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
                    % (JAVA_RPC_FN[JSON_TYPES[retour]], nom, args),
                    "    }"]
     lignes.append("}")
+    # Classe de PREMIER NIVEAU (`class Rectangle` a cote de Solution) : hors de la coquille, en
+    # classe non publique du meme fichier. Rangee dans Solution, elle devenait Solution.Rectangle
+    # et le harnais `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question.
+    for bouchon in premier_niveau:
+        lignes.append(bouchon.replace("    public static final class ", "final class ", 1))
     return "\n".join(lignes) + "\n"
 
 
@@ -2573,6 +2598,9 @@ def rust_struct_fields(source):
                 liste = None
                 break
             nom, type_ = (m.strip() for m in nue.split(":", 1))
+            # `pub largeur: i32` (et `pub(crate) ...`) : la visibilite ne fait pas partie du nom —
+            # sans ce retrait, « pub largeur » etait refuse et la structure entiere perdue.
+            nom = re.sub(r"^pub(\([^)]*\))?\s+", "", nom)
             if type_ not in RUST_TYPES or not nom.isidentifier():
                 liste = None
                 break
@@ -2879,7 +2907,10 @@ def rust_server_source(methods, student_source, objets=(), champs=None):
                    % (nom, "\n".join(lectures), appel))
     return '''%s
 
-use std::io::{BufRead, Write};
+// ALIASES : le serveur partage le fichier du code soumis, et un `use std::io::Write;` chez
+// l'etudiant (banal pour un flush) levait E0252, nom defini deux fois. Les methodes de trait
+// marchent des que le trait est en portee, quel que soit son nom.
+use std::io::{BufRead as MooditBufRead, Write as MooditWrite};
 
 fn moodit_hexe(s: &str) -> String {
     // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
@@ -3806,7 +3837,10 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
     extraction = code_blanchi(student_source, rust=True)
     methodes = rust_signatures(extraction)
     objets = rust_object_api(extraction)
-    champs = rust_capture_fields(student_source)
+    # Source NETTOYEE, comme les signatures : lue brute, une virgule ou une fin de ligne
+    # dans un commentaire de champ faisait perdre des champs, et le litteral du harnais
+    # ne compilait plus.
+    champs = rust_capture_fields(extraction)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : i32, "
                       "i64, f64, bool, String).")
@@ -3979,7 +4013,9 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     extraction = code_blanchi(student_source, backticks=True)
     methodes = go_signatures(extraction)
     objets = go_object_api(extraction)
-    champs = go_capture_fields(student_source)
+    # Source NETTOYEE : commentaires et etiquettes `json:"x"` effaces, comme pour les
+    # signatures — lue brute, une etiquette faisait perdre toute la structure.
+    champs = go_capture_fields(extraction)
     if not (methodes or objets):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
                       "int64, float64, bool, string).")

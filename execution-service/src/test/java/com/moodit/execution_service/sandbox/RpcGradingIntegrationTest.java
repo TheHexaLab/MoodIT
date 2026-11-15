@@ -256,6 +256,72 @@ class RpcGradingIntegrationTest {
                 """).passed()).isFalse();
     }
 
+    @Test
+    void rust_champ_commente_note_juste() {
+        // La forme de la demo V9_1, avec un commentaire de champ. Les champs etaient lus sur la
+        // source BRUTE : « // en cm, environ » faisait perdre `hauteur`, et le litteral du
+        // harnais ne compilait plus — 0 sur une reponse juste.
+        String h = "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12";
+        assertThat(note("Rust", h, """
+                struct Rectangle {
+                    largeur: i32, // en cm, environ
+                    hauteur: i32,
+                }
+                impl Rectangle {
+                    fn aire(&self) -> i32 { self.largeur * self.hauteur }
+                }
+                """).passed()).isTrue();
+    }
+
+    @Test
+    void go_champ_etiquete_note_juste() {
+        // Une etiquette `json:"l"` faisait perdre toute la structure, lue sur la source brute.
+        String h = "return Rectangle{Largeur: 3, Hauteur: 4}.Aire() == 12";
+        assertThat(note("Go", h, """
+                package main
+
+                type Rectangle struct {
+                	Largeur int `json:"l"`
+                	Hauteur int
+                }
+
+                func (r Rectangle) Aire() int { return r.Largeur * r.Hauteur }
+                """).passed()).isTrue();
+    }
+
+    @Test
+    void rust_solution_qui_importe_write_note_juste() {
+        // `use std::io::Write;` (banal pour un flush) levait E0252 : le SERVEUR, qui partage le
+        // fichier de l'etudiant, importait Write sans alias.
+        assertThat(note("Rust", "doubler(5) == 10", """
+                use std::io::Write;
+
+                fn doubler(n: i32) -> i32 {
+                    std::io::stdout().flush().unwrap();
+                    n * 2
+                }
+                """).passed()).isTrue();
+    }
+
+    @Test
+    void java_classe_de_premier_niveau_note_juste() {
+        // `class Rectangle` A COTE de Solution : le bouchon la rangeait dans Solution, et
+        // `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question. La forme imbriquee
+        // (Solution.Rectangle) reste couverte par java_objets_par_poignee.
+        String h = "return new Rectangle(3, 4).aire() == 12;";
+        assertThat(note("Java", h, """
+                public class Solution {
+                }
+
+                class Rectangle {
+                    private final int l;
+                    private final int h;
+                    Rectangle(int l, int h) { this.l = l; this.h = h; }
+                    int aire() { return l * h; }
+                }
+                """).passed()).isTrue();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

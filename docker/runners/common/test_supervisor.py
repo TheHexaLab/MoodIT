@@ -1328,5 +1328,75 @@ class NotationIncompleteTest(unittest.TestCase):
             supervisor.CaseOutcome(True, ran=True), self._o(ran=True)]))
 
 
+class Passe24Test(unittest.TestCase):
+    """Champs lus sur la source nettoyee, `pub` Rust, import serveur aliase, classe Java de
+    premier niveau, zombies. Chaque test garde aussi la forme qui marchait deja."""
+
+    NL, TAB, BT, Q = chr(10), chr(9), chr(96), chr(34)
+
+    def test_rust_commentaire_de_champ_ne_perd_rien(self):
+        # PRECONDITION seulement : la capture fonctionne sur la source NETTOYEE. Le defaut etait
+        # a l'APPEL (run_rust_rpc lui passait la source brute), invisible ici : il est garde par
+        # rust_champ_commente_note_juste dans RpcGradingIntegrationTest.
+        src = self.NL.join(["struct Rectangle {",
+                            "    largeur: i32, // en cm, environ",
+                            "    hauteur: i32,",
+                            "}", ""])
+        champs = supervisor.rust_capture_fields(supervisor.code_blanchi(src, rust=True))
+        self.assertEqual(champs.get("Rectangle"), [("largeur", "i32"), ("hauteur", "i32")])
+
+    def test_rust_champs_pub(self):
+        src = self.NL.join(["pub struct Rectangle {",
+                            "    pub largeur: i32,",
+                            "    pub(crate) hauteur: i32,",
+                            "}", ""])
+        self.assertEqual(supervisor.rust_struct_fields(src).get("Rectangle"),
+                         [("largeur", "i32"), ("hauteur", "i32")])
+        # La forme sans visibilite marche toujours.
+        nu = self.NL.join(["struct Rectangle {", "    largeur: i32,", "    hauteur: i32,",
+                           "}", ""])
+        self.assertEqual(supervisor.rust_struct_fields(nu).get("Rectangle"),
+                         [("largeur", "i32"), ("hauteur", "i32")])
+
+    def test_go_etiquette_de_champ_ne_perd_rien(self):
+        # PRECONDITION seulement, comme ci-dessus : l'appel (run_go_rpc) est garde par
+        # go_champ_etiquete_note_juste dans RpcGradingIntegrationTest.
+        etiquette = self.BT + "json:" + self.Q + "l" + self.Q + self.BT
+        src = self.NL.join(["type Rectangle struct {",
+                            self.TAB + "Largeur int " + etiquette,
+                            self.TAB + "Hauteur int",
+                            "}", ""])
+        champs = supervisor.go_capture_fields(supervisor.code_blanchi(src, backticks=True))
+        self.assertEqual(champs.get("Rectangle"), [("Largeur", "int"), ("Hauteur", "int")])
+
+    def test_rust_import_du_serveur_aliase(self):
+        serveur = supervisor.rust_server_source(
+            [("i32", "doubler", ["i32"])], "fn doubler(n: i32) -> i32 { n * 2 }")
+        self.assertIn("Write as MooditWrite", serveur)
+        self.assertNotIn("use std::io::{BufRead, Write};", serveur)
+
+    def test_java_classe_de_premier_niveau_hors_de_la_coquille(self):
+        stub = supervisor.java_stub_source("Solution", [], objects=[
+            ("Rectangle", [["int", "int"]], [("int", "aire", [])]),
+            ("Solution.Carre", [["int"]], [("int", "aire", [])])])
+        fin_solution = stub.index(self.NL + "}" + self.NL)
+        # Premier niveau : classe du fichier, accessible comme « new Rectangle(...) ».
+        self.assertIn(self.NL + "final class Rectangle {", stub)
+        self.assertNotIn("public static final class Rectangle", stub)
+        self.assertGreater(stub.index("final class Rectangle"), fin_solution)
+        # Imbriquee : reste dans sa coquille, « new Solution.Carre(...) » marche toujours.
+        self.assertIn("public static final class Carre", stub)
+        self.assertLess(stub.index("class Carre"), fin_solution)
+
+    def test_un_zombie_n_est_pas_un_survivant(self):
+        def status(etat, uid):
+            return self.NL.join(["Name:" + self.TAB + "x",
+                                 "State:" + self.TAB + etat,
+                                 "Uid:" + self.TAB + uid + self.TAB + uid, ""])
+        self.assertTrue(supervisor.survivant_etudiant(status("S (sleeping)", "1300"), 1300))
+        self.assertFalse(supervisor.survivant_etudiant(status("Z (zombie)", "1300"), 1300))
+        self.assertFalse(supervisor.survivant_etudiant(status("S (sleeping)", "0"), 1300))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
