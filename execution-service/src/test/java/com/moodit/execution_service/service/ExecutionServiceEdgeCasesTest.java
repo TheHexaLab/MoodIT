@@ -494,11 +494,15 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
                 .isEqualTo("Le harnais n'a pas pu évaluer ton résultat");
 
+        // Phase 2 INTERROMPUE par signal : meme prefixe « Interrompu » que les autres
+        // interruptions. Ce n'est pas qu'un libelle : la boucle d'evaluation s'en sert pour savoir
+        // que l'etudiant a lui-meme consomme le budget, et ne pas transformer son epuisement en
+        // tentative a reprendre (cf. budget_epuise_par_un_harnais_interrompu_reste_une_note).
         pistonRun(f -> isPhase1(f)
                 ? stage(dump(f, ""), "", 0, null, null)
                 : stage("", "", null, "SIGKILL", null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
-                .isEqualTo("Le harnais n'a pas pu évaluer ton résultat");
+                .startsWith("Interrompu en phase 2");
     }
 
     @Test

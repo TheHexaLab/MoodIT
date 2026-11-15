@@ -61,6 +61,29 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void notation_incomplete_est_une_panne_en_interne_mais_reste_visible_au_tester() {
+        // Le superviseur signale une notation INCOMPLETE pour cause non imputable (erreur
+        // interne, ou budget epuise par la charge sans qu'aucun cas ait atteint son delai).
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":true,"detail":null,"ms":1},
+                  {"index":1,"passed":false,"detail":"Non exécuté : budget de notation dépassé","ms":0}
+                ],"events":[],"canaries":"ok","incomplet":true}
+                """);
+        // Chemin INTERNE (la correction d'une soumission) : ce n'est pas une note. Avant, le cas
+        // saute arrivait en passed=false et core l'enregistrait — tentative UNIQUE perdue a
+        // cause de la charge.
+        assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                .isInstanceOf(SandboxException.class);
+        // Chemin PUBLIC (« Tester ») : les verdicts restent rendus, le prof doit voir que sa
+        // question a trop de cas pour le budget.
+        List<TestResult> r = evaluator.evaluate("Go", "code", TWO_CASES, null,
+                DockerEvaluator.PUBLIC_WALL_MS);
+        assertThat(r.get(0).passed()).isTrue();
+        assertThat(r.get(1).detail()).contains("budget");
+    }
+
+    @Test
     void conteneur_mort_sans_json_leve_au_lieu_de_noter_zero() {
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode. Sans
         // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »

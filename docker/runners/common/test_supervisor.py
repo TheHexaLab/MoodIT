@@ -1288,5 +1288,43 @@ class PackageJavaTest(unittest.TestCase):
             self.assertFalse(supervisor.PACKAGE_JAVA.search(supervisor.code_blanchi(src)), src)
 
 
+class NotationIncompleteTest(unittest.TestCase):
+    """Une PANNE ne doit jamais devenir une note ; une panne PROVOQUEE ne doit jamais devenir un
+    reessai. notation_incomplete tranche entre les deux, et ces quatre cas la verrouillent."""
+
+    def _o(self, **kw):
+        return supervisor.CaseOutcome(False, **kw)
+
+    def test_erreur_interne_rend_la_notation_incomplete(self):
+        # Notre code a leve : jamais la faute de l'etudiant, meme s'il a aussi depasse un delai.
+        self.assertTrue(supervisor.notation_incomplete([
+            self._o(skipped=True, cause="erreur"),
+            self._o(ran=True, timed_out=True)]))
+
+    def test_budget_epuise_par_la_charge_rend_la_notation_incomplete(self):
+        # Le scenario de prod : serveur charge, aucun cas n'a atteint son delai, le budget a
+        # quand meme saute la fin — la note serait perdue a cause de la charge.
+        self.assertTrue(supervisor.notation_incomplete([
+            supervisor.CaseOutcome(True, ran=True),
+            self._o(skipped=True, cause="budget")]))
+
+    def test_budget_epuise_par_l_etudiant_reste_une_note(self):
+        # LE garde-fou anti-reessai : si un cas a atteint son delai, c'est l'etudiant qui a
+        # consomme le budget — le rendre « incomplet » lui offrirait une tentative de plus
+        # chaque fois qu'il fait tourner son code jusqu'au delai.
+        self.assertFalse(supervisor.notation_incomplete([
+            self._o(ran=True, timed_out=True),
+            self._o(skipped=True, cause="budget")]))
+
+    def test_disque_sature_reste_une_note(self):
+        # C'est le code soumis qui ecrit : la cause est imputable, quel que soit le reste.
+        self.assertFalse(supervisor.notation_incomplete([
+            supervisor.CaseOutcome(True, ran=True),
+            self._o(skipped=True, cause="espace")]))
+        # Et une notation ordinaire n'est evidemment pas incomplete.
+        self.assertFalse(supervisor.notation_incomplete([
+            supervisor.CaseOutcome(True, ran=True), self._o(ran=True)]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

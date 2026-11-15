@@ -239,6 +239,23 @@ class RpcGradingIntegrationTest {
         assertThat(r.detail()).contains("package");
     }
 
+    @Test
+    void go_tolerance_flottante_avec_math_abs() {
+        // L'idiome des questions a reponse flottante : comparer a une tolerance. Le noteur Go
+        // n'importait pas « math » — un harnais ecrit AUJOURD'HUI ainsi ne compilait pas.
+        String h = "return math.Abs(moitie(3)-1.5) < 1e-9";
+        assertThat(note("Go", h, """
+                package main
+
+                func moitie(n int) float64 { return float64(n) / 2 }
+                """).passed()).isTrue();
+        assertThat(note("Go", h, """
+                package main
+
+                func moitie(n int) float64 { return 0 }
+                """).passed()).isFalse();
+    }
+
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test

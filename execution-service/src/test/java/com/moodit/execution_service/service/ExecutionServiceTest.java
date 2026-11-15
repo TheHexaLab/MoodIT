@@ -102,6 +102,43 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void budget_epuise_par_la_charge_en_interne_est_une_panne_pas_une_note() {
+        // Le scenario de prod : une classe soumet d'un coup, l'attente de place COMPTE dans le
+        // budget, et les derniers harnais ne sont pas lances alors qu'aucun n'a depasse son
+        // delai. Sur le chemin INTERNE, ce n'est pas une note : 502, tentative a reprendre.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 0;
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(req)))
+                .isInstanceOf(com.moodit.execution_service.sandbox.SandboxException.class);
+    }
+
+    @Test
+    void budget_epuise_par_un_harnais_interrompu_reste_une_note() {
+        // LE garde-fou anti-reessai : un harnais qui atteint son delai signe que l'etudiant a
+        // lui-meme consomme le budget. Sans ce garde-fou, faire tourner chaque harnais jusqu'au
+        // delai epuisait le budget et offrait une tentative de plus a chaque fois.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 0;
+        pistonRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
+        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).detail()).startsWith("Interrompu");
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    @Test
     void budget_absurde_ne_degrade_pas_la_correction() {
         // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement)
         // saturait la conversion en nanosecondes, l'addition débordait en une échéance NÉGATIVE

@@ -166,6 +166,11 @@ public class ExecutionService {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(clampedBudgetMs);
         List<TestResult> results = new ArrayList<>();
         boolean exhausted = false;
+        // Un harnais INTERROMPU (delai ou memoire) signe que l'etudiant a lui-meme consomme du
+        // budget : son epuisement lui est alors imputable. Sans ce garde-fou, faire tourner
+        // chaque harnais jusqu'au delai epuisait le budget et transformait la panne provoquee en
+        // reessai gratuit.
+        boolean interrompu = false;
         for (TestCaseInput testCase : request.testCases()) {
             // Le PREMIER harnais part toujours : un budget mal configuré (0, négatif) doit
             // dégrader la correction, pas la vider de tout verdict réel. L'échéance est ensuite
@@ -180,6 +185,14 @@ public class ExecutionService {
                             + "les harnais restants ne sont pas lancés",
                             budgetMs, results.size(), request.testCases().size());
                     exhausted = true;
+                    // Chemin INTERNE et budget epuise par la CHARGE (l'attente de place compte
+                    // dans le budget, et aucun harnais n'a atteint son delai) : ce n'est pas une
+                    // note. 502 -> la tentative est supprimee, l'etudiant resoumet — au lieu d'un
+                    // « Non évalué » enregistre comme un echec definitif.
+                    if (limiter.isInternal() && !interrompu) {
+                        throw new SandboxException("Notation incomplète (charge du serveur) : "
+                                + "la tentative est à reprendre");
+                    }
                 }
                 results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), false,
                         "Non évalué : budget d'évaluation dépassé (les harnais précédents ont "
@@ -187,8 +200,12 @@ public class ExecutionService {
                 continue;
             }
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
-            results.add(runOne(request.language(), request.code(), testCase, newNonce(),
-                    request.timeoutMs()));
+            TestResult r = runOne(request.language(), request.code(), testCase, newNonce(),
+                    request.timeoutMs());
+            if (r.detail() != null && r.detail().startsWith("Interrompu")) {
+                interrompu = true;
+            }
+            results.add(r);
         }
         return results;
     }
@@ -299,7 +316,13 @@ public class ExecutionService {
         // fuit pas son stderr (structure des tables de référence) à l'étudiant.
         CodeAssembler.Assembled p2 = assembler.assembleSqlPhase2(data, testCase.harnessCode(), nonce);
         RunnerExec.Stage run2 = execute("sqlite3", p2.files(), null, timeoutMs).run();
-        if (run2 == null || run2.signal() != null || (run2.code() != null && run2.code() != 0)) {
+        if (run2 != null && run2.signal() != null) {
+            // Meme prefixe « Interrompu » que les autres interruptions : la boucle s'en sert pour
+            // savoir si l'etudiant a consomme le budget.
+            return new TestResult(testCase.name(), weight, false,
+                    "Interrompu en phase 2 (dépassement de temps ou de mémoire probable)");
+        }
+        if (run2 == null || (run2.code() != null && run2.code() != 0)) {
             return new TestResult(testCase.name(), weight, false, "Le harnais n'a pas pu évaluer ton résultat");
         }
         return sqlResult(testCase.name(), weight, run2, nonce);

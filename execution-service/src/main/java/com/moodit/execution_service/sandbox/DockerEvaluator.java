@@ -263,7 +263,9 @@ public class DockerEvaluator {
 
         DockerSandbox.ContainerRun run = sandbox.run(imageFor(project.runnerLanguage()),
                 project.files(), walls.wallMs());
-        return toResults(run, cases);
+        // Interne = tout appel qui n'est pas plafonne au mur PUBLIC (la correction d'une
+        // soumission, ou la surcharge sans plafond). Seul ce chemin enregistre une note.
+        return toResults(run, cases, maxWallMs > PUBLIC_WALL_MS);
     }
 
     /** Mur du conteneur et budget du superviseur d'un job de notation. */
@@ -301,7 +303,8 @@ public class DockerEvaluator {
         return new Walls(wall, budget);
     }
 
-    private List<TestResult> toResults(DockerSandbox.ContainerRun run, List<TestCaseInput> cases) {
+    private List<TestResult> toResults(DockerSandbox.ContainerRun run, List<TestCaseInput> cases,
+            boolean internal) {
         JsonNode root;
         try {
             root = MAPPER.readTree(run.stdout());
@@ -325,6 +328,17 @@ public class DockerEvaluator {
         }
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
+        }
+        // Notation INCOMPLETE pour une cause NON IMPUTABLE (erreur interne du superviseur, ou
+        // budget global epuise par la charge sans qu'aucun cas ait atteint son delai — le
+        // superviseur tranche, il connait les delais) : sur le chemin interne, ce n'est pas une
+        // note. Les verdicts sautes arrivaient en passed=false, core les enregistrait, et une
+        // panne ou une classe entiere soumettant d'un coup coutait sa tentative UNIQUE a
+        // l'etudiant. Le « Tester » public garde ses verdicts : le prof doit les voir.
+        if (internal && root.path("incomplet").asBoolean(false)) {
+            log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
+            throw new SandboxException(
+                    "Notation incomplète (charge du serveur ou panne) : la tentative est à reprendre");
         }
 
         // Défense en PROFONDEUR : le superviseur neutralise déjà les verdicts quand les canaris

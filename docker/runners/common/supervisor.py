@@ -748,13 +748,35 @@ def first_lines(text, pattern, count=6):
 
 class CaseOutcome:
     def __init__(self, passed, detail=None, ran=False, timed_out=False, skipped=False,
-                 killed=False):
+                 killed=False, cause=None):
         self.passed = passed
+        # Cause d'un saut : "erreur" (superviseur), "budget" (budget global), "espace" (disque
+        # sature par le code soumis). Seules les deux premieres peuvent ne pas etre imputables.
+        self.cause = cause
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
         self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
         self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
         self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
+
+
+def notation_incomplete(reels):
+    """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
+
+    Vrai si un cas a subi une erreur interne du superviseur, ou si le budget global a saute
+    des cas SANS qu'aucun cas reel ait atteint son delai. Execution-service en fait alors un
+    502 sur le chemin INTERNE : la tentative est supprimee et l'etudiant resoumet, au lieu
+    d'une note perdue a cause de la charge ou d'une panne.
+
+    Le garde-fou « aucun delai atteint » est ce qui empeche le reessai gratuit : sans lui, un
+    etudiant qui sait sa reponse fausse ferait tourner chaque cas jusqu'au delai pour epuiser
+    le budget, et la panne qu'il aurait provoquee lui rendrait sa tentative. Un disque sature
+    (cause « espace ») reste imputable pour la meme raison : c'est le code soumis qui ecrit."""
+    reels = list(reels)
+    if any(o.cause == "erreur" for o in reels):
+        return True
+    return (any(o.cause == "budget" for o in reels)
+            and not any(o.timed_out for o in reels))
 
 
 def inconclusive(outcome):
@@ -1707,9 +1729,15 @@ import (
     "encoding/hex"
     "encoding/json"
     "fmt"
+    "math"
     "os"
     "strings"
 )
+
+// `math` pour les tolerances flottantes du harnais (math.Abs(x - y) < 1e-9, l'idiome des
+// questions a reponse flottante) ; marque comme utilise, Go refusant un import inutile. Sans
+// risque de collision : les bouchons vivent au niveau du paquet, `math.X` sous son espace.
+var _ = math.Abs
 %s
 var mooditLecteur = bufio.NewReader(os.Stdin)
 
@@ -3696,7 +3724,11 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # Même verdict que le chemin commun : le message du NOTEUR d'abord — c'est le harnais du
     # prof qui a échoué, et présenter le stderr de l'étudiant désignait le mauvais fautif.
     passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
-    return CaseOutcome(passed, detail, ran=True), None
+    # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
+    # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
+    # accuser de falsification une soumission dont un vrai cas avait reussi.
+    tue = code is not None and code < 0 and not passed
+    return CaseOutcome(passed, detail, ran=True, killed=tue), None
 
 
 def run_csharp_rpc(case_dir, env, timeout_s, case_index):
@@ -3872,7 +3904,11 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_
     if expire:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
-    return CaseOutcome(passed, detail, ran=True), None
+    # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
+    # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
+    # accuser de falsification une soumission dont un vrai cas avait reussi.
+    tue = code is not None and code < 0 and not passed
+    return CaseOutcome(passed, detail, ran=True, killed=tue), None
 
 
 def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
@@ -4300,7 +4336,7 @@ def main():
             outcomes[case["index"]] = CaseOutcome(
                 False, "Espace de travail saturé : le code écrit trop de fichiers "
                        "(ou des fichiers trop gros) dans son dossier temporaire.",
-                ran=False, skipped=True)
+                ran=False, skipped=True, cause="espace")
             timings[case["index"]] = 0
             event("espace_sature", case=case["index"])
             continue
@@ -4311,7 +4347,7 @@ def main():
         if case_deadline is not None and time.monotonic() >= case_deadline:
             outcomes[case["index"]] = CaseOutcome(
                 False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
-                ran=False, skipped=True)
+                ran=False, skipped=True, cause="budget")
             timings[case["index"]] = 0
             event("budget_depasse", case=case["index"])
             continue
@@ -4324,7 +4360,7 @@ def main():
             # « incoherents » de canary_verdict, donc par « falsification probable » et la mise
             # à zéro de toute la soumission. Une défaillance du noteur ne doit jamais accuser.
             outcome, ms = CaseOutcome(False, "Erreur interne du noteur",
-                                      ran=False, skipped=True), 0
+                                      ran=False, skipped=True, cause="erreur"), 0
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms
@@ -4363,7 +4399,10 @@ def main():
                         "detail": redact_tokens(detail),
                         "ms": timings[case["index"]]})
 
-    print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries},
+    incomplet = notation_incomplete(
+        outcomes[c["index"]] for c in cases if not c.get("canary"))
+    print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries,
+                      "incomplet": incomplet},
                      ensure_ascii=False))
 
 
