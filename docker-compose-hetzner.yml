@@ -230,6 +230,9 @@ services:
       # pendant plusieurs minutes. Les valeurs par défaut (2 vCPU, 1,5 Go) visent le dev.
       SANDBOX_CPUS: "1.0"
       SANDBOX_MEMORY_MB: "1024"
+      # Images runner du MEME commit que ce service (posé par deploy/update.sh, cf.
+      # docker/runners/build.sh) ; `latest` si la variable manque (compose lancé à la main).
+      SANDBOX_IMAGE_TAG: "${MOODIT_RUNNER_TAG:-latest}"
     mem_limit: 512m
     volumes:
       # Runner des langages COMPILÉS (#116) : conteneurs jetables moodit-runner-* via le démon

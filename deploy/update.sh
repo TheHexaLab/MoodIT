@@ -233,6 +233,10 @@ if ! git reset --hard "origin/$BRANCH"; then
   fail "git reset --hard origin/$BRANCH impossible — aucun changement appliqué."
 fi
 ok "Code aligné sur origin/$BRANCH (${REMOTE:0:8})"
+# Images runner taguées par COMMIT, lues par execution-service via SANDBOX_IMAGE_TAG (compose) :
+# le service et le superviseur ne se parlent sans version de format que s'ils viennent du même
+# commit. Construire les nouvelles images ne touche donc plus celles du service encore en place.
+export MOODIT_RUNNER_TAG="${REMOTE:0:12}"
 log "Résumé des changements :"
 git --no-pager log --oneline --no-decorate "${LOCAL}..${REMOTE}" 2>/dev/null | head -n 15 | sed 's/^/     /' || true
 
@@ -257,6 +261,13 @@ fi
 rollback() {
   warn "Rollback du code vers ${LOCAL:0:8}…"
   git reset --hard "$LOCAL" >/dev/null 2>&1 || true
+  # Images runner de l'ANCIENNE version : sans elles, l'ancien service tournerait avec celles
+  # du commit refusé. `latest` d'abord (un ancien compose ne lit que lui), puis le tag du commit.
+  export MOODIT_RUNNER_TAG="${LOCAL:0:12}"
+  MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
+    || warn "Rollback : images runner (latest) non reconstruites."
+  bash docker/runners/build.sh >>"$LOG" 2>&1 \
+    || warn "Rollback : images runner (${MOODIT_RUNNER_TAG}) non reconstruites."
   $COMPOSE up -d --build >>"$LOG" 2>&1 || warn "Rollback : échec du redémarrage de l'ancienne version."
   fail "Build/déploiement de la nouvelle version échoué — ancienne version restaurée."
 }
@@ -290,6 +301,14 @@ fi
 
 # --- 4. Nettoyage des images orphelines -------------------------------------
 docker image prune -f >/dev/null 2>&1 || true
+# Images runner des commits ANTÉRIEURS : on garde latest, la version déployée et la précédente
+# (rollback à la main). Une image encore utilisée par un conteneur n'est pas supprimée.
+docker images --format '{{.Repository}}:{{.Tag}}' | grep '^moodit-runner-' | while read -r image; do
+  case "${image##*:}" in
+    latest|"${REMOTE:0:12}"|"${LOCAL:0:12}") ;;
+    *) docker rmi "$image" >/dev/null 2>&1 || true ;;
+  esac
+done
 
 # --- 5. Health check --------------------------------------------------------
 step "Vérification de santé"

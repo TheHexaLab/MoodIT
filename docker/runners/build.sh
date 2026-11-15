@@ -12,7 +12,11 @@ cd "$(dirname "$0")"
 
 # NB : côté build le tag vient de MOODIT_RUNNER_TAG ; côté execution-service, l'image utilisée
 # vient de SANDBOX_IMAGE_TAG (app.sandbox.image-tag). Les deux valent « latest » par défaut —
-# si l'un change, changer l'autre.
+# si l'un change, changer l'autre. En prod, deploy/update.sh pose le COMMIT déployé des deux
+# côtés : le format d'échange entre execution-service et le superviseur n'a pas de version, et
+# un service ne doit jamais tourner avec les images d'un autre commit (déploiement en cours,
+# rollback). `latest` est posé AUSSI : un `docker compose up` lancé à la main, sans la
+# variable, retombe sur les dernières images construites.
 TAG="${MOODIT_RUNNER_TAG:-latest}"
 
 # Sans argument : les dix images. Avec : seulement celles demandees — la CI s en sert pour
@@ -24,6 +28,11 @@ fi
 
 for lang in "${LANGS[@]}"; do
   echo "── moodit-runner-${lang}:${TAG}"
-  docker build -t "moodit-runner-${lang}:${TAG}" -f "${lang}/Dockerfile" .
+  if [ "$TAG" = "latest" ]; then
+    docker build -t "moodit-runner-${lang}:latest" -f "${lang}/Dockerfile" .
+  else
+    docker build -t "moodit-runner-${lang}:${TAG}" -t "moodit-runner-${lang}:latest" \
+      -f "${lang}/Dockerfile" .
+  fi
 done
 echo "Images runner prêtes."

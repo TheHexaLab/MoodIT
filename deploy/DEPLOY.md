@@ -346,4 +346,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   `containers/create|start|wait|logs|delete` et `images/inspect`) : c'est le suivi ouvert avant
   tout usage à plus grande échelle. Les images sont construites par
   `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
-  fait automatiquement).
+  fait automatiquement). En prod, `update.sh` les tague par **commit** (`MOODIT_RUNNER_TAG`,
+  repris par execution-service via `SANDBOX_IMAGE_TAG` dans le compose) en plus de `latest` :
+  le format d'échange avec le superviseur n'a pas de version, et un service ne tourne ainsi
+  jamais avec les images d'un autre commit — ni pendant un déploiement, ni après un rollback,
+  qui reconstruit celles de la version restaurée. Les tags des commits plus anciens que le
+  précédent sont supprimés à chaque déploiement.
