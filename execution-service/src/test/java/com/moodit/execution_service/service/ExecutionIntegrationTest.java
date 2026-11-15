@@ -206,6 +206,35 @@ class ExecutionIntegrationTest {
     // lire le nonce — process.mainModule.require était le vecteur, désormais fermé par l'isolation).
 
     @Test
+    void jsx_devancer_la_reponse_rpc_echoue() {
+        requireRuntime("javascript");
+        gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");
+        // Jumeau du test JS : une ligne conforme ecrite D'AVANCE sur stdout (au chargement
+        // du module) etait consommee comme reponse au premier appel. L'identifiant par
+        // appel, desormais exige dans la reponse, la fait ignorer.
+        assertThat(passes("JSX",
+                "process.stdout.write(JSON.stringify({ok:true, value:'<h1>Bonjour</h1>'})"
+                        + " + String.fromCharCode(10));"
+                        + "function Composant(){ return React.createElement('div'); }",
+                "return html.includes('<h1>Bonjour</h1>');")).isFalse();
+    }
+
+    @Test
+    void jsx_console_log_honnete_ne_coute_pas_la_note() {
+        requireRuntime("javascript");
+        gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");
+        // Un console.log de debogage au chargement ET pendant le rendu : reflexe honnete.
+        // Il polluait la premiere ligne lue par le noteur (JSON casse -> html undefined),
+        // et une reponse JUSTE etait notee 0 sur tentative unique — la classe de defaut
+        // que cette PR ferme partout ailleurs.
+        assertThat(passes("JSX",
+                "console.log('charge');\n"
+                        + "function Composant(){ console.log('rendu');"
+                        + " return React.createElement('h1', null, 'Bonjour'); }",
+                "return html.includes('<h1>Bonjour</h1>');")).isTrue();
+    }
+
+    @Test
     void jsx_static_render_isolation() {
         requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");

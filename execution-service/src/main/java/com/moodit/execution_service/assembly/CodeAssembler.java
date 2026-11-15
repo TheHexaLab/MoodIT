@@ -881,6 +881,10 @@ public class CodeAssembler {
                 + "global.window = win; global.document = win.document; global.navigator = win.navigator;\n"
                 + "globalThis.IS_REACT_ACT_ENVIRONMENT = true;\n"
                 + "['HTMLElement','Element','Node','Text','Event','MouseEvent','KeyboardEvent','InputEvent','CustomEvent','getComputedStyle','customElements','requestAnimationFrame','cancelAnimationFrame'].forEach(function(k){ if(win[k]!==undefined) global[k]=win[k]; });\n"
+                // console.log/info neutralisés AVANT le chargement du composant : le stdout
+                // du serveur est le canal de réponse, et un log honnête au niveau module ou
+                // pendant le rendu le polluait — comme dans le serveur JS ordinaire.
+                + "console.log=function(){}; console.info=function(){};\n"
                 + "let Composant;\n"
                 + "try {\n"
                 + "  let src = fs.readFileSync(__dirname + '/component.tsx','utf8');\n"
@@ -908,16 +912,34 @@ public class CodeAssembler {
                 + "      else if(m.op==='fireEvent'){ act(function(){ reg[m.handle].dispatchEvent(new window.Event(m.type, Object.assign({bubbles:true,cancelable:true}, m.init||{}))); }); r={ok:true,value:null}; }\n"
                 + "      else r={ok:false,error:'op inconnu'};\n"
                 + "    } catch(e){ r={ok:false,error:String(e&&e.message||e)}; }\n"
-                + "    process.stdout.write(JSON.stringify(r)+NL);\n"
+                // L'identifiant reçu est RENVOYÉ (il rattache la réponse à SON appel), et
+                // la réponse est AUTO-CADRÉE par un saut de ligne initial : une écriture
+                // étudiante sans saut de ligne final ne la contamine pas.
+                + "    r.id=m.id;\n"
+                + "    process.stdout.write(NL+JSON.stringify(r)+NL);\n"
                 + "  }});\n";
         String grader = "const cp=require('child_process'), fs=require('fs');\n"
                 + "try{fs.unlinkSync('main.js');}catch(e){}\n"
                 + "const NL=String.fromCharCode(10);\n"
                 + "const child=cp.spawn(process.execPath,['jsx-server.js'],{stdio:['pipe','pipe','inherit']});\n"
                 + "child.stdout.pause(); const outFd=child.stdout._handle.fd;\n"
-                + "function rpc(o){ child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20); let s='';\n"
-                + "  while(s.indexOf(NL)<0){ let n; try{n=fs.readSync(outFd,b,0,b.length,null);}catch(e){if(e.code==='EAGAIN')continue;throw e;} if(n===0)break; s+=b.toString('utf8',0,n); }\n"
-                + "  const r=JSON.parse(s.split(NL)[0]); if(!r.ok) throw new Error(r.error); return r; }\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse — même invariant
+                // que les neuf autres répartiteurs : sans lui, une ligne conforme écrite
+                // d'avance par le composant était consommée comme réponse (devancement), et
+                // un console.log honnête cassait le JSON de la première ligne (réponse juste
+                // notée 0). Tampon PERSISTANT : l'ancien lecteur jetait tout ce qui suivait
+                // la première ligne à chaque appel.
+                + "const crypto=require('crypto'); let buf='';\n"
+                + "function rpc(o){ o.id=crypto.randomBytes(8).toString('hex');\n"
+                + "  child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20);\n"
+                + "  for(;;){ let i;\n"
+                + "    while((i=buf.indexOf(NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
+                + "      let r; try{ r=JSON.parse(line); }catch(e){ continue; }\n"
+                + "      if(!r || typeof r!=='object' || r.id!==o.id) continue;\n"
+                + "      if(!r.ok) throw new Error(r.error); return r; }\n"
+                + "    let n; try{ n=fs.readSync(outFd,b,0,b.length,null); }catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
+                + "    if(n===0) throw new Error('processus etudiant termine'); \n"
+                + "    buf+=b.toString('utf8',0,n); } }\n"
                 + "function uw(r){ if(r.node!==undefined) return elp(r.node); return r.value; }\n"
                 + "function elp(handle){ return new Proxy({__h:handle}, { get(t,p){ if(p==='__h')return handle;\n"
                 + "  const r=rpc({op:'get',handle,name:String(p)});\n"
