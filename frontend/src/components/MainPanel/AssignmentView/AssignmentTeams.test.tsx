@@ -178,25 +178,49 @@ describe('ManageTeamsPopup', () => {
   it('garde le focus dans la fenêtre quand le contrôle cliqué disparaît', async () => {
     popup();
     fireEvent.click(await screen.findByRole('button', { name: 'Retirer A de Équipe 1' }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retirer B de Équipe 1' })));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retirer B de Équipe 1' }));
 
     fireEvent.change(screen.getByLabelText('Équipe de E'), { target: { value: '2' } });
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Équipe de F')));
+    expect(document.activeElement).toBe(screen.getByLabelText('Équipe de F'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Retirer Équipe 1' }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' })));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
+  });
+
+  it('pose le focus sur le DOM à jour même si le clic suit le chargement avant ses effets', async () => {
+    // Reproduit la course vue en CI : le clic arrive pendant que les effets passifs du rendu de
+    // chargement sont encore en attente (l'observateur de mutation passe avant le planificateur
+    // de React). Hors `act`, sinon `act` viderait ces effets avant le clic.
+    const actEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    let resolveFetch: (value: typeof TEAMS) => void = () => {};
+    popup({ onFetch: () => new Promise((resolve) => { resolveFetch = resolve; }) });
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const clicked = new Promise<void>((done) => {
+        const observer = new MutationObserver(() => {
+          const button = screen.queryByRole('button', { name: 'Retirer A de Équipe 1' });
+          if (!button) return;
+          observer.disconnect();
+          button.click();
+          done();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+      resolveFetch(TEAMS);
+      await clicked;
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Retirer A de Équipe 1' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retirer B de Équipe 1' }));
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
   });
 
   it('le dernier étudiant placé envoie le focus sur le précédent, puis sur « Ajouter une équipe »', async () => {
     popup({ onFetch: vi.fn().mockResolvedValue({ teams: [OPEN], unassigned: ['E', 'F'] }) });
     fireEvent.change(await screen.findByLabelText('Équipe de F'), { target: { value: '2' } });
-    // waitFor : le composant pose le focus APRES son rendu — une lecture synchrone de
-    // document.activeElement perdait la course sur un runner CI chargé (vert en local,
-    // rouge intermittent en CI). La sémantique testée ne change pas : le focus FINIT là.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Équipe de E')));
+    expect(document.activeElement).toBe(screen.getByLabelText('Équipe de E'));
     fireEvent.change(screen.getByLabelText('Équipe de E'), { target: { value: '2' } });
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' })));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
   });
 
   it('ajoute une équipe vide, au premier numéro libre', async () => {
