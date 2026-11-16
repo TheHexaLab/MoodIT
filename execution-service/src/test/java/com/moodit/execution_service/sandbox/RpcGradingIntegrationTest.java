@@ -55,7 +55,7 @@ class RpcGradingIntegrationTest {
     // ───────────────────────────── 1. Le harnais booléen note ─────────────────────────────
 
     @Test
-    void java_bonne_puis_mauvaise_reponse() {
+    void java_right_then_wrong_answer() {
         String h = "return Solution.doubler(5) == 10;";
         assertThat(note("Java", h, """
                 public class Solution {
@@ -70,7 +70,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void go_bonne_puis_mauvaise_reponse() {
+    void go_right_then_wrong_answer() {
         String h = "return doubler(5) == 10";
         assertThat(note("Go", h, "package main\n\nfunc doubler(n int) int { return n * 2 }\n")
                 .passed()).isTrue();
@@ -79,28 +79,28 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_bonne_puis_mauvaise_reponse() {
+    void c_right_then_wrong_answer() {
         String h = "return doubler(5) == 10;";
         assertThat(note("C", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
         assertThat(note("C", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
     }
 
     @Test
-    void cpp_bonne_puis_mauvaise_reponse() {
+    void cpp_right_then_wrong_answer() {
         String h = "return doubler(5) == 10;";
         assertThat(note("C++", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
         assertThat(note("C++", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
     }
 
     @Test
-    void rust_bonne_puis_mauvaise_reponse() {
+    void rust_right_then_wrong_answer() {
         String h = "doubler(5) == 10";
         assertThat(note("Rust", h, "fn doubler(n: i32) -> i32 { n * 2 }\n").passed()).isTrue();
         assertThat(note("Rust", h, "fn doubler(n: i32) -> i32 { 0 }\n").passed()).isFalse();
     }
 
     @Test
-    void csharp_bonne_puis_mauvaise_reponse() {
+    void csharp_right_then_wrong_answer() {
         String h = "return Solution.Doubler(5) == 10;";
         assertThat(note("C#", h, """
                 public class Solution {
@@ -115,7 +115,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_statique_sans_modificateur_est_notee() {
+    void csharp_static_without_modifier_is_graded() {
         // En C# un membre de classe est PRIVÉ par défaut : c'est l'écriture la plus naturelle
         // d'un exercice, et elle doit être notée. Avant le correctif, l'extraction acceptait la
         // signature mais le serveur la résolvait en `BindingFlags.Public` : le bouchon était
@@ -136,7 +136,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_objet_sans_modificateur_est_note() {
+    void java_object_without_modifier_is_graded() {
         // Visibilité de PAQUET sur la classe, le constructeur et la méthode : un exercice POO
         // écrit sans cérémonie. Le serveur sait déjà l'invoquer (getDeclared* +
         // setAccessible) ; seule l'extraction exigeait `public`, et refusait donc une
@@ -166,13 +166,13 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_statique_dans_une_classe_secondaire_est_notee() {
+    void java_static_in_secondary_class_is_graded() {
         // Le bouchon aplatit les statiques de TOUTES les classes dans la principale : le
         // harnais « Solution.doubler(5) » compile même si l'étudiant a mis la fonction dans
         // une classe à côté. Le serveur doit donc chercher dans le même périmètre — sinon
         // l'appel levait à l'exécution et une réponse JUSTE était notée 0.
         String h = "return Solution.doubler(5) == 10;";
-        String deuxClasses = """
+        String twoClasses = """
                 public class Solution {
                 }
 
@@ -180,26 +180,26 @@ class RpcGradingIntegrationTest {
                     static int doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("Java", h, deuxClasses).passed()).isTrue();
-        assertThat(note("Java", h, deuxClasses.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(note("Java", h, twoClasses).passed()).isTrue();
+        assertThat(note("Java", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
-    void csharp_statique_dans_une_classe_secondaire_est_notee() {
+    void csharp_static_in_secondary_class_is_graded() {
         String h = "return Solution.Doubler(5) == 10;";
-        String deuxClasses = """
+        String twoClasses = """
                 class Solution {
                 }
                 class Outils {
                     static int Doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("C#", h, deuxClasses).passed()).isTrue();
-        assertThat(note("C#", h, deuxClasses.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(note("C#", h, twoClasses).passed()).isTrue();
+        assertThat(note("C#", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
-    void version_commentee_au_dessus_de_la_vraie_classe_est_notee() {
+    void commented_version_above_real_class_is_graded() {
         // Le réflexe courant : garder l'ancienne version en commentaire. Le choix de la classe
         // principale se fait sur la source DÉPOUILLÉE — sans cela, le fichier déposé (Java) et
         // les typeof du serveur (C#) étaient nommés d'après la classe commentée, et la
@@ -223,7 +223,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_package_rejete_avec_un_diagnostic_clair() {
+    void java_package_rejected_with_clear_diagnostic() {
         // Un `package ...;` colle depuis un IDE faisait compiler la classe dans un sous-dossier :
         // la decouverte plate la manquait, et le cas tombait dans « aucune methode exploitable »
         // — un 0 avec un message qui ne designe pas la cause. Desormais : un diagnostic qui dit
@@ -240,7 +240,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void go_tolerance_flottante_avec_math_abs() {
+    void go_float_tolerance_with_math_abs() {
         // L'idiome des questions a reponse flottante : comparer a une tolerance. Le noteur Go
         // n'importait pas « math » — un harnais ecrit AUJOURD'HUI ainsi ne compilait pas.
         String h = "return math.Abs(moitie(3)-1.5) < 1e-9";
@@ -257,7 +257,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_champ_commente_note_juste() {
+    void rust_commented_field_graded_correctly() {
         // La forme de la demo V9_1, avec un commentaire de champ. Les champs etaient lus sur la
         // source BRUTE : « // en cm, environ » faisait perdre `hauteur`, et le litteral du
         // harnais ne compilait plus — 0 sur une reponse juste.
@@ -274,7 +274,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void go_champ_etiquete_note_juste() {
+    void go_tagged_field_graded_correctly() {
         // Une etiquette `json:"l"` faisait perdre toute la structure, lue sur la source brute.
         String h = "return Rectangle{Largeur: 3, Hauteur: 4}.Aire() == 12";
         assertThat(note("Go", h, """
@@ -290,7 +290,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_solution_qui_importe_write_note_juste() {
+    void rust_solution_importing_write_graded_correctly() {
         // `use std::io::Write;` (banal pour un flush) levait E0252 : le SERVEUR, qui partage le
         // fichier de l'etudiant, importait Write sans alias.
         assertThat(note("Rust", "doubler(5) == 10", """
@@ -304,7 +304,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_classe_de_premier_niveau_note_juste() {
+    void java_top_level_class_graded_correctly() {
         // `class Rectangle` A COTE de Solution : le bouchon la rangeait dans Solution, et
         // `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question. La forme imbriquee
         // (Solution.Rectangle) reste couverte par java_objets_par_poignee.
@@ -323,9 +323,9 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_noms_longs_de_types_notes_juste() {
+    void csharp_long_type_names_graded_correctly() {
         // `String` EST `string`, `Int32` EST `int` : aucun bouchon n'etait genere et une reponse
-        // juste etait notee 0. Garde l'APPEL : l'extraction C# passe par cs_types_canoniques.
+        // juste etait notee 0. Garde l'APPEL : l'extraction C# passe par cs_canonical_types.
         assertThat(note("C#", "return Solution.Inverse(\"ab\") == \"ba\";", """
                 using System;
 
@@ -340,7 +340,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_fonction_static_et_parametre_const_notes_juste() {
+    void c_static_function_and_const_parameter_graded_correctly() {
         assertThat(note("C", "return doubler(5) == 10;",
                 "static int doubler(const int n) { return n * 2; }").passed()).isTrue();
     }
@@ -348,19 +348,19 @@ class RpcGradingIntegrationTest {
     // ───────── Formes courantes qui valaient 0 (28e passe) : la juste passe, la fausse non ─────────
 
     @Test
-    void csharp_retours_double_statique_et_objet() {
+    void csharp_double_returns_static_and_object() {
         // `InvariantCulture` devenait `InbrutariantCulture` dans la lecture d'un double : le
         // harnais ne compilait plus des qu'une methode rendait un double.
         // Une classe de bouchons par question : chemin statique et chemin objet, chacun le sien.
-        String statique = """
+        String staticCode = """
                 class Solution {
                     public static double Moitie(int n) { return n / 2.0; }
                 }
                 """;
         String hs = "return Solution.Moitie(3) == 1.5;";
-        assertThat(note("C#", hs, statique).passed()).isTrue();
-        assertThat(note("C#", hs, statique.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
-        String objet = """
+        assertThat(note("C#", hs, staticCode).passed()).isTrue();
+        assertThat(note("C#", hs, staticCode.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        String objectCode = """
                 class Rect {
                     int l, h;
                     public Rect(int l, int h) { this.l = l; this.h = h; }
@@ -368,12 +368,12 @@ class RpcGradingIntegrationTest {
                 }
                 """;
         String ho = "return System.Math.Abs(new Rect(3, 4).Aire() - 6.0) < 1e-9;";
-        assertThat(note("C#", ho, objet).passed()).isTrue();
-        assertThat(note("C#", ho, objet.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
+        assertThat(note("C#", ho, objectCode).passed()).isTrue();
+        assertThat(note("C#", ho, objectCode.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
     }
 
     @Test
-    void rust_constructeur_qui_rend_self() {
+    void rust_constructor_returning_self() {
         String h = "Rect::new(3, 4).aire() == 12";
         String code = """
                 pub struct Rect { l: i64, h: i64 }
@@ -387,7 +387,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void cpp_la_surcharge_appelee_est_celle_du_harnais() {
+    void cpp_overload_called_is_the_harness_one() {
         // `Rect()` declare AVANT `Rect(int, int)` : l'aiguillage par nom construisait `Rect()`.
         String h = "return Rect(3, 4).aire() == 12;";
         String code = """
@@ -404,7 +404,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void cpp_explicit_et_virtual() {
+    void cpp_explicit_and_virtual() {
         String h = "return Carre(3).aire() == 9;";
         String code = """
                 class Carre {
@@ -419,7 +419,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_fonction_notee_au_nom_de_la_libc() {
+    void c_graded_function_named_like_libc() {
         // Le bouchon `static int abs(int)` suivait <stdlib.h> : redeclaration refusee. Le cas
         // faux prouve que le harnais appelle bien la fonction de l'etudiant, pas celle de la libc.
         String h = "return abs(-5) == 5;";
@@ -428,7 +428,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_namespace_classe_d_aide_imbriquee_et_methode_nommee_Double() {
+    void csharp_namespace_helper_nested_class_and_method_named_Double() {
         String h = "return Solution.Double(4) == 8;";
         String code = """
                 using System;
@@ -445,7 +445,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_classe_sans_constructeur_declare() {
+    void csharp_class_without_declared_constructor() {
         String h = "return new Compteur().Trois() == 3;";
         String code = "class Compteur { public int Trois() { return 3; } }";
         assertThat(note("C#", h, code).passed()).isTrue();
@@ -453,7 +453,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_annotation_a_arguments_sur_la_ligne_de_la_classe() {
+    void java_annotation_with_arguments_on_class_line() {
         String h = "return Solution.doubler(5) == 10;";
         String code = """
                 class Aide { }
@@ -466,7 +466,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_statique_homonyme_dans_une_classe_imbriquee() {
+    void java_same_static_in_nested_class() {
         // Deux bouchons `calcul(int)` dans la meme classe : le noteur ne compilait plus.
         String h = "return Solution.calcul(3) == 7;";
         String code = """
@@ -482,7 +482,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_statique_homonyme_dans_une_classe_d_aide() {
+    void csharp_same_static_in_helper_class() {
         String h = "return Solution.Calcul(3) == 7;";
         String code = """
                 class Solution {
@@ -499,7 +499,7 @@ class RpcGradingIntegrationTest {
     // ───────── Bouchons objet bornes a LEUR classe ; en-tetes du noteur C (31e passe) ─────────
 
     @Test
-    void csharp_deux_classes_avec_la_meme_methode_d_instance() {
+    void csharp_two_classes_with_same_instance_method() {
         String h = "return new Rectangle(3, 4).Aire() == 12;";
         String code = """
                 class Rectangle {
@@ -518,7 +518,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_heritage_avec_override() {
+    void csharp_inheritance_with_override() {
         String h = "return new Carre(3).Aire() == 9;";
         String code = """
                 abstract class Forme {
@@ -535,7 +535,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_constructeur_et_methodes_dans_deux_blocs_impl() {
+    void rust_constructor_and_methods_in_two_impl_blocks() {
         String h = "R::new(3).double() == 6";
         String code = """
                 pub struct R { l: i64 }
@@ -551,7 +551,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void cpp_classe_imbriquee() {
+    void cpp_nested_class() {
         String h = "return A(3).f() == 6;";
         String code = """
                 class A {
@@ -571,7 +571,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_harnais_avec_fabs_et_true_et_fonction_nommee_round() {
+    void c_harness_with_fabs_true_and_function_named_round() {
         // Le prof ne peut pas ecrire d'#include : <math.h> et <stdbool.h> lui sont fournis. Une
         // fonction notee `int round(int)` ne heurte plus la declaration de <math.h>.
         String h = "return fabs(moitie(5) - 2.5) < 1e-9 && round(7) == 7 && true;";
@@ -585,7 +585,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void aucun_processus_du_code_soumis_ne_survit_au_cas_suivant() {
+    void no_submitted_process_survives_into_the_next_case() {
         require("C");
         // Isolation entre les cas : chaque appel laisse derriere lui un processus detache dont le
         // fil PRINCIPAL est sorti (affiche « zombie », mais un autre fil tourne encore), et
@@ -647,7 +647,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void box_n_est_pas_inscriptible_par_le_code_soumis() {
+    void box_is_not_writable_by_submitted_code() {
         // /box est un tmpfs monte en 1777 : le code soumis pouvait y poser ce qu'il voulait, a
         // l'endroit que root parcourt entre deux cas. Le superviseur le passe en 0755 en mode
         // notation. Sonde directe, sans dependre d'aucune protection du noyau : la creation
@@ -665,12 +665,12 @@ class RpcGradingIntegrationTest {
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────
 
     @Test
-    void java_objets_par_poignee() {
+    void java_objects_by_handle() {
         // Le harnais écrit l'appel naturellement ; l'objet est construit DANS le processus de
         // l'étudiant et le noteur n'en manipule qu'une poignée. Champs privés compris : c'est du
         // code normal côté étudiant.
         String h = "return new Solution.Rectangle(3, 4).aire() == 12;";
-        String poo = """
+        String oop = """
                 public class Solution {
                     public static class Rectangle {
                         private final int largeur;
@@ -681,14 +681,14 @@ class RpcGradingIntegrationTest {
                     public static int doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("Java", h, poo).passed()).isTrue();
-        assertThat(note("Java", h, poo.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(note("Java", h, oop).passed()).isTrue();
+        assertThat(note("Java", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     @Test
-    void csharp_objets_par_poignee() {
+    void csharp_objects_by_handle() {
         String h = "return new Solution(3, 4).Aire() == 12;";
-        String poo = """
+        String oop = """
                 public class Solution {
                     private readonly int largeur;
                     private readonly int hauteur;
@@ -697,16 +697,16 @@ class RpcGradingIntegrationTest {
                     public static int Doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("C#", h, poo).passed()).isTrue();
-        assertThat(note("C#", h, poo.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(note("C#", h, oop).passed()).isTrue();
+        assertThat(note("C#", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     @Test
-    void go_objets_par_poignee() {
+    void go_objects_by_handle() {
         // Go n'a pas de constructeur : l'idiome est une fonction qui renvoie la structure, et
         // c'est elle qu'on proxifie.
         String h = "return NewRectangle(3, 4).Aire() == 12";
-        String poo = """
+        String oop = """
                 package main
 
                 type Rectangle struct {
@@ -720,14 +720,14 @@ class RpcGradingIntegrationTest {
 
                 func (r Rectangle) Aire() int { return r.largeur * r.hauteur }
                 """;
-        assertThat(note("Go", h, poo).passed()).isTrue();
-        assertThat(note("Go", h, poo.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
+        assertThat(note("Go", h, oop).passed()).isTrue();
+        assertThat(note("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
     }
 
     @Test
-    void rust_objets_par_poignee() {
+    void rust_objects_by_handle() {
         String h = "Rectangle::new(3, 4).aire() == 12";
-        String poo = """
+        String oop = """
                 struct Rectangle {
                     largeur: i32,
                     hauteur: i32,
@@ -743,16 +743,16 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, poo).passed()).isTrue();
-        assertThat(note("Rust", h, poo.replace("self.largeur * self.hauteur", "0"))
+        assertThat(note("Rust", h, oop).passed()).isTrue();
+        assertThat(note("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
                 .passed()).isFalse();
     }
 
     @Test
-    void cpp_objets_par_poignee() {
+    void cpp_objects_by_handle() {
         String h = "return Rectangle(3, 4).aire() == 12;";
         // Constructeur à LISTE D'INITIALISATION : la forme du code de départ de la démo.
-        String poo = """
+        String oop = """
                 class Rectangle {
                     int largeur, hauteur;
                 public:
@@ -760,18 +760,18 @@ class RpcGradingIntegrationTest {
                     int aire() { return largeur * hauteur; }
                 };
                 """;
-        assertThat(note("C++", h, poo).passed()).isTrue();
-        assertThat(note("C++", h, poo.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(note("C++", h, oop).passed()).isTrue();
+        assertThat(note("C++", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     // ── Formes RÉELLES des questions POO de la démo (db/demo/V2_3) : ce sont elles qui
     //    décident si la fonctionnalité est utilisable, pas des exemples écrits pour le test.
 
     @Test
-    void go_litteral_a_champs_nommes() {
+    void go_named_field_literal() {
         // Idiome Go d'une structure sans constructeur, et forme du harnais de la démo.
         String h = "r := Rectangle{largeur: 3, hauteur: 4}\nreturn r.aire() == 12";
-        String poo = """
+        String oop = """
                 package main
 
                 type Rectangle struct {
@@ -781,14 +781,14 @@ class RpcGradingIntegrationTest {
 
                 func (r Rectangle) aire() int { return r.largeur * r.hauteur }
                 """;
-        assertThat(note("Go", h, poo).passed()).isTrue();
-        assertThat(note("Go", h, poo.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
+        assertThat(note("Go", h, oop).passed()).isTrue();
+        assertThat(note("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
     }
 
     @Test
-    void rust_litteral_a_champs_nommes() {
+    void rust_named_field_literal() {
         String h = "let r = Rectangle { largeur: 3, hauteur: 4 };\nr.aire() == 12";
-        String poo = """
+        String oop = """
                 struct Rectangle {
                     largeur: i32,
                     hauteur: i32,
@@ -800,17 +800,17 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, poo).passed()).isTrue();
-        assertThat(note("Rust", h, poo.replace("self.largeur * self.hauteur", "0"))
+        assertThat(note("Rust", h, oop).passed()).isTrue();
+        assertThat(note("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
                 .passed()).isFalse();
     }
 
     @Test
-    void java_classe_publique_est_l_objet() {
+    void java_public_class_is_the_object() {
         // La classe publique s'appelle Rectangle : c'est elle qu'on instancie, et il n'y a
         // AUCUNE méthode statique. Exiger une statique refusait cette question.
         String h = "return new Rectangle(3, 4).aire() == 12;";
-        String poo = """
+        String oop = """
                 public class Rectangle {
                     private int largeur, hauteur;
 
@@ -824,15 +824,15 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Java", h, poo).passed()).isTrue();
-        assertThat(note("Java", h, poo.replace("return largeur * hauteur;", "return 0;"))
+        assertThat(note("Java", h, oop).passed()).isTrue();
+        assertThat(note("Java", h, oop.replace("return largeur * hauteur;", "return 0;"))
                 .passed()).isFalse();
     }
 
     @Test
-    void csharp_sans_methode_statique() {
+    void csharp_without_static_method() {
         String h = "return new Rectangle(3, 4).aire() == 12;";
-        String poo = """
+        String oop = """
                 using System;
 
                 class Rectangle {
@@ -850,8 +850,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("C#", h, poo).passed()).isTrue();
-        assertThat(note("C#", h, poo.replace("return largeur * hauteur;", "return 0;"))
+        assertThat(note("C#", h, oop).passed()).isTrue();
+        assertThat(note("C#", h, oop.replace("return largeur * hauteur;", "return 0;"))
                 .passed()).isFalse();
     }
 
@@ -859,7 +859,7 @@ class RpcGradingIntegrationTest {
     //    cas rendait « Échec de compilation » à un étudiant dont le code était juste.
 
     @Test
-    void java_tous_les_types_de_retour_marshalables() {
+    void java_all_marshalable_return_types() {
         // `long`, `double` et `boolean` sont des MOTS RÉSERVÉS : le nom de la méthode RPC ne peut
         // pas être dérivé du type. Seuls int et String compilaient.
         assertThat(note("Java", "return Solution.moitie(7) == 3L;",
@@ -877,7 +877,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_chaine_contenant_un_separateur_du_protocole() {
+    void java_string_containing_protocol_separator() {
         // Un `]`, un `\"` ou une barre oblique inverse dans la valeur cassait l'analyse : la
         // réponse juste était notée FAUSSE. Les chaînes voyagent donc en hexadécimal.
         String code = "public class Solution { public static String copie(String s)"
@@ -889,10 +889,10 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_methode_avec_parametres() {
+    void rust_method_with_parameters() {
         // Les arguments n'étaient ni lus ni transmis côté étudiant : rustc refusait son programme.
         String h = "let c = Compteur { valeur: 10 };\nc.plus(5) == 15";
-        String poo = """
+        String oop = """
                 struct Compteur {
                     valeur: i32,
                 }
@@ -903,16 +903,16 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, poo).passed()).isTrue();
-        assertThat(note("Rust", h, poo.replace("self.valeur + n", "0")).passed()).isFalse();
+        assertThat(note("Rust", h, oop).passed()).isTrue();
+        assertThat(note("Rust", h, oop.replace("self.valeur + n", "0")).passed()).isFalse();
     }
 
     @Test
-    void go_methode_a_recepteur_pointeur() {
+    void go_pointer_receiver_method() {
         // L'idiome le plus répandu. L'aiguillage appelait la méthode sur le résultat d'une
         // assertion de type, qui n'est pas adressable : le programme ne compilait pas.
         String h = "c := NewCompteur(10)\nreturn c.Plus(5) == 15";
-        String poo = """
+        String oop = """
                 package main
 
                 type Compteur struct {
@@ -925,12 +925,12 @@ class RpcGradingIntegrationTest {
 
                 func (c *Compteur) Plus(n int) int { return c.valeur + n }
                 """;
-        assertThat(note("Go", h, poo).passed()).isTrue();
-        assertThat(note("Go", h, poo.replace("c.valeur + n", "0")).passed()).isFalse();
+        assertThat(note("Go", h, oop).passed()).isTrue();
+        assertThat(note("Go", h, oop.replace("c.valeur + n", "0")).passed()).isFalse();
     }
 
     @Test
-    void chaines_et_flottants_sur_les_protocoles_texte() {
+    void strings_and_floats_over_text_protocols() {
         // `%g` tronquait un double à 6 chiffres significatifs, dans les deux sens, et une chaîne
         // contenant « | » décalait tout l'appel : réponse juste notée fausse.
         assertThat(note("C", "return doubler(3.14159265) > 6.2831852;",
@@ -943,7 +943,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void inclusion_du_noteur_a_la_compilation_refusee() {
+    void grader_inclusion_at_compile_time_refused() {
         // Le compilateur OBEIT au texte soumis : il sait embarquer un fichier dans le binaire
         // (include_str! en Rust, .incbin via asm en C). Compile par root a cote du noteur,
         // c'etait le harnais ET le nonce dans le binaire note. La compilation etudiante tourne
@@ -960,7 +960,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void cgo_reste_coupe_pour_le_build_etudiant() {
+    void cgo_stays_disabled_for_student_build() {
         // CGO_ENABLED=0 du Dockerfile ne survivait PAS au env= de Popen : cgo redevenait actif
         // et son preambule C savait inclure ../noteur/noteur.go. La variable est posee dans
         // l'environnement de build lui-meme ; un import "C" doit donc echouer a compiler.
@@ -974,7 +974,7 @@ class RpcGradingIntegrationTest {
     // ──────────────────── 2. Forger le résultat : plus aucun canal ────────────────────
 
     @Test
-    void java_forge_de_la_reponse_et_du_jeton_echoue() {
+    void java_forged_answer_and_token_fail() {
         // Tout à la fois : devancer la réponse RPC, forger un rapport, sortir en zéro, chercher
         // le jeton dans ses fichiers ET dans sa propre mémoire (/proc/self/mem).
         TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
@@ -1021,7 +1021,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_interposition_de_printf_echoue() {
+    void c_printf_interposition_fails() {
         // Le résiduel historique de C/C++ : le code étudiant détournait printf pour capturer la
         // sortie du mini-framework — jeton compris — puis forgeait le verdict. Le harnais n'est
         // plus dans son unité de compilation : il n'y a plus rien à capturer.
@@ -1048,7 +1048,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void go_devancer_la_reponse_echoue() {
+    void go_answering_early_fails() {
         TestResult r = note("Go", "return doubler(5) == 10", """
                 package main
 
@@ -1073,7 +1073,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_dup2_et_reflexion_echouent() {
+    void csharp_dup2_and_reflection_fail() {
         // mono autorise l'appel natif : on tente de detourner le descripteur 1 et de fouiller
         // l'assemblage par reflexion. Le noteur est ailleurs, sous un autre UID.
         TestResult r = note("C#", "return Solution.Doubler(5) == 10;", """
@@ -1106,7 +1106,7 @@ class RpcGradingIntegrationTest {
     // ────────────── 3. Le harnais du prof : ni lisible, ni modifiable ──────────────
 
     @Test
-    void java_harnais_introuvable_et_immodifiable() {
+    void java_harness_unreachable_and_immutable() {
         TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
                 import java.nio.file.Files;
                 import java.nio.file.Path;
@@ -1138,7 +1138,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_harnais_introuvable() {
+    void c_harness_unreachable() {
         // La sonde cherche le texte du harnais parmi les fichiers APPARTENANT A ROOT (le harnais,
         // le noteur, job.json) : c'est ce qu'une lecture de harnais vise reellement. Restreindre
         // a `-user root` evite que la sonde ne se matche ELLE-MEME — la chaine recherchee figure
@@ -1167,7 +1167,7 @@ class RpcGradingIntegrationTest {
     // ───────────────────────── 4. Pas de fausse accusation ─────────────────────────
 
     @Test
-    void code_honnete_bavard_passe_quand_meme() {
+    void honest_chatty_code_still_passes() {
         // Un étudiant qui imprime beaucoup, sur la sortie comme sur l'erreur, ne doit pas être
         // pénalisé : sa sortie n'est pas le canal de verdict (le nonce part du NOTEUR).
         TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
@@ -1189,7 +1189,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void fermer_sa_sortie_dans_la_fonction_notee_echoue_nettement() {
+    void closing_stdout_in_graded_function_fails_cleanly() {
         // LIMITE ASSUMÉE, documentée dans docker/runners/README.md (« Contrat du canal de
         // réponse »). Fermer sa sortie standard DANS LA FONCTION NOTÉE détruit le canal sur
         // lequel le processus de l'étudiant répond : le cas ne peut pas être noté. Ce qui compte,
@@ -1214,7 +1214,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void idiomes_et_valeurs_que_la_revue_a_trouves_non_couverts() {
+    void idioms_and_values_the_review_found_uncovered() {
         // 1. C# : un constructeur prenant UN SEUL int — `new Compteur(0)`, l'idiome le plus
         //    courant — collisionnait avec le constructeur « à poignée » du bouchon. Le noteur ne
         //    compilait plus et la question rendait 0 sans diagnostic.
@@ -1250,7 +1250,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_fonction_associee_ou_imbriquee_ne_casse_pas_la_compilation() {
+    void rust_associated_or_nested_function_does_not_break_compilation() {
         // Une `fn` dans un `impl`, ou imbriquée dans une autre fonction, n'est pas appelable au
         // niveau module : l'aiguillage généré la citait quand même et le programme de l'étudiant
         // ne compilait plus. Il recevait 0 avec une erreur de compilation qui n'était pas la
@@ -1273,7 +1273,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void rust_methode_mutante_nest_pas_notee_a_tort() {
+    void rust_mutating_method_not_wrongly_graded() {
         // En capture de champs, l'objet est reconstruit à chaque appel : une méthode `&mut self`
         // verrait sa modification perdue EN SILENCE. Le type n'est donc pas proxifié de cette
         // façon — le harnais ne compile pas et le prof le voit, plutôt qu'un faux verdict.
@@ -1295,7 +1295,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void java_exception_du_code_soumis_donne_son_motif_et_pas_un_timeout() {
+    void java_submitted_code_exception_gives_its_cause_not_a_timeout() {
         // La réponse d'erreur du serveur ne portait pas l'identifiant de l'appel : le noteur ne
         // la consommait jamais, les deux processus s'attendaient, et le cas rendait « Interrompu
         // (temps limite dépassé) » au bout de son mur au lieu du vrai motif.
@@ -1309,14 +1309,14 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void sortie_non_terminee_par_un_saut_de_ligne_ne_bloque_pas_le_couple() {
+    void output_without_trailing_newline_does_not_block_the_pair() {
         // Le stdout du code noté EST le canal de réponse et il partage son tampon : une dernière
         // écriture sans saut de ligne se collait au début de la ligne de réponse, qui n'était
         // alors plus reconnue. Le couple s'attendait, et une réponse JUSTE était notée
         // « Interrompu (temps limite dépassé) » après avoir brûlé tout son temps.
-        record Cas(String langage, String harnais, String code) { }
-        List<Cas> cas = List.of(
-                new Cas("Java", "return Solution.doubler(5) == 10;", """
+        record CaseSpec(String lang, String harnessCode, String code) { }
+        List<CaseSpec> caseInput = List.of(
+                new CaseSpec("Java", "return Solution.doubler(5) == 10;", """
                         public class Solution {
                             public static int doubler(int n) {
                                 System.out.print("sans saut de ligne");
@@ -1324,13 +1324,13 @@ class RpcGradingIntegrationTest {
                             }
                         }
                         """),
-                new Cas("Rust", "doubler(5) == 10", """
+                new CaseSpec("Rust", "doubler(5) == 10", """
                         fn doubler(n: i32) -> i32 {
                             print!("sans saut de ligne");
                             n * 2
                         }
                         """),
-                new Cas("Go", "return doubler(5) == 10", """
+                new CaseSpec("Go", "return doubler(5) == 10", """
                         package main
 
                         import "fmt"
@@ -1340,7 +1340,7 @@ class RpcGradingIntegrationTest {
                         \treturn n * 2
                         }
                         """),
-                new Cas("C", "return doubler(5) == 10;", """
+                new CaseSpec("C", "return doubler(5) == 10;", """
                         #include <stdio.h>
 
                         int doubler(int n) {
@@ -1348,7 +1348,7 @@ class RpcGradingIntegrationTest {
                             return n * 2;
                         }
                         """),
-                new Cas("C++", "return doubler(5) == 10;", """
+                new CaseSpec("C++", "return doubler(5) == 10;", """
                         #include <iostream>
 
                         int doubler(int n) {
@@ -1356,7 +1356,7 @@ class RpcGradingIntegrationTest {
                             return n * 2;
                         }
                         """),
-                new Cas("C#", "return Solution.doubler(5) == 10;", """
+                new CaseSpec("C#", "return Solution.doubler(5) == 10;", """
                         using System;
 
                         class Solution {
@@ -1366,23 +1366,23 @@ class RpcGradingIntegrationTest {
                             }
                         }
                         """));
-        for (Cas c : cas) {
-            TestResult r = note(c.langage(), c.harnais(), c.code());
+        for (CaseSpec c : caseInput) {
+            TestResult r = note(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
-                    .as("sortie non terminée en " + c.langage() + " : "
+                    .as("sortie non terminée en " + c.lang() + " : "
                             + (r.detail() == null ? "" : r.detail()))
                     .isTrue();
         }
     }
 
     @Test
-    void le_chemin_du_prof_qui_part_des_valeurs_par_defaut() {
+    void teacher_path_starting_from_defaults() {
         // Code de départ de la base (V2), complété par l'étudiant, noté par le GABARIT de harnais
         // de la base (V9) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
         // le vérifiait, et le gabarit C# y appelait une méthode qui n'existe pas.
-        record Cas(String langage, String harnais, String code) { }
-        List<Cas> cas = List.of(
-                new Cas("Java", "return Solution.solution() == 42;", """
+        record CaseSpec(String lang, String harnessCode, String code) { }
+        List<CaseSpec> caseInput = List.of(
+                new CaseSpec("Java", "return Solution.solution() == 42;", """
                         // Sandbox : bibliothèque standard Java (JDK, aucun réseau).
                         public class Solution {
                             public static int solution() {
@@ -1394,7 +1394,7 @@ class RpcGradingIntegrationTest {
                             }
                         }
                         """),
-                new Cas("C#", "return Solution.solution() == 42;", """
+                new CaseSpec("C#", "return Solution.solution() == 42;", """
                         // Sandbox : bibliothèque standard .NET/Mono (aucun réseau).
                         using System;
 
@@ -1408,7 +1408,7 @@ class RpcGradingIntegrationTest {
                             }
                         }
                         """),
-                new Cas("Go", "return solution() == 42", """
+                new CaseSpec("Go", "return solution() == 42", """
                         // Sandbox : bibliothèque standard Go (aucun réseau).
                         package main
 
@@ -1420,7 +1420,7 @@ class RpcGradingIntegrationTest {
 
                         func main() { fmt.Println(solution()) }
                         """),
-                new Cas("Rust", "solution() == 42", """
+                new CaseSpec("Rust", "solution() == 42", """
                         // Sandbox : bibliothèque standard Rust (aucun réseau, pas de crate externe).
                         fn solution() -> i32 {
                             42
@@ -1428,7 +1428,7 @@ class RpcGradingIntegrationTest {
 
                         fn main() { println!("{}", solution()); }
                         """),
-                new Cas("C", "return solution() == 42;", """
+                new CaseSpec("C", "return solution() == 42;", """
                         // Sandbox : bibliothèque standard C (libc, aucun réseau).
                         #include <stdio.h>
 
@@ -1441,7 +1441,7 @@ class RpcGradingIntegrationTest {
                             return 0;
                         }
                         """),
-                new Cas("C++", "return solution() == 42;", """
+                new CaseSpec("C++", "return solution() == 42;", """
                         // Sandbox : bibliothèque standard C++ (STL, aucun réseau).
                         #include <iostream>
 
@@ -1454,52 +1454,52 @@ class RpcGradingIntegrationTest {
                             return 0;
                         }
                         """));
-        for (Cas c : cas) {
-            TestResult bon = note(c.langage(), c.harnais(), c.code());
-            assertThat(bon.passed())
-                    .as("valeurs par défaut en " + c.langage() + " : "
-                            + (bon.detail() == null ? "" : bon.detail()))
+        for (CaseSpec c : caseInput) {
+            TestResult good = note(c.lang(), c.harnessCode(), c.code());
+            assertThat(good.passed())
+                    .as("valeurs par défaut en " + c.lang() + " : "
+                            + (good.detail() == null ? "" : good.detail()))
                     .isTrue();
             // Et une mauvaise réponse échoue : le test mesure bien la notation, pas un « tout
             // passe ».
-            assertThat(note(c.langage(), c.harnais(), c.code().replace("42", "41")).passed())
-                    .as("mauvaise réponse en " + c.langage())
+            assertThat(note(c.lang(), c.harnessCode(), c.code().replace("42", "41")).passed())
+                    .as("mauvaise réponse en " + c.lang())
                     .isFalse();
         }
     }
 
     @Test
-    void chemins_d_erreur_echouent_proprement() {
+    void error_paths_fail_cleanly() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.
-        TestResult harnaisFaux = note("Java", "return Solution.inexistante(3) == 1;",
+        TestResult falseHarness = note("Java", "return Solution.inexistante(3) == 1;",
                 "public class Solution { public static int doubler(int n) { return n * 2; } }");
-        assertThat(harnaisFaux.passed()).isFalse();
-        assertThat(harnaisFaux.detail()).contains("harnais");
+        assertThat(falseHarness.passed()).isFalse();
+        assertThat(falseHarness.detail()).contains("harnais");
 
-        TestResult sansApi = note("Java", "return true;",
+        TestResult withoutApi = note("Java", "return true;",
                 "public class Solution { private static int cache = 1; }");
-        assertThat(sansApi.passed()).isFalse();
-        assertThat(sansApi.detail()).isNotEmpty();
+        assertThat(withoutApi.passed()).isFalse();
+        assertThat(withoutApi.detail()).isNotEmpty();
 
-        TestResult codeCasse = note("Rust", "doubler(5) == 10", "fn doubler(n: i32) -> i32 { n *");
-        assertThat(codeCasse.passed()).isFalse();
-        assertThat(codeCasse.detail()).contains("compilation");
+        TestResult brokenCode = note("Rust", "doubler(5) == 10", "fn doubler(n: i32) -> i32 { n *");
+        assertThat(brokenCode.passed()).isFalse();
+        assertThat(brokenCode.detail()).contains("compilation");
 
-        TestResult harnaisQuiLeve = note("Java",
+        TestResult throwingHarness = note("Java",
                 "throw new IllegalStateException(\"le prof s'est trompé\");",
                 "public class Solution { public static int doubler(int n) { return n * 2; } }");
-        assertThat(harnaisQuiLeve.passed()).isFalse();
-        assertThat(harnaisQuiLeve.detail()).contains("harnais");
+        assertThat(throwingHarness.passed()).isFalse();
+        assertThat(throwingHarness.detail()).contains("harnais");
     }
 
     @Test
-    void code_honnete_bavard_passe_dans_les_cinq_autres_langages() {
+    void honest_chatty_code_passes_in_the_other_five_languages() {
         // « Ne pas accuser un étudiant honnête » a déjà demandé trois correctifs : la propriété
         // doit être mesurée dans CHAQUE langage, pas seulement en Java.
-        record Cas(String langage, String harnais, String code) { }
-        List<Cas> cas = List.of(
-                new Cas("Go", "return doubler(5) == 10", """
+        record CaseSpec(String lang, String harnessCode, String code) { }
+        List<CaseSpec> caseInput = List.of(
+                new CaseSpec("Go", "return doubler(5) == 10", """
                         package main
 
                         import "fmt"
@@ -1511,7 +1511,7 @@ class RpcGradingIntegrationTest {
 
                         func main() { fmt.Println(doubler(21)) }
                         """),
-                new Cas("Rust", "doubler(5) == 10", """
+                new CaseSpec("Rust", "doubler(5) == 10", """
                         fn doubler(n: i32) -> i32 {
                             println!("je calcule {}", n);
                             eprintln!("trace");
@@ -1520,7 +1520,7 @@ class RpcGradingIntegrationTest {
 
                         fn main() { println!("{}", doubler(21)); }
                         """),
-                new Cas("C", "return doubler(5) == 10;", """
+                new CaseSpec("C", "return doubler(5) == 10;", """
                         #include <stdio.h>
 
                         int doubler(int n) {
@@ -1531,7 +1531,7 @@ class RpcGradingIntegrationTest {
 
                         int main(void) { printf("%d\\n", doubler(21)); return 0; }
                         """),
-                new Cas("C++", "return doubler(5) == 10;", """
+                new CaseSpec("C++", "return doubler(5) == 10;", """
                         #include <iostream>
 
                         int doubler(int n) {
@@ -1541,7 +1541,7 @@ class RpcGradingIntegrationTest {
 
                         int main() { std::cout << doubler(21) << std::endl; return 0; }
                         """),
-                new Cas("C#", "return Solution.doubler(5) == 10;", """
+                new CaseSpec("C#", "return Solution.doubler(5) == 10;", """
                         using System;
 
                         class Solution {
@@ -1554,10 +1554,10 @@ class RpcGradingIntegrationTest {
                             public static void Main() { Console.WriteLine(doubler(21)); }
                         }
                         """));
-        for (Cas c : cas) {
-            TestResult r = note(c.langage(), c.harnais(), c.code());
+        for (CaseSpec c : caseInput) {
+            TestResult r = note(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
-                    .as("code honnête mais bavard en " + c.langage() + " : "
+                    .as("code honnête mais bavard en " + c.lang() + " : "
                             + (r.detail() == null ? "" : r.detail()))
                     .isTrue();
             assertThat(r.detail() == null ? "" : r.detail()).doesNotContain("⚠");

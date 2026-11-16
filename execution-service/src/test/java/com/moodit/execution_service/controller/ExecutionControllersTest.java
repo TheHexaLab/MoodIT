@@ -105,7 +105,7 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void runner_docker_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
+    void docker_runner_down_gives_502_without_leaking_internal_detail() throws Exception {
         when(service.evaluate(any())).thenThrow(
                 new com.moodit.execution_service.sandbox.SandboxException("Démon Docker injoignable (npipe)"));
 

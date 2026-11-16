@@ -20,7 +20,7 @@ class HarnessProjectsTest {
      * processus). Un harnais BOOLÉEN, lui, part sur le chemin non falsifiable — deux processus,
      * deux UID — et produit une disposition différente, couverte par ses propres tests.
      */
-    private static final Map<String, String> HARNAIS_FRAMEWORK = Map.of(
+    private static final Map<String, String> FRAMEWORK_HARNESS = Map.of(
             "Java", "@Test void t() { }",
             "C#", "[Test] public void T() { }",
             "Go", "func TestT(t *testing.T) {}",
@@ -29,18 +29,18 @@ class HarnessProjectsTest {
             "C++", "MOODIT_TEST(t) { }");
 
     /** Harnais au format framework du langage visé. */
-    private static String harnais(String language) {
-        return HARNAIS_FRAMEWORK.getOrDefault(language, "MOODIT_TEST(t) { }");
+    private static String harnessCode(String language) {
+        return FRAMEWORK_HARNESS.getOrDefault(language, "MOODIT_TEST(t) { }");
     }
 
     /** Un cas dont le harnais est au format FRAMEWORK du langage visé (ancienne disposition). */
     private static List<TestCaseInput> oneCase(String language) {
         return List.of(new TestCaseInput("aire du rectangle",
-                HARNAIS_FRAMEWORK.getOrDefault(language, "MOODIT_TEST(t) { }"), 2));
+                FRAMEWORK_HARNESS.getOrDefault(language, "MOODIT_TEST(t) { }"), 2));
     }
 
     @Test
-    void runner_language_resout_les_alias_et_rejette_les_interpretes() {
+    void runner_language_resolves_aliases_and_rejects_interpreted() {
         assertThat(HarnessProjects.runnerLanguage("Java")).isEqualTo("java");
         assertThat(HarnessProjects.runnerLanguage("C#")).isEqualTo("csharp");
         assertThat(HarnessProjects.runnerLanguage("cs")).isEqualTo("csharp");
@@ -52,7 +52,7 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void job_json_echappe_les_noms_de_cas() {
+    void job_json_escapes_case_names() {
         HarnessProjects.Project project = HarnessProjects.build("Java", "class A {}",
                 List.of(new TestCaseInput("nom \"piégé\"\navec\tsaut", "h", 1),
                         new TestCaseInput("anti\\slash\rretour\u0001contrôle", "h", 1)), null);
@@ -62,7 +62,7 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void chaque_langage_a_un_gabarit_de_canari() {
+    void every_language_has_a_canary_template() {
         for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
             Map<String, String> files = HarnessProjects.build(language, "code", oneCase(language), null).files();
             boolean canaryPresent = files.entrySet().stream()
@@ -72,37 +72,37 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void chaque_langage_depose_le_code_soumis_et_le_harnais_marque() {
+    void every_language_drops_submitted_code_and_marked_harness() {
         // Seule disposition : le code soumis dans son fichier, le harnais du prof dans un AUTRE,
         // précédé du marqueur. Le superviseur compile le second dans le noteur, le premier dans
         // le serveur — deux programmes, deux UID. Les douze tests de disposition du format
         // framework que ce test remplace décrivaient un chemin falsifiable, retiré de #116.
-        record Attendu(String langage, String fichierSoumis, String extensionHarnais) { }
-        for (Attendu a : List.of(
-                new Attendu("Java", "Solution.java", "java"),
-                new Attendu("C#", "solution.cs", "cs"),
-                new Attendu("Go", "main.go", "go"),
-                new Attendu("Rust", "solution.rs", "rs"),
-                new Attendu("C", "solution.c", "c"),
-                new Attendu("C++", "solution.cpp", "cpp"))) {
+        record Expected(String lang, String submittedFile, String harnessExtension) { }
+        for (Expected a : List.of(
+                new Expected("Java", "Solution.java", "java"),
+                new Expected("C#", "solution.cs", "cs"),
+                new Expected("Go", "main.go", "go"),
+                new Expected("Rust", "solution.rs", "rs"),
+                new Expected("C", "solution.c", "c"),
+                new Expected("C++", "solution.cpp", "cpp"))) {
             Map<String, String> files = HarnessProjects
-                    .build(a.langage(), codeSoumis(a.langage()), oneCase(a.langage()), null)
+                    .build(a.lang(), submittedCode(a.lang()), oneCase(a.lang()), null)
                     .files();
-            assertThat(files).as("code soumis de " + a.langage())
-                    .containsKey("cases/0/src/" + a.fichierSoumis());
-            String harnais = files.get("cases/0/src/harnais_rpc." + a.extensionHarnais());
-            assertThat(harnais).as("harnais marqué de " + a.langage())
+            assertThat(files).as("code soumis de " + a.lang())
+                    .containsKey("cases/0/src/" + a.submittedFile());
+            String harnessCode = files.get("cases/0/src/harnais_rpc." + a.harnessExtension());
+            assertThat(harnessCode).as("harnais marqué de " + a.lang())
                     .isNotNull()
                     .contains("__MOODIT_HARNAIS__");
             // Le harnais n'est JAMAIS dans le fichier du code soumis : c'est tout l'intérêt.
-            assertThat(files.get("cases/0/src/" + a.fichierSoumis()))
+            assertThat(files.get("cases/0/src/" + a.submittedFile()))
                     .doesNotContain("__MOODIT_HARNAIS__");
         }
     }
 
     /** Code soumis minimal déclarant une entrée marshalable, par langage. */
-    private static String codeSoumis(String langue) {
-        return switch (langue) {
+    private static String submittedCode(String languageName) {
+        return switch (languageName) {
             case "Java" -> "public class Solution { static int doubler(int n) { return n * 2; } }";
             case "C#" -> "class Solution { static int doubler(int n) { return n * 2; } }";
             case "Go" -> "package main\n\nfunc doubler(n int) int { return n * 2 }\n";
@@ -112,7 +112,7 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void nom_de_cas_null_devient_une_chaine_json_vide() {
+    void null_case_name_becomes_empty_json_string() {
         HarnessProjects.Project project = HarnessProjects.build("Go", "package main",
                 List.of(new TestCaseInput(null, "func TestT(t *testing.T) {}", 1)), null);
         assertThat(project.files().get("job.json")).contains("\"name\":\"\"");
@@ -132,61 +132,61 @@ class HarnessProjectsTest {
      * périmé dès qu'une migration ultérieure retoucherait un gabarit — le défaut repasserait.
      */
     @Test
-    void chaque_gabarit_de_harnais_appelle_une_entree_que_le_code_de_depart_declare()
+    void every_harness_template_calls_an_entry_the_start_code_declares()
             throws java.io.IOException {
-        java.util.List<String> migrations = migrationsParVersion();
+        java.util.List<String> migrations = migrationsByVersion();
 
-        for (String langue : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            String gabarit = valeurEffective(migrations, "('" + langue + "', $hc$", "$hc$");
-            assertThat(gabarit).as("gabarit de harnais de " + langue).isNotEmpty();
+        for (String languageName : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            String template = effectiveValue(migrations, "('" + languageName + "', $hc$", "$hc$");
+            assertThat(template).as("gabarit de harnais de " + languageName).isNotEmpty();
             // Ancré sur « == ATTENDU » : le point d'entrée est le dernier identifiant suivi de
             // « ( » AVANT cette comparaison. Prendre le premier de la ligne désignerait `abs`
             // dans un `Math.abs(solution(3) - 7.0) < 1e-9`.
-            String expression = gabarit.lines()
+            String expression = template.lines()
                     .map(String::strip)
                     .filter(l -> l.contains("== ATTENDU"))
                     .findFirst()
                     .orElseThrow(() -> new AssertionError(
-                            "le gabarit de " + langue + " ne compare plus à ATTENDU : "
+                            "le gabarit de " + languageName + " ne compare plus à ATTENDU : "
                                     + "ancrer ce test autrement"));
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\w+)\\s*\\(")
                     .matcher(expression.substring(0, expression.indexOf("== ATTENDU")));
-            String entree = null;
+            String entry_ = null;
             while (m.find()) {
-                entree = m.group(1);
+                entry_ = m.group(1);
             }
-            assertThat(entree).as("appel lisible dans le gabarit de " + langue).isNotNull();
+            assertThat(entry_).as("appel lisible dans le gabarit de " + languageName).isNotNull();
 
-            String depart = valeurEffective(migrations, "('" + langue + "',", "$sc$");
-            assertThat(depart).as("code de départ de " + langue).isNotEmpty();
+            String lineBegin = effectiveValue(migrations, "('" + languageName + "',", "$sc$");
+            assertThat(lineBegin).as("code de départ de " + languageName).isNotEmpty();
             // Hors commentaires : un commentaire qui contiendrait le mot ne vaut pas déclaration.
-            String code = depart.lines()
+            String code = lineBegin.lines()
                     .filter(l -> !l.strip().startsWith("//") && !l.strip().startsWith("#"))
                     .reduce("", (a, b) -> a + "\n" + b);
             assertThat(code)
-                    .as("le gabarit de " + langue + " appelle " + entree
+                    .as("le gabarit de " + languageName + " appelle " + entry_
                             + "(), que le code de départ doit déclarer")
-                    .contains(entree);
+                    .contains(entry_);
         }
     }
 
     /** Contenu des migrations {@code db/migration/V*.sql}, par numéro de version croissant. */
-    private static java.util.List<String> migrationsParVersion() throws java.io.IOException {
-        java.util.TreeMap<Integer, String> parVersion = new java.util.TreeMap<>();
-        try (var fichiers = java.nio.file.Files.list(
+    private static java.util.List<String> migrationsByVersion() throws java.io.IOException {
+        java.util.TreeMap<Integer, String> byVersion = new java.util.TreeMap<>();
+        try (var fileList = java.nio.file.Files.list(
                 java.nio.file.Path.of("..", "db", "migration"))) {
-            for (java.nio.file.Path p : fichiers.toList()) {
-                String nom = p.getFileName().toString();
+            for (java.nio.file.Path p : fileList.toList()) {
+                String caseName = p.getFileName().toString();
                 java.util.regex.Matcher v = java.util.regex.Pattern.compile("^V(\\d+)__")
-                        .matcher(nom);
-                if (nom.endsWith(".sql") && v.find()) {
-                    parVersion.put(Integer.parseInt(v.group(1)),
+                        .matcher(caseName);
+                if (caseName.endsWith(".sql") && v.find()) {
+                    byVersion.put(Integer.parseInt(v.group(1)),
                             java.nio.file.Files.readString(p));
                 }
             }
         }
-        assertThat(parVersion).as("migrations trouvées").isNotEmpty();
-        return List.copyOf(parVersion.values());
+        assertThat(byVersion).as("migrations trouvées").isNotEmpty();
+        return List.copyOf(byVersion.values());
     }
 
     /**
@@ -198,34 +198,34 @@ class HarnessProjectsTest {
      * fichier où le langage cherché est absent : c'est ce que faisait la première version de ce
      * test, et elle échouait sur Java.
      */
-    private static String valeurEffective(java.util.List<String> migrations, String debut,
-            String delimiteur) {
-        String valeur = "";
+    private static String effectiveValue(java.util.List<String> migrations, String begin,
+            String delimiter) {
+        String value = "";
         for (String migration : migrations) {
-            String trouve = bloc(migration, debut, delimiteur);
-            if (!trouve.isEmpty()) {
-                valeur = trouve;
+            String found = block(migration, begin, delimiter);
+            if (!found.isEmpty()) {
+                value = found;
             }
         }
-        return valeur;
+        return value;
     }
 
     /** Contenu entre le premier {@code $…$} qui suit {@code debut}. */
-    private static String bloc(String texte, String debut, String delimiteur) {
-        int i = texte.indexOf(debut);
+    private static String block(String sourceText, String begin, String delimiter) {
+        int i = sourceText.indexOf(begin);
         if (i < 0) {
             return "";
         }
-        int j = texte.indexOf(delimiteur, i + debut.length() - delimiteur.length());
+        int j = sourceText.indexOf(delimiter, i + begin.length() - delimiter.length());
         if (j < 0) {
             return "";
         }
-        int k = texte.indexOf(delimiteur, j + delimiteur.length());
-        return k < 0 ? "" : texte.substring(j + delimiteur.length(), k);
+        int k = sourceText.indexOf(delimiter, j + delimiter.length());
+        return k < 0 ? "" : sourceText.substring(j + delimiter.length(), k);
     }
 
     @Test
-    void le_nom_du_fichier_suit_le_type_public_de_premier_niveau_quelle_que_soit_sa_forme() {
+    void file_name_follows_top_level_public_type_in_any_form() {
         // Chaque forme etait notee 0 : fichier mal nomme, javac refusait la classe publique.
         // Identifiant Unicode (\w ne reconnait que l'ASCII : « Réponse » donnait R.java).
         assertThat(HarnessProjects.javaFileName("public class Réponse { }", "Solution"))
@@ -268,7 +268,7 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void le_nom_du_fichier_se_lit_en_temps_lineaire() {
+    void file_name_is_read_in_linear_time() {
         // Une tete en \s* multiligne faisait repartir le moteur de chaque ligne jusqu'au bout
         // de la source : temps quadratique, sur une source choisie par l'etudiant.
         for (String source : List.of("\t\n".repeat(100_000), "\n".repeat(200_000),
@@ -279,7 +279,7 @@ class HarnessProjectsTest {
     }
 
     @Test
-    void un_class_en_commentaire_ne_leurre_pas_le_nom_du_fichier() {
+    void commented_class_does_not_mislead_file_name() {
         // Un étudiant qui garde une ancienne version en commentaire voyait le fichier déposé
         // nommé d'après la classe COMMENTÉE : javac refusait alors sa vraie classe publique
         // (le nom du fichier fait foi), et une soumission correcte échouait avec un diagnostic

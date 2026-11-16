@@ -66,12 +66,12 @@ class RunnerSandboxIntegrationTest {
     // ─────────────────────────── Isolation du conteneur ───────────────────────────
 
     @Test
-    void sortie_reseau_refusee_depuis_le_code_etudiant() {
+    void network_egress_refused_for_student_code() {
         require("Go");
         // --network none : aucune interface hors loopback, donc connect() échoue IMMÉDIATEMENT
         // (réseau inatteignable) — aucune dépendance à un hôte externe, aucune attente. Sans
         // cette garantie, le code soumis exfiltrerait sa réponse ou le nonce depuis le VPS.
-        String sonde = """
+        String probe = """
                 package main
 
                 import "net"
@@ -92,7 +92,7 @@ class RunnerSandboxIntegrationTest {
 
                 func main() {}
                 """;
-        List<TestResult> r = evaluator.evaluate("Go", sonde, List.of(
+        List<TestResult> r = evaluator.evaluate("Go", probe, List.of(
                 new TestCaseInput("réseau", GO_HARNESS, 1),
                 new TestCaseInput("témoin", "return temoin(5) == 10", 1)), null);
         assertThat(r.get(0).passed()).isFalse();
@@ -103,12 +103,12 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
-    void execution_depuis_tmp_refusee_depuis_le_code_etudiant() {
+    void execution_from_tmp_refused_for_student_code() {
         require("Go");
         // /tmp est monté noexec : un binaire déposé par l'UID étudiant ne peut pas être exécuté
         // (seul /box, qui porte les programmes compilés, est exec). Tout échec de MISE EN PLACE
         // de la sonde renvoie la bonne réponse, pour que le test échoue au lieu de passer à vide.
-        String sonde = """
+        String probe = """
                 package main
 
                 import (
@@ -133,32 +133,32 @@ class RunnerSandboxIntegrationTest {
 
                 func main() {}
                 """;
-        assertThat(evaluate("Go", sonde, GO_HARNESS).get(0).passed()).isFalse();
+        assertThat(evaluate("Go", probe, GO_HARNESS).get(0).passed()).isFalse();
     }
 
     // ─────────────────────────── Budgets et robustesse ───────────────────────────
 
     @Test
-    void boucle_infinie_interrompue() {
+    void infinite_loop_is_interrupted() {
         require("Go");
-        String infini = "package main\n\nfunc doubler(n int) int { for {} }\n\nfunc main() {}\n";
-        List<TestResult> r = evaluator.evaluate("Go", infini,
+        String infiniteLoop = "package main\n\nfunc doubler(n int) int { for {} }\n\nfunc main() {}\n";
+        List<TestResult> r = evaluator.evaluate("Go", infiniteLoop,
                 List.of(new TestCaseInput("t", GO_HARNESS, 1)), 2000);
         assertThat(r.get(0).passed()).isFalse();
         assertThat(r.get(0).detail()).contains("Interrompu");
     }
 
     @Test
-    void erreur_de_compilation_expliquee() {
+    void compilation_error_is_explained() {
         require("Go");
-        String casse = "package main\n\nfunc doubler(n int) int { return n *\n";
-        List<TestResult> r = evaluate("Go", casse, GO_HARNESS);
+        String broken = "package main\n\nfunc doubler(n int) int { return n *\n";
+        List<TestResult> r = evaluate("Go", broken, GO_HARNESS);
         assertThat(r.get(0).passed()).isFalse();
         assertThat(r.get(0).detail()).contains("compilation");
     }
 
     @Test
-    void tester_public_note_vraiment_les_cas() {
+    void public_tester_really_grades_cases() {
         require("Go");
         // Chemin PUBLIC (« Tester » du prof), DEUX cas, temps limite 60 s — la valeur maximale
         // de l'éditeur. Avec un budget dérivé du pire cas théorique, il tombait à 1 s : seul le
@@ -175,7 +175,7 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
-    void java_temps_limite_court_plancher_vm() {
+    void java_short_time_limit_vm_floor() {
         require("Java");
         // 1 s de temps limite — valeur légitime pour un doubler : sans plancher, la JVM froide
         // tuait tous les cas et une simple configuration faisait échouer une réponse juste. Le
@@ -191,7 +191,7 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
-    void poids_des_cas_rendus_tels_quels() {
+    void case_weights_returned_as_is() {
         require("C");
         List<TestResult> r = evaluator.evaluate("C",
                 "int doubler(int n) { return n * 2; }",

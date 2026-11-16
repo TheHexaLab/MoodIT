@@ -199,7 +199,7 @@ public final class HarnessProjects {
      * compilation avec un diagnostic qui ne désigne pas la cause. Blocs de texte Java
      * ({@code \"\"\"}) compris.
      */
-    static String sansCommentairesNiChaines(String source) {
+    static String withoutCommentsOrLiterals(String source) {
         StringBuilder res = new StringBuilder(source.length());
         int i = 0;
         int n = source.length();
@@ -266,31 +266,31 @@ public final class HarnessProjects {
      * fichier Java : la notation et le bouton « Exécuter » ({@code CodeAssembler}) l'appellent.
      */
     public static String javaFileName(String source, String fallback) {
-        source = sansCommentairesNiChaines(source == null ? "" : source);
+        source = withoutCommentsOrLiterals(source == null ? "" : source);
         Matcher m = JAVA_TYPE_DECL.matcher(source);
-        String premier = null;
-        int profondeur = 0;
-        int lu = 0;
+        String firstTopLevel = null;
+        int depth = 0;
+        int scanned = 0;
         while (m.find()) {
-            for (; lu < m.start(); lu++) {
-                char c = source.charAt(lu);
+            for (; scanned < m.start(); scanned++) {
+                char c = source.charAt(scanned);
                 if (c == '{') {
-                    profondeur++;
-                } else if (c == '}' && profondeur > 0) {
-                    profondeur--;
+                    depth++;
+                } else if (c == '}' && depth > 0) {
+                    depth--;
                 }
             }
-            if (profondeur != 0) {
+            if (depth != 0) {
                 continue;
             }
             if (PUBLIC_MOD.matcher(m.group(1)).find()) {
                 return m.group(2) + ".java";
             }
-            if (premier == null) {
-                premier = m.group(2);
+            if (firstTopLevel == null) {
+                firstTopLevel = m.group(2);
             }
         }
-        return (premier != null ? premier : fallback) + ".java";
+        return (firstTopLevel != null ? firstTopLevel : fallback) + ".java";
     }
 
     private static String jsonString(String value) {

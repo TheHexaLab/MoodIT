@@ -884,7 +884,7 @@ class PermissionServiceTest {
   }
 
   @Test
-  void execEvaluate_enseignant_allowed() {
+  void execEvaluate_teacher_allowed() {
     // « Tester » de l'éditeur de quiz : réservé à ceux qui éditent des quiz — un appel y lance
     // un conteneur de notation avec du code et des harnais fournis par l'appelant (#116).
     loggedIn(user(5));
@@ -893,7 +893,7 @@ class PermissionServiceTest {
   }
 
   @Test
-  void execEvaluate_adminProgramme_allowed() {
+  void execEvaluate_programAdmin_allowed() {
     // Un admin de programme édite des quiz (canManageQuizContent), donc son « Tester » doit
     // passer. Cette branche de la règle n'était couverte par aucun test : retirer le
     // `hasRoleInAnyProgram(ADMIN)` ne faisait rougir personne, et une régression lui aurait
@@ -908,14 +908,14 @@ class PermissionServiceTest {
   }
 
   @Test
-  void execEvaluate_etudiant_denied() {
+  void execEvaluate_student_denied() {
     // Un étudiant passe par « Exécuter » (/exec/run) et par la soumission de quiz, jamais ici.
     loggedIn(user(5));
     assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isFalse();
   }
 
   @Test
-  void execEvaluate_gardien_global_allowed() {
+  void execEvaluate_globalGuardian_allowed() {
     loggedIn(user(5));
     when(membershipService.hasGlobalRole(5L)).thenReturn(true);
     assertThat(service().isAllowed(EMAIL, "/exec/evaluate", "POST", "{}")).isTrue();

@@ -145,11 +145,20 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 ```
 
 > **Premier déploiement de #116 — l'ancien `update.sh` s'exécute.** Le script qui tire cette
-> version est celui d'AVANT elle : il ne lance pas `docker/runners/build.sh`, ne passe pas
-> `--remove-orphans`, et surveille encore `moodit_piston`. Jusqu'à correction, toute exécution
-> rend 502 et les tentatives sont supprimées. Marche à suivre : construire les dix images runner
-> À LA MAIN (`bash docker/runners/build.sh`) avant de basculer, puis relancer `update.sh --force`
-> une fois la nouvelle version en place.
+> version est celui d'AVANT elle (bash garde le fichier ouvert) : il ne construit pas les images
+> runner, ne pose pas `MOODIT_RUNNER_TAG`, ne passe pas `--remove-orphans`, et surveille encore
+> `moodit_piston`. Sans images, toute exécution rend 502 et les tentatives sont supprimées. Et
+> le clone du serveur est encore sur l'ancien commit, où `docker/runners/` n'existe pas : les
+> images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
+>
+> ```bash
+> git fetch origin deploiement
+> git worktree add --detach /tmp/moodit-runners origin/deploiement
+> MOODIT_RUNNER_TAG=latest bash /tmp/moodit-runners/docker/runners/build.sh   # les 10 images, en latest
+> git worktree remove /tmp/moodit-runners
+> ./deploy/update.sh           # l'ANCIEN script bascule le code ; execution-service lit « latest »
+> ./deploy/update.sh --force   # le NOUVEAU : images taguées par commit, --remove-orphans (Piston)
+> ```
 
 ### Changement de schéma : migrations Flyway
 
@@ -168,7 +177,22 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
 > un harnais existant qui passe un tableau, une structure ou une collection ne compilera plus —
 > `passed=false` pour chaque étudiant, sans panne visible. **Avant le déploiement : inventorier
-> les Test_Case des six langages compilés et rejouer chacun avec « Tester ».**
+> les Test_Case des six langages compilés et rejouer chacun avec « Tester ».** Inventaire :
+>
+> ```bash
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+>   SELECT qz.id AS quiz, qz.title AS titre, qz.is_published AS publie, q.id AS question,
+>          l.name AS langage, tc.id AS cas, tc.name AS nom_cas
+>   FROM Test_Case tc
+>   JOIN Question q ON q.id = tc.question_id
+>   JOIN Language l ON l.id = q.language_id
+>   JOIN Quiz qz ON qz.id = q.quiz_id
+>   WHERE l.name IN ('Java', 'C', 'C++', 'C#', 'Go', 'Rust')
+>   ORDER BY qz.is_published DESC, qz.id, q.id, tc.id;"
+> ```
+>
+> Chaque ligne est un cas à rejouer ; les quiz publiés d'abord. Le harnais C/C++ dispose de
+> `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :
@@ -332,7 +356,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
-  `execution-service` les balaie à son démarrage, et on peut les lister à la main avec
+  `execution-service` les balaie au démarrage puis toutes les 10 min (`OrphanSweeper`), une fois
+  passé un délai de grâce de 20 min qui protège les corrections en cours ; on peut les lister à la main avec
   `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
   `/var/run/docker.sock` : c'est un accès
   **root-équivalent au démon de l'hôte**, et il faut en mesurer la portée — contrairement à

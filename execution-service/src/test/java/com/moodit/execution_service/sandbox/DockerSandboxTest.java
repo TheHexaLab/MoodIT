@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DockerSandboxTest {
 
     @Test
-    void tar_place_les_fichiers_sous_box_en_0600_et_ready_en_dernier() throws IOException {
+    void tar_places_files_under_box_0600_and_ready_last() throws IOException {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("job.json", "{}");
         files.put("cases/0/src/main.go", "package main");
@@ -42,7 +42,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void hote_docker_par_defaut_selon_l_os() {
+    void default_docker_host_depends_on_os() {
         String host = DockerSandbox.defaultDockerHost();
         if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
             assertThat(host).startsWith("npipe://");
@@ -57,7 +57,7 @@ class DockerSandboxTest {
     private final DockerSandbox unreachable = new DockerSandbox("tcp://127.0.0.1:1", 512, 64, 1.0);
 
     @Test
-    void demon_injoignable_available_et_image_present_repondent_false() {
+    void unreachable_daemon_available_and_image_present_return_false() {
         assertThat(unreachable.available()).isFalse();
         // Second appel : le client déjà initialisé est réutilisé (chemin rapide).
         assertThat(unreachable.available()).isFalse();
@@ -65,14 +65,14 @@ class DockerSandboxTest {
     }
 
     @Test
-    void demon_injoignable_run_leve_sandbox_exception() {
+    void unreachable_daemon_run_throws_sandbox_exception() {
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> unreachable.run("moodit-runner-go:latest", Map.of("job.json", "{}"), 1000))
                 .isInstanceOf(SandboxException.class);
     }
 
     @Test
-    void hote_docker_invalide_echoue_en_sandbox_exception_au_premier_run() {
+    void invalid_docker_host_fails_with_sandbox_exception_on_first_run() {
         // L'initialisation paresseuse du client échoue (URI invalide) → message « injoignable ».
         DockerSandbox invalid = new DockerSandbox("::pas-une-uri::", 512, 64, 1.0);
         org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -82,7 +82,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void image_present_distingue_absente_de_demon_en_erreur() {
+    void image_present_tells_missing_from_daemon_error() {
         var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
         var inspect = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectImageCmd.class);
         org.mockito.Mockito.when(docker.inspectImageCmd("absente")).thenReturn(inspect);
@@ -163,7 +163,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void cycle_complet_retourne_sorties_et_exit_puis_detruit_le_conteneur() {
+    void full_cycle_returns_output_and_exit_then_removes_container() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
         DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 512, 64, 1.0);
@@ -177,7 +177,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void image_absente_message_actionnable() {
+    void missing_image_actionable_message() {
         var create = org.mockito.Mockito.mock(com.github.dockerjava.api.command.CreateContainerCmd.class);
         org.mockito.Mockito.when(create.withHostConfig(org.mockito.ArgumentMatchers.any())).thenReturn(create);
         org.mockito.Mockito.when(create.withLabels(org.mockito.ArgumentMatchers.<java.util.Map<String, String>>any())).thenReturn(create);
@@ -193,7 +193,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void budget_de_temps_depasse_leve_sandbox_exception_et_detruit_le_conteneur() {
+    void time_budget_exceeded_throws_sandbox_exception_and_removes_container() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
         DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, null), 512, 64, 1.0);
@@ -205,7 +205,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void echec_du_nettoyage_n_avale_pas_le_resultat() {
+    void cleanup_failure_does_not_swallow_result() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
         org.mockito.Mockito.when(remove.exec()).thenThrow(new RuntimeException("démon occupé"));
@@ -215,7 +215,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void balayage_des_conteneurs_orphelins_au_demarrage() {
+    void orphan_containers_swept_at_startup() {
         // Si la JVM meurt pendant une notation, le nettoyage du finally n'a pas lieu : les
         // conteneurs survivants portent l'étiquette moodit.runner et sont balayés au démarrage.
         com.github.dockerjava.api.DockerClient docker =
@@ -245,15 +245,15 @@ class DockerSandboxTest {
     }
 
     @Test
-    void un_conteneur_runner_est_balaye_seulement_passe_le_delai_de_grace() {
+    void runner_container_swept_only_after_grace_period() {
         // Récent, il appartient peut-être à une notation en cours : « created » (fenêtre
         // create → start d'une autre instance) comme TERMINÉ (fenêtre fin → lecture des
         // journaux). Le balayer faisait échouer cette notation : 502, tentative supprimée.
-        long maintenant = System.currentTimeMillis() / 1000;
-        long vieux = (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 1000) / 1000;
-        for (String statut : new String[] {"created", "Created", "exited", "dead", null}) {
-            assertThat(DockerSandbox.removable(container(statut, maintenant))).as(statut).isFalse();
-            assertThat(DockerSandbox.removable(container(statut, vieux))).as(statut).isTrue();
+        long now = System.currentTimeMillis() / 1000;
+        long old = (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 1000) / 1000;
+        for (String status : new String[] {"created", "Created", "exited", "dead", null}) {
+            assertThat(DockerSandbox.removable(container(status, now))).as(status).isFalse();
+            assertThat(DockerSandbox.removable(container(status, old))).as(status).isTrue();
         }
         // Date absente (champ non rempli par le démon) : on s'abstient.
         assertThat(DockerSandbox.removable(container("exited", 0))).isFalse();
@@ -269,13 +269,13 @@ class DockerSandboxTest {
     }
 
     @Test
-    void balayage_silencieux_si_le_demon_est_injoignable() {
+    void sweep_is_silent_when_daemon_unreachable() {
         // Un démon absent ne doit pas empêcher le service de démarrer.
         assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
     }
 
     @Test
-    void host_config_pose_toutes_les_garanties_d_isolation() {
+    void host_config_sets_every_isolation_guarantee() {
         // Le bloc HostConfig PORTE le modèle de menace de #116 : une ligne retirée par un
         // refactoring ou une résolution de conflit ne casse AUCUN autre test (la matrice
         // anti-triche note juste, elle ne tente pas de sortir du conteneur). D'où ces
@@ -331,7 +331,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void tailles_des_tmpfs_derivees_de_la_memoire_du_conteneur() {
+    void tmpfs_sizes_derived_from_container_memory() {
         // Un tmpfs est compté dans le cgroup : codées en dur, les trois tailles occupaient
         // jusqu'à 83 % de la mémoire quand SANDBOX_MEMORY_MB est abaissé (1 Go en prod).
         DockerSandbox prod = new DockerSandbox("tcp://localhost:1", 1024, 512, 1.0);
@@ -341,9 +341,9 @@ class DockerSandboxTest {
         assertThat(prod.boxSizeMb() + prod.tmpSizeMb() + prod.shmSizeMb()).isLessThan(1024);
 
         // Planchers : une mémoire minuscule garde des tmpfs utilisables.
-        DockerSandbox minuscule = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
-        assertThat(minuscule.boxSizeMb()).isEqualTo(256);
-        assertThat(minuscule.tmpSizeMb()).isEqualTo(32);
-        assertThat(minuscule.shmSizeMb()).isEqualTo(16);
+        DockerSandbox lowercase = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
+        assertThat(lowercase.boxSizeMb()).isEqualTo(256);
+        assertThat(lowercase.tmpSizeMb()).isEqualTo(32);
+        assertThat(lowercase.shmSizeMb()).isEqualTo(16);
     }
 }

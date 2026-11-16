@@ -180,13 +180,13 @@ class CodeAssemblerLanguagesTest {
             "sqlite, sqlite3",
             "SQLITE3, sqlite3",
     })
-    void alias_de_langage_resolus_a_l_assemblage(String language, String runtime) {
+    void language_aliases_resolved_at_assembly(String language, String runtime) {
         assertThat(assembler.assemble(language, "", "", "N").runtime()).isEqualTo(runtime);
     }
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"cplusplus", "cs", "c-sharp", "golang", "Java", "Rust", "C"})
-    void alias_compiles_refuses_a_l_assemblage_le_runner_docker_les_note(String language) {
+    void compiled_aliases_rejected_by_assembler_graded_by_docker_runner(String language) {
         // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
         assertThatThrownBy(() -> assembler.assemble(language, "", "", "N"))
                 .isInstanceOf(UnsupportedLanguageException.class);
@@ -228,7 +228,7 @@ class CodeAssemblerLanguagesTest {
             "SQL, sqlite3, main.sql",
             "Java, java, Main.java",
     })
-    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String runtime,
+    void run_sends_code_as_is_in_expected_file(String language, String runtime,
             String fileName) {
         String code = "// code étudiant de " + language;
         var a = assembler.assembleRun(language, code);
@@ -248,7 +248,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void run_java_lit_le_nom_du_fichier_comme_la_notation() {
+    void run_java_reads_file_name_like_grading() {
         // « Exécuter » avait son propre lecteur (public class \w+) : Unicode, sealed et classe
         // commentee y donnaient un autre fichier que celui de la notation.
         var a = assembler.assembleRun("Java", """

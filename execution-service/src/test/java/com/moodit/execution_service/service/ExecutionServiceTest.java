@@ -70,7 +70,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_depasse_les_harnais_restants_ne_sont_pas_lances() {
+    void budget_exceeded_remaining_harnesses_not_launched() {
         // Le chemin interprété lance un conteneur et prend une place PAR HARNAIS (100 autorisés) :
         // sans échéance, une correction occupait le sandbox des heures après que l'appelant a
         // renoncé, et core devait budgéter un délai de lecture du même ordre (#216). Budget à 0 :
@@ -102,7 +102,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_epuise_par_l_attente_de_place_en_interne_est_une_panne_pas_une_note()
+    void budget_exhausted_by_internal_slot_wait_is_a_failure_not_a_grade()
             throws Exception {
         // VRAIE charge : la place unique du sandbox est occupee par une autre correction pendant
         // 600 ms. L'evaluation attend, et c'est cette attente — creee par les autres — qui epuise
@@ -112,9 +112,9 @@ class ExecutionServiceTest {
         ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
         svc.interpretedBudgetMs = 200;
         pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
-        java.util.concurrent.CountDownLatch prise = new java.util.concurrent.CountDownLatch(1);
-        Thread autre = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
-            prise.countDown();
+        java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
+        Thread other = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            acquired.countDown();
             try {
                 Thread.sleep(600);
             } catch (InterruptedException ex) {
@@ -122,19 +122,19 @@ class ExecutionServiceTest {
             }
             return null;
         })));
-        autre.start();
-        prise.await();
+        other.start();
+        acquired.await();
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
 
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(req)))
                 .isInstanceOf(com.moodit.execution_service.sandbox.SandboxException.class);
-        autre.join();
+        other.join();
     }
 
     @Test
-    void solution_lente_sous_le_delai_sans_attente_recoit_une_note_partielle() {
+    void slow_solution_within_delay_without_wait_gets_partial_grade() {
         // Le scenario de la revue : une solution CORRECTE mais lente, chaque harnais sous son
         // delai, aucune attente de place. Le budget s'epuise de facon REPRODUCTIBLE — en faire un
         // 502 rendait la question impossible a noter (502 a chaque renvoi) et bloquait une place a
@@ -162,7 +162,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_epuise_par_un_harnais_interrompu_reste_une_note() throws Exception {
+    void budget_exhausted_by_interrupted_harness_stays_a_grade() throws Exception {
         // VRAIE contention (la place unique est occupee 600 ms par une autre correction, budget
         // 200 ms), donc le travail mesure tient dans le budget — MAIS le harnais atteint son
         // delai. Sans le garde-fou, une solution qui boucle dans une file chargee partait en 502 :
@@ -172,9 +172,9 @@ class ExecutionServiceTest {
         ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
         svc.interpretedBudgetMs = 200;
         pistonRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
-        java.util.concurrent.CountDownLatch prise = new java.util.concurrent.CountDownLatch(1);
-        Thread autre = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
-            prise.countDown();
+        java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
+        Thread other = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            acquired.countDown();
             try {
                 Thread.sleep(600);
             } catch (InterruptedException ex) {
@@ -182,14 +182,14 @@ class ExecutionServiceTest {
             }
             return null;
         })));
-        autre.start();
-        prise.await();
+        other.start();
+        acquired.await();
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
 
         List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
-        autre.join();
+        other.join();
         assertThat(r).hasSize(2);
         assertThat(r.get(0).detail()).startsWith("Interrompu");
         assertThat(r.get(1).passed()).isFalse();
@@ -197,7 +197,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_absurde_ne_degrade_pas_la_correction() {
+    void absurd_budget_does_not_degrade_grading() {
         // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement)
         // saturait la conversion en nanosecondes, l'addition débordait en une échéance NÉGATIVE
         // — donc DÉJÀ dépassée — et un seul harnais sur cent était évalué. Une configuration
@@ -216,7 +216,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void budget_large_tous_les_harnais_sont_evalues() {
+    void ample_budget_evaluates_every_harness() {
         // Contrôle négatif du test ci-dessus : avec le budget par défaut (15 min), l'échéance
         // n'intervient jamais — sinon le test précédent passerait pour la mauvaise raison.
         pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
@@ -405,7 +405,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void nom_de_classe_java_reserve_refuse_avec_un_diagnostic() {
+    void reserved_java_class_name_rejected_with_diagnostic() {
         // `public class harnais_rpc` portait la même clé de fichier que le harnais du prof (le
         // code soumis était écrasé) et `MooditX` est sauté à la copie par le superviseur : dans
         // les deux cas, « Aucun fichier de code soumis » — un 0 qui n'explique pas la cause.
@@ -413,13 +413,13 @@ class ExecutionServiceTest {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
 
-        for (String classe : List.of("MooditPiege", "harnais_rpc")) {
+        for (String className : List.of("MooditPiege", "harnais_rpc")) {
             List<TestResult> results = routed.evaluate(oneTest("Java",
-                    "public class " + classe + " { static int f() { return 1; } }",
-                    "return " + classe + ".f() == 1;"));
-            assertThat(results).as("refus de " + classe).hasSize(1);
+                    "public class " + className + " { static int f() { return 1; } }",
+                    "return " + className + ".f() == 1;"));
+            assertThat(results).as("refus de " + className).hasSize(1);
             assertThat(results.get(0).passed()).isFalse();
-            assertThat(results.get(0).detail()).contains(classe).contains("réservé");
+            assertThat(results.get(0).detail()).contains(className).contains("réservé");
         }
         verifyNoInteractions(docker);
         // Et un nom NORMAL ne déclenche rien : le refus est chirurgical.
@@ -428,7 +428,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void harnais_au_format_framework_refuse_avec_un_diagnostic() {
+    void framework_format_harness_rejected_with_diagnostic() {
         // Cette forme compilait le harnais AVEC le code de l'étudiant : le processus qui détenait
         // le secret était celui qu'il contrôle, et cinq canaux de forge y ont été démontrés. Elle
         // n'a jamais été déployée, donc rien n'en dépend — mais la laisser vivre offrait au prof
@@ -450,7 +450,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void harnais_booleen_atteint_le_runner_dans_les_six_langages() {
+    void boolean_harness_reaches_runner_in_all_six_languages() {
         // RÉGRESSION : un garde-fou en amont renvoyait 0 à tous les cas d'une question dont le
         // harnais était justement au format SÛR, sans jamais atteindre le runner. Ce test entre
         // par la porte de PRODUCTION (ExecutionService.evaluate), pas par DockerEvaluator.
@@ -546,7 +546,7 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void rejets_avant_la_prise_de_place_et_mur_plafonne_selon_l_appelant() {
+    void rejections_before_slot_and_wall_capped_by_caller() {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
         ExecutionService routed = new ExecutionService(assembler, runner, limiter, docker);

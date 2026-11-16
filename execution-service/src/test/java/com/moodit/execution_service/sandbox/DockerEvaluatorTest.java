@@ -36,7 +36,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void mappe_les_verdicts_par_index_avec_noms_et_poids() {
+    void maps_verdicts_by_index_with_names_and_weights() {
         supervisorReturns("""
                 {"v":1,"results":[
                   {"index":0,"name":"premier","passed":true,"detail":null,"ms":10},
@@ -50,7 +50,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void cas_sans_verdict_echoue_fail_closed() {
+    void case_without_verdict_fails_closed() {
         supervisorReturns("""
                 {"v":1,"results":[{"index":0,"passed":true,"ms":1}],"events":[],"canaries":"ok"}
                 """);
@@ -61,7 +61,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void notation_incomplete_est_une_panne_en_interne_mais_reste_visible_au_tester() {
+    void incomplete_grading_is_internal_failure_but_visible_to_tester() {
         // Le superviseur signale une notation INCOMPLETE pour cause non imputable : une erreur
         // interne de son propre code, seule cause qui ne vient jamais de l'etudiant.
         supervisorReturns("""
@@ -83,7 +83,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void le_marqueur_de_framework_ne_fait_pas_deborder_la_pile() {
+    void framework_marker_does_not_overflow_the_stack() {
         // Le moteur Java repete un groupe par recursion : une qualification sans fin
         // (`@a.a.a.…`) faisait deborder la pile au lieu de repondre « pas un framework ».
         assertThat(DockerEvaluator.frameworkMarkerFound("java", "@" + "a.".repeat(50_000))).isFalse();
@@ -96,7 +96,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void une_falsification_l_emporte_sur_incomplet_meme_cote_java() {
+    void forgery_wins_over_incomplete_on_java_side_too() {
         // Le superviseur ne signale jamais « incomplet » avec des canaris incoherents, mais Java
         // ne lui fait pas confiance aveuglement : une regression cote superviseur ne doit pas
         // transformer une falsification en tentative a reprendre (502).
@@ -112,7 +112,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void conteneur_mort_sans_json_leve_au_lieu_de_noter_zero() {
+    void dead_container_without_json_throws_instead_of_grading_zero() {
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode. Sans
         // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »
         // passed=false — une liste de verdicts VALIDE aux yeux de core, qui persistait un 0
@@ -129,7 +129,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void json_illisible_leve_sandbox_exception() {
+    void unreadable_json_throws_sandbox_exception() {
         // stderr volumineux : tronqué dans le journal, jamais dans l'exception.
         when(sandbox.run(any(), anyMap(), anyLong()))
                 .thenReturn(new DockerSandbox.ContainerRun("pas du json", "x".repeat(5000), 1));
@@ -143,7 +143,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void erreur_du_superviseur_leve_sandbox_exception() {
+    void supervisor_error_throws_sandbox_exception() {
         supervisorReturns("{\"v\":1,\"error\":\"fichiers du job non reçus\"}");
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(SandboxException.class)
@@ -151,13 +151,13 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void image_cpp_partage_celle_du_c() {
+    void cpp_image_shares_the_c_one() {
         assertThat(evaluator.imageFor("cpp")).isEqualTo("moodit-runner-c:latest");
         assertThat(evaluator.imageFor("java")).isEqualTo("moodit-runner-java:latest");
     }
 
     @Test
-    void budget_mural_borne_et_image_du_langage_utilisee() {
+    void wall_budget_bounded_and_language_image_used() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         evaluator.evaluate("C++", "code",
                 List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)), 5000);
@@ -167,7 +167,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void temps_limite_aberrant_borne_jamais_de_mur_negatif() {
+    void absurd_time_limit_bounded_never_negative_wall() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         // Négatif (valeur stockée aberrante) : borné à 1 ms, puis PLANCHER VM (10 s — miroir
         // du superviseur, JVM froide) — le mur reste positif et couvre le temps réel accordé.
@@ -187,7 +187,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void mur_couvre_les_compilations_reelles_de_chaque_langage() {
+    void wall_covers_real_compilations_of_every_language() {
         // Le chemin non falsifiable compile DEUX programmes par cas — le noteur et le code
         // soumis — et TROIS en Java, où les signatures sont lues sur les classes compilées. Le
         // mur n'en budgétait qu'une : un cas lancé juste avant l'échéance du budget se faisait
@@ -198,16 +198,16 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void marqueur_reserve_dans_le_code_soumis_rejete_sans_conteneur() {
+    void reserved_marker_in_submitted_code_rejected_without_container() {
         // __MOODIT_ dans la copie recevrait les substitutions runtime (jeton, canaris) : rejet
         // explicite AVANT tout conteneur — chaque cas échoue avec le même détail.
         // Poids absent sur un cas (champ optionnel de l'API) : le rejet passe par
         // effectiveWeight() — pas de NPE à l'unboxing.
-        List<TestCaseInput> casesSansPoids = List.of(
+        List<TestCaseInput> casesWithoutWeight = List.of(
                 new TestCaseInput("premier", "h1", 2), new TestCaseInput("second", "h2", null));
         List<TestResult> results = evaluator.evaluate("Go",
                 "package main\nfunc f() { println(\"[MOODIT] jeton=__MOODIT_T__\") }",
-                casesSansPoids, null);
+                casesWithoutWeight, null);
         assertThat(results).hasSize(2);
         assertThat(results).allSatisfy(r -> {
             assertThat(r.passed()).isFalse();
@@ -219,32 +219,32 @@ class DockerEvaluatorTest {
     // ── Reconnaissance de la FORME du harnais (#116) ─────────────────────────────
 
     @Test
-    void la_forme_du_harnais_choisit_le_chemin_dans_les_six_langages() {
+    void harness_form_picks_the_path_in_all_six_languages() {
         // Il n'y a plus qu'une forme notée : le corps booléen. `frameworkMarkerFound` est le
         // DÉTECTEUR du format retiré — ExecutionService s'en sert pour REFUSER un harnais au
         // format framework avec un diagnostic, avant toute prise de place sandbox. Un booléen
         // ne doit jamais le déclencher (refus à tort), un vrai test toujours (notation par un
         // chemin qui n'existe plus).
-        record Cas(String langage, String booleen, String framework) { }
-        List<Cas> cas = List.of(
-                new Cas("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
-                new Cas("csharp", "return Solution.Doubler(5) == 10;", "[Test] public void T() {}"),
-                new Cas("go", "return doubler(5) == 10", "func TestT(t *testing.T) {}"),
-                new Cas("rust", "doubler(5) == 10", "#[test] fn t() {}"),
-                new Cas("c", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"),
-                new Cas("cpp", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"));
-        for (Cas c : cas) {
-            assertThat(DockerEvaluator.frameworkMarkerFound(c.langage(), c.booleen()))
-                    .as("harnais booléen en " + c.langage() + " → chemin non falsifiable")
+        record CaseSpec(String lang, String booleanForm, String framework) { }
+        List<CaseSpec> caseInput = List.of(
+                new CaseSpec("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
+                new CaseSpec("csharp", "return Solution.Doubler(5) == 10;", "[Test] public void T() {}"),
+                new CaseSpec("go", "return doubler(5) == 10", "func TestT(t *testing.T) {}"),
+                new CaseSpec("rust", "doubler(5) == 10", "#[test] fn t() {}"),
+                new CaseSpec("c", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"),
+                new CaseSpec("cpp", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"));
+        for (CaseSpec c : caseInput) {
+            assertThat(DockerEvaluator.frameworkMarkerFound(c.lang(), c.booleanForm()))
+                    .as("harnais booléen en " + c.lang() + " → chemin non falsifiable")
                     .isFalse();
-            assertThat(DockerEvaluator.frameworkMarkerFound(c.langage(), c.framework()))
-                    .as("harnais framework en " + c.langage() + " → ancien chemin")
+            assertThat(DockerEvaluator.frameworkMarkerFound(c.lang(), c.framework()))
+                    .as("harnais framework en " + c.lang() + " → ancien chemin")
                     .isTrue();
         }
     }
 
     @Test
-    void formes_parametrees_et_qualifiees_reconnues_comme_framework() {
+    void parameterized_and_qualified_forms_recognized_as_framework() {
         // Formes IDIOMATIQUES qu'un contrôle littéral prenait pour des harnais booléens.
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "[TestCase(3, 4, 12)] public void Aire(…) {}")).isTrue();
@@ -262,7 +262,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void mur_plafonne_pour_un_appel_public() {
+    void wall_capped_for_public_call() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
         // 10 cas × (60 s + 10 s + 90 s) dépasserait largement le plafond public (4 min).
         List<TestCaseInput> many = java.util.stream.IntStream.range(0, 10)
@@ -273,7 +273,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void canaris_incoherents_neutralisent_les_verdicts_cote_java() {
+    void inconsistent_canaries_neutralize_verdicts_java_side() {
         // Défense en PROFONDEUR : même si le superviseur renvoyait « passed », Java refuse.
         supervisorReturns("""
                 {"v":1,"results":[
@@ -289,7 +289,7 @@ class DockerEvaluatorTest {
     }
 
     @Test
-    void aucun_dockerfile_ne_laisse_de_continuation_pendante() throws java.io.IOException {
+    void no_dockerfile_leaves_a_dangling_continuation() throws java.io.IOException {
         // Un `\` en fin de ligne suivi d'une ligne VIDE fait avaler l'instruction suivante par
         // le RUN en cours. L'image ne se construit plus, et le message d'erreur accuse la
         // commande du RUN — pas la continuation. C'est arrivé en retirant les téléchargements
@@ -301,75 +301,75 @@ class DockerEvaluatorTest {
         java.util.Set<String> instructions = java.util.Set.of("FROM", "RUN", "COPY", "ADD",
                 "USER", "WORKDIR", "ENV", "ARG", "ENTRYPOINT", "CMD", "EXPOSE", "VOLUME",
                 "LABEL", "SHELL", "HEALTHCHECK", "STOPSIGNAL", "ONBUILD");
-        java.util.List<String> fautifs = new java.util.ArrayList<>();
-        int lus = 0;
-        java.nio.file.Path racine = java.nio.file.Path.of("..", "docker", "runners");
-        try (var dossiers = java.nio.file.Files.list(racine)) {
-            for (java.nio.file.Path d : dossiers.sorted().toList()) {
+        java.util.List<String> offending = new java.util.ArrayList<>();
+        int readFiles = 0;
+        java.nio.file.Path rootDir = java.nio.file.Path.of("..", "docker", "runners");
+        try (var directories = java.nio.file.Files.list(rootDir)) {
+            for (java.nio.file.Path d : directories.sorted().toList()) {
                 java.nio.file.Path df = d.resolve("Dockerfile");
                 if (!java.nio.file.Files.isRegularFile(df)) {
                     continue;
                 }
-                lus++;
-                java.util.List<String> lignes = java.nio.file.Files.readAllLines(df);
-                for (int i = 0; i < lignes.size(); i++) {
-                    if (!lignes.get(i).stripTrailing().endsWith("\\")) {
+                readFiles++;
+                java.util.List<String> lineList = java.nio.file.Files.readAllLines(df);
+                for (int i = 0; i < lineList.size(); i++) {
+                    if (!lineList.get(i).stripTrailing().endsWith("\\")) {
                         continue;
                     }
-                    if (i == lignes.size() - 1) {
-                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (fin de fichier)");
+                    if (i == lineList.size() - 1) {
+                        offending.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (fin de fichier)");
                         continue;
                     }
-                    String suivante = lignes.get(i + 1).strip();
-                    String motCle = suivante.split("\\s+", 2)[0].toUpperCase(java.util.Locale.ROOT);
-                    if (suivante.isEmpty()) {
-                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (ligne vide)");
-                    } else if (instructions.contains(motCle)) {
-                        fautifs.add(d.getFileName() + "/Dockerfile:" + (i + 1)
-                                + " (instruction " + motCle + " avalée)");
+                    String nextOne = lineList.get(i + 1).strip();
+                    String keyword = nextOne.split("\\s+", 2)[0].toUpperCase(java.util.Locale.ROOT);
+                    if (nextOne.isEmpty()) {
+                        offending.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (ligne vide)");
+                    } else if (instructions.contains(keyword)) {
+                        offending.add(d.getFileName() + "/Dockerfile:" + (i + 1)
+                                + " (instruction " + keyword + " avalée)");
                     }
                 }
             }
         }
-        assertThat(fautifs)
+        assertThat(offending)
                 .withFailMessage("continuation pendante (l'instruction suivante serait avalée "
-                        + "par le RUN, et l'image ne construirait plus) : %s", fautifs)
+                        + "par le RUN, et l'image ne construirait plus) : %s", offending)
                 .isEmpty();
         // Exhaustif par construction : si la racine changeait de forme, le test verdirait sans
         // rien avoir lu.
-        assertThat(lus)
+        assertThat(readFiles)
                 .withFailMessage("10 Dockerfiles runner attendus, %d lus — le test ne vérifie "
-                        + "plus ce qu'il annonce", lus)
+                        + "plus ce qu'il annonce", readFiles)
                 .isEqualTo(10);
     }
 
 
     @Test
-    void budget_du_tester_public_reste_proportionnel_au_mur() {
+    void public_tester_budget_stays_proportional_to_wall() {
         // Le pire cas THÉORIQUE d'un cas (compilations à 90 s) dépasse le plafond public de
         // 4 min : dérivé de lui seul, le budget tombait à 1 s et le « Tester » du prof ne
         // notait qu'un cas — voire aucun, un canari pouvant passer en premier. Aucun test
         // n'assertait cette valeur : la CI était verte sur un chemin inopérant.
-        long mur = DockerEvaluator.PUBLIC_WALL_MS;
+        long wall = DockerEvaluator.PUBLIC_WALL_MS;
         // Java, 2 cas, timeout par défaut (plancher VM 10 s) : pireCas = 295 s > mur entier.
-        DockerEvaluator.Walls java = DockerEvaluator.walls("java", 2, 10_000, mur);
-        assertThat(java.wallMs()).isEqualTo(mur);
-        assertThat(java.budgetMs()).isEqualTo(mur * 3 / 5);
+        DockerEvaluator.Walls java = DockerEvaluator.walls("java", 2, 10_000, wall);
+        assertThat(java.wallMs()).isEqualTo(wall);
+        assertThat(java.budgetMs()).isEqualTo(wall * 3 / 5);
         // Go à 60 s — la valeur maximale de l'éditeur : pireCas = 255 s > mur.
-        DockerEvaluator.Walls go = DockerEvaluator.walls("go", 2, 60_000, mur);
-        assertThat(go.budgetMs()).isEqualTo(mur * 3 / 5);
+        DockerEvaluator.Walls go = DockerEvaluator.walls("go", 2, 60_000, wall);
+        assertThat(go.budgetMs()).isEqualTo(wall * 3 / 5);
     }
 
     @Test
-    void budget_interne_garde_la_formule_stricte_et_son_invariant() {
+    void internal_budget_keeps_strict_formula_and_invariant() {
         // Chemin INTERNE (soumission d'un étudiant) : mur à 15 min, la formule stricte domine
         // et l'invariant « budget + pireCas + marge ≤ mur » doit tenir — c'est lui qui protège
         // la tentative d'une suppression au mur (#216).
         DockerEvaluator.Walls java = DockerEvaluator.walls("java", 3, 10_000, Long.MAX_VALUE);
         assertThat(java.wallMs()).isEqualTo(15 * 60_000);
         assertThat(java.budgetMs()).isEqualTo(585_000);
-        long pireCasJava = 10_000 + 10_000 + 3 * 90_000 + 5_000;
-        assertThat(java.budgetMs() + pireCasJava + 20_000).isLessThanOrEqualTo(java.wallMs());
+        long worstCaseJava = 10_000 + 10_000 + 3 * 90_000 + 5_000;
+        assertThat(java.budgetMs() + worstCaseJava + 20_000).isLessThanOrEqualTo(java.wallMs());
         // Et même au plancher proportionnel, l'invariant tient sur tout mur NON plafonné :
         // mur candidat = 30 s + (N+2) × pireCas ≥ 3 × pireCas, donc la marge de 40 % couvre
         // toujours un cas entier. Vérifié sur le plus petit job possible.
@@ -377,13 +377,13 @@ class DockerEvaluatorTest {
         // l'emportait des 56 s sous le plafond interne et rompait l'invariant de quelques
         // secondes. Il est reserve au chemin public : ici la formule stricte, l'invariant exact.
         DockerEvaluator.Walls javaLong = DockerEvaluator.walls("java", 3, 60_000, Long.MAX_VALUE);
-        long pireCasJavaLong = 60_000 + 10_000 + 3 * 90_000 + 5_000;
-        assertThat(javaLong.budgetMs() + pireCasJavaLong + 20_000)
+        long worstCaseJavaLong = 60_000 + 10_000 + 3 * 90_000 + 5_000;
+        assertThat(javaLong.budgetMs() + worstCaseJavaLong + 20_000)
                 .isLessThanOrEqualTo(javaLong.wallMs());
         DockerEvaluator.Walls go = DockerEvaluator.walls("go", 1, 10_000, Long.MAX_VALUE);
-        long pireCasGo = 10_000 + 10_000 + 2 * 90_000 + 5_000;
-        assertThat(go.budgetMs() + pireCasGo).isLessThanOrEqualTo(go.wallMs());
-        assertThat(go.budgetMs()).isEqualTo(go.wallMs() - pireCasGo - 20_000);
+        long worstCaseGo = 10_000 + 10_000 + 2 * 90_000 + 5_000;
+        assertThat(go.budgetMs() + worstCaseGo).isLessThanOrEqualTo(go.wallMs());
+        assertThat(go.budgetMs()).isEqualTo(go.wallMs() - worstCaseGo - 20_000);
     }
 
 }

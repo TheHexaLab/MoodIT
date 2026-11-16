@@ -176,12 +176,12 @@ public class DockerEvaluator {
         if (!"java".equals(runnerLanguage)) {
             return null;
         }
-        String fichier = HarnessProjects.javaFileName(code == null ? "" : code, "Solution");
-        String classe = fichier.substring(0, fichier.length() - ".java".length());
-        if (!classe.startsWith("Moodit") && !"harnais_rpc".equals(classe)) {
+        String fileName = HarnessProjects.javaFileName(code == null ? "" : code, "Solution");
+        String className = fileName.substring(0, fileName.length() - ".java".length());
+        if (!className.startsWith("Moodit") && !"harnais_rpc".equals(className)) {
             return null;
         }
-        String detail = "Le nom de classe « " + classe + " » est réservé par la notation "
+        String detail = "Le nom de classe « " + className + " » est réservé par la notation "
                 + "(« harnais_rpc » et le préfixe « Moodit » appartiennent aux fichiers du "
                 + "superviseur). Renommer la classe — par exemple « Solution » — et resoumettre.";
         return cases.stream()
@@ -342,8 +342,8 @@ public class DockerEvaluator {
         // Les canaris sont lus AVANT : un verdict de falsification ne doit jamais devenir une
         // tentative a reprendre. Le superviseur le garantit deja ; Java ne lui fait pas confiance
         // aveuglement (defense en profondeur, comme pour les verdicts ci-dessous).
-        boolean canariesIncoherents = "incoherents".equals(root.path("canaries").asString(""));
-        if (internal && !canariesIncoherents && root.path("incomplet").asBoolean(false)) {
+        boolean canariesInconsistent = "incoherents".equals(root.path("canaries").asString(""));
+        if (internal && !canariesInconsistent && root.path("incomplet").asBoolean(false)) {
             log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
             throw new SandboxException(
                     "Notation incomplète (panne du noteur) : la tentative est à reprendre");
@@ -378,7 +378,7 @@ public class DockerEvaluator {
             boolean passed = node != null && node.path("passed").asBoolean(false);
             String detail = node == null ? "Notation incomplète (cas sans verdict)"
                     : (node.path("detail").isString() ? node.path("detail").asString() : null);
-            if (canariesIncoherents && passed) {
+            if (canariesInconsistent && passed) {
                 passed = false;
                 detail = "⚠ Incohérence détectée pendant la notation (falsification probable)."
                         + (detail == null || detail.isBlank() ? "" : "\n" + detail);

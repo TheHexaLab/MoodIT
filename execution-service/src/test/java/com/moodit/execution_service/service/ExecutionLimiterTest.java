@@ -224,7 +224,7 @@ class ExecutionLimiterTest {
     }
 
     @Test
-    void une_place_reste_reservee_aux_corrections_internes() throws Exception {
+    void a_slot_stays_reserved_for_internal_grading() throws Exception {
         // max = 2 : le PUBLIC ne peut occuper qu'UNE place — un conteneur de notation public
         // (qui peut vivre des minutes) ne doit jamais affamer la correction interne.
         ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
@@ -247,7 +247,7 @@ class ExecutionLimiterTest {
     }
 
     @Test
-    void le_contexte_interne_est_visible_et_restaure() {
+    void internal_context_is_visible_and_restored() {
         // Le mur du conteneur dépend de ce drapeau (public : plafond court).
         ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 2);
         assertThat(limiter.isInternal()).isFalse();
@@ -256,7 +256,7 @@ class ExecutionLimiterTest {
     }
 
     @Test
-    void l_attente_publique_ne_depasse_pas_le_delai_configure() throws Exception {
+    void public_wait_does_not_exceed_configured_delay() throws Exception {
         // Les deux acquisitions (place publique puis place globale) partagent UNE échéance :
         // sinon l'appelant patientait 2 × queue-wait-ms avant son 429.
         ExecutionLimiter limiter = new ExecutionLimiter(2, 300, 5);

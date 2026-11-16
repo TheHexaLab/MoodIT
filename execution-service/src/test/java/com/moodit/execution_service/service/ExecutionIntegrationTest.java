@@ -101,7 +101,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void python_devancer_la_reponse_rpc_echoue() {
+    void python_answering_rpc_early_fails() {
         requireRuntime("python");
         // DEVANCEMENT : le stdout du serveur étudiant EST le canal de réponse. En imprimant une
         // réponse conforme AVANT d'être appelé, le code noté la faisait consommer comme réponse
@@ -117,7 +117,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void javascript_devancer_la_reponse_rpc_echoue() {
+    void javascript_answering_rpc_early_fails() {
         requireRuntime("javascript");
         assertThat(passes("JavaScript",
                 "console.log(JSON.stringify({ok: true, value: 10}));\n"
@@ -206,7 +206,7 @@ class ExecutionIntegrationTest {
     // lire le nonce — process.mainModule.require était le vecteur, désormais fermé par l'isolation).
 
     @Test
-    void jsx_devancer_la_reponse_rpc_echoue() {
+    void jsx_answering_rpc_early_fails() {
         requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");
         // Jumeau du test JS : une ligne conforme ecrite D'AVANCE sur stdout (au chargement
@@ -220,7 +220,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void jsx_console_log_honnete_ne_coute_pas_la_note() {
+    void jsx_honest_console_log_does_not_cost_the_grade() {
         requireRuntime("javascript");
         gate(vendorAvailable(), "Bundle react-runtime.js absent (APP_VENDOR_DIR)");
         // Un console.log de debogage au chargement ET pendant le rendu : reflexe honnete.
@@ -320,7 +320,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void run_java_plancher_couvre_compilation_et_jvm_froide() {
+    void run_java_floor_covers_compilation_and_cold_jvm() {
         // Mode fichier-source (JEP 330) : la compilation vit dans la fenêtre de run — le
         // plancher du superviseur (10 s) doit absorber javac en-processus + la JVM froide,
         // sinon un « Exécuter » correct était « Interrompu » par intermittence (défaut 3 s).
@@ -333,7 +333,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void run_go_compilation_separee_de_la_fenetre_de_run() {
+    void run_go_compilation_separate_from_run_window() {
         requireRuntime("go");
         RunnerExec.Result res = RUNNER.execute("go", List.of(new RunnerExec.File("main.go",
                 "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"bonjour go\") }\n")));

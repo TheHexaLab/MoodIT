@@ -83,7 +83,7 @@ PUMP_SWEEP_JOIN_S = 1           # attente APRÈS le balayage de secours (tube li
 # read_capped, pour que tout ce que la pompe garde soit effectivement relu.
 PUMP_TAIL_BYTES = OUTPUT_CAP // 2
 
-class EtatSortie:
+class ExitState:
     """Capture des sorties d'UN cas : des octets ont-ils été perdus (tmpfs saturé) ?
 
     La queue est alors perdue, donc la ligne du jeton aussi. Sans cet état, Java et C#
@@ -96,19 +96,19 @@ class EtatSortie:
     rien n'avait saturé. Une pompe retardataire n'écrit que dans l'état de SON cas."""
 
     def __init__(self, case_index=None):
-        self.perdue = False
+        self.lost = False
         self.case = case_index
         # Un processus du cas est mort PAR SIGNAL (OOM du cgroup, SIGSEGV…). Posé ici plutôt
         # que dans chacun des six runners : run_proc est le seul endroit qui voie le code brut.
-        self.tue_par_signal = False
+        self.killed_by_signal = False
         # Un processus du cas a dépassé son temps limite. Les runners écrasent l'information
         # (« if timed_out or code != 0: Échec de compilation »), si bien qu'une COMPILATION
         # expirée arrivait avec timed_out=False et passait pour une cause concluante : un code
         # lent à compiler se faisait accuser de sabotage.
-        self.expire = False
+        self.expired = False
 
 
-ETAT_SORTIE = EtatSortie()
+EXIT_STATE = ExitState()
 
 EVENTS = []
 
@@ -129,7 +129,7 @@ def log(msg):
 # Ouverture par root SANS suivre de lien et sans bloquer sur une FIFO. Drapeaux POSIX lus par
 # getattr : le superviseur ne tourne que sous Linux, mais ses tests unitaires tournent aussi
 # sous Windows (O_BINARY : pas de traduction des fins de ligne).
-O_SANS_LIEN = (getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+O_NO_LINK = (getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
 
 
@@ -143,7 +143,7 @@ def read_capped(path, cap=OUTPUT_CAP):
         # Sans suivre de lien et sans bloquer : root relit des fichiers poses dans des dossiers
         # que le code soumis peut atteindre. Un lien lui faisait relire un fichier root du
         # conteneur, une FIFO le bloquait jusqu'au mur. Seul un fichier ORDINAIRE est relu.
-        fd = os.open(path, os.O_RDONLY | O_SANS_LIEN)
+        fd = os.open(path, os.O_RDONLY | O_NO_LINK)
         with os.fdopen(fd, "rb") as f:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
@@ -304,26 +304,26 @@ def canary_verdict(cases, outcomes):
         return "aucun"
     # Les canaris NON IMPUTABLES sont écartés du jugement : sautés faute de budget global
     # (l'ordre est tiré au sort) ou victimes d'une défaillance du noteur (tmpfs saturé).
-    jugeables = [c for c in canary_cases if not outcomes[c["index"]].skipped]
-    non_imputables = len(jugeables) < len(canary_cases)
-    if not jugeables:
+    judgeable = [c for c in canary_cases if not outcomes[c["index"]].skipped]
+    not_imputable = len(judgeable) < len(canary_cases)
+    if not judgeable:
         return "indetermines"
-    reels = [c for c in cases if not c.get("canary") and not outcomes[c["index"]].skipped]
+    real_cases = [c for c in cases if not c.get("canary") and not outcomes[c["index"]].skipped]
 
-    confirmes, accusables = [], []
-    for c in jugeables:
+    confirmed, accusable = [], []
+    for c in judgeable:
         issue = outcomes[c["index"]]
         if issue.ran and issue.passed == (c["canary"] == "pass"):
-            confirmes.append(c)                       # CONFIRMÉ
+            confirmed.append(c)                       # CONFIRMÉ
         elif issue.ran or not inconclusive(issue):
-            accusables.append(c)                      # non confirmé, et imputable a priori
+            accusable.append(c)                      # non confirmé, et imputable a priori
         # sinon : compilation échouée pour une cause non concluante — règle 2, jamais d'accusation
 
-    if accusables:
+    if accusable:
         # LE critère : l'étudiant y gagne-t-il ? Sans cas réel vert, faire échouer des canaris
         # ne rapporte rien — accuser ne protégerait donc personne et frapperait un code
         # honnête. C'est aussi ce qui couvre l'échec de compilation global (aucun cas vert).
-        if any(outcomes[c["index"]].passed for c in reels):
+        if any(outcomes[c["index"]].passed for c in real_cases):
             event("canari_incoherent",
                   detail="canaris non conformes alors qu'un cas réel a réussi "
                          "— falsification probable")
@@ -332,7 +332,7 @@ def canary_verdict(cases, outcomes):
     # « ok » exige que CHAQUE canari ait été CONFIRMÉ : un canari non compilé pour une cause
     # non concluante n'accuse pas, mais il n'a rien vérifié non plus — répondre « ok »
     # prétendrait le contraire. Idem si l'un était non imputable.
-    if non_imputables or len(confirmes) != len(jugeables):
+    if not_imputable or len(confirmed) != len(judgeable):
         return "indetermines"
     return "ok"
 
@@ -358,7 +358,7 @@ def free_bytes_under(blocks_available, block_size, threshold):
     return blocks_available * block_size < threshold
 
 
-def uid_reel(status):
+def real_uid(status):
     """UID reel lu dans un /proc/<pid>/status, ou None. PURE (testee)."""
     for line in status.splitlines():
         if line.startswith("Uid:"):
@@ -367,23 +367,23 @@ def uid_reel(status):
     return None
 
 
-def etat_tache(stat_ligne):
+def task_state(stat_line):
     """Etat d'une tache lu dans /proc/<pid>/task/<tid>/stat. PURE (testee). Le nom du programme,
     entre parentheses, peut contenir espaces et parentheses : on lit apres la DERNIERE."""
-    reste = stat_ligne[stat_ligne.rfind(")") + 1:].split()
-    return reste[0] if reste else "X"
+    rest = stat_line[stat_line.rfind(")") + 1:].split()
+    return rest[0] if rest else "X"
 
 
-def taches_vivantes(etats):
+def tasks_alive(states):
     """Un processus est-il encore VIVANT ? PURE (testee).
 
     Juger sur l'etat du seul processus ne suffit pas : un programme multithread dont le fil
     PRINCIPAL est sorti est affiche Z (zombie) alors que ses autres fils tournent encore. On
     regarde donc chaque tache : vivant tant qu'une n'est ni Z ni X."""
-    return any(e not in ("Z", "X") for e in etats)
+    return any(e not in ("Z", "X") for e in states)
 
 
-def tuer_uid_etudiant():
+def kill_student_uid():
     """SIGKILL a TOUS les processus de l'UID etudiant, en un appel : kill(-1) lance SOUS cet
     UID atteint tout ce qu'il peut signaler, quel que soit l'etat, le groupe ou la session
     (setsid ne protege de rien), et le noyau le fait sans laisser de fork s'intercaler."""
@@ -401,26 +401,26 @@ def tuer_uid_etudiant():
     os.waitpid(pid, 0)
 
 
-def _une_passe_survivants():
+def _survivor_pass():
     """Compte les processus de l'UID etudiant encore vivants ; recolte les zombies VRAIMENT
     morts. Le superviseur est PID 1 : les orphelins lui reviennent, et sans recolte ils
     occupaient pour toujours une entree de la table des processus (512 par conteneur)."""
-    vivants = 0
+    alive = 0
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open("/proc/" + pid + "/status", "r") as f:
-                if uid_reel(f.read()) != str(STUDENT_UID):
+                if real_uid(f.read()) != str(STUDENT_UID):
                     continue
-            etats = []
+            states = []
             for tid in os.listdir("/proc/" + pid + "/task"):
                 with open("/proc/" + pid + "/task/" + tid + "/stat", "r") as f:
-                    etats.append(etat_tache(f.read()))
+                    states.append(task_state(f.read()))
         except (OSError, ValueError):
             continue
-        if taches_vivantes(etats):
-            vivants += 1
+        if tasks_alive(states):
+            alive += 1
             continue
         try:
             # Recolte CIBLEE (ce pid, jamais -1) : un waitpid(-1) volerait le statut des
@@ -428,34 +428,34 @@ def _une_passe_survivants():
             os.waitpid(int(pid), os.WNOHANG)
         except ChildProcessError:
             pass
-    return vivants
+    return alive
 
 
 def kill_student_survivors():
     """Isolation entre les cas d'une meme evaluation : plus AUCUN processus de l'UID etudiant
     ne survit au cas qui l'a lance. Appele entre deux cas.
 
-    On tue par l'UID (tuer_uid_etudiant), puis on verifie : la mort d'un processus tue n'est
+    On tue par l'UID (kill_student_uid), puis on verifie : la mort d'un processus tue n'est
     pas instantanee. Borne a 25 passes pour ne jamais rester coince ici."""
     for _ in range(25):
-        tuer_uid_etudiant()
-        if _une_passe_survivants() == 0:
+        kill_student_uid()
+        if _survivor_pass() == 0:
             return
         time.sleep(0.05)
 
 
-def purge_partages():
+def purge_shared_dirs():
     """Vide /tmp et /dev/shm entre deux cas : ces tmpfs survivent d'un cas a l'autre, et un
     fichier depose au cas N (un nonce exfiltre, un relais) etait lisible au cas N+1."""
-    for dossier in ("/tmp", "/dev/shm"):
+    for directory in ("/tmp", "/dev/shm"):
         try:
-            for nom in os.listdir(dossier):
-                chemin = os.path.join(dossier, nom)
+            for ident in os.listdir(directory):
+                fpath = os.path.join(directory, ident)
                 try:
-                    if os.path.isdir(chemin) and not os.path.islink(chemin):
-                        shutil.rmtree(chemin, ignore_errors=True)
+                    if os.path.isdir(fpath) and not os.path.islink(fpath):
+                        shutil.rmtree(fpath, ignore_errors=True)
                     else:
-                        os.unlink(chemin)
+                        os.unlink(fpath)
                 except OSError:
                     continue
         except OSError:
@@ -478,7 +478,7 @@ def preexec_student_compile():
     os.setuid(STUDENT_UID)
 
 
-def etu_build_env(build_dir):
+def student_build_env(build_dir):
     """Environnement de la compilation ETUDIANTE : tout ce qui s'ecrit lui appartient.
 
     CGO_ENABLED=0 est pose ICI et dans base_env : l'ENV du Dockerfile go ne survit pas au
@@ -498,66 +498,66 @@ def etu_build_env(build_dir):
     }
 
 
-def fixe_droits(chemin, uid, gid, mode, mode_dossier=None):
+def set_owner_mode(fpath, uid, gid, mode, dir_mode=None):
     """chown + chmod par DESCRIPTEUR, ouvert sans suivre de lien et sans bloquer.
 
     root pose ces droits dans des dossiers que le code soumis a pu toucher : par chemin, un
     lien pose a la place d'un fichier lui faisait changer la CIBLE. Ici un lien echoue (ELOOP,
     une OSError : panne d'environnement imputable, donc une note), et ce qui est change est
     exactement ce qui a ete ouvert. `mode_dossier` s'applique si c'est un dossier."""
-    fd = os.open(chemin, os.O_RDONLY | O_SANS_LIEN)
+    fd = os.open(fpath, os.O_RDONLY | O_NO_LINK)
     try:
         st = os.fstat(fd)
         os.fchown(fd, uid, gid)
-        os.fchmod(fd, mode_dossier if (mode_dossier is not None
+        os.fchmod(fd, dir_mode if (dir_mode is not None
                                        and stat.S_ISDIR(st.st_mode)) else mode)
     finally:
         os.close(fd)
 
 
-def fixe_droits_arbre(racine, uid, gid, mode_fichier, mode_dossier):
-    """fixe_droits sur un arbre, racine comprise. Un lien n'est ni suivi ni modifie."""
-    if os.path.islink(racine):
+def set_owner_mode_tree(tree_root, uid, gid, file_mode, dir_mode):
+    """set_owner_mode sur un arbre, racine comprise. Un lien n'est ni suivi ni modifie."""
+    if os.path.islink(tree_root):
         return
-    for r, ds, fs in os.walk(racine):
-        for nom in ds + fs:
-            chemin = os.path.join(r, nom)
-            if not os.path.islink(chemin):
-                fixe_droits(chemin, uid, gid, mode_fichier, mode_dossier)
-    fixe_droits(racine, uid, gid, mode_dossier, mode_dossier)
+    for r, ds, fs in os.walk(tree_root):
+        for ident in ds + fs:
+            fpath = os.path.join(r, ident)
+            if not os.path.islink(fpath):
+                set_owner_mode(fpath, uid, gid, file_mode, dir_mode)
+    set_owner_mode(tree_root, uid, gid, dir_mode, dir_mode)
 
 
-def chown_arbre(racine, uid, gid):
+def chown_tree(tree_root, uid, gid):
     """chown recursif, racine comprise — sans suivre aucun lien (cf. lock_sources)."""
-    if os.path.islink(racine):
+    if os.path.islink(tree_root):
         return
-    for r, ds, fs in os.walk(racine):
-        for nom in ds + fs:
-            os.chown(os.path.join(r, nom), uid, gid, follow_symlinks=False)
-    os.chown(racine, uid, gid)
+    for r, ds, fs in os.walk(tree_root):
+        for ident in ds + fs:
+            os.chown(os.path.join(r, ident), uid, gid, follow_symlinks=False)
+    os.chown(tree_root, uid, gid)
 
 
-def chantier_etudiant(case_dir):
+def student_build_dir(case_dir):
     """Chantier de compilation ETUDIANT : ne contient que son code, et lui appartient."""
     d = os.path.join(case_dir, "etu_build")
     os.makedirs(os.path.join(d, "home"), exist_ok=True)
     os.makedirs(os.path.join(d, "tmp"), exist_ok=True)
-    chown_arbre(d, STUDENT_UID, STUDENT_GID)
+    chown_tree(d, STUDENT_UID, STUDENT_GID)
     os.chmod(d, 0o700)
     return d
 
 
-def ecrire_prive(chemin, texte):
+def write_private(fpath, src_text):
     """Fichier SECRET (noteur : harnais + nonce) en 0600 root DES SA CREATION.
 
     Ouvert puis ecrit en 0644 par defaut, il restait lisible de tous pendant toute la fenetre
     des compilations — le chmod d'apres-coup fermait la porte apres le passage."""
-    fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(texte)
+        f.write(src_text)
 
 
-def verrouille_src(case_dir):
+def lock_src_dir(case_dir):
     """Bloque la TRAVERSEE de src/ (harnais marque compris) avant toute compilation etudiante.
     root, lui, lit a travers ; le processus etudiant recoit EACCES."""
     src = os.path.join(case_dir, "src")
@@ -597,7 +597,7 @@ def open_output(path):
 
 
 def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
-               etat=None):
+               state=None):
     """Recopie un tube du processus exécuté vers son fichier de sortie, côté ROOT.
 
     MIROIR de read_capped : au-delà du plafond, on garde la TÊTE puis la QUEUE. Tous les
@@ -613,13 +613,13 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
     tail = collections.deque(maxlen=tail_bytes)
     dropped = 0
     writable = True
-    tete_ouverte = True
+    head_open = True
     try:
         while True:
             chunk = src.read(65536)
             if not chunk:
                 break
-            if writable and tete_ouverte:
+            if writable and head_open:
                 part = chunk[: cap - written]
                 if len(part) < len(chunk):
                     # Le plafond tombe DANS ce bloc : la tête se ferme DÉFINITIVEMENT, coupée
@@ -631,17 +631,17 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
                     # devenait discontinue — et le DERNIER bloc, celui qui porte la ligne du
                     # jeton, pouvait s'y retrouver AVANT le marqueur, hors de la fenêtre que
                     # read_capped relit. Même fausse accusation, par un autre chemin.
-                    tete_ouverte = False
-                    coupe = part.rfind(b"\n")
-                    part = part[: coupe + 1] if coupe >= 0 else b""
+                    head_open = False
+                    cut_at = part.rfind(b"\n")
+                    part = part[: cut_at + 1] if cut_at >= 0 else b""
                 try:
                     dst.write(part)
                     written += len(part)
                 except (OSError, ValueError):
                     writable = False      # tmpfs saturé / fichier refermé : on continue à LIRE
                     part = b""
-                    if etat is not None:
-                        etat.perdue = True
+                    if state is not None:
+                        state.lost = True
                 chunk = chunk[len(part):]
             if chunk:
                 dropped += len(chunk)
@@ -651,14 +651,14 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
             dropped -= len(kept)
             # MÊME libellé que read_capped, au mot près : libtest_selection s'en sert pour
             # détecter une sortie tronquée et renoncer alors au filtre.
-            marqueur = ("\n… (sortie tronquée au milieu : %d octets)\n"
+            marker = ("\n… (sortie tronquée au milieu : %d octets)\n"
                         % (written + dropped + len(kept))).encode("utf-8")
             try:
-                dst.write(marqueur)
+                dst.write(marker)
                 dst.write(kept)
             except (OSError, ValueError):
-                if etat is not None:
-                    etat.perdue = True
+                if state is not None:
+                    state.lost = True
     except (OSError, ValueError):
         pass          # tube rompu : le processus est mort, rien de plus à lire
 
@@ -699,7 +699,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
     # valeur de retour, devenait « Erreur interne du noteur », et sur un CANARI une accusation
     # de falsification pour une simple saturation. On ferme donc soi-même, en avalant l'erreur.
     out = err = None
-    etat = ETAT_SORTIE          # état DU CAS en cours, capturé une fois pour toutes
+    state = EXIT_STATE          # état DU CAS en cours, capturé une fois pour toutes
     try:
         out, err = open_output(out_path), open_output(err_path)
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
@@ -711,16 +711,16 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
             stdin.close()
         pumps = [threading.Thread(target=drain_pipe,
                                   args=(proc.stdout, out, OUTPUT_FILE_CAP,
-                                        PUMP_TAIL_BYTES, etat), daemon=True),
+                                        PUMP_TAIL_BYTES, state), daemon=True),
                  threading.Thread(target=drain_pipe,
                                   args=(proc.stderr, err, OUTPUT_FILE_CAP,
-                                        PUMP_TAIL_BYTES, etat), daemon=True)]
+                                        PUMP_TAIL_BYTES, state), daemon=True)]
         for pump in pumps:
             pump.start()
         try:
             code, timed_out = proc.wait(timeout=timeout_s), False
             if code is not None and code < 0:
-                etat.tue_par_signal = True      # subprocess rend -N pour un signal
+                state.killed_by_signal = True      # subprocess rend -N pour un signal
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -730,7 +730,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
                 proc.kill()
             proc.wait()
             code, timed_out = None, True
-            etat.expire = True
+            state.expired = True
         # Le processus noté est mort, mais ses DESCENDANTS peuvent encore tenir ses tubes
         # ouverts, et drain_pipe reste alors bloqué dans read() jusqu'à l'EOF. On BALAYE
         # D'ABORD, puisque c'est précisément ce qui libère le tube : attendre avant de balayer
@@ -748,19 +748,19 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
         except OSError:
             pass
         kill_student_survivors()
-        purge_partages()
-        echeance = time.monotonic() + PUMP_SWEEP_JOIN_S
+        purge_shared_dirs()
+        due = time.monotonic() + PUMP_SWEEP_JOIN_S
         for pump in pumps:
-            pump.join(timeout=max(0, echeance - time.monotonic()))
+            pump.join(timeout=max(0, due - time.monotonic()))
         if any(pump.is_alive() for pump in pumps):
             # Dernier recours : un survivant que ni le groupe ni l'UID étudiant n'ont attrapé.
             # Échéance BORNÉE — un fil encore vivant au fork du Popen suivant est un risque
             # (preexec_fn n'est pas sûr depuis un processus multithreadé), mais pendre ici
             # ferait tuer le conteneur au mur et perdrait TOUTE la notation.
-            echeance = time.monotonic() + PUMP_JOIN_S
+            due = time.monotonic() + PUMP_JOIN_S
             for pump in pumps:
-                pump.join(timeout=max(0, echeance - time.monotonic()))
-        for pump, flux in zip(pumps, (proc.stdout, proc.stderr)):
+                pump.join(timeout=max(0, due - time.monotonic()))
+        for pump, stream in zip(pumps, (proc.stdout, proc.stderr)):
             # Fermer un tube dont la pompe est ENCORE VIVANTE bloquerait : elle attend dans
             # read() en tenant le verrou du tampon, et close() doit l'acquérir — sans borne, ce
             # qui annulerait le join borné ci-dessus et ferait tuer le conteneur au mur (toute
@@ -768,7 +768,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
             # disparaît avec lui.
             if not pump.is_alive():
                 try:
-                    flux.close()
+                    stream.close()
                 except (OSError, ValueError):
                     pass
         return code, timed_out
@@ -777,8 +777,8 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
         # O_CREAT), et Popen peut lever (fork ENOMEM). Laisser remonter aurait rendu le cas
         # « Erreur interne du noteur » — accusation sur une saturation. On dégrade : pas de
         # sortie, donc pas de verdict « réussi » possible, mais rien d'imputable.
-        etat.perdue = True
-        event("espace_sature", case=etat.case,
+        state.lost = True
+        event("espace_sature", case=state.case,
               detail="ouverture des sorties impossible : %r" % e)
         return None, False
     finally:
@@ -789,17 +789,17 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
                 os.close(token_fd)
             except OSError:
                 pass
-        sature = False
-        for flux in (out, err):
-            if flux is None:
+        saturated = False
+        for stream in (out, err):
+            if stream is None:
                 continue
             try:
-                flux.close()
+                stream.close()
             except OSError:
-                sature = True      # une saturation est UNE condition, pas une par flux
-        if sature:
-            etat.perdue = True
-            event("espace_sature", case=etat.case,
+                saturated = True      # une saturation est UNE condition, pas une par flux
+        if saturated:
+            state.lost = True
+            event("espace_sature", case=state.case,
                   detail="écriture des sorties impossible")
 
 
@@ -872,7 +872,7 @@ class CaseOutcome:
         self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
 
 
-def cause_exception(e):
+def exception_cause(e):
     """Cause d'une exception attrapee pendant un cas : "environnement" ou "erreur". PURE (testee).
 
     Une OSError vient de l'ENVIRONNEMENT — disque plein, lien pose dans /box, table des processus
@@ -882,15 +882,15 @@ def cause_exception(e):
     return "environnement" if isinstance(e, OSError) else "erreur"
 
 
-def job_incomplet(canaries, reels):
+def job_incomplete(canaries, real_cases):
     """Le JOB est-il « incomplet » (502 sur le chemin interne) ? PURE (testee).
 
     Un verdict de FALSIFICATION l'emporte toujours : des canaris incoherents ne deviennent jamais
     une tentative a reprendre, meme si un cas a aussi subi une erreur interne."""
-    return canaries != "incoherents" and notation_incomplete(reels)
+    return canaries != "incoherents" and grading_incomplete(real_cases)
 
 
-def noteur_tue(code, passed):
+def grader_killed(code, passed):
     """Le NOTEUR est-il mort par signal (OOM...) sans verdict ? PURE (testee).
 
     Cause NON CONCLUANTE : un canari « pass » tue par manque de memoire passait sinon pour un
@@ -899,7 +899,7 @@ def noteur_tue(code, passed):
     return code is not None and code < 0 and not passed
 
 
-def notation_incomplete(reels):
+def grading_incomplete(real_cases):
     """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
 
     Vrai SEULEMENT si un cas a subi une erreur interne du superviseur : notre code a leve, ce
@@ -912,7 +912,7 @@ def notation_incomplete(reels):
     beaucoup de cas, l'epuise donc de facon REPRODUCTIBLE — en faire un 502 rendait la question
     impossible a noter et bloquait une place a chaque renvoi. Un disque sature (cause « espace »)
     reste imputable aussi : c'est le code soumis qui ecrit."""
-    return any(o.cause == "erreur" for o in reels)
+    return any(o.cause == "erreur" for o in real_cases)
 
 
 def inconclusive(outcome):
@@ -941,11 +941,11 @@ def redact_tokens(detail):
     faire dans un message, et les détails pourraient un jour être montrés à l'étudiant."""
     if not detail:
         return detail
-    nettoye = detail
+    cleaned = detail
     for token in TOKENS.values():
         if token:
-            nettoye = nettoye.replace(token, "…")
-    return nettoye
+            cleaned = cleaned.replace(token, "…")
+    return cleaned
 
 
 def prep_run(case_dir, src):
@@ -984,17 +984,17 @@ def harness_rpc_body(case_dir):
     src = os.path.join(case_dir, "src")
     if not os.path.isdir(src):
         return None
-    for nom in sorted(os.listdir(src)):
-        chemin = os.path.join(src, nom)
-        if not os.path.isfile(chemin):
+    for ident in sorted(os.listdir(src)):
+        fpath = os.path.join(src, ident)
+        if not os.path.isfile(fpath):
             continue
         try:
-            with open(chemin, "r", encoding="utf-8", errors="replace") as f:
-                contenu = f.read()
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                body_text = f.read()
         except OSError:
             continue
-        if "__MOODIT_HARNAIS__" in contenu:
-            return contenu.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
+        if "__MOODIT_HARNAIS__" in body_text:
+            return body_text.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
     return None
 
 
@@ -1099,56 +1099,56 @@ def java_class_api(javap_output):
 
     `nom source` : les classes imbriquées sont compilées en `Outer$Inner` ; le harnais les écrit
     `Outer.Inner`, et c'est cette forme qu'on rend."""
-    classe = JAVAP_CLASS.search(javap_output or "")
-    if not classe:
+    klass = JAVAP_CLASS.search(javap_output or "")
+    if not klass:
         return None, [], []
-    binaire = classe.group(1)
-    simple = binaire.split("$")[-1]
+    binary_name = klass.group(1)
+    simple = binary_name.split("$")[-1]
     ctors = []
-    for nom, args in JAVAP_CTOR.findall(javap_output):
-        if nom.split("$")[-1] != simple and nom != binaire:
+    for ident, args in JAVAP_CTOR.findall(javap_output):
+        if ident.split("$")[-1] != simple and ident != binary_name:
             continue
         types = [a.strip() for a in args.split(",") if a.strip()]
         if all(t in JSON_TYPES for t in types):
             ctors.append(types)
-    methodes = []
-    for retour, nom, args in JAVAP_METHOD.findall(javap_output):
-        if nom == "main" or retour not in JSON_TYPES:
+    method_list = []
+    for ret, ident, args in JAVAP_METHOD.findall(javap_output):
+        if ident == "main" or ret not in JSON_TYPES:
             continue
         types = [a.strip() for a in args.split(",") if a.strip()]
         if all(t in JSON_TYPES for t in types):
-            methodes.append((retour, nom, types))
+            method_list.append((ret, ident, types))
     # Les méthodes STATIQUES sont déjà proxifiées par java_signatures : on ne garde ici que
     # l'instance, pour ne pas générer deux fois le même bouchon.
-    statiques = {(r, n, tuple(t)) for r, n, t in java_signatures(javap_output)}
-    methodes = [m for m in methodes if (m[0], m[1], tuple(m[2])) not in statiques]
-    return binaire.replace("$", "."), ctors, methodes
+    statics = {(r, n, tuple(t)) for r, n, t in java_signatures(javap_output)}
+    method_list = [m for m in method_list if (m[0], m[1], tuple(m[2])) not in statics]
+    return binary_name.replace("$", "."), ctors, method_list
 
 
-def java_object_stub(nom_source, ctors, methodes):
+def java_object_stub(source_name, ctors, method_list):
     """Bouchon d'une classe OBJET : constructeur → poignée, méthodes → appel sur la poignée.
 
     FONCTION PURE (testée). Une classe imbriquée (`Outer.Inner`) est rendue dans sa coquille, pour
     que le harnais puisse l'écrire exactement comme l'étudiant l'a déclarée."""
-    simple = nom_source.split(".")[-1]
-    corps = ["    public static final class " + simple + " {",
+    simple = source_name.split(".")[-1]
+    body = ["    public static final class " + simple + " {",
              "        private final int __h;"]
     for types in ctors or [[]]:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        corps += ["        public %s(%s) {" % (simple, params),
+        body += ["        public %s(%s) {" % (simple, params),
                   "            this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
-                  % (nom_source, args),
+                  % (source_name, args),
                   "        }"]
-    for retour, nom, types in methodes:
+    for ret, ident, types in method_list:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        corps += ["        public %s %s(%s) {" % (retour, nom, params),
+        body += ["        public %s %s(%s) {" % (ret, ident, params),
                   "            return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
-                  % ("m" + JSON_TYPES[retour].lower(), nom, args),
+                  % ("m" + JSON_TYPES[ret].lower(), ident, args),
                   "        }"]
-    corps.append("    }")
-    return "\n".join(corps)
+    body.append("    }")
+    return "\n".join(body)
 
 
 def java_signatures(javap_output):
@@ -1156,31 +1156,31 @@ def java_signatures(javap_output):
 
     FONCTION PURE (testée). `main` est écartée (point d'entrée, pas une API notée), ainsi que
     toute signature dont un type n'est pas marshalable."""
-    trouvees = []
-    for retour, nom, args in JAVAP_SIGNATURE.findall(javap_output or ""):
-        if nom == "main":
+    hits = []
+    for ret, ident, args in JAVAP_SIGNATURE.findall(javap_output or ""):
+        if ident == "main":
             continue
         types = [a.strip() for a in args.split(",") if a.strip()]
-        if retour not in JSON_TYPES or any(t not in JSON_TYPES for t in types):
+        if ret not in JSON_TYPES or any(t not in JSON_TYPES for t in types):
             continue
-        trouvees.append((retour, nom, types))
-    return sans_doublon(trouvees)
+        hits.append((ret, ident, types))
+    return dedupe_signatures(hits)
 
 
-def sans_doublon(signatures):
+def dedupe_signatures(signatures):
     """Une signature (nom, types) une seule fois, la PREMIERE vue. PURE (testee).
 
     Java et C# aplatissent dans UNE classe de bouchons les statiques de toutes les classes du
     code soumis : `Solution.calcul(int)` et une classe d'aide `Aide.calcul(int)` donnaient deux
     bouchons identiques, que le compilateur refusait — une reponse juste notee 0, avec un
     message qui accusait le harnais du prof."""
-    vues, resultat = set(), []
-    for retour, nom, types in signatures:
-        cle = (nom, tuple(types))
-        if cle not in vues:
-            vues.add(cle)
-            resultat.append((retour, nom, types))
-    return resultat
+    seen, result = set(), []
+    for ret, ident, types in signatures:
+        dedup_key = (ident, tuple(types))
+        if dedup_key not in seen:
+            seen.add(dedup_key)
+            result.append((ret, ident, types))
+    return result
 
 
 def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instance=()):
@@ -1190,48 +1190,48 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
     ligne de code étudiant n'entre dans ce programme. `objects` apporte les classes IMBRIQUÉES
     proxifiées par poignée, pour que `new Solution.Rectangle(3, 4).aire()` s'écrive naturellement
     alors que l'objet vit, lui, dans le processus de l'étudiant."""
-    lignes = ["public final class " + class_name + " {"]
+    src_lines = ["public final class " + class_name + " {"]
     if self_ctors and self_instance:
         # La classe de premier niveau EST l'objet : c'est le cas d'une question POO dont la
         # classe publique est `Rectangle`, et le harnais écrit `new Rectangle(3, 4).aire()`.
-        lignes.append("    private final int __h;")
+        src_lines.append("    private final int __h;")
         for types in self_ctors or [[]]:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            lignes += ["    public %s(%s) {" % (class_name, params),
+            src_lines += ["    public %s(%s) {" % (class_name, params),
                        "        this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
                        % (class_name, args),
                        "    }"]
-        for retour, nom, types in self_instance:
+        for ret, ident, types in self_instance:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            lignes += ["    public %s %s(%s) {" % (retour, nom, params),
+            src_lines += ["    public %s %s(%s) {" % (ret, ident, params),
                        "        return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
-                       % ("m" + JSON_TYPES[retour].lower(), nom, args),
+                       % ("m" + JSON_TYPES[ret].lower(), ident, args),
                        "    }"]
     else:
-        lignes.append("    private " + class_name + "() {}")
-    premier_niveau = []
-    for nom_source, ctors, instance in objects:
-        if "." in nom_source:
+        src_lines.append("    private " + class_name + "() {}")
+    top_level = []
+    for source_name, ctors, instance in objects:
+        if "." in source_name:
             # Classe IMBRIQUEE (Solution.Rectangle) : dans sa coquille, comme l'etudiant l'a ecrite.
-            lignes.append(java_object_stub(nom_source, ctors, instance))
+            src_lines.append(java_object_stub(source_name, ctors, instance))
         else:
-            premier_niveau.append(java_object_stub(nom_source, ctors, instance))
-    for retour, nom, types in methods:
+            top_level.append(java_object_stub(source_name, ctors, instance))
+    for ret, ident, types in methods:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        lignes += ["    public static %s %s(%s) {" % (retour, nom, params),
+        src_lines += ["    public static %s %s(%s) {" % (ret, ident, params),
                    "        return MooditRpc.%s(\"%s\", new Object[]{%s});"
-                   % (JAVA_RPC_FN[JSON_TYPES[retour]], nom, args),
+                   % (JAVA_RPC_FN[JSON_TYPES[ret]], ident, args),
                    "    }"]
-    lignes.append("}")
+    src_lines.append("}")
     # Classe de PREMIER NIVEAU (`class Rectangle` a cote de Solution) : hors de la coquille, en
     # classe non publique du meme fichier. Rangee dans Solution, elle devenait Solution.Rectangle
     # et le harnais `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question.
-    for bouchon in premier_niveau:
-        lignes.append(bouchon.replace("    public static final class ", "final class ", 1))
-    return "\n".join(lignes) + "\n"
+    for stub_src in top_level:
+        src_lines.append(stub_src.replace("    public static final class ", "final class ", 1))
+    return "\n".join(src_lines) + "\n"
 
 
 def java_grader_source(harness_code, nonce):
@@ -1415,9 +1415,9 @@ __CORPS__
 """.replace("__CORPS__", indent_java(harness_code)).replace("__NONCE__", nonce)
 
 
-def indent_java(corps):
+def indent_java(body):
     """Corps du harnais indenté dans la méthode. FONCTION PURE (testée)."""
-    return "\n".join("        " + l if l.strip() else l for l in (corps or "").splitlines())
+    return "\n".join("        " + l if l.strip() else l for l in (body or "").splitlines())
 
 
 def java_server_source(class_names):
@@ -1605,31 +1605,31 @@ def go_signatures(source):
     `func f(a, b int) int`. `main` est écartée, ainsi que toute signature dont un type n'est pas
     marshalable : le harnais qui l'appellerait ne compilerait pas — message au prof, jamais un
     faux verdict."""
-    trouvees = []
-    for nom, params, retour in GO_FUNC.findall(source or ""):
-        if nom == "main" or (retour or "") not in GO_TYPES:
+    hits = []
+    for ident, params, ret in GO_FUNC.findall(source or ""):
+        if ident == "main" or (ret or "") not in GO_TYPES:
             continue
         types = []
-        valide = True
-        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-            morceaux = groupe.split()
-            if len(morceaux) == 2:
-                types.append(morceaux[1])
-            elif len(morceaux) == 1:
+        valid = True
+        for param_group in [p.strip() for p in params.split(",") if p.strip()]:
+            pieces = param_group.split()
+            if len(pieces) == 2:
+                types.append(pieces[1])
+            elif len(pieces) == 1:
                 types.append(None)          # type porté par le groupe suivant (a, b int)
             else:
-                valide = False
+                valid = False
         # Propagation à rebours des types groupés : (a, b int) → [int, int]
-        dernier = None
+        last_item = None
         for i in range(len(types) - 1, -1, -1):
             if types[i] is None:
-                types[i] = dernier
+                types[i] = last_item
             else:
-                dernier = types[i]
-        if not valide or any(t not in GO_TYPES for t in types):
+                last_item = types[i]
+        if not valid or any(t not in GO_TYPES for t in types):
             continue
-        trouvees.append((retour, nom, types))
-    return trouvees
+        hits.append((ret, ident, types))
+    return hits
 
 
 GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
@@ -1645,48 +1645,48 @@ def go_object_api(source):
     littéral à champs nommés (`Rectangle{largeur: 3, hauteur: 4}`), pris en charge par capture de
     champs (cf. go_object_stub). Un type sans méthode marshalable n'est pas proxifié : le harnais
     qui l'appelle ne compilera pas — message au prof, jamais un faux verdict."""
-    champs = go_capture_fields(source)
+    field_list = go_capture_fields(source)
     structs = set(GO_STRUCT.findall(source or ""))
     if not structs:
         return []
-    par_type = {s: ([], []) for s in structs}
-    for nom, params, retour in GO_FUNC.findall(source or ""):
+    by_type = {s: ([], []) for s in structs}
+    for ident, params, ret in GO_FUNC.findall(source or ""):
         # `func NewRectangle(…) *Rectangle` est la forme la plus répandue : sans retirer l'étoile,
         # ce constructeur n'était pas reconnu et la question n'était pas proxifiée.
-        if (retour or "").lstrip("*") not in structs or nom == "main":
+        if (ret or "").lstrip("*") not in structs or ident == "main":
             continue
         types = _go_param_types(params)
         if types is not None:
-            cible = (retour or "").lstrip("*")
-            par_type[cible][0].append((nom, types, (retour or "").startswith("*")))
-    for _, recepteur, nom, params, retour in GO_METHOD.findall(source or ""):
-        if recepteur not in structs:
+            target_file = (ret or "").lstrip("*")
+            by_type[target_file][0].append((ident, types, (ret or "").startswith("*")))
+    for _, receiver, ident, params, ret in GO_METHOD.findall(source or ""):
+        if receiver not in structs:
             continue
-        if (retour or "") not in GO_TYPES:
+        if (ret or "") not in GO_TYPES:
             continue
         types = _go_param_types(params)
         if types is not None:
-            par_type[recepteur][1].append((retour, nom, types))
-    return [(t, c, m) for t, (c, m) in sorted(par_type.items()) if m and (c or t in champs)]
+            by_type[receiver][1].append((ret, ident, types))
+    return [(t, c, m) for t, (c, m) in sorted(by_type.items()) if m and (c or t in field_list)]
 
 
 def _go_param_types(params):
     """Types des paramètres d'une signature Go, ou None si l'un n'est pas marshalable. PURE."""
     types = []
-    for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-        morceaux = groupe.split()
-        if len(morceaux) == 2:
-            types.append(morceaux[1])
-        elif len(morceaux) == 1:
+    for param_group in [p.strip() for p in params.split(",") if p.strip()]:
+        pieces = param_group.split()
+        if len(pieces) == 2:
+            types.append(pieces[1])
+        elif len(pieces) == 1:
             types.append(None)
         else:
             return None
-    dernier = None
+    last_item = None
     for i in range(len(types) - 1, -1, -1):
         if types[i] is None:
-            types[i] = dernier
+            types[i] = last_item
         else:
-            dernier = types[i]
+            last_item = types[i]
     return types if all(t in GO_TYPES for t in types) else None
 
 
@@ -1721,29 +1721,29 @@ def go_struct_fields(source):
     Sert à proxifier l'IDIOME Go : `Rectangle{largeur: 3, hauteur: 4}`. Il n'y a pas de
     constructeur dans ce langage, donc exiger une fonction-constructeur écarterait la façon
     normale d'écrire — et c'est celle que les profs emploient."""
-    champs = {}
-    for typ, corps in GO_STRUCT_BODY.findall(source or ""):
-        liste = []
-        for ligne in corps.splitlines():
-            nue = ligne.split("//")[0].strip()
-            if not nue:
+    field_list = {}
+    for typ, body in GO_STRUCT_BODY.findall(source or ""):
+        entries = []
+        for src_line in body.splitlines():
+            bare_line = src_line.split("//")[0].strip()
+            if not bare_line:
                 continue
-            morceaux = nue.replace(",", " ").split()
-            if len(morceaux) < 2 or morceaux[-1] not in GO_TYPES:
-                liste = None
+            pieces = bare_line.replace(",", " ").split()
+            if len(pieces) < 2 or pieces[-1] not in GO_TYPES:
+                entries = None
                 break
-            for nom in morceaux[:-1]:
+            for ident in pieces[:-1]:
                 # Seul chemin ou du texte etudiant LIBRE entrait dans la source du NOTEUR :
                 # contraint a un identifiant strict, tout le reste ecarte la structure.
-                if not re.fullmatch(r"[A-Za-z_]\w*", nom):
-                    liste = None
+                if not re.fullmatch(r"[A-Za-z_]\w*", ident):
+                    entries = None
                     break
-                liste.append((nom, morceaux[-1]))
-            if liste is None:
+                entries.append((ident, pieces[-1]))
+            if entries is None:
                 break
-        if liste:
-            champs[typ] = liste
-    return champs
+        if entries:
+            field_list[typ] = entries
+    return field_list
 
 
 def go_pointer_receivers(source):
@@ -1752,7 +1752,7 @@ def go_pointer_receivers(source):
     Une telle méthode peut modifier l'objet. La capture de champs reconstruisant l'objet à chaque
     appel, la modification serait perdue EN SILENCE (verdict faux sans diagnostic) : ces types
     passent donc par la poignée d'un constructeur, ou ne sont pas proxifiés du tout."""
-    return {recepteur for etoile, recepteur, _, _, _ in GO_METHOD.findall(source or "") if etoile}
+    return {receiver for star, receiver, _, _, _ in GO_METHOD.findall(source or "") if star}
 
 
 def go_capture_fields(source):
@@ -1764,7 +1764,7 @@ def go_capture_fields(source):
     return {t: f for t, f in go_struct_fields(source).items() if t not in mutants}
 
 
-def go_object_stub(objets, champs=None):
+def go_object_stub(obj_list, field_list=None):
     """Bouchons OBJET Go : littéral à champs capturés ou poignée, et méthodes relayées.
 
     FONCTION PURE (testée). Quand tous les champs sont marshalables, le bouchon les MIROITE :
@@ -1772,117 +1772,117 @@ def go_object_stub(objets, champs=None):
     moment de l'appel. Une fonction-constructeur reste proxifiée dans ce mode — elle s'exécute
     chez l'étudiant et le bouchon RELIT les champs du résultat, ce qui garde la valeur simple et
     autorise aussi bien `NewRectangle(3, 4)` que le littéral. Sinon : poignée du constructeur."""
-    champs = champs or {}
-    morceaux = []
-    for typ, ctors, methodes in objets:
-        if typ in champs:
-            morceaux.append("type %s struct {\n%s\n}"
-                            % (typ, "\n".join("    %s %s" % (n, t) for n, t in champs[typ])))
-            for nom, types, pointeur in ctors:
+    field_list = field_list or {}
+    pieces = []
+    for typ, ctors, method_list in obj_list:
+        if typ in field_list:
+            pieces.append("type %s struct {\n%s\n}"
+                            % (typ, "\n".join("    %s %s" % (n, t) for n, t in field_list[typ])))
+            for ident, types, pointer in ctors:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
-                lectures = ", ".join(
+                reads = ", ".join(
                     "%s: %s" % (n, GO_CONV[t] % ("mooditIndex(champs, %d)" % i))
-                    for i, (n, t) in enumerate(champs[typ]))
+                    for i, (n, t) in enumerate(field_list[typ]))
                 # Le constructeur garde SA signature ici aussi : la branche à poignée le faisait
                 # déjà, pas celle-ci, et un harnais qui rangeait le résultat dans un *T (ou le
                 # comparait à nil) ne compilait que d'un côté.
-                morceaux.append('''func %s(%s) %s%s {
+                pieces.append('''func %s(%s) %s%s {
     champs := mooditChamps("%s", []interface{}{%s})
     return %s%s{%s}
-}''' % (nom, params, "*" if pointeur else "", typ, nom, args,
-        "&" if pointeur else "", typ, lectures))
-            valeurs = ", ".join("o.%s" % n for n, _ in champs[typ])
-            for retour, nom, types in methodes:
+}''' % (ident, params, "*" if pointer else "", typ, ident, args,
+        "&" if pointer else "", typ, reads))
+            vals = ", ".join("o.%s" % n for n, _ in field_list[typ])
+            for ret, ident, types in method_list:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
-                conv = GO_CONV[retour] % (
+                conv = GO_CONV[ret] % (
                     'mooditMethode(int(mooditEntier(mooditNouvelle("%s", []interface{}{%s}))), '
-                    '"%s.%s", []interface{}{%s})' % (typ, valeurs, typ, nom, args))
-                morceaux.append('''func (o %s) %s(%s) %s {
+                    '"%s.%s", []interface{}{%s})' % (typ, vals, typ, ident, args))
+                pieces.append('''func (o %s) %s(%s) %s {
     return %s
-}''' % (typ, nom, params, retour, conv))
+}''' % (typ, ident, params, ret, conv))
             continue
-        morceaux.append("type %s struct {\n    __h int\n}" % typ)
-        for nom, types, pointeur in ctors:
+        pieces.append("type %s struct {\n    __h int\n}" % typ)
+        for ident, types, pointer in ctors:
             params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
             # Le constructeur garde SA signature : `*Rectangle` s'il rend un pointeur, pour que
             # le harnais du prof s'écrive exactement comme avec le code de l'étudiant.
-            morceaux.append('''func %s(%s) %s%s {
+            pieces.append('''func %s(%s) %s%s {
     return %s%s{__h: int(mooditEntier(mooditNouvelle("%s", []interface{}{%s})))}
-}''' % (nom, params, "*" if pointeur else "", typ,
-        "&" if pointeur else "", typ, nom, args))
-        for retour, nom, types in methodes:
+}''' % (ident, params, "*" if pointer else "", typ,
+        "&" if pointer else "", typ, ident, args))
+        for ret, ident, types in method_list:
             params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            conv = GO_CONV[retour] % 'mooditMethode(o.__h, "%s.%s", []interface{}{%s})' % (typ, nom, args)
-            morceaux.append('''func (o %s) %s(%s) %s {
+            conv = GO_CONV[ret] % 'mooditMethode(o.__h, "%s.%s", []interface{}{%s})' % (typ, ident, args)
+            pieces.append('''func (o %s) %s(%s) %s {
     return %s
-}''' % (typ, nom, params, retour, conv))
-    return "\n\n".join(morceaux)
+}''' % (typ, ident, params, ret, conv))
+    return "\n\n".join(pieces)
 
 
-def go_object_dispatch(objets, champs=None):
+def go_object_dispatch(obj_list, field_list=None):
     """Aiguillage OBJET côté étudiant : construit et appelle POUR DE VRAI. PURE (testée).
 
     Un type à champs capturés se construit par son littéral, exactement comme le ferait
     l'étudiant ; la clé `new` porte alors le NOM DU TYPE, et non celui d'un constructeur."""
-    champs = champs or {}
-    cas_new, cas_methode = [], []
-    for typ, ctors, methodes in objets:
-        if typ in champs:
-            affectations = ", ".join(
+    field_list = field_list or {}
+    new_branch, method_branch = [], []
+    for typ, ctors, method_list in obj_list:
+        if typ in field_list:
+            assignments = ", ".join(
                 "%s: %s" % (n, GO_CONV[t] % ("req.Args[%d]" % i))
-                for i, (n, t) in enumerate(champs[typ]))
-            cas_new.append('        case "%s":\n'
+                for i, (n, t) in enumerate(field_list[typ]))
+            new_branch.append('        case "%s":\n'
                            '            mooditObjets = append(mooditObjets, &%s{%s})\n'
                            '            valeur = len(mooditObjets) - 1'
-                           % (typ, typ, affectations))
+                           % (typ, typ, assignments))
             # Une fonction-constructeur renvoie les CHAMPS du résultat, pas une poignée : le
             # bouchon reconstruit alors une valeur simple, utilisable comme un littéral.
-            for nom, types, _ in ctors:
+            for ident, types, _ in ctors:
                 args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
-                champs_retour = ", ".join("moodit_cree.%s" % n for n, _ in champs[typ])
-                cas_new.append('        case "%s":\n'
+                return_fields = ", ".join("moodit_cree.%s" % n for n, _ in field_list[typ])
+                new_branch.append('        case "%s":\n'
                                '            moodit_cree := %s(%s)\n'
                                '            valeur = []interface{}{%s}'
-                               % (nom, nom, args, champs_retour))
+                               % (ident, ident, args, return_fields))
         else:
             # On garde un POINTEUR vers l'objet : une méthode à récepteur pointeur — l'idiome le
             # plus répandu — ne peut pas être appelée sur le résultat d'une assertion de type,
             # qui n'est pas adressable. Le programme de l'étudiant ne compilait pas, et il lisait
             # « Échec de compilation » pour du code qu'il n'avait pas écrit.
-            for nom, types, pointeur in ctors:
+            for ident, types, pointer in ctors:
                 args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
-                cas_new.append('        case "%s":\n'
+                new_branch.append('        case "%s":\n'
                                '            moodit_cree := %s(%s)\n'
                                '            mooditObjets = append(mooditObjets, %smoodit_cree)\n'
                                '            valeur = len(mooditObjets) - 1'
-                               % (nom, nom, args, "" if pointeur else "&"))
-        for retour, nom, types in methodes:
+                               % (ident, ident, args, "" if pointer else "&"))
+        for ret, ident, types in method_list:
             args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
             # `(*T)` : un récepteur valeur s'appelle aussi sur un pointeur (déréférencement
             # automatique), donc une seule forme suffit pour les deux.
-            cas_methode.append('        case "%s.%s":\n'
+            method_branch.append('        case "%s.%s":\n'
                                '            valeur = mooditObjets[req.Handle].(*%s).%s(%s)'
-                               % (typ, nom, typ, nom, args))
-    return "\n".join(cas_new), "\n".join(cas_methode)
+                               % (typ, ident, typ, ident, args))
+    return "\n".join(new_branch), "\n".join(method_branch)
 
 
-def go_grader_source(methods, harness_code, nonce, objets=(), champs=None):
+def go_grader_source(methods, harness_code, nonce, obj_list=(), field_list=None):
     """Programme NOTEUR Go : bouchons typés + harnais booléen du prof + nonce. PURE (testée)."""
-    bouchons = []
-    for retour, nom, types in methods:
+    stubs = []
+    for ret, ident, types in methods:
         params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
         # MÊME table que l'aiguillage et que les bouchons objets : trois copies divergentes ont
         # déjà produit trois défauts (deux contournements de l'encodage, une lecture en flottant).
-        conv = GO_CONV[retour] % "v"
-        bouchons.append("""func %s(%s) %s {
+        conv = GO_CONV[ret] % "v"
+        stubs.append("""func %s(%s) %s {
     v := mooditAppel("%s", []interface{}{%s})
     return %s
-}""" % (nom, params, retour, nom, args, conv))
+}""" % (ident, params, ret, ident, args, conv))
     return '''package main
 
 import (
@@ -2032,24 +2032,24 @@ func main() {
     }
     os.Exit(1)
 }
-''' % (GO_RPC_RUNTIME, "\n\n".join(bouchons), go_object_stub(objets, champs),
+''' % (GO_RPC_RUNTIME, "\n\n".join(stubs), go_object_stub(obj_list, field_list),
        "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
        nonce)
 
 
-def go_server_source(methods, objets=(), champs=None):
+def go_server_source(methods, obj_list=(), field_list=None):
     """Serveur de l'étudiant : aiguillage TYPÉ vers ses fonctions et ses objets. PURE (testée).
 
     Aucun nonce, aucun harnais, aucun attendu : ce programme ne peut rien apprendre du verdict."""
-    cas_new, cas_methode = go_object_dispatch(objets, champs)
-    cas = []
-    for retour, nom, types in methods:
+    new_branch, method_branch = go_object_dispatch(obj_list, field_list)
+    branches = []
+    for ret, ident, types in methods:
         # UNE seule table de conversion, partagée avec l'aiguillage des objets et les bouchons du
         # noteur : cette boucle-ci avait la sienne, et elle est restée sur `mooditNombre` quand
         # les entiers sont passés à la lecture exacte — une somme au-delà de 2^53 revenait fausse
         # sur le chemin le plus courant, celui de l'appel de fonction.
         args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
-        cas.append('        case "%s":\n            valeur = %s(%s)' % (nom, nom, args))
+        branches.append('        case "%s":\n            valeur = %s(%s)' % (ident, ident, args))
     return '''package main
 
 import (
@@ -2145,8 +2145,8 @@ func mooditServe() {
 func main() {
     mooditServe()
 }
-''' % (GO_RPC_RUNTIME, cas_new or "        case \"\":", cas_methode or "        case \"\":",
-       "\n".join(cas))
+''' % (GO_RPC_RUNTIME, new_branch or "        case \"\":", method_branch or "        case \"\":",
+       "\n".join(branches))
 
 
 GO_MAIN_DECL = re.compile(r"^func\s+main\s*\(\s*\)\s*\{", re.M)
@@ -2177,7 +2177,7 @@ C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+)*"
 # 17 chiffres suffisent à garantir l'aller-retour exact d'un double IEEE 754.
 C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
 # Lecture d'un champ texte, UNE seule fois pour les cinq sites qui en avaient une copie.
-C_LECTURE = {"int": "atoi", "long": "atol", "double": "atof"}
+C_READ = {"int": "atoi", "long": "atol", "double": "atof"}
 
 
 # Un littéral de caractère, et RIEN d'autre : 'x', '\n', '\u{1F600}'. Tout le reste —
@@ -2203,97 +2203,97 @@ def code_depths(source):
     Règles couvertes : `//` jusqu'à la fin de ligne, `/* */` (imbriqués, comme en Rust), chaînes
     `"…"` et littéraux de caractère `'…'` avec échappements, chaînes brutes `r"…"` et `r#"…"#`
     (Rust) ou `R"(…)"` (C++)."""
-    texte = source or ""
-    profondeurs = [0] * len(texte)
-    niveau = 0
+    src_text = source or ""
+    depths = [0] * len(src_text)
+    level = 0
     i = 0
-    n = len(texte)
-    bloc = 0            # profondeur des /* */
+    n = len(src_text)
+    block = 0            # profondeur des /* */
     while i < n:
-        c = texte[i]
-        if bloc:
-            if texte.startswith("/*", i):
-                bloc += 1
-                profondeurs[i] = niveau
-                profondeurs[i + 1] = niveau
+        c = src_text[i]
+        if block:
+            if src_text.startswith("/*", i):
+                block += 1
+                depths[i] = level
+                depths[i + 1] = level
                 i += 2
                 continue
-            if texte.startswith("*/", i):
-                bloc -= 1
-                profondeurs[i] = niveau
-                profondeurs[i + 1] = niveau
+            if src_text.startswith("*/", i):
+                block -= 1
+                depths[i] = level
+                depths[i + 1] = level
                 i += 2
                 continue
-            profondeurs[i] = niveau
+            depths[i] = level
             i += 1
             continue
-        if texte.startswith("//", i):
-            fin = texte.find("\n", i)
-            fin = n if fin < 0 else fin
-            for j in range(i, fin):
-                profondeurs[j] = niveau
-            i = fin
+        if src_text.startswith("//", i):
+            finish = src_text.find("\n", i)
+            finish = n if finish < 0 else finish
+            for j in range(i, finish):
+                depths[j] = level
+            i = finish
             continue
-        if texte.startswith("/*", i):
-            bloc = 1
-            profondeurs[i] = niveau
-            profondeurs[i + 1] = niveau
+        if src_text.startswith("/*", i):
+            block = 1
+            depths[i] = level
+            depths[i + 1] = level
             i += 2
             continue
-        brut = re.match(r'r(#*)"', texte[i:]) or re.match(r'R"\(', texte[i:])
-        if brut and (c in "rR"):
+        raw = re.match(r'r(#*)"', src_text[i:]) or re.match(r'R"\(', src_text[i:])
+        if raw and (c in "rR"):
             if c == "r":
-                dieses = brut.group(1)
-                ferme = '"' + dieses
-                debut = i + 1 + len(dieses) + 1
+                hashes = raw.group(1)
+                closed = '"' + hashes
+                begin = i + 1 + len(hashes) + 1
             else:
-                ferme = ')"'
-                debut = i + 3
-            fin = texte.find(ferme, debut)
-            fin = n if fin < 0 else fin + len(ferme)
-            for j in range(i, fin):
-                profondeurs[j] = niveau
-            i = fin
+                closed = ')"'
+                begin = i + 3
+            finish = src_text.find(closed, begin)
+            finish = n if finish < 0 else finish + len(closed)
+            for j in range(i, finish):
+                depths[j] = level
+            i = finish
             continue
-        if c == "'" and not CHAR_LITERAL.match(texte, i):
+        if c == "'" and not CHAR_LITERAL.match(src_text, i):
             # L'apostrophe n'ouvre PAS toujours un littéral de caractère : durée de vie Rust
             # (`&'static str`), étiquette de boucle (`'ext: loop`), séparateur de chiffres C++
             # (`1'000`). La prendre pour une ouverture faisait ignorer les accolades jusqu'à la
             # fin de la ligne, décalait le compteur pour tout le reste du fichier, et les
             # fonctions suivantes disparaissaient : un code CORRECT rendait « aucune fonction
             # exploitable ». On ne la traite comme un littéral que si elle en a la FORME.
-            profondeurs[i] = niveau
+            depths[i] = level
             i += 1
             continue
         if c in "\"'":
-            profondeurs[i] = niveau
+            depths[i] = level
             j = i + 1
             while j < n:
-                if texte[j] == "\\":
-                    profondeurs[j] = niveau
+                if src_text[j] == "\\":
+                    depths[j] = level
                     if j + 1 < n:
-                        profondeurs[j + 1] = niveau
+                        depths[j + 1] = level
                     j += 2
                     continue
-                profondeurs[j] = niveau
-                if texte[j] == c:
+                depths[j] = level
+                if src_text[j] == c:
                     j += 1
                     break
-                if texte[j] == "\n":
+                if src_text[j] == "\n":
                     break        # chaîne non fermée : on ne mange pas le reste du fichier
                 j += 1
             i = j
             continue
         if c == "}":
-            niveau -= 1
-        profondeurs[i] = niveau
+            level -= 1
+        depths[i] = level
         if c == "{":
-            niveau += 1
+            level += 1
         i += 1
-    return profondeurs
+    return depths
 
 
-def block_end(texte, debut):
+def block_end(src_text, begin):
     """Fin du bloc ouvert à `debut` (index de son `{`), par appariement LEXICAL. PURE (testée).
 
     Même balayage que `code_depths` — une accolade en littéral ou en commentaire ne compte pas —
@@ -2302,21 +2302,21 @@ def block_end(texte, debut):
     Les profondeurs sont calculées UNE fois par texte (_fermetures) : recalculées à chaque
     classe, 400 classes C++ prenaient 44 s par cas, hors de tout budget. Même résultat : la
     première accolade fermante après `debut` à la même profondeur, trouvée par dichotomie."""
-    profondeurs, par_niveau = _fermetures(texte)
-    liste = par_niveau.get(profondeurs[debut], [])
-    k = bisect.bisect_right(liste, debut)
-    return liste[k] if k < len(liste) else len(texte)
+    depths, by_level = _closings(src_text)
+    entries = by_level.get(depths[begin], [])
+    k = bisect.bisect_right(entries, begin)
+    return entries[k] if k < len(entries) else len(src_text)
 
 
 @functools.lru_cache(maxsize=8)
-def _fermetures(texte):
+def _closings(src_text):
     """Profondeurs du texte et, par profondeur, positions de ses `}` de CODE. Mémoïsé."""
-    profondeurs = code_depths(texte)
-    par_niveau = {}
-    for i, c in enumerate(texte):
+    depths = code_depths(src_text)
+    by_level = {}
+    for i, c in enumerate(src_text):
         if c == "}":
-            par_niveau.setdefault(profondeurs[i], []).append(i)
-    return profondeurs, par_niveau
+            by_level.setdefault(depths[i], []).append(i)
+    return depths, by_level
 
 
 def cpp_class_spans(source):
@@ -2324,15 +2324,15 @@ def cpp_class_spans(source):
 
     Sert à ne PAS prendre une méthode pour une fonction libre : `int aire() { … }` indenté dans
     une classe n'est pas appelable sans objet, et le bouchon généré ne compilait pas."""
-    texte = source or ""
-    plages = []
-    for classe in CPP_CLASS.finditer(texte):
+    src_text = source or ""
+    spans = []
+    for klass in CPP_CLASS.finditer(src_text):
         try:
-            debut = texte.index("{", classe.start())
+            begin = src_text.index("{", klass.start())
         except ValueError:
             continue
-        plages.append((debut, block_end(texte, debut)))
-    return plages
+        spans.append((begin, block_end(src_text, begin)))
+    return spans
 
 
 def c_signatures(source, cpp=False):
@@ -2342,21 +2342,21 @@ def c_signatures(source, cpp=False):
     tout ce qui vit dans un corps de classe (ce sont des méthodes, proxifiées par poignée). Une
     signature hors liste n'est pas proxifiée : le harnais qui l'appelle ne compilera pas (message
     au prof, jamais un faux verdict)."""
-    plages = cpp_class_spans(source) if cpp else []
-    trouvees = []
-    for trouve in C_FUNC.finditer(source or ""):
-        if any(debut <= trouve.start() <= fin for debut, fin in plages):
+    spans = cpp_class_spans(source) if cpp else []
+    hits = []
+    for hit in C_FUNC.finditer(source or ""):
+        if any(begin <= hit.start() <= finish for begin, finish in spans):
             continue
-        retour, nom, params = trouve.group(1), trouve.group(2), trouve.group(3)
-        retour = retour.replace(" ", "")
-        if nom == "main" or retour not in C_TYPES:
+        ret, ident, params = hit.group(1), hit.group(2), hit.group(3)
+        ret = ret.replace(" ", "")
+        if ident == "main" or ret not in C_TYPES:
             continue
         # Le MEME lecteur que le chemin objet C++ (_c_param_types) : deux copies divergeaient.
         types = _c_param_types(params)
         if types is None:
             continue
-        trouvees.append((retour, nom, types))
-    return trouvees
+        hits.append((ret, ident, types))
+    return hits
 
 
 CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
@@ -2368,58 +2368,58 @@ def cpp_object_api(source):
 
     Le corps de la classe est découpé par appariement d'accolades, et seules les déclarations de
     la section PUBLIQUE comptent (une `class` commence en privé, une `struct` en public)."""
-    texte = source or ""
-    resultat = []
-    plages = cpp_class_spans(texte)
-    for classe in CPP_CLASS.finditer(texte):
-        nom_classe = classe.group(1)
+    src_text = source or ""
+    result = []
+    spans = cpp_class_spans(src_text)
+    for klass in CPP_CLASS.finditer(src_text):
+        class_ident = klass.group(1)
         # Classe IMBRIQUEE : elle ne s'ecrit que `A::B`, et le serveur, qui la nomme `B`, ne
         # compilait plus. Elle n'est pas proxifiee (ni ses membres pris pour ceux de A).
-        if any(d < classe.start() < f for d, f in plages):
+        if any(d < klass.start() < f for d, f in spans):
             continue
         try:
-            debut = texte.index("{", classe.start())
+            begin = src_text.index("{", klass.start())
         except ValueError:
             continue
-        fin = block_end(texte, debut)
-        corps = texte[debut + 1:fin]
-        public = texte[classe.start():debut].lstrip().startswith("struct")
-        ctors, methodes = [], []
-        profondeurs = _fermetures(texte)[0]
-        niveau = profondeurs[debut] + 1
-        position = debut + 1
-        for ligne in corps.splitlines(True):
-            depart = position + len(ligne) - len(ligne.lstrip())
-            position += len(ligne)
+        finish = block_end(src_text, begin)
+        body = src_text[begin + 1:finish]
+        public = src_text[klass.start():begin].lstrip().startswith("struct")
+        ctors, method_list = [], []
+        depths = _closings(src_text)[0]
+        level = depths[begin] + 1
+        position = begin + 1
+        for src_line in body.splitlines(True):
+            line_begin = position + len(src_line) - len(src_line.lstrip())
+            position += len(src_line)
             # Une ligne d'une classe IMBRIQUEE n'est pas un membre de celle-ci : ses methodes
             # etaient attribuees a la classe englobante, et le serveur ne compilait plus.
-            if depart < len(texte) and profondeurs[depart] != niveau:
+            if line_begin < len(src_text) and depths[line_begin] != level:
                 continue
-            nue = ligne.strip()
-            if nue.startswith("public:"):
+            bare_line = src_line.strip()
+            if bare_line.startswith("public:"):
                 public = True
-                nue = nue[len("public:"):].strip()
-            elif nue.startswith("private:") or nue.startswith("protected:"):
+                bare_line = bare_line[len("public:"):].strip()
+            elif bare_line.startswith("private:") or bare_line.startswith("protected:"):
                 public = False
                 continue
-            if not public or not nue:
+            if not public or not bare_line:
                 continue
             # Qualificatifs sans effet sur la signature vue de l'appelant.
-            nue = CPP_QUALIF.sub("", nue)
-            ctor = re.match(re.escape(nom_classe) + r"\s*\(([^()]*)\)", nue)
+            bare_line = CPP_QUALIF.sub("", bare_line)
+            ctor = re.match(re.escape(class_ident) + r"\s*\(([^()]*)\)", bare_line)
             if ctor:
                 types = _c_param_types(ctor.group(1))
                 if types is not None:
                     ctors.append(types)
                 continue
-            methode = re.match(r"(int|long|double)\s+(\w+)\s*\(([^()]*)\)", nue)
-            if methode:
-                types = _c_param_types(methode.group(3))
+            meth = re.match(r"(int|long|double)\s+(\w+)\s*\(([^()]*)\)", bare_line)
+            if meth:
+                types = _c_param_types(meth.group(3))
                 if types is not None:
-                    methodes.append((methode.group(1), methode.group(2), types))
-        if ctors and methodes:
-            resultat.append((nom_classe, ctors, methodes))
-    return resultat
+                    method_list.append((meth.group(1), meth.group(2), types))
+        if ctors and method_list:
+            result.append((class_ident, ctors, method_list))
+    return result
 
 
 def _c_param_types(params):
@@ -2430,92 +2430,92 @@ def _c_param_types(params):
     l'autre). Pointeur, tableau ou reference -> None (pas de bouchon : `int *tab` n'est pas
     `int`). `const` est ignore : `const int n` est un `int` pour l'appelant."""
     types = []
-    for groupe in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-        if any(c in groupe for c in "*[&"):
+    for param_group in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
+        if any(c in param_group for c in "*[&"):
             return None
-        morceaux = [m for m in groupe.split() if m != "const"]
-        if len(morceaux) < 2 or morceaux[0] not in C_TYPES:
+        pieces = [m for m in param_group.split() if m != "const"]
+        if len(pieces) < 2 or pieces[0] not in C_TYPES:
             return None
-        types.append(morceaux[0])
+        types.append(pieces[0])
     return types
 
 
-def cpp_object_stub(objets):
+def cpp_object_stub(obj_list):
     """Bouchons OBJET C++ : classe à poignée, constructeurs et méthodes relayés. PURE (testée)."""
-    morceaux = []
-    for classe, ctors, methodes in objets:
-        corps = ["class %s {" % classe, "    int __h;", "public:"]
+    pieces = []
+    for klass, ctors, method_list in obj_list:
+        body = ["class %s {" % klass, "    int __h;", "public:"]
         for types in ctors:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             fmt = "".join("|" + C_TYPES[t] for t in types)
             args = "".join(", a%d" % i for i in range(len(types)))
-            corps += ["    %s(%s) {" % (classe, params),
+            body += ["    %s(%s) {" % (klass, params),
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
                       '        snprintf(requete, sizeof requete, "%%s|new|%s%s", id%s);'
-                      % (c_cle(classe, types), fmt, args),
+                      % (c_dispatch_key(klass, types), fmt, args),
                       "        moodit_envoie(requete);",
                       "        __h = atoi(moodit_valeur(id));",
                       "    }"]
-        for retour, nom, types in methodes:
+        for ret, ident, types in method_list:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             fmt = "".join("|" + C_TYPES[t] for t in types)
             args = "".join(", a%d" % i for i in range(len(types)))
-            lecture = C_LECTURE[retour]
-            corps += ["    %s %s(%s) {" % (retour, nom, params),
+            reader = C_READ[ret]
+            body += ["    %s %s(%s) {" % (ret, ident, params),
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
                       '        snprintf(requete, sizeof requete, "%%s|method|%s.%s|%%d%s", id, __h%s);'
-                      % (classe, c_cle(nom, types), fmt, args),
+                      % (klass, c_dispatch_key(ident, types), fmt, args),
                       "        moodit_envoie(requete);",
-                      "        return %s(moodit_valeur(id));" % lecture,
+                      "        return %s(moodit_valeur(id));" % reader,
                       "    }"]
-        corps.append("};")
-        morceaux.append("\n".join(corps))
-    return "\n\n".join(morceaux)
+        body.append("};")
+        pieces.append("\n".join(body))
+    return "\n\n".join(pieces)
 
 
-def c_cle(nom, types):
+def c_dispatch_key(ident, types):
     """Cle d'aiguillage C/C++ : NOM ET TYPES, `Rect(int,int)`. PURE (testee).
 
     Le seul nom ne choisit pas une surcharge : avec `Rect()` declare avant `Rect(int, int)`,
     c'est `Rect()` qui etait construit, et une reponse juste etait notee fausse. L'arite seule
     ne departagerait pas `f(int)` de `f(double)`."""
-    return "%s(%s)" % (nom, ",".join(types))
+    return "%s(%s)" % (ident, ",".join(types))
 
 
-def cpp_object_dispatch(objets):
+def cpp_object_dispatch(obj_list):
     """Aiguillage OBJET côté étudiant : une pile PAR CLASSE, construction réelle. PURE (testée)."""
-    piles, cas = [], []
-    for classe, ctors, methodes in objets:
-        piles.append("static std::vector<%s> moodit_objets_%s;" % (classe, classe))
+    stacks, branches = [], []
+    for klass, ctors, method_list in obj_list:
+        stacks.append("static std::vector<%s> moodit_objets_%s;" % (klass, klass))
         for types in ctors:
-            lectures = "\n".join(
+            reads = "\n".join(
                 "        %s a%d = %s(moodit_jeton());"
-                % (t, i, C_LECTURE[t])
+                % (t, i, C_READ[t])
                 for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            cas.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
+            branches.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
 %s
         moodit_objets_%s.push_back(%s(%s));
         printf("\\n%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
         fflush(stdout);
         return;
-    }''' % (c_cle(classe, types), lectures, classe, classe, args, classe))
-        for retour, nom, types in methodes:
-            lectures = "\n".join(
+    }''' % (c_dispatch_key(klass, types), reads, klass, klass, args, klass))
+        for ret, ident, types in method_list:
+            reads = "\n".join(
                 "        %s a%d = %s(moodit_jeton());"
-                % (t, i, C_LECTURE[t])
+                % (t, i, C_READ[t])
                 for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
-            cas.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
+            branches.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
         int h = atoi(moodit_jeton());
 %s
         printf("\\n%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
         fflush(stdout);
         return;
-    }''' % (classe, c_cle(nom, types), lectures, C_TYPES[retour], classe, nom, args))
-    return "\n".join(piles), "\n\n".join(cas)
+    }''' % (klass, c_dispatch_key(ident, types), reads, C_TYPES[ret], klass, ident, args))
+    return "\n".join(stacks), "\n\n".join(branches)
 
 
 C_RUNTIME = r'''
@@ -2557,31 +2557,31 @@ static const char *moodit_valeur(const char *id) {
 '''
 
 
-def c_grader_source(methods, harness_code, nonce, cpp=False, objets=()):
+def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     """Programme NOTEUR C/C++ : bouchons typés + harnais booléen + nonce. PURE (testée)."""
-    bouchons = []
-    for retour, nom, types in methods:
+    stubs = []
+    for ret, ident, types in methods:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         fmt = "".join("|" + C_TYPES[t] for t in types)
         args = "".join(", a%d" % i for i in range(len(types)))
-        lecture = C_LECTURE[retour]
+        reader = C_READ[ret]
         # PAS static : apres <stdlib.h>, un `static int abs(int)` est une redeclaration
         # refusee par gcc et g++ ; la definition ordinaire, elle, remplace celle de la libc.
-        bouchons.append("""%s moodit_f_%s(%s) {
+        stubs.append("""%s moodit_f_%s(%s) {
     char id[40], requete[4096];
     moodit_identifiant(id);
     snprintf(requete, sizeof requete, "%%s|call|%s%s", id%s);
     moodit_envoie(requete);
     return %s(moodit_valeur(id));
-}""" % (retour, nom, params or "void", c_cle(nom, types), fmt, args, lecture))
+}""" % (ret, ident, params or "void", c_dispatch_key(ident, types), fmt, args, reader))
     # Le harnais du prof ne peut pas ajouter d'#include : <math.h> (fabs, sqrt) et <stdbool.h>
     # (true/false en C) lui sont fournis. Les bouchons sont PREFIXES puis renommes par #define :
     # une fonction notee au nom d'une fonction de <math.h> avec une autre signature
     # (`int round(int)`) ne heurte ainsi aucune declaration, et le harnais ecrit `round(3)`.
-    entete = "#include <math.h>\n#include <stdbool.h>\n"
-    renommages = "".join("#define %s moodit_f_%s\n" % (n, n)
-                         for n in dict.fromkeys(nom for _, nom, _ in methods))
-    return entete + C_RUNTIME + r'''
+    header = "#include <math.h>\n#include <stdbool.h>\n"
+    renames = "".join("#define %s moodit_f_%s\n" % (n, n)
+                         for n in dict.fromkeys(ident for _, ident, _ in methods))
+    return header + C_RUNTIME + r'''
 /* Identifiant IMPREVISIBLE par appel, tire de /dev/urandom : sans lui, le code note pouvait
    imprimer la reponse attendue AVANT la question et faire passer un code faux. */
 static void moodit_identifiant(char *sortie) {
@@ -2596,7 +2596,7 @@ static void moodit_identifiant(char *sortie) {
     sortie[16] = '\0';
 }
 
-''' + "\n\n".join(bouchons) + "\n\n" + renommages + cpp_object_stub(objets) + r'''
+''' + "\n\n".join(stubs) + "\n\n" + renames + cpp_object_stub(obj_list) + r'''
 
 static int moodit_harnais(void) {
 ''' + "\n".join("    " + l if l.strip() else l
@@ -2616,27 +2616,27 @@ int main(void) {
 '''
 
 
-def c_server_source(methods, student_source, cpp=False, objets=()):
+def c_server_source(methods, student_source, cpp=False, obj_list=()):
     """Programme ÉTUDIANT C/C++ : son code (main renommé) + aiguillage typé. PURE (testée)."""
-    cas = []
-    for retour, nom, types in methods:
-        lectures = []
+    branches = []
+    for ret, ident, types in methods:
+        reads = []
         for i, t in enumerate(types):
-            conv = C_LECTURE[t]
-            lectures.append("        %s a%d = %s(moodit_jeton());" % (t, i, conv))
+            conv = C_READ[t]
+            reads.append("        %s a%d = %s(moodit_jeton());" % (t, i, conv))
         args = ", ".join("a%d" % i for i in range(len(types)))
-        cas.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
+        branches.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
 %s
         printf("\\n%%s|ok|%s\\n", id, %s(%s));
         fflush(stdout);
         return;
-    }""" % (c_cle(nom, types), "\n".join(lectures), C_TYPES[retour], nom, args))
-    piles, cas_objets = cpp_object_dispatch(objets)
+    }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], ident, args))
+    stacks, object_branches = cpp_object_dispatch(obj_list)
     return ("#define main __moodit_student_main\n"
             + (student_source or "")
             + "\n#undef main\n"
-            + ("#include <vector>\n" if objets else "")
-            + C_RUNTIME + piles + r'''
+            + ("#include <vector>\n" if obj_list else "")
+            + C_RUNTIME + stacks + r'''
 static char *moodit_reste;
 
 /* Decoupage a la main : strsep n'est pas dans l'ISO C17 (-std=c17), et ceci compile aussi en C++. */
@@ -2650,7 +2650,7 @@ static const char *moodit_jeton(void) {
 
 /* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
 static void moodit_traite(const char *id, const char *op, const char *nom) {
-''' + "\n".join(cas) + "\n\n" + cas_objets + r'''
+''' + "\n".join(branches) + "\n\n" + object_branches + r'''
     printf("\n%s|err|fonction inconnue\n", id);
     fflush(stdout);
 }
@@ -2679,35 +2679,35 @@ RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String"
 
 def rust_signatures(source):
     """Fonctions de PREMIER NIVEAU du code étudiant → [(retour, nom, [types])]. PURE (testée)."""
-    profondeurs = code_depths(source)
-    trouvees = []
-    for trouve in RUST_FN.finditer(source or ""):
-        nom, params, retour = trouve.group(1), trouve.group(2), trouve.group(3)
-        if profondeurs[trouve.start(1)] != 0:
+    depths = code_depths(source)
+    hits = []
+    for hit in RUST_FN.finditer(source or ""):
+        ident, params, ret = hit.group(1), hit.group(2), hit.group(3)
+        if depths[hit.start(1)] != 0:
             continue    # fonction associée (impl) ou imbriquée : pas appelable au niveau module
-        if nom == "main" or retour not in RUST_TYPES:
+        if ident == "main" or ret not in RUST_TYPES:
             continue
         types = []
-        valide = True
-        for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-            if ":" not in groupe:
-                valide = False
+        valid = True
+        for param_group in [p.strip() for p in params.split(",") if p.strip()]:
+            if ":" not in param_group:
+                valid = False
                 break
-            t = groupe.split(":", 1)[1].strip()
+            t = param_group.split(":", 1)[1].strip()
             if t not in RUST_TYPES:
-                valide = False
+                valid = False
                 break
             types.append(t)
-        if valide:
-            trouvees.append((retour, nom, types))
-    return trouvees
+        if valid:
+            hits.append((ret, ident, types))
+    return hits
 
 
 RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
 RUST_IMPL = re.compile(r"^[ \t]*impl\s+(\w+)\s*\{", re.M)
 RUST_FN_IN_IMPL = re.compile(
     r"^[ \t]*(?:pub\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)", re.M)
-def rust_envoi(types):
+def rust_send_args(types):
     """Serialisation des arguments Rust sur le fil. FONCTION PURE (testee).
 
     Une chaine part en HEXADECIMAL : le protocole est a champs separes par « | » et a une ligne
@@ -2730,43 +2730,43 @@ def rust_object_api(source):
 
     Un `impl` est découpé par appariement d'accolades : une fonction associée qui RENVOIE le type
     est un constructeur (`Rectangle::new`), une fonction qui prend `&self` est une méthode."""
-    texte = source or ""
-    structs = set(RUST_STRUCT.findall(texte))
-    par_type = {}                           # type -> (ctors, methodes), ordre d'apparition
-    captures = rust_capture_fields(texte)   # UNE fois : relu dans la boucle, c'etait quadratique
-    for impl in RUST_IMPL.finditer(texte):
+    src_text = source or ""
+    structs = set(RUST_STRUCT.findall(src_text))
+    by_type = {}                           # type -> (ctors, methodes), ordre d'apparition
+    captured = rust_capture_fields(src_text)   # UNE fois : relu dans la boucle, c'etait quadratique
+    for impl in RUST_IMPL.finditer(src_text):
         typ = impl.group(1)
         if typ not in structs:
             continue
-        debut = texte.index("{", impl.start())
-        fin = block_end(texte, debut)
-        corps = texte[debut:fin]
+        begin = src_text.index("{", impl.start())
+        finish = block_end(src_text, begin)
+        body = src_text[begin:finish]
         # Plusieurs blocs `impl` pour le meme type se CUMULENT : le constructeur d'un premier
         # bloc etait perdu quand les methodes venaient d'un second.
-        ctors, methodes = par_type.setdefault(typ, ([], []))
-        for nom, params, retour in RUST_FN_IN_IMPL.findall(corps):
-            morceaux = [p.strip() for p in params.split(",") if p.strip()]
-            prend_self = bool(morceaux) and morceaux[0].endswith("self")
-            utiles = morceaux[1:] if prend_self else morceaux
+        ctors, method_list = by_type.setdefault(typ, ([], []))
+        for ident, params, ret in RUST_FN_IN_IMPL.findall(body):
+            pieces = [p.strip() for p in params.split(",") if p.strip()]
+            takes_self = bool(pieces) and pieces[0].endswith("self")
+            useful = pieces[1:] if takes_self else pieces
             types = []
-            valide = True
-            for groupe in utiles:
-                if ":" not in groupe or groupe.split(":", 1)[1].strip() not in RUST_TYPES:
-                    valide = False
+            valid = True
+            for param_group in useful:
+                if ":" not in param_group or param_group.split(":", 1)[1].strip() not in RUST_TYPES:
+                    valid = False
                     break
-                types.append(groupe.split(":", 1)[1].strip())
-            if not valide:
+                types.append(param_group.split(":", 1)[1].strip())
+            if not valid:
                 continue
             # `-> Self` est la forme du Rust Book : c'est le meme constructeur que `-> Type`.
-            if not prend_self and retour in (typ, "Self"):
-                ctors.append((nom, types))
-            elif prend_self and retour in RUST_TYPES:
-                methodes.append((retour, nom, types))
-    resultat = []
-    for typ, (ctors, methodes) in par_type.items():
-        if methodes and (ctors or typ in captures):
-            resultat.append((typ, ctors, sans_doublon(methodes)))
-    return resultat
+            if not takes_self and ret in (typ, "Self"):
+                ctors.append((ident, types))
+            elif takes_self and ret in RUST_TYPES:
+                method_list.append((ret, ident, types))
+    result = []
+    for typ, (ctors, method_list) in by_type.items():
+        if method_list and (ctors or typ in captured):
+            result.append((typ, ctors, dedupe_signatures(method_list)))
+    return result
 
 
 RUST_STRUCT_BODY = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*\{([^{}]*)\}", re.M | re.S)
@@ -2778,27 +2778,27 @@ def rust_struct_fields(source):
     Comme en Go, l'idiome Rust d'une structure sans `new` est le LITTÉRAL À CHAMPS NOMMÉS
     (`Rectangle { largeur: 3, hauteur: 4 }`) : c'est la forme qu'écrivent les profs, donc celle
     qu'il faut savoir proxifier."""
-    champs = {}
-    for typ, corps in RUST_STRUCT_BODY.findall(source or ""):
-        liste = []
-        for groupe in corps.split(","):
-            nue = groupe.split("//")[0].strip()
-            if not nue:
+    field_list = {}
+    for typ, body in RUST_STRUCT_BODY.findall(source or ""):
+        entries = []
+        for param_group in body.split(","):
+            bare_line = param_group.split("//")[0].strip()
+            if not bare_line:
                 continue
-            if ":" not in nue:
-                liste = None
+            if ":" not in bare_line:
+                entries = None
                 break
-            nom, type_ = (m.strip() for m in nue.split(":", 1))
+            ident, type_ = (m.strip() for m in bare_line.split(":", 1))
             # `pub largeur: i32` (et `pub(crate) ...`) : la visibilite ne fait pas partie du nom —
             # sans ce retrait, « pub largeur » etait refuse et la structure entiere perdue.
-            nom = re.sub(r"^pub(\([^)]*\))?\s+", "", nom)
-            if type_ not in RUST_TYPES or not nom.isidentifier():
-                liste = None
+            ident = re.sub(r"^pub(\([^)]*\))?\s+", "", ident)
+            if type_ not in RUST_TYPES or not ident.isidentifier():
+                entries = None
                 break
-            liste.append((nom, type_))
-        if liste:
-            champs[typ] = liste
-    return champs
+            entries.append((ident, type_))
+        if entries:
+            field_list[typ] = entries
+    return field_list
 
 
 def rust_mut_receivers(source):
@@ -2807,18 +2807,18 @@ def rust_mut_receivers(source):
     Pendant exact de `go_pointer_receivers` : une telle méthode peut modifier l'objet, et la
     capture de champs le reconstruit à chaque appel — la modification serait perdue EN SILENCE,
     donc un verdict faux sans diagnostic. Ces types passent par la poignée d'un constructeur."""
-    texte = source or ""
+    src_text = source or ""
     mutants = set()
-    for impl in RUST_IMPL.finditer(texte):
+    for impl in RUST_IMPL.finditer(src_text):
         typ = impl.group(1)
         try:
-            debut = texte.index("{", impl.start())
+            begin = src_text.index("{", impl.start())
         except ValueError:
             continue
-        fin = block_end(texte, debut)
-        for _, params, _ in RUST_FN_IN_IMPL.findall(texte[debut:fin]):
-            premier = (params.split(",")[0] if params else "").strip()
-            if premier.replace(" ", "").startswith("&mutself"):
+        finish = block_end(src_text, begin)
+        for _, params, _ in RUST_FN_IN_IMPL.findall(src_text[begin:finish]):
+            first_item = (params.split(",")[0] if params else "").strip()
+            if first_item.replace(" ", "").startswith("&mutself"):
                 mutants.add(typ)
     return mutants
 
@@ -2832,171 +2832,171 @@ def rust_capture_fields(source):
     return {t: f for t, f in rust_struct_fields(source).items() if t not in mutants}
 
 
-def rust_object_stub(objets, champs=None):
+def rust_object_stub(obj_list, field_list=None):
     """Bouchons OBJET Rust : littéral à champs capturés ou poignée, et méthodes relayées.
 
     FONCTION PURE (testée). Champs tous marshalables → le bouchon les MIROITE et la méthode
     construit l'objet CHEZ l'étudiant au moment de l'appel ; sinon, poignée d'un constructeur."""
-    champs = champs or {}
-    morceaux = []
-    for typ, ctors, methodes in objets:
-        if typ in champs:
+    field_list = field_list or {}
+    pieces = []
+    for typ, ctors, method_list in obj_list:
+        if typ in field_list:
             declaration = "struct %s {\n%s\n}" % (
-                typ, "\n".join("    %s: %s," % (n, t) for n, t in champs[typ]))
+                typ, "\n".join("    %s: %s," % (n, t) for n, t in field_list[typ]))
             # Les champs suivent la MÊME sérialisation que les arguments : le lecteur d'en face
             # déhexe, donc un champ String envoyé en clair revenait mutilé (une valeur commençant
             # par « H » surtout), et une réponse juste était notée fausse.
-            envoi_champs = "".join(
+            send_fields = "".join(
                 ' + "|" + &moodit_hexe(&self.%s)' % n if t == "String"
                 else ' + "|" + &self.%s.to_string()' % n
-                for n, t in champs[typ])
-            corps = []
+                for n, t in field_list[typ])
+            body = []
             # Une fonction associée CONSTRUCTRICE (Rectangle::new) reste proxifiée : elle
             # s'exécute chez l'étudiant et le bouchon relit les champs de son résultat.
-            for nom, types in ctors:
+            for ident, types in ctors:
                 params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
-                envoi = rust_envoi(types)
-                lectures = "\n".join(
+                send_args = rust_send_args(types)
+                reads = "\n".join(
                     "        let %s = %s;" % (n, RUST_CONV[t] % 'parts.next().unwrap_or("")')
-                    for n, t in champs[typ])
-                litteral = ", ".join(n for n, _ in champs[typ])
-                corps.append('''    fn %s(%s) -> %s {
+                    for n, t in field_list[typ])
+                literal = ", ".join(n for n, _ in field_list[typ])
+                body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
         let brut = moodit_appel(&id, &(id.clone() + "|new|%s"%s));
         let mut parts = brut.split('|');
 %s
         %s { %s }
-    }''' % (nom, params, typ, nom, envoi, lectures, typ, litteral))
-            for retour, nom, types in methodes:
+    }''' % (ident, params, typ, ident, send_args, reads, typ, literal))
+            for ret, ident, types in method_list:
                 params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
-                envoi = rust_envoi(types)
-                parse = ("moodit_dehexe(brut.as_str())" if retour == "String"
-                         else "brut.parse::<%s>().unwrap_or_default()" % retour)
-                corps.append('''    fn %s(%s) -> %s {
+                send_args = rust_send_args(types)
+                parse = ("moodit_dehexe(brut.as_str())" if ret == "String"
+                         else "brut.parse::<%s>().unwrap_or_default()" % ret)
+                body.append('''    fn %s(%s) -> %s {
         let cid = moodit_id();
         let h = moodit_appel(&cid, &(cid.clone() + "|new|%s"%s));
         let id = moodit_id();
         let requete = id.clone() + "|method|%s.%s|" + &h%s;
         let brut = moodit_appel(&id, &requete);
         %s
-    }''' % (nom, params, retour, typ, envoi_champs, typ, nom, envoi, parse))
-            morceaux.append("%s\n\nimpl %s {\n%s\n}"
-                            % (declaration, typ, "\n\n".join(corps)))
+    }''' % (ident, params, ret, typ, send_fields, typ, ident, send_args, parse))
+            pieces.append("%s\n\nimpl %s {\n%s\n}"
+                            % (declaration, typ, "\n\n".join(body)))
             continue
-        corps = []
-        for nom, types in ctors:
+        body = []
+        for ident, types in ctors:
             params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
-            envoi = rust_envoi(types)
-            corps.append('''    fn %s(%s) -> %s {
+            send_args = rust_send_args(types)
+            body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
         let requete = id.clone() + "|new|%s"%s;
         %s { __h: moodit_appel(&id, &requete).parse::<i64>().unwrap_or_default() }
-    }''' % (nom, params, typ, nom, envoi, typ))
-        for retour, nom, types in methodes:
+    }''' % (ident, params, typ, ident, send_args, typ))
+        for ret, ident, types in method_list:
             params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
-            envoi = rust_envoi(types)
-            parse = ("moodit_dehexe(brut.as_str())" if retour == "String"
-                     else "brut.parse::<%s>().unwrap_or_default()" % retour)
+            send_args = rust_send_args(types)
+            parse = ("moodit_dehexe(brut.as_str())" if ret == "String"
+                     else "brut.parse::<%s>().unwrap_or_default()" % ret)
             # Ordre du protocole, commun à tous les langages à protocole texte :
             #   id|op|nom|poignée|args…   (la poignée ne vaut que pour `method`)
-            corps.append('''    fn %s(%s) -> %s {
+            body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
         let requete = id.clone() + "|method|%s.%s|" + &self.__h.to_string()%s;
         let brut = moodit_appel(&id, &requete);
         %s
-    }''' % (nom, params, retour, typ, nom, envoi, parse))
-        morceaux.append("struct %s {\n    __h: i64,\n}\n\nimpl %s {\n%s\n}"
-                        % (typ, typ, "\n\n".join(corps)))
-    return "\n\n".join(morceaux)
+    }''' % (ident, params, ret, typ, ident, send_args, parse))
+        pieces.append("struct %s {\n    __h: i64,\n}\n\nimpl %s {\n%s\n}"
+                        % (typ, typ, "\n\n".join(body)))
+    return "\n\n".join(pieces)
 
 
-def rust_object_dispatch(objets, champs=None):
+def rust_object_dispatch(obj_list, field_list=None):
     """Aiguillage OBJET côté étudiant : une pile PAR TYPE, pas d'unsafe. PURE (testée).
 
     Un type à champs capturés se construit par son littéral, comme l'écrirait l'étudiant ; la clé
     `new` porte alors le NOM DU TYPE et non celui d'un constructeur."""
-    champs = champs or {}
-    piles, cas = [], []
-    for typ, ctors, methodes in objets:
-        piles.append("    let mut moodit_%s: Vec<%s> = Vec::new();" % (typ.lower(), typ))
-        if typ in champs:
-            lectures = "\n".join(
+    field_list = field_list or {}
+    stacks, branches = [], []
+    for typ, ctors, method_list in obj_list:
+        stacks.append("    let mut moodit_%s: Vec<%s> = Vec::new();" % (typ.lower(), typ))
+        if typ in field_list:
+            reads = "\n".join(
                 '                let %s = %s;' % (n, RUST_CONV[t] % 'args.next().unwrap_or("")')
-                for n, t in champs[typ])
-            litteral = "%s { %s }" % (typ, ", ".join(n for n, _ in champs[typ]))
-            cas.append('''            "new|%s" => {
+                for n, t in field_list[typ])
+            literal = "%s { %s }" % (typ, ", ".join(n for n, _ in field_list[typ]))
+            branches.append('''            "new|%s" => {
 %s
                 moodit_%s.push(%s);
                 format!("{}|ok|{}", id, moodit_%s.len() - 1)
-            }''' % (typ, lectures, typ.lower(), litteral, typ.lower()))
-            for nom, types in ctors:
-                lectures_args = "\n".join(
+            }''' % (typ, reads, typ.lower(), literal, typ.lower()))
+            for ident, types in ctors:
+                read_args = "\n".join(
                     '                let a%d = %s;'
                     % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types))
-                appel = "%s::%s(%s)" % (typ, nom, ", ".join("a%d" % i for i in range(len(types))))
-                retours = "".join(
+                call_expr = "%s::%s(%s)" % (typ, ident, ", ".join("a%d" % i for i in range(len(types))))
+                rets = "".join(
                     '                                + "|" + &moodit_hexe(&moodit_cree.%s)' % n
                     if t == "String"
                     else '                                + "|" + &moodit_cree.%s.to_string()' % n
-                    for n, t in champs[typ])
-                cas.append('''            "new|%s" => {
+                    for n, t in field_list[typ])
+                branches.append('''            "new|%s" => {
 %s
                 let moodit_cree = %s;
                 format!("{}|ok", id)
 %s
-            }''' % (nom, lectures_args, appel, retours))
+            }''' % (ident, read_args, call_expr, rets))
         else:
             # Sans capture de champs, le constructeur rend une POIGNÉE. Les deux formes étaient
             # émises pour un type à champs capturés : le second bras, inatteignable, valait un
             # avertissement `unreachable_patterns` à la compilation.
-            for nom, types in ctors:
-                lectures = "\n".join(
+            for ident, types in ctors:
+                reads = "\n".join(
                     '                let a%d = %s;'
                     % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types))
-                appel = "%s::%s(%s)" % (typ, nom,
+                call_expr = "%s::%s(%s)" % (typ, ident,
                                         ", ".join("a%d" % i for i in range(len(types))))
-                cas.append('''            "new|%s" => {
+                branches.append('''            "new|%s" => {
 %s
                 moodit_%s.push(%s);
                 format!("{}|ok|{}", id, moodit_%s.len() - 1)
-            }''' % (nom, lectures, typ.lower(), appel, typ.lower()))
-        for retour, nom, types in methodes:
+            }''' % (ident, reads, typ.lower(), call_expr, typ.lower()))
+        for ret, ident, types in method_list:
             # Les arguments de la méthode doivent être LUS et TRANSMIS : sans cela, le bouchon du
             # noteur les envoyait, l'appel généré ici était à vide, et rustc refusait le programme
             # de l'étudiant — « Échec de compilation » sur du code qu'il n'avait pas écrit.
-            lectures_m = "\n".join(
+            read_m = "\n".join(
                 '                let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                 for i, t in enumerate(types))
-            passage = ", ".join("a%d" % i for i in range(len(types)))
-            appel_m = "moodit_%s[h].%s(%s)" % (typ.lower(), nom, passage)
-            if retour == "String":
-                appel_m = "moodit_hexe(&%s)" % appel_m
-            cas.append('''            "method|%s.%s" => {
+            pass_item = ", ".join("a%d" % i for i in range(len(types)))
+            call_expr_m = "moodit_%s[h].%s(%s)" % (typ.lower(), ident, pass_item)
+            if ret == "String":
+                call_expr_m = "moodit_hexe(&%s)" % call_expr_m
+            branches.append('''            "method|%s.%s" => {
                 let h = args.next().unwrap_or("0").parse::<usize>().unwrap_or(0);
 %s
                 format!("{}|ok|{}", id, %s)
-            }''' % (typ, nom, lectures_m, appel_m))
-    return "\n".join(piles), "\n".join(cas)
+            }''' % (typ, ident, read_m, call_expr_m))
+    return "\n".join(stacks), "\n".join(branches)
 
 
-def rust_grader_source(methods, harness_code, nonce, objets=(), champs=None):
+def rust_grader_source(methods, harness_code, nonce, obj_list=(), field_list=None):
     """Programme NOTEUR Rust : bouchons typés + harnais booléen + nonce. PURE (testée)."""
-    bouchons = []
-    for retour, nom, types in methods:
+    stubs = []
+    for ret, ident, types in methods:
         params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
         # Un raccourci « un seul argument » court-circuitait la sérialisation typée, donc
         # l'encodage des chaînes : `copie("a|b")` partait brut et décalait tout l'appel.
-        corps = rust_envoi(types).replace(' + "|" + ', "", 1) or '""'
-        parse = "moodit_dehexe(&brut)" if retour == "String" else "brut.parse::<%s>().unwrap()" % retour
-        args = (" + \"|\" + " + corps) if types else ""
-        bouchons.append('''fn %s(%s) -> %s {
+        body = rust_send_args(types).replace(' + "|" + ', "", 1) or '""'
+        parse = "moodit_dehexe(&brut)" if ret == "String" else "brut.parse::<%s>().unwrap()" % ret
+        args = (" + \"|\" + " + body) if types else ""
+        stubs.append('''fn %s(%s) -> %s {
     let id = moodit_id();
     let requete = id.clone() + "|%s"%s;
     let brut = moodit_appel(&id, &requete);
     %s
-}''' % (nom, params, retour, nom, args, parse))
+}''' % (ident, params, ret, ident, args, parse))
     return '''// Imports ALIASES : le serveur partage le fichier du code soumis, et un `use` identique
 // chez l etudiant levait E0252 (import en double) sur du code valide. Les methodes de
 // trait marchent des que le trait est en portee, quel que soit son nom.
@@ -3076,26 +3076,26 @@ fn main() {
     }
     std::process::exit(1);
 }
-''' % ("\n\n".join(bouchons), rust_object_stub(objets, champs),
+''' % ("\n\n".join(stubs), rust_object_stub(obj_list, field_list),
        "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
        nonce)
 
 
-def rust_server_source(methods, student_source, objets=(), champs=None):
+def rust_server_source(methods, student_source, obj_list=(), field_list=None):
     """Programme ÉTUDIANT Rust : son code + aiguillage typé (fonctions et objets). PURE (testée)."""
-    piles, cas_objets = rust_object_dispatch(objets, champs)
-    cas = []
-    for retour, nom, types in methods:
+    stacks, object_branches = rust_object_dispatch(obj_list, field_list)
+    branches = []
+    for ret, ident, types in methods:
         # MÊME table que les bouchons et l'aiguillage des objets (RUST_CONV) : une copie à part
         # est restée en arrière à chaque changement d'invariant, et c'est ainsi que l'encodage
         # des chaînes a été oublié une première fois.
-        lectures = ['            let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
+        reads = ['            let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types)]
-        appel = "%s(%s)" % (nom, ", ".join("a%d" % i for i in range(len(types))))
-        if retour == "String":
-            appel = "moodit_hexe(&%s)" % appel
-        cas.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
-                   % (nom, "\n".join(lectures), appel))
+        call_expr = "%s(%s)" % (ident, ", ".join("a%d" % i for i in range(len(types))))
+        if ret == "String":
+            call_expr = "moodit_hexe(&%s)" % call_expr
+        branches.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
+                   % (ident, "\n".join(reads), call_expr))
     return '''%s
 
 // ALIASES : le serveur partage le fichier du code soumis, et un `use std::io::Write;` chez
@@ -3155,7 +3155,7 @@ fn moodit_serve() {
 fn main() {
     moodit_serve();
 }
-''' % (rust_without_main(student_source), piles, "\n".join(cas), cas_objets)
+''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
 
 
 RUST_MAIN = re.compile(r"^[ \t]*fn\s+main\s*\(\s*\)", re.M)
@@ -3192,9 +3192,9 @@ CS_ALIAS_RE = re.compile(r"\b(?:System\.)?(String|Int32|Int64|Double|Boolean)\b"
                          r"(?=\s+[A-Za-z_]\w*\s*[(,)=;])")
 
 
-def cs_types_canoniques(texte):
+def cs_canonical_types(src_text):
     """Source C# dont les noms longs de types de base sont ramenes au mot-cle. PURE (testee)."""
-    return CS_ALIAS_RE.sub(lambda m: CS_ALIAS[m.group(1)], texte or "")
+    return CS_ALIAS_RE.sub(lambda m: CS_ALIAS[m.group(1)], src_text or "")
 
 
 def _cs_param_types(params):
@@ -3203,27 +3203,27 @@ def _cs_param_types(params):
     La valeur par defaut (`int n = 5`) et le modificateur `in` ne changent pas le type vu par
     l'appelant ; `ref`/`out` le changent (passage par reference) : refuses."""
     types = []
-    for groupe in [p.strip() for p in params.split(",") if p.strip()]:
-        morceaux = [m for m in groupe.split("=")[0].split() if m != "in"]
-        if len(morceaux) != 2 or morceaux[0] not in CS_TYPES:
+    for param_group in [p.strip() for p in params.split(",") if p.strip()]:
+        pieces = [m for m in param_group.split("=")[0].split() if m != "in"]
+        if len(pieces) != 2 or pieces[0] not in CS_TYPES:
             return None
-        types.append(morceaux[0])
+        types.append(pieces[0])
     return types
 
 
 def cs_signatures(source):
     """Méthodes STATIQUES du code étudiant → [(retour, nom, [types])], visibilité indifférente. PURE (testée)."""
-    trouvees = []
-    for retour, nom, params in CS_METHOD.findall(source or ""):
-        if nom == "Main":
+    hits = []
+    for ret, ident, params in CS_METHOD.findall(source or ""):
+        if ident == "Main":
             continue
         types = _cs_param_types(params)
         if types is not None:
-            trouvees.append((retour, nom, types))
-    return sans_doublon(trouvees)
+            hits.append((ret, ident, types))
+    return dedupe_signatures(hits)
 
 
-def cs_envoi(types):
+def cs_send_args(types):
     """Sérialisation des arguments C#. FONCTION PURE (testée) — chaîne en hexadécimal, nombre en
     culture INVARIANTE (une concaténation implicite donnait « 3,14 », illisible d'en face)."""
     return "".join(
@@ -3242,57 +3242,57 @@ def cs_envoi(types):
 # Gabarits de lecture : `v` est le NOM DE L'ARGUMENT, a remplacer par « (v » seulement — un
 # remplacement de « v » nu changeait InvariantCulture en InbrutariantCulture (le harnais ne
 # compilait plus des qu'une methode rendait un double).
-CS_LECTURE = {"int": "int.Parse(v)", "long": "long.Parse(v)",
+CS_READ = {"int": "int.Parse(v)", "long": "long.Parse(v)",
               "double": "double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)",
               "bool": "bool.Parse(v)", "string": "MooditRpc.Dehexe(v)"}
 
 
-def cs_object_stub(classe, ctors, methodes):
+def cs_object_stub(klass, ctors, method_list):
     """Bouchons OBJET C# : constructeur → poignée, méthodes d'instance → appel sur la poignée.
 
     FONCTION PURE (testée). `new Rectangle(3, 4).Aire()` s'écrit naturellement dans le harnais,
     alors que l'objet vit dans le processus de l'étudiant."""
-    morceaux = []
+    pieces = []
     for types in ctors:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
         # invariant d'en face, donc une réponse juste notée fausse.
-        args = cs_envoi(types)
-        morceaux.append('''    public %s(%s) {
+        args = cs_send_args(types)
+        pieces.append('''    public %s(%s) {
         string id = MooditRpc.Id();
         __h = int.Parse(MooditRpc.Appel(id, id + "|new|%s"%s));
-    }''' % (classe, params, classe, args))
-    for retour, nom, types in methodes:
+    }''' % (klass, params, klass, args))
+    for ret, ident, types in method_list:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
         # invariant d'en face, donc une réponse juste notée fausse.
-        args = cs_envoi(types)
-        lecture = CS_LECTURE[retour].replace("(v", "(brut")
-        morceaux.append('''    public %s %s(%s) {
+        args = cs_send_args(types)
+        reader = CS_READ[ret].replace("(v", "(brut")
+        pieces.append('''    public %s %s(%s) {
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|method|" + __h + "|%s"%s);
         return %s;
-    }''' % (retour, nom, params, nom, args, lecture))
-    return "\n\n".join(morceaux)
+    }''' % (ret, ident, params, ident, args, reader))
+    return "\n\n".join(pieces)
 
 
-def cs_grader_source(methods, harness_code, nonce, classe, ctors=(), instance=()):
+def cs_grader_source(methods, harness_code, nonce, klass, ctors=(), instance=()):
     """Programme NOTEUR C# : bouchons typés + harnais booléen + nonce. PURE (testée)."""
-    bouchons = []
-    for retour, nom, types in methods:
+    stubs = []
+    for ret, ident, types in methods:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
         # invariant d'en face, donc une réponse juste notée fausse.
-        args = cs_envoi(types)
-        lecture = CS_LECTURE[retour].replace("(v", "(brut")
-        bouchons.append('''    public static %s %s(%s) {
+        args = cs_send_args(types)
+        reader = CS_READ[ret].replace("(v", "(brut")
+        stubs.append('''    public static %s %s(%s) {
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|%s"%s);
         return %s;
-    }''' % (retour, nom, params, nom, args, lecture))
+    }''' % (ret, ident, params, ident, args, reader))
     return '''using System;
 using System.IO;
 
@@ -3376,7 +3376,7 @@ public static class MooditGrader {
         return 1;
     }
 }
-''' % (classe, cs_object_stub(classe, ctors, instance), "\n\n".join(bouchons),
+''' % (klass, cs_object_stub(klass, ctors, instance), "\n\n".join(stubs),
        "\n".join("        " + l if l.strip() else l
                  for l in (harness_code or "").splitlines()), nonce)
 
@@ -3528,61 +3528,61 @@ CS_INSTANCE = re.compile(
     r"(int|long|double|bool|string)\s+(\w+)\s*\(([^()]*)\)", re.M)
 
 
-def cs_object_api(source, classe):
+def cs_object_api(source, klass):
     """API OBJET d'une classe C# → ([constructeurs], [méthodes d'instance]). PURE (testée).
 
     Lue à la REGEX comme le reste du chemin C# : le prof n'a rien à déclarer, et une signature
     hors types marshalables est simplement écartée (le harnais qui l'appelle ne compilera pas)."""
-    types_de = _cs_param_types   # le MEME lecteur que les statiques
+    param_types_of = _cs_param_types   # le MEME lecteur que les statiques
 
     ctors = []
     # re.M est INDISPENSABLE : le gabarit est ancre en debut de LIGNE (sans quoi un
     # `new Rectangle(3, 4)` passerait pour une declaration), et sans ce drapeau `^` ne
     # vaudrait que pour le debut du fichier — aucun constructeur ne serait trouve.
-    for params in re.findall(CS_CTOR_TPL % re.escape(classe), source or "", re.M):
-        types = types_de(params)
+    for params in re.findall(CS_CTOR_TPL % re.escape(klass), source or "", re.M):
+        types = param_types_of(params)
         if types is not None:
             ctors.append(types)
     # AUCUN constructeur declare : C# fournit le constructeur par defaut, comme Java.
     # Seulement pour une classe DECLAREE dans le code soumis.
-    declares = re.findall(CS_CTOR_TPL % re.escape(classe), source or "", re.M)
-    if not declares and re.search(r"\bclass\s+%s\b" % re.escape(classe), source or ""):
+    declares = re.findall(CS_CTOR_TPL % re.escape(klass), source or "", re.M)
+    if not declares and re.search(r"\bclass\s+%s\b" % re.escape(klass), source or ""):
         ctors = [[]]
-    methodes = []
-    texte = source or ""
-    for debut, fin, niveau in corps_de_classe(texte, r"\bclass\s+%s\b" % re.escape(classe)):
-        profondeurs = _fermetures(texte)[0]
-        for m in CS_INSTANCE.finditer(texte, debut, fin):
+    method_list = []
+    src_text = source or ""
+    for begin, finish, level in class_bodies(src_text, r"\bclass\s+%s\b" % re.escape(klass)):
+        depths = _closings(src_text)[0]
+        for m in CS_INSTANCE.finditer(src_text, begin, finish):
             # Membre DIRECT de la classe visee : une autre classe du fichier (Carre a cote de
             # Rectangle) ou une classe imbriquee donnaient des bouchons en double, que mcs
             # refusait (CS0111) — une reponse juste notee 0.
-            if profondeurs[m.start(2)] != niveau:
+            if depths[m.start(2)] != level:
                 continue
-            types = types_de(m.group(3))
+            types = param_types_of(m.group(3))
             if types is not None and m.group(2) != "Main":
-                methodes.append((m.group(1), m.group(2), types))
-    return ctors, sans_doublon(methodes)
+                method_list.append((m.group(1), m.group(2), types))
+    return ctors, dedupe_signatures(method_list)
 
 
-def corps_de_classe(texte, motif_entete):
+def class_bodies(src_text, header_pattern):
     """Corps des classes dont l'entete correspond : [(debut, fin, profondeur des membres)].
     PURE (testee). Appariement LEXICAL (block_end) : une accolade en litteral ne compte pas."""
-    corps = []
-    for entete in re.finditer(motif_entete, texte):
-        debut = texte.find("{", entete.end())
-        if debut < 0:
+    body = []
+    for header in re.finditer(header_pattern, src_text):
+        begin = src_text.find("{", header.end())
+        if begin < 0:
             continue
         # `class Rect;` (declaration anticipee) : l'accolade trouvee appartient a la suite.
-        if ";" in texte[entete.end():debut]:
+        if ";" in src_text[header.end():begin]:
             continue
-        corps.append((debut, block_end(texte, debut), _fermetures(texte)[0][debut] + 1))
-    return corps
+        body.append((begin, block_end(src_text, begin), _closings(src_text)[0][begin] + 1))
+    return body
 
 
 CS_CLASS = re.compile(r"\bclass\s+(\w+)")
 
 
-def code_blanchi(texte, backticks=False, rust=False):
+def blank_code(src_text, backticks=False, rust=False):
     """Source sans commentaires ni litteraux, pour l EXTRACTION seulement (lignes preservees).
 
     Une fonction gardee en commentaire de bloc etait extraite comme une vraie signature :
@@ -3590,56 +3590,56 @@ def code_blanchi(texte, backticks=False, rust=False):
     aux quatre autres langages. `backticks` couvre les chaines brutes Go ; `rust` masque
     d abord les litteraux de caractere via CHAR_LITERAL (une apostrophe de lifetime n ouvre
     pas une chaine) et gere les chaines brutes r"..."/r#"..."#."""
-    texte = texte or ""
+    src_text = src_text or ""
     if rust:
-        texte = CHAR_LITERAL.sub(lambda m: " " * len(m.group(0)), texte)
+        src_text = CHAR_LITERAL.sub(lambda m: " " * len(m.group(0)), src_text)
     res = []
     i = 0
-    n = len(texte)
+    n = len(src_text)
     while i < n:
-        c = texte[i]
-        deux = texte[i:i + 2]
-        if deux == "//":
-            while i < n and texte[i] != chr(10):
+        c = src_text[i]
+        two_chars = src_text[i:i + 2]
+        if two_chars == "//":
+            while i < n and src_text[i] != chr(10):
                 res.append(" ")
                 i += 1
-        elif deux == "/*":
+        elif two_chars == "/*":
             res.append("  ")
             i += 2
-            profondeur = 1
-            while i < n and profondeur:
-                if rust and texte[i:i + 2] == "/*":
-                    profondeur += 1
+            depth = 1
+            while i < n and depth:
+                if rust and src_text[i:i + 2] == "/*":
+                    depth += 1
                     res.append("  ")
                     i += 2
-                elif texte[i:i + 2] == "*/":
-                    profondeur -= 1
+                elif src_text[i:i + 2] == "*/":
+                    depth -= 1
                     res.append("  ")
                     i += 2
                 else:
-                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    res.append(src_text[i] if src_text[i] == chr(10) else " ")
                     i += 1
-        elif rust and c == "r" and texte[i + 1:i + 2] in ('"', "#"):
+        elif rust and c == "r" and src_text[i + 1:i + 2] in ('"', "#"):
             j = i + 1
-            dieses = 0
-            while texte[j:j + 1] == "#":
-                dieses += 1
+            hashes = 0
+            while src_text[j:j + 1] == "#":
+                hashes += 1
                 j += 1
-            if texte[j:j + 1] != '"':
+            if src_text[j:j + 1] != '"':
                 res.append(c)
                 i += 1
                 continue
-            fin = '"' + "#" * dieses
-            k = texte.find(fin, j + 1)
-            k = n if k < 0 else k + len(fin)
-            for x in texte[i:k]:
+            finish = '"' + "#" * hashes
+            k = src_text.find(finish, j + 1)
+            k = n if k < 0 else k + len(finish)
+            for x in src_text[i:k]:
                 res.append(x if x == chr(10) else " ")
             i = k
         elif backticks and c == "`":
             res.append(" ")
             i += 1
-            while i < n and texte[i] != "`":
-                res.append(texte[i] if texte[i] == chr(10) else " ")
+            while i < n and src_text[i] != "`":
+                res.append(src_text[i] if src_text[i] == chr(10) else " ")
                 i += 1
             if i < n:
                 res.append(" ")
@@ -3648,12 +3648,12 @@ def code_blanchi(texte, backticks=False, rust=False):
             quote = c
             res.append(" ")
             i += 1
-            while i < n and texte[i] != quote:
-                if texte[i] == chr(92) and i + 1 < n:
+            while i < n and src_text[i] != quote:
+                if src_text[i] == chr(92) and i + 1 < n:
                     res.append("  ")
                     i += 2
                 else:
-                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    res.append(src_text[i] if src_text[i] == chr(10) else " ")
                     i += 1
             if i < n:
                 res.append(" ")
@@ -3664,7 +3664,7 @@ def code_blanchi(texte, backticks=False, rust=False):
     return "".join(res)
 
 
-def cs_sans_commentaires(texte):
+def cs_strip_comments(src_text):
     """Source C# sans commentaires ni litteraux (remplaces par des espaces, lignes preservees).
 
     Un `class X` dans un commentaire ou une chaine leurrait le choix de la classe principale et
@@ -3674,116 +3674,116 @@ def cs_sans_commentaires(texte):
     interpolees `$"..."` comprises."""
     res = []
     i = 0
-    n = len(texte or "")
-    texte = texte or ""
+    n = len(src_text or "")
+    src_text = src_text or ""
     while i < n:
-        deux = texte[i:i + 2]
-        if deux == "//":
-            while i < n and texte[i] != chr(10):
+        two_chars = src_text[i:i + 2]
+        if two_chars == "//":
+            while i < n and src_text[i] != chr(10):
                 res.append(" ")
                 i += 1
-        elif deux == "/*":
+        elif two_chars == "/*":
             res.append("  ")
             i += 2
-            while i < n and texte[i:i + 2] != "*/":
-                res.append(texte[i] if texte[i] == chr(10) else " ")
+            while i < n and src_text[i:i + 2] != "*/":
+                res.append(src_text[i] if src_text[i] == chr(10) else " ")
                 i += 1
             if i < n:
                 res.append("  ")
                 i += 2
-        elif deux == '@"' or texte[i:i + 3] in ('$@"', '@$"'):
-            saut = 3 if texte[i:i + 3] in ('$@"', '@$"') else 2
-            res.append(" " * saut)
-            i += saut
+        elif two_chars == '@"' or src_text[i:i + 3] in ('$@"', '@$"'):
+            newline = 3 if src_text[i:i + 3] in ('$@"', '@$"') else 2
+            res.append(" " * newline)
+            i += newline
             while i < n:
-                if texte[i] == '"':
-                    if texte[i + 1:i + 2] == '"':
+                if src_text[i] == '"':
+                    if src_text[i + 1:i + 2] == '"':
                         res.append("  ")
                         i += 2
                         continue
                     res.append(" ")
                     i += 1
                     break
-                res.append(texte[i] if texte[i] == chr(10) else " ")
+                res.append(src_text[i] if src_text[i] == chr(10) else " ")
                 i += 1
-        elif texte[i] in ('"', chr(39)):
-            quote = texte[i]
+        elif src_text[i] in ('"', chr(39)):
+            quote = src_text[i]
             res.append(" ")
             i += 1
-            while i < n and texte[i] != quote:
-                if texte[i] == chr(92) and i + 1 < n:
+            while i < n and src_text[i] != quote:
+                if src_text[i] == chr(92) and i + 1 < n:
                     res.append("  ")
                     i += 2
                 else:
-                    res.append(texte[i] if texte[i] == chr(10) else " ")
+                    res.append(src_text[i] if src_text[i] == chr(10) else " ")
                     i += 1
             if i < n:
                 res.append(" ")
                 i += 1
         else:
-            res.append(texte[i])
+            res.append(src_text[i])
             i += 1
     return "".join(res)
 
 
-CS_JETONS = re.compile(r"[{};]|\bclass\s+(\w+)")
+CS_TOKENS = re.compile(r"[{};]|\bclass\s+(\w+)")
 CS_NAMESPACE = re.compile(r"\bnamespace\s+([\w.]+)")
 
 
-def cs_classes_premier_niveau(source):
+def cs_top_level_classes(source):
     """Classes de PREMIER NIVEAU du code soumis, dans l'ordre, sans doublon. PURE (testee).
 
     Premier niveau = enfermee seulement dans des `namespace`. Une classe IMBRIQUEE n'est pas
     visible sous son nom depuis le serveur (`typeof(Rect)` ne compilait pas), et le code
     soumis ne compilait plus."""
-    texte = source or ""
-    noms, pile, segment = [], [], 0
-    for m in CS_JETONS.finditer(texte):
+    src_text = source or ""
+    idents, stack, segment = [], [], 0
+    for m in CS_TOKENS.finditer(src_text):
         if m.group(1):
-            if all(pile) and m.group(1) not in noms:
-                noms.append(m.group(1))
+            if all(stack) and m.group(1) not in idents:
+                idents.append(m.group(1))
             continue
         if m.group(0) == "{":
-            pile.append(bool(re.match(r"\s*namespace\s+[\w.]+\s*$", texte[segment:m.start()])))
-        elif m.group(0) == "}" and pile:
-            pile.pop()
+            stack.append(bool(re.match(r"\s*namespace\s+[\w.]+\s*$", src_text[segment:m.start()])))
+        elif m.group(0) == "}" and stack:
+            stack.pop()
         segment = m.end()
-    return noms
+    return idents
 
 
 def cs_namespaces(source):
     """Espaces de noms declares (bloc ou fichier) : le serveur les importe. PURE (testee)."""
-    vus = []
-    for nom in CS_NAMESPACE.findall(source or ""):
-        if nom not in vus:
-            vus.append(nom)
-    return vus
+    seen_names = []
+    for ident in CS_NAMESPACE.findall(source or ""):
+        if ident not in seen_names:
+            seen_names.append(ident)
+    return seen_names
 
 
-def cs_student_class(source, harnais=""):
+def cs_student_class(source, harness=""):
     """Classe que le harnais appellera. PURE (testee).
 
     La PREMIERE classe ne l'est pas forcement : une classe d'aide declaree avant Solution
     recevait les bouchons, et `Solution.F()` du harnais ne compilait plus. On prend la premiere
     classe de premier niveau que le harnais NOMME, sinon Solution, sinon la premiere."""
-    classes = cs_classes_premier_niveau(source)
-    nu = cs_sans_commentaires(harnais or "")
-    for nom in classes:
-        if re.search(r"\b%s\b" % re.escape(nom), nu):
-            return nom
+    classes = cs_top_level_classes(source)
+    bare = cs_strip_comments(harness or "")
+    for ident in classes:
+        if re.search(r"\b%s\b" % re.escape(ident), bare):
+            return ident
     if "Solution" in classes:
         return "Solution"
     return classes[0] if classes else "Solution"
 
 
-def cs_student_classes(source, harnais=""):
+def cs_student_classes(source, harness=""):
     """Classes de PREMIER NIVEAU, la principale d'abord. PURE (testee).
 
     Le serveur doit chercher une statique dans le même périmètre que l'extraction
     (`cs_signatures`, toute la source) et que le bouchon, qui aplatit ces statiques dans la
     classe principale."""
-    principale = cs_student_class(source, harnais)
-    return [principale] + [n for n in cs_classes_premier_niveau(source) if n != principale]
+    main_class = cs_student_class(source, harness)
+    return [main_class] + [n for n in cs_top_level_classes(source) if n != main_class]
 
 
 def grader_uid():
@@ -3817,19 +3817,19 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
     procs = []
     try:
         g_err, s_err = open_output(g_err_path), open_output(s_err_path)
-        noteur = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
+        grader_dir = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
                                   stderr=g_err, preexec_fn=demote_grader)
-        procs.append(noteur)
-        etudiant = subprocess.Popen(student_cmd, cwd=cwd, env=s_env, stdin=req_r, stdout=rep_w,
+        procs.append(grader_dir)
+        student_side = subprocess.Popen(student_cmd, cwd=cwd, env=s_env, stdin=req_r, stdout=rep_w,
                                     stderr=s_err, preexec_fn=demote_student)
-        procs.append(etudiant)
+        procs.append(student_side)
         for fd in (req_r, req_w, rep_r, rep_w):
             os.close(fd)            # le parent lâche les quatre extrémités : EOF se propage
-        expire = False
+        expired = False
         try:
-            code = noteur.wait(timeout=timeout_s)
+            code = grader_dir.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            code, expire = None, True
+            code, expired = None, True
         for proc in procs:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -3840,24 +3840,24 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
             except subprocess.TimeoutExpired:
                 pass
         kill_student_survivors()
-        purge_partages()
-        return code, expire, read_capped(g_err_path), read_capped(s_err_path)
+        purge_shared_dirs()
+        return code, expired, read_capped(g_err_path), read_capped(s_err_path)
     except OSError as e:
         for fd in (req_r, req_w, rep_r, rep_w):
             try:
                 os.close(fd)
             except OSError:
                 pass
-        ETAT_SORTIE.perdue = True
-        event("espace_sature", case=ETAT_SORTIE.case, detail="lancement du couple impossible : %r" % e)
+        EXIT_STATE.lost = True
+        event("espace_sature", case=EXIT_STATE.case, detail="lancement du couple impossible : %r" % e)
         return None, False, "", ""
     finally:
-        for flux in (g_err, s_err):
-            if flux is not None:
+        for stream in (g_err, s_err):
+            if stream is not None:
                 try:
-                    flux.close()
+                    stream.close()
                 except OSError:
-                    ETAT_SORTIE.perdue = True
+                    EXIT_STATE.lost = True
 
 
 def run_java_rpc(case_dir, env, timeout_s, case_index):
@@ -3868,37 +3868,37 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     Verdict = le nonce est présent sur le stderr du noteur. L'étudiant ne peut pas le produire :
     il n'est ni dans son processus, ni dans ses fichiers, ni dans sa mémoire."""
     src = os.path.join(case_dir, "src")
-    etu_src = os.path.join(case_dir, "etu_src")
-    etu_classes = os.path.join(case_dir, "etu_classes")
-    not_src = os.path.join(case_dir, "not_src")
-    not_classes = os.path.join(case_dir, "not_classes")
-    for d in (etu_src, etu_classes, not_src, not_classes):
+    student_src = os.path.join(case_dir, "etu_src")
+    student_classes = os.path.join(case_dir, "etu_classes")
+    grader_src = os.path.join(case_dir, "not_src")
+    grader_classes = os.path.join(case_dir, "not_classes")
+    for d in (student_src, student_classes, grader_src, grader_classes):
         os.makedirs(d, exist_ok=True)
     # Le dossier du NOTEUR est ferme des sa naissance, et la compilation ETUDIANTE tourne sous
     # l'UID etudiant dans des dossiers a lui — meme regime que les quatre langages a inclusion
     # textuelle, pour un seul invariant au lieu de six.
-    os.chmod(not_src, 0o700)
-    os.chmod(not_classes, 0o700)
-    verrouille_src(case_dir)
-    chantier = chantier_etudiant(case_dir)
-    for d in (etu_src, etu_classes):
+    os.chmod(grader_src, 0o700)
+    os.chmod(grader_classes, 0o700)
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    for d in (student_src, student_classes):
         os.chown(d, STUDENT_UID, STUDENT_GID)
         os.chmod(d, 0o700)
 
     # 1. Le code étudiant, SEUL. Son fichier harnais n'est même pas copié ici.
     student_file = None
-    for nom in sorted(os.listdir(src)):
-        if not nom.endswith(".java") or nom.startswith("Moodit"):
+    for ident in sorted(os.listdir(src)):
+        if not ident.endswith(".java") or ident.startswith("Moodit"):
             continue
-        with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
-            contenu = f.read()
-        if "__MOODIT_HARNAIS__" in contenu:
+        with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
+            body_text = f.read()
+        if "__MOODIT_HARNAIS__" in body_text:
             continue                      # le harnais du prof ne suit JAMAIS l'etudiant
-        student_file = os.path.join(etu_src, nom)
+        student_file = os.path.join(student_src, ident)
         with open(student_file, "w", encoding="utf-8") as f:
-            f.write(contenu)
-        fixe_droits(student_file, STUDENT_UID, STUDENT_GID, 0o600)
-        student_contenu = contenu
+            f.write(body_text)
+        set_owner_mode(student_file, STUDENT_UID, STUDENT_GID, 0o600)
+        student_content = body_text
     if student_file is None:
         return None, "Aucun fichier de code soumis"
     # Un `package ...;` fait compiler la classe dans un SOUS-DOSSIER : la decouverte plate des
@@ -3906,88 +3906,88 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # exploitable » — un 0 avec un message qui ne designe pas la cause. On le DIT, au lieu de
     # rethreader le nom qualifie dans tout le pipeline (risque de recreer le defaut qu on ferme).
     # Source BLANCHIE : un `package` en commentaire ou chaine ne declenche rien.
-    if PACKAGE_JAVA.search(code_blanchi(student_contenu)):
+    if PACKAGE_JAVA.search(blank_code(student_content)):
         return None, ("Retire la ligne « package ... ; » en tete du fichier : la notation "
                       "attend la classe dans le paquet par defaut. (Le bouton « Executer » "
                       "l accepte, pas la notation.)")
-    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", etu_classes, student_file],
-                            case_dir, etu_build_env(chantier), COMPILE_TIMEOUT_S,
+    code, expired = run_proc(["javac", "-encoding", "UTF-8", "-d", student_classes, student_file],
+                            case_dir, student_build_env(build_area), COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
                             preexec_student_compile)
-    if expire or code != 0:
+    if expired or code != 0:
         return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
 
     # 2. Signatures, lues sur les CLASSES compilées — le prof n'a rien à déclarer. On lit AUSSI
     #    les classes imbriquées (Outer$Inner), pour proxifier les objets : le harnais écrit
     #    `new Solution.Rectangle(3, 4).aire()` et l'objet vit, lui, chez l'étudiant.
-    classe = os.path.basename(student_file)[:-len(".java")]
-    binaires = sorted(nom[:-len(".class")] for nom in os.listdir(etu_classes)
-                      if nom.endswith(".class") and not nom.startswith("Moodit"))
-    code, expire = run_proc(["javap", "-p", "-cp", etu_classes] + binaires,
+    klass = os.path.basename(student_file)[:-len(".java")]
+    binary_names = sorted(ident[:-len(".class")] for ident in os.listdir(student_classes)
+                      if ident.endswith(".class") and not ident.startswith("Moodit"))
+    code, expired = run_proc(["javap", "-p", "-cp", student_classes] + binary_names,
                             case_dir, env, LIST_TIMEOUT_S,
                             os.path.join(case_dir, "javap.out"), os.path.join(case_dir, "javap.err"),
                             preexec_compile)
     javap = read_capped(os.path.join(case_dir, "javap.out"))
-    methodes = java_signatures(javap)
+    method_list = java_signatures(javap)
     # Une déclaration de classe par bloc : on les sépare pour lire l'API objet de chacune.
-    objets = []
-    soi_ctors, soi_instance = (), ()
-    for bloc in re.split(r"(?=^Compiled from )", javap, flags=re.M):
-        nom_source, ctors, instance = java_class_api(bloc)
-        if not nom_source or not (ctors or instance):
+    obj_list = []
+    own_ctors, own_instance = (), ()
+    for block in re.split(r"(?=^Compiled from )", javap, flags=re.M):
+        source_name, ctors, instance = java_class_api(block)
+        if not source_name or not (ctors or instance):
             continue
-        if nom_source == classe:
+        if source_name == klass:
             # La classe publique peut ÊTRE l'objet à instancier (question POO dont la classe
             # s'appelle Rectangle) : son bouchon porte alors le constructeur et les méthodes.
-            soi_ctors, soi_instance = ctors, instance
+            own_ctors, own_instance = ctors, instance
         else:
-            objets.append((nom_source, ctors, instance))
-    if expire or code != 0 or not (methodes or objets or (soi_ctors and soi_instance)):
+            obj_list.append((source_name, ctors, instance))
+    if expired or code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
         return None, ("Aucune méthode statique ni objet exploitable dans la classe "
-                      + classe + " (types acceptés : int, long, double, boolean, String).")
+                      + klass + " (types acceptés : int, long, double, boolean, String).")
 
     # 3. Le NOTEUR : bouchon + harnais du prof + nonce. Aucune ligne de code étudiant.
-    harnais = ""
-    for nom in sorted(os.listdir(src)):
-        if nom.endswith(".java"):
-            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
-                contenu = f.read()
-            if "__MOODIT_HARNAIS__" in contenu:
-                harnais = contenu.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
-    ecrire_prive(os.path.join(not_src, classe + ".java"),
-                 java_stub_source(classe, methodes, objets, soi_ctors, soi_instance))
-    ecrire_prive(os.path.join(not_src, "MooditGrader.java"),
-                 java_grader_source(harnais, TOKENS.get(case_index) or ""))
-    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-d", not_classes,
-                             os.path.join(not_src, classe + ".java"),
-                             os.path.join(not_src, "MooditGrader.java")],
+    harness = ""
+    for ident in sorted(os.listdir(src)):
+        if ident.endswith(".java"):
+            with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
+                body_text = f.read()
+            if "__MOODIT_HARNAIS__" in body_text:
+                harness = body_text.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
+    write_private(os.path.join(grader_src, klass + ".java"),
+                 java_stub_source(klass, method_list, obj_list, own_ctors, own_instance))
+    write_private(os.path.join(grader_src, "MooditGrader.java"),
+                 java_grader_source(harness, TOKENS.get(case_index) or ""))
+    code, expired = run_proc(["javac", "-encoding", "UTF-8", "-d", grader_classes,
+                             os.path.join(grader_src, klass + ".java"),
+                             os.path.join(grader_src, "MooditGrader.java")],
                             case_dir, env, COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "nc.out"), os.path.join(case_dir, "nc.err"),
                             preexec_compile)
-    if expire or code != 0:
+    if expired or code != 0:
         return None, ("Le harnais ne compile pas contre la signature du code soumis :\n"
                       + read_capped(os.path.join(case_dir, "nc.err"))[:1500])
 
     # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
-    with open(os.path.join(etu_src, "MooditServer.java"), "w", encoding="utf-8") as f:
-        f.write(java_server_source([classe] + [b for b in binaires if b != classe]))
-    code, expire = run_proc(["javac", "-encoding", "UTF-8", "-cp", etu_classes, "-d", etu_classes,
-                             os.path.join(etu_src, "MooditServer.java")],
+    with open(os.path.join(student_src, "MooditServer.java"), "w", encoding="utf-8") as f:
+        f.write(java_server_source([klass] + [b for b in binary_names if b != klass]))
+    code, expired = run_proc(["javac", "-encoding", "UTF-8", "-cp", student_classes, "-d", student_classes,
+                             os.path.join(student_src, "MooditServer.java")],
                             case_dir, env, COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "sc.out"), os.path.join(case_dir, "sc.err"),
                             preexec_compile)
-    if expire or code != 0:
+    if expired or code != 0:
         return None, "Erreur interne du noteur (serveur RPC)"
 
     # 5. CLOISONNEMENT : chacun chez soi, 700. L'étudiant ne peut pas lire le noteur (ni son
     #    binaire, ni sa source, ni — UID distinct — sa mémoire) ; le harnais du prof est hors
     #    d'atteinte par construction.
     lock_sources(src)
-    for chemin in (not_src, not_classes):
-        fixe_droits_arbre(chemin, grader_uid(), grader_uid(), 0o700, 0o700)
+    for fpath in (grader_src, grader_classes):
+        set_owner_mode_tree(fpath, grader_uid(), grader_uid(), 0o700, 0o700)
     # etu_classes a ete rempli par la compilation ETUDIANTE : aucun lien n'y est suivi.
-    for chemin in (etu_src, etu_classes):
-        fixe_droits_arbre(chemin, STUDENT_UID, STUDENT_GID, 0o700, 0o700)
+    for fpath in (student_src, student_classes):
+        set_owner_mode_tree(fpath, STUDENT_UID, STUDENT_GID, 0o700, 0o700)
     prep_run(case_dir, src)
 
     # 6. Un HOME et un tmp PAR PROCESSUS, du bon propriétaire : une JVM sans tmpdir inscriptible
@@ -3996,28 +3996,28 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     work = os.path.join(case_dir, "work")
     os.makedirs(work, exist_ok=True)
     os.chmod(work, 0o755)
-    etu_tmp = student_dir(work, "tmp")
-    etu_home = student_dir(work, "home")
-    not_tmp = os.path.join(work, "not_tmp")
-    not_home = os.path.join(work, "not_home")
-    for chemin in (not_tmp, not_home):
-        os.makedirs(chemin, exist_ok=True)
-        os.chown(chemin, grader_uid(), grader_uid())
-        os.chmod(chemin, 0o700)
-    g_env = dict(env, HOME=not_home, TMPDIR=not_tmp)
-    s_env = dict(env, HOME=etu_home, TMPDIR=etu_tmp)
+    student_tmp = student_dir(work, "tmp")
+    student_home = student_dir(work, "home")
+    grader_tmp = os.path.join(work, "not_tmp")
+    grader_home = os.path.join(work, "not_home")
+    for fpath in (grader_tmp, grader_home):
+        os.makedirs(fpath, exist_ok=True)
+        os.chown(fpath, grader_uid(), grader_uid())
+        os.chmod(fpath, 0o700)
+    g_env = dict(env, HOME=grader_home, TMPDIR=grader_tmp)
+    s_env = dict(env, HOME=student_home, TMPDIR=student_tmp)
 
     # 7. Les deux processus, tubes croisés.
-    code, expire, g_err, s_err = run_pair(
+    code, expired, g_err, s_err = run_pair(
         ["java", "-XX:MaxRAMPercentage=35", "--illegal-native-access=deny",
-         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + not_tmp,
-         "-cp", not_classes, "MooditGrader"],
+         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + grader_tmp,
+         "-cp", grader_classes, "MooditGrader"],
         ["java", "-XX:MaxRAMPercentage=35", "--illegal-native-access=deny",
-         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + etu_tmp,
-         "-cp", etu_classes, "MooditServer"],
+         "--sun-misc-unsafe-memory-access=deny", "-Djava.io.tmpdir=" + student_tmp,
+         "-cp", student_classes, "MooditServer"],
         case_dir, g_env, s_env, timeout_s,
         os.path.join(case_dir, "grader.err"), os.path.join(case_dir, "student.err"))
-    if expire:
+    if expired:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
 
     # Même verdict que le chemin commun : le message du NOTEUR d'abord — c'est le harnais du
@@ -4026,8 +4026,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
     # accuser de falsification une soumission dont un vrai cas avait reussi.
-    tue = noteur_tue(code, passed)
-    return CaseOutcome(passed, detail, ran=True, killed=tue), None
+    grader_dead = grader_killed(code, passed)
+    return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
 
 def run_csharp_rpc(case_dir, env, timeout_s, case_index):
@@ -4037,62 +4037,62 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     AILLEURS : il n'y a plus rien à détourner ni à inspecter dans le processus de l'étudiant."""
     src = os.path.join(case_dir, "src")
     student_source = ""
-    for nom in sorted(os.listdir(src)):
-        if nom == "solution.cs":
-            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+    for ident in sorted(os.listdir(src)):
+        if ident == "solution.cs":
+            with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
     # L extraction lit la source DEPOUILLEE (commentaires et chaines blanchis) : un `class X`
     # ou une methode en commentaire leurrait le choix de la classe principale, la liste des
     # typeof du serveur et les bouchons. Le fichier depose, lui, reste l original.
-    extraction = cs_types_canoniques(cs_sans_commentaires(student_source))
-    methodes = cs_signatures(extraction)
-    harnais = harness_rpc_body(case_dir) or ""
-    classe = cs_student_class(extraction, harnais)
-    ctors, instance = cs_object_api(extraction, classe)
+    extraction = cs_canonical_types(cs_strip_comments(student_source))
+    method_list = cs_signatures(extraction)
+    harness = harness_rpc_body(case_dir) or ""
+    klass = cs_student_class(extraction, harness)
+    ctors, instance = cs_object_api(extraction, klass)
     # Une question POO n'a AUCUNE méthode statique : son API, c'est le constructeur et les
     # méthodes d'instance. Exiger une statique refusait ces questions (dont celles de la démo).
-    if not (methodes or (ctors and instance)):
+    if not (method_list or (ctors and instance)):
         return None, ("Aucune méthode exploitable dans le code soumis : ni méthode statique, "
                       "ni constructeur avec méthode d'instance (types acceptés : int, long, "
                       "double, bool, string).")
-    harnais = harness_rpc_body(case_dir) or ""
+    harness = harness_rpc_body(case_dir) or ""
 
-    verrouille_src(case_dir)
-    chantier = chantier_etudiant(case_dir)
-    etu_src = os.path.join(chantier, "serveur.cs")
-    not_src = os.path.join(case_dir, "noteur.cs")
-    etu_copie = os.path.join(chantier, "solution_etu.cs")
-    with open(etu_copie, "w", encoding="utf-8") as f:
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    student_src = os.path.join(build_area, "serveur.cs")
+    grader_src = os.path.join(case_dir, "noteur.cs")
+    student_copy = os.path.join(build_area, "solution_etu.cs")
+    with open(student_copy, "w", encoding="utf-8") as f:
         f.write(student_source)
-    with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(cs_server_source(cs_student_classes(extraction, harnais),
+    with open(student_src, "w", encoding="utf-8") as f:
+        f.write(cs_server_source(cs_student_classes(extraction, harness),
                                  cs_namespaces(extraction)))
-    for chemin in (etu_copie, etu_src):
-        fixe_droits(chemin, STUDENT_UID, STUDENT_GID, 0o600)
-    ecrire_prive(not_src, cs_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
-                                           classe, ctors, instance))
-    bin_etu = os.path.join(chantier, "etu.exe")
-    bin_not = os.path.join(case_dir, "noteur.exe")
+    for fpath in (student_copy, student_src):
+        set_owner_mode(fpath, STUDENT_UID, STUDENT_GID, 0o600)
+    write_private(grader_src, cs_grader_source(method_list, harness, TOKENS.get(case_index) or "",
+                                           klass, ctors, instance))
+    student_bin = os.path.join(build_area, "etu.exe")
+    grader_bin = os.path.join(case_dir, "noteur.exe")
     # C# n'a pas d'inclusion textuelle a la compilation, mais le serveur est compile AVEC le
     # code soumis : meme regime que les autres — sous l'UID etudiant, dans son chantier.
-    for cmd, etiquette, cwd_c, env_c, prex in (
-            (["mcs", "-main:MooditServer", "-out:" + bin_etu, etu_src, etu_copie],
-             "code soumis", chantier, etu_build_env(chantier), preexec_student_compile),
-            (["mcs", "-main:MooditGrader", "-out:" + bin_not, not_src],
+    for cmd, label, cwd_c, env_c, preexec_c in (
+            (["mcs", "-main:MooditServer", "-out:" + student_bin, student_src, student_copy],
+             "code soumis", build_area, student_build_env(build_area), preexec_student_compile),
+            (["mcs", "-main:MooditGrader", "-out:" + grader_bin, grader_src],
              "harnais", case_dir, env, preexec_compile)):
-        code, expire = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S,
+        code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                prex)
-        if expire or code != 0:
+                                preexec_c)
+        if expired or code != 0:
             detail = (read_capped(os.path.join(case_dir, "cc.err"))
                       or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
-            if etiquette == "harnais":
+            if label == "harnais":
                 return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
-    fixe_droits(etu_copie, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
+    set_owner_mode(student_copy, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
-                           not_src, bin_not, etu_src, bin_etu,
-                           grader_cmd=["mono", bin_not], student_cmd=["mono", bin_etu])
+                           grader_src, grader_bin, student_src, student_bin,
+                           grader_cmd=["mono", grader_bin], student_cmd=["mono", student_bin])
 
 
 def run_rust_rpc(case_dir, env, timeout_s, case_index):
@@ -4102,53 +4102,53 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
     rien à inclure, et il n'y a plus de nonce dans ce processus."""
     src = os.path.join(case_dir, "src")
     student_source = ""
-    for nom in sorted(os.listdir(src)):
-        if nom == "solution.rs":
-            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+    for ident in sorted(os.listdir(src)):
+        if ident == "solution.rs":
+            with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    extraction = code_blanchi(student_source, rust=True)
-    methodes = rust_signatures(extraction)
-    objets = rust_object_api(extraction)
+    extraction = blank_code(student_source, rust=True)
+    method_list = rust_signatures(extraction)
+    obj_list = rust_object_api(extraction)
     # Source NETTOYEE, comme les signatures : lue brute, une virgule ou une fin de ligne
     # dans un commentaire de champ faisait perdre des champs, et le litteral du harnais
     # ne compilait plus.
-    champs = rust_capture_fields(extraction)
-    if not (methodes or objets):
+    field_list = rust_capture_fields(extraction)
+    if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : i32, "
                       "i64, f64, bool, String).")
-    harnais = harness_rpc_body(case_dir) or ""
+    harness = harness_rpc_body(case_dir) or ""
 
-    verrouille_src(case_dir)
-    chantier = chantier_etudiant(case_dir)
-    etu_src = os.path.join(chantier, "etu.rs")
-    not_src = os.path.join(case_dir, "noteur.rs")
-    with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(rust_server_source(methodes, student_source, objets, champs))
-    fixe_droits(etu_src, STUDENT_UID, STUDENT_GID, 0o600)
-    ecrire_prive(not_src,
-                 rust_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
-    bin_etu = os.path.join(chantier, "etu_bin")
-    bin_not = os.path.join(case_dir, "noteur_bin")
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    student_src = os.path.join(build_area, "etu.rs")
+    grader_src = os.path.join(case_dir, "noteur.rs")
+    with open(student_src, "w", encoding="utf-8") as f:
+        f.write(rust_server_source(method_list, student_source, obj_list, field_list))
+    set_owner_mode(student_src, STUDENT_UID, STUDENT_GID, 0o600)
+    write_private(grader_src,
+                 rust_grader_source(method_list, harness, TOKENS.get(case_index) or "", obj_list, field_list))
+    student_bin = os.path.join(build_area, "etu_bin")
+    grader_bin = os.path.join(case_dir, "noteur_bin")
     # Compilation etudiante sous SON UID, dans SON chantier : `include_str!("noteur.rs")`
     # embarquait harnais et nonce quand rustc tournait en root a cote du noteur.
-    for source, sortie, etiquette, cwd_c, env_c, prex in (
-            (etu_src, bin_etu, "code soumis", chantier, etu_build_env(chantier),
+    for source, out_value, label, cwd_c, env_c, preexec_c in (
+            (student_src, student_bin, "code soumis", build_area, student_build_env(build_area),
              preexec_student_compile),
-            (not_src, bin_not, "harnais", case_dir, env, preexec_compile)):
-        code, expire = run_proc(["rustc", "-O", "--edition", "2021", source, "-o", sortie],
+            (grader_src, grader_bin, "harnais", case_dir, env, preexec_compile)):
+        code, expired = run_proc(["rustc", "-O", "--edition", "2021", source, "-o", out_value],
                                 cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                prex)
-        if expire or code != 0:
+                                preexec_c)
+        if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
-            if etiquette == "harnais":
+            if label == "harnais":
                 return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
-                           not_src, bin_not, etu_src, bin_etu)
+                           grader_src, grader_bin, student_src, student_bin)
 
 
-def rpc_verdict(jeton, g_err, s_err):
+def rpc_verdict(tok, g_err, s_err):
     """Verdict d'un cas noté par le COUPLE noteur/étudiant. FONCTION PURE (testée).
 
     Le nonce du cas n'est détenu que par le noteur, qui ne l'émet sur SON stderr que si le harnais
@@ -4160,8 +4160,8 @@ def rpc_verdict(jeton, g_err, s_err):
     # texte vient de l etudiant — en sous-chaine, toute fuite du nonce devenait un « reussi »
     # des que ce texte le contenait. Le noteur emet le nonce encadre de sauts de ligne, et les
     # relais remplacent \n/\r par des espaces : un texte relaye ne peut pas fabriquer de ligne.
-    passed = bool(jeton) and any(
-        ligne.rstrip(chr(13)) == jeton for ligne in (g_err or "").split(chr(10)))
+    passed = bool(tok) and any(
+        src_line.rstrip(chr(13)) == tok for src_line in (g_err or "").split(chr(10)))
     if passed:
         return True, None
     detail = (first_lines(g_err or "", r"^\[MOODIT\]")
@@ -4170,42 +4170,42 @@ def rpc_verdict(jeton, g_err, s_err):
     return False, detail
 
 
-def finish_rpc_pair(case_dir, env, timeout_s, case_index, not_src, bin_not, etu_src, bin_etu,
+def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin, student_src, student_bin,
                     grader_cmd=None, student_cmd=None):
     """Cloisonne les deux programmes, les lance en couple, rend le verdict.
 
     Partie COMMUNE à C/C++ et Rust (et à tout langage dont le noteur est un binaire) : chacun
     chez soi en 700 sous son UID, puis le nonce du noteur fait le verdict."""
     lock_sources(os.path.join(case_dir, "src"))
-    for chemin, uid, mode in ((not_src, grader_uid(), 0o600), (bin_not, grader_uid(), 0o500),
-                              (etu_src, STUDENT_UID, 0o600), (bin_etu, STUDENT_UID, 0o500)):
-        if os.path.isdir(chemin) and not os.path.islink(chemin):
+    for fpath, uid, mode in ((grader_src, grader_uid(), 0o600), (grader_bin, grader_uid(), 0o500),
+                              (student_src, STUDENT_UID, 0o600), (student_bin, STUDENT_UID, 0o500)):
+        if os.path.isdir(fpath) and not os.path.islink(fpath):
             # Go travaille par MODULE : on cloisonne le dossier entier, récursivement.
-            fixe_droits_arbre(chemin, uid, uid, 0o600, 0o700)
+            set_owner_mode_tree(fpath, uid, uid, 0o600, 0o700)
             continue
         # Sans suivre de lien : etu_src et bin_etu vivent dans le chantier de l'etudiant.
-        fixe_droits(chemin, uid, uid, mode)
+        set_owner_mode(fpath, uid, uid, mode)
     prep_run(case_dir, os.path.join(case_dir, "src"))
     work = os.path.join(case_dir, "work")
     os.makedirs(work, exist_ok=True)
     os.chmod(work, 0o755)
-    etu_tmp = student_dir(work, "tmp")
-    not_tmp = os.path.join(work, "not_tmp")
-    os.makedirs(not_tmp, exist_ok=True)
-    os.chown(not_tmp, grader_uid(), grader_uid())
-    os.chmod(not_tmp, 0o700)
-    code, expire, g_err, s_err = run_pair(
-        grader_cmd or [bin_not], student_cmd or [bin_etu], case_dir,
-        dict(env, HOME=not_tmp, TMPDIR=not_tmp), dict(env, HOME=etu_tmp, TMPDIR=etu_tmp),
+    student_tmp = student_dir(work, "tmp")
+    grader_tmp = os.path.join(work, "not_tmp")
+    os.makedirs(grader_tmp, exist_ok=True)
+    os.chown(grader_tmp, grader_uid(), grader_uid())
+    os.chmod(grader_tmp, 0o700)
+    code, expired, g_err, s_err = run_pair(
+        grader_cmd or [grader_bin], student_cmd or [student_bin], case_dir,
+        dict(env, HOME=grader_tmp, TMPDIR=grader_tmp), dict(env, HOME=student_tmp, TMPDIR=student_tmp),
         timeout_s, os.path.join(case_dir, "grader.err"), os.path.join(case_dir, "student.err"))
-    if expire:
+    if expired:
         return CaseOutcome(False, "Interrompu (temps limite dépassé)", ran=True, timed_out=True), None
     passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
     # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
     # accuser de falsification une soumission dont un vrai cas avait reussi.
-    tue = noteur_tue(code, passed)
-    return CaseOutcome(passed, detail, ran=True, killed=tue), None
+    grader_dead = grader_killed(code, passed)
+    return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
 
 def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
@@ -4216,116 +4216,116 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     processus — c'est le résiduel in-process de C/C++ qui disparaît, pas qui se détecte."""
     src = os.path.join(case_dir, "src")
     student_source = ""
-    for nom in sorted(os.listdir(src)):
-        if nom.startswith("solution.") :
-            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
+    for ident in sorted(os.listdir(src)):
+        if ident.startswith("solution.") :
+            with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    extraction = code_blanchi(student_source)
-    objets = cpp_object_api(extraction) if ext == "cpp" else []
-    methodes = c_signatures(extraction, cpp=(ext == "cpp"))
-    if not (methodes or objets):
+    extraction = blank_code(student_source)
+    obj_list = cpp_object_api(extraction) if ext == "cpp" else []
+    method_list = c_signatures(extraction, cpp=(ext == "cpp"))
+    if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
-    harnais = harness_rpc_body(case_dir) or ""
+    harness = harness_rpc_body(case_dir) or ""
 
-    verrouille_src(case_dir)
-    chantier = chantier_etudiant(case_dir)
-    etu_src = os.path.join(chantier, "etu." + ext)
-    not_src = os.path.join(case_dir, "noteur." + ext)
-    with open(etu_src, "w", encoding="utf-8") as f:
-        f.write(c_server_source(methodes, student_source, cpp=(ext == "cpp"), objets=objets))
-    fixe_droits(etu_src, STUDENT_UID, STUDENT_GID, 0o600)
-    ecrire_prive(not_src, c_grader_source(methodes, harnais, TOKENS.get(case_index) or "",
-                                          cpp=(ext == "cpp"), objets=objets))
-    bin_etu = os.path.join(chantier, "etu_bin")
-    bin_not = os.path.join(case_dir, "noteur_bin")
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    student_src = os.path.join(build_area, "etu." + ext)
+    grader_src = os.path.join(case_dir, "noteur." + ext)
+    with open(student_src, "w", encoding="utf-8") as f:
+        f.write(c_server_source(method_list, student_source, cpp=(ext == "cpp"), obj_list=obj_list))
+    set_owner_mode(student_src, STUDENT_UID, STUDENT_GID, 0o600)
+    write_private(grader_src, c_grader_source(method_list, harness, TOKENS.get(case_index) or "",
+                                          cpp=(ext == "cpp"), obj_list=obj_list))
+    student_bin = os.path.join(build_area, "etu_bin")
+    grader_bin = os.path.join(case_dir, "noteur_bin")
     # Le code soumis est compile SOUS L'UID ETUDIANT, dans un chantier qui ne contient que
     # lui : compile par root a cote du noteur, un `.incbin`/`#include` embarquait harnais et
     # nonce dans le binaire note. Le noteur, lui, reste compile par root — aucune ligne
     # etudiante n'y entre.
-    for source, sortie, etiquette, cwd_c, env_c, prex in (
-            (etu_src, bin_etu, "code soumis", chantier, etu_build_env(chantier),
+    for source, out_value, label, cwd_c, env_c, preexec_c in (
+            (student_src, student_bin, "code soumis", build_area, student_build_env(build_area),
              preexec_student_compile),
-            (not_src, bin_not, "harnais", case_dir, env, preexec_compile)):
+            (grader_src, grader_bin, "harnais", case_dir, env, preexec_compile)):
         # -fno-builtin : `abs`, `sqrt`… sont des fonctions INTEGREES de gcc, calculees a la
         # compilation (abs(-5) devient 5) sans appeler la fonction notee du meme nom — une
         # reponse fausse passait. Les deux programmes, pour que chacun appelle la vraie.
-        code, expire = run_proc([compiler, std, "-O1", "-fno-builtin", source, "-o", sortie, "-lm"],
+        code, expired = run_proc([compiler, std, "-O1", "-fno-builtin", source, "-o", out_value, "-lm"],
                                 cwd_c, env_c, COMPILE_TIMEOUT_S,
                                 os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                prex)
-        if expire or code != 0:
+                                preexec_c)
+        if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
-            if etiquette == "harnais":
+            if label == "harnais":
                 return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
-                           not_src, bin_not, etu_src, bin_etu)
+                           grader_src, grader_bin, student_src, student_bin)
 
 
 def run_go_rpc(case_dir, env, timeout_s, case_index):
     """Notation NON FALSIFIABLE d'un cas Go : harnais booléen, deux binaires, deux UID."""
     src = os.path.join(case_dir, "src")
-    etu = os.path.join(case_dir, "etu")
-    noteur = os.path.join(case_dir, "noteur")
-    for d in (etu, noteur):
+    student_mod = os.path.join(case_dir, "etu")
+    grader_dir = os.path.join(case_dir, "noteur")
+    for d in (student_mod, grader_dir):
         os.makedirs(d, exist_ok=True)
 
     student_source = ""
-    for nom in sorted(os.listdir(src)):
-        if nom.endswith(".go") and nom != "go.mod":
-            with open(os.path.join(src, nom), "r", encoding="utf-8", errors="replace") as f:
-                contenu = f.read()
-            if "__MOODIT_HARNAIS__" not in contenu and "_test.go" not in nom:
-                student_source = contenu
-    extraction = code_blanchi(student_source, backticks=True)
-    methodes = go_signatures(extraction)
-    objets = go_object_api(extraction)
+    for ident in sorted(os.listdir(src)):
+        if ident.endswith(".go") and ident != "go.mod":
+            with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
+                body_text = f.read()
+            if "__MOODIT_HARNAIS__" not in body_text and "_test.go" not in ident:
+                student_source = body_text
+    extraction = blank_code(student_source, backticks=True)
+    method_list = go_signatures(extraction)
+    obj_list = go_object_api(extraction)
     # Source NETTOYEE : commentaires et etiquettes `json:"x"` effaces, comme pour les
     # signatures — lue brute, une etiquette faisait perdre toute la structure.
-    champs = go_capture_fields(extraction)
-    if not (methodes or objets):
+    field_list = go_capture_fields(extraction)
+    if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
                       "int64, float64, bool, string).")
-    harnais = harness_rpc_body(case_dir) or ""
+    harness = harness_rpc_body(case_dir) or ""
 
     # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI
     # présent dans l'arborescence que son processus peut lire.
-    with open(os.path.join(etu, "go.mod"), "w", encoding="utf-8") as f:
+    with open(os.path.join(student_mod, "go.mod"), "w", encoding="utf-8") as f:
         f.write("module moodit_etu\n\ngo 1.23\n")
-    with open(os.path.join(etu, "solution.go"), "w", encoding="utf-8") as f:
+    with open(os.path.join(student_mod, "solution.go"), "w", encoding="utf-8") as f:
         f.write(go_student_without_main(student_source))
-    with open(os.path.join(etu, "serveur.go"), "w", encoding="utf-8") as f:
-        f.write(go_server_source(methodes, objets, champs))
-    ecrire_prive(os.path.join(noteur, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
-    ecrire_prive(os.path.join(noteur, "noteur.go"),
-                 go_grader_source(methodes, harnais, TOKENS.get(case_index) or "", objets, champs))
-    os.chmod(noteur, 0o700)
+    with open(os.path.join(student_mod, "serveur.go"), "w", encoding="utf-8") as f:
+        f.write(go_server_source(method_list, obj_list, field_list))
+    write_private(os.path.join(grader_dir, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
+    write_private(os.path.join(grader_dir, "noteur.go"),
+                 go_grader_source(method_list, harness, TOKENS.get(case_index) or "", obj_list, field_list))
+    os.chmod(grader_dir, 0o700)
 
     # Le module ETUDIANT lui appartient, et son build tourne sous SON UID avec CGO coupe : en
     # root avec cgo actif (la parade du Dockerfile etait perdue par le env= de Popen), un
     # preambule cgo embarquait ../noteur/noteur.go — harnais et nonce — dans le binaire note.
-    verrouille_src(case_dir)
-    chantier = chantier_etudiant(case_dir)
-    chown_arbre(etu, STUDENT_UID, STUDENT_GID)
-    os.chmod(etu, 0o700)
-    bin_etu = os.path.join(etu, "etu_bin")
-    bin_not = os.path.join(case_dir, "noteur_bin")
-    for dossier, sortie, etiquette, env_c, prex in (
-            (etu, bin_etu, "code soumis", etu_build_env(chantier), preexec_student_compile),
-            (noteur, bin_not, "harnais", env, preexec_compile)):
-        code, expire = run_proc(["go", "build", "-o", sortie, "."], dossier, env_c,
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    chown_tree(student_mod, STUDENT_UID, STUDENT_GID)
+    os.chmod(student_mod, 0o700)
+    student_bin = os.path.join(student_mod, "etu_bin")
+    grader_bin = os.path.join(case_dir, "noteur_bin")
+    for directory, out_value, label, env_c, preexec_c in (
+            (student_mod, student_bin, "code soumis", student_build_env(build_area), preexec_student_compile),
+            (grader_dir, grader_bin, "harnais", env, preexec_compile)):
+        code, expired = run_proc(["go", "build", "-o", out_value, "."], directory, env_c,
                                 COMPILE_TIMEOUT_S, os.path.join(case_dir, "cc.out"),
-                                os.path.join(case_dir, "cc.err"), prex)
-        if expire or code != 0:
+                                os.path.join(case_dir, "cc.err"), preexec_c)
+        if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
-            if etiquette == "harnais":
+            if label == "harnais":
                 return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
-                           noteur, bin_not, etu, bin_etu)
+                           grader_dir, grader_bin, student_mod, student_bin)
 
 
 RUNNERS = {
@@ -4361,10 +4361,10 @@ def substitute_placeholders(case_dir, mapping):
 
 
 def execute_case(language, case, timeout_s):
-    # État de capture NEUF pour ce cas (voir EtatSortie : une pompe retardataire du cas
+    # État de capture NEUF pour ce cas (voir ExitState : une pompe retardataire du cas
     # précédent ne doit pas désarmer la détection ici).
-    global ETAT_SORTIE
-    ETAT_SORTIE = EtatSortie(case["index"])
+    global EXIT_STATE
+    EXIT_STATE = ExitState(case["index"])
     case_dir = os.path.join(BOX, "cases", str(case["index"]))
     runner = RUNNERS[language]
     env = base_env(case_dir)
@@ -4375,13 +4375,13 @@ def execute_case(language, case, timeout_s):
     elapsed_ms = int((time.monotonic() - start) * 1000)
     if compile_error is not None:
         outcome = CaseOutcome(False, compile_error, ran=False)
-    if ETAT_SORTIE.tue_par_signal and not outcome.passed:
+    if EXIT_STATE.killed_by_signal and not outcome.passed:
         outcome.killed = True
-    if ETAT_SORTIE.expire and not outcome.passed:
+    if EXIT_STATE.expired and not outcome.passed:
         # Vaut aussi pour une COMPILATION expirée, que les runners rapportent en simple
         # « Échec de compilation » : c'est une cause NON CONCLUANTE, pas un sabotage.
         outcome.timed_out = True
-    if ETAT_SORTIE.perdue and not outcome.passed:
+    if EXIT_STATE.lost and not outcome.passed:
         # Saturation du tmpfs : NON IMPUTABLE, exactement comme une erreur interne. Sans ce
         # marquage, un canari tombé sur une saturation échouait, et canary_verdict concluait
         # « incoherents » → bandeau « falsification probable » et mise à zéro de TOUTE la
@@ -4457,18 +4457,18 @@ def exec_commands(runtime, entry):
 EXEC_JSON_CAP = 2 * EXEC_OUTPUT_CAP + 1024
 
 
-def borne_json(texte, plafond=EXEC_JSON_CAP):
+def bound_json(src_text, ceiling=EXEC_JSON_CAP):
     """Borne la taille ECHAPPEE d'une sortie, telle qu'elle partira dans le JSON. PURE (testee).
 
     read_capped borne les CARACTERES ; mais un caractere de controle s'echappe en six octets
     (\\u0001) : une sortie qui en est pleine faisait six fois le plafond, deux sorties par
     etape, et execution-service (256 Mo de tas en prod) relisait le tout en memoire. Au-dela du
     plafond, on garde la TETE et la QUEUE, comme read_capped : la queue porte les verdicts."""
-    if len(json.dumps(texte, ensure_ascii=False)) <= plafond:
-        return texte
-    garde = max(plafond // 12 - 64, 0)   # pire cas : 6 octets par caractere, tete + queue
-    return (texte[:garde] + "\n… (sortie tronquée au milieu : trop de caractères de contrôle)\n"
-            + (texte[-garde:] if garde else ""))
+    if len(json.dumps(src_text, ensure_ascii=False)) <= ceiling:
+        return src_text
+    keep_chars = max(ceiling // 12 - 64, 0)   # pire cas : 6 octets par caractere, tete + queue
+    return (src_text[:keep_chars] + "\n… (sortie tronquée au milieu : trop de caractères de contrôle)\n"
+            + (src_text[-keep_chars:] if keep_chars else ""))
 
 
 def exec_stage(code, timed_out, out_path, err_path):
@@ -4483,8 +4483,8 @@ def exec_stage(code, timed_out, out_path, err_path):
         except ValueError:
             signal_name = "SIG" + str(-code)
         code = None
-    return {"stdout": borne_json(read_capped(out_path, EXEC_OUTPUT_CAP)),
-            "stderr": borne_json(read_capped(err_path, EXEC_OUTPUT_CAP)),
+    return {"stdout": bound_json(read_capped(out_path, EXEC_OUTPUT_CAP)),
+            "stderr": bound_json(read_capped(err_path, EXEC_OUTPUT_CAP)),
             "code": code, "signal": signal_name}
 
 
@@ -4578,10 +4578,10 @@ def main():
     # UID. (job.json n'existe pas encore ici — il est DEPLACE dans /box par wait_for_files ;
     # son verrouillage se fait donc apres, une fois charge.)
     for _d in ("gocache_etu", "gopath_etu"):
-        _chemin = os.path.join(BOX, _d)
-        os.makedirs(_chemin, exist_ok=True)
-        os.chown(_chemin, STUDENT_UID, STUDENT_GID)
-        os.chmod(_chemin, 0o700)
+        _fpath = os.path.join(BOX, _d)
+        os.makedirs(_fpath, exist_ok=True)
+        os.chown(_fpath, STUDENT_UID, STUDENT_GID)
+        os.chmod(_fpath, 0o700)
     if not wait_for_files():
         print(json.dumps({"v": 1, "error": "fichiers du job non reçus"}))
         return
@@ -4639,7 +4639,7 @@ def main():
     # compris. root lit toujours a travers (il construit chaque noteur), le processus etudiant
     # recoit EACCES. Le verrou par cas reste, en defense en profondeur.
     for case in cases:
-        verrouille_src(os.path.join(BOX, "cases", str(case["index"])))
+        lock_src_dir(os.path.join(BOX, "cases", str(case["index"])))
     order = list(cases)
     rng.shuffle(order)
 
@@ -4696,13 +4696,13 @@ def main():
             # reprendre). Une OSError vient de l'ENVIRONNEMENT — disque, liens, processus — que
             # l'etudiant partage et peut provoquer : en faire un 502 lui offrait un reessai a
             # volonte. Elle reste skipped (aucune accusation de falsification), mais elle note.
-            environnement = cause_exception(e) == "environnement"
+            environmental = exception_cause(e) == "environnement"
             outcome, ms = CaseOutcome(
                 False,
                 ("Notation impossible : espace de travail épuisé ou modifié par le code soumis"
-                 if environnement else "Erreur interne du noteur"),
+                 if environmental else "Erreur interne du noteur"),
                 ran=False, skipped=True,
-                cause="environnement" if environnement else "erreur"), 0
+                cause="environnement" if environmental else "erreur"), 0
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms
@@ -4710,7 +4710,7 @@ def main():
         # groupe tué au timeout — il survivrait au cas et pourrait peser sur (voire tracer,
         # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
         kill_student_survivors()
-        purge_partages()
+        purge_shared_dirs()
         # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
         # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
         # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
@@ -4743,10 +4743,10 @@ def main():
 
     # Un verdict de FALSIFICATION l'emporte : des canaris incoherents ne doivent jamais devenir
     # une tentative a reprendre, meme si un cas a aussi subi une erreur interne.
-    incomplet = job_incomplet(
+    incomplete = job_incomplete(
         canaries, (outcomes[c["index"]] for c in cases if not c.get("canary")))
     print(json.dumps({"v": 1, "results": results, "events": EVENTS, "canaries": canaries,
-                      "incomplet": incomplet},
+                      "incomplet": incomplete},
                      ensure_ascii=False))
 
 

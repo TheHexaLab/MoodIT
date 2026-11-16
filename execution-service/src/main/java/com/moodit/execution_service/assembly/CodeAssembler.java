@@ -528,8 +528,8 @@ public class CodeAssembler {
     }
 
     /** Littéral shell à guillemets simples, sûr pour un texte quelconque. */
-    private static String shellSingleQuote(String texte) {
-        return "'" + texte.replace("'", "'\\''") + "'";
+    private static String shellSingleQuote(String sourceText) {
+        return "'" + sourceText.replace("'", "'\\''") + "'";
     }
 
 

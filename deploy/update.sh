@@ -245,9 +245,9 @@ runner_tag() {
   c="${c:-$1}"
   printf '%s' "${c:0:12}"
 }
-TAG_NOUVEAU="$(runner_tag "$REMOTE")"
-TAG_ANCIEN="$(runner_tag "$LOCAL")"
-export MOODIT_RUNNER_TAG="$TAG_NOUVEAU"
+NEW_RUNNER_TAG="$(runner_tag "$REMOTE")"
+OLD_RUNNER_TAG="$(runner_tag "$LOCAL")"
+export MOODIT_RUNNER_TAG="$NEW_RUNNER_TAG"
 log "Résumé des changements :"
 git --no-pager log --oneline --no-decorate "${LOCAL}..${REMOTE}" 2>/dev/null | head -n 15 | sed 's/^/     /' || true
 
@@ -274,7 +274,7 @@ rollback() {
   git reset --hard "$LOCAL" >/dev/null 2>&1 || true
   # Images runner de l'ANCIENNE version : sans elles, l'ancien service tournerait avec celles
   # du commit refusé. `latest` d'abord (un ancien compose ne lit que lui), puis le tag du commit.
-  export MOODIT_RUNNER_TAG="$TAG_ANCIEN"
+  export MOODIT_RUNNER_TAG="$OLD_RUNNER_TAG"
   MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
     || warn "Rollback : images runner (latest) non reconstruites."
   bash docker/runners/build.sh >>"$LOG" 2>&1 \
@@ -316,7 +316,7 @@ docker image prune -f >/dev/null 2>&1 || true
 # (rollback à la main). Une image encore utilisée par un conteneur n'est pas supprimée.
 docker images --format '{{.Repository}}:{{.Tag}}' | grep '^moodit-runner-' | while read -r image; do
   case "${image##*:}" in
-    latest|"$TAG_NOUVEAU"|"$TAG_ANCIEN") ;;
+    latest|"$NEW_RUNNER_TAG"|"$OLD_RUNNER_TAG") ;;
     *) docker rmi "$image" >/dev/null 2>&1 || true ;;
   esac
 done

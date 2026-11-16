@@ -275,7 +275,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("execTimeoutMs : non positif → null (défaut du sandbox), plafonné à 60 s sinon")
-        void execTimeout_normaliseALEcriture() {
+        void execTimeout_normalizedOnWrite() {
             when(courseRepository.findById(1)).thenReturn(Optional.of(course));
             when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));

@@ -85,7 +85,7 @@ class ExecutionServiceEdgeCasesTest {
     // ── run() : exécution simple ────────────────────────────────────────────────
 
     @Test
-    void run_envoie_le_code_brut_et_renvoie_la_sortie() {
+    void run_sends_raw_code_and_returns_output() {
         when(runner.execute(eq("python"), any(), any(), any()))
                 .thenReturn(new RunnerExec.Result(null, stage("bonjour\n", "", 0, null, null), null));
 
@@ -129,7 +129,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void run_compilation_tuee_est_signalee_comme_interrompue() {
+    void run_killed_compilation_reported_as_interrupted() {
         // Le superviseur rend une compilation tuée SANS code, avec un signal, et sans étape run.
         piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
 
@@ -141,7 +141,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void evaluate_compilation_tuee_echoue_le_cas_avec_un_detail_interrompu() {
+    void evaluate_killed_compilation_fails_case_with_interrupted_detail() {
         piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
 
         List<TestResult> r = service.evaluate(new EvaluateRequest("TypeScript", null, "let x = 1",
@@ -208,7 +208,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void run_erreur_du_runner_est_propagee() {
+    void run_runner_error_is_propagated() {
         when(runner.execute(anyString(), any(), any(), any())).thenThrow(new SandboxException("injoignable"));
 
         assertThatThrownBy(() -> service.run(new RunRequest("Python", null, "")))
@@ -218,7 +218,7 @@ class ExecutionServiceEdgeCasesTest {
     // ── evaluate() : verdict et messages d'échec ────────────────────────────────
 
     @Test
-    void evaluate_transmet_le_runtime_normalise_au_runner() {
+    void evaluate_passes_normalized_runtime_to_runner() {
         pistonRun(f -> stage("", nonceIn(f), 0, null, null));
 
         service.evaluate(new EvaluateRequest("Python", null, "def f(): pass",

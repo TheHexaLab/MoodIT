@@ -76,7 +76,7 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void typescript_nomme_en_ts_et_neutralise_le_typage() {
+    void typescript_named_ts_and_type_checking_disabled() {
         var a = assembler.assemble("TypeScript", "function doubler(n: number): number { return n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_ts");
         assertThat(a.runtime()).isEqualTo("typescript");

@@ -129,7 +129,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
         @org.junit.jupiter.params.provider.MethodSource("ordresMalFormes")
         @DisplayName("Ordre soumis qui n'est pas une permutation des éléments → refusé (400), rien d'enregistré")
-        void ordreMalForme_refuse(String cas, Integer[] ids) {
+        void ordreMalForme_refuse(String caseInput, Integer[] ids) {
             when(quizRepository.findById(4)).thenReturn(Optional.of(orderingQuiz()));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
 

@@ -33,7 +33,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void image_par_runtime_et_rejet_des_inconnus() {
+    void image_per_runtime_and_unknown_rejected() {
         assertThat(runner.imageFor("python")).isEqualTo("moodit-runner-python:latest");
         assertThat(runner.imageFor("javascript")).isEqualTo("moodit-runner-node:latest");
         assertThat(runner.imageFor("typescript")).isEqualTo("moodit-runner-node:latest");
@@ -45,7 +45,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void construit_le_job_entree_premier_fichier_et_stdin() {
+    void builds_job_with_entry_first_file_and_stdin() {
         supervisorReturns("""
                 {"v":1,"compile":null,
                  "run":{"stdout":"ok\\n","stderr":"","code":0,"signal":null}}
@@ -72,7 +72,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void temps_limite_borne_a_60s_et_defaut_3s() {
+    void time_limit_bounded_to_60s_default_3s() {
         supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
         runner.execute("bash", List.of(new RunnerExec.File("main.sh", "x")), null, 999_999);
         verify(sandbox).run(any(), anyMap(), eq(75_000L + 60_000L));
@@ -82,7 +82,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void etape_de_compilation_et_signal_traduits() {
+    void compile_stage_and_signal_mapped() {
         supervisorReturns("""
                 {"v":1,
                  "compile":{"stdout":"","stderr":"erreur de syntaxe","code":2,"signal":null},
@@ -105,7 +105,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void reponse_illisible_ou_erreur_du_superviseur_fail_closed() {
+    void unreadable_response_or_supervisor_error_fails_closed() {
         // Une sortie VIDE ne lève pas chez Jackson 3 (MissingNode) : sans garde, elle rendait
         // Result(null, null) → « Aucune sortie d'exécution », au lieu du 502 d'une panne.
         supervisorReturns("");
@@ -126,7 +126,7 @@ class RunnerExecTest {
     }
 
     @Test
-    void aucun_fichier_est_refuse() {
+    void no_file_is_rejected() {
         assertThatThrownBy(() -> runner.execute("python", List.of(), null, null))
                 .isInstanceOf(SandboxException.class);
         assertThatThrownBy(() -> runner.execute("python", null, null, null))
@@ -134,14 +134,14 @@ class RunnerExecTest {
     }
 
     @Test
-    void alias_de_runtime_normalises_et_images_dediees() {
+    void runtime_aliases_normalized_with_dedicated_images() {
         assertThat(runner.imageFor("csharp")).isEqualTo("moodit-runner-csharp:latest");
         assertThat(runner.imageFor("rust")).isEqualTo("moodit-runner-rust:latest");
         assertThat(runner.imageFor("  JAVA  ")).isEqualTo("moodit-runner-java:latest");
     }
 
     @Test
-    void runtime_null_normalise_dans_le_job() {
+    void null_runtime_normalized_in_job() {
         supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
         assertThatThrownBy(() -> runner.execute(null, List.of(new RunnerExec.File("x", "y"))))
                 .isInstanceOf(RuntimeException.class);

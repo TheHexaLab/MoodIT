@@ -106,7 +106,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Même avec des réglages minuscules, le budget couvre le mur du runner")
-    void readTimeout_plancherDuMurDuRunner() {
+    void readTimeout_runnerWallFloor() {
         // Depuis le runner (#116), chaque unité exec peut légitimement durer jusqu'à son mur
         // (75 s) : des réglages trop bas ne doivent plus pouvoir produire un budget qui
         // abandonne une correction en cours (#216). Un stub « plus lent que le budget » est
@@ -146,7 +146,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Le temps limite de la question entre dans le budget par unité dès qu'il dépasse le défaut")
-    void readTimeout_integreLeTempsLimiteDeLaQuestion() {
+    void readTimeout_includesQuestionTimeLimit() {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
@@ -186,7 +186,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Interprété : le budget est plafonné par celui du serveur, dépassement d'un harnais compris")
-    void readTimeout_plafonneParLeBudgetDuServeur() {
+    void readTimeout_cappedByServerBudget() {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // Symétrique du plafond compilé : le chemin interprété lance un conteneur PAR unité, donc
@@ -211,18 +211,18 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Le budget serveur surchargé est suivi par le miroir client (même variable d'environnement)")
-    void readTimeout_suitLeBudgetServeurSurcharge() {
+    void readTimeout_followsOverriddenServerBudget() {
         // Le budget est lu dans la MÊME variable qu'execution-service (EXEC_INTERPRETED_BUDGET_MS) :
         // un plafond client figé devenait trop COURT dès qu'on relevait le budget serveur, et core
         // abandonnait une correction encore en cours — exactement le bug de #216. Ici 30 min.
-        ExecutionClient relache = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+        ExecutionClient released = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, 15_000, 30 * 60_000);
-        assertThat(relache.readTimeoutMs("Python", 100, null))
+        assertThat(released.readTimeoutMs("Python", 100, null))
                 .isEqualTo(10_000 + 30 * 60_000 + 145_000);
         // Et un budget serveur ABAISSÉ raccourcit le miroir d'autant (5 min).
-        ExecutionClient serre = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+        ExecutionClient tight = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, 15_000, 5 * 60_000);
-        assertThat(serre.readTimeoutMs("Python", 100, null))
+        assertThat(tight.readTimeoutMs("Python", 100, null))
                 .isEqualTo(10_000 + 5 * 60_000 + 145_000);
     }
 
@@ -243,7 +243,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Le temps limite de la question part dans le corps HTTP (timeoutMs), replafonné")
-    void evaluate_envoieLeTimeoutDansLeCorps() throws IOException {
+    void evaluate_sendsTimeoutInBody() throws IOException {
         String url = startStub(200,
                 "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
                         + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 0);
@@ -261,7 +261,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
-    void workUnits_sqlEnDeuxPhases() {
+    void workUnits_sqlInTwoPhases() {
         assertThat(ExecutionClient.workUnits("Python", 3)).isEqualTo(3);
         assertThat(ExecutionClient.workUnits(null, 3)).isEqualTo(3);
         assertThat(ExecutionClient.workUnits("sql", 3)).isEqualTo(6);
