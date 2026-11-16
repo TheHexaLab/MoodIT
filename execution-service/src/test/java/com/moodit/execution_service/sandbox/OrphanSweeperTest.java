@@ -22,6 +22,8 @@ class OrphanSweeperTest {
         Scheduled schedule = OrphanSweeper.class.getMethod("sweep").getAnnotation(Scheduled.class);
         assertThat(schedule).isNotNull();
         assertThat(schedule.fixedDelayString()).contains("orphan-sweep-ms");
+        // Premier passage dès le démarrage : il remplace le balayage retiré de la fabrique du bean.
+        assertThat(schedule.initialDelayString()).isEqualTo("${app.sandbox.orphan-sweep-initial-ms:0}");
         assertThat(SandboxBeans.class.getAnnotation(EnableScheduling.class)).isNotNull();
     }
 }

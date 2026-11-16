@@ -20,9 +20,8 @@ public class SandboxBeans {
             @Value("${app.sandbox.memory-mb:1536}") long memoryMb,
             @Value("${app.sandbox.pids-limit:512}") long pidsLimit,
             @Value("${app.sandbox.cpus:2.0}") double cpus) {
-        DockerSandbox sandbox = new DockerSandbox(dockerHost, memoryMb, pidsLimit, cpus);
-        // Restes d'une instance précédente tuée en pleine notation (voir removeOrphans()).
-        sandbox.removeOrphans();
-        return sandbox;
+        // Pas de balayage des orphelins ici : un démon muet bloquerait le démarrage du service.
+        // OrphanSweeper s'en charge dès le démarrage du planificateur, hors du fil principal.
+        return new DockerSandbox(dockerHost, memoryMb, pidsLimit, cpus);
     }
 }

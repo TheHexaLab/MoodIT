@@ -20,6 +20,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -52,23 +53,44 @@ public class DockerSandbox {
     /** Étiquette posée sur tout conteneur runner : permet de retrouver les orphelins. */
     public static final String RUNNER_LABEL = "moodit.runner";
 
+    /** Établissement de la connexion au démon : au-delà, il est tenu pour injoignable. */
+    static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
+
+    /**
+     * Silence maximal du démon pendant une réponse (create, copie, start, suppression, liste,
+     * inspection, ping). Sans cette borne, un démon qui accepte la connexion sans répondre bloquait
+     * le fil indéfiniment, avec sa place du sémaphore du sandbox : trois appels suffisaient à rendre
+     * l'exécution indisponible jusqu'au redémarrage du service. Ne s'applique PAS à {@code /wait},
+     * silencieux jusqu'à la fin du conteneur (voir {@link #waitClient()}).
+     */
+    static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(60);
+
     private final String dockerHost;
     private final long memoryBytes;
     private final long pidsLimit;
     private final long nanoCpus;
+    private final Duration responseTimeout;
     private volatile DockerClient client;
+    private volatile DockerClient waitClient;
 
     public DockerSandbox(String dockerHost, long memoryMb, long pidsLimit, double cpus) {
+        this(dockerHost, memoryMb, pidsLimit, cpus, RESPONSE_TIMEOUT);
+    }
+
+    /** Pour les tests : délai de réponse raccourci. */
+    DockerSandbox(String dockerHost, long memoryMb, long pidsLimit, double cpus, Duration responseTimeout) {
         this.dockerHost = dockerHost == null || dockerHost.isBlank() ? defaultDockerHost() : dockerHost;
         this.memoryBytes = memoryMb * 1024 * 1024;
         this.pidsLimit = pidsLimit;
         this.nanoCpus = (long) (cpus * 1_000_000_000L);
+        this.responseTimeout = responseTimeout;
     }
 
     /** Pour les tests : client Docker injecté (aucune résolution d'hôte). */
     DockerSandbox(DockerClient client, long memoryMb, long pidsLimit, double cpus) {
         this("tcp://injecte-pour-les-tests", memoryMb, pidsLimit, cpus);
         this.client = client;
+        this.waitClient = client;
     }
 
     /** Espace de travail du job (sources, artefacts de build) : 60 % de la mémoire, ≥ 256 Mo. */
@@ -101,16 +123,42 @@ public class DockerSandbox {
         }
         synchronized (this) {
             if (client == null) {
-                var config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                        .withDockerHost(dockerHost)
-                        .build();
-                var http = new ZerodepDockerHttpClient.Builder()
-                        .dockerHost(config.getDockerHost())
-                        .build();
-                client = DockerClientImpl.getInstance(config, http);
+                client = newClient(responseTimeout);
             }
             return client;
         }
+    }
+
+    /**
+     * Client réservé à {@code /wait} : le démon n'y écrit RIEN avant la fin du conteneur (jusqu'à
+     * {@code DockerEvaluator.MAX_WALL_MS}), un délai de réponse le couperait. L'attente est bornée
+     * côté appelant par {@code awaitStatusCode(wall)}, puis le {@code finally} de {@link #run}
+     * détruit le conteneur, ce qui ferme le flux.
+     */
+    private DockerClient waitClient() {
+        DockerClient current = waitClient;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            if (waitClient == null) {
+                waitClient = newClient(null);
+            }
+            return waitClient;
+        }
+    }
+
+    private DockerClient newClient(Duration responseTimeout) {
+        var config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                .withDockerHost(dockerHost)
+                .build();
+        var http = new ZerodepDockerHttpClient.Builder()
+                .dockerHost(config.getDockerHost())
+                .connectionTimeout(CONNECTION_TIMEOUT);
+        if (responseTimeout != null) {
+            http.responseTimeout(responseTimeout);
+        }
+        return DockerClientImpl.getInstance(config, http.build());
     }
 
     /** Le démon répond-il ? (gating des tests d'intégration et messages d'erreur clairs) */
@@ -125,9 +173,9 @@ public class DockerSandbox {
 
     /**
      * Supprime les conteneurs runner laissés par une instance précédente (JVM tuée pendant une
-     * notation : son {@code finally} de nettoyage n'a jamais tourné). Appelé au démarrage du
-     * service ; sans effet si le démon est injoignable — ce n'est pas une raison de ne pas
-     * démarrer.
+     * notation : son {@code finally} de nettoyage n'a jamais tourné). Appelé par
+     * {@link OrphanSweeper}, hors du démarrage du service ; sans effet si le démon est injoignable
+     * ou muet (délais du client).
      */
     public int removeOrphans() {
         int removed = 0;
@@ -265,7 +313,7 @@ public class DockerSandbox {
                     // Étiquette : seul moyen de RETROUVER ces conteneurs. Si la JVM meurt
                     // pendant une notation (OOM, redémarrage, update.sh), le `finally` de
                     // nettoyage ci-dessous ne s'exécute jamais et le conteneur reste en
-                    // « Exited » — `removeOrphans()` les balaie au démarrage du service.
+                    // « Exited » — `OrphanSweeper` les balaie après le démarrage du service.
                     .withLabels(Map.of(RUNNER_LABEL, "1"))
                     .exec();
             containerId = created.getId();
@@ -282,7 +330,7 @@ public class DockerSandbox {
 
             docker.startContainerCmd(containerId).exec();
 
-            Integer status = docker.waitContainerCmd(containerId)
+            Integer status = waitClient().waitContainerCmd(containerId)
                     .start()
                     .awaitStatusCode(wallTimeoutMs, TimeUnit.MILLISECONDS);
 

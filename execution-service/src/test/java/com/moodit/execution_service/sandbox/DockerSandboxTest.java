@@ -274,6 +274,105 @@ class DockerSandboxTest {
         assertThat(new DockerSandbox("tcp://localhost:1", 512, 64, 1.0).removeOrphans()).isZero();
     }
 
+    // ── Démon MUET (connexion acceptée, aucune réponse) : faux démon HTTP local ──
+
+    /** Faux démon : {@code /wait} répond après {@code waitDelayMs}, le reste selon {@code mute}. */
+    private static com.sun.net.httpserver.HttpServer fakeDaemon(boolean mute, long waitDelayMs)
+            throws IOException {
+        var server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool(task -> {
+            Thread thread = new Thread(task, "faux-demon-docker");
+            thread.setDaemon(true);   // les gestionnaires muets dorment encore après stop()
+            return thread;
+        }));
+        server.createContext("/", exchange -> {
+            try (exchange) {
+                String method = exchange.getRequestMethod();
+                String path = exchange.getRequestURI().getPath();
+                if (mute) {
+                    Thread.sleep(30_000);
+                    return;
+                }
+                if (path.endsWith("/containers/create")) {
+                    reply(exchange, 201, "{\"Id\":\"cid\",\"Warnings\":[]}");
+                } else if (path.endsWith("/archive")) {
+                    reply(exchange, 200, "");
+                } else if (path.endsWith("/start")) {
+                    exchange.sendResponseHeaders(204, -1);
+                } else if (path.endsWith("/wait")) {
+                    // Comme dockerd : en-têtes envoyés tout de suite, corps à la fin du conteneur.
+                    exchange.getResponseHeaders().add("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, 0);
+                    exchange.getResponseBody().flush();
+                    Thread.sleep(waitDelayMs);
+                    exchange.getResponseBody().write("{\"StatusCode\":0}\n".getBytes(StandardCharsets.UTF_8));
+                } else if (path.endsWith("/logs")) {
+                    exchange.getResponseHeaders().add("Content-Type", "application/vnd.docker.raw-stream");
+                    exchange.sendResponseHeaders(200, -1);
+                } else if ("DELETE".equals(method)) {
+                    exchange.sendResponseHeaders(204, -1);
+                } else {
+                    reply(exchange, 404, "{}");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        server.start();
+        return server;
+    }
+
+    private static void reply(com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+            throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
+        if (bytes.length > 0) {
+            exchange.getResponseBody().write(bytes);
+        }
+    }
+
+    private static String tcp(com.sun.net.httpserver.HttpServer server) {
+        return "tcp://127.0.0.1:" + server.getAddress().getPort();
+    }
+
+    @Test
+    void mute_daemon_times_out_instead_of_blocking() throws IOException {
+        // Sans délai de réponse, chacun de ces appels bloquait indéfiniment (et une notation
+        // gardait sa place du sémaphore du sandbox jusqu'au redémarrage du service).
+        var server = fakeDaemon(true, 0);
+        try {
+            DockerSandbox sandbox = new DockerSandbox(tcp(server), 512, 64, 1.0, java.time.Duration.ofMillis(300));
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), () -> {
+                assertThat(sandbox.available()).isFalse();
+                assertThat(sandbox.removeOrphans()).isZero();
+                org.assertj.core.api.Assertions.assertThatThrownBy(
+                                () -> sandbox.run("img", Map.of("job.json", "{}"), 60_000))
+                        .isInstanceOf(SandboxException.class);
+            });
+        } finally {
+            server.stop(0);
+        }
+        // Valeurs de prod : bornées, et assez larges pour un démon simplement chargé.
+        assertThat(DockerSandbox.CONNECTION_TIMEOUT).isEqualTo(java.time.Duration.ofSeconds(5));
+        assertThat(DockerSandbox.RESPONSE_TIMEOUT).isEqualTo(java.time.Duration.ofSeconds(60));
+    }
+
+    @Test
+    void wait_is_not_cut_by_response_timeout() throws IOException {
+        // /wait reste muet jusqu'à la fin du conteneur, bien au-delà du délai de réponse : il
+        // passe par un client sans délai de réponse, borné par le mur seul.
+        var server = fakeDaemon(false, 1500);
+        try {
+            DockerSandbox sandbox = new DockerSandbox(tcp(server), 512, 64, 1.0, java.time.Duration.ofMillis(300));
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(20), () ->
+                    assertThat(sandbox.run("img", Map.of("job.json", "{}"), 10_000).exitCode()).isZero());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test
     void host_config_sets_every_isolation_guarantee() {
         // Le bloc HostConfig PORTE le modèle de menace de #116 : une ligne retirée par un
