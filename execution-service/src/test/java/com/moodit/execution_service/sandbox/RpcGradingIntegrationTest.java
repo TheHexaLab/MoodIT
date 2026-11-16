@@ -496,6 +496,94 @@ class RpcGradingIntegrationTest {
         assertThat(note("C#", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
     }
 
+    // ───────── Bouchons objet bornes a LEUR classe ; en-tetes du noteur C (31e passe) ─────────
+
+    @Test
+    void csharp_deux_classes_avec_la_meme_methode_d_instance() {
+        String h = "return new Rectangle(3, 4).Aire() == 12;";
+        String code = """
+                class Rectangle {
+                    int l, h;
+                    public Rectangle(int l, int h) { this.l = l; this.h = h; }
+                    public int Aire() { return l * h; }
+                }
+                class Carre {
+                    int c;
+                    public Carre(int c) { this.c = c; }
+                    public int Aire() { return c * c; }
+                }
+                """;
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("l * h", "l + h")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_heritage_avec_override() {
+        String h = "return new Carre(3).Aire() == 9;";
+        String code = """
+                abstract class Forme {
+                    public abstract int Aire();
+                }
+                class Carre : Forme {
+                    int c;
+                    public Carre(int c) { this.c = c; }
+                    public override int Aire() { return c * c; }
+                }
+                """;
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("c * c", "c + c")).passed()).isFalse();
+    }
+
+    @Test
+    void rust_constructeur_et_methodes_dans_deux_blocs_impl() {
+        String h = "R::new(3).double() == 6";
+        String code = """
+                pub struct R { l: i64 }
+                impl R {
+                    pub fn new(l: i64) -> Self { R { l } }
+                }
+                impl R {
+                    pub fn double(&self) -> i64 { self.l * 2 }
+                }
+                """;
+        assertThat(note("Rust", h, code).passed()).isTrue();
+        assertThat(note("Rust", h, code.replace("self.l * 2", "self.l")).passed()).isFalse();
+    }
+
+    @Test
+    void cpp_classe_imbriquee() {
+        String h = "return A(3).f() == 6;";
+        String code = """
+                class A {
+                    int x;
+                public:
+                    class B {
+                    public:
+                        B(int y) { }
+                        int g() { return 1; }
+                    };
+                    A(int v) { x = v; }
+                    int f() { return x * 2; }
+                };
+                """;
+        assertThat(note("C++", h, code).passed()).isTrue();
+        assertThat(note("C++", h, code.replace("x * 2", "x")).passed()).isFalse();
+    }
+
+    @Test
+    void c_harnais_avec_fabs_et_true_et_fonction_nommee_round() {
+        // Le prof ne peut pas ecrire d'#include : <math.h> et <stdbool.h> lui sont fournis. Une
+        // fonction notee `int round(int)` ne heurte plus la declaration de <math.h>.
+        String h = "return fabs(moitie(5) - 2.5) < 1e-9 && round(7) == 7 && true;";
+        String code = """
+                double moitie(int n) { return n / 2.0; }
+                int round(int n) { return n; }
+                """;
+        assertThat(note("C", h, code).passed()).isTrue();
+        assertThat(note("C", h, code.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        assertThat(note("C++", h, code).passed()).isTrue();
+    }
+
     @Test
     void aucun_processus_du_code_soumis_ne_survit_au_cas_suivant() {
         require("C");

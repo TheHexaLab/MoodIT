@@ -1648,8 +1648,9 @@ class Passe28Test(unittest.TestCase):
 
     def test_c_bouchon_non_static(self):
         noteur = supervisor.c_grader_source([("int", "abs", ["int"])], "return abs(-1) == 1;", "1")
-        self.assertIn("int abs(int a0) {", noteur)
-        self.assertNotIn("static int abs(", noteur)
+        self.assertIn("int moodit_f_abs(int a0) {", noteur)
+        self.assertIn("#define abs moodit_f_abs", noteur)
+        self.assertNotIn("static int moodit_f_abs", noteur)
 
     def test_cpp_explicit_et_virtual(self):
         src = self.NL.join(["class Rect {", "public:", "    explicit Rect(int c) { }",
@@ -1739,6 +1740,54 @@ class Passe30Test(unittest.TestCase):
         # La surcharge d'une AUTRE signature reste : seul le doublon exact part.
         self.assertEqual(supervisor.cs_signatures(src),
                          [("int", "Calcul", ["int"]), ("int", "Calcul", ["int", "int"])])
+
+
+class Passe31Test(unittest.TestCase):
+    """Bouchons objet bornes a LEUR classe, dans chaque langage ; en-tetes du noteur C/C++."""
+
+    NL = chr(10)
+
+    def test_cs_methodes_de_la_seule_classe_visee(self):
+        src = self.NL.join(["class Rectangle {", "  public Rectangle(int l, int h) { }",
+                            "  public int Aire() { return 1; }", "}",
+                            "class Carre {", "  public Carre(int c) { }",
+                            "  public int Aire() { return 2; }", "  public int Cote() { return 2; }",
+                            "}", ""])
+        self.assertEqual(supervisor.cs_object_api(src, "Rectangle"),
+                         ([["int", "int"]], [("int", "Aire", [])]))
+        self.assertEqual(supervisor.cs_object_api(src, "Carre"),
+                         ([["int"]], [("int", "Aire", []), ("int", "Cote", [])]))
+
+    def test_cs_heritage_et_classe_imbriquee(self):
+        src = self.NL.join(["abstract class Forme {", "  public abstract int Aire();", "}",
+                            "class Carre : Forme {", "  public Carre(int c) { }",
+                            "  public override int Aire() { return 4; }",
+                            "  class Detail { public int Aire() { return 0; } }", "}", ""])
+        self.assertEqual(supervisor.cs_object_api(src, "Carre"), ([["int"]], [("int", "Aire", [])]))
+
+    def test_rust_plusieurs_blocs_impl(self):
+        src = self.NL.join(["pub struct R { l: i64 }", "impl R {",
+                            "    pub fn new(l: i64) -> Self { R { l } }", "}",
+                            "impl R {", "    pub fn aire(&self) -> i64 { self.l }", "}", ""])
+        self.assertEqual(supervisor.rust_object_api(src), [("R", [("new", ["i64"])], [("i64", "aire", [])])])
+
+    def test_cpp_classe_imbriquee(self):
+        src = self.NL.join(["class A {", "public:", "  class B {", "  public:", "    B(int x) { }",
+                            "    int g() { return 1; }", "  };", "  A(int x) { }",
+                            "  int f() { return 1; }", "};", ""])
+        # B ne s'ecrit que A::B : ni proxifiee, ni ses membres pris pour ceux de A.
+        self.assertEqual(supervisor.cpp_object_api(src), [("A", [["int"]], [("int", "f", [])])])
+
+    def test_noteur_c_fournit_math_et_bool_et_renomme_les_bouchons(self):
+        noteur = supervisor.c_grader_source([("int", "round", ["int"]), ("double", "f", ["double"]),
+                                             ("double", "f", ["int"])],
+                                            "return fabs(f(1.0) - 2.5) < 1e-9 && true;", "1",
+                                            cpp=True)
+        self.assertTrue(noteur.startswith("#include <math.h>" + self.NL + "#include <stdbool.h>"))
+        self.assertIn("int moodit_f_round(int a0) {", noteur)
+        # Un seul #define par nom, meme surcharge ; place AVANT le harnais.
+        self.assertEqual(noteur.count("#define f moodit_f_f"), 1)
+        self.assertLess(noteur.index("#define round moodit_f_round"), noteur.index("moodit_harnais(void)"))
 
 
 if __name__ == "__main__":

@@ -2370,8 +2370,13 @@ def cpp_object_api(source):
     la section PUBLIQUE comptent (une `class` commence en privé, une `struct` en public)."""
     texte = source or ""
     resultat = []
+    plages = cpp_class_spans(texte)
     for classe in CPP_CLASS.finditer(texte):
         nom_classe = classe.group(1)
+        # Classe IMBRIQUEE : elle ne s'ecrit que `A::B`, et le serveur, qui la nomme `B`, ne
+        # compilait plus. Elle n'est pas proxifiee (ni ses membres pris pour ceux de A).
+        if any(d < classe.start() < f for d, f in plages):
+            continue
         try:
             debut = texte.index("{", classe.start())
         except ValueError:
@@ -2380,7 +2385,16 @@ def cpp_object_api(source):
         corps = texte[debut + 1:fin]
         public = texte[classe.start():debut].lstrip().startswith("struct")
         ctors, methodes = [], []
-        for ligne in corps.splitlines():
+        profondeurs = _fermetures(texte)[0]
+        niveau = profondeurs[debut] + 1
+        position = debut + 1
+        for ligne in corps.splitlines(True):
+            depart = position + len(ligne) - len(ligne.lstrip())
+            position += len(ligne)
+            # Une ligne d'une classe IMBRIQUEE n'est pas un membre de celle-ci : ses methodes
+            # etaient attribuees a la classe englobante, et le serveur ne compilait plus.
+            if depart < len(texte) and profondeurs[depart] != niveau:
+                continue
             nue = ligne.strip()
             if nue.startswith("public:"):
                 public = True
@@ -2553,14 +2567,20 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, objets=()):
         lecture = C_LECTURE[retour]
         # PAS static : apres <stdlib.h>, un `static int abs(int)` est une redeclaration
         # refusee par gcc et g++ ; la definition ordinaire, elle, remplace celle de la libc.
-        bouchons.append("""%s %s(%s) {
+        bouchons.append("""%s moodit_f_%s(%s) {
     char id[40], requete[4096];
     moodit_identifiant(id);
     snprintf(requete, sizeof requete, "%%s|call|%s%s", id%s);
     moodit_envoie(requete);
     return %s(moodit_valeur(id));
 }""" % (retour, nom, params or "void", c_cle(nom, types), fmt, args, lecture))
-    entete = "" if cpp else ""
+    # Le harnais du prof ne peut pas ajouter d'#include : <math.h> (fabs, sqrt) et <stdbool.h>
+    # (true/false en C) lui sont fournis. Les bouchons sont PREFIXES puis renommes par #define :
+    # une fonction notee au nom d'une fonction de <math.h> avec une autre signature
+    # (`int round(int)`) ne heurte ainsi aucune declaration, et le harnais ecrit `round(3)`.
+    entete = "#include <math.h>\n#include <stdbool.h>\n"
+    renommages = "".join("#define %s moodit_f_%s\n" % (n, n)
+                         for n in dict.fromkeys(nom for _, nom, _ in methods))
     return entete + C_RUNTIME + r'''
 /* Identifiant IMPREVISIBLE par appel, tire de /dev/urandom : sans lui, le code note pouvait
    imprimer la reponse attendue AVANT la question et faire passer un code faux. */
@@ -2576,7 +2596,7 @@ static void moodit_identifiant(char *sortie) {
     sortie[16] = '\0';
 }
 
-''' + "\n\n".join(bouchons) + "\n\n" + cpp_object_stub(objets) + r'''
+''' + "\n\n".join(bouchons) + "\n\n" + renommages + cpp_object_stub(objets) + r'''
 
 static int moodit_harnais(void) {
 ''' + "\n".join("    " + l if l.strip() else l
@@ -2712,7 +2732,7 @@ def rust_object_api(source):
     est un constructeur (`Rectangle::new`), une fonction qui prend `&self` est une méthode."""
     texte = source or ""
     structs = set(RUST_STRUCT.findall(texte))
-    resultat = []
+    par_type = {}                           # type -> (ctors, methodes), ordre d'apparition
     captures = rust_capture_fields(texte)   # UNE fois : relu dans la boucle, c'etait quadratique
     for impl in RUST_IMPL.finditer(texte):
         typ = impl.group(1)
@@ -2721,7 +2741,9 @@ def rust_object_api(source):
         debut = texte.index("{", impl.start())
         fin = block_end(texte, debut)
         corps = texte[debut:fin]
-        ctors, methodes = [], []
+        # Plusieurs blocs `impl` pour le meme type se CUMULENT : le constructeur d'un premier
+        # bloc etait perdu quand les methodes venaient d'un second.
+        ctors, methodes = par_type.setdefault(typ, ([], []))
         for nom, params, retour in RUST_FN_IN_IMPL.findall(corps):
             morceaux = [p.strip() for p in params.split(",") if p.strip()]
             prend_self = bool(morceaux) and morceaux[0].endswith("self")
@@ -2740,8 +2762,10 @@ def rust_object_api(source):
                 ctors.append((nom, types))
             elif prend_self and retour in RUST_TYPES:
                 methodes.append((retour, nom, types))
+    resultat = []
+    for typ, (ctors, methodes) in par_type.items():
         if methodes and (ctors or typ in captures):
-            resultat.append((typ, ctors, methodes))
+            resultat.append((typ, ctors, sans_doublon(methodes)))
     return resultat
 
 
@@ -3525,11 +3549,34 @@ def cs_object_api(source, classe):
     if not declares and re.search(r"\bclass\s+%s\b" % re.escape(classe), source or ""):
         ctors = [[]]
     methodes = []
-    for retour, nom, params in CS_INSTANCE.findall(source or ""):
-        types = types_de(params)
-        if types is not None and nom != "Main":
-            methodes.append((retour, nom, types))
-    return ctors, methodes
+    texte = source or ""
+    for debut, fin, niveau in corps_de_classe(texte, r"\bclass\s+%s\b" % re.escape(classe)):
+        profondeurs = _fermetures(texte)[0]
+        for m in CS_INSTANCE.finditer(texte, debut, fin):
+            # Membre DIRECT de la classe visee : une autre classe du fichier (Carre a cote de
+            # Rectangle) ou une classe imbriquee donnaient des bouchons en double, que mcs
+            # refusait (CS0111) — une reponse juste notee 0.
+            if profondeurs[m.start(2)] != niveau:
+                continue
+            types = types_de(m.group(3))
+            if types is not None and m.group(2) != "Main":
+                methodes.append((m.group(1), m.group(2), types))
+    return ctors, sans_doublon(methodes)
+
+
+def corps_de_classe(texte, motif_entete):
+    """Corps des classes dont l'entete correspond : [(debut, fin, profondeur des membres)].
+    PURE (testee). Appariement LEXICAL (block_end) : une accolade en litteral ne compte pas."""
+    corps = []
+    for entete in re.finditer(motif_entete, texte):
+        debut = texte.find("{", entete.end())
+        if debut < 0:
+            continue
+        # `class Rect;` (declaration anticipee) : l'accolade trouvee appartient a la suite.
+        if ";" in texte[entete.end():debut]:
+            continue
+        corps.append((debut, block_end(texte, debut), _fermetures(texte)[0][debut] + 1))
+    return corps
 
 
 CS_CLASS = re.compile(r"\bclass\s+(\w+)")

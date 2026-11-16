@@ -3,6 +3,7 @@ package com.moodit.execution_service.sandbox;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Client Docker PARTAGÉ du sandbox (#116) : une seule instance (et un seul client paresseux)
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
  * ({@link RunnerExec}).
  */
 @Configuration
+@EnableScheduling   // OrphanSweeper : balayage périodique des orphelins
 public class SandboxBeans {
 
     @Bean

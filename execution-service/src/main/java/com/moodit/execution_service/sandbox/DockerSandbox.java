@@ -159,7 +159,7 @@ public class DockerSandbox {
                 }
             }
             if (removed > 0) {
-                log.info("{} conteneur(s) runner orphelin(s) supprimé(s) au démarrage", removed);
+                log.info("{} conteneur(s) runner orphelin(s) supprimé(s)", removed);
             }
         } catch (RuntimeException e) {
             log.debug("Balayage des conteneurs orphelins impossible : {}", e.getMessage());
