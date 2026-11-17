@@ -710,7 +710,7 @@ class ObjectApiTest(unittest.TestCase):
         source = supervisor.java_stub_source(
             "Rectangle", [], (), [["int", "int"]], [("int", "aire", [])])
         self.assertIn("public Rectangle(int a0, int a1) {", source)
-        self.assertIn('MooditRpc.nouvelle("Rectangle"', source)
+        self.assertIn('MooditRpc.nouvelle("Rectangle(int,int)"', source)
         self.assertIn("public int aire() {", source)
         self.assertNotIn("private Rectangle() {}", source)
 
@@ -1831,6 +1831,70 @@ class ReservedNamesTest(unittest.TestCase):
         self.assertIn("« fabs » est déjà fourni au harnais par la bibliothèque standard", one)
         many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
         self.assertIn("« max », « min » sont déjà fournis au harnais", many)
+
+
+class Review246Test(unittest.TestCase):
+    """Revue de la PR #246 : reponses Java/C# justes notees 0 ou fausses."""
+
+    def test_java_anonymous_and_local_classes_are_not_nameable(self):
+        self.assertTrue(supervisor.java_nameable_class("Solution"))
+        self.assertTrue(supervisor.java_nameable_class("Solution$Rectangle"))
+        self.assertFalse(supervisor.java_nameable_class("Solution$1"))
+        self.assertFalse(supervisor.java_nameable_class("Solution$1Aide"))
+        self.assertFalse(supervisor.java_nameable_class("Solution$1$Interne"))
+
+    def test_java_anonymous_class_yields_no_stub(self):
+        # Sortie javap d'un `new Comparator<Integer>() { ... }` dans une methode statique : le
+        # constructeur sans parametre faisait passer la classe, et le bouchon `class 1 { ... }`
+        # empechait le noteur de compiler -- reponse juste notee 0.
+        javap = ("Compiled from \"Solution.java\"\n"
+                 "final class Solution$1 implements java.util.Comparator<java.lang.Integer> {\n"
+                 "  Solution$1();\n"
+                 "  public int compare(java.lang.Integer, java.lang.Integer);\n"
+                 "}\n")
+        self.assertEqual(supervisor.java_class_api(javap), (None, [], []))
+        local = ("Compiled from \"Solution.java\"\n"
+                 "class Solution$1Acc {\n"
+                 "  int t;\n"
+                 "  Solution$1Acc();\n"
+                 "  int total();\n"
+                 "}\n")
+        self.assertEqual(supervisor.java_class_api(local), (None, [], []))
+
+    def test_rpc_name_carries_parameter_types(self):
+        self.assertEqual(supervisor.rpc_name("f", ["int", "double"]), "f(int,double)")
+        self.assertEqual(supervisor.rpc_name("f", []), "f()")
+
+    def test_java_stubs_send_the_full_signature(self):
+        stub = supervisor.java_stub_source(
+            "Solution", [("int", "moitie", ["int"]), ("double", "moitie", ["double"])],
+            objects=[("Solution.Rect", [["int"], ["double"]], [("int", "plus", ["int"])])])
+        self.assertIn('MooditRpc.integer("moitie(int)"', stub)
+        self.assertIn('MooditRpc.double_("moitie(double)"', stub)
+        self.assertIn('MooditRpc.nouvelle("Solution.Rect(int)"', stub)
+        self.assertIn('MooditRpc.nouvelle("Solution.Rect(double)"', stub)
+        self.assertIn('MooditRpc.minteger(__h, "plus(int)"', stub)
+
+    def test_java_server_resolves_by_parameter_types(self):
+        server = supervisor.java_server_source(["Solution"])
+        # Les trois resolutions (statique, constructeur, instance) passent par `signe`, plus
+        # aucune par la seule arite.
+        self.assertEqual(server.count("signe(m.getParameterTypes(), appel, args.length)"), 2)
+        self.assertIn("signe(c.getParameterTypes(), appel, args.length)", server)
+        self.assertNotIn("getParameterCount()", server)
+
+    def test_cs_stubs_and_server_use_the_full_signature(self):
+        source = supervisor.cs_grader_source(
+            [("int", "Moitie", ["int"]), ("double", "Moitie", ["double"])], "return true;",
+            "N", "Rect", ctors=[["int"], ["double"]], instance=[("int", "Plus", ["int"])])
+        self.assertIn('"|Moitie(int)"', source)
+        self.assertIn('"|Moitie(double)"', source)
+        self.assertIn('"|new|Rect(double)"', source)
+        self.assertIn('"|Plus(int)"', source)
+        server = supervisor.cs_server_source(["Solution"])
+        self.assertEqual(server.count("Signe(c.GetParameters(), parts[2], parts.Length - 3)"), 1)
+        self.assertEqual(server.count("Signe(m.GetParameters(), parts[3], parts.Length - 4)"), 1)
+        self.assertEqual(server.count("Signe(m.GetParameters(), nom, parts.Length - 2)"), 1)
 
 
 if __name__ == "__main__":

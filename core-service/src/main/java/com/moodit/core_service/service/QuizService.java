@@ -1010,10 +1010,16 @@ public class QuizService {
      * sinon borné au plafond du runner (RunnerExec.MAX_RUN_TIMEOUT_MS = 60 s). Une valeur
      * aberrante envoyée à l'API ne doit jamais atteindre la base (mur de conteneur négatif,
      * budgets de lecture faussés).
+     *
+     * <p>Arrondi à la seconde SUPÉRIEURE : le superviseur du runner travaille en secondes
+     * entières ({@code timeout_ms // 1000}). 1 500 ms y devenaient 1 s alors que core et
+     * execution-service budgétaient 1,5 s ; la valeur stockée est maintenant celle qui
+     * s'applique vraiment.
      */
     private static Integer normalizeExecTimeout(Integer ms) {
         if (ms == null || ms <= 0) return null;
-        return Math.min(ms, 60_000);
+        int capped = Math.min(ms, 60_000);
+        return (capped + 999) / 1000 * 1000;
     }
 
     /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */

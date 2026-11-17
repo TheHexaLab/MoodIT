@@ -404,6 +404,80 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void java_anonymous_and_local_classes_graded_correctly() {
+        // `Solution$1` (Comparator anonyme) et `Solution$1Acc` (classe locale) recevaient un
+        // bouchon `class 1 { … }` : le noteur ne compilait plus et une réponse juste valait 0.
+        String h = "return Solution.plusGrand(3, 9, 4) == 9 && Solution.somme(4) == 10;";
+        String code = """
+                import java.util.*;
+                public class Solution {
+                    static int plusGrand(int a, int b, int c) {
+                        List<Integer> l = new ArrayList<>(List.of(a, b, c));
+                        l.sort(new Comparator<Integer>() {
+                            public int compare(Integer x, Integer y) { return Integer.compare(y, x); }
+                        });
+                        return l.get(0);
+                    }
+                    static int somme(int n) {
+                        class Acc { int t; void add(int v) { t += v; } }
+                        Acc acc = new Acc();
+                        for (int i = 1; i <= n; i++) { acc.add(i); }
+                        return acc.t;
+                    }
+                }
+                """;
+        assertThat(note("Java", h, code).passed()).isTrue();
+        assertThat(note("Java", h, code.replace("compare(y, x)", "compare(x, y)")).passed()).isFalse();
+    }
+
+    @Test
+    void java_overloads_of_same_arity_resolved_by_types() {
+        // Le serveur choisissait la première méthode de même nom et même arité : `moitie(7)`
+        // pouvait appeler `moitie(double)`, et une réponse juste était notée fausse.
+        String h = "return Solution.moitie(7) == 3 && Solution.moitie(7.0) == 3.5"
+                + " && new Solution.Rect(3).aire() == 3 && new Solution.Rect(3.0).aire() == 9"
+                + " && new Solution.Rect(2).plus(1) == 3 && new Solution.Rect(2).plus(1.0) == 2.5;";
+        String code = """
+                public class Solution {
+                    static double moitie(double x) { return x / 2; }
+                    static int moitie(int n) { return n / 2; }
+                    static class Rect {
+                        int l, h;
+                        Rect(double c) { l = (int) c; h = (int) c; }
+                        Rect(int a) { l = a; h = 1; }
+                        int aire() { return l * h; }
+                        int plus(int n) { return aire() + n; }
+                        double plus(double d) { return aire() + d / 2; }
+                    }
+                }
+                """;
+        assertThat(note("Java", h, code).passed()).isTrue();
+        assertThat(note("Java", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_overloads_of_same_arity_resolved_by_types() {
+        // Même défaut qu'en Java : le serveur résolvait par nom et arité seulement.
+        String h = "return new Rect(3).Aire() == 3 && new Rect(3.0).Aire() == 9"
+                + " && new Rect(2).Plus(1) == 3 && new Rect(2).Plus(1.0) == 2.5"
+                + " && Rect.Moitie(7) == 3 && Rect.Moitie(7.0) == 3.5;";
+        String code = """
+                public class Rect {
+                    int l, h;
+                    public Rect(double c) { l = (int) c; h = (int) c; }
+                    public Rect(int a) { l = a; h = 1; }
+                    public int Aire() { return l * h; }
+                    public int Plus(int n) { return Aire() + n; }
+                    public double Plus(double d) { return Aire() + d / 2; }
+                    public static double Moitie(double x) { return x / 2; }
+                    public static int Moitie(int n) { return n / 2; }
+                }
+                """;
+        assertThat(note("C#", h, code).passed()).isTrue();
+        assertThat(note("C#", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
+    }
+
+    @Test
     void cpp_explicit_and_virtual() {
         String h = "return Carre(3).aire() == 9;";
         String code = """

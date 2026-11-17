@@ -1074,6 +1074,26 @@ JAVA_RPC_FN = {"Integer": "integer", "Long": "long_", "Double": "double_",
                "Boolean": "boolean_", "String": "string"}
 
 
+def rpc_name(ident, types):
+    """Nom porte sur le fil RPC Java et C# : `f(int,double)`. PURE (testee).
+
+    Le nom et l'arite seuls ne choisissaient pas une surcharge : avec `f(int)` et `f(double)`
+    dans le code soumis, le serveur prenait la premiere de meme arite (ordre non specifie
+    par la reflexion), et une reponse juste pouvait etre notee fausse, pas toujours de la
+    meme facon. Le serveur compare maintenant la liste des types, comme `c_dispatch_key`."""
+    return "%s(%s)" % (ident, ",".join(types))
+
+
+def java_nameable_class(binary_name):
+    """Vrai si la classe compilee peut etre NOMMEE dans du source Java. PURE (testee).
+
+    Une classe anonyme (`Solution$1`) ou locale (`Solution$1Aide`) a un segment qui commence
+    par un chiffre : son bouchon (`class 1 { ... }`) n'etait pas du Java valide, le noteur ne
+    compilait plus, et une reponse juste etait notee 0 -- pour un `new Comparator<>() { ... }`,
+    idiome courant. Le harnais ne peut de toute facon pas ecrire ces classes."""
+    return all(part.isidentifier() for part in (binary_name or "").split("$"))
+
+
 JAVAP_CLASS = re.compile(r"^(?:public\s+)?(?:final\s+|abstract\s+)?class\s+([\w.$]+)", re.M)
 # La visibilite n est PAS exigee, ici non plus : `class Rectangle { Rectangle(int,int){} }`
 # est l ecriture la plus courante d un exercice a un seul fichier, et le serveur sait deja
@@ -1103,6 +1123,8 @@ def java_class_api(javap_output):
     if not klass:
         return None, [], []
     binary_name = klass.group(1)
+    if not java_nameable_class(binary_name):
+        return None, [], []
     simple = binary_name.split("$")[-1]
     ctors = []
     for ident, args in JAVAP_CTOR.findall(javap_output):
@@ -1138,14 +1160,14 @@ def java_object_stub(source_name, ctors, method_list):
         args = ", ".join("a%d" % i for i in range(len(types)))
         body += ["        public %s(%s) {" % (simple, params),
                   "            this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
-                  % (source_name, args),
+                  % (rpc_name(source_name, types), args),
                   "        }"]
     for ret, ident, types in method_list:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
         body += ["        public %s %s(%s) {" % (ret, ident, params),
                   "            return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
-                  % ("m" + JSON_TYPES[ret].lower(), ident, args),
+                  % ("m" + JSON_TYPES[ret].lower(), rpc_name(ident, types), args),
                   "        }"]
     body.append("    }")
     return "\n".join(body)
@@ -1200,14 +1222,14 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
             args = ", ".join("a%d" % i for i in range(len(types)))
             src_lines += ["    public %s(%s) {" % (class_name, params),
                        "        this.__h = MooditRpc.nouvelle(\"%s\", new Object[]{%s});"
-                       % (class_name, args),
+                       % (rpc_name(class_name, types), args),
                        "    }"]
         for ret, ident, types in self_instance:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
             args = ", ".join("a%d" % i for i in range(len(types)))
             src_lines += ["    public %s %s(%s) {" % (ret, ident, params),
                        "        return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
-                       % ("m" + JSON_TYPES[ret].lower(), ident, args),
+                       % ("m" + JSON_TYPES[ret].lower(), rpc_name(ident, types), args),
                        "    }"]
     else:
         src_lines.append("    private " + class_name + "() {}")
@@ -1223,7 +1245,7 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
         args = ", ".join("a%d" % i for i in range(len(types)))
         src_lines += ["    public static %s %s(%s) {" % (ret, ident, params),
                    "        return MooditRpc.%s(\"%s\", new Object[]{%s});"
-                   % (JAVA_RPC_FN[JSON_TYPES[ret]], ident, args),
+                   % (JAVA_RPC_FN[JSON_TYPES[ret]], rpc_name(ident, types), args),
                    "    }"]
     src_lines.append("}")
     # Classe de PREMIER NIVEAU (`class Rectangle` a cote de Solution) : hors de la coquille, en
@@ -1465,7 +1487,8 @@ public final class MooditServer {
         if (op.equals("new")) { return construit(ligne); }
         if (op.equals("method")) { return methode(ligne); }
         String id = entre(ligne, "\\"id\\":\\"", "\\"");
-        String nom = entre(ligne, "\\"name\\":\\"", "\\"");
+        String appel = entre(ligne, "\\"name\\":\\"", "\\"");
+        String nom = base(appel);
         String brut = entre(ligne, "\\"args\\":[", "]");
         Object[] args = decoupe(brut);
         Method cible = null;
@@ -1475,7 +1498,10 @@ public final class MooditServer {
         // bouchon puis introuvable ici, et une reponse juste etait notee 0.
         for (String __c : new String[] {__CLASSES__}) {
             for (Method m : Class.forName(__c).getDeclaredMethods()) {
-                if (m.getName().equals(nom) && m.getParameterCount() == args.length) { cible = m; break; }
+                if (m.getName().equals(nom) && signe(m.getParameterTypes(), appel, args.length)) {
+                    cible = m;
+                    break;
+                }
             }
             if (cible != null) { break; }
         }
@@ -1490,11 +1516,12 @@ public final class MooditServer {
 
     private static String construit(String ligne) throws Exception {
         String id = entre(ligne, "\\"id\\":\\"", "\\"");
-        String classe = entre(ligne, "\\"class\\":\\"", "\\"").replace('.', '$');
+        String appel = entre(ligne, "\\"class\\":\\"", "\\"");
+        String classe = base(appel).replace('.', '$');
         Object[] args = decoupe(entre(ligne, "\\"args\\":[", "]"));
         Class<?> cible = Class.forName(classe);
         for (java.lang.reflect.Constructor<?> c : cible.getDeclaredConstructors()) {
-            if (c.getParameterCount() != args.length) { continue; }
+            if (!signe(c.getParameterTypes(), appel, args.length)) { continue; }
             c.setAccessible(true);
             Class<?>[] types = c.getParameterTypes();
             Object[] convertis = new Object[args.length];
@@ -1509,12 +1536,15 @@ public final class MooditServer {
 
     private static String methode(String ligne) throws Exception {
         String id = entre(ligne, "\\"id\\":\\"", "\\"");
-        String nom = entre(ligne, "\\"name\\":\\"", "\\"");
+        String appel = entre(ligne, "\\"name\\":\\"", "\\"");
+        String nom = base(appel);
         int handle = Integer.parseInt(entre(ligne + ",", "\\"handle\\":", ",").trim());
         Object[] args = decoupe(entre(ligne, "\\"args\\":[", "]"));
         Object instance = OBJETS.get(handle);
         for (Method m : instance.getClass().getDeclaredMethods()) {
-            if (!m.getName().equals(nom) || m.getParameterCount() != args.length) { continue; }
+            if (!m.getName().equals(nom) || !signe(m.getParameterTypes(), appel, args.length)) {
+                continue;
+            }
             m.setAccessible(true);
             Class<?>[] types = m.getParameterTypes();
             Object[] convertis = new Object[args.length];
@@ -1525,6 +1555,29 @@ public final class MooditServer {
                     + encode(m.invoke(instance, convertis)) + "}";
         }
         throw new NoSuchMethodException(nom);
+    }
+
+    /** Nom sans sa signature : `f(int,double)` donne `f`. */
+    private static String base(String appel) {
+        int p = appel.indexOf('(');
+        return p < 0 ? appel : appel.substring(0, p);
+    }
+
+    /**
+     * La surcharge VISEE par le bouchon : memes types de parametres, dans l'ordre. Le nom et
+     * l'arite seuls prenaient la premiere de meme arite, et une reponse juste pouvait etre
+     * notee fausse des que le code soumis declarait f(int) et f(double).
+     */
+    private static boolean signe(Class<?>[] types, String appel, int arite) {
+        if (types.length != arite) { return false; }
+        int p = appel.indexOf('(');
+        if (p < 0) { return true; }
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < types.length; i++) {
+            if (i > 0) { b.append(','); }
+            b.append(types[i].getName());
+        }
+        return b.toString().equals(appel.substring(p + 1, appel.length() - 1));
     }
 
     private static Object convertit(Class<?> type, String brut) {
@@ -3322,7 +3375,7 @@ def cs_object_stub(klass, ctors, method_list):
         pieces.append('''    public %s(%s) {
         string id = MooditRpc.Id();
         __h = int.Parse(MooditRpc.Appel(id, id + "|new|%s"%s));
-    }''' % (klass, params, klass, args))
+    }''' % (klass, params, rpc_name(klass, types), args))
     for ret, ident, types in method_list:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
@@ -3334,7 +3387,7 @@ def cs_object_stub(klass, ctors, method_list):
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|method|" + __h + "|%s"%s);
         return %s;
-    }''' % (ret, ident, params, ident, args, reader))
+    }''' % (ret, ident, params, rpc_name(ident, types), args, reader))
     return "\n\n".join(pieces)
 
 
@@ -3352,7 +3405,7 @@ def cs_grader_source(methods, harness_code, nonce, klass, ctors=(), instance=())
         string id = MooditRpc.Id();
         string brut = MooditRpc.Appel(id, id + "|%s"%s);
         return %s;
-    }''' % (ret, ident, params, ident, args, reader))
+    }''' % (ret, ident, params, rpc_name(ident, types), args, reader))
     return '''using System;
 using System.IO;
 
@@ -3485,6 +3538,34 @@ public static class MooditServer {
         return donnes;
     }
 
+    /** Nom sans sa signature : `F(int,double)` donne `F`. */
+    static string Base(string appel) {
+        int p = appel.IndexOf('(');
+        return p < 0 ? appel : appel.Substring(0, p);
+    }
+
+    static string NomType(Type t) {
+        if (t.IsByRef) { t = t.GetElementType(); }   // parametre `in`
+        if (t == typeof(int)) { return "int"; }
+        if (t == typeof(long)) { return "long"; }
+        if (t == typeof(double)) { return "double"; }
+        if (t == typeof(bool)) { return "bool"; }
+        if (t == typeof(string)) { return "string"; }
+        return t.FullName;
+    }
+
+    // La surcharge VISEE par le bouchon : memes types de parametres, dans l'ordre. Le nom et
+    // l'arite seuls prenaient la premiere de meme arite, et une reponse juste pouvait etre
+    // notee fausse des que le code soumis declarait F(int) et F(double).
+    static bool Signe(ParameterInfo[] attendus, string appel, int arite) {
+        if (attendus.Length != arite) { return false; }
+        int p = appel.IndexOf('(');
+        if (p < 0) { return true; }
+        string[] noms = new string[attendus.Length];
+        for (int i = 0; i < attendus.Length; i++) { noms[i] = NomType(attendus[i].ParameterType); }
+        return string.Join(",", noms) == appel.Substring(p + 1, appel.Length - p - 2);
+    }
+
     /** Valeur de retour sur le fil : une chaîne part encodée. */
     static string Sortie(object v) {
         if (v is string) { return Hexe((string) v); }
@@ -3515,7 +3596,7 @@ public static class MooditServer {
                     foreach (var c in cible2.GetConstructors(
                             BindingFlags.Public | BindingFlags.NonPublic
                             | BindingFlags.Instance)) {
-                        if (c.GetParameters().Length != parts.Length - 3) { continue; }
+                        if (!Signe(c.GetParameters(), parts[2], parts.Length - 3)) { continue; }
                         OBJETS.Add(c.Invoke(Convertis(c.GetParameters(), parts, 3)));
                         construit = true;
                         break;
@@ -3530,12 +3611,12 @@ public static class MooditServer {
                 }
                 if (nom == "method") {
                     object instance = OBJETS[int.Parse(parts[2])];
-                    string nomMethode = parts[3];
+                    string nomMethode = Base(parts[3]);
                     MethodInfo cible3 = null;
                     foreach (MethodInfo m in instance.GetType().GetMethods(
                             BindingFlags.Public | BindingFlags.NonPublic
                             | BindingFlags.Instance)) {
-                        if (m.Name == nomMethode && m.GetParameters().Length == parts.Length - 4) {
+                        if (m.Name == nomMethode && Signe(m.GetParameters(), parts[3], parts.Length - 4)) {
                             cible3 = m;
                             break;
                         }
@@ -3552,7 +3633,7 @@ public static class MooditServer {
                 foreach (Type __t in new Type[] { %s }) {
                     foreach (MethodInfo m in __t.GetMethods(
                             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
-                        if (m.Name == nom && m.GetParameters().Length == parts.Length - 2) {
+                        if (m.Name == Base(nom) && Signe(m.GetParameters(), nom, parts.Length - 2)) {
                             cible = m;
                             break;
                         }
@@ -3981,8 +4062,11 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     #    les classes imbriquées (Outer$Inner), pour proxifier les objets : le harnais écrit
     #    `new Solution.Rectangle(3, 4).aire()` et l'objet vit, lui, chez l'étudiant.
     klass = os.path.basename(student_file)[:-len(".java")]
+    # Classes ANONYMES et LOCALES ecartees (java_nameable_class) : le harnais ne peut pas les
+    # nommer, et leur bouchon ne compilait pas.
     binary_names = sorted(ident[:-len(".class")] for ident in os.listdir(student_classes)
-                      if ident.endswith(".class") and not ident.startswith("Moodit"))
+                      if ident.endswith(".class") and not ident.startswith("Moodit")
+                      and java_nameable_class(ident[:-len(".class")]))
     code, expired = run_proc(["javap", "-p", "-cp", student_classes] + binary_names,
                             case_dir, env, LIST_TIMEOUT_S,
                             os.path.join(case_dir, "javap.out"), os.path.join(case_dir, "javap.err"),
