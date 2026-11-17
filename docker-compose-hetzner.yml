@@ -123,6 +123,9 @@ services:
       # services et vont dans .env.docker (cf. .env.example). Posées ici, core attendrait une
       # autre valeur que le serveur et abandonnerait des corrections encore en cours (#216).
       JAVA_TOOL_OPTIONS: "-Xmx320m"
+      # Corrections de quiz à harnais menées en parallèle par core : à garder ÉGAL à
+      # EXEC_MAX_CONCURRENT du bloc execution-service (3). Les modifier ensemble.
+      QUIZ_CODE_GRADING_THREADS: "3"
     mem_limit: 640m
     networks:
       - internal
@@ -216,6 +219,7 @@ services:
       # Posées dans ce bloc, elles ne vaudraient que pour execution-service, et core abandonnerait
       # des corrections encore en cours — tentatives d'étudiants supprimées. Elles vont dans le
       # .env.docker commun (cf. .env.example), que les deux services chargent par env_file.
+      # À garder ÉGAL à QUIZ_CODE_GRADING_THREADS du bloc core-service.
       EXEC_MAX_CONCURRENT: "3"
       # Un appel public tient maintenant un conteneur entier (quelques secondes pour un
       # interprété) au lieu d'une requête HTTP sous-seconde : l'attente d'une place suit.
@@ -238,7 +242,7 @@ services:
       # Runner des langages COMPILÉS (#116) : conteneurs jetables moodit-runner-* via le démon
       # Docker de l'HÔTE (docker-outside-of-docker). Accès ROOT-ÉQUIVALENT à l'hôte : ce service
       # est joignable depuis Internet (/exec/** via le gateway), un défaut d'exécution de code y
-      # vaudrait donc l'hôte entier. Assumé en attendant un proxy de socket restreint ; cf.
+      # vaudrait donc l'hôte entier. Assumé en attendant son durcissement (#271) ; cf.
       # deploy/DEPLOY.md. Images construites au déploiement par docker/runners/build.sh.
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

@@ -36,7 +36,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.TransactionDefinition;
 
 /**
  * Soumission ASYNCHRONE d'une tentative ({@link QuizService#submitQuiz}) et correction en tâche de
@@ -205,7 +207,43 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
             verify(eventPublisher).publishEvent(event.capture());
             assertThat(event.getValue().attemptId()).isEqualTo(55);
+            // La question Code n'a aucun harnais : rien à exécuter, donc pool rapide.
+            assertThat(event.getValue().needsSandbox()).isFalse();
             verify(transactionManager).commit(any());
+        }
+
+        @Test
+        @DisplayName("Question Code avec harnais → évènement marqué needsSandbox (pool du code)")
+        void questionCodeAvecHarnais_needsSandbox() {
+            testCase(codeQ, 90, "cas", 1);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> {
+                Attempt a = inv.getArgument(0);
+                a.setId(57);
+                return a;
+            });
+
+            service.submitQuiz(4, body(), EMAIL);
+
+            ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
+            verify(eventPublisher).publishEvent(event.capture());
+            assertThat(event.getValue()).isEqualTo(new AttemptSubmittedEvent(57, true));
+        }
+
+        @Test
+        @DisplayName("Harnais sur une question qui n'est pas de type Code → pas de sandbox")
+        void harnaisHorsQuestionCode_pasDeSandbox() {
+            testCase(choiceQ, 91, "cas", 1);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.submitQuiz(4, body(), EMAIL);
+
+            ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
+            verify(eventPublisher).publishEvent(event.capture());
+            assertThat(event.getValue().needsSandbox()).isFalse();
         }
 
         @Test
@@ -342,6 +380,24 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
             verifyNoInteractions(submissionTestCaseRepository);
             assertThat(attempt.getStatus()).isEqualTo("pending");
+        }
+
+        @Test
+        @DisplayName("Correction refusée par l'executor → pending supprimé dans une NOUVELLE transaction, push failed")
+        void abandon_supprimeDansUneNouvelleTransaction() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+
+            service.abandonGrading(ATTEMPT_ID, new TaskRejectedException("file pleine"));
+
+            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
+            verifyNoInteractions(executionClient);
+            // Appelé depuis le rappel after-commit de la soumission : en REQUIRED, la lecture et la
+            // suppression rejoindraient la transaction déjà committée et ne seraient jamais écrites.
+            ArgumentCaptor<TransactionDefinition> defs = ArgumentCaptor.forClass(TransactionDefinition.class);
+            verify(transactionManager, times(2)).getTransaction(defs.capture());
+            assertThat(defs.getAllValues()).allSatisfy(def -> assertThat(def.getPropagationBehavior())
+                    .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW));
         }
 
         @Test

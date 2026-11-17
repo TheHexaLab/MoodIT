@@ -26,6 +26,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -407,9 +408,31 @@ public class QuizService {
         }
 
         // Correction lancée APRÈS commit (l'entité pending doit être visible du job) : évènement
-        // transactionnel @AfterCommit + @Async (cf. QuizGradingListener).
-        eventPublisher.publishEvent(new AttemptSubmittedEvent(saved.getId()));
+        // transactionnel @AfterCommit, puis pool selon la présence de harnais (cf. QuizGradingListener).
+        eventPublisher.publishEvent(new AttemptSubmittedEvent(saved.getId(), needsSandbox(quiz)));
         return saved.getId();
+    }
+
+    /**
+     * Vrai si la correction passera par execution-service : au moins une question Code avec des
+     * harnais (même règle que {@link #buildCodeTasks}, qui ignore une question Code sans harnais).
+     */
+    private boolean needsSandbox(Quiz quiz) {
+        for (Question question : sortedQuestions(quiz)) {
+            if ("coding".equals(slugFor(question)) && !orderedTestCases(question).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Abandonne une correction qui n'a pas pu être planifiée (executor saturé, cf.
+     * QuizGradingListener) : même traitement qu'une défaillance de correction, la tentative pending
+     * est supprimée et l'auteur prévenu, il peut resoumettre.
+     */
+    public void abandonGrading(Integer attemptId, RuntimeException cause) {
+        failGrading(attemptId, cause);
     }
 
     /**
@@ -419,9 +442,8 @@ public class QuizService {
      * <p><b>TOUTE défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
      * SUPPRIME la tentative pending et pousse {@code quiz:attempt-failed} : on ne laisse JAMAIS un
      * {@code "pending"} coincé, sinon l'index {@code uq_attempt_pending} verrouillerait tout renvoi.
-     * La tentative unique n'est donc pas consommée. Appelée en async après commit (cf.
-     * QuizGradingListener) ; publique pour passer par le proxy Spring (l'@Async ne marche pas en
-     * self-invocation).
+     * La tentative unique n'est donc pas consommée. Appelée après commit sur l'un des executors de
+     * correction (cf. QuizGradingListener), hors de toute transaction.
      */
     public void gradeAttempt(Integer attemptId) {
         GradingContext ctx;
@@ -468,7 +490,11 @@ public class QuizService {
         }
         long[] who = null;
         try {
+            // REQUIRES_NEW : depuis abandonGrading, on est encore dans le rappel after-commit de la
+            // soumission, dont les ressources restent liées au thread. Une propagation REQUIRED
+            // rejoindrait cette transaction déjà committée et la suppression ne serait jamais écrite.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
+            readTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             readTx.setReadOnly(true);
             who = readTx.execute(status -> {
                 Attempt a = attemptRepository.findById(attemptId).orElse(null);
@@ -478,6 +504,7 @@ public class QuizService {
             // Destinataire introuvable : on pousse pas d'event, le front récupère par polling.
         }
         TransactionTemplate delTx = new TransactionTemplate(transactionManager);
+        delTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         delTx.executeWithoutResult(status -> attemptRepository.deleteById(attemptId));
         if (who != null) {
             realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, null);

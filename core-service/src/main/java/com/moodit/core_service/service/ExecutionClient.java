@@ -100,7 +100,7 @@ public class ExecutionClient {
             long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
             // Plafonné par le MUR du serveur (DockerEvaluator.MAX_WALL_MS) : au-delà, le
             // conteneur est tué de toute façon. Sans ce miroir, 100 harnais donnaient un délai
-            // de ~3 h pendant lesquelles un fil @Async serait resté épinglé si le démon se
+            // de ~3 h pendant lesquelles un fil de correction serait resté épinglé si le démon se
             // bloquait sans fermer la socket.
             // Nombre de COMPILATIONS par cas : le chemin NON FALSIFIABLE (#116, harnais booléen)
             // compile le noteur ET le code soumis séparément, et trois fois en Java, où les
@@ -130,7 +130,7 @@ public class ExecutionClient {
         // (phases isolées) ; ce dépassement est AJOUTÉ, sans quoi le client renoncerait avant le
         // serveur et supprimerait une tentative encore en correction (le bug de #216).
         // Sans ce plafond, 100 harnais Python donnaient près de 7 h de délai, pendant lesquelles
-        // un fil @Async restait épinglé si execution-service pendait sans fermer la socket — le
+        // un fil de correction restait épinglé si execution-service pendait sans fermer la socket — le
         // chemin compilé, lui, était déjà borné par EVAL_MAX_WALL_MS.
         long overshootUnits = sqlLanguage(language) ? 2 : 1;
         long serverWork = Math.min((long) Math.max(workUnits, 1) * perUnitWithQueue,
