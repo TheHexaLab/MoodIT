@@ -181,6 +181,29 @@ class ExecuteCaseSaturationTest(unittest.TestCase):
         self.assertTrue(issue.killed)
         self.assertTrue(supervisor.inconclusive(issue))
 
+    def test_grader_build_failure_is_flagged_inconclusive(self):
+        # Le NOTEUR n'a pas compilé (bouchons générés + harnais) : pour un canari, dont le
+        # harnais est fixe, c'est le générateur qui a cédé — jamais une accusation.
+        def fake_runner(case_dir, env, timeout_s, case_index):
+            return None, supervisor.HARNESS_BUILD_ERROR + " contre le code soumis :\nCS0111"
+
+        supervisor.RUNNERS["Java"] = fake_runner
+        issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+        self.assertFalse(issue.ran)
+        self.assertTrue(issue.harness_build)
+        self.assertTrue(supervisor.inconclusive(issue))
+
+    def test_student_build_failure_stays_conclusive(self):
+        # Le message du compilateur vient APRÈS notre préfixe : un code soumis qui ne compile
+        # pas, même s'il « écrit » la phrase du noteur, reste un échec ordinaire.
+        def fake_runner(case_dir, env, timeout_s, case_index):
+            return None, "Échec de compilation :\n" + supervisor.HARNESS_BUILD_ERROR
+
+        supervisor.RUNNERS["Java"] = fake_runner
+        issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+        self.assertFalse(issue.harness_build)
+        self.assertFalse(supervisor.inconclusive(issue))
+
     def test_without_saturation_nothing_changes(self):
         issue = self._run_case(supervisor.CaseOutcome(
             False, "assertion ratee", ran=True), lost=False)
@@ -1987,6 +2010,132 @@ class Review246bTest(unittest.TestCase):
         # notation (édition 2021) acceptait.
         build, _ = supervisor.exec_commands("rust", "main.rs")
         self.assertEqual(build[build.index("--edition") + 1], "2021")
+
+
+class Review246cTest(unittest.TestCase):
+    """Troisième revue de la PR #246 : réponses justes notées fausses par les générateurs."""
+
+    NL = "\n"
+
+    CS_SRC = NL.join([
+        "class Solution { public int Somme(int a, int b) => Calcul.Somme(a, b); }",
+        "static class Calcul { public static int Somme(int a, int b) => a + b; }", ""])
+
+    def test_cs_canary_grader_has_no_duplicate_member(self):
+        # Le harnais d'un canari ne nomme aucune classe : les bouchons vont dans Solution, qui
+        # porte une méthode d'instance de même signature que la statique de Calcul. Deux
+        # membres identiques (CS0111) : le canari ne compilait pas, un vrai cas si → 0 et
+        # « falsification probable » sur une réponse juste.
+        extraction = supervisor.cs_canonical_types(supervisor.cs_strip_comments(self.CS_SRC))
+        methods = supervisor.cs_signatures(extraction)
+        canary_harness = "return __MOODIT_A__ == __MOODIT_B__;"
+        klass = supervisor.cs_student_class(extraction, canary_harness)
+        self.assertEqual(klass, "Solution")
+        ctors, instance = supervisor.cs_object_api(extraction, klass)
+        source = supervisor.cs_grader_source(methods, canary_harness, "N", klass, ctors, instance)
+        self.assertEqual(len(re.findall(r"public (?:static )?int Somme\(int a0, int a1\)", source)), 1)
+        self.assertIn("public int Somme(int a0, int a1)", source)
+        # Le vrai cas (harnais qui nomme Calcul) garde, lui, sa statique.
+        real = "return Calcul.Somme(2, 3) == 5;"
+        klass = supervisor.cs_student_class(extraction, real)
+        ctors, instance = supervisor.cs_object_api(extraction, klass)
+        source = supervisor.cs_grader_source(methods, real, "N", klass, ctors, instance)
+        self.assertIn("public static int Somme(int a0, int a1)", source)
+
+    def test_cs_static_named_like_the_class_is_left_out(self):
+        source = supervisor.cs_grader_source([("int", "Rect", ["int"]), ("int", "F", [])],
+                                             "return true;", "N", "Rect")
+        self.assertNotIn("public static int Rect(", source)
+        self.assertIn("public static int F(", source)
+
+    def test_canary_grader_build_failure_never_accuses(self):
+        cases = [{"index": 0}, {"index": 1, "canary": "pass"}, {"index": 2, "canary": "fail"}]
+        broken = supervisor.CaseOutcome(False, "x", ran=False, harness_build=True)
+        outcomes = {0: outcome(True), 1: broken, 2: outcome(False)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+        # Un échec de compilation du CODE SOUMIS limité aux canaris, lui, accuse toujours.
+        outcomes = {0: outcome(True), 1: outcome(False, ran=False), 2: outcome(False)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+
+    def test_canary_reserve_returned_as_canaries_run(self):
+        self.assertEqual(supervisor.pending_canary_reserve(80.0, 2, 2), 80.0)
+        self.assertEqual(supervisor.pending_canary_reserve(80.0, 2, 1), 40.0)
+        self.assertEqual(supervisor.pending_canary_reserve(80.0, 2, 0), 0.0)
+        self.assertEqual(supervisor.pending_canary_reserve(80.0, 0, 0), 0.0)
+
+    def test_grader_dirs_live_outside_the_student_work_dir(self):
+        directory = tempfile.mkdtemp()
+        try:
+            with unittest.mock.patch.object(supervisor.os, "chown", create=True) as chown:
+                path = supervisor.grader_dir(directory, "noteur_tmp")
+            self.assertEqual(os.path.dirname(path), directory)
+            self.assertNotIn("work", os.path.relpath(path, directory))
+            chown.assert_called_once_with(path, supervisor.grader_uid(), supervisor.grader_uid())
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        # Plus aucun dossier du noteur sous work/ dans les deux chemins concernés.
+        with open(supervisor.__file__, encoding="utf-8") as f:
+            text = f.read()
+        self.assertNotIn('os.path.join(work, "not_', text)
+
+    def test_cpp_digit_separator_keeps_following_functions(self):
+        src = self.NL.join([
+            "const long LIMITE = 1'000;",
+            "long carre(long x) { return x * x; }",
+            "long moitie(long x) { return x / 2; }", ""])
+        names = [ident for _, ident, _ in supervisor.c_signatures(supervisor.blank_code(src), cpp=True)]
+        self.assertEqual(names, ["carre", "moitie"])
+        self.assertIn("0xFF'FF", supervisor.blank_code("int m = 0xFF'FF;"))
+        # Les vrais littéraux de caractère restent blanchis, préfixes compris.
+        for literal in ("'{'", "L'{'", "u'{'", "'\\''"):
+            self.assertNotIn("{", supervisor.blank_code("char c = %s;" % literal), literal)
+
+    def test_rust_method_consuming_self_is_not_proxied(self):
+        src = self.NL.join([
+            "struct Rect { l: i64, h: i64 }",
+            "impl Rect {",
+            "    fn new(l: i64, h: i64) -> Rect { Rect { l, h } }",
+            "    fn aire(&self) -> i64 { self.l * self.h }",
+            "    fn agrandir(&mut self, k: i64) -> i64 { self.l *= k; self.l }",
+            "    fn en_texte(self) -> String { format!(\"{}\", self.l) }",
+            "    fn detruire(mut self) -> i64 { self.l = 0; self.l }",
+            "}", ""])
+        (typ, _, methods), = supervisor.rust_object_api(supervisor.blank_code(src, rust=True))
+        self.assertEqual(typ, "Rect")
+        self.assertEqual([m[1] for m in methods], ["aire", "agrandir"])
+
+    def test_go_generated_imports_do_not_collide_with_submitted_names(self):
+        methods = [("string", "hex", ["int"]), ("int", "json", []), ("int", "bufio", [])]
+        harness = 'return strings.Contains(hex(255), "f") && fmt.Sprint(1) == "1"'
+        grader = supervisor.go_grader_source(methods, harness, "N")
+        server = supervisor.go_server_source(methods)
+        for alias in ("moodit_hex \"encoding/hex\"", "moodit_json \"encoding/json\"",
+                      "moodit_bufio \"bufio\"", "moodit_os \"os\"", "moodit_rand \"crypto/rand\""):
+            self.assertIn(alias, grader)
+        self.assertIn("moodit_hex.EncodeToString", grader)
+        # Le harnais du prof n'est jamais réécrit, et garde fmt, math et strings par leur nom.
+        self.assertIn(harness, grader)
+        for plain in ('    "fmt"\n', '    "math"\n', '    "strings"\n'):
+            self.assertIn(plain, grader)
+        for alias in ("moodit_json", "moodit_fmt", "moodit_os", "moodit_strings", "moodit_bufio"):
+            self.assertIn('    %s "' % alias, server)
+        # Aucune référence nue à un paquet aliasé dans le code généré.
+        for code, names in ((grader.replace(harness, ""), ("hex", "json", "bufio", "os", "rand")),
+                            (server, ("json", "fmt", "os", "strings", "bufio"))):
+            for name in names:
+                self.assertIsNone(re.search(r"(?<![\w.])%s\." % name, code), name)
+        self.assertEqual(supervisor.go_harness_package_names(["strings", "f", "math", "hex"]),
+                         ["strings", "math"])
+
+    def test_null_strings_travel_as_null(self):
+        java_server = supervisor.java_server_source(["Solution"])
+        self.assertIn('if (v.equals("null") && !type.isPrimitive()) { return null; }', java_server)
+        grader = supervisor.cs_grader_source([("string", "F", ["string"])], "return true;", "N", "Solution")
+        server = supervisor.cs_server_source(["Solution"])
+        for source in (grader, server):
+            self.assertIn('if (s == null) { return "N"; }', source)
+            self.assertIn('if (v == "N") { return null; }', source)
+        self.assertIn("if (v == null) { return Hexe(null); }", server)
 
 
 class SqliteExecTest(unittest.TestCase):

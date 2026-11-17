@@ -4,9 +4,13 @@
 # Utilisé en dev local, par la CI et au déploiement.
 #
 # Les FROM sont épinglés par DIGEST (#24, même pratique que les actions CI) et les
-# téléchargements restants vérifiés par SHA-256 : le socle de la sandbox ne
-# bouge jamais sans revue. Mise à jour d'une base : `docker buildx imagetools inspect <tag>`
-# pour le nouveau digest, puis reconstruire et passer le job CI `integration`.
+# téléchargements directs vérifiés par SHA-256 : les bases et les chaînes de compilation ne
+# bougent jamais sans revue. Les paquets apt (python3, mono-devel, sqlite3), eux, ne sont PAS
+# figés : ils viennent des archives signées de la distribution (intégrité garantie), mais leur
+# version suit les correctifs de celle-ci d'une construction à l'autre — les épingler casserait
+# la construction dès qu'une version quitte le miroir. Mise à jour d'une base :
+# `docker buildx imagetools inspect <tag>` pour le nouveau digest, puis reconstruire et passer
+# le job CI `integration`.
 set -euo pipefail
 cd "$(dirname "$0")"
 

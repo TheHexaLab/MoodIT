@@ -263,6 +263,17 @@ def canary_reserve_seconds(budget_s, timeout_s):
     return min(2.0 * (timeout_s + COMPILE_TIMEOUT_S), budget_s / 3.0)
 
 
+def pending_canary_reserve(reserve_s, total_canaries, pending_canaries):
+    """Part de la réserve encore due aux canaris NON EXÉCUTÉS — FONCTION PURE (testée).
+
+    La réserve est rendue au fur et à mesure : sans cela, une fois les deux canaris passés, les
+    cas réels restants perdaient encore le tiers du budget et étaient sautés alors qu'il
+    restait du temps — une note partielle sur le « Tester » du prof."""
+    if total_canaries <= 0 or pending_canaries <= 0:
+        return 0.0
+    return reserve_s * min(pending_canaries, total_canaries) / total_canaries
+
+
 def canary_verdict(cases, outcomes):
     """Verdict des canaris, FONCTION PURE (couverte par test_supervisor.py) : « aucun »,
     « ok », « incoherents » (falsification probable) ou « indetermines » (rien de concluant,
@@ -812,6 +823,18 @@ def student_dir(case_dir, name):
     return path
 
 
+def grader_dir(case_dir, name):
+    """Dossier privé du NOTEUR (HOME, TMP) : 700 à son UID, sous case_dir (root, 755).
+
+    Jamais sous work/ : ce dossier appartient à l'étudiant, qui pouvait y renommer le dossier
+    du noteur pendant l'exécution et poser le sien à la place."""
+    path = os.path.join(case_dir, name)
+    os.makedirs(path, exist_ok=True)
+    os.chown(path, grader_uid(), grader_uid())
+    os.chmod(path, 0o700)
+    return path
+
+
 def base_env(case_dir):
     """Environnement de la phase de COMPILATION (root) ; run_student le dérive pour l'étudiant."""
     return {
@@ -860,8 +883,12 @@ def first_lines(text, pattern, count=6):
 
 class CaseOutcome:
     def __init__(self, passed, detail=None, ran=False, timed_out=False, skipped=False,
-                 killed=False, cause=None):
+                 killed=False, cause=None, harness_build=False):
         self.passed = passed
+        # Le NOTEUR (bouchons générés + harnais) n'a pas compilé, le code soumis si. Pour un
+        # canari, dont le harnais est fixe, la cause est forcément le générateur de bouchons :
+        # cause non concluante, jamais une accusation (cf. inconclusive).
+        self.harness_build = harness_build
         # Cause d'un saut : "erreur" (superviseur), "budget" (budget global), "espace" (disque
         # sature par le code soumis). Seules les deux premieres peuvent ne pas etre imputables.
         self.cause = cause
@@ -915,6 +942,10 @@ def grading_incomplete(real_cases):
     return any(o.cause == "erreur" for o in real_cases)
 
 
+# Début de TOUT message d'échec de compilation du noteur (voir CaseOutcome.harness_build).
+HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
+
+
 def inconclusive(outcome):
     """L'échec de ce cas a-t-il une cause NON CONCLUANTE ? FONCTION PURE (testée).
 
@@ -922,7 +953,7 @@ def inconclusive(outcome):
     Le verdict des canaris s'en sert pour ne pas accuser — wrapper_verdict prend déjà soin
     de ne pas accuser un processus tué après les tests, et canary_verdict défaisait cette
     précaution par l'autre porte."""
-    return outcome.timed_out or outcome.killed
+    return outcome.timed_out or outcome.killed or outcome.harness_build
 
 
 # Nom du test canari tiré au sort, par index de cas (vide pour un cas réel). Sert à
@@ -1629,6 +1660,10 @@ public final class MooditServer {
 
     private static Object convertit(Class<?> type, String brut) {
         String v = brut.trim();
+        // JSON null (sans guillemets) = argument null. Une vraie chaîne « null » voyage entre
+        // guillemets, en hexadécimal : sans ce cas, le null du harnais arrivait comme le TEXTE
+        // « null » chez l'étudiant — `s == null` faux sur une réponse juste.
+        if (v.equals("null") && !type.isPrimitive()) { return null; }
         if (type == int.class || type == Integer.class) { return Integer.valueOf(v); }
         if (type == long.class || type == Long.class) { return Long.valueOf(v); }
         if (type == double.class || type == Double.class) { return Double.valueOf(v); }
@@ -1710,6 +1745,37 @@ GO_PREDECLARED = frozenset("""
 def go_reserved_names(names):
     """Noms de fonctions soumises qui masqueraient un identifiant prédéclaré. PURE (testée)."""
     return [n for n in dict.fromkeys(names) if n in GO_PREDECLARED]
+
+
+# Paquets importés par les programmes GÉNÉRÉS. En Go, un nom d'import et une déclaration de
+# paquet ne peuvent pas coexister : une `func hex(n int) string` soumise faisait refuser le
+# noteur (qui importe encoding/hex), une `func json…` le serveur — « le harnais ne compile pas »
+# sur une réponse juste. Ces imports passent donc sous un alias `moodit_…`, sauf ceux que le
+# harnais du PROF peut utiliser par leur nom (fmt, math, strings), réservés ci-dessous.
+GO_GRADER_ALIASED = ("bufio", "crypto/rand", "encoding/hex", "encoding/json", "os")
+GO_SERVER_ALIASED = ("bufio", "encoding/json", "fmt", "os", "strings")
+GO_HARNESS_PACKAGES = frozenset(("fmt", "math", "strings"))
+
+
+def go_alias_imports(template, packages):
+    """Gabarit Go dont les imports `packages` passent sous l'alias `moodit_<nom>`. PURE (testée).
+
+    Appliquée au GABARIT seul, avant l'insertion du harnais : le code du prof n'est jamais
+    réécrit."""
+    for path in packages:
+        name = path.rsplit("/", 1)[-1]
+        alias = "moodit_" + name
+        line = '    "%s"\n' % path
+        if line not in template:
+            raise ValueError("import absent du gabarit : " + path)
+        template = template.replace(line, '    %s "%s"\n' % (alias, path))
+        template = re.sub(r"(?<![\w.])%s\." % re.escape(name), alias + ".", template)
+    return template
+
+
+def go_harness_package_names(names):
+    """Noms soumis qui masqueraient un paquet que le harnais du prof utilise. PURE (testée)."""
+    return [n for n in dict.fromkeys(names) if n in GO_HARNESS_PACKAGES]
 
 
 def go_signatures(source):
@@ -1997,7 +2063,7 @@ def go_grader_source(methods, harness_code, nonce, obj_list=(), field_list=None)
     v := mooditAppel("%s", []interface{}{%s})
     return %s
 }""" % (ident, params, ret, ident, args, conv))
-    return '''package main
+    return go_alias_imports('''package main
 
 import (
     "bufio"
@@ -2146,7 +2212,7 @@ func main() {
     }
     os.Exit(1)
 }
-''' % (GO_RPC_RUNTIME, "\n\n".join(stubs), go_object_stub(obj_list, field_list),
+''', GO_GRADER_ALIASED) % (GO_RPC_RUNTIME, "\n\n".join(stubs), go_object_stub(obj_list, field_list),
        "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
        nonce)
 
@@ -2164,7 +2230,7 @@ def go_server_source(methods, obj_list=(), field_list=None):
         # sur le chemin le plus courant, celui de l'appel de fonction.
         args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
         branches.append('        case "%s":\n            valeur = %s(%s)' % (ident, ident, args))
-    return '''package main
+    return go_alias_imports('''package main
 
 import (
     "bufio"
@@ -2259,7 +2325,7 @@ func mooditServe() {
 func main() {
     mooditServe()
 }
-''' % (GO_RPC_RUNTIME, new_branch or "        case \"\":", method_branch or "        case \"\":",
+''', GO_SERVER_ALIASED) % (GO_RPC_RUNTIME, new_branch or "        case \"\":", method_branch or "        case \"\":",
        "\n".join(branches))
 
 
@@ -2924,6 +2990,12 @@ def rust_object_api(source):
         for ident, params, ret in RUST_FN_IN_IMPL.findall(body):
             pieces = [p.strip() for p in params.split(",") if p.strip()]
             takes_self = bool(pieces) and pieces[0].endswith("self")
+            # Seul un EMPRUNT (`&self`, `&mut self`, `&'a self`) se proxifie : le serveur
+            # appelle la méthode sur l'objet resté dans sa table (`moodit_t[h].f()`), qu'il ne
+            # peut pas déplacer. Une méthode qui CONSOMME `self` (`fn en_texte(self)`) faisait
+            # refuser tout le serveur par rustc (E0507), même si le harnais ne l'appelait pas.
+            if takes_self and not pieces[0].replace(" ", "").startswith("&"):
+                continue
             useful = pieces[1:] if takes_self else pieces
             types = []
             valid = True
@@ -3460,7 +3532,18 @@ def cs_object_stub(klass, ctors, method_list):
 def cs_grader_source(methods, harness_code, nonce, klass, ctors=(), instance=()):
     """Programme NOTEUR C# : bouchons typés + harnais booléen + nonce. PURE (testée)."""
     stubs = []
+    # Les statiques de TOUTES les classes sont aplaties dans `klass`, à côté de ses méthodes
+    # d'instance : une statique d'une autre classe de même nom et de mêmes paramètres qu'une
+    # méthode d'instance de `klass` donnait deux membres identiques (CS0111). Le noteur ne
+    # compilait plus — pour un canari seulement, dont le harnais ne nomme aucune classe — et
+    # une réponse juste était accusée de falsification. C# ne surcharge pas par `static` :
+    # la méthode d'instance l'emporte (c'est elle que `new Klass().F()` appelle). Un membre du
+    # nom de la classe est aussi interdit (CS0542).
+    taken = {(ident, tuple(types)) for _, ident, types in instance}
     for ret, ident, types in methods:
+        if (ident, tuple(types)) in taken or ident == klass:
+            continue
+        taken.add((ident, tuple(types)))
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         # Conversion EXPLICITE en culture invariante : une concaténation implicite passe par la
         # culture courante, où un double s'écrit « 3,14 » — illisible par le double.Parse
@@ -3484,12 +3567,16 @@ static class MooditRpc {
     // Mêmes codecs que le serveur : une chaîne ne voyage qu'en hexadécimal, le fil étant à
     // champs séparés par « | » et à une ligne par message.
     public static string Hexe(string s) {
-        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+        // null voyage en JETON « N » (une chaîne, même vide, commence par « H ») : rendu par
+        // « H » vide, il arrivait en "" — `== null` noté faux sur une réponse juste.
+        if (s == null) { return "N"; }
+        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s);
         return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
     }
 
     public static string Dehexe(string v) {
         v = (v ?? "").Trim();
+        if (v == "N") { return null; }
         if (!v.StartsWith("H")) { return v; }
         byte[] octets = new byte[(v.Length - 1) / 2];
         for (int i = 0; i < octets.Length; i++) {
@@ -3576,12 +3663,16 @@ public static class MooditServer {
     // Chaîne → HEXADÉCIMAL sur le fil : le protocole est à champs séparés par « | » et à une
     // ligne par message, donc un « | » ou un saut de ligne dans la valeur décalait tout l'appel.
     public static string Hexe(string s) {
-        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+        // null voyage en JETON « N » (une chaîne, même vide, commence par « H ») : rendu par
+        // « H » vide, il arrivait en "" — `== null` noté faux sur une réponse juste.
+        if (s == null) { return "N"; }
+        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s);
         return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
     }
 
     public static string Dehexe(string v) {
         v = (v ?? "").Trim();
+        if (v == "N") { return null; }
         if (!v.StartsWith("H")) { return v; }
         byte[] octets = new byte[(v.Length - 1) / 2];
         for (int i = 0; i < octets.Length; i++) {
@@ -3634,6 +3725,8 @@ public static class MooditServer {
 
     /** Valeur de retour sur le fil : une chaîne part encodée. */
     static string Sortie(object v) {
+        // Seule une méthode à retour string peut rendre null ici (types valeur sinon).
+        if (v == null) { return Hexe(null); }
         if (v is string) { return Hexe((string) v); }
         // « G17 » (et « G9 » pour un float) : aller-retour exact, que le format « G » par
         // défaut ne garantit pas. La documentation .NET déconseille « R » pour un double.
@@ -3789,6 +3882,20 @@ def class_bodies(src_text, header_pattern):
 CS_CLASS = re.compile(r"\bclass\s+(\w+)")
 
 
+def _digit_separator(src_text, i):
+    """L'apostrophe en `i` est-elle un séparateur de chiffres (`1'000`, `0xFF'FF`) ? PURE.
+
+    Oui si elle suit un jeton NUMÉRIQUE (qui commence par un chiffre) et précède un chiffre
+    hexadécimal. Les préfixes de caractère (`L'a'`, `u'a'`, `u8'a'`) commencent par une lettre,
+    et `x = 'a'` n'a pas de jeton collé devant : ils restent des littéraux."""
+    if i + 1 >= len(src_text) or src_text[i + 1] not in "0123456789abcdefABCDEF":
+        return False
+    j = i
+    while j > 0 and (src_text[j - 1].isalnum() or src_text[j - 1] in "_'"):
+        j -= 1
+    return j < i and src_text[j].isdigit()
+
+
 def blank_code(src_text, backticks=False, rust=False):
     """Source sans commentaires ni litteraux, pour l EXTRACTION seulement (lignes preservees).
 
@@ -3851,6 +3958,12 @@ def blank_code(src_text, backticks=False, rust=False):
             if i < n:
                 res.append(" ")
                 i += 1
+        elif not rust and c == chr(39) and _digit_separator(src_text, i):
+            # Séparateur de chiffres C++14 (`1'000`) : pas un littéral. Le prendre pour une
+            # ouverture blanchissait la suite jusqu'à la prochaine apostrophe, et les fonctions
+            # suivantes disparaissaient de l'extraction (« aucune fonction exploitable »).
+            res.append(c)
+            i += 1
         elif c == '"' or (not rust and c == chr(39)):
             quote = c
             res.append(" ")
@@ -4201,7 +4314,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             os.path.join(case_dir, "nc.out"), os.path.join(case_dir, "nc.err"),
                             preexec_compile)
     if expired or code != 0:
-        return None, ("Le harnais ne compile pas contre la signature du code soumis :\n"
+        return None, (HARNESS_BUILD_ERROR + " contre la signature du code soumis :\n"
                       + read_capped(os.path.join(case_dir, "nc.err"))[:1500])
 
     # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
@@ -4234,12 +4347,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     os.chmod(work, 0o755)
     student_tmp = student_dir(work, "tmp")
     student_home = student_dir(work, "home")
-    grader_tmp = os.path.join(work, "not_tmp")
-    grader_home = os.path.join(work, "not_home")
-    for fpath in (grader_tmp, grader_home):
-        os.makedirs(fpath, exist_ok=True)
-        os.chown(fpath, grader_uid(), grader_uid())
-        os.chmod(fpath, 0o700)
+    grader_tmp = grader_dir(case_dir, "noteur_tmp")
+    grader_home = grader_dir(case_dir, "noteur_home")
     g_env = dict(env, HOME=grader_home, TMPDIR=grader_tmp)
     s_env = dict(env, HOME=student_home, TMPDIR=student_tmp)
 
@@ -4327,7 +4436,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
             detail = (read_capped(os.path.join(case_dir, "cc.err"))
                       or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
             if label == "harnais":
-                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
     set_owner_mode(student_copy, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4382,7 +4491,7 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin)
@@ -4430,10 +4539,7 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin
     os.makedirs(work, exist_ok=True)
     os.chmod(work, 0o755)
     student_tmp = student_dir(work, "tmp")
-    grader_tmp = os.path.join(work, "not_tmp")
-    os.makedirs(grader_tmp, exist_ok=True)
-    os.chown(grader_tmp, grader_uid(), grader_uid())
-    os.chmod(grader_tmp, 0o700)
+    grader_tmp = grader_dir(case_dir, "noteur_tmp")
     code, expired, g_err, s_err = run_pair(
         grader_cmd or [grader_bin], student_cmd or [student_bin], case_dir,
         dict(env, HOME=grader_tmp, TMPDIR=grader_tmp), dict(env, HOME=student_tmp, TMPDIR=student_tmp),
@@ -4504,7 +4610,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4546,6 +4652,11 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
                                     for name in [type_name] + [c[0] for c in ctors]])
     if reserved:
         return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
+    packages = go_harness_package_names([ident for _, ident, _ in method_list]
+                                        + [name for type_name, ctors, _ in obj_list
+                                           for name in [type_name] + [c[0] for c in ctors]])
+    if packages:
+        return None, reserved_name_message(packages, "un paquet Go importé pour le harnais")
 
     # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI
     # présent dans l'arborescence que son processus peut lire.
@@ -4578,7 +4689,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, "Le harnais ne compile pas contre le code soumis :\n" + detail
+                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4631,7 +4742,10 @@ def execute_case(language, case, timeout_s):
     outcome, compile_error = runner(case_dir, env, timeout_s, case["index"])
     elapsed_ms = int((time.monotonic() - start) * 1000)
     if compile_error is not None:
-        outcome = CaseOutcome(False, compile_error, ran=False)
+        # Le préfixe est NOTRE texte (le message du compilateur ne vient qu'après) : le code
+        # soumis ne peut pas le produire.
+        outcome = CaseOutcome(False, compile_error, ran=False,
+                              harness_build=compile_error.startswith(HARNESS_BUILD_ERROR))
     if EXIT_STATE.killed_by_signal and not outcome.passed:
         outcome.killed = True
     if EXIT_STATE.expired and not outcome.passed:
@@ -4945,8 +5059,12 @@ def main():
     canary_reserve_s = 0.0
     if deadline is not None and budget_ms:
         canary_reserve_s = canary_reserve_seconds(budget_ms / 1000.0, timeout_s)
+    total_canaries = sum(1 for c in cases if c.get("canary"))
+    pending_canaries = total_canaries
 
     for case in order:
+        if case.get("canary"):
+            pending_canaries -= 1   # à partir d'ici, ce canari ne réclame plus sa part
         if box_exhausted():
             # Espace de travail saturé (par un cas précédent, ou par la copie du job) : rien
             # à reprocher à l'étudiant, et surtout pas une falsification — un cas « sauté »
@@ -4958,10 +5076,12 @@ def main():
             timings[case["index"]] = 0
             event("espace_sature", case=case["index"])
             continue
-        # Un cas réel doit laisser la réserve des canaris intacte ; un canari puise dedans.
+        # Un cas réel doit laisser intacte la réserve des canaris PAS ENCORE exécutés ; un
+        # canari puise dedans.
         case_deadline = deadline
         if deadline is not None and not case.get("canary"):
-            case_deadline = deadline - canary_reserve_s
+            case_deadline = deadline - pending_canary_reserve(
+                canary_reserve_s, total_canaries, pending_canaries)
         if case_deadline is not None and time.monotonic() >= case_deadline:
             outcomes[case["index"]] = CaseOutcome(
                 False, "Non exécuté : budget de notation dépassé (trop de cas ou cas trop longs)",
